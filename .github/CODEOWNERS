@@ -1,0 +1,9 @@
+# Money + security paths require Miguel's (@despensasupermercados) review before merge.
+# Enable branch protection on `main`: "Require review from Code Owners" + "Require
+# status checks (tests)". This stops the nightly agent (or anyone) from merging a
+# change to the bonus SOP without a human yes.
+
+/src/bonus.js        @despensasupermercados
+/test/bonus.test.js  @despensasupermercados
+/src/auth.js         @despensasupermercados
+/migrations/         @despensasupermercados
