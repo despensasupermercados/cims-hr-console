@@ -1,0 +1,44 @@
+name: nightly-self-maintenance
+# Runs the agent each morning to review, health-check, repair the safe class, and
+# flag the rest. Requires repo secret ANTHROPIC_API_KEY. Honors CLAUDE.md rules:
+# money/auth/schema changes are PRs for Miguel, never auto-merges.
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+  workflow_dispatch: {}    # allow manual runs
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Run test gate (record current health)
+        run: npm test || echo "TESTS_RED" >> $GITHUB_ENV
+      - name: Agent review + maintenance
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # The standing brief. The agent must obey CLAUDE.md.
+          prompt: |
+            You are the nightly maintainer for the CIMS HR Console. Follow CLAUDE.md strictly.
+            Do, in order:
+            1. Review the diff since the last successful nightly run and any open issues.
+            2. Run `npm test`. If red, open an issue titled "Nightly: test gate RED" with the failing cases and a proposed fix as a PR. Do not merge.
+            3. Run data-integrity checks and report anomalies that could affect a bonus count
+               or a billing figure (crew-ID name-bridge mismatches, orphan contracts, crew with
+               no agency, bonus counts that do not reconcile to bonus_outcome history). Flag —
+               do not silently fix — anything money-affecting.
+            4. Auto-fix only the CLAUDE.md whitelist (deps that keep tests green, lint/format,
+               docs, regenerated export data) via a PR; auto-merge only if tests pass AND the
+               change is entirely within the whitelist.
+            5. Anything touching money, auth, schema, or crew data -> open a PR addressed to
+               Miguel with a written diagnosis and recommended fix. Never auto-merge it.
+            6. Post a <=5 line digest: checked / fixed / waiting-on-Miguel / red tests.
