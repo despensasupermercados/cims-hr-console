@@ -1,0 +1,16 @@
+{
+  "name": "cims-hr-console",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "migrate": "wrangler d1 migrations apply cims-hr-console --remote",
+    "migrate:staging": "wrangler d1 migrations apply cims-hr-console-staging --remote",
+    "deploy": "npm test && npm run migrate && wrangler deploy",
+    "deploy:staging": "npm test && npm run migrate:staging && wrangler deploy --env staging"
+  },
+  "devDependencies": {
+    "wrangler": "^3"
+  }
+}

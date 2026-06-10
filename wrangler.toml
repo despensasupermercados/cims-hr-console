@@ -1,0 +1,23 @@
+name = "cims-hr-console"
+main = "src/worker.js"
+compatibility_date = "2025-05-01"
+
+# Production database (already live, holds the 97 crew).
+[[d1_databases]]
+binding = "DB"
+database_name = "cims-hr-console"
+database_id = "f0ac8b6a-deac-4214-8f42-e22b202d7d7d"
+migrations_dir = "migrations"
+
+# ---- Staging: a separate Worker + separate D1 copy. Nothing reaches prod data
+# that has not run green here first. Create the staging DB once with:
+#   wrangler d1 create cims-hr-console-staging
+# then paste its id below.
+[env.staging]
+name = "cims-hr-console-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "cims-hr-console-staging"
+database_id = "REPLACE_WITH_STAGING_DB_ID"
+migrations_dir = "migrations"

@@ -1,0 +1,647 @@
+import { ladderValue, computeBonus, mapFeedbackToScore } from "./bonus.js";
+import { signToken, verifyToken } from "./auth.js";
+
+/* ============================================================
+   DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
+   Single-file ES module. Paste into the dashboard Worker editor.
+   Bindings required:
+     - D1 database bound as  DB   (the cims-hr-console database)
+   Secrets (set in dashboard → Settings → Variables and Secrets):
+     - SESSION_SECRET  (required) long random string; signs login + session tokens
+     - BOOTSTRAP_KEY   (required for first login w/o email) long random string
+     - RESEND_API_KEY  (optional) enables emailing the magic link via Resend
+     - MAIL_FROM       (optional) e.g. "CIMS <noreply@dg3.com>" for Resend
+   Auth model: two full users (allowlist = rows in `users`). Magic-link via
+   stateless signed token (15 min). Session = signed cookie (12h). Crew never log in.
+   ============================================================ */
+
+const SESSION_TTL = 60 * 60 * 12;      // 12h
+const LOGIN_TTL   = 60 * 15;           // 15m
+const COOKIE = "cims_sid";
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const p = url.pathname;
+    try {
+      // ---- auth endpoints ----
+      if (p === "/login")                return htmlResponse(LOGIN_HTML);
+      if (p === "/api/auth/request" && request.method === "POST") return authRequest(request, env, url);
+      if (p === "/auth/verify")          return authVerify(request, env, url);
+      if (p === "/auth/dev")             return authDev(request, env, url);
+      if (p === "/api/auth/logout")      return logout();
+
+      // ---- public contributor feedback (token-authenticated, no login) ----
+      if (p === "/fb")                   return htmlResponse(FB_HTML);
+      if (p === "/api/feedback/form")    return apiFeedbackForm(env, url);
+      if (p === "/api/feedback/submit" && request.method === "POST") return apiFeedbackSubmit(request, env);
+
+      // ---- everything below requires a session ----
+      const session = await getSession(request, env);
+      if (p.startsWith("/api/")) {
+        if (!session) return json({ error: "unauthorized" }, 401);
+        if (p === "/api/me")        return json({ email: session.email });
+        if (p === "/api/dashboard") return apiDashboard(env);
+        if (p === "/api/crew")      return apiCrew(env, url);
+        if (p === "/api/crew/get")  return apiCrewOne(env, url);
+        if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
+        if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
+        if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
+        if (p === "/api/feedback/crew")  return apiFeedbackCrew(env, url);
+        return json({ error: "not found" }, 404);
+      }
+      // app shell (any non-api path) — gate on session
+      if (!session) return Response.redirect(url.origin + "/login", 302);
+      return htmlResponse(APP_HTML);
+    } catch (err) {
+      return json({ error: "server_error", detail: String(err && err.message || err) }, 500);
+    }
+  }
+};
+
+/* ----------------------- auth helpers ----------------------- */
+function getCookie(request, name) {
+  const c = request.headers.get("Cookie") || "";
+  const m = c.match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+async function getSession(request, env) {
+  if (!env.SESSION_SECRET) return null;
+  const t = getCookie(request, COOKIE);
+  if (!t) return null;
+  const p = await verifyToken(t, env.SESSION_SECRET);
+  return (p && p.p === "session") ? p : null;
+}
+async function isAllowed(env, email) {
+  if (!email) return false;
+  const row = await env.DB.prepare("SELECT email FROM users WHERE lower(email)=lower(?)").bind(email).first();
+  return !!row;
+}
+function sessionCookie(token) {
+  return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
+}
+async function logActivity(env, email, action, detail) {
+  try {
+    await env.DB.prepare("INSERT INTO activity_log (id,user_id,action,detail,at) VALUES (?,?,?,?,?)")
+      .bind("log_" + crypto.randomUUID(), email || null, action, detail || null, new Date().toISOString()).run();
+  } catch {}
+}
+
+// POST /api/auth/request {email} -> email a magic link (or report bootstrap path)
+async function authRequest(request, env, url) {
+  const { email } = await request.json().catch(() => ({}));
+  if (!await isAllowed(env, email)) {
+    // Do not reveal allowlist membership.
+    return json({ ok: true, sent: true });
+  }
+  const token = await signToken({ email, p: "login", exp: Math.floor(Date.now() / 1000) + LOGIN_TTL }, env.SESSION_SECRET);
+  const link = `${url.origin}/auth/verify?token=${token}`;
+  if (env.RESEND_API_KEY) {
+    await sendMagicLink(env, email, link).catch(() => {});
+    await logActivity(env, email, "login_request", "emailed");
+    return json({ ok: true, sent: true });
+  }
+  // No email provider configured yet: instruct to use bootstrap.
+  await logActivity(env, email, "login_request", "no_mailer");
+  return json({ ok: true, sent: false, note: "Email sending is not configured yet. Use the bootstrap link." });
+}
+
+async function sendMagicLink(env, email, link) {
+  await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: env.MAIL_FROM || "CIMS <onboarding@resend.dev>",
+      to: [email],
+      subject: "Your CIMS Console sign-in link",
+      html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`
+    })
+  });
+}
+
+// GET /auth/verify?token=...  -> set session cookie
+async function authVerify(request, env, url) {
+  const token = url.searchParams.get("token");
+  const p = await verifyToken(token, env.SESSION_SECRET);
+  if (!p || p.p !== "login" || !await isAllowed(env, p.email)) {
+    return htmlResponse(noticeHTML("Link invalid or expired", "Please request a new sign-in link."), 401);
+  }
+  const sess = await signToken({ email: p.email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
+  await logActivity(env, p.email, "login", "verify");
+  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": sessionCookie(sess) } });
+}
+
+// GET /auth/dev?key=BOOTSTRAP_KEY&email=...  -> bootstrap session (until email is wired)
+async function authDev(request, env, url) {
+  const key = url.searchParams.get("key");
+  const email = url.searchParams.get("email");
+  if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
+  if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
+  const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
+  await logActivity(env, email, "login", "bootstrap");
+  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": sessionCookie(sess) } });
+}
+function logout() {
+  return new Response(null, { status: 302, headers: { "Location": "/login", "Set-Cookie": `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0` } });
+}
+
+/* ----------------------- data API ----------------------- */
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json" } });
+}
+const TODAY = () => new Date().toISOString().slice(0, 10);
+function plus(days) { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); }
+
+async function apiDashboard(env) {
+  const today = TODAY(), in90 = plus(90);
+  const q = async (sql, ...b) => (await env.DB.prepare(sql).bind(...b).first());
+  const total = (await q("SELECT COUNT(*) n FROM crew")).n;
+  const byStatus = await env.DB.prepare("SELECT status, COUNT(*) n FROM crew GROUP BY status").all();
+  const statusMap = {}; for (const r of byStatus.results) statusMap[r.status] = r.n;
+  const medExp = (await q("SELECT COUNT(*) n FROM crew WHERE med_exp IS NOT NULL AND med_exp < ?", in90)).n;
+  const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
+  const usvExp = (await q("SELECT COUNT(*) n FROM crew WHERE usv_exp IS NOT NULL AND usv_exp < ?", in90)).n;
+  const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
+  return json({
+    today,
+    workforce: {
+      total,
+      on_board: statusMap["On board"] || 0,
+      on_vacation: statusMap["On Vacation"] || 0,
+      earmarked: statusMap["Earmarked"] || 0,
+      inactive: statusMap["Inactive"] || 0,
+      vessels
+    },
+    compliance: { med_exp_90: medExp, pp_exp_90: ppExp, usv_exp_90: usvExp }
+  });
+}
+
+async function apiCrew(env, url) {
+  const search = (url.searchParams.get("q") || "").trim().toLowerCase();
+  const status = url.searchParams.get("status") || "";
+  let sql = "SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, med_exp, pp_exp, usv_exp, baseline_count FROM crew";
+  const where = [], bind = [];
+  if (status) { where.push("status = ?"); bind.push(status); }
+  if (search) {
+    where.push("(lower(first_name) LIKE ? OR lower(last_name) LIKE ? OR lower(agency_id) LIKE ? OR lower(vessel_observed) LIKE ?)");
+    const s = "%" + search + "%"; bind.push(s, s, s, s);
+  }
+  if (where.length) sql += " WHERE " + where.join(" AND ");
+  sql += " ORDER BY last_name, first_name";
+  const rs = await env.DB.prepare(sql).bind(...bind).all();
+  return json({ count: rs.results.length, crew: rs.results });
+}
+
+async function apiCrewOne(env, url) {
+  const id = url.searchParams.get("id");
+  const row = await env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first();
+  if (!row) return json({ error: "not found" }, 404);
+  return json({ crew: row });
+}
+
+/* ----------------------- bonus engine (locked SOP) ----------------------- */
+async function crewCount(env, crewRowId, baseline) {
+  const last = await env.DB.prepare("SELECT count_after FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(crewRowId).first();
+  return last ? last.count_after : (baseline == null ? 0 : baseline);
+}
+async function apiBonusCrew(env, url) {
+  const id = url.searchParams.get("id");
+  const cr = await env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(id).first();
+  if (!cr) return json({ error: "not found" }, 404);
+  const count = await crewCount(env, cr.id, cr.baseline_count);
+  const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
+  return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: cr.baseline_count != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results });
+}
+async function apiBonusCommit(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const cr = await env.DB.prepare("SELECT id, agency_id, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(b.agency_id).first();
+  if (!cr) return json({ error: "crew_not_found" }, 404);
+  const count = await crewCount(env, cr.id, cr.baseline_count);
+  const r = computeBonus({ count, sliders: b.sliders, evalScore: b.evalScore, gates: b.gates });
+  if ((r.gate === "rush" || r.gate === "audit") && !(b.gateNote && b.gateNote.trim())) return json({ error: "gate_note_required" }, 400);
+  if (!b.spanStart || !b.spanEnd) return json({ error: "span_required" }, 400);
+  if (b.spanEnd < b.spanStart) return json({ error: "span_invalid" }, 400);
+  const ships = (Array.isArray(b.ships) && b.ships.filter(Boolean).length) ? b.ships.filter(Boolean) : [cr.vessel_observed || "—"];
+  const g = b.gates || {};
+  const endReason = (!g.complete && g.compassion) ? "compassionate" : (g.complete ? "completed" : (b.endReason || "early_relief"));
+  const grpN = ((await env.DB.prepare("SELECT COUNT(*) n FROM contract WHERE crew_id=?").bind(cr.id).first()).n) + 1;
+  const groupId = cr.agency_id + "-C" + grpN;
+  const cid = "ct_" + crypto.randomUUID();
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now).run();
+  for (let i = 0; i < ships.length; i++) {
+    await env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now).run();
+  }
+  const oid = "bo_" + crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(oid, cid, groupId, cr.id, 1, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now).run();
+  await logActivity(env, (session && session.email), "commit_outcome", groupId + " pay=" + r.pay + " gate=" + (r.gate || "none"));
+  return json({ ok: true, group: groupId, ships, result: r });
+}
+
+/* ----------------------- feedback windows ----------------------- */
+const FB_TTL = 60 * 60 * 24 * 30; // 30 days
+const FB_ROLES = { ray: "Ray — Inventory & Orders", rolando: "Rolando — Technical", dexter: "Dexter — Field review" };
+async function sha256hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+// Self-creating tables (avoids any manual console SQL).
+async function ensureFb(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_request2 (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', due_date TEXT, requested_by TEXT, requested_at TEXT NOT NULL, UNIQUE (crew_id, role))").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL)").run();
+}
+// Rita fires a scoped request for a crew+role -> returns a single-use signed link.
+async function apiFeedbackRequest(request, env, session, url) {
+  await ensureFb(env);
+  const b = await request.json().catch(() => ({}));
+  const role = b.role;
+  if (!FB_ROLES[role]) return json({ error: "bad_role" }, 400);
+  const cr = await env.DB.prepare("SELECT id, agency_id, first_name, last_name FROM crew WHERE agency_id=?").bind(b.agency_id).first();
+  if (!cr) return json({ error: "crew_not_found" }, 404);
+  const token = await signToken({ p: "fb", crewId: cr.id, agency_id: cr.agency_id, role, exp: Math.floor(Date.now() / 1000) + FB_TTL }, env.SESSION_SECRET);
+  const th = await sha256hex(token);
+  const rid = "fr_" + crypto.randomUUID();
+  const now = new Date().toISOString();
+  // one open request per crew+role: replace any existing
+  await env.DB.prepare("DELETE FROM feedback_request2 WHERE crew_id=? AND role=?").bind(cr.id, role).run();
+  await env.DB.prepare("INSERT INTO feedback_request2 (id,crew_id,role,token_hash,status,due_date,requested_by,requested_at) VALUES (?,?,?,?,?,?,?,?)")
+    .bind(rid, cr.id, role, th, "pending", b.due_date || null, (session && session.email) || null, now).run();
+  await logActivity(env, session && session.email, "feedback_request2", cr.agency_id + " " + role);
+  return json({ ok: true, link: url.origin + "/fb?t=" + token, role, crew: cr.first_name + " " + cr.last_name });
+}
+// Contributor opens the link: validate token, return scoped context.
+async function apiFeedbackForm(env, url) {
+  await ensureFb(env);
+  const t = url.searchParams.get("t");
+  const p = await verifyToken(t, env.SESSION_SECRET);
+  if (!p || p.p !== "fb" || !FB_ROLES[p.role]) return json({ error: "invalid_or_expired" }, 401);
+  const th = await sha256hex(t);
+  const req = await env.DB.prepare("SELECT id, status FROM feedback_request2 WHERE token_hash=?").bind(th).first();
+  if (!req) return json({ error: "revoked" }, 401);
+  const cr = await env.DB.prepare("SELECT first_name, middle_name, last_name, vessel_observed FROM crew WHERE id=?").bind(p.crewId).first();
+  const existing = await env.DB.prepare("SELECT answers_json FROM feedback_response2 WHERE request_id=?").bind(req.id).first();
+  return json({ ok: true, role: p.role, roleLabel: FB_ROLES[p.role], crew: [cr.first_name, cr.middle_name, cr.last_name].filter(Boolean).join(" "), vessel: cr.vessel_observed, status: req.status, answers: existing ? JSON.parse(existing.answers_json) : null });
+}
+// Contributor submits answers (no session; token authenticates).
+async function apiFeedbackSubmit(request, env) {
+  await ensureFb(env);
+  const b = await request.json().catch(() => ({}));
+  const p = await verifyToken(b.t, env.SESSION_SECRET);
+  if (!p || p.p !== "fb" || !FB_ROLES[p.role]) return json({ error: "invalid_or_expired" }, 401);
+  const th = await sha256hex(b.t);
+  const req = await env.DB.prepare("SELECT id, crew_id, role FROM feedback_request2 WHERE token_hash=?").bind(th).first();
+  if (!req) return json({ error: "revoked" }, 401);
+  const now = new Date().toISOString();
+  const naDexter = req.role === "dexter" && (b.answers && b.answers.assessed === "No (N/A)") && !(b.answers && b.answers.mono);
+  await env.DB.prepare("DELETE FROM feedback_response2 WHERE request_id=?").bind(req.id).run();
+  await env.DB.prepare("INSERT INTO feedback_response2 (id,request_id,crew_id,role,answers_json,submitted_at) VALUES (?,?,?,?,?,?)")
+    .bind("fp_" + crypto.randomUUID(), req.id, req.crew_id, req.role, JSON.stringify(b.answers || {}), now).run();
+  await env.DB.prepare("UPDATE feedback_request2 SET status=? WHERE id=?").bind(naDexter ? "na" : "answered", req.id).run();
+  await logActivity(env, null, "feedback_submit", req.role);
+  // notify (queue; emailed server-side once Resend wired)
+  try { await env.DB.prepare("INSERT INTO outbox (id,kind,to_addr,payload,status,created_at) VALUES (?,?,?,?,?,?)").bind("ob_" + crypto.randomUUID(), "feedback_notify", "onboardsupport@dg3.com", req.role + " feedback in", "queued", now).run(); } catch {}
+  return json({ ok: true });
+}
+// Rita: feedback status + responses for a crew (also used to pre-fill the Score Card).
+async function apiFeedbackCrew(env, url) {
+  await ensureFb(env);
+  const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(url.searchParams.get("id")).first();
+  if (!cr) return json({ error: "not_found" }, 404);
+  const reqs = await env.DB.prepare("SELECT role, status, requested_at FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all();
+  const resp = await env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=?").bind(cr.id).all();
+  const answers = {}; for (const r of resp.results) answers[r.role] = JSON.parse(r.answers_json);
+  return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers) });
+}
+
+/* ----------------------- HTML ----------------------- */
+function htmlResponse(body, status = 200) {
+  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+function noticeHTML(title, msg) {
+  return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+  <body style="font-family:system-ui;background:#0f2238;color:#fff;display:grid;place-items:center;height:100vh;margin:0">
+  <div style="text-align:center"><h2>${title}</h2><p style="color:#9fb4cc">${msg}</p><a href="/login" style="color:#5FB946">Back to sign in</a></div>`;
+}
+
+const STYLE = `
+:root{--navy:#1B3A5C;--deep:#142D48;--ink:#16293D;--green:#5FB946;--green-d:#3E8E2A;--amber:#B0741A;--red:#BC3B2C;--royal:#1E6FD0;--line:#E4E9F0;--line-2:#D5DDE9;--mut:#6B7C93;--bg:#E9EDF3;--surface:#fff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+h1,h2,h3,.fh{font-family:'Outfit',system-ui,sans-serif;letter-spacing:-.012em}
+.brandmark{width:30px;height:30px;border-radius:8px;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Outfit';font-weight:800;font-size:16px}
+header{background:linear-gradient(180deg,#1F4268,#16314F);color:#fff;padding:0 22px;display:flex;align-items:center;gap:16px;height:58px;position:sticky;top:0;z-index:20}
+header .brand{font-family:'Outfit';font-weight:700;font-size:15px}
+header .brand small{display:block;font-size:9px;font-weight:500;color:#9fb4cc;letter-spacing:.1em;text-transform:uppercase}
+nav{margin-left:auto;display:flex;gap:4px}
+nav button{background:transparent;border:0;color:#b9cce0;padding:8px 14px;border-radius:8px;font-family:'Outfit';font-weight:600;font-size:13.5px;cursor:pointer}
+nav button.on,nav button:hover{background:rgba(255,255,255,.12);color:#fff}
+nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
+.wrap{max-width:1180px;margin:0 auto;padding:22px}
+.zlabel{font-family:'Outfit';font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:20px 0 10px;display:flex;align-items:center;gap:12px}
+.zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(20,45,72,.05);text-align:center}
+.tile .n{font-family:'Outfit';font-size:30px;font-weight:800;color:var(--navy);line-height:1}
+.tile .l{font-size:10.5px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:8px}
+.tile.green .n{color:var(--green-d)}.tile.amber .n{color:var(--amber)}.tile.royal .n{color:var(--royal)}.tile.gray .n{color:#6B7C93}.tile.red .n{color:var(--red)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0 14px}
+.bar h2{font-size:19px;color:var(--navy);margin-right:auto}
+input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--deep)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 15px;box-shadow:0 1px 2px rgba(20,45,72,.05);border-left:3px solid var(--navy)}
+.card.b-Royal{border-left-color:#1E6FD0}.card.b-Celebrity{border-left-color:#0C8C8C}.card.b-Azamara{border-left-color:#7A5AA8}.card.b-NCL{border-left-color:#E0962B}
+.cname{font-family:'Outfit';font-weight:700;font-size:15px;color:var(--navy)}
+.csub{font-size:12px;color:var(--mut);margin-top:2px}
+.statdot{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin-top:9px}
+.statdot i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.vessel{font-size:13px;font-weight:600;color:var(--deep);margin-top:9px}
+.cchips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.cchip{font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px}
+.cchip.red{background:#fbe9e7;color:var(--red)}.cchip.amber{background:#fff5e6;color:var(--amber)}.cchip.ok{background:#eaf6e6;color:var(--green-d)}
+.muted{color:var(--mut);font-size:13px;padding:30px;text-align:center}
+.ov{position:fixed;inset:0;background:rgba(20,45,72,.5);display:flex;align-items:center;justify-content:center;z-index:60;padding:20px}
+.modal{background:#fff;border-radius:15px;width:560px;max-width:100%;max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(20,45,72,.28)}
+.mh{background:linear-gradient(180deg,#1F4268,#16314F);color:#fff;padding:15px 20px;font-family:'Outfit';font-weight:700;font-size:16px;display:flex;align-items:center;border-bottom:2px solid var(--green)}
+.mh button{margin-left:auto;background:transparent;border:0;color:#cdd9e8;font-size:22px;cursor:pointer;line-height:1}
+.mb{padding:20px}
+.fg{margin-bottom:13px}.fg label{display:block;font-size:12px;font-weight:600;color:var(--mut);margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em}
+.fg input,.fg select,.fg textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:14px}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.rng{display:flex;align-items:center;gap:10px}.rng input[type=range]{flex:1}.rng .v{font-family:'Outfit';font-weight:700;color:var(--navy);width:30px;text-align:center}
+.ck{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:13.5px}.ck input{width:17px;height:17px}
+.scorebox{background:var(--bg);border-radius:11px;padding:14px;margin:8px 0}
+.scorerow{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}.scorerow b{font-family:'Outfit'}
+.bigpay{font-family:'Outfit';font-weight:800;font-size:30px;color:var(--green-d);text-align:center;margin:6px 0}.bigpay.zero{color:var(--red)}
+.gateflag{background:#fbe9e7;color:var(--red);border-radius:8px;padding:8px 11px;font-size:12.5px;font-weight:600;margin-top:6px}
+.mf{display:flex;gap:9px;justify-content:flex-end;margin-top:10px}
+.btn{padding:9px 15px;border:0;border-radius:9px;background:var(--navy);color:#fff;font-weight:600;cursor:pointer;font-family:'DM Sans';font-size:13.5px}
+.btn.green{background:var(--green)}.btn.ghost{background:#fff;border:1px solid var(--line);color:var(--navy)}
+.warn{background:#fdf7ec;border:1px solid #ecdfc2;color:var(--amber);border-radius:9px;padding:9px 11px;font-size:12.5px;margin-bottom:12px}
+.brow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-bottom:7px;cursor:pointer}
+.brow:hover{border-color:var(--navy)}
+.hint{font-size:11.5px;color:var(--mut);margin-top:3px}
+`;
+
+const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>DG3 CIMS · Sign in</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>${STYLE}
+#g{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--deep),var(--navy));padding:24px}
+.box{background:#fff;border-radius:16px;padding:34px 30px;width:360px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
+.box h1{color:var(--navy);font-size:20px;margin:14px 0 4px}.box p{color:var(--mut);font-size:13px;margin-bottom:20px}
+.box input{width:100%;text-align:center}.box button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:var(--green);color:#fff;font-weight:700;font-family:'Outfit';font-size:15px;cursor:pointer}
+.msg{font-size:12.5px;margin-top:12px;min-height:16px;color:var(--mut)}
+</style></head><body><div id=g><div class=box>
+<div class=brandmark style="margin:0 auto">D</div>
+<h1>HR Operational Console</h1><p>DG3 Cruise Industry Managed Services</p>
+<input id=email type=email placeholder="you@dg3.com" autocomplete=email>
+<button onclick="req()">Send sign-in link</button>
+<div class=msg id=msg></div>
+</div></div>
+<script>
+async function req(){
+  const email=document.getElementById('email').value.trim();
+  const msg=document.getElementById('msg');
+  if(!email){msg.textContent='Enter your email.';return;}
+  msg.textContent='Working…';
+  const r=await fetch('/api/auth/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+  const d=await r.json();
+  if(d.sent){msg.textContent='If that address is authorized, a sign-in link is on its way.';}
+  else{msg.innerHTML='Email isn\\'t set up yet. Ask Miguel for the bootstrap link to sign in.';}
+}
+document.getElementById('email').addEventListener('keydown',e=>{if(e.key==='Enter')req();});
+</script></body></html>`;
+
+const FB_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>CIMS Crew Feedback</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>${STYLE}#fbwrap{max-width:620px;margin:0 auto;padding:26px 18px}.fhd{display:flex;align-items:center;gap:12px;margin-bottom:6px}.card2{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(20,45,72,.07);padding:20px 22px;margin-top:14px}</style>
+</head><body><div id=fbwrap>
+<div class=fhd><div class=brandmark>D</div><div><div style="font-family:'Outfit';font-weight:700;color:var(--navy)">DG3 CIMS — Crew Feedback</div><div class=hint id=fbsub>Loading…</div></div></div>
+<div id=fbbody></div></div>
+<script>
+var T=new URLSearchParams(location.search).get('t');
+var ROLE=null;
+function sel(id,opts,val){return '<select id='+id+'>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('')+'</select>';}
+function ta(id,v){return '<textarea id='+id+' rows=2>'+(v||'')+'</textarea>';}
+async function start(){
+  if(!T){document.getElementById('fbsub').textContent='Missing link token.';return;}
+  var d=await (await fetch('/api/feedback/form?t='+encodeURIComponent(T))).json();
+  if(d.error){document.getElementById('fbbody').innerHTML='<div class=card2><b>This link is invalid or has expired.</b><div class=hint style="margin-top:6px">Please ask Rita for a new feedback link.</div></div>';document.getElementById('fbsub').textContent='';return;}
+  ROLE=d.role;var a=d.answers||{};
+  document.getElementById('fbsub').textContent=d.roleLabel+' · '+d.crew+(d.vessel?(' · '+d.vessel):'');
+  var f='';
+  if(d.role==='ray'){
+    f+='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+sel('order',['No','Yes'],a.order||'No')+'</div>'
+     +'<div class=fg><label>If yes — cause</label>'+sel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause||'N/A')+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
+     +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
+     +'<div class=fg><label>Orders placed on time (par respected)?</label>'+sel('ontime',['Always','Mostly','Often late'],a.ontime||'Always')+'</div>'
+     +'<div class=fg><label>Order accuracy</label>'+sel('acc',['Accurate','Minor errors','Frequent errors'],a.acc||'Accurate')+'</div>'
+     +'<div class=fg><label>Par maintained at handover</label>'+sel('par',['Maintained','Some gaps','Not maintained'],a.par||'Maintained')+'</div>'
+     +'<div class=fg><label>Failed end-of-contract inventory audit?</label>'+sel('audit',['No','Yes'],a.audit||'No')+'</div>'
+     +'<div class=fg><label>Note / evidence (optional)</label>'+ta('note',a.note)+'</div>';
+  } else if(d.role==='rolando'){
+    f+='<div class=fg><label>Machine clean &amp; serviceable at handover?</label>'+sel('clean',['Yes','Minor issues','No'],a.clean||'Yes')+'</div>'
+     +'<div class=fg><label>Preventive maintenance done correctly?</label>'+sel('pm',['Yes','Partial','No'],a.pm||'Yes')+'</div>'
+     +'<div class=fg><label>Unresolved technical issues left for the reliever?</label>'+sel('unres',['None','Minor','Major'],a.unres||'None')+'</div>'
+     +'<div class=fg><label>Note / evidence (optional)</label>'+ta('note',a.note)+'</div>';
+  } else {
+    f+='<div class=fg><label>Did you assess this crew this contract?</label>'+sel('assessed',['No (N/A)','Yes'],a.assessed||'No (N/A)')+'</div>'
+     +'<div class=fg><label>Mono click % this contract (&lt;20% target)</label><input id=mono type=number min=0 max=100 step=0.1 value="'+(a.mono||'')+'" placeholder="e.g. 14"><div class=hint>Feeds the Mono discipline sub-score.</div></div>'
+     +'<div class=fg><label>Inventory observations</label>'+ta('inv',a.inv)+'</div>'
+     +'<div class=fg><label>Technical observations</label>'+ta('tech',a.tech)+'</div>'
+     +'<div class=fg><label>Overall impression</label>'+ta('overall',a.overall)+'</div>';
+  }
+  document.getElementById('fbbody').innerHTML='<div class=card2>'+f+'<div class=mf><button class="btn green" id=sb onclick="submitFb()">Submit feedback</button></div><div class=hint id=fbmsg style="text-align:right"></div></div>';
+}
+function val(id){var e=document.getElementById(id);return e?e.value:undefined;}
+async function submitFb(){
+  var ans={};
+  if(ROLE==='ray')ans={order:val('order'),rushcause:val('rushcause'),rushcost:val('rushcost'),ontime:val('ontime'),acc:val('acc'),par:val('par'),audit:val('audit'),note:val('note')};
+  else if(ROLE==='rolando')ans={clean:val('clean'),pm:val('pm'),unres:val('unres'),note:val('note')};
+  else ans={assessed:val('assessed'),mono:val('mono'),inv:val('inv'),tech:val('tech'),overall:val('overall')};
+  document.getElementById('sb').disabled=true;document.getElementById('fbmsg').textContent='Saving…';
+  var r=await (await fetch('/api/feedback/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({t:T,answers:ans})})).json();
+  document.getElementById('fbbody').innerHTML='<div class=card2 style="text-align:center"><div style="font-family:Outfit;font-weight:800;color:var(--green-d);font-size:20px">✓ Thank you</div><div class=hint style="margin-top:6px">Your feedback was recorded for Rita. You can close this page.</div></div>';
+}
+start();
+</script></body></html>`;
+
+const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>DG3 CIMS · HR Console</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>${STYLE}</style></head><body>
+<header>
+  <div class=brandmark>D</div>
+  <div class=brand>DG3 CIMS<small>HR Operational Console</small></div>
+  <nav>
+    <button id=nav-dashboard class=on onclick="show('dashboard')">Dashboard</button>
+    <button id=nav-crew onclick="show('crew')">Crew</button>
+    <button id=nav-bonus onclick="show('bonus')">Bonus</button>
+    <a class=out href="/api/auth/logout">Sign out</a>
+  </nav>
+</header>
+<div class=wrap id=view></div>
+<script>
+const $=s=>document.querySelector(s);
+let CREW=[];
+function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6'}[st]||'#9aa7b6';}
+function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
+function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
+async function show(tab){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
+  $('#nav-'+tab).classList.add('on');
+  if(tab==='dashboard')return renderDashboard();
+  if(tab==='crew')return renderCrew();
+  if(tab==='bonus')return renderBonus();
+}
+async function renderDashboard(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  const d=await (await fetch('/api/dashboard')).json();
+  const w=d.workforce,c=d.compliance;
+  $('#view').innerHTML=
+   '<div class=zlabel>Workforce</div><div class=tiles>'
+   +tile(w.total,'Total crew')+tile(w.on_board,'On board','green')+tile(w.on_vacation,'On vacation','amber')
+   +tile(w.earmarked,'Earmarked','royal')+tile(w.inactive,'Inactive','gray')+tile(w.vessels,'Vessels')
+   +'</div>'
+   +'<div class=zlabel>Compliance — expiring within 90 days</div><div class=tiles>'
+   +tile(c.med_exp_90,'Medical','red')+tile(c.pp_exp_90,'Passport','amber')+tile(c.usv_exp_90,'US visa','amber')
+   +'</div>'
+   +'<p class=muted style="text-align:left;padding:14px 2px">Live from Cloudflare D1 · '+w.total+' crew · as of '+d.today+'</p>';
+}
+function tile(n,l,cls){return '<div class="tile '+(cls||'')+'"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
+async function renderCrew(){
+  $('#view').innerHTML=
+   '<div class=bar><h2>Crew</h2>'
+   +'<input id=q placeholder="Search name, ID, ship…" oninput="filterCrew()" style="width:240px">'
+   +'<select id=st onchange="filterCrew()"><option value="">All statuses</option>'
+   +'<option>On board</option><option>On Vacation</option><option>Earmarked</option><option>Inactive</option></select>'
+   +'</div><div id=crewcount class=csub style="margin:-6px 0 12px"></div><div id=crewgrid class=grid></div>';
+  await loadCrew();
+}
+async function loadCrew(){
+  const q=$('#q')?$('#q').value:'';const st=$('#st')?$('#st').value:'';
+  const r=await (await fetch('/api/crew?q='+encodeURIComponent(q)+'&status='+encodeURIComponent(st))).json();
+  CREW=r.crew;
+  $('#crewcount').textContent=r.count+' crew';
+  $('#crewgrid').innerHTML=CREW.map(card).join('')||'<div class=muted>No matches.</div>';
+}
+let _t;function filterCrew(){clearTimeout(_t);_t=setTimeout(loadCrew,180);}
+function card(c){
+  const name=[c.first_name,c.last_name].filter(Boolean).join(' ');
+  const b=brandOf(c.vessel_observed);
+  return '<div class="card b-'+b+'">'
+   +'<div class=cname>'+name+'</div>'
+   +'<div class=csub>'+c.agency_id+' · '+(c.rank_observed||'')+'</div>'
+   +'<div class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</div>'
+   +'<div class=vessel>'+(c.vessel_observed||'—')+'</div>'
+   +'<div class=cchips>'+docChip('Med',c.med_exp)+docChip('PP',c.pp_exp)+docChip('USV',c.usv_exp)+'</div>'
+   +'</div>';
+}
+/* ---- bonus engine (client mirror of server logic) ---- */
+var FW={sOrder:20,sAcc:25,sPar:15,sHand:10,sComm:10,sMono:5};
+var LADDER=[0,0,250,500,750,1000,1250,1500,1750,2000];
+function ladderValue(n){return n<=1?0:n>=9?2000:LADDER[n];}
+var _SC=null;
+function gateLabel(g){return {not_completed:'Contract not completed',rush:'Rush shipment from ordering failure',audit:'Failed inventory audit',eval_below_3:'Supervisor evaluation below 3'}[g]||g;}
+function computeBonusC(){
+  var g={complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked};
+  var op=0;for(var k in FW){var e=$('#'+k);var v=e?parseInt(e.value):0;op+=v;}
+  var ev=parseInt($('#sEval').value);var ep=ev>=3?15:0;var score=op+ep;
+  var gate=null,resets=false,advances=true;
+  if(!g.complete&&!g.compassion){gate='not_completed';resets=true;advances=false;}
+  else if(g.rush){gate='rush';resets=true;advances=false;}
+  else if(g.audit){gate='audit';resets=true;advances=false;}
+  else if(ev<3){gate='eval_below_3';advances=false;}
+  var count=_SC.count;var nextCount=resets?0:(advances?count+1:count);
+  var pay=(!gate&&score>=80)?Math.round(ladderValue(nextCount)*score/100):0;
+  return {score:score,gate:gate,count:count,nextCount:nextCount,pay:pay,rung:ladderValue(nextCount)};
+}
+function rng(id,label,max){return '<div class=fg><label>'+label+' — '+max+'%</label><div class=rng><input type=range id='+id+' min=0 max='+max+' value=0 oninput="recalcScore()"><span class=v id='+id+'v>0</span></div></div>';}
+async function renderBonus(){
+  $('#view').innerHTML='<div class=bar><h2>Bonus — Score a contract</h2>'
+   +'<input id=bq placeholder="Search crew to score…" oninput="filterBonus()" style="width:260px"></div>'
+   +'<div class=hint style="margin:-6px 0 12px">Pick a crew member to open their contract-completion Score Card. Scoring writes a permanent outcome and updates their consecutive-contract count.</div>'
+   +'<div id=blist></div>';
+  loadBonus();
+}
+let _bt;function filterBonus(){clearTimeout(_bt);_bt=setTimeout(loadBonus,180);}
+async function loadBonus(){
+  var q=$('#bq')?$('#bq').value:'';
+  var r=await (await fetch('/api/crew?q='+encodeURIComponent(q))).json();
+  $('#blist').innerHTML=r.crew.slice(0,40).map(function(c){
+    var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
+    return '<div class=brow onclick="openScore(\\''+c.agency_id+'\\')"><div><div class=cname style="font-size:14px">'+name+'</div><div class=csub>'+c.agency_id+' · '+(c.vessel_observed||'—')+'</div></div><div style="margin-left:auto"><span class="btn green" style="pointer-events:none">Score →</span></div></div>';
+  }).join('')||'<div class=muted>No matches.</div>';
+}
+async function openScore(id){
+  var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
+  _SC=d; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
+  var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew — treated as 0. Confirm via the reconciliation sheet before any payout is finalised.</div>';
+  var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
+  var body=''
+   +'<div class=hint>'+cr.agency_id+' · '+d.rank+' · Contract count <b>'+d.count+'</b> → completing makes it '+(d.count+1)+'. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
+   +warn+hist+'<div id=fbPanel></div>'
+   +'<div class=f2 style="margin-top:12px"><div class=fg><label>Sign-on</label><input type=date id=spanStart></div><div class=fg><label>Sign-off</label><input type=date id=spanEnd></div></div>'
+   +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
+   +'<label class=ck><input type=checkbox id=gComplete checked onchange="recalcScore()"> Contract completed in full</label>'
+   +'<label class=ck><input type=checkbox id=gCompassion onchange="recalcScore()"> Not completed — approved compassionate leave (treat as completed)</label>'
+   +'<label class=ck><input type=checkbox id=gRush onchange="recalcScore()"> Emergency/rush order from ordering failure (resets count)</label>'
+   +'<label class=ck><input type=checkbox id=gAudit onchange="recalcScore()"> Failed end-of-contract inventory audit (resets count)</label>'
+   +'<div class=fg id=gateNoteWrap style="display:none"><label>Reason &amp; evidence (required for a reset gate)</label><textarea id=gateNote rows=2 placeholder="e.g. Rush airfreight magenta toner 12 Mar — par hit 0, prior order skipped. Zendesk #5843."></textarea></div>'
+   +'<div style="margin:14px 0 6px;font-weight:700;font-family:\\'Outfit\\';color:var(--navy)">Scorecard</div>'
+   +'<div class=hint style="margin:-2px 0 8px">Award each factor from evidence (sliders start at 0).</div>'
+   +rng('sOrder','On-time ordering',20)+rng('sAcc','Order accuracy',25)+rng('sPar','Par maintenance',15)
+   +rng('sHand','Ship-condition handover',10)+rng('sComm','Communication (manual — Rita)',10)+rng('sMono','Mono click discipline (<20%)',5)
+   +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
+   +'<div id=scoreOut></div>'
+   +'<div class=mf><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()">Close &amp; commit</button></div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';
+  recalcScore();
+  applyFeedback(cr.agency_id);
+}
+async function applyFeedback(id){
+  var d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(id))).json();
+  if(!d||!d.ok||!document.getElementById('fbPanel'))return;
+  var byRole={};(d.requests||[]).forEach(function(r){byRole[r.role]=r.status;});
+  var roles=[['ray','Ray'],['rolando','Rolando'],['dexter','Dexter']];
+  var btns=roles.map(function(x){var st=byRole[x[0]]||'none';var lbl=st==='answered'?'✓ '+x[1]:st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
+  var ev=(d.prefill&&d.prefill.evidence&&d.prefill.evidence.length)?('<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Evidence from windows</b><br>'+d.prefill.evidence.join('<br>')+'</div>'):'';
+  document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'</div><div id=fbLink></div>'+ev+'</div>';
+  var pf=d.prefill||{};
+  if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}
+  if(pf.sliders)for(var k in pf.sliders){var e=$('#'+k);if(e)e.value=pf.sliders[k];}
+  if(pf.gateNote&&pf.gateNote.length){var gn=$('#gateNote');if(gn&&!gn.value)gn.value=pf.gateNote.join(' · ');}
+  recalcScore();
+}
+async function genLink(id,role){
+  var r=await (await fetch('/api/feedback/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,role:role})})).json();
+  if(r.error){alert('Error: '+r.error);return;}
+  document.getElementById('fbLink').innerHTML='<div class=hint style="margin-top:6px">Single-use '+role+' link — send to the contributor:<br><input readonly value="'+r.link+'" onclick="this.select()" style="width:100%;margin-top:4px;font-size:11px"></div>';
+}
+function recalcScore(){
+  for(var k in FW){var e=$('#'+k);if(e)$('#'+k+'v').textContent=e.value;}
+  $('#gateNoteWrap').style.display=($('#gRush').checked||$('#gAudit').checked)?'block':'none';
+  var r=computeBonusC();
+  var note=r.gate?(r.gate==='eval_below_3'?'Forfeited — count holds at '+r.count:'Bonus $0 — count resets to 0'):(r.score<80?'Below 80% floor — $0, count advances to '+r.nextCount:'Ladder $'+r.rung.toLocaleString()+' × '+r.score+'% (proportional)');
+  $('#scoreOut').innerHTML='<div class=scorebox><div class=scorerow><span>Scorecard total</span><b>'+r.score+'%</b></div><div class=scorerow><span>Floor</span><b>80%</b></div><div class=scorerow><span>Count after</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'<div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=hint style="text-align:center">'+note+'</div></div>';
+}
+async function commitBonus(){
+  var btn=$('#commitBtn');btn.disabled=true;btn.textContent='Committing…';
+  var sliders={};for(var k in FW)sliders[k]=parseInt($('#'+k).value);
+  var payload={agency_id:_SC.crew.agency_id,spanStart:$('#spanStart').value,spanEnd:$('#spanEnd').value,
+    ships:$('#ships').value.split(',').map(function(s){return s.trim();}).filter(Boolean),
+    sliders:sliders,evalScore:parseInt($('#sEval').value),
+    gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
+    gateNote:$('#gateNote')?$('#gateNote').value:''};
+  var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+  if(res.error){btn.disabled=false;btn.textContent='Close & commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  var r=res.result;
+  $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'bonus\\')">Done</button></div></div></div></div>';
+}
+function mClose(){$('#modalRoot').innerHTML='';}
+show('dashboard');
+</script>
+<div id=modalRoot></div></body></html>`;
