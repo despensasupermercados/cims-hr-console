@@ -19,7 +19,7 @@ import { billingReport } from "./daysworked.js";
    stateless signed token (15 min). Session = signed cookie (12h). Crew never log in.
    ============================================================ */
 
-const SESSION_TTL = 60 * 60 * 12;      // 12h
+const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days (internal 2-user tool; reduces re-login friction)
 const LOGIN_TTL   = 60 * 15;           // 15m
 const COOKIE = "cims_sid";
 
@@ -236,7 +236,10 @@ async function apiCrewOne(env, url) {
   const id = url.searchParams.get("id");
   const row = await env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first();
   if (!row) return json({ error: "not found" }, 404);
-  return json({ crew: row });
+  await ensureKeyman(env);
+  const ct = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
+  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
+  return json({ crew: row, contracts: ct, daysWorked: (dw && dw.days) || 0 });
 }
 
 /* ----------------------- compliance + rotation (read views) ----------------------- */
@@ -681,12 +684,33 @@ async function loadCrew(){
   CREW=r.crew;
   $('#crewcount').textContent=r.count+' crew';
   $('#crewgrid').innerHTML=CREW.map(card).join('')||'<div class=muted>No matches.</div>';
+  document.querySelectorAll('#crewgrid .card[data-crew]').forEach(function(el){el.onclick=function(){openCrew(el.getAttribute('data-crew'));};});
 }
 let _t;function filterCrew(){clearTimeout(_t);_t=setTimeout(loadCrew,180);}
+async function openCrew(id){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  const d=await (await fetch('/api/crew/get?id='+encodeURIComponent(id))).json();
+  if(d.error){$('#view').innerHTML='<div class=muted>Not found.</div>';return;}
+  const c=d.crew;const name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
+  const doc=function(label,dt){if(!dt)return '<span class="cchip">'+label+': —</span>';const days=(new Date(dt)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+dt+'</span>';};
+  let h='<div class=bar><h2>'+name+'</h2><button class="btn ghost" style="margin-left:auto" onclick="renderCrew()">← Back to crew</button></div>';
+  h+='<div class="card" style="border-left:3px solid var(--navy);max-width:none">'
+    +'<div class=csub>'+c.agency_id+' · '+(c.rank_override||c.rank_observed||'')+'</div>'
+    +'<div class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</div>'
+    +'<div class=vessel>'+(c.vessel_observed||'—')+'</div>'
+    +'<div class=cchips style="margin-top:8px">'+doc('Medical',c.med_exp)+doc("Seaman bk",c.sirb_exp)+doc('Passport',c.pp_exp)+doc('US visa',c.usv_exp)+doc('Schengen',c.sch_exp)+'</div>'
+    +'</div>';
+  const ct=d.contracts||[];
+  h+='<div class=zlabel style="margin-top:16px">Contract history'+(d.daysWorked?(' · '+d.daysWorked.toLocaleString()+' sea-days'):'')+'</div>';
+  if(!ct.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No Keyman contract history on file.</p>';
+  else h+='<table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Sign on</th><th>Sign off</th><th>Basis</th></tr></thead><tbody>'
+    +ct.map(function(x){var off=x.act||x.proj||'—';var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td>'+x.on+'</td><td>'+off+'</td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
+  $('#view').innerHTML=h;
+}
 function card(c){
   const name=[c.first_name,c.last_name].filter(Boolean).join(' ');
   const b=brandOf(c.vessel_observed);
-  return '<div class="card b-'+b+'">'
+  return '<div class="card b-'+b+'" data-crew="'+c.agency_id+'" style="cursor:pointer">'
    +'<div class=cname>'+name+'</div>'
    +'<div class=csub>'+c.agency_id+' · '+(c.rank_observed||'')+'</div>'
    +'<div class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</div>'
