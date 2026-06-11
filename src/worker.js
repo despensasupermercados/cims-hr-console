@@ -518,6 +518,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .tbl th{text-align:left;background:#F2F5FA;color:var(--navy);font-family:'Outfit';font-weight:700;padding:9px 12px;border-bottom:1px solid var(--line-2)}
 .tbl td{padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink)}
 .tbl tr:last-child td{border-bottom:0}
+.setmenu.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .tbl td:nth-child(n+2),.tbl th:nth-child(n+2){text-align:right}
 .tbl td:first-child,.tbl th:first-child{text-align:left}
 .hint{font-size:11.5px;color:var(--mut);margin-top:3px}
@@ -641,6 +642,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
     <button id=nav-data onclick="show('data')">Data</button>
+    <button id=nav-settings onclick="show('settings')">Settings</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -663,6 +665,48 @@ async function show(tab){
   if(tab==='billing')return renderBilling();
   if(tab==='fleet')return renderFleet();
   if(tab==='data')return renderData();
+  if(tab==='settings')return renderSettings();
+}
+function renderSettings(){
+  $('#view').innerHTML='<div class=bar><h2>Settings</h2></div>'
+   +'<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">'
+   +'<div style="min-width:170px"><div class=zlabel>Menu</div>'
+     +'<button class="btn ghost setmenu" data-set="uploads" style="display:block;width:100%;text-align:left;margin-bottom:6px">Data uploads</button>'
+     +'<button class="btn ghost setmenu" data-set="session" style="display:block;width:100%;text-align:left;margin-bottom:6px">Session</button>'
+     +'<button class="btn ghost setmenu" data-set="about" style="display:block;width:100%;text-align:left">About</button>'
+   +'</div><div id=setbody style="flex:1;min-width:320px"></div></div>';
+  document.querySelectorAll('.setmenu').forEach(function(b){b.onclick=function(){document.querySelectorAll('.setmenu').forEach(function(x){x.classList.remove('on');});b.classList.add('on');setShow(b.getAttribute('data-set'));};});
+  document.querySelector('.setmenu').classList.add('on');
+  setShow('uploads');
+}
+function setShow(s){ if(s==='uploads')return setUploads(); if(s==='session')return setSession(); return setAbout(); }
+function setUploads(){
+  $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
+   +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
+   +'<label class=csub>Data type</label><br>'
+   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="" disabled>Keyman contracts — coming soon</option><option value="" disabled>Vessel deployment — coming soon</option></select>'
+   +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
+     +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop the file here</div>'
+     +'<div class=csub style="margin-top:4px">or click to choose · .xls or .xlsx only</div></div>'
+   +'<input type=file id=crewfile accept=".xls,.xlsx" style="display:none" onchange="handleDrop(this.files)">'
+   +'<div id=imp class=csub style="margin-top:12px"></div>'
+   +'<p class=muted style="text-align:left;margin-top:10px">Only the data types listed above are accepted — nothing else is read. You\\'ll see a preview before anything is saved, and bonus baselines are never affected.</p>'
+   +'</div>';
+  var dz=$('#dropzone'), fi=$('#crewfile');
+  dz.onclick=function(){fi.click();};
+  dz.ondragover=function(e){e.preventDefault();dz.style.borderColor='var(--green)';dz.style.background='#F2F8EF';};
+  dz.ondragleave=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';};
+  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};
+}
+async function setSession(){
+  var me={}; try{me=await (await fetch('/api/me')).json();}catch(e){}
+  $('#setbody').innerHTML='<div class=zlabel>Session</div><div class="card" style="max-width:none">'
+   +'<div class=csub>Signed in as <b style="color:var(--navy)">'+(me.email||'—')+'</b></div>'
+   +'<div class=csub style="margin-top:6px">Sessions last 30 days. <a href="/api/auth/logout">Sign out</a></div></div>';
+}
+function setAbout(){
+  $('#setbody').innerHTML='<div class=zlabel>About</div><div class="card" style="max-width:none">'
+   +'<div class=csub>DG3 CIMS — HR Operational Console. Crew, rotation, document compliance, days-worked billing, and fleet. Auto-deployed from GitHub with a test gate and nightly self-maintenance.</div></div>';
 }
 let IMPROWS=null;
 function loadSheetJS(cb){
@@ -672,8 +716,7 @@ function loadSheetJS(cb){
   s.onload=cb; s.onerror=function(){$('#imp').textContent='Could not load the spreadsheet parser.';};
   document.head.appendChild(s);
 }
-function crewFileChange(input){
-  var f=input.files&&input.files[0]; if(!f)return;
+function parseCrewFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
   loadSheetJS(function(){
     var rd=new FileReader();
@@ -687,6 +730,13 @@ function crewFileChange(input){
     };
     rd.readAsArrayBuffer(f);
   });
+}
+function handleDrop(files){
+  var f=files&&files[0]; if(!f)return;
+  var t=$('#dstype')?$('#dstype').value:'crew';
+  if(t!=='crew'){$('#imp').textContent='That data type is not enabled yet.';return;}
+  if(!/\\.(xls|xlsx)$/i.test(f.name)){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
+  parseCrewFile(f);
 }
 async function previewImport(){
   if(!IMPROWS||!IMPROWS.length){$('#imp').textContent='No rows found in the file.';return;}
@@ -709,12 +759,7 @@ async function applyImport(){
 async function renderData(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   const d=await (await fetch('/api/datastatus')).json();
-  let h='<div class="card" style="border-left:3px solid var(--navy);max-width:none;margin-bottom:14px">'
-    +'<div class=cname>Refresh crew registry (AdvancedQuery)</div>'
-    +'<div class=csub>Upload Rita\\'s AdvancedQuery export (.xls / .xlsx). You\\'ll see a preview before anything changes. Bonus baselines are never touched.</div>'
-    +'<input type=file id=crewfile accept=".xls,.xlsx" style="margin-top:10px" onchange="crewFileChange(this)">'
-    +'<div id=imp class=csub style="margin-top:8px"></div></div>';
-  h+='<div class=zlabel>Data sources</div><table class=tbl><thead><tr><th>Dataset</th><th>Source</th><th>Records</th></tr></thead><tbody>'
+  let h='<div class=zlabel>Data sources</div><table class=tbl><thead><tr><th>Dataset</th><th>Source</th><th>Records</th></tr></thead><tbody>'
     +d.datasets.map(function(x){return '<tr><td>'+x.name+'</td><td>'+x.source+'</td><td>'+x.count.toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
   h+='<div class=zlabel style="margin-top:18px">Recent loads</div>';
   if(!d.log.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No load events recorded yet.</p>';
