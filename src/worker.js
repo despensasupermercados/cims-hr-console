@@ -509,6 +509,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
 <script>
 const $=s=>document.querySelector(s);
 let CREW=[];
+let ROT=null,ROTF='';
 function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6'}[st]||'#9aa7b6';}
 function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
@@ -523,17 +524,30 @@ async function show(tab){
 }
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  const b=await (await fetch('/api/rotation')).json();const c=b.counts;
-  let h='<div class=zlabel>Rotation — by status</div><div class=tiles>'
-    +tile(c['On board'],'On board','green')+tile(c['On Vacation'],'On vacation','amber')
-    +tile(c['Earmarked'],'Earmarked','royal')+tile(c['Inactive'],'Inactive','gray')+tile(c.vessels,'Vessels')+'</div>';
+  ROT=await (await fetch('/api/rotation')).json();ROTF='';
+  drawRotation();
+}
+function rotFilter(s){ROTF=(ROTF===s)?'':s;drawRotation();}
+function rtile(n,l,cls,st){
+  const act=(st!==''&&ROTF===st);
+  return '<div class="tile '+(cls||'')+'" data-rot="'+st+'" style="cursor:pointer'+(act?';outline:3px solid var(--navy);outline-offset:-2px':'')+'"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';
+}
+function drawRotation(){
+  const b=ROT,c=b.counts;
+  let h='<div class=zlabel>Rotation — by status'+(ROTF?(' · showing '+ROTF+' (click the tile again to clear)'):' · click a tile to filter')+'</div><div class=tiles>'
+    +rtile(c['On board'],'On board','green','On board')+rtile(c['On Vacation'],'On vacation','amber','On Vacation')
+    +rtile(c['Earmarked'],'Earmarked','royal','Earmarked')+rtile(c['Inactive'],'Inactive','gray','Inactive')
+    +rtile(c.vessels,'Vessels','','')+'</div>';
   const vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
   h+='<div class=zlabel>By vessel</div><div class=grid>'+vessels.map(function(v){
-    const crew=b.byVessel[v];
+    let crew=b.byVessel[v];
+    if(ROTF)crew=crew.filter(function(x){return x.status===ROTF;});
+    if(!crew.length)return '';
     const names=crew.map(function(x){return '<div class=statdot><i style="background:'+dot(x.status)+'"></i>'+x.name+' <span class=csub>('+x.status+')</span></div>';}).join('');
     return '<div class="card b-'+brandOf(v)+'"><div class=cname>'+v+'</div><div class=csub>'+crew.length+' crew</div>'+names+'</div>';
-  }).join('')+'</div>';
+  }).filter(Boolean).join('')+'</div>';
   $('#view').innerHTML=h;
+  document.querySelectorAll('#view .tile[data-rot]').forEach(function(el){el.onclick=function(){rotFilter(el.getAttribute('data-rot'));};});
 }
 async function renderCompliance(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
