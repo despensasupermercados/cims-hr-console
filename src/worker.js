@@ -636,20 +636,42 @@ function drawRotation(){
   $('#view').innerHTML=h;
   document.querySelectorAll('#view .tile[data-rot]').forEach(function(el){el.onclick=function(){rotFilter(el.getAttribute('data-rot'));};});
 }
+let COMP=null;
 async function renderCompliance(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
-  const d=await (await fetch('/api/compliance')).json();const rows=d.report||[];
-  let h='<div class=bar><h2>Document compliance</h2><div class=csub style="margin-left:auto">'+rows.length+' flagged · within '+d.warnDays+' days · as of '+d.today+'</div></div>';
-  if(!rows.length){h+='<p class=muted style="text-align:left;padding:14px 2px">All clear — no documents expired or expiring within '+d.warnDays+' days.</p>';}
-  else{h+='<div class=grid>'+rows.map(function(r){
+  if(!$('#compdays')){
+    $('#view').innerHTML='<div class=bar><h2>Document compliance</h2>'
+      +'<label class=csub style="margin-left:auto">Window '
+      +'<select id=compdays onchange="loadCompliance()"><option value=30>30 days</option><option value=60 selected>60 days</option><option value=90>90 days</option></select></label>'
+      +'<button class="btn ghost" onclick="exportCompliance()">Download CSV</button></div>'
+      +'<div id=compsub class=csub style="margin:-6px 0 12px"></div><div id=compbody></div>';
+  }
+  loadCompliance();
+}
+async function loadCompliance(){
+  const days=$('#compdays')?$('#compdays').value:60;
+  $('#compbody').innerHTML='<div class=muted>Loading…</div>';
+  COMP=await (await fetch('/api/compliance?days='+days)).json();
+  const rows=COMP.report||[];
+  const exp=rows.filter(function(r){return r.severity===3;}).length;
+  $('#compsub').textContent=rows.length+' flagged ('+exp+' expired) · within '+COMP.warnDays+' days · as of '+COMP.today;
+  if(!rows.length){$('#compbody').innerHTML='<p class=muted style="text-align:left;padding:14px 2px">All clear — no documents expired or expiring within '+COMP.warnDays+' days.</p>';return;}
+  $('#compbody').innerHTML='<div class=grid>'+rows.map(function(r){
     const flags=r.flags.map(function(f){
       const cls=f.status==='expired'?'red':f.status==='expiring'?'amber':'royal';
       const txt=f.status==='missing'?(f.doc+' missing'):(f.doc+' '+(f.exp||'')+(f.days!=null?(' ('+(f.days<0?(Math.abs(f.days)+'d ago'):(f.days+'d'))+')'):''));
       return '<span class="cchip '+cls+'">'+txt+'</span>';
     }).join('');
-    return '<div class="card b-'+brandOf(r.vessel)+'"><div class=cname>'+r.name+'</div><div class=csub>'+r.agency_id+' · '+(r.vessel||'—')+'</div><div class=statdot><i style="background:'+dot(r.status)+'"></i>'+(r.status||'')+'</div><div class=cchips>'+flags+'</div></div>';
-  }).join('')+'</div>';}
-  $('#view').innerHTML=h;
+    return '<div class="card b-'+brandOf(r.vessel)+'" data-crew="'+r.agency_id+'" style="cursor:pointer"><div class=cname>'+r.name+'</div><div class=csub>'+r.agency_id+' · '+(r.vessel||'—')+'</div><div class=statdot><i style="background:'+dot(r.status)+'"></i>'+(r.status||'')+'</div><div class=cchips>'+flags+'</div></div>';
+  }).join('')+'</div>';
+  document.querySelectorAll('#compbody .card[data-crew]').forEach(function(el){el.onclick=function(){openCrew(el.getAttribute('data-crew'));};});
+}
+function exportCompliance(){
+  if(!COMP)return;
+  const rows=[['Crew','ID','Vessel','Status','Document','Doc status','Expiry','Days']];
+  (COMP.report||[]).forEach(function(r){r.flags.forEach(function(f){rows.push([r.name,r.agency_id,r.vessel||'',r.status||'',f.doc,f.status,f.exp||'',f.days==null?'':f.days]);});});
+  const csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='compliance_'+COMP.today+'_'+COMP.warnDays+'d.csv';a.click();
 }
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
@@ -698,6 +720,7 @@ async function openCrew(id){
     +'<div class=csub>'+c.agency_id+' · '+(c.rank_override||c.rank_observed||'')+'</div>'
     +'<div class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</div>'
     +'<div class=vessel>'+(c.vessel_observed||'—')+'</div>'
+    +'<div class=csub style="margin-top:6px">'+[c.email,c.phone,c.province,(c.dob?('DOB '+c.dob):'')].filter(Boolean).join(' · ')+'</div>'
     +'<div class=cchips style="margin-top:8px">'+doc('Medical',c.med_exp)+doc("Seaman bk",c.sirb_exp)+doc('Passport',c.pp_exp)+doc('US visa',c.usv_exp)+doc('Schengen',c.sch_exp)+'</div>'
     +'</div>';
   const ct=d.contracts||[];
