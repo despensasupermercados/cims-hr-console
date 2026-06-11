@@ -2,6 +2,7 @@ import { ladderValue, computeBonus, mapFeedbackToScore } from "./bonus.js";
 import { signToken, verifyToken } from "./auth.js";
 import { crewComplianceReport } from "./compliance.js";
 import { buildRotationBoard } from "./rotation.js";
+import { KEYMAN_CONTRACTS } from "./keyman_data.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -156,9 +157,22 @@ function json(obj, status = 200) {
 const TODAY = () => new Date().toISOString().slice(0, 10);
 function plus(days) { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); }
 
+// Self-creating + self-seeding Keyman contract history (no console/migration needed).
+// Informational only — decoupled from bonus tables; never affects payouts.
+async function ensureKeyman(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, co TEXT, st TEXT, seq INTEGER, sign_on TEXT, sign_off TEXT)").run();
+  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract").first()).n;
+  if (n === 0 && KEYMAN_CONTRACTS.length) {
+    const stmt = env.DB.prepare("INSERT INTO keyman_contract (sc,km,co,st,seq,sign_on,sign_off) VALUES (?,?,?,?,?,?,?)");
+    await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.co, r.st, r.seq, r.on, r.off)));
+  }
+}
+
 async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
   const q = async (sql, ...b) => (await env.DB.prepare(sql).bind(...b).first());
+  await ensureKeyman(env);
+  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(sign_off)-julianday(sign_on))) AS INTEGER) days FROM keyman_contract WHERE sign_on IS NOT NULL AND sign_off IS NOT NULL AND sign_off>sign_on");
   const total = (await q("SELECT COUNT(*) n FROM crew")).n;
   const byStatus = await env.DB.prepare("SELECT status, COUNT(*) n FROM crew GROUP BY status").all();
   const statusMap = {}; for (const r of byStatus.results) statusMap[r.status] = r.n;
@@ -176,7 +190,8 @@ async function apiDashboard(env) {
       inactive: statusMap["Inactive"] || 0,
       vessels
     },
-    compliance: { med_exp_90: medExp, pp_exp_90: ppExp, usv_exp_90: usvExp }
+    compliance: { med_exp_90: medExp, pp_exp_90: ppExp, usv_exp_90: usvExp },
+    history: { crew: (hist && hist.crew) || 0, contracts: (hist && hist.contracts) || 0, days: (hist && hist.days) || 0 }
   });
 }
 
@@ -575,6 +590,9 @@ async function renderDashboard(){
    +'</div>'
    +'<div class=zlabel>Compliance — expiring within 90 days</div><div class=tiles>'
    +tile(c.med_exp_90,'Medical','red')+tile(c.pp_exp_90,'Passport','amber')+tile(c.usv_exp_90,'US visa','amber')
+   +'</div>'
+   +'<div class=zlabel>Contract history (Keyman)</div><div class=tiles>'
+   +tile(d.history.crew,'Crew w/ history')+tile(d.history.contracts,'Contracts on file')+tile(d.history.days.toLocaleString(),'Total sea-days')
    +'</div>'
    +'<p class=muted style="text-align:left;padding:14px 2px">Live from Cloudflare D1 · '+w.total+' crew · as of '+d.today+'</p>';
 }
