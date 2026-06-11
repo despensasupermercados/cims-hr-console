@@ -35,3 +35,6 @@ the whitelist in CLAUDE.md; money/auth/schema/crew changes are always PRs for a 
 ## Secrets (set in Cloudflare Worker settings / CI — never in code)
 `SESSION_SECRET`, `BOOTSTRAP_KEY`, `RESEND_API_KEY` (opt), `MAIL_FROM` (opt);
 CI: `CLOUDFLARE_API_TOKEN`, `ANTHROPIC_API_KEY`.
+
+
+<!-- ci: trigger Workers Build (deploy pipeline test) -->
