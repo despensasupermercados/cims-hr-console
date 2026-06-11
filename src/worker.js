@@ -140,13 +140,16 @@ async function authVerify(request, env, url) {
 
 // GET /auth/dev?key=BOOTSTRAP_KEY&email=...  -> bootstrap session (until email is wired)
 async function authDev(request, env, url) {
-  const key = url.searchParams.get("key");
-  const email = url.searchParams.get("email");
+  let key, email;
+  if (request.method === "POST") { const b = await request.json().catch(() => ({})); key = b.key; email = b.email; }
+  else { key = url.searchParams.get("key"); email = url.searchParams.get("email"); }
   if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
   await logActivity(env, email, "login", "bootstrap");
-  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": sessionCookie(sess) } });
+  const cookie = sessionCookie(sess);
+  if (request.method === "POST") return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Set-Cookie": cookie, "Content-Type": "application/json" } });
+  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": cookie } });
 }
 function logout() {
   return new Response(null, { status: 302, headers: { "Location": "/login", "Set-Cookie": `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0` } });
@@ -464,6 +467,12 @@ const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta
 <input id=email type=email placeholder="you@dg3.com" autocomplete=email>
 <button onclick="req()">Send sign-in link</button>
 <div class=msg id=msg></div>
+<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+<a href="#" id=keytoggle style="color:var(--royal);font-size:12.5px;text-decoration:none">Sign in with access key</a>
+<div id=keybox style="display:none;margin-top:10px">
+<input id=akey type=password placeholder="Access key" autocomplete=off>
+<button onclick="keyLogin()" style="background:var(--navy)">Sign in</button>
+</div></div>
 </div></div>
 <script>
 async function req(){
@@ -474,7 +483,18 @@ async function req(){
   const r=await fetch('/api/auth/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
   const d=await r.json();
   if(d.sent){msg.textContent='If that address is authorized, a sign-in link is on its way.';}
-  else{msg.innerHTML='Email isn\\'t set up yet. Ask Miguel for the bootstrap link to sign in.';}
+  else{msg.innerHTML='Email isn\\'t set up yet. Use your access key below to sign in.';}
+}
+document.getElementById('keytoggle').addEventListener('click',function(e){e.preventDefault();var b=document.getElementById('keybox');b.style.display=(b.style.display==='none')?'block':'none';if(b.style.display==='block')document.getElementById('akey').focus();});
+async function keyLogin(){
+  var email=document.getElementById('email').value.trim();
+  var key=document.getElementById('akey').value.trim();
+  var msg=document.getElementById('msg');
+  if(!email){msg.textContent='Enter your email first.';return;}
+  if(!key){msg.textContent='Enter your access key.';return;}
+  msg.textContent='Signing in…';
+  var r=await fetch('/auth/dev',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,key:key})});
+  if(r.ok){location.href='/';}else{msg.textContent='Invalid email or access key.';}
 }
 document.getElementById('email').addEventListener('keydown',e=>{if(e.key==='Enter')req();});
 </script></body></html>`;
