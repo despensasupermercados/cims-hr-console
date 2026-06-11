@@ -896,18 +896,19 @@ async function renderDashboard(){
   const w=d.workforce,c=d.compliance;
   $('#view').innerHTML=
    '<div class=zlabel>Workforce</div><div class=tiles>'
-   +tile(w.total,'Total crew')+tile(w.on_board,'On board','green')+tile(w.on_vacation,'On vacation','amber')
-   +tile(w.earmarked,'Earmarked','royal')+tile(w.inactive,'Inactive','gray')+tile(w.vessels,'Vessels')
+   +tile(w.total,'Total crew','','crew')+tile(w.on_board,'On board','green','rotation')+tile(w.on_vacation,'On vacation','amber','rotation')
+   +tile(w.earmarked,'Earmarked','royal','rotation')+tile(w.inactive,'Inactive','gray','rotation')+tile(w.vessels,'Vessels','','fleet')
    +'</div>'
    +'<div class=zlabel>Compliance — expiring within 90 days</div><div class=tiles>'
-   +tile(c.med_exp_90,'Medical','red')+tile(c.pp_exp_90,'Passport','amber')+tile(c.usv_exp_90,'US visa','amber')
+   +tile(c.med_exp_90,'Medical','red','compliance')+tile(c.pp_exp_90,'Passport','amber','compliance')+tile(c.usv_exp_90,'US visa','amber','compliance')
    +'</div>'
    +'<div class=zlabel>Contract history (Keyman)</div><div class=tiles>'
-   +tile(d.history.crew,'Crew w/ history')+tile(d.history.contracts,'Contracts on file')+tile(d.history.days.toLocaleString(),'Total sea-days')
+   +tile(d.history.crew,'Crew w/ history','','data')+tile(d.history.contracts,'Contracts on file','','billing')+tile(d.history.days.toLocaleString(),'Total sea-days','','billing')
    +'</div>'
-   +'<p class=muted style="text-align:left;padding:14px 2px">Live from Cloudflare D1 · '+w.total+' crew · as of '+d.today+'</p>';
+   +'<p class=muted style="text-align:left;padding:14px 2px">Live from Cloudflare D1 · '+w.total+' crew · as of '+d.today+' · tip: tiles are clickable</p>';
+  document.querySelectorAll('#view .tile[data-go]').forEach(function(el){el.onclick=function(){show(el.getAttribute('data-go'));};});
 }
-function tile(n,l,cls){return '<div class="tile '+(cls||'')+'"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
+function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 async function renderCrew(){
   $('#view').innerHTML=
    '<div class=bar><h2>Crew</h2>'
