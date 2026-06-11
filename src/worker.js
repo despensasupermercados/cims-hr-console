@@ -53,6 +53,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (p === "/api/fleet")      return apiFleet();
+        if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
@@ -167,13 +168,35 @@ function plus(days) { const d = new Date(); d.setDate(d.getDate() + days); retur
 
 // Self-creating + self-seeding Keyman contract history (no console/migration needed).
 // Informational only — decoupled from bonus tables; never affects payouts.
+async function logData(env, source, rows, status) {
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_log (id TEXT PRIMARY KEY, source TEXT, rows INTEGER, status TEXT, at TEXT)").run();
+    await env.DB.prepare("INSERT INTO data_log (id,source,rows,status,at) VALUES (?,?,?,?,?)").bind("dl_" + crypto.randomUUID(), source, rows, status, new Date().toISOString()).run();
+  } catch {}
+}
 async function ensureKeyman(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract2 (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT)").run();
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract2").first()).n;
   if (n === 0 && KEYMAN_CONTRACTS.length) {
     const stmt = env.DB.prepare("INSERT INTO keyman_contract2 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
     await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.ship, r.st, r.seq, r.on, r.proj, r.act)));
+    await logData(env, "keyman_contract (CIMS Keyman)", KEYMAN_CONTRACTS.length, "seeded");
   }
+}
+async function apiDataStatus(env) {
+  await ensureKeyman(env); try { await ensureFb(env); } catch {}
+  const q = async (s) => (await env.DB.prepare(s).first());
+  const cnt = async (s) => { try { return (await q(s)).n; } catch { return 0; } };
+  const datasets = [
+    { name: "Crew registry", source: "AdvancedQuery (TDG, Rita)", count: await cnt("SELECT COUNT(*) n FROM crew") },
+    { name: "Contract history", source: "CIMS Keyman workbook", count: await cnt("SELECT COUNT(*) n FROM keyman_contract2") },
+    { name: "Fleet / vessels", source: "Vessel Deployment reference", count: VESSEL_REF.length },
+    { name: "Feedback responses", source: "In-app (contributors)", count: await cnt("SELECT COUNT(*) n FROM feedback_response2") },
+    { name: "Bonus outcomes", source: "In-app (committed)", count: await cnt("SELECT COUNT(*) n FROM bonus_outcome") },
+  ];
+  let log = [];
+  try { log = (await env.DB.prepare("SELECT source,rows,status,at FROM data_log ORDER BY at DESC LIMIT 12").all()).results; } catch {}
+  return json({ today: TODAY(), datasets, log });
 }
 // Read all contract rows in the shape billingReport expects.
 async function keymanRows(env) {
@@ -578,6 +601,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
+    <button id=nav-data onclick="show('data')">Data</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -599,6 +623,19 @@ async function show(tab){
   if(tab==='compliance')return renderCompliance();
   if(tab==='billing')return renderBilling();
   if(tab==='fleet')return renderFleet();
+  if(tab==='data')return renderData();
+}
+async function renderData(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  const d=await (await fetch('/api/datastatus')).json();
+  let h='<div class=zlabel>Data sources</div><table class=tbl><thead><tr><th>Dataset</th><th>Source</th><th>Records</th></tr></thead><tbody>'
+    +d.datasets.map(function(x){return '<tr><td>'+x.name+'</td><td>'+x.source+'</td><td>'+x.count.toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='<div class=zlabel style="margin-top:18px">Recent loads</div>';
+  if(!d.log.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No load events recorded yet.</p>';
+  else h+='<table class=tbl><thead><tr><th>Source</th><th>Records</th><th>Status</th><th>When</th></tr></thead><tbody>'
+    +d.log.map(function(l){return '<tr><td>'+l.source+'</td><td>'+(l.rows||'')+'</td><td><span class="cchip ok">'+l.status+'</span></td><td>'+(l.at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='<p class=muted style="text-align:left;padding:10px 2px">Autonomous refresh from the Drive folder activates once the read-only service account is connected. Until then, data loads on deploy. Bonus baselines stay gated for Rita.</p>';
+  $('#view').innerHTML=h;
 }
 async function renderFleet(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
