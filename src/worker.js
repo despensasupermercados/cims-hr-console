@@ -53,6 +53,7 @@ export default {
         if (p === "/api/crew/get")  return apiCrewOne(env, url);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
+        if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
@@ -328,6 +329,17 @@ async function apiRotation(env) {
   board.inDock = inDockNow(DRY_DOCK, TODAY());
   return json(board);
 }
+async function apiRotationAssign(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const id = b.agency_id, ship = b.ship;
+  if (!id) return json({ error: "no_id" }, 400);
+  const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(id).first();
+  if (!cr) return json({ error: "not_found" }, 404);
+  const v = (ship === "__POOL__" || !ship) ? null : ship;
+  await env.DB.prepare("UPDATE crew SET vessel_observed=?, updated_at=? WHERE agency_id=?").bind(v, new Date().toISOString(), id).run();
+  await logActivity(env, session && session.email, "rotation_assign", id + " -> " + (v || "pool"));
+  return json({ ok: true });
+}
 function apiFleet() {
   const today = TODAY();
   return json({ today, vessels: VESSEL_REF, dryDock: fleetDryDock(DRY_DOCK, today), inDock: inDockNow(DRY_DOCK, today), upcoming: upcomingDocks(DRY_DOCK, today, 120) });
@@ -523,6 +535,10 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .setmenu.on{background:var(--navy);color:#fff;border-color:var(--navy)}
 .printhead{display:none;font-family:'Outfit';font-weight:800;color:var(--navy);font-size:17px;margin-bottom:12px}
 @media print{header,.noprint{display:none!important}.wrap{padding:0}.printhead{display:block!important}body{background:#fff}.tile,.card,table{break-inside:avoid}}
+.rchip{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 9px;margin:3px 4px 3px 0;font-size:12.5px;cursor:grab}
+.rchip i{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.shipbody{min-height:34px;margin-top:6px}
+.shipdrop{transition:outline .08s}
 .tbl td:nth-child(n+2),.tbl th:nth-child(n+2){text-align:right}
 .tbl td:first-child,.tbl th:first-child{text-align:left}
 .hint{font-size:11.5px;color:var(--mut);margin-top:3px}
@@ -847,35 +863,41 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
+let DRAGID=null;
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  ROT=await (await fetch('/api/rotation')).json();ROTF='';
+  ROT=await (await fetch('/api/rotation')).json();
   drawRotation();
 }
-function rotFilter(s){ROTF=(ROTF===s)?'':s;drawRotation();}
-function rtile(n,l,cls,st){
-  const act=(st!==''&&ROTF===st);
-  return '<div class="tile '+(cls||'')+'" data-rot="'+st+'" style="cursor:pointer'+(act?';outline:3px solid var(--navy);outline-offset:-2px':'')+'"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';
+function rotChip(x){return '<div class="rchip" draggable="true" data-crew="'+x.agency_id+'" title="drag to reassign"><i style="background:'+dot(x.status)+'"></i>'+x.name+'</div>';}
+function shipCard(key,label,crew,docked){
+  var chips=crew.map(rotChip).join('')||'<div class=hint style="opacity:.55">drop crew here</div>';
+  return '<div class="card shipdrop" data-ship="'+key+'"><div class=cname>'+label+(docked?' <span class="cchip red">dry dock</span>':'')+'</div><div class=csub>'+crew.length+' crew</div><div class=shipbody>'+chips+'</div></div>';
 }
 function drawRotation(){
-  const b=ROT,c=b.counts;
-  let h='<div class=zlabel>Rotation — by status'+(ROTF?(' · showing '+ROTF+' (click the tile again to clear)'):' · click a tile to filter')+'</div><div class=tiles>'
-    +rtile(c['On board'],'On board','green','On board')+rtile(c['On Vacation'],'On vacation','amber','On Vacation')
-    +rtile(c['Earmarked'],'Earmarked','royal','Earmarked')+rtile(c['Inactive'],'Inactive','gray','Inactive')
-    +rtile(c.vessels,'Vessels','','')+'</div>';
-  const vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
-  const dock=b.inDock||[];
+  const b=ROT,c=b.counts,dock=b.inDock||[];
   const isDocked=function(v){var u=(v||'').toUpperCase();return dock.some(function(s){return u.indexOf(s.toUpperCase())>=0;});};
-  h+='<div class=zlabel>By vessel</div><div class=grid>'+vessels.map(function(v){
-    let crew=b.byVessel[v];
-    if(ROTF)crew=crew.filter(function(x){return x.status===ROTF;});
-    if(!crew.length)return '';
-    const dd=isDocked(v)?' <span class="cchip red">dry dock</span>':'';
-    const names=crew.map(function(x){return '<div class=statdot><i style="background:'+dot(x.status)+'"></i>'+x.name+' <span class=csub>('+x.status+')</span></div>';}).join('');
-    return '<div class="card b-'+brandOf(v)+'"><div class=cname>'+v+dd+'</div><div class=csub>'+crew.length+' crew</div>'+names+'</div>';
-  }).filter(Boolean).join('')+'</div>';
+  let h='<div class=zlabel>Rotation planner — drag a crew card onto a ship to reassign</div><div class=tiles>'
+    +tile(c['On board'],'On board','green')+tile(c['On Vacation'],'On vacation','amber')
+    +tile(c['Earmarked'],'Earmarked','royal')+tile(c['Inactive'],'Inactive','gray')+tile(c.vessels,'Vessels')+'</div>';
+  const pool=b.byVessel['—']||[];
+  h+='<div class=zlabel>Unassigned pool</div>'+shipCard('__POOL__','Unassigned pool',pool,false);
+  const vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
+  h+='<div class=zlabel style="margin-top:14px">By vessel</div><div class=grid>'+vessels.map(function(v){return shipCard(v,v,b.byVessel[v],isDocked(v));}).join('')+'</div>';
   $('#view').innerHTML=h;
-  document.querySelectorAll('#view .tile[data-rot]').forEach(function(el){el.onclick=function(){rotFilter(el.getAttribute('data-rot'));};});
+  document.querySelectorAll('#view .rchip').forEach(function(el){el.ondragstart=function(){DRAGID=el.getAttribute('data-crew');};});
+  document.querySelectorAll('#view .shipdrop').forEach(function(z){
+    z.ondragover=function(e){e.preventDefault();z.style.outline='2px solid var(--green)';};
+    z.ondragleave=function(){z.style.outline='';};
+    z.ondrop=function(e){e.preventDefault();z.style.outline='';assignCrew(DRAGID,z.getAttribute('data-ship'));};
+  });
+}
+async function assignCrew(id,ship){
+  if(!id)return; DRAGID=null;
+  try{
+    var r=await (await fetch('/api/rotation/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,ship:ship})})).json();
+    if(r.ok)renderRotation();
+  }catch(e){}
 }
 let COMP=null;
 async function renderCompliance(){
