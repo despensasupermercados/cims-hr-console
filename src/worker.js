@@ -4,6 +4,8 @@ import { crewComplianceReport } from "./compliance.js";
 import { buildRotationBoard } from "./rotation.js";
 import { KEYMAN_CONTRACTS } from "./keyman_data.js";
 import { billingReport } from "./daysworked.js";
+import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
+import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -50,6 +52,7 @@ export default {
         if (p === "/api/crew/get")  return apiCrewOne(env, url);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
+        if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
@@ -258,7 +261,13 @@ async function apiRotation(env) {
   const rows = (await env.DB.prepare(
     "SELECT agency_id, first_name, last_name, status, vessel_observed, rank_observed, rank_override FROM crew WHERE redacted=0"
   ).all()).results;
-  return json(buildRotationBoard(rows));
+  const board = buildRotationBoard(rows);
+  board.inDock = inDockNow(DRY_DOCK, TODAY());
+  return json(board);
+}
+function apiFleet() {
+  const today = TODAY();
+  return json({ today, vessels: VESSEL_REF, dryDock: fleetDryDock(DRY_DOCK, today), inDock: inDockNow(DRY_DOCK, today), upcoming: upcomingDocks(DRY_DOCK, today, 120) });
 }
 
 /* ----------------------- bonus engine (locked SOP) ----------------------- */
@@ -568,6 +577,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-rotation onclick="show('rotation')">Rotation</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
+    <button id=nav-fleet onclick="show('fleet')">Fleet</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -588,6 +598,22 @@ async function show(tab){
   if(tab==='rotation')return renderRotation();
   if(tab==='compliance')return renderCompliance();
   if(tab==='billing')return renderBilling();
+  if(tab==='fleet')return renderFleet();
+}
+async function renderFleet(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  const f=await (await fetch('/api/fleet')).json();
+  const ddBadge=function(s){const c=s==='in_dock'?'red':s==='upcoming'?'amber':'ok';const t=s==='in_dock'?'in dock':s;return '<span class="cchip '+c+'">'+t+'</span>';};
+  const byBrand={};f.vessels.forEach(function(v){byBrand[v.brand]=(byBrand[v.brand]||0)+1;});
+  let h='<div class=zlabel>Fleet</div><div class=tiles>'
+    +tile(f.vessels.length,'Vessels')+tile(byBrand.RCI||0,'Royal','royal')+tile(byBrand.CEL||0,'Celebrity')
+    +tile(f.inDock.length,'In dry dock now',f.inDock.length?'red':'green')+tile(f.upcoming.length,'Docks ≤120d','amber')+'</div>';
+  h+='<div class=zlabel>Dry-dock schedule</div><table class=tbl><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Days</th><th>Status</th></tr></thead><tbody>'
+    +f.dryDock.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.days||'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='<div class=zlabel style="margin-top:18px">Vessels</div><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Class</th><th>Homeport</th><th>Region</th><th>Lead time</th></tr></thead><tbody>'
+    +f.vessels.map(function(v){return '<tr><td>'+v.name+'</td><td>'+v.brand+'</td><td>'+v.cls+'</td><td>'+(v.homeport||'—')+'</td><td>'+(v.region||'—')+'</td><td>'+(v.lead?(v.lead+'d'):'—')+'</td></tr>';}).join('')+'</tbody></table>'
+    +'<p class=muted style="text-align:left;padding:10px 2px">Lead time = Miami PO to delivery at ship location. Reference snapshot; refresh when deployment source updates.</p>';
+  $('#view').innerHTML=h;
 }
 let BILL=null;
 function ymd(d){return d.toISOString().slice(0,10);}
@@ -646,12 +672,15 @@ function drawRotation(){
     +rtile(c['Earmarked'],'Earmarked','royal','Earmarked')+rtile(c['Inactive'],'Inactive','gray','Inactive')
     +rtile(c.vessels,'Vessels','','')+'</div>';
   const vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
+  const dock=b.inDock||[];
+  const isDocked=function(v){var u=(v||'').toUpperCase();return dock.some(function(s){return u.indexOf(s.toUpperCase())>=0;});};
   h+='<div class=zlabel>By vessel</div><div class=grid>'+vessels.map(function(v){
     let crew=b.byVessel[v];
     if(ROTF)crew=crew.filter(function(x){return x.status===ROTF;});
     if(!crew.length)return '';
+    const dd=isDocked(v)?' <span class="cchip red">dry dock</span>':'';
     const names=crew.map(function(x){return '<div class=statdot><i style="background:'+dot(x.status)+'"></i>'+x.name+' <span class=csub>('+x.status+')</span></div>';}).join('');
-    return '<div class="card b-'+brandOf(v)+'"><div class=cname>'+v+'</div><div class=csub>'+crew.length+' crew</div>'+names+'</div>';
+    return '<div class="card b-'+brandOf(v)+'"><div class=cname>'+v+dd+'</div><div class=csub>'+crew.length+' crew</div>'+names+'</div>';
   }).filter(Boolean).join('')+'</div>';
   $('#view').innerHTML=h;
   document.querySelectorAll('#view .tile[data-rot]').forEach(function(el){el.onclick=function(){rotFilter(el.getAttribute('data-rot'));};});
