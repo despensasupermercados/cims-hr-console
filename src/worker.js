@@ -519,6 +519,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .tbl td{padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink)}
 .tbl tr:last-child td{border-bottom:0}
 .setmenu.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.printhead{display:none;font-family:'Outfit';font-weight:800;color:var(--navy);font-size:17px;margin-bottom:12px}
+@media print{header,.noprint{display:none!important}.wrap{padding:0}.printhead{display:block!important}body{background:#fff}.tile,.card,table{break-inside:avoid}}
 .tbl td:nth-child(n+2),.tbl th:nth-child(n+2){text-align:right}
 .tbl td:first-child,.tbl th:first-child{text-align:left}
 .hint{font-size:11.5px;color:var(--mut);margin-top:3px}
@@ -929,23 +931,40 @@ async function loadCrew(){
 let _t;function filterCrew(){clearTimeout(_t);_t=setTimeout(loadCrew,180);}
 async function openCrew(id){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  const d=await (await fetch('/api/crew/get?id='+encodeURIComponent(id))).json();
+  var dq=fetch('/api/crew/get?id='+encodeURIComponent(id)).then(function(r){return r.json();});
+  var bq=fetch('/api/bonus/crew?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};});
+  const d=await dq; const bz=await bq;
   if(d.error){$('#view').innerHTML='<div class=muted>Not found.</div>';return;}
   const c=d.crew;const name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
   const doc=function(label,dt){if(!dt)return '<span class="cchip">'+label+': —</span>';const days=(new Date(dt)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+dt+'</span>';};
-  let h='<div class=bar><h2>'+name+'</h2><button class="btn ghost" style="margin-left:auto" onclick="renderCrew()">← Back to crew</button></div>';
+  let h='<div class="bar noprint"><h2>'+name+'</h2>'
+    +'<button class="btn ghost" style="margin-left:auto" onclick="renderCrew()">← Back</button>'
+    +'<button class="btn" onclick="window.print()">Print / Save PDF</button></div>';
+  h+='<div class=stmt>';
+  h+='<div class=printhead>DG3 CIMS — Crew Statement · '+name+' · '+new Date().toISOString().slice(0,10)+'</div>';
   h+='<div class="card" style="border-left:3px solid var(--navy);max-width:none">'
+    +'<div class=cname>'+name+'</div>'
     +'<div class=csub>'+c.agency_id+' · '+(c.rank_override||c.rank_observed||'')+'</div>'
     +'<div class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</div>'
     +'<div class=vessel>'+(c.vessel_observed||'—')+'</div>'
     +'<div class=csub style="margin-top:6px">'+[c.email,c.phone,c.province,(c.dob?('DOB '+c.dob):'')].filter(Boolean).join(' · ')+'</div>'
     +'<div class=cchips style="margin-top:8px">'+doc('Medical',c.med_exp)+doc("Seaman bk",c.sirb_exp)+doc('Passport',c.pp_exp)+doc('US visa',c.usv_exp)+doc('Schengen',c.sch_exp)+'</div>'
     +'</div>';
+  if(bz&&!bz.error){
+    h+='<div class=zlabel style="margin-top:16px">Bonus standing</div>';
+    h+='<div class=csub style="margin-bottom:8px">Rank: <b style="color:var(--navy)">'+(bz.rank||'—')+'</b> · '+(bz.count!=null?bz.count:0)+' completed contract(s)'+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
+    h+='<div class=tiles>'+tile((bz.count!=null?bz.count:0),'Completed')+tile('$'+(bz.nextRungIfClean!=null?Number(bz.nextRungIfClean).toLocaleString():'—'),'Next rung if clean')+'</div>';
+    var outs=bz.outcomes||[];
+    if(outs.length) h+='<table class=tbl><thead><tr><th>Date</th><th>Ships</th><th>Score</th><th>Gate</th><th>Pay</th></tr></thead><tbody>'
+      +outs.map(function(o){var ships='';try{ships=JSON.parse(o.ships_json||'[]').join(', ');}catch(e){}return '<tr><td>'+(o.committed_at||'').slice(0,10)+'</td><td>'+ships+'</td><td>'+o.score_pct+'%</td><td>'+(o.gate||'—')+'</td><td>$'+(o.pay_usd||0).toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
+    else h+='<p class=muted style="text-align:left;padding:6px 2px">No bonus outcomes committed yet.</p>';
+  }
   const ct=d.contracts||[];
   h+='<div class=zlabel style="margin-top:16px">Contract history'+(d.daysWorked?(' · '+d.daysWorked.toLocaleString()+' sea-days'):'')+'</div>';
   if(!ct.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No Keyman contract history on file.</p>';
   else h+='<table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Sign on</th><th>Sign off</th><th>Basis</th></tr></thead><tbody>'
     +ct.map(function(x){var off=x.act||x.proj||'—';var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td>'+x.on+'</td><td>'+off+'</td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='</div>';
   $('#view').innerHTML=h;
 }
 function card(c){
