@@ -6,6 +6,7 @@ import { KEYMAN_CONTRACTS } from "./keyman_data.js";
 import { billingReport } from "./daysworked.js";
 import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
 import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
+import { mapRows, diffCrew } from "./crewimport.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -54,6 +55,7 @@ export default {
         if (p === "/api/rotation")   return apiRotation(env);
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
+        if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
@@ -183,6 +185,43 @@ async function ensureKeyman(env) {
     await logData(env, "keyman_contract (CIMS Keyman)", KEYMAN_CONTRACTS.length, "seeded");
   }
 }
+// Crew refresh from an uploaded AdvancedQuery export. Browser parses the file (SheetJS) and
+// POSTs raw rows here. dryRun -> return a preview diff; apply -> upsert. NEVER touches
+// baseline_count (money). Status NOT NULL + CHECK, so new rows without a valid status are skipped.
+async function apiCrewImport(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const dryRun = !!b.dryRun;
+  const { mapped, invalidCount } = mapRows(b.rows || []);
+  const ex = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, dob, province, phone, email, med_exp, sirb_exp, pp_exp, sch_exp, usv_exp FROM crew").all()).results;
+  const existing = {}; for (const r of ex) existing[r.agency_id] = r;
+  const d = diffCrew(mapped, existing);
+  if (dryRun) {
+    return json({ dryRun: true, total: d.total, add: d.add.length, change: d.change.length, unchanged: d.unchanged, needsStatus: d.needsStatus.length, invalid: invalidCount, sampleAdd: d.add.slice(0, 10), sampleChange: d.change.slice(0, 10) });
+  }
+  const applyIds = new Set([...d.add, ...d.change.map(c => c.agency_id)]);
+  const now = new Date().toISOString();
+  const stmt = env.DB.prepare(
+    "INSERT INTO crew (id,agency_id,agency_code,first_name,middle_name,last_name,status,rank_observed,vessel_observed,dob,province,phone,email,med_exp,sirb_exp,pp_exp,sch_exp,usv_exp,redacted,created_at,updated_at) " +
+    "VALUES (?,?,'TDG',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?) " +
+    "ON CONFLICT(agency_id) DO UPDATE SET " +
+    "first_name=COALESCE(excluded.first_name,crew.first_name), middle_name=COALESCE(excluded.middle_name,crew.middle_name), " +
+    "last_name=COALESCE(excluded.last_name,crew.last_name), status=COALESCE(excluded.status,crew.status), " +
+    "rank_observed=COALESCE(excluded.rank_observed,crew.rank_observed), vessel_observed=COALESCE(excluded.vessel_observed,crew.vessel_observed), " +
+    "dob=COALESCE(excluded.dob,crew.dob), province=COALESCE(excluded.province,crew.province), phone=COALESCE(excluded.phone,crew.phone), " +
+    "email=COALESCE(excluded.email,crew.email), med_exp=COALESCE(excluded.med_exp,crew.med_exp), sirb_exp=COALESCE(excluded.sirb_exp,crew.sirb_exp), " +
+    "pp_exp=COALESCE(excluded.pp_exp,crew.pp_exp), sch_exp=COALESCE(excluded.sch_exp,crew.sch_exp), usv_exp=COALESCE(excluded.usv_exp,crew.usv_exp), updated_at=excluded.updated_at"
+  );
+  const batch = [];
+  for (const m of mapped) {
+    if (!applyIds.has(m.agency_id)) continue;
+    batch.push(stmt.bind("crew_" + m.agency_id, m.agency_id, m.first_name, m.middle_name, m.last_name, m.status,
+      m.rank_observed, m.vessel_observed, m.dob, m.province, m.phone, m.email, m.med_exp, m.sirb_exp, m.pp_exp, m.sch_exp, m.usv_exp, now, now));
+  }
+  if (batch.length) await env.DB.batch(batch);
+  await logData(env, "crew (AdvancedQuery, by " + ((session && session.email) || "?") + ")", batch.length, "refreshed: +" + d.add.length + " ~" + d.change.length);
+  return json({ ok: true, applied: batch.length, added: d.add.length, changed: d.change.length, skippedNoStatus: d.needsStatus.length, invalid: invalidCount });
+}
+
 async function apiDataStatus(env) {
   await ensureKeyman(env); try { await ensureFb(env); } catch {}
   const q = async (s) => (await env.DB.prepare(s).first());
@@ -625,10 +664,57 @@ async function show(tab){
   if(tab==='fleet')return renderFleet();
   if(tab==='data')return renderData();
 }
+let IMPROWS=null;
+function loadSheetJS(cb){
+  if(window.XLSX)return cb();
+  var s=document.createElement('script');
+  s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  s.onload=cb; s.onerror=function(){$('#imp').textContent='Could not load the spreadsheet parser.';};
+  document.head.appendChild(s);
+}
+function crewFileChange(input){
+  var f=input.files&&input.files[0]; if(!f)return;
+  $('#imp').textContent='Reading '+f.name+'…';
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        IMPROWS=XLSX.utils.sheet_to_json(ws,{raw:true,defval:''});
+        previewImport();
+      }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+async function previewImport(){
+  if(!IMPROWS||!IMPROWS.length){$('#imp').textContent='No rows found in the file.';return;}
+  $('#imp').textContent='Analyzing '+IMPROWS.length+' rows…';
+  var r=await (await fetch('/api/crew/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:IMPROWS,dryRun:true})})).json();
+  var h='<div style="margin-top:6px"><b style="color:var(--navy)">Preview</b> — '+r.total+' rows read · '
+    +'<span class="cchip ok">'+r.add+' new</span> <span class="cchip amber">'+r.change+' changed</span> '+r.unchanged+' unchanged'
+    +(r.needsStatus?(' · <span class="cchip red">'+r.needsStatus+' new without status (skipped)</span>'):'')
+    +(r.invalid?(' · '+r.invalid+' unreadable'):'')+'</div>';
+  if((r.add+r.change)>0) h+='<button class="btn" style="margin-top:10px" onclick="applyImport()">Apply '+(r.add+r.change)+' changes</button>';
+  else h+='<div class=csub style="margin-top:8px">Nothing to update — data already matches.</div>';
+  $('#imp').innerHTML=h;
+}
+async function applyImport(){
+  $('#imp').textContent='Applying…';
+  var r=await (await fetch('/api/crew/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:IMPROWS})})).json();
+  if(r.ok){$('#imp').innerHTML='<span class="cchip ok">Done</span> applied '+r.applied+' ('+r.added+' new, '+r.changed+' changed'+(r.skippedNoStatus?(', '+r.skippedNoStatus+' skipped'):'')+'). <a href="#" onclick="renderData();return false">Reload</a>';IMPROWS=null;}
+  else $('#imp').textContent='Import failed.';
+}
 async function renderData(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   const d=await (await fetch('/api/datastatus')).json();
-  let h='<div class=zlabel>Data sources</div><table class=tbl><thead><tr><th>Dataset</th><th>Source</th><th>Records</th></tr></thead><tbody>'
+  let h='<div class="card" style="border-left:3px solid var(--navy);max-width:none;margin-bottom:14px">'
+    +'<div class=cname>Refresh crew registry (AdvancedQuery)</div>'
+    +'<div class=csub>Upload Rita\\'s AdvancedQuery export (.xls / .xlsx). You\\'ll see a preview before anything changes. Bonus baselines are never touched.</div>'
+    +'<input type=file id=crewfile accept=".xls,.xlsx" style="margin-top:10px" onchange="crewFileChange(this)">'
+    +'<div id=imp class=csub style="margin-top:8px"></div></div>';
+  h+='<div class=zlabel>Data sources</div><table class=tbl><thead><tr><th>Dataset</th><th>Source</th><th>Records</th></tr></thead><tbody>'
     +d.datasets.map(function(x){return '<tr><td>'+x.name+'</td><td>'+x.source+'</td><td>'+x.count.toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
   h+='<div class=zlabel style="margin-top:18px">Recent loads</div>';
   if(!d.log.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No load events recorded yet.</p>';
