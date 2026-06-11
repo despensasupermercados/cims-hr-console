@@ -1,5 +1,7 @@
 import { ladderValue, computeBonus, mapFeedbackToScore } from "./bonus.js";
 import { signToken, verifyToken } from "./auth.js";
+import { crewComplianceReport } from "./compliance.js";
+import { buildRotationBoard } from "./rotation.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -44,6 +46,8 @@ export default {
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/crew")      return apiCrew(env, url);
         if (p === "/api/crew/get")  return apiCrewOne(env, url);
+        if (p === "/api/compliance") return apiCompliance(env, url);
+        if (p === "/api/rotation")   return apiRotation(env);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
         if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
@@ -197,6 +201,22 @@ async function apiCrewOne(env, url) {
   const row = await env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first();
   if (!row) return json({ error: "not found" }, 404);
   return json({ crew: row });
+}
+
+/* ----------------------- compliance + rotation (read views) ----------------------- */
+async function apiCompliance(env, url) {
+  const today = new Date().toISOString().slice(0, 10);
+  const warn = parseInt(url.searchParams.get("days")) || 60;
+  const rows = (await env.DB.prepare(
+    "SELECT agency_id, first_name, last_name, status, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0"
+  ).all()).results;
+  return json({ today, warnDays: warn, report: crewComplianceReport(rows, today, warn) });
+}
+async function apiRotation(env) {
+  const rows = (await env.DB.prepare(
+    "SELECT agency_id, first_name, last_name, status, vessel_observed, rank_observed, rank_override FROM crew WHERE redacted=0"
+  ).all()).results;
+  return json(buildRotationBoard(rows));
 }
 
 /* ----------------------- bonus engine (locked SOP) ----------------------- */
@@ -480,6 +500,8 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-dashboard class=on onclick="show('dashboard')">Dashboard</button>
     <button id=nav-crew onclick="show('crew')">Crew</button>
     <button id=nav-bonus onclick="show('bonus')">Bonus</button>
+    <button id=nav-rotation onclick="show('rotation')">Rotation</button>
+    <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -496,6 +518,37 @@ async function show(tab){
   if(tab==='dashboard')return renderDashboard();
   if(tab==='crew')return renderCrew();
   if(tab==='bonus')return renderBonus();
+  if(tab==='rotation')return renderRotation();
+  if(tab==='compliance')return renderCompliance();
+}
+async function renderRotation(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  const b=await (await fetch('/api/rotation')).json();const c=b.counts;
+  let h='<div class=zlabel>Rotation — by status</div><div class=tiles>'
+    +tile(c['On board'],'On board','green')+tile(c['On Vacation'],'On vacation','amber')
+    +tile(c['Earmarked'],'Earmarked','royal')+tile(c['Inactive'],'Inactive','gray')+tile(c.vessels,'Vessels')+'</div>';
+  const vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
+  h+='<div class=zlabel>By vessel</div><div class=grid>'+vessels.map(function(v){
+    const crew=b.byVessel[v];
+    const names=crew.map(function(x){return '<div class=statdot><i style="background:'+dot(x.status)+'"></i>'+x.name+' <span class=csub>('+x.status+')</span></div>';}).join('');
+    return '<div class="card b-'+brandOf(v)+'"><div class=cname>'+v+'</div><div class=csub>'+crew.length+' crew</div>'+names+'</div>';
+  }).join('')+'</div>';
+  $('#view').innerHTML=h;
+}
+async function renderCompliance(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  const d=await (await fetch('/api/compliance')).json();const rows=d.report||[];
+  let h='<div class=bar><h2>Document compliance</h2><div class=csub style="margin-left:auto">'+rows.length+' flagged · within '+d.warnDays+' days · as of '+d.today+'</div></div>';
+  if(!rows.length){h+='<p class=muted style="text-align:left;padding:14px 2px">All clear — no documents expired or expiring within '+d.warnDays+' days.</p>';}
+  else{h+='<div class=grid>'+rows.map(function(r){
+    const flags=r.flags.map(function(f){
+      const cls=f.status==='expired'?'red':f.status==='expiring'?'amber':'royal';
+      const txt=f.status==='missing'?(f.doc+' missing'):(f.doc+' '+(f.exp||'')+(f.days!=null?(' ('+(f.days<0?(Math.abs(f.days)+'d ago'):(f.days+'d'))+')'):''));
+      return '<span class="cchip '+cls+'">'+txt+'</span>';
+    }).join('');
+    return '<div class="card b-'+brandOf(r.vessel)+'"><div class=cname>'+r.name+'</div><div class=csub>'+r.agency_id+' · '+(r.vessel||'—')+'</div><div class=statdot><i style="background:'+dot(r.status)+'"></i>'+(r.status||'')+'</div><div class=cchips>'+flags+'</div></div>';
+  }).join('')+'</div>';}
+  $('#view').innerHTML=h;
 }
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
