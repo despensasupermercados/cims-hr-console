@@ -3,6 +3,7 @@ import { signToken, verifyToken } from "./auth.js";
 import { crewComplianceReport } from "./compliance.js";
 import { buildRotationBoard } from "./rotation.js";
 import { KEYMAN_CONTRACTS } from "./keyman_data.js";
+import { billingReport } from "./daysworked.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -49,6 +50,7 @@ export default {
         if (p === "/api/crew/get")  return apiCrewOne(env, url);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
+        if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
         if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
@@ -160,19 +162,38 @@ function plus(days) { const d = new Date(); d.setDate(d.getDate() + days); retur
 // Self-creating + self-seeding Keyman contract history (no console/migration needed).
 // Informational only — decoupled from bonus tables; never affects payouts.
 async function ensureKeyman(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, co TEXT, st TEXT, seq INTEGER, sign_on TEXT, sign_off TEXT)").run();
-  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract").first()).n;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract2 (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT)").run();
+  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract2").first()).n;
   if (n === 0 && KEYMAN_CONTRACTS.length) {
-    const stmt = env.DB.prepare("INSERT INTO keyman_contract (sc,km,co,st,seq,sign_on,sign_off) VALUES (?,?,?,?,?,?,?)");
-    await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.co, r.st, r.seq, r.on, r.off)));
+    const stmt = env.DB.prepare("INSERT INTO keyman_contract2 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
+    await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.ship, r.st, r.seq, r.on, r.proj, r.act)));
   }
+}
+// Read all contract rows in the shape billingReport expects.
+async function keymanRows(env) {
+  const r = await env.DB.prepare("SELECT sc, ship, sign_on on, proj_off proj, act_off act FROM keyman_contract2").all();
+  return r.results;
+}
+async function apiDaysWorked(env, url) {
+  await ensureKeyman(env);
+  const asOf = TODAY();
+  const from = url.searchParams.get("from") || null;
+  const to = url.searchParams.get("to") || asOf;
+  const rows = await keymanRows(env);
+  const rep = billingReport(rows, { from, to, asOf });
+  // attach crew names (sc -> name) for the per-crew view
+  const names = {};
+  const cr = await env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed FROM crew").all();
+  for (const c of cr.results) names[c.agency_id] = { name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim(), vessel: c.vessel_observed };
+  rep.perCrew = rep.perCrew.map(x => ({ ...x, name: (names[x.sc] && names[x.sc].name) || x.sc }));
+  return json(rep);
 }
 
 async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
   const q = async (sql, ...b) => (await env.DB.prepare(sql).bind(...b).first());
   await ensureKeyman(env);
-  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(sign_off)-julianday(sign_on))) AS INTEGER) days FROM keyman_contract WHERE sign_on IS NOT NULL AND sign_off IS NOT NULL AND sign_off>sign_on");
+  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on");
   const total = (await q("SELECT COUNT(*) n FROM crew")).n;
   const byStatus = await env.DB.prepare("SELECT status, COUNT(*) n FROM crew GROUP BY status").all();
   const statusMap = {}; for (const r of byStatus.results) statusMap[r.status] = r.n;
@@ -416,6 +437,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .warn{background:#fdf7ec;border:1px solid #ecdfc2;color:var(--amber);border-radius:9px;padding:9px 11px;font-size:12.5px;margin-bottom:12px}
 .brow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-bottom:7px;cursor:pointer}
 .brow:hover{border-color:var(--navy)}
+.tbl{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13.5px}
+.tbl th{text-align:left;background:#F2F5FA;color:var(--navy);font-family:'Outfit';font-weight:700;padding:9px 12px;border-bottom:1px solid var(--line-2)}
+.tbl td{padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink)}
+.tbl tr:last-child td{border-bottom:0}
+.tbl td:nth-child(n+2),.tbl th:nth-child(n+2){text-align:right}
+.tbl td:first-child,.tbl th:first-child{text-align:left}
 .hint{font-size:11.5px;color:var(--mut);margin-top:3px}
 `;
 
@@ -517,6 +544,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-bonus onclick="show('bonus')">Bonus</button>
     <button id=nav-rotation onclick="show('rotation')">Rotation</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
+    <button id=nav-billing onclick="show('billing')">Billing</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -536,6 +564,47 @@ async function show(tab){
   if(tab==='bonus')return renderBonus();
   if(tab==='rotation')return renderRotation();
   if(tab==='compliance')return renderCompliance();
+  if(tab==='billing')return renderBilling();
+}
+let BILL=null;
+function ymd(d){return d.toISOString().slice(0,10);}
+async function renderBilling(){
+  if(!$('#billfrom')){
+    const to=new Date();const from=new Date();from.setMonth(from.getMonth()-3);
+    $('#view').innerHTML='<div class=bar><h2>Days-worked billing</h2>'
+      +'<label class=csub style="margin-left:auto">From <input type=date id=billfrom value="'+ymd(from)+'"></label>'
+      +'<label class=csub>To <input type=date id=billto value="'+ymd(to)+'"></label>'
+      +'<button class="btn" onclick="loadBilling()">Run</button>'
+      +'<button class="btn ghost" onclick="exportBilling()">Download CSV</button></div>'
+      +'<div id=billsub class=csub style="margin:-6px 0 12px"></div><div id=billbody></div>';
+  }
+  loadBilling();
+}
+async function loadBilling(){
+  const f=$('#billfrom').value,t=$('#billto').value;
+  $('#billbody').innerHTML='<div class=muted>Calculating…</div>';
+  BILL=await (await fetch('/api/daysworked?from='+f+'&to='+t)).json();
+  const T=BILL.totals;
+  $('#billsub').textContent=T.days.toLocaleString()+' sea-days · '+T.crew+' crew · '+T.vessels+' vessels · '+T.contracts+' contracts in window';
+  const bdg=function(b){const c=b==='actual'?'ok':b==='mixed'?'amber':'royal';return '<span class="cchip '+c+'">'+b+'</span>';};
+  let h='<div class=zlabel>By vessel</div><table class=tbl><thead><tr><th>Vessel</th><th>Crew</th><th>Days</th><th>Basis</th></tr></thead><tbody>'
+    +BILL.perVessel.map(function(v){return '<tr><td>'+v.ship+'</td><td>'+v.crew+'</td><td>'+v.days.toLocaleString()+'</td><td>'+bdg(v.basis)+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='<div class=zlabel style="margin-top:18px">By crew</div><table class=tbl><thead><tr><th>Crew</th><th>Days</th><th>Contracts</th><th>Basis</th></tr></thead><tbody>'
+    +BILL.perCrew.map(function(c){return '<tr><td>'+c.name+'</td><td>'+c.days.toLocaleString()+'</td><td>'+c.contracts+'</td><td>'+bdg(c.basis)+'</td></tr>';}).join('')+'</tbody></table>'
+    +'<p class=muted style="text-align:left;padding:10px 2px">Basis: actual = real sign-off · projected = planned · mixed = both. Per-vessel reflects current vessel assignment.</p>';
+  $('#billbody').innerHTML=h;
+}
+function exportBilling(){
+  if(!BILL)return;
+  const rows=[['VESSEL DAYS','','','']];
+  rows.push(['Vessel','Crew','Days','Basis']);
+  BILL.perVessel.forEach(function(v){rows.push([v.ship,v.crew,v.days,v.basis]);});
+  rows.push([]);rows.push(['CREW DAYS','','','']);rows.push(['Crew','Days','Contracts','Basis']);
+  BILL.perCrew.forEach(function(c){rows.push([c.name,c.days,c.contracts,c.basis]);});
+  const csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
