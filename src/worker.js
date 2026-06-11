@@ -280,7 +280,8 @@ async function apiDashboard(env) {
       vessels
     },
     compliance: { med_exp_90: medExp, pp_exp_90: ppExp, usv_exp_90: usvExp },
-    history: { crew: (hist && hist.crew) || 0, contracts: (hist && hist.contracts) || 0, days: (hist && hist.days) || 0 }
+    history: { crew: (hist && hist.crew) || 0, contracts: (hist && hist.contracts) || 0, days: (hist && hist.days) || 0 },
+    dryDockNow: inDockNow(DRY_DOCK, today).length
   });
 }
 
@@ -515,7 +516,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .brow{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;margin-bottom:7px;cursor:pointer}
 .brow:hover{border-color:var(--navy)}
 .tbl{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13.5px}
-.tbl th{text-align:left;background:#F2F5FA;color:var(--navy);font-family:'Outfit';font-weight:700;padding:9px 12px;border-bottom:1px solid var(--line-2)}
+.tbl th{text-align:left;background:#F2F5FA;color:var(--navy);font-family:'Outfit';font-weight:700;padding:9px 12px;border-bottom:1px solid var(--line-2);cursor:pointer;user-select:none}
+.tbl th[data-sort=asc]::after{content:' ▲';font-size:9px}.tbl th[data-sort=desc]::after{content:' ▼';font-size:9px}
 .tbl td{padding:8px 12px;border-bottom:1px solid var(--line);color:var(--ink)}
 .tbl tr:last-child td{border-bottom:0}
 .setmenu.on{background:var(--navy);color:#fff;border-color:var(--navy)}
@@ -653,6 +655,26 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
 const $=s=>document.querySelector(s);
 let CREW=[];
 let ROT=null,ROTF='';
+let CURRENT_CREW=null,CURD=null;
+// Click any .tbl header to sort that table (numeric / ISO-date / text aware).
+document.addEventListener('click',function(e){
+  var th=e.target&&e.target.closest?e.target.closest('.tbl thead th'):null; if(!th)return;
+  var table=th.closest('table'); var tb=table.tBodies[0]; if(!tb)return;
+  var idx=Array.prototype.indexOf.call(th.parentNode.children,th);
+  var dir=th.getAttribute('data-sort')==='asc'?-1:1;
+  th.parentNode.querySelectorAll('th').forEach(function(x){x.removeAttribute('data-sort');});
+  th.setAttribute('data-sort',dir===1?'asc':'desc');
+  var iso=/^\\d{4}-\\d{2}-\\d{2}/;
+  var rows=Array.prototype.slice.call(tb.rows);
+  rows.sort(function(a,b){
+    var x=(a.cells[idx]?a.cells[idx].textContent:'').trim(), y=(b.cells[idx]?b.cells[idx].textContent:'').trim();
+    if(iso.test(x)&&iso.test(y)) return (x<y?-1:x>y?1:0)*dir;
+    var xn=x.replace(/[^0-9.-]/g,''), yn=y.replace(/[^0-9.-]/g,''), nx=parseFloat(xn), ny=parseFloat(yn);
+    if(xn!==''&&yn!==''&&!isNaN(nx)&&!isNaN(ny)) return (nx-ny)*dir;
+    return x.localeCompare(y)*dir;
+  });
+  rows.forEach(function(r){tb.appendChild(r);});
+});
 function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6'}[st]||'#9aa7b6';}
 function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
@@ -900,6 +922,7 @@ async function renderDashboard(){
    '<div class=zlabel>Workforce</div><div class=tiles>'
    +tile(w.total,'Total crew','','crew')+tile(w.on_board,'On board','green','rotation')+tile(w.on_vacation,'On vacation','amber','rotation')
    +tile(w.earmarked,'Earmarked','royal','rotation')+tile(w.inactive,'Inactive','gray','rotation')+tile(w.vessels,'Vessels','','fleet')
+   +tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
    +'</div>'
    +'<div class=zlabel>Compliance — expiring within 90 days</div><div class=tiles>'
    +tile(c.med_exp_90,'Medical','red','compliance')+tile(c.pp_exp_90,'Passport','amber','compliance')+tile(c.usv_exp_90,'US visa','amber','compliance')
@@ -937,9 +960,16 @@ async function openCrew(id){
   if(d.error){$('#view').innerHTML='<div class=muted>Not found.</div>';return;}
   const c=d.crew;const name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
   const doc=function(label,dt){if(!dt)return '<span class="cchip">'+label+': —</span>';const days=(new Date(dt)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+dt+'</span>';};
+  CURRENT_CREW=c.agency_id; CURD={crew:c,contracts:(d.contracts||[]),bonus:bz};
   let h='<div class="bar noprint"><h2>'+name+'</h2>'
     +'<button class="btn ghost" style="margin-left:auto" onclick="renderCrew()">← Back</button>'
+    +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<button class="btn" onclick="window.print()">Print / Save PDF</button></div>';
+  h+='<div class="card noprint" style="max-width:none;margin-bottom:14px"><div class=csub style="margin-bottom:6px">Request a feedback window (creates a single-use link to send the contributor):</div>'
+    +'<button class="btn ghost rf" data-role="ray">Ray — Orders</button> '
+    +'<button class="btn ghost rf" data-role="rolando">Rolando — Technical</button> '
+    +'<button class="btn ghost rf" data-role="dexter">Dexter — Field</button>'
+    +'<div id=fbout class=csub style="margin-top:8px"></div></div>';
   h+='<div class=stmt>';
   h+='<div class=printhead>DG3 CIMS — Crew Statement · '+name+' · '+new Date().toISOString().slice(0,10)+'</div>';
   h+='<div class="card" style="border-left:3px solid var(--navy);max-width:none">'
@@ -966,6 +996,25 @@ async function openCrew(id){
     +ct.map(function(x){var off=x.act||x.proj||'—';var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td>'+x.on+'</td><td>'+off+'</td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
   h+='</div>';
   $('#view').innerHTML=h;
+  document.querySelectorAll('#view .rf').forEach(function(b){b.onclick=function(){reqFeedback(b.getAttribute('data-role'));};});
+}
+async function reqFeedback(role){
+  $('#fbout').textContent='Creating link…';
+  try{
+    var r=await (await fetch('/api/feedback/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:CURRENT_CREW,role:role})})).json();
+    if(r.ok)$('#fbout').innerHTML='<div style="margin-top:4px"><b style="color:var(--navy)">'+r.role+'</b> link for '+r.crew+' (send to the contributor):<br><input readonly value="'+r.link+'" style="width:100%;margin-top:4px" onclick="this.select()"></div>';
+    else $('#fbout').textContent='Could not create the link.';
+  }catch(e){$('#fbout').textContent='Could not create the link.';}
+}
+function exportCrewCSV(){
+  if(!CURD)return;
+  var c=CURD.crew, rows=[];
+  rows.push(['Field','Value']);
+  [['Crew ID','agency_id'],['First name','first_name'],['Middle','middle_name'],['Last name','last_name'],['Status','status'],['Rank','rank_observed'],['Vessel','vessel_observed'],['DOB','dob'],['Province','province'],['Phone','phone'],['Email','email'],['Medical exp','med_exp'],['Seaman bk exp','sirb_exp'],['Passport exp','pp_exp'],['Schengen exp','sch_exp'],['US visa exp','usv_exp']].forEach(function(p){rows.push([p[0],c[p[1]]==null?'':c[p[1]]]);});
+  rows.push([]);rows.push(['Contract #','Ship','Sign on','Sign off','Basis']);
+  (CURD.contracts||[]).forEach(function(x){rows.push([x.seq,x.ship||'',x.on||'',x.act||x.proj||'',x.act?'actual':(x.proj?'projected':'open')]);});
+  var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v;}).join(',');}).join('\\n');
+  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='crew_'+c.agency_id+'.csv';a.click();
 }
 function card(c){
   const name=[c.first_name,c.last_name].filter(Boolean).join(' ');
