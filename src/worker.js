@@ -10,6 +10,8 @@ import { mapRows, diffCrew } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
+import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
+import { TRAVEL_2025 } from "./travel_data.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -69,6 +71,8 @@ export default {
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
+        if (p === "/api/travel")     return apiTravel(env, url);
+        if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
         if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
@@ -257,7 +261,7 @@ async function apiCrewImport(request, env, session) {
 }
 
 async function apiDataStatus(env) {
-  await ensureKeyman(env); try { await ensureFb(env); } catch {}
+  await ensureKeyman(env); try { await ensureFb(env); } catch {} try { await ensureTravel(env); } catch {}
   const q = async (s) => (await env.DB.prepare(s).first());
   const cnt = async (s) => { try { return (await q(s)).n; } catch { return 0; } };
   const datasets = [
@@ -266,6 +270,7 @@ async function apiDataStatus(env) {
     { name: "Fleet / vessels", source: "Vessel Deployment reference", count: VESSEL_REF.length },
     { name: "Feedback responses", source: "In-app (contributors)", count: await cnt("SELECT COUNT(*) n FROM feedback_response2") },
     { name: "Bonus outcomes", source: "In-app (committed)", count: await cnt("SELECT COUNT(*) n FROM bonus_outcome") },
+    { name: "Travel expenses", source: "Travel workbook (2025 history + Rita uploads)", count: await cnt("SELECT COUNT(*) n FROM travel_expense") },
   ];
   let log = [];
   try { log = (await env.DB.prepare("SELECT source,rows,status,at FROM data_log ORDER BY at DESC LIMIT 12").all()).results; } catch {}
@@ -289,6 +294,47 @@ async function apiDaysWorked(env, url) {
   for (const c of cr.results) names[c.agency_id] = { name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim(), vessel: c.vessel_observed };
   rep.perCrew = rep.perCrew.map(x => ({ ...x, name: (names[x.sc] && names[x.sc].name) || x.sc }));
   return json(rep);
+}
+
+// Travel expenses — 2025 seeded as history; 2026+ uploaded in-app by Rita (replace-by-year).
+async function ensureTravel(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, total REAL)").run();
+  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
+  if (n === 0 && TRAVEL_2025.length) {
+    const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,crew_name,air,hotel,medical,visa,food,transport,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+    for (let i = 0; i < TRAVEL_2025.length; i += 100) {
+      await env.DB.batch(TRAVEL_2025.slice(i, i + 100).map((r, j) => stmt.bind("tx_" + r.year + "_" + r.month + "_" + (i + j), r.year, r.month, r.leg, r.crew_name, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.total)));
+    }
+    await logData(env, "travel_expense (2025 history)", TRAVEL_2025.length, "seeded");
+  }
+}
+async function apiTravel(env, url) {
+  await ensureTravel(env);
+  const year = url.searchParams.get("year");
+  let sql = "SELECT year,month,leg,crew_name,air,hotel,medical,visa,food,transport,total FROM travel_expense";
+  const bind = [];
+  if (year) { sql += " WHERE year=?"; bind.push(+year); }
+  sql += " ORDER BY year DESC, month, crew_name";
+  const rows = (await env.DB.prepare(sql).bind(...bind).all()).results;
+  const years = (await env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all()).results.map(r => r.year);
+  return json({ years, summary: travelSummarize(rows), records: rows });
+}
+async function apiTravelImport(request, env, session) {
+  await ensureTravel(env);
+  const b = await request.json().catch(() => ({}));
+  const year = +b.year;
+  if (!year) return json({ error: "year_required" }, 400);
+  const recs = parseTravelSheets(b.sheets || {}, year);
+  if (b.dryRun) { const s = travelSummarize(recs); return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg }); }
+  await env.DB.prepare("DELETE FROM travel_expense WHERE year=?").bind(year).run();
+  if (recs.length) {
+    const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,crew_name,air,hotel,medical,visa,food,transport,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+    for (let i = 0; i < recs.length; i += 100) {
+      await env.DB.batch(recs.slice(i, i + 100).map((r, j) => stmt.bind("tx_" + year + "_" + r.month + "_" + (i + j), year, r.month, r.leg, r.crew_name, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.total)));
+    }
+  }
+  await logData(env, "travel_expense (" + year + ", by " + ((session && session.email) || "?") + ")", recs.length, "replaced year " + year);
+  return json({ ok: true, year, applied: recs.length });
 }
 
 async function apiDashboard(env) {
@@ -758,6 +804,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-rotation onclick="show('rotation')">Rotation</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
+    <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
     <button id=nav-data onclick="show('data')">Data</button>
     <button id=nav-settings onclick="show('settings')">Settings</button>
@@ -801,6 +848,7 @@ async function show(tab){
   if(tab==='rotation')return renderRotation();
   if(tab==='compliance')return renderCompliance();
   if(tab==='billing')return renderBilling();
+  if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
   if(tab==='data')return renderData();
   if(tab==='settings')return renderSettings();
@@ -822,7 +870,7 @@ function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
    +'<label class=csub>Data type</label><br>'
-   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="" disabled>Keyman contracts — coming soon</option><option value="vessel">Vessel deployment — preview structure (.xls / .xlsx)</option></select>'
+   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="" disabled>Keyman contracts — coming soon</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — preview structure (.xls / .xlsx)</option></select>'
    +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
      +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop the file here</div>'
      +'<div class=csub style="margin-top:4px">or click to choose · .xls or .xlsx only</div></div>'
@@ -872,10 +920,48 @@ function parseCrewFile(f){
 function handleDrop(files){
   var f=files&&files[0]; if(!f)return;
   var t=$('#dstype')?$('#dstype').value:'crew';
-  if(t!=='crew'&&t!=='vessel'){$('#imp').textContent='That data type is not enabled yet.';return;}
+  if(t!=='crew'&&t!=='vessel'&&t!=='travel'){$('#imp').textContent='That data type is not enabled yet.';return;}
   if(!/\\.(xls|xlsx)$/i.test(f.name)){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
   if(t==='vessel')return parseVesselFile(f);
+  if(t==='travel')return parseTravelFile(f);
   parseCrewFile(f);
+}
+var TRAVELUP=null;
+function parseTravelFile(f){
+  var ym=(f.name.match(/20\\d\\d/)||[])[0];
+  if(!ym){$('#imp').textContent='Could not detect the year from the filename (expected e.g. 2026 in the name).';return;}
+  $('#imp').textContent='Reading '+f.name+'…';
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array',raw:true});
+        var months=['JAN','FEB','MAR','APRIL','MAY','JUNE','JULY','AUG','SEPT','OCT','NOV','DEC'];
+        var sheets={};
+        wb.SheetNames.forEach(function(sn){ if(months.indexOf(sn.toUpperCase())>=0){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        TRAVELUP={sheets:sheets,year:+ym};
+        previewTravel();
+      }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+async function previewTravel(){
+  $('#imp').textContent='Analyzing…';
+  var r=await (await fetch('/api/travel/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:TRAVELUP.sheets,year:TRAVELUP.year,dryRun:true})})).json();
+  if(r.error){$('#imp').textContent='Error: '+r.error;return;}
+  var h='<div style="margin-top:6px"><b style="color:var(--navy)">Preview '+r.year+'</b> — '+r.records+' line items · '+r.crew+' crew · $'+Number(r.total).toLocaleString()
+    +'<div class=csub style="margin-top:4px">Sign-on $'+Number(r.byLeg.on||0).toLocaleString()+' · Sign-off $'+Number(r.byLeg.off||0).toLocaleString()+' · Transfer $'+Number(r.byLeg.transfer||0).toLocaleString()+'</div></div>';
+  h+='<div class=csub style="margin-top:6px;color:var(--amber)">Applying replaces all '+r.year+' travel records (2025 history is untouched).</div>';
+  if(r.records>0)h+='<button class="btn" style="margin-top:10px" onclick="applyTravel()">Apply '+r.year+' ('+r.records+' items)</button>';
+  else h+='<div class=csub style="margin-top:8px">No travel line items found in that workbook.</div>';
+  $('#imp').innerHTML=h;
+}
+async function applyTravel(){
+  $('#imp').textContent='Applying…';
+  var r=await (await fetch('/api/travel/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:TRAVELUP.sheets,year:TRAVELUP.year})})).json();
+  if(r.ok)$('#imp').innerHTML='<span class="cchip ok">Done</span> loaded '+r.applied+' travel items for '+r.year+'. <a href="#" onclick="show(\\'travel\\');return false">Open Travel</a>';
+  else $('#imp').textContent='Import failed.';
 }
 function parseVesselFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
@@ -936,6 +1022,24 @@ async function renderData(){
   else h+='<table class=tbl><thead><tr><th>Source</th><th>Records</th><th>Status</th><th>When</th></tr></thead><tbody>'
     +d.log.map(function(l){return '<tr><td>'+l.source+'</td><td>'+(l.rows||'')+'</td><td><span class="cchip ok">'+l.status+'</span></td><td>'+(l.at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table>';
   h+='<p class=muted style="text-align:left;padding:10px 2px">Autonomous refresh from the Drive folder activates once the read-only service account is connected. Until then, data loads on deploy. Bonus baselines stay gated for Rita.</p>';
+  $('#view').innerHTML=h;
+}
+let TRV=null;
+function usd(n){return n?('$'+Number(n).toLocaleString()):'—';}
+async function renderTravel(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  TRV=await (await fetch('/api/travel')).json();
+  var s=TRV.summary;var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h='<div class=bar><h2>Travel expenses</h2><span class=csub style="margin-left:auto">Years on file: '+((TRV.years||[]).join(', ')||'—')+'</span></div>';
+  h+='<div class=tiles>'+tile('$'+s.total.toLocaleString(),'Total spend')+tile(s.records,'Line items')+tile(s.crew,'Crew')
+    +tile('$'+(s.byLeg.on||0).toLocaleString(),'Sign-on','green')+tile('$'+(s.byLeg.off||0).toLocaleString(),'Sign-off','amber')+tile('$'+(s.byLeg.transfer||0).toLocaleString(),'Transfer','royal')+'</div>';
+  h+='<div class=zlabel>By category</div><table class=tbl><thead><tr><th>Air</th><th>Hotel</th><th>Medical</th><th>Visa</th><th>Food</th><th>Transport</th></tr></thead><tbody><tr>'
+    +['air','hotel','medical','visa','food','transport'].map(function(c){return '<td>'+usd(s.byCat[c])+'</td>';}).join('')+'</tr></tbody></table>';
+  h+='<div class=zlabel style="margin-top:18px">By month</div><table class=tbl><thead><tr><th>Month</th><th>Total</th></tr></thead><tbody>'
+    +Object.keys(s.byMonth).sort(function(a,b){return a-b;}).map(function(m){return '<tr><td>'+mn[m]+'</td><td>'+usd(s.byMonth[m])+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='<div class=zlabel style="margin-top:18px">Line items ('+TRV.records.length+')</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Leg</th><th>Crew</th><th>Air</th><th>Hotel</th><th>Med</th><th>Visa</th><th>Food</th><th>Trans</th><th>Total</th></tr></thead><tbody>'
+    +TRV.records.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+r.leg+'</td><td>'+r.crew_name+'</td><td>'+usd(r.air)+'</td><td>'+usd(r.hotel)+'</td><td>'+usd(r.medical)+'</td><td>'+usd(r.visa)+'</td><td>'+usd(r.food)+'</td><td>'+usd(r.transport)+'</td><td><b>'+usd(r.total)+'</b></td></tr>';}).join('')+'</tbody></table>'
+    +'<p class=muted style="text-align:left;padding:10px 2px">2025 is loaded as history. Newer years: upload in Settings → Data uploads → Travel expenses.</p>';
   $('#view').innerHTML=h;
 }
 async function renderFleet(){
