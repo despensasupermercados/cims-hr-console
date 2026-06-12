@@ -360,7 +360,7 @@ async function apiDashboard(env) {
   const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
   // Birthdays today (match MM-DD of dob).
   const md = today.slice(5);
-  const bd = (await env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? ORDER BY last_name").bind(md).all()).results;
+  const bd = (await env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND status='On board' ORDER BY last_name").bind(md).all()).results;
   const birthdays = bd.map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: b.vessel_observed || "" }));
   // Travel budget (latest year on file), split crew vs shoreside management.
   await ensureTravel(env);
