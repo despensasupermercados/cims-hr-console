@@ -9,6 +9,7 @@ import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
 import { mapRows, diffCrew } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
+import { crewDeployment } from "./deploy.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -341,7 +342,7 @@ async function apiCrewOne(env, url) {
   await ensureKeyman(env);
   const ct = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
   const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
-  return json({ crew: row, contracts: ct, daysWorked: (dw && dw.days) || 0 });
+  return json({ crew: row, contracts: ct, daysWorked: (dw && dw.days) || 0, deployment: crewDeployment(row, VESSEL_REF, DRY_DOCK, TODAY()) });
 }
 
 /* ----------------------- compliance + rotation (read views) ----------------------- */
@@ -1133,6 +1134,20 @@ async function openCrew(id){
     +'<div class=csub style="margin-top:6px">'+[c.email,c.phone,c.province,(c.dob?('DOB '+c.dob):'')].filter(Boolean).join(' · ')+'</div>'
     +'<div class=cchips style="margin-top:8px">'+doc('Medical',c.med_exp)+doc("Seaman bk",c.sirb_exp)+doc('Passport',c.pp_exp)+doc('US visa',c.usv_exp)+doc('Schengen',c.sch_exp)+'</div>'
     +'</div>';
+  var dp=d.deployment||{};
+  if(dp.matched){
+    var vlabel=dp.visa?(dp.visa.required+': '+(dp.visa.exp||'missing')):'Region entry visa varies by nationality';
+    var vsuffix='',vcls='';
+    if(dp.visa){var vs2=dp.visa.status;vcls=vs2==='ok'?'ok':(vs2==='expiring'?'amber':'red');if(vs2==='expired')vsuffix=' (EXPIRED)';else if(vs2==='expiring')vsuffix=' (<90d)';else if(vs2==='missing')vsuffix=' (MISSING)';}
+    var dd=dp.nextDryDock;
+    var ddTxt=dd?(dd.start+(dd.end?(' → '+dd.end):'')+' · '+(dd.loc||'')+(dd.note?(' · '+dd.note):'')):'none scheduled';
+    h+='<div class="card" style="max-width:none;margin-top:12px;border-left:3px solid var(--royal)">'
+      +'<div class=zlabel style="margin-bottom:6px">Deployment &amp; document fit</div>'
+      +'<div class=csub>'+dp.vessel+' · '+(dp.brand||'')+' '+(dp.cls||'')+' class · Homeport '+(dp.homeport||'—')+' · '+(dp.region||'—')+'</div>'
+      +'<div class=cchips style="margin-top:8px"><span class="cchip '+vcls+'">'+vlabel+vsuffix+'</span></div>'
+      +'<div class=csub style="margin-top:8px"><b>Next dry dock (crew change):</b> '+ddTxt+'</div>'
+      +'</div>';
+  }
   if(bz&&!bz.error){
     h+='<div class=zlabel style="margin-top:16px">Bonus standing</div>';
     h+='<div class=csub style="margin-bottom:8px">Rank: <b style="color:var(--navy)">'+(bz.rank||'—')+'</b> · '+(bz.count!=null?bz.count:0)+' completed contract(s)'+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
