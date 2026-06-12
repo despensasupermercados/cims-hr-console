@@ -297,23 +297,37 @@ async function apiDaysWorked(env, url) {
 }
 
 // Travel expenses — 2025 seeded as history; 2026+ uploaded in-app by Rita (replace-by-year).
+// kind = 'crew' (monthly sheets) | 'shoreside' (CIMS staff sheet) so the dashboard can show
+// totals with and without shoreside management.
+async function insertTravel(env, recs, year) {
+  const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,kind,crew_name,air,hotel,medical,visa,food,transport,other,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+  for (let i = 0; i < recs.length; i += 100) {
+    await env.DB.batch(recs.slice(i, i + 100).map((r, j) => {
+      const y = year || r.year;
+      return stmt.bind("tx_" + y + "_" + r.month + "_" + (r.kind || "crew") + "_" + (i + j), y, r.month, r.leg, r.kind || "crew", r.crew_name, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.other || 0, r.total);
+    }));
+  }
+}
 async function ensureTravel(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, total REAL)").run();
-  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
-  if (n === 0 && TRAVEL_2025.length) {
-    const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,crew_name,air,hotel,medical,visa,food,transport,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
-    for (let i = 0; i < TRAVEL_2025.length; i += 100) {
-      await env.DB.batch(TRAVEL_2025.slice(i, i + 100).map((r, j) => stmt.bind("tx_" + r.year + "_" + r.month + "_" + (i + j), r.year, r.month, r.leg, r.crew_name, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.total)));
-    }
-    await logData(env, "travel_expense (2025 history)", TRAVEL_2025.length, "seeded");
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run();
+  try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0").run(); } catch {}
+  const total = (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
+  const shore = (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense WHERE kind='shoreside'").first()).n;
+  if ((total === 0 || shore === 0) && TRAVEL_2025.length) {
+    await env.DB.prepare("DELETE FROM travel_expense WHERE year=2025").run();
+    await insertTravel(env, TRAVEL_2025, 2025);
+    await logData(env, "travel_expense (2025 history incl. shoreside)", TRAVEL_2025.length, "seeded");
   }
 }
 async function apiTravel(env, url) {
   await ensureTravel(env);
-  const year = url.searchParams.get("year");
-  let sql = "SELECT year,month,leg,crew_name,air,hotel,medical,visa,food,transport,total FROM travel_expense";
-  const bind = [];
-  if (year) { sql += " WHERE year=?"; bind.push(+year); }
+  const year = url.searchParams.get("year"), kind = url.searchParams.get("kind");
+  let sql = "SELECT year,month,leg,kind,crew_name,air,hotel,medical,visa,food,transport,other,total FROM travel_expense";
+  const where = [], bind = [];
+  if (year) { where.push("year=?"); bind.push(+year); }
+  if (kind) { where.push("kind=?"); bind.push(kind); }
+  if (where.length) sql += " WHERE " + where.join(" AND ");
   sql += " ORDER BY year DESC, month, crew_name";
   const rows = (await env.DB.prepare(sql).bind(...bind).all()).results;
   const years = (await env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all()).results.map(r => r.year);
@@ -325,14 +339,9 @@ async function apiTravelImport(request, env, session) {
   const year = +b.year;
   if (!year) return json({ error: "year_required" }, 400);
   const recs = parseTravelSheets(b.sheets || {}, year);
-  if (b.dryRun) { const s = travelSummarize(recs); return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg }); }
+  if (b.dryRun) { const s = travelSummarize(recs); return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind }); }
   await env.DB.prepare("DELETE FROM travel_expense WHERE year=?").bind(year).run();
-  if (recs.length) {
-    const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,crew_name,air,hotel,medical,visa,food,transport,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
-    for (let i = 0; i < recs.length; i += 100) {
-      await env.DB.batch(recs.slice(i, i + 100).map((r, j) => stmt.bind("tx_" + year + "_" + r.month + "_" + (i + j), year, r.month, r.leg, r.crew_name, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.total)));
-    }
-  }
+  if (recs.length) await insertTravel(env, recs, year);
   await logData(env, "travel_expense (" + year + ", by " + ((session && session.email) || "?") + ")", recs.length, "replaced year " + year);
   return json({ ok: true, year, applied: recs.length });
 }
@@ -349,8 +358,22 @@ async function apiDashboard(env) {
   const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
   const usvExp = (await q("SELECT COUNT(*) n FROM crew WHERE usv_exp IS NOT NULL AND usv_exp < ?", in90)).n;
   const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
+  // Travel budget (latest year on file), split crew vs shoreside management.
+  await ensureTravel(env);
+  const ty = (await q("SELECT MAX(year) y FROM travel_expense")).y;
+  const travel = { year: ty || null, all: 0, shoreside: 0, crew: 0, months: [], air: 0 };
+  if (ty) {
+    const tr = (await env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=? GROUP BY kind").bind(ty).all()).results;
+    for (const r of tr) { travel.all += r.t || 0; if (r.kind === "shoreside") travel.shoreside += r.t || 0; }
+    travel.crew = Math.round((travel.all - travel.shoreside) * 100) / 100;
+    travel.all = Math.round(travel.all * 100) / 100;
+    travel.shoreside = Math.round(travel.shoreside * 100) / 100;
+    const ms = (await env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=? GROUP BY month ORDER BY month").bind(ty).all()).results;
+    travel.months = ms.map(r => ({ m: r.month, t: Math.round((r.t || 0) * 100) / 100 }));
+    travel.air = Math.round(ms.reduce((s, r) => s + (r.a || 0), 0) * 100) / 100;
+  }
   return json({
-    today,
+    today, travel,
     workforce: {
       total,
       on_board: statusMap["On board"] || 0,
@@ -936,9 +959,9 @@ function parseTravelFile(f){
     rd.onload=function(e){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
-        var months=['JAN','FEB','MAR','APRIL','MAY','JUNE','JULY','AUG','SEPT','OCT','NOV','DEC'];
+        var want=['JAN','FEB','MAR','APRIL','MAY','JUNE','JULY','AUG','SEPT','OCT','NOV','DEC','CIMS'];
         var sheets={};
-        wb.SheetNames.forEach(function(sn){ if(months.indexOf(sn.toUpperCase())>=0){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        wb.SheetNames.forEach(function(sn){ if(want.indexOf(sn.toUpperCase())>=0){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
         TRAVELUP={sheets:sheets,year:+ym};
         previewTravel();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
@@ -1024,23 +1047,65 @@ async function renderData(){
   h+='<p class=muted style="text-align:left;padding:10px 2px">Autonomous refresh from the Drive folder activates once the read-only service account is connected. Until then, data loads on deploy. Bonus baselines stay gated for Rita.</p>';
   $('#view').innerHTML=h;
 }
-let TRV=null;
+let TRV=null,TRV_KIND='';
 function usd(n){return n?('$'+Number(n).toLocaleString()):'—';}
 async function renderTravel(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
-  TRV=await (await fetch('/api/travel')).json();
-  var s=TRV.summary;var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var h='<div class=bar><h2>Travel expenses</h2><span class=csub style="margin-left:auto">Years on file: '+((TRV.years||[]).join(', ')||'—')+'</span></div>';
-  h+='<div class=tiles>'+tile('$'+s.total.toLocaleString(),'Total spend')+tile(s.records,'Line items')+tile(s.crew,'Crew')
-    +tile('$'+(s.byLeg.on||0).toLocaleString(),'Sign-on','green')+tile('$'+(s.byLeg.off||0).toLocaleString(),'Sign-off','amber')+tile('$'+(s.byLeg.transfer||0).toLocaleString(),'Transfer','royal')+'</div>';
-  h+='<div class=zlabel>By category</div><table class=tbl><thead><tr><th>Air</th><th>Hotel</th><th>Medical</th><th>Visa</th><th>Food</th><th>Transport</th></tr></thead><tbody><tr>'
-    +['air','hotel','medical','visa','food','transport'].map(function(c){return '<td>'+usd(s.byCat[c])+'</td>';}).join('')+'</tr></tbody></table>';
-  h+='<div class=zlabel style="margin-top:18px">By month</div><table class=tbl><thead><tr><th>Month</th><th>Total</th></tr></thead><tbody>'
-    +Object.keys(s.byMonth).sort(function(a,b){return a-b;}).map(function(m){return '<tr><td>'+mn[m]+'</td><td>'+usd(s.byMonth[m])+'</td></tr>';}).join('')+'</tbody></table>';
-  h+='<div class=zlabel style="margin-top:18px">Line items ('+TRV.records.length+')</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Leg</th><th>Crew</th><th>Air</th><th>Hotel</th><th>Med</th><th>Visa</th><th>Food</th><th>Trans</th><th>Total</th></tr></thead><tbody>'
-    +TRV.records.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+r.leg+'</td><td>'+r.crew_name+'</td><td>'+usd(r.air)+'</td><td>'+usd(r.hotel)+'</td><td>'+usd(r.medical)+'</td><td>'+usd(r.visa)+'</td><td>'+usd(r.food)+'</td><td>'+usd(r.transport)+'</td><td><b>'+usd(r.total)+'</b></td></tr>';}).join('')+'</tbody></table>'
-    +'<p class=muted style="text-align:left;padding:10px 2px">2025 is loaded as history. Newer years: upload in Settings → Data uploads → Travel expenses.</p>';
-  $('#view').innerHTML=h;
+  $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
+    +'<span class=csub style="margin-left:auto;margin-right:6px">View:</span>'
+    +'<button class="btn ghost trk" data-k="">All</button> <button class="btn ghost trk" data-k="crew">Crew</button> <button class="btn ghost trk" data-k="shoreside">Shoreside mgmt</button></div>'
+    +'<div id=trbody><div class=muted>Loading…</div></div>';
+  document.querySelectorAll('.trk').forEach(function(b){b.onclick=function(){TRV_KIND=b.getAttribute('data-k');document.querySelectorAll('.trk').forEach(function(x){x.classList.remove('on');});b.classList.add('on');loadTravel();};});
+  document.querySelector('.trk').classList.add('on');
+  loadTravel();
+}
+async function loadTravel(){
+  $('#trbody').innerHTML='<div class=muted>Loading…</div>';
+  TRV=await (await fetch('/api/travel'+(TRV_KIND?('?kind='+TRV_KIND):''))).json();
+  var s=TRV.summary,recs=TRV.records,mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // Aggregate by year-month for trend + deltas.
+  var ymTot={},ymCrew={},ymShore={},person={};
+  recs.forEach(function(r){var k=r.year*100+r.month;ymTot[k]=(ymTot[k]||0)+r.total;if(r.kind==='shoreside')ymShore[k]=(ymShore[k]||0)+r.total;else ymCrew[k]=(ymCrew[k]||0)+r.total;person[r.crew_name]=(person[r.crew_name]||0)+r.total;});
+  var keys=Object.keys(ymTot).map(Number).sort(function(a,b){return a-b;});
+  var fy=function(k){return mn[k%100]+' '+String(Math.floor(k/100)).slice(2);};
+  var latest=keys[keys.length-1],prev=keys.length>1?keys[keys.length-2]:null;
+  var mom=(prev&&ymTot[prev])?((ymTot[latest]-ymTot[prev])/ymTot[prev]*100):null;
+  var avg=keys.length?s.total/keys.length:0;
+  var peak=keys.reduce(function(a,b){return ymTot[b]>(ymTot[a]||0)?b:a;},keys[0]);
+  var airShare=s.total?(s.byCat.air/s.total*100):0;
+  var pnames=Object.keys(person).sort(function(a,b){return person[b]-person[a];});
+  var top=pnames[0]||'—';
+  var momTxt=mom==null?'—':((mom>=0?'▲ ':'▼ ')+Math.abs(mom).toFixed(0)+'%');
+  // Decision signals
+  var h='<div class=csub style="margin-bottom:8px">Years on file: '+((TRV.years||[]).join(', ')||'—')+'</div>';
+  h+='<div class=zlabel>Where we are</div><div class=tiles>'
+    +tile('$'+s.total.toLocaleString(),'Total spend')
+    +tile('$'+(s.byKind.crew||0).toLocaleString(),'Crew','green')
+    +tile('$'+(s.byKind.shoreside||0).toLocaleString(),'Shoreside mgmt','amber')
+    +tile('$'+Math.round(avg).toLocaleString(),'Avg / month')+'</div>';
+  h+='<div class=zlabel>Decision signals</div><div class=tiles>'
+    +tile((latest?fy(latest):'—')+' · $'+Math.round(ymTot[latest]||0).toLocaleString(),'Latest month')
+    +tile(momTxt,'Latest vs prev',(mom==null?'':(mom>=0?'red':'green')))
+    +tile(Math.round(airShare)+'%','Air share of spend',(airShare>=70?'amber':''))
+    +tile(fy(peak)+' · $'+Math.round(ymTot[peak]||0).toLocaleString(),'Peak month','red')
+    +tile(top,'Top spender')+'</div>';
+  // Month over month
+  var maxv=keys.reduce(function(a,b){return Math.max(a,ymTot[b]);},0)||1;
+  h+='<div class=zlabel style="margin-top:18px">Month over month</div><table class=tbl><thead><tr><th>Month</th><th>Crew</th><th>Shoreside</th><th>Total</th><th>Δ vs prev</th><th>Trend</th></tr></thead><tbody>';
+  keys.forEach(function(k,i){
+    var pv=i>0?ymTot[keys[i-1]]:null;var dd=(pv?((ymTot[k]-pv)/pv*100):null);
+    var darr=dd==null?'—':((dd>=0?'▲ ':'▼ ')+Math.abs(dd).toFixed(0)+'%');var dcol=dd==null?'var(--mut)':(dd>=0?'var(--red)':'var(--green-d)');
+    var bw=Math.round(ymTot[k]/maxv*100);
+    h+='<tr><td>'+fy(k)+'</td><td>'+usd(ymCrew[k])+'</td><td>'+usd(ymShore[k])+'</td><td><b>'+usd(ymTot[k])+'</b></td><td style="color:'+dcol+'">'+darr+'</td><td><div style="height:9px;background:var(--navy);width:'+bw+'%;border-radius:4px;min-width:2px"></div></td></tr>';
+  });
+  h+='</tbody></table>';
+  // By category
+  h+='<div class=zlabel style="margin-top:18px">By category</div><table class=tbl><thead><tr><th>Air</th><th>Hotel</th><th>Medical</th><th>Visa</th><th>Food</th><th>Transport</th><th>Other</th></tr></thead><tbody><tr>'
+    +['air','hotel','medical','visa','food','transport','other'].map(function(c){return '<td>'+usd(s.byCat[c])+'</td>';}).join('')+'</tr></tbody></table>';
+  // Line items
+  h+='<div class=zlabel style="margin-top:18px">Line items ('+recs.length+')</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Name</th><th>Air</th><th>Hotel</th><th>Med</th><th>Visa</th><th>Food</th><th>Trans</th><th>Other</th><th>Total</th></tr></thead><tbody>'
+    +recs.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td>'+usd(r.air)+'</td><td>'+usd(r.hotel)+'</td><td>'+usd(r.medical)+'</td><td>'+usd(r.visa)+'</td><td>'+usd(r.food)+'</td><td>'+usd(r.transport)+'</td><td>'+usd(r.other)+'</td><td><b>'+usd(r.total)+'</b></td></tr>';}).join('')+'</tbody></table>'
+    +'<p class=muted style="text-align:left;padding:10px 2px">2025 is loaded as history (crew + shoreside management). Newer years: upload in Settings → Data uploads → Travel expenses.</p>';
+  $('#trbody').innerHTML=h;
 }
 async function renderFleet(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
@@ -1186,8 +1251,27 @@ async function renderDashboard(){
    +'<div class=zlabel>Contract history (Keyman)</div><div class=tiles>'
    +tile(d.history.crew,'Crew w/ history','','data')+tile(d.history.contracts,'Contracts on file','','billing')+tile(d.history.days.toLocaleString(),'Total sea-days','','billing')
    +'</div>'
+   +'<div class=zlabel>Travel budget'+(d.travel&&d.travel.year?(' · '+d.travel.year):'')+' <button class="btn ghost" id=shtog style="margin-left:8px;padding:2px 10px;font-size:12px">Hide shoreside</button></div><div class=tiles id=trv></div><div id=trvmom class=csub style="margin-top:6px"></div>'
    +'<p class=muted style="text-align:left;padding:14px 2px">Live from Cloudflare D1 · '+w.total+' crew · as of '+d.today+' · tip: tiles are clickable</p>';
   document.querySelectorAll('#view .tile[data-go]').forEach(function(el){el.onclick=function(){show(el.getAttribute('data-go'));};});
+  (function(){
+    var tv2=d.travel||{},ms=tv2.months||[],el=document.getElementById('trvmom');if(!el||!ms.length)return;
+    var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var last=ms[ms.length-1],prev=ms.length>1?ms[ms.length-2]:null,max=ms.reduce(function(a,b){return Math.max(a,b.t);},0)||1;
+    var spark=ms.map(function(x){var hh=Math.max(2,Math.round(x.t/max*28));return '<span title="'+mn[x.m]+\': \$'+Math.round(x.t).toLocaleString()+'" style="display:inline-block;width:11px;height:'+hh+'px;background:var(--navy);margin-right:2px;vertical-align:bottom;border-radius:2px;opacity:'+(x===last?1:.45)+'"></span>';}).join('');
+    var mom=(prev&&prev.t)?((last.t-prev.t)/prev.t*100):null,arrow=mom==null?'':(mom>=0?'▲':'▼'),col=mom==null?'var(--mut)':(mom>=0?'var(--red)':'var(--green-d)');
+    var air=tv2.air||0,share=tv2.all?Math.round(air/tv2.all*100):0;
+    el.innerHTML='<div style="height:30px;margin:4px 0 6px">'+spark+'</div>Latest: <b style="color:var(--navy)">'+mn[last.m]+'</b> \$'+Math.round(last.t).toLocaleString()+(mom!=null?(' · <span style="color:'+col+'">'+arrow+' '+Math.abs(mom).toFixed(0)+'% vs '+mn[prev.m]+'</span>'):'')+' · air '+share+'% of spend';
+  }());
+  var tv=d.travel||{},SHHIDE=false;
+  function paintTrv(){
+    var el=document.getElementById('trv'); if(!el)return;
+    var head=SHHIDE?tv.crew:tv.all, lab=SHHIDE?'Crew travel (excl. shoreside)':'Total travel (incl. shoreside)';
+    el.innerHTML=tile('$'+Number(head||0).toLocaleString(),lab,'','travel')+tile('$'+Number(tv.crew||0).toLocaleString(),'Crew','green','travel')+tile('$'+Number(tv.shoreside||0).toLocaleString(),'Shoreside mgmt','amber','travel');
+    el.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});
+  }
+  var bt=document.getElementById('shtog'); if(bt)bt.onclick=function(){SHHIDE=!SHHIDE;bt.textContent=SHHIDE?'Show shoreside':'Hide shoreside';paintTrv();};
+  paintTrv();
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 async function renderCrew(){
