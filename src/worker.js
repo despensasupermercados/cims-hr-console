@@ -67,6 +67,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
+        if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
@@ -438,20 +439,50 @@ async function apiRotation(env) {
   ).all()).results;
   const board = buildRotationBoard(rows);
   board.inDock = inDockNow(DRY_DOCK, TODAY());
-  // Attach each crew's latest Keyman contract leg (ship + sign-on/off) for the rich cards.
-  await ensureKeyman(env);
+  // Attach each crew's current + next Keyman leg, embark/disembark ports, and readiness flags.
+  await ensureKeyman(env); await ensureReady(env);
+  const today = TODAY();
+  const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const shipHome = {}; for (const v of VESSEL_REF) shipHome[normShip(v.name)] = v.homeport || null;
   const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract2").all()).results;
-  const latest = {};
-  for (const r of legs) {
-    if (!r.sign_on) continue;
-    if (!latest[r.sc] || (r.seq || 0) > (latest[r.sc].seq || 0)) latest[r.sc] = r;
-  }
+  const byCrew = {};
+  for (const r of legs) { if (!r.sign_on) continue; (byCrew[r.sc] = byCrew[r.sc] || []).push(r); }
+  for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  const rd = (await env.DB.prepare("SELECT agency_id, eccr, air, hotel FROM crew_ready").all()).results;
+  const readyMap = {}; for (const r of rd) readyMap[r.agency_id] = r;
   const attach = (arr) => (arr || []).forEach(it => {
-    const l = latest[it.agency_id];
-    if (l) { it.kmShip = l.ship || null; it.signOn = l.sign_on || null; it.signOff = l.act_off || l.proj_off || null; }
+    const rm = readyMap[it.agency_id] || {};
+    it.eccr = !!rm.eccr; it.air = !!rm.air; it.hotel = !!rm.hotel;
+    const ls = byCrew[it.agency_id];
+    if (ls && ls.length) {
+      let ci = ls.findIndex(r => r.sign_on <= today && (r.act_off || r.proj_off || "9999") >= today);
+      if (ci < 0) ci = ls.length - 1;
+      const cur = ls[ci], nx = ls[ci + 1];
+      it.kmShip = cur.ship || null; it.signOn = cur.sign_on || null;
+      it.signOff = cur.act_off || cur.proj_off || null; it.offConfirmed = !!cur.act_off;
+      it.embark = shipHome[normShip(cur.ship)] || null;
+      it.nextShip = nx ? (nx.ship || null) : null;
+      it.disembark = nx ? (shipHome[normShip(nx.ship)] || null) : null;
+    }
   });
   for (const v in board.byVessel) attach(board.byVessel[v]);
   return json(board);
+}
+async function ensureReady(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_ready (agency_id TEXT PRIMARY KEY, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, updated_at TEXT)").run();
+}
+// POST {agency_id, field in [eccr,air,hotel], value} — Rita ticks crew-change readiness.
+async function apiReady(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const f = b.field;
+  if (["eccr", "air", "hotel"].indexOf(f) < 0) return json({ error: "bad_field" }, 400);
+  if (!b.agency_id) return json({ error: "no_id" }, 400);
+  await ensureReady(env);
+  const v = b.value ? 1 : 0;
+  await env.DB.prepare("INSERT INTO crew_ready (agency_id," + f + ",updated_at) VALUES (?,?,?) ON CONFLICT(agency_id) DO UPDATE SET " + f + "=excluded." + f + ", updated_at=excluded.updated_at")
+    .bind(b.agency_id, v, new Date().toISOString()).run();
+  await logActivity(env, session && session.email, "crew_ready", b.agency_id + " " + f + "=" + v);
+  return json({ ok: true });
 }
 async function apiRotationAssign(request, env, session) {
   const b = await request.json().catch(() => ({}));
@@ -696,6 +727,10 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .rcard .rleg2 i{width:7px;height:7px;border-radius:50%;display:inline-block}
 .rcard .rleg2 i.ondot{background:var(--green)}.rcard .rleg2 i.offdot{background:var(--amber)}
 .rcard .rdur{display:inline-block;margin-top:6px;background:#eef2f7;color:var(--mut);font-size:10.5px;padding:2px 8px;border-radius:20px}
+.rtags{margin-top:7px;display:flex;flex-wrap:wrap;gap:4px}
+.rtag{font-size:9px;font-weight:800;letter-spacing:.03em;padding:2px 6px;border-radius:6px;border:1px solid var(--line-2);color:var(--mut);background:#fff}
+.rtag.on{background:#EAF6E6;border-color:#bfe0b0;color:var(--green-d)}
+.rtag.rtoggle{cursor:pointer;user-select:none}
 .poolwrap{background:#fff;border:1px dashed var(--line-2);border-radius:13px;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:8px;min-height:48px}
 .zlabel{font-family:'Outfit';font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:20px 0 10px;display:flex;align-items:center;gap:12px}
 .zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
@@ -1241,16 +1276,19 @@ let DRAGID=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={};
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
 function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
+function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
 function rotCard(x){
-  var on=x.signOn?((x.kmShip?x.kmShip+' · ':'')+'ON '+x.signOn):'';
-  var off=x.signOff?('OFF '+x.signOff):'';
+  var on=x.signOn?((x.embark?x.embark+' · ':'')+(x.kmShip?x.kmShip+' · ':'')+'ON '+x.signOn):'';
+  var off=x.signOff?((x.disembark?x.disembark+' · ':'')+'OFF '+x.signOff):'';
   var dur=durLabel(x.signOn,x.signOff);
+  var tags=rtag('ECCR',x.eccr,x.agency_id,'eccr')+rtag('AIR',x.air,x.agency_id,'air')+rtag('HOTEL',x.hotel,x.agency_id,'hotel')+rtag('OFF DATE',!!x.offConfirmed,null,null)+(x.nextShip?rtag('NEXT: '+x.nextShip,true,null,null):rtag('NEXT SHIP',false,null,null));
   return '<div class="rcard" draggable="true" data-crew="'+x.agency_id+'" title="drag to reassign">'
     +'<div class=rnm>'+x.name+'</div>'
     +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+'</div>'
     +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
     +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
     +(dur?'<span class=rdur>'+dur+'</span>':'')
+    +'<div class=rtags>'+tags+'</div>'
     +'</div>';
 }
 function rotShip(ship,crew,docked){
@@ -1289,6 +1327,7 @@ function drawRotation(){
   document.querySelectorAll('#rotbody .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
   document.querySelectorAll('#rotbody [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
   document.querySelectorAll('#rotbody .rcard').forEach(function(el){el.ondragstart=function(){DRAGID=el.getAttribute('data-crew');};});
+  document.querySelectorAll('#rotbody .rtoggle').forEach(function(el){el.onclick=function(e){e.stopPropagation();var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});};el.ondragstart=function(e){e.preventDefault();e.stopPropagation();};});
   document.querySelectorAll('#rotbody .shipdrop').forEach(function(z){
     z.ondragover=function(e){e.preventDefault();z.style.outline='2px solid var(--green)';};
     z.ondragleave=function(){z.style.outline='';};
