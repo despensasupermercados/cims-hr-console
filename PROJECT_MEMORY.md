@@ -200,20 +200,22 @@ explicitly clear/upsert the relevant table (not rely on redeploy).
   Ray.Guerra (feedback 'ray'), Rolando.Abellan ('rolando'), Dexter.Lawrence ('dexter'+mono%),
   Ohji.Miranda (role TBC), Joemar.DeLeon (trainer).
 
-### PENDING ACCESS GRANTS — recorded 2026-06-12, NOT YET GRANTED (Miguel's call)
+### PENDING ACCESS GRANTS — emails CONFIRMED by Miguel 2026-06-12, NOT YET GRANTED
 Miguel wants these 5 to eventually get console login, but **access is NOT enabled yet** — he said
 "just want their emails added... will not give the access yet... don't wanna forget." Do NOT add to
-the `users` allowlist until Miguel explicitly says go. Emails below are **inferred** from the
-First.Last@dg3.com convention — **DOMAIN UNCONFIRMED, verify with Miguel before activating:**
-  1. Ray Guerra    — Ray.Guerra@dg3.com      (feedback 'ray')
+the `users` allowlist until Miguel explicitly says go. **Emails confirmed verbatim by Miguel:**
+  1. Ray Guerra      — Ray.Guerra@dg3.com      (feedback 'ray')
   2. Rolando Abellan — Rolando.Abellan@dg3.com (feedback 'rolando')
   3. Dexter Lawrence — Dexter.Lawrence@dg3.com (feedback 'dexter' + mono%)
-  4. Joemar De Leon  — Joemar.DeLeon@dg3.com   (trainer)
+  4. Joemar De Leon  — joemar.deleon@dg3.com   (trainer; note: all-lowercase as given — auth is case-insensitive)
   5. Ohji Miranda    — Ohji.Miranda@dg3.com    (role TBC; Miguel spelled "Ohjie")
 **Access-model caveat when granting:** the `users` table has only ONE role — `'full'` (CHECK role IN
 ('full')). Adding any of these = FULL access (bonus $, billing margins, crew PII: passport/visa/
 medical). If Miguel wants them limited to feedback/their crew, a scoped role must be built FIRST
 (new role value + per-tab gating). Flag this again at grant time.
+**OPEN DECISION (Miguel, not yet answered):** keep explicit allowlist vs. build scoped role vs.
+domain-wide @dg3.com. Claude recommended KEEPING the allowlist (domain-wide = full PII+money to all
+of DG3; bad trade). Awaiting Miguel's direction before any access change.
 
 ---
 
