@@ -310,10 +310,15 @@ async function insertTravel(env, recs, year) {
 }
 async function ensureTravel(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run();
-  try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'").run(); } catch {}
-  try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0").run(); } catch {}
-  const total = (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
-  const shore = (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense WHERE kind='shoreside'").first()).n;
+  // Steady state = one combined count. If 'kind' is missing (legacy table) the query throws -> migrate once.
+  let st = null;
+  try { st = await env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first(); } catch (e) { st = null; }
+  if (!st) {
+    try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'").run(); } catch {}
+    try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0").run(); } catch {}
+  }
+  const total = st ? st.total : (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
+  const shore = st ? (st.shore || 0) : 0;
   if ((total === 0 || shore === 0) && TRAVEL_2025.length) {
     await env.DB.prepare("DELETE FROM travel_expense WHERE year=2025").run();
     await insertTravel(env, TRAVEL_2025, 2025);
@@ -1075,7 +1080,9 @@ async function renderTravel(){
 }
 async function loadTravel(){
   $('#trbody').innerHTML='<div class=muted>Loading…</div>';
+  try{
   TRV=await (await fetch('/api/travel'+(TRV_KIND?('?kind='+TRV_KIND):''))).json();
+  if(TRV&&TRV.error)throw new Error(TRV.error);
   var s=TRV.summary,recs=TRV.records,mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   // Aggregate by year-month for trend + deltas.
   var ymTot={},ymCrew={},ymShore={},person={};
@@ -1121,6 +1128,7 @@ async function loadTravel(){
     +recs.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td>'+usd(r.air)+'</td><td>'+usd(r.hotel)+'</td><td>'+usd(r.medical)+'</td><td>'+usd(r.visa)+'</td><td>'+usd(r.food)+'</td><td>'+usd(r.transport)+'</td><td>'+usd(r.other)+'</td><td><b>'+usd(r.total)+'</b></td></tr>';}).join('')+'</tbody></table>'
     +'<p class=muted style="text-align:left;padding:10px 2px">2025 is loaded as history (crew + shoreside management). Newer years: upload in Settings → Data uploads → Travel expenses.</p>';
   $('#trbody').innerHTML=h;
+  }catch(e){$('#trbody').innerHTML='<div class="card" style="max-width:none"><b>Could not load travel data.</b><div class=csub style="margin-top:6px">'+((e&&e.message)||e)+'</div><button class="btn" style="margin-top:10px" onclick="loadTravel()">Retry</button></div>';}
 }
 let FLEET=null,FLT={mode:'all',q:''};
 async function renderFleet(){
