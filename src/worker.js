@@ -774,6 +774,8 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .modwrap{position:fixed;inset:0;background:rgba(16,30,48,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:200;overflow:auto}
 .modcard{background:#fff;border-radius:16px;max-width:680px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .modhd{display:flex;align-items:flex-start;gap:12px}.modhd>div:first-child{flex:1}
+.chip{display:inline-block;font-size:12px;font-weight:600;padding:5px 12px;border-radius:20px;border:1px solid var(--line-2);color:var(--mut);background:#fff;cursor:pointer;margin:0 2px 4px 0}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .zlabel{font-family:'Outfit';font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:20px 0 10px;display:flex;align-items:center;gap:12px}
 .zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}
@@ -1315,7 +1317,7 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let DRAGID=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false;
+let DRAGID=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
 function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
@@ -1369,17 +1371,42 @@ async function saveNote(id){
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
-  ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={};
+  ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={};ROT_MONTHS=[];
+  var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
+  var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
   $('#view').innerHTML='<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
-    +'<div class=bar style="margin-bottom:8px"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:200px">'
+    +'<div class=bar style="margin-bottom:8px;flex-wrap:wrap"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:170px">'
+    +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All brands</option><option>Royal</option><option>Celebrity</option><option>Azamara</option><option>NCL</option></select>'
-    +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button></div>'
-    +'<div id=rotbody></div>';
+    +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
+    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()">Days worked (Excel)</button></div>'
+    +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
   drawRotation();
+}
+function rmonthChips(){
+  var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var h='<span class="chip'+(ROT_MONTHS.length?'':' on')+'" data-m="all">All months</span> ';
+  for(var i=1;i<=12;i++)h+='<span class="chip'+(ROT_MONTHS.indexOf(i)>=0?' on':'')+'" data-m="'+i+'">'+mn[i-1]+'</span> ';
+  document.getElementById('rotchips').innerHTML=h;
+  document.querySelectorAll('#rotchips .chip').forEach(function(el){el.onclick=function(){var m=el.getAttribute('data-m');if(m==='all'){ROT_MONTHS=[];}else{m=+m;var k=ROT_MONTHS.indexOf(m);if(k>=0)ROT_MONTHS.splice(k,1);else ROT_MONTHS.push(m);}rmonthChips();drawRotation();};});
+}
+// True if a leg [signOn..signOff] overlaps the selected year and any selected month.
+function legInFilter(x){
+  if(!ROT_YEAR&&!ROT_MONTHS.length)return true;
+  var on=x.signOn?new Date(x.signOn):null, off=x.signOff?new Date(x.signOff):on;
+  if(!on)return false;
+  if(ROT_YEAR){var y=+ROT_YEAR;if(!(on.getFullYear()<=y&&(off||on).getFullYear()>=y))return false;}
+  if(ROT_MONTHS.length){
+    var yr=ROT_YEAR?+ROT_YEAR:on.getFullYear();
+    var hit=ROT_MONTHS.some(function(m){var a=new Date(yr,m-1,1),b=new Date(yr,m,0);return on<=b&&(off||on)>=a;});
+    if(!hit)return false;
+  }
+  return true;
 }
 function drawRotation(){
   var b=ROT,c=b.counts;
-  var sfilt=function(arr){return ROT_F?(arr||[]).filter(function(x){return x.status===ROT_F;}):(arr||[]);};
+  if(document.getElementById('rotchips'))rmonthChips();
+  var sfilt=function(arr){return (arr||[]).filter(function(x){return (!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
   var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')+rfTile(c.vessels,'Vessels — show all','','')+'</div>';
   var pool=sfilt(b.pool||[]);
@@ -1399,6 +1426,17 @@ function drawRotation(){
     z.ondragleave=function(){z.style.outline='';};
     z.ondrop=function(e){e.preventDefault();z.style.outline='';assignCrew(DRAGID,z.getAttribute('data-ship'));};
   });
+}
+async function exportDaysExcel(){
+  try{
+    var d=await (await fetch('/api/daysworked')).json();
+    var rows=[['CREW DAYS WORKED'],['Crew','Days','Contracts','Basis']];
+    (d.perCrew||[]).forEach(function(c){rows.push([c.name,c.days,c.contracts,c.basis]);});
+    rows.push([]);rows.push(['BY VESSEL']);rows.push(['Vessel','Crew','Days','Basis']);
+    (d.perVessel||[]).forEach(function(v){rows.push([v.ship,v.crew,v.days,v.basis]);});
+    var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
+    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='days-worked.csv';a.click();
+  }catch(e){alert('Could not export days worked.');}
 }
 async function assignCrew(id,ship){
   if(!id)return; DRAGID=null;
