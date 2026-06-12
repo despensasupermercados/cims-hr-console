@@ -624,7 +624,8 @@ async function apiFeedbackCrew(env, url) {
 
 /* ----------------------- HTML ----------------------- */
 function htmlResponse(body, status = 200) {
-  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  // no-store: the app shell is dynamic + ships often; never let the browser serve a stale UI.
+  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, must-revalidate" } });
 }
 // Serve a base64-embedded binary asset (icons). Long cache; immutable per deploy.
 function assetResponse(b64, type) {
@@ -837,7 +838,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-dashboard class=on onclick="show('dashboard')">Dashboard</button>
     <button id=nav-crew onclick="show('crew')">Crew</button>
     <button id=nav-bonus onclick="show('bonus')">Bonus</button>
-    <button id=nav-rotation onclick="show('rotation')">Rotation</button>
+    <button id=nav-rotation onclick="show('rotation')">Keyman</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
@@ -1209,17 +1210,22 @@ function shipCard(key,label,crew,docked){
   var chips=crew.map(rotChip).join('')||'<div class=hint style="opacity:.55">drop crew here</div>';
   return '<div class="card shipdrop" data-ship="'+key+'"><div class=cname>'+label+(docked?' <span class="cchip red">dry dock</span>':'')+'</div><div class=csub>'+crew.length+' crew</div><div class=shipbody>'+chips+'</div></div>';
 }
+let ROT_F='';
+function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
 function drawRotation(){
   const b=ROT,c=b.counts,dock=b.inDock||[];
   const isDocked=function(v){var u=(v||'').toUpperCase();return dock.some(function(s){return u.indexOf(s.toUpperCase())>=0;});};
-  let h='<div class=zlabel>Rotation planner — drag a crew card onto a ship to reassign</div><div class=tiles>'
-    +tile(c['On board'],'On board','green')+tile(c['On Vacation'],'On vacation','amber')
-    +tile(c['Earmarked'],'Earmarked','royal')+tile(c['Inactive'],'Inactive','gray')+tile(c.vessels,'Vessels')+'</div>';
-  const pool=b.byVessel['—']||[];
+  const flt=function(arr){return ROT_F?(arr||[]).filter(function(x){return x.status===ROT_F;}):(arr||[]);};
+  let h='<div class=zlabel>Keyman planner — drag a crew card onto a ship to reassign'+(ROT_F?(' · showing '+ROT_F):'')+'</div><div class=tiles>'
+    +rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
+    +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')+rfTile(c.vessels,'Vessels — show all','','')+'</div>';
+  const pool=flt(b.byVessel['—']);
   h+='<div class=zlabel>Unassigned pool</div>'+shipCard('__POOL__','Unassigned pool',pool,false);
-  const vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
-  h+='<div class=zlabel style="margin-top:14px">By vessel</div><div class=grid>'+vessels.map(function(v){return shipCard(v,v,b.byVessel[v],isDocked(v));}).join('')+'</div>';
+  var vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
+  if(ROT_F) vessels=vessels.filter(function(v){return flt(b.byVessel[v]).length>0;});
+  h+='<div class=zlabel style="margin-top:14px">By vessel'+(ROT_F?(' ('+vessels.length+')'):'')+'</div><div class=grid>'+(vessels.length?vessels.map(function(v){return shipCard(v,v,flt(b.byVessel[v]),isDocked(v));}).join(''):'<div class=muted style="padding:10px">No '+ROT_F+' crew on any vessel.</div>')+'</div>';
   $('#view').innerHTML=h;
+  document.querySelectorAll('#view .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
   document.querySelectorAll('#view .rchip').forEach(function(el){el.ondragstart=function(){DRAGID=el.getAttribute('data-crew');};});
   document.querySelectorAll('#view .shipdrop').forEach(function(z){
     z.ondragover=function(e){e.preventDefault();z.style.outline='2px solid var(--green)';};
