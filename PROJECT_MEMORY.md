@@ -200,10 +200,13 @@ explicitly clear/upsert the relevant table (not rely on redeploy).
   Ray.Guerra (feedback 'ray'), Rolando.Abellan ('rolando'), Dexter.Lawrence ('dexter'+mono%),
   Ohji.Miranda (role TBC), Joemar.DeLeon (trainer).
 
-### PENDING ACCESS GRANTS — emails CONFIRMED by Miguel 2026-06-12, NOT YET GRANTED
-Miguel wants these 5 to eventually get console login, but **access is NOT enabled yet** — he said
-"just want their emails added... will not give the access yet... don't wanna forget." Do NOT add to
-the `users` allowlist until Miguel explicitly says go. **Emails confirmed verbatim by Miguel:**
+### ACCESS GRANTED 2026-06-12 — 5 contributors added as FULL users (Miguel's explicit decision)
+Miguel decided "Full access now" 2026-06-12. The 5 below are now in the allowlist. Implemented as
+code: `ALLOWLIST_SEED` + `ensureUsers()` in src/worker.js (idempotent INSERT OR IGNORE, runs on each
+login via authRequest/authDev). Committed + deployed. The allowlist is now SINGLE SOURCE OF TRUTH in
+code (all 7 = Miguel, Rita, + these 5). Note: only role 'full' exists, so all 7 see bonus $ + billing
++ crew PII. (Could NOT verify rows via Cloudflare D1 console — that UI hung all session; seed is
+tested + deployed + login-triggered.) **Emails confirmed verbatim by Miguel:**
   1. Ray Guerra      — Ray.Guerra@dg3.com      (feedback 'ray')
   2. Rolando Abellan — Rolando.Abellan@dg3.com (feedback 'rolando')
   3. Dexter Lawrence — Dexter.Lawrence@dg3.com (feedback 'dexter' + mono%)
@@ -213,15 +216,70 @@ the `users` allowlist until Miguel explicitly says go. **Emails confirmed verbat
 ('full')). Adding any of these = FULL access (bonus $, billing margins, crew PII: passport/visa/
 medical). If Miguel wants them limited to feedback/their crew, a scoped role must be built FIRST
 (new role value + per-tab gating). Flag this again at grant time.
-**OPEN DECISION (Miguel, not yet answered):** keep explicit allowlist vs. build scoped role vs.
-domain-wide @dg3.com. Claude recommended KEEPING the allowlist (domain-wide = full PII+money to all
-of DG3; bad trade). Awaiting Miguel's direction before any access change.
+**DECISION 2026-06-12:** keep the explicit allowlist. Domain-wide `@dg3.com` was REJECTED
+(would give full PII + money to every DG3 employee; bad trade). If low-friction onboarding is
+ever needed, build a scoped role FIRST, then domain-allow into that scoped role — never into 'full'.
 
 ---
 
-## 10. TASK STATE (high level)
-Done: pipeline (F1–F5), schema+seed, dashboard/crew/bonus engine, feedback windows, Keyman
-history load, rotation board, days-worked billing, compliance, crew-360, fleet/dry-dock,
-30-day sessions, access-key login. Pending: #16 email (domain), #17 baselines (Rita), #22 PDF
-statements, #28 vessel economics (in progress — fleet done, data.xlsx pending), data-refresh
-mechanism (§8, awaiting Path A/B decision + Drive credential).
+## 10. LIVE STATE & SESSION-2 DECISIONS (2026-06-12)
+
+### Live infrastructure
+- **App is LIVE at https://cims.work** (Cloudflare Workers; custom domain attached; nameservers on
+  Cloudflare: crystal/edward.ns.cloudflare.com). Also at cims-hr-console.sanmartin.workers.dev.
+- **Email (Resend):** domain **cims.work VERIFIED** (DKIM/SPF/MX auto-configured into Cloudflare DNS).
+  Secrets set by Miguel: `RESEND_API_KEY` + `MAIL_FROM` = `CIMS <noreply@cims.work>`. Magic-link login
+  works end-to-end — verified: send → Resend "Delivered" to Miguel.Sanmartin@dg3.com.
+  **DELIVERABILITY GAP:** DG3's mail filter quarantines (cold domain). FIX = DG3 IT allowlists
+  `cims.work` / `noreply@cims.work` (an IT-request note was drafted for Miguel). Optional: add a
+  DMARC record (offered, not yet added). Until then everyone uses **access-key (BOOTSTRAP_KEY) login**.
+- **Favicon:** brand icon (navy #1B3A5C squircle + green #5FB946 waves, transparent corners) embedded
+  as base64 in src/icons.js, served at /favicon.ico + /apple-touch-icon.png; <link> tags on all pages.
+
+### Auth / access (see §9 block above for the 5 granted users)
+- 7 full users total (Miguel, Rita + 5 contributors). Seeded in code: `ALLOWLIST_SEED` + `ensureUsers()`.
+- Only role = 'full'. No scoped role yet. Crew never log in (unchanged).
+
+### #22 Crew PDF statement — BUILT + deployed (delivery half gated)
+- Dependency-free PDF: **src/pdf.js** (hand-rolled PDF writer, Helvetica, tables, auto page-break) +
+  **src/statement.js** (brand layout; doc-compliance flags; **bonus standing INCLUDED incl. $** per
+  Miguel's choice; contract history + sea-days). Verified by rendering to PNG.
+- Endpoints: `GET /api/crew/statement.pdf?id=` (download — works now) + `POST /api/crew/statement/email`
+  (stores to R2 if `env.STATEMENTS` bound + emails via Resend with PDF attachment). crew-360 has
+  **Download PDF** + **Email statement** buttons.
+- GATED: (1) R2 bucket not created yet (needs Cloudflare dashboard — hung all session) → bind
+  `env.STATEMENTS` later; code is inert-safe until then. (2) auto-email rides on the deliverability fix.
+
+### #28 Vessel deployment — REFRAMED: HR context, NOT billing/economics
+- The "equipment/cost-per-click/manpower billing" framing was a MIS-TITLE (never intended; no such
+  file exists). Vessel deployment was always meant as HR context. Use it across HR where it helps.
+- `data.xlsx` (Drive, Vessel Deployments) = wide **deployment itinerary** matrix: 1 sheet "Export",
+  2223 rows × 352 cols, stacked header brand(CEL/RCI)→class→ship→fields(PORT, RANK, PORT NAME, ARRIVE,
+  DEPART, TENDER). ~51 ships. NOT yet parsed/loaded (the 2.3MB file can't be pulled through the Drive
+  connector or chat without overflow; in-app preview uploader is the intake path).
+- SHIPPED: **src/deploy.js** (pure, tested) → crew-360 "Deployment & document fit" card: ship
+  homeport/region (from VESSEL_REF, already encoded), **region-required visa** check (US C1/D for US
+  regions, Schengen for Europe) vs crew visa expiry, and **next dry-dock** (forced crew change).
+- In-app **Vessel deployment — preview structure** option live in Settings → Data uploads (client-side
+  SheetJS; shows sheets/columns/samples; read-only, no save). Next steps if wanted: parse the matrix
+  → per-date ship position → pin relief ports to actual port calls.
+- Logistics/lead-time planner was proposed then DEFERRED — Miguel said HR focus, not logistics (lead
+  times are estimates in VESSEL_REF and fine as-is).
+
+### Deploy mechanics (IMPORTANT for future sessions)
+- GitHub MCP is READ-ONLY → deploy = upload changed files via the **GitHub web uploader driven with the
+  Chrome MCP** (file_upload to the upload page, commit to main). Push to main triggers Workers Builds
+  (runs `npm test` gate, then deploys). The commit-message field often won't take focus after upload —
+  default "Add files via upload" message is fine.
+- **Cloudflare dashboard hangs on its splash in the Chrome automation tab** (recurring, all session).
+  Avoid dashboard-dependent steps where possible; D1 changes done via code seeding, DNS verified via
+  `dig`. R2 bucket creation is the one thing still requiring the dashboard.
+- Verification gate (run locally before every deploy): `node -e "import('./src/worker.js')…"` (validates
+  imports + APP_HTML template), `node --test`, and a client-JS `node --check` on the extracted APP_HTML
+  <script>. As of 2026-06-12: **73 tests pass.**
+
+### Still open
+- #17 bonus baselines — GATED on Rita's reconciliation (money); not loaded.
+- R2 bucket for statement storage; email deliverability (IT allowlist).
+- Optional: parse data.xlsx itinerary; per-nationality visa rules; DMARC record.
+- Data-refresh mechanism (§8) — vessel preview is increment 1; crew refresh live; nightly/auto TBD.
