@@ -7,6 +7,7 @@ import { billingReport } from "./daysworked.js";
 import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
 import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
 import { mapRows, diffCrew } from "./crewimport.js";
+import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -17,7 +18,7 @@ import { mapRows, diffCrew } from "./crewimport.js";
      - SESSION_SECRET  (required) long random string; signs login + session tokens
      - BOOTSTRAP_KEY   (required for first login w/o email) long random string
      - RESEND_API_KEY  (optional) enables emailing the magic link via Resend
-     - MAIL_FROM       (optional) e.g. "CIMS <noreply@dg3.com>" for Resend
+     - MAIL_FROM       (optional) "CIMS <noreply@cims.work>" (cims.work is the verified Resend domain)
    Auth model: two full users (allowlist = rows in `users`). Magic-link via
    stateless signed token (15 min). Session = signed cookie (12h). Crew never log in.
    ============================================================ */
@@ -31,6 +32,12 @@ export default {
     const url = new URL(request.url);
     const p = url.pathname;
     try {
+      // ---- public brand icons (no auth) ----
+      if (p === "/favicon.ico")          return assetResponse(ICO_B64, "image/x-icon");
+      if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png")
+                                         return assetResponse(PNG180_B64, "image/png");
+      if (p === "/icon-512.png")         return assetResponse(PNG512_B64, "image/png");
+
       // ---- auth endpoints ----
       if (p === "/login")                return htmlResponse(LOGIN_HTML);
       if (p === "/api/auth/request" && request.method === "POST") return authRequest(request, env, url);
@@ -465,6 +472,13 @@ async function apiFeedbackCrew(env, url) {
 function htmlResponse(body, status = 200) {
   return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
+// Serve a base64-embedded binary asset (icons). Long cache; immutable per deploy.
+function assetResponse(b64, type) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Response(bytes, { headers: { "Content-Type": type, "Cache-Control": "public, max-age=86400" } });
+}
 function noticeHTML(title, msg) {
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
   <body style="font-family:system-ui;background:#0f2238;color:#fff;display:grid;place-items:center;height:100vh;margin:0">
@@ -546,6 +560,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>DG3 CIMS · Sign in</title>
+<link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${STYLE}
 #g{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--deep),var(--navy));padding:24px}
@@ -593,6 +608,7 @@ document.getElementById('email').addEventListener('keydown',e=>{if(e.key==='Ente
 
 const FB_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>CIMS Crew Feedback</title>
+<link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${STYLE}#fbwrap{max-width:620px;margin:0 auto;padding:26px 18px}.fhd{display:flex;align-items:center;gap:12px;margin-bottom:6px}.card2{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(20,45,72,.07);padding:20px 22px;margin-top:14px}</style>
 </head><body><div id=fbwrap>
@@ -648,6 +664,7 @@ start();
 
 const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>DG3 CIMS · HR Console</title>
+<link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${STYLE}</style></head><body>
 <header>
