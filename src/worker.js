@@ -358,6 +358,10 @@ async function apiDashboard(env) {
   const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
   const usvExp = (await q("SELECT COUNT(*) n FROM crew WHERE usv_exp IS NOT NULL AND usv_exp < ?", in90)).n;
   const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
+  // Birthdays today (match MM-DD of dob).
+  const md = today.slice(5);
+  const bd = (await env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? ORDER BY last_name").bind(md).all()).results;
+  const birthdays = bd.map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: b.vessel_observed || "" }));
   // Travel budget (latest year on file), split crew vs shoreside management.
   await ensureTravel(env);
   const ty = (await q("SELECT MAX(year) y FROM travel_expense")).y;
@@ -373,7 +377,7 @@ async function apiDashboard(env) {
     travel.air = Math.round(ms.reduce((s, r) => s + (r.a || 0), 0) * 100) / 100;
   }
   return json({
-    today, travel,
+    today, travel, birthdays,
     workforce: {
       total,
       on_board: statusMap["On board"] || 0,
@@ -395,8 +399,8 @@ async function apiCrew(env, url) {
   const where = [], bind = [];
   if (status) { where.push("status = ?"); bind.push(status); }
   if (search) {
-    where.push("(lower(first_name) LIKE ? OR lower(last_name) LIKE ? OR lower(agency_id) LIKE ? OR lower(vessel_observed) LIKE ?)");
-    const s = "%" + search + "%"; bind.push(s, s, s, s);
+    where.push("(lower(first_name) LIKE ? OR lower(last_name) LIKE ? OR lower(agency_id) LIKE ? OR lower(vessel_observed) LIKE ? OR lower(province) LIKE ? OR lower(rank_observed) LIKE ?)");
+    const s = "%" + search + "%"; bind.push(s, s, s, s, s, s);
   }
   if (where.length) sql += " WHERE " + where.join(" AND ");
   sql += " ORDER BY last_name, first_name";
@@ -648,6 +652,14 @@ nav{margin-left:auto;display:flex;gap:4px}
 nav button{background:transparent;border:0;color:#b9cce0;padding:8px 14px;border-radius:8px;font-family:'Outfit';font-weight:600;font-size:13.5px;cursor:pointer}
 nav button.on,nav button:hover{background:rgba(255,255,255,.12);color:#fff}
 nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
+.burger{display:none;background:transparent;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;margin-left:auto;padding:6px 8px}
+@media(max-width:900px){
+  .burger{display:block}
+  header nav{display:none;position:absolute;top:56px;right:8px;margin-left:0;flex-direction:column;align-items:stretch;gap:2px;background:#16314F;padding:8px;border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.35);min-width:200px;z-index:60}
+  header nav.open{display:flex}
+  nav button{text-align:left;width:100%;font-size:15px;padding:11px 14px}
+  nav a.out{padding:11px 14px}
+}
 .wrap{max-width:1180px;margin:0 auto;padding:22px}
 .zlabel{font-family:'Outfit';font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:20px 0 10px;display:flex;align-items:center;gap:12px}
 .zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
@@ -820,6 +832,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
 <header>
   <div class=brandmark>D</div>
   <div class=brand>DG3 CIMS<small>HR Operational Console</small></div>
+  <button class=burger aria-label="Menu" onclick="document.querySelector('header nav').classList.toggle('open')">☰</button>
   <nav>
     <button id=nav-dashboard class=on onclick="show('dashboard')">Dashboard</button>
     <button id=nav-crew onclick="show('crew')">Crew</button>
@@ -864,6 +877,7 @@ function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Ce
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
 async function show(tab){
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
+  var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
   $('#nav-'+tab).classList.add('on');
   if(tab==='dashboard')return renderDashboard();
   if(tab==='crew')return renderCrew();
@@ -1107,20 +1121,42 @@ async function loadTravel(){
     +'<p class=muted style="text-align:left;padding:10px 2px">2025 is loaded as history (crew + shoreside management). Newer years: upload in Settings → Data uploads → Travel expenses.</p>';
   $('#trbody').innerHTML=h;
 }
+let FLEET=null,FLT={mode:'all',q:''};
 async function renderFleet(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  const f=await (await fetch('/api/fleet')).json();
-  const ddBadge=function(s){const c=s==='in_dock'?'red':s==='upcoming'?'amber':'ok';const t=s==='in_dock'?'in dock':s;return '<span class="cchip '+c+'">'+t+'</span>';};
-  const byBrand={};f.vessels.forEach(function(v){byBrand[v.brand]=(byBrand[v.brand]||0)+1;});
-  let h='<div class=zlabel>Fleet</div><div class=tiles>'
-    +tile(f.vessels.length,'Vessels')+tile(byBrand.RCI||0,'Royal','royal')+tile(byBrand.CEL||0,'Celebrity')
-    +tile(f.inDock.length,'In dry dock now',f.inDock.length?'red':'green')+tile(f.upcoming.length,'Docks ≤120d','amber')+'</div>';
-  h+='<div class=zlabel>Dry-dock schedule</div><table class=tbl><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Days</th><th>Status</th></tr></thead><tbody>'
-    +f.dryDock.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.days||'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join('')+'</tbody></table>';
-  h+='<div class=zlabel style="margin-top:18px">Vessels</div><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Class</th><th>Homeport</th><th>Region</th><th>Lead time</th></tr></thead><tbody>'
-    +f.vessels.map(function(v){return '<tr><td>'+v.name+'</td><td>'+v.brand+'</td><td>'+v.cls+'</td><td>'+(v.homeport||'—')+'</td><td>'+(v.region||'—')+'</td><td>'+(v.lead?(v.lead+'d'):'—')+'</td></tr>';}).join('')+'</tbody></table>'
-    +'<p class=muted style="text-align:left;padding:10px 2px">Lead time = Miami PO to delivery at ship location. Reference snapshot; refresh when deployment source updates.</p>';
-  $('#view').innerHTML=h;
+  FLEET=await (await fetch('/api/fleet')).json();
+  FLT={mode:'all',q:''};
+  $('#view').innerHTML='<div class=bar><h2>Fleet</h2><input id=fq placeholder="Search ship, port, region, class, brand…" oninput="FLT.q=this.value;paintFleet()" style="margin-left:auto;width:300px"></div><div id=fleettiles class=tiles></div><div id=fleetbody></div>';
+  paintFleet();
+}
+function paintFleet(){
+  var f=FLEET;if(!f)return;
+  var inDock=f.inDock||[];
+  var isInDock=function(v){var u=(v.name||'').toUpperCase();return inDock.some(function(s){return u.indexOf(String(s).toUpperCase())>=0;});};
+  var byBrand={};f.vessels.forEach(function(v){byBrand[v.brand]=(byBrand[v.brand]||0)+1;});
+  var ft=function(n,l,cls,mode){return '<div class="tile '+(cls||'')+'" data-fm="'+mode+'" style="cursor:pointer;'+(FLT.mode===mode?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';};
+  document.getElementById('fleettiles').innerHTML=
+     ft(f.vessels.length,'All vessels','','all')+ft(byBrand.RCI||0,'Royal','royal','rci')+ft(byBrand.CEL||0,'Celebrity','','cel')
+    +ft(inDock.length,'In dry dock now',inDock.length?'red':'green','dock')+ft((f.upcoming||[]).length,'Docks ≤120d','amber','upcoming');
+  document.querySelectorAll('#fleettiles .tile[data-fm]').forEach(function(el){el.onclick=function(){var m=el.getAttribute('data-fm');FLT.mode=(FLT.mode===m&&m!=='all')?'all':m;paintFleet();};});
+  var q=(FLT.q||'').toLowerCase();
+  var vmatch=function(v){
+    if(FLT.mode==='rci'&&v.brand!=='RCI')return false;
+    if(FLT.mode==='cel'&&v.brand!=='CEL')return false;
+    if(FLT.mode==='dock'&&!isInDock(v))return false;
+    if(FLT.mode==='upcoming'&&!(f.upcoming||[]).some(function(u){return u.ship===v.name;}))return false;
+    if(q){var s=(v.name+' '+v.brand+' '+v.cls+' '+(v.homeport||'')+' '+(v.region||'')).toLowerCase();if(s.indexOf(q)<0)return false;}
+    return true;
+  };
+  var vs=f.vessels.filter(vmatch);
+  var ddBadge=function(s){var c=s==='in_dock'?'red':s==='upcoming'?'amber':'ok';var t=s==='in_dock'?'in dock':s;return '<span class="cchip '+c+'">'+t+'</span>';};
+  var dd=(f.dryDock||[]).filter(function(d){if(!q)return true;var s=((d.ship||'')+' '+(d.loc||'')).toLowerCase();return s.indexOf(q)>=0;});
+  var h='<div class=zlabel>Dry-dock schedule'+(q?(' · matching "'+FLT.q+'"'):'')+'</div><table class=tbl><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Days</th><th>Status</th></tr></thead><tbody>'
+    +(dd.length?dd.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.days||'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table>';
+  h+='<div class=zlabel style="margin-top:18px">Vessels ('+vs.length+')</div><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Class</th><th>Homeport</th><th>Region</th><th>Lead time</th></tr></thead><tbody>'
+    +(vs.length?vs.map(function(v){return '<tr><td>'+v.name+'</td><td>'+v.brand+'</td><td>'+v.cls+'</td><td>'+(v.homeport||'—')+'</td><td>'+(v.region||'—')+'</td><td>'+(v.lead?(v.lead+'d'):'—')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table>'
+    +'<p class=muted style="text-align:left;padding:10px 2px">Tap a tile to filter the vessel list; search matches ship, port, region, class, brand. Lead time = Miami PO to delivery at ship location.</p>';
+  document.getElementById('fleetbody').innerHTML=h;
 }
 let BILL=null;
 function ymd(d){return d.toISOString().slice(0,10);}
@@ -1245,6 +1281,7 @@ async function renderDashboard(){
    +tile(w.earmarked,'Earmarked','royal','rotation')+tile(w.inactive,'Inactive','gray','rotation')+tile(w.vessels,'Vessels','','fleet')
    +tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
    +'</div>'
+   +((d.birthdays&&d.birthdays.length)?('<div class="card" style="max-width:none;border-left:3px solid var(--green);margin:2px 0 14px"><b style="color:var(--green-d)">🎂 Birthday today:</b> '+d.birthdays.map(function(b){return b.name+(b.vessel?(' · '+b.vessel):'');}).join(' &nbsp;•&nbsp; ')+'</div>'):'')
    +'<div class=zlabel>Compliance — expiring within 90 days</div><div class=tiles>'
    +tile(c.med_exp_90,'Medical','red','compliance')+tile(c.pp_exp_90,'Passport','amber','compliance')+tile(c.usv_exp_90,'US visa','amber','compliance')
    +'</div>'
@@ -1274,13 +1311,22 @@ async function renderDashboard(){
   paintTrv();
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
+function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
 async function renderCrew(){
+  var wf={};try{wf=((await (await fetch('/api/dashboard')).json()).workforce)||{};}catch(e){}
   $('#view').innerHTML=
    '<div class=bar><h2>Crew</h2>'
-   +'<input id=q placeholder="Search name, ID, ship…" oninput="filterCrew()" style="width:240px">'
+   +'<input id=q placeholder="Search name, ID, ship, city, rank…" oninput="filterCrew()" style="margin-left:auto;width:260px">'
    +'<select id=st onchange="filterCrew()"><option value="">All statuses</option>'
    +'<option>On board</option><option>On Vacation</option><option>Earmarked</option><option>Inactive</option></select>'
-   +'</div><div id=crewcount class=csub style="margin:-6px 0 12px"></div><div id=crewgrid class=grid></div>';
+   +'</div><div class=tiles id=crewtiles>'
+     +crewTile(wf.total,'All crew','','')
+     +crewTile(wf.on_board,'On board','green','On board')
+     +crewTile(wf.on_vacation,'On vacation','amber','On Vacation')
+     +crewTile(wf.earmarked,'Earmarked','royal','Earmarked')
+     +crewTile(wf.inactive,'Inactive','gray','Inactive')
+   +'</div><div id=crewcount class=csub style="margin:6px 0 12px"></div><div id=crewgrid class=grid></div>';
+  document.querySelectorAll('#crewtiles .tile[data-st]').forEach(function(el){el.onclick=function(){var s=document.getElementById('st');s.value=el.getAttribute('data-st');loadCrew();};});
   await loadCrew();
 }
 async function loadCrew(){
