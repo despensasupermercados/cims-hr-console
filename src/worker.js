@@ -98,6 +98,26 @@ async function isAllowed(env, email) {
   const row = await env.DB.prepare("SELECT email FROM users WHERE lower(email)=lower(?)").bind(email).first();
   return !!row;
 }
+// Login allowlist — SINGLE SOURCE OF TRUTH. All rows are role 'full' (only role today).
+// WARNING: 'full' = sees bonus $, billing margins, and crew PII. Granting full access was
+// Miguel's explicit decision 2026-06-12. To scope a user, a non-'full' role must be built first.
+const ALLOWLIST_SEED = [
+  ["Miguel.Sanmartin@dg3.com", "Miguel San Martin"],
+  ["Rita.Berenyi@dg3.com",     "Rita Berenyi"],
+  ["Ray.Guerra@dg3.com",       "Ray Guerra"],
+  ["Rolando.Abellan@dg3.com",  "Rolando Abellan"],
+  ["Dexter.Lawrence@dg3.com",  "Dexter Lawrence"],
+  ["joemar.deleon@dg3.com",    "Joemar De Leon"],
+  ["Ohji.Miranda@dg3.com",     "Ohji Miranda"],
+];
+// Idempotent: seeds the allowlist (INSERT OR IGNORE on UNIQUE email). Safe to run every login.
+async function ensureUsers(env) {
+  for (const [email, name] of ALLOWLIST_SEED) {
+    const id = "u_" + email.toLowerCase().replace(/[^a-z0-9]/g, "");
+    await env.DB.prepare("INSERT OR IGNORE INTO users (id, email, name, role) VALUES (?,?,?,'full')")
+      .bind(id, email, name).run();
+  }
+}
 function sessionCookie(token) {
   return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
 }
@@ -111,6 +131,7 @@ async function logActivity(env, email, action, detail) {
 // POST /api/auth/request {email} -> email a magic link (or report bootstrap path)
 async function authRequest(request, env, url) {
   const { email } = await request.json().catch(() => ({}));
+  await ensureUsers(env).catch(() => {});
   if (!await isAllowed(env, email)) {
     // Do not reveal allowlist membership.
     return json({ ok: true, sent: true });
@@ -158,6 +179,7 @@ async function authDev(request, env, url) {
   if (request.method === "POST") { const b = await request.json().catch(() => ({})); key = b.key; email = b.email; }
   else { key = url.searchParams.get("key"); email = url.searchParams.get("email"); }
   if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
+  await ensureUsers(env).catch(() => {});
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
   await logActivity(env, email, "login", "bootstrap");
