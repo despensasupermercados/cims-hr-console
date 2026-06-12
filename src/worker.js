@@ -8,6 +8,7 @@ import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
 import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
 import { mapRows, diffCrew } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
+import { composeStatement } from "./statement.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -58,6 +59,8 @@ export default {
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/crew")      return apiCrew(env, url);
         if (p === "/api/crew/get")  return apiCrewOne(env, url);
+        if (p === "/api/crew/statement.pdf") return apiStatementPdf(env, url);
+        if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
@@ -386,6 +389,61 @@ async function apiBonusCrew(env, url) {
   const count = await crewCount(env, cr.id, cr.baseline_count);
   const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
   return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: cr.baseline_count != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results });
+}
+// Assemble everything the PDF statement needs for one crew (crew + contracts + sea-days + bonus).
+async function gatherStatement(env, id) {
+  const crew = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first();
+  if (!crew) return null;
+  await ensureKeyman(env);
+  const contracts = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
+  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
+  const count = await crewCount(env, crew.id, crew.baseline_count);
+  const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
+  const bonus = { rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", count, baseline_set: crew.baseline_count != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
+}
+// GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
+async function apiStatementPdf(env, url) {
+  const id = url.searchParams.get("id");
+  const data = await gatherStatement(env, id);
+  if (!data) return json({ error: "not_found" }, 404);
+  const bytes = composeStatement(data);
+  return new Response(bytes, { headers: {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `inline; filename="CIMS_Statement_${id}.pdf"`,
+  }});
+}
+// POST /api/crew/statement/email {id, to?} -> store in R2 (if bound) + email PDF via Resend (if configured).
+async function apiStatementEmail(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const id = b.id;
+  const data = await gatherStatement(env, id);
+  if (!data) return json({ error: "not_found" }, 404);
+  const to = b.to || data.crew.email;
+  if (!to) return json({ ok: false, error: "no_recipient", note: "This crew has no email on file. Pass an address or add one to the registry." });
+  const bytes = composeStatement(data);
+  const b64 = (() => { let s = ""; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); })();
+  const key = `statements/${id}/${data.generatedAt.slice(0, 10)}.pdf`;
+  let stored = false;
+  if (env.STATEMENTS) { try { await env.STATEMENTS.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } }); stored = true; } catch (e) {} }
+  if (!env.RESEND_API_KEY) {
+    await logActivity(env, session && session.email, "statement_email", id + " no_mailer");
+    return json({ ok: false, stored, sent: false, note: "Email is not configured yet (RESEND_API_KEY). PDF " + (stored ? "was stored in R2." : "generated but not stored — no R2 bucket bound yet.") });
+  }
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: env.MAIL_FROM || "CIMS <onboarding@resend.dev>",
+      to: [to],
+      subject: "Your DG3 CIMS crew statement",
+      html: `<p>Please find your CIMS crew statement attached.</p><p>DG3 Cruise Industry Managed Services</p>`,
+      attachments: [{ filename: `CIMS_Statement_${id}.pdf`, content: b64 }],
+    }),
+  }).catch(() => null);
+  const ok = !!(r && r.ok);
+  await logActivity(env, session && session.email, "statement_email", id + " -> " + to + (ok ? " sent" : " send_failed") + (stored ? " stored" : ""));
+  return json({ ok, stored, sent: ok, to });
 }
 async function apiBonusCommit(request, env, session) {
   const b = await request.json().catch(() => ({}));
@@ -1025,7 +1083,9 @@ async function openCrew(id){
   let h='<div class="bar noprint"><h2>'+name+'</h2>'
     +'<button class="btn ghost" style="margin-left:auto" onclick="renderCrew()">← Back</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
-    +'<button class="btn" onclick="window.print()">Print / Save PDF</button></div>';
+    +'<button class="btn ghost" onclick="emailStatement()">Email statement</button>'
+    +'<button class="btn" onclick="downloadStatement()">Download PDF</button></div>'
+    +'<div id=stmtout class="csub noprint" style="margin:-6px 0 10px"></div>';
   h+='<div class="card noprint" style="max-width:none;margin-bottom:14px"><div class=csub style="margin-bottom:6px">Request a feedback window (creates a single-use link to send the contributor):</div>'
     +'<button class="btn ghost rf" data-role="ray">Ray — Orders</button> '
     +'<button class="btn ghost rf" data-role="rolando">Rolando — Technical</button> '
@@ -1076,6 +1136,18 @@ function exportCrewCSV(){
   (CURD.contracts||[]).forEach(function(x){rows.push([x.seq,x.ship||'',x.on||'',x.act||x.proj||'',x.act?'actual':(x.proj?'projected':'open')]);});
   var csv=rows.map(function(r){return r.map(function(v){v=String(v==null?'':v);return /[",\\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v;}).join(',');}).join('\\n');
   var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='crew_'+c.agency_id+'.csv';a.click();
+}
+function downloadStatement(){ if(CURRENT_CREW) window.open('/api/crew/statement.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
+async function emailStatement(){
+  if(!CURRENT_CREW)return;
+  var out=document.getElementById('stmtout'); if(out){out.style.color='';out.textContent='Sending…';}
+  try{
+    var r=await (await fetch('/api/crew/statement/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:CURRENT_CREW})})).json();
+    if(out){
+      if(r.sent) out.innerHTML='<span style="color:var(--green-d)">Statement emailed to '+r.to+(r.stored?' (stored)':'')+'.</span>';
+      else out.innerHTML='<span style="color:var(--amber)">'+(r.note||'Could not send.')+'</span>';
+    }
+  }catch(e){ if(out){out.style.color='var(--red)';out.textContent='Could not send the statement.';} }
 }
 function card(c){
   const name=[c.first_name,c.last_name].filter(Boolean).join(' ');
