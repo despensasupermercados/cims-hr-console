@@ -1190,7 +1190,8 @@ async function loadTravel(){
   try{
   TRV=await (await fetch('/api/travel'+(TRV_KIND?('?kind='+TRV_KIND):''))).json();
   if(TRV&&TRV.error)throw new Error(TRV.error);
-  var s=TRV.summary,recs=TRV.records,mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var s=TRV.summary||{},recs=TRV.records||[],mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  s.byKind=s.byKind||{};s.byCat=s.byCat||{};s.byLeg=s.byLeg||{};s.byMonth=s.byMonth||{};s.total=s.total||0;s.records=s.records||recs.length;s.crew=s.crew||0;
   // Aggregate by year-month for trend + deltas.
   var ymTot={},ymCrew={},ymShore={},person={};
   recs.forEach(function(r){var k=r.year*100+r.month;ymTot[k]=(ymTot[k]||0)+r.total;if(r.kind==='shoreside')ymShore[k]=(ymShore[k]||0)+r.total;else ymCrew[k]=(ymCrew[k]||0)+r.total;person[r.crew_name]=(person[r.crew_name]||0)+r.total;});
