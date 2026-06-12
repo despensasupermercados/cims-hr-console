@@ -901,7 +901,7 @@ function parseVesselFile(f){
           }
           h+='</div>';
         });
-        h+='<p class=muted style="text-align:left;margin-top:10px">Read-only structure preview — nothing saved. Screenshot this so the vessel economics load can be built to match.</p>';
+        h+='<p class=muted style="text-align:left;margin-top:10px">Read-only structure preview — nothing saved. Screenshot this so the vessel deployment load can be built to match.</p>';
         $('#imp').innerHTML=h;
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };

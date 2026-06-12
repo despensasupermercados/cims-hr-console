@@ -53,8 +53,8 @@ export function composeStatement(data) {
   ];
   for (const [label, dt] of docs) {
     const s = docStatus(dt, today);
-    pdf.row([label, s.txt], [0, 150], { size: 9.5 });
-    // recolor the value by overprinting is overkill; keep value colored via separate call:
+    // Color the whole row by status so expired/expiring docs jump out on the printed statement.
+    pdf.row([label, s.txt], [0, 150], { size: 9.5, color: s.color });
   }
   pdf.rule();
 
