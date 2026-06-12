@@ -821,7 +821,7 @@ function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
    +'<label class=csub>Data type</label><br>'
-   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="" disabled>Keyman contracts — coming soon</option><option value="" disabled>Vessel deployment — coming soon</option></select>'
+   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="" disabled>Keyman contracts — coming soon</option><option value="vessel">Vessel deployment — preview structure (.xls / .xlsx)</option></select>'
    +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
      +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop the file here</div>'
      +'<div class=csub style="margin-top:4px">or click to choose · .xls or .xlsx only</div></div>'
@@ -871,9 +871,41 @@ function parseCrewFile(f){
 function handleDrop(files){
   var f=files&&files[0]; if(!f)return;
   var t=$('#dstype')?$('#dstype').value:'crew';
-  if(t!=='crew'){$('#imp').textContent='That data type is not enabled yet.';return;}
+  if(t!=='crew'&&t!=='vessel'){$('#imp').textContent='That data type is not enabled yet.';return;}
   if(!/\\.(xls|xlsx)$/i.test(f.name)){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
+  if(t==='vessel')return parseVesselFile(f);
   parseCrewFile(f);
+}
+function parseVesselFile(f){
+  $('#imp').textContent='Reading '+f.name+'…';
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+        var h='<div style="margin-top:6px"><b style="color:var(--navy)">File profile</b> — '+wb.SheetNames.length+' sheet(s) in '+f.name+'</div>';
+        wb.SheetNames.forEach(function(sn){
+          var ws=wb.Sheets[sn];
+          var rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+          var headers=(rows[0]||[]).map(function(x){return String(x);});
+          var n=rows.length>0?rows.length-1:0;
+          h+='<div class="card" style="max-width:none;margin-top:10px;border-left:3px solid var(--green)">'
+            +'<div class=cname style="font-size:15px">'+sn+'</div>'
+            +'<div class=csub>'+n+' data rows · '+headers.length+' columns</div>'
+            +'<div class=csub style="margin-top:6px"><b>Columns:</b> '+headers.join('  |  ')+'</div>';
+          var sample=rows.slice(1,4);
+          if(sample.length){
+            h+='<div style="overflow:auto"><table class=tbl style="margin-top:6px"><thead><tr>'+headers.map(function(c){return '<th>'+c+'</th>';}).join('')+'</tr></thead><tbody>'
+              +sample.map(function(r){return '<tr>'+headers.map(function(_,i){return '<td>'+String(r[i]==null?'':r[i])+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table></div>';
+          }
+          h+='</div>';
+        });
+        h+='<p class=muted style="text-align:left;margin-top:10px">Read-only structure preview — nothing saved. Screenshot this so the vessel economics load can be built to match.</p>';
+        $('#imp').innerHTML=h;
+      }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
+    };
+    rd.readAsArrayBuffer(f);
+  });
 }
 async function previewImport(){
   if(!IMPROWS||!IMPROWS.length){$('#imp').textContent='No rows found in the file.';return;}
