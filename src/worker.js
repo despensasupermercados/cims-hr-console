@@ -438,6 +438,19 @@ async function apiRotation(env) {
   ).all()).results;
   const board = buildRotationBoard(rows);
   board.inDock = inDockNow(DRY_DOCK, TODAY());
+  // Attach each crew's latest Keyman contract leg (ship + sign-on/off) for the rich cards.
+  await ensureKeyman(env);
+  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract2").all()).results;
+  const latest = {};
+  for (const r of legs) {
+    if (!r.sign_on) continue;
+    if (!latest[r.sc] || (r.seq || 0) > (latest[r.sc].seq || 0)) latest[r.sc] = r;
+  }
+  const attach = (arr) => (arr || []).forEach(it => {
+    const l = latest[it.agency_id];
+    if (l) { it.kmShip = l.ship || null; it.signOn = l.sign_on || null; it.signOff = l.act_off || l.proj_off || null; }
+  });
+  for (const v in board.byVessel) attach(board.byVessel[v]);
   return json(board);
 }
 async function apiRotationAssign(request, env, session) {
@@ -667,6 +680,23 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
   nav a.out{padding:11px 14px}
 }
 .wrap{max-width:1180px;margin:0 auto;padding:22px}
+.shipsec{background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:0 2px 10px rgba(20,45,72,.06);overflow:hidden;margin-bottom:10px}
+.shiphdr{display:flex;align-items:center;padding:12px 14px;cursor:pointer;border-left:3px solid var(--royal)}
+.shiphdr .nm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:15px}
+.shiphdr .meta{margin-left:auto;color:var(--mut);font-size:12.5px;display:flex;align-items:center;gap:8px}
+.shiphdr .arw{display:inline-block;transition:transform .15s}.shiphdr .arw.closed{transform:rotate(-90deg)}
+.shipbody{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:6px 14px 14px}
+.shipbody.closed{display:none}
+.rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:grab}
+.rcard:active{cursor:grabbing}.rcard:hover{border-color:var(--navy)}
+.rcard .rnm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:4px}
+.rcard .rleg{font-size:11.5px;color:var(--mut);display:flex;align-items:center;gap:6px}
+.rcard .rleg i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.rcard .rleg2{font-size:11.5px;color:#3a4a5e;display:flex;align-items:center;gap:6px;margin-top:2px}
+.rcard .rleg2 i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.rcard .rleg2 i.ondot{background:var(--green)}.rcard .rleg2 i.offdot{background:var(--amber)}
+.rcard .rdur{display:inline-block;margin-top:6px;background:#eef2f7;color:var(--mut);font-size:10.5px;padding:2px 8px;border-radius:20px}
+.poolwrap{background:#fff;border:1px dashed var(--line-2);border-radius:13px;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:8px;min-height:48px}
 .zlabel{font-family:'Outfit';font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:20px 0 10px;display:flex;align-items:center;gap:12px}
 .zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}
@@ -1207,35 +1237,59 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let DRAGID=null;
+let DRAGID=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={};
+const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
+function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
+function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
+function rotCard(x){
+  var on=x.signOn?((x.kmShip?x.kmShip+' · ':'')+'ON '+x.signOn):'';
+  var off=x.signOff?('OFF '+x.signOff):'';
+  var dur=durLabel(x.signOn,x.signOff);
+  return '<div class="rcard" draggable="true" data-crew="'+x.agency_id+'" title="drag to reassign">'
+    +'<div class=rnm>'+x.name+'</div>'
+    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+'</div>'
+    +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
+    +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
+    +(dur?'<span class=rdur>'+dur+'</span>':'')
+    +'</div>';
+}
+function rotShip(ship,crew,docked){
+  var brand=brandOf(ship),col=BRANDCOL[brand]||'#1E6FD0',closed=!!ROT_CLOSED[ship];
+  var body=crew.length?crew.map(rotCard).join(''):'<div class=hint style="opacity:.55;padding:6px">drop crew here</div>';
+  return '<div class=shipsec><div class=shiphdr data-toggle="'+ship+'" style="border-left-color:'+col+'"><span class=nm>'+ship+'</span><span class=meta>'+brand+(docked?' · dry dock':'')+' · '+crew.length+' crew <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
+    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+ship+'">'+body+'</div></div>';
+}
+function rotExpand(open){if(!ROT)return;Object.keys(ROT.byVessel).forEach(function(v){if(v!=='—')ROT_CLOSED[v]=!open;});drawRotation();}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
+  ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={};
+  $('#view').innerHTML='<div class=zlabel>Keyman planner — drag a crew card onto a ship to reassign</div>'
+    +'<div class=bar style="margin-bottom:8px"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:200px">'
+    +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All brands</option><option>Royal</option><option>Celebrity</option><option>Azamara</option><option>NCL</option></select>'
+    +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button></div>'
+    +'<div id=rotbody></div>';
   drawRotation();
 }
-function rotChip(x){return '<div class="rchip" draggable="true" data-crew="'+x.agency_id+'" title="drag to reassign"><i style="background:'+dot(x.status)+'"></i>'+x.name+'</div>';}
-function shipCard(key,label,crew,docked){
-  var chips=crew.map(rotChip).join('')||'<div class=hint style="opacity:.55">drop crew here</div>';
-  return '<div class="card shipdrop" data-ship="'+key+'"><div class=cname>'+label+(docked?' <span class="cchip red">dry dock</span>':'')+'</div><div class=csub>'+crew.length+' crew</div><div class=shipbody>'+chips+'</div></div>';
-}
-let ROT_F='';
-function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
 function drawRotation(){
-  const b=ROT,c=b.counts,dock=b.inDock||[];
-  const isDocked=function(v){var u=(v||'').toUpperCase();return dock.some(function(s){return u.indexOf(s.toUpperCase())>=0;});};
-  const flt=function(arr){return ROT_F?(arr||[]).filter(function(x){return x.status===ROT_F;}):(arr||[]);};
-  let h='<div class=zlabel>Keyman planner — drag a crew card onto a ship to reassign'+(ROT_F?(' · showing '+ROT_F):'')+'</div><div class=tiles>'
-    +rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
+  var b=ROT,c=b.counts,dock=b.inDock||[];
+  var isDocked=function(v){var u=(v||'').toUpperCase();return dock.some(function(s){return u.indexOf(s.toUpperCase())>=0;});};
+  var flt=function(arr){return ROT_F?(arr||[]).filter(function(x){return x.status===ROT_F;}):(arr||[]);};
+  var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')+rfTile(c.vessels,'Vessels — show all','','')+'</div>';
-  const pool=flt(b.byVessel['—']);
-  h+='<div class=zlabel>Unassigned pool</div>'+shipCard('__POOL__','Unassigned pool',pool,false);
-  var vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';}).sort();
-  if(ROT_F) vessels=vessels.filter(function(v){return flt(b.byVessel[v]).length>0;});
-  h+='<div class=zlabel style="margin-top:14px">By vessel'+(ROT_F?(' ('+vessels.length+')'):'')+'</div><div class=grid>'+(vessels.length?vessels.map(function(v){return shipCard(v,v,flt(b.byVessel[v]),isDocked(v));}).join(''):'<div class=muted style="padding:10px">No '+ROT_F+' crew on any vessel.</div>')+'</div>';
-  $('#view').innerHTML=h;
-  document.querySelectorAll('#view .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
-  document.querySelectorAll('#view .rchip').forEach(function(el){el.ondragstart=function(){DRAGID=el.getAttribute('data-crew');};});
-  document.querySelectorAll('#view .shipdrop').forEach(function(z){
+  var pool=flt(b.byVessel['—']);
+  h+='<div class=zlabel>Unassigned pool ('+pool.length+')</div><div class="poolwrap shipdrop" data-ship="__POOL__">'+(pool.length?pool.map(rotCard).join(''):'<div class=hint style="opacity:.6;padding:4px">Drag crew here to pull them off a ship. Empty = everyone placed.</div>')+'</div>';
+  var vessels=Object.keys(b.byVessel).filter(function(v){return v!=='—';});
+  if(ROT_BRAND)vessels=vessels.filter(function(v){return brandOf(v)===ROT_BRAND;});
+  if(ROT_FIND){var q=ROT_FIND.toLowerCase();vessels=vessels.filter(function(v){return v.toLowerCase().indexOf(q)>=0;});}
+  if(ROT_F)vessels=vessels.filter(function(v){return flt(b.byVessel[v]).length>0;});
+  vessels.sort();
+  h+='<div class=zlabel style="margin-top:14px">By vessel ('+vessels.length+')</div>'+(vessels.length?vessels.map(function(v){return rotShip(v,flt(b.byVessel[v]),isDocked(v));}).join(''):'<div class=muted style="padding:10px">No vessels match.</div>');
+  document.getElementById('rotbody').innerHTML=h;
+  document.querySelectorAll('#rotbody .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
+  document.querySelectorAll('#rotbody [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
+  document.querySelectorAll('#rotbody .rcard').forEach(function(el){el.ondragstart=function(){DRAGID=el.getAttribute('data-crew');};});
+  document.querySelectorAll('#rotbody .shipdrop').forEach(function(z){
     z.ondragover=function(e){e.preventDefault();z.style.outline='2px solid var(--green)';};
     z.ondragleave=function(){z.style.outline='';};
     z.ondrop=function(e){e.preventDefault();z.style.outline='';assignCrew(DRAGID,z.getAttribute('data-ship'));};
