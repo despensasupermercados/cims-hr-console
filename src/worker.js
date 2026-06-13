@@ -229,7 +229,7 @@ async function logData(env, source, rows, status) {
 // Bump when KEYMAN_CONTRACTS is regenerated from a new workbook so the deploy actually RELOADS
 // D1 (seed-only-when-empty would otherwise ignore the new data). Reseed is keyman_contract2 only;
 // per-contract manual edits live in the separate contract_edit table and are preserved.
-const KEYMAN_VERSION = "2026-06-13-contractcounter";
+const KEYMAN_VERSION = "2026-06-13-contractcounter-v2";
 async function ensureKeyman(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract2 (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
@@ -903,8 +903,11 @@ async function apiFeedbackCrew(env, url) {
   const answers = {}; for (const r of resp.results) answers[r.role] = JSON.parse(r.answers_json);
   return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers) });
 }
-// Feedback Windows board: crew whose contract is ending soon (≤45d) or just ended (≤30d ago),
-// with per-role window status so Rita can chase the contributors before scoring.
+// Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
+// Keyman projected-off dates are an unreliable trigger (often stale), which left the board empty.
+// We now key off live crew status: "On Vacation" = a contract just completed -> feedback due NOW;
+// "On board" = currently serving -> feedback due at sign-off (pre-stage). Keyman dates, when present,
+// are used only for display/sort, never to include/exclude. Inactive/Earmarked are not shown.
 async function apiFeedbackBoard(env) {
   await ensureKeyman(env); await ensureFb(env);
   const today = TODAY();
@@ -916,18 +919,19 @@ async function apiFeedbackBoard(env) {
   const reqByCrew = {}, respByCrew = {};
   for (const r of reqs) (reqByCrew[r.crew_id] = reqByCrew[r.crew_id] || {})[r.role] = r.status;
   for (const r of resp) (respByCrew[r.crew_id] = respByCrew[r.crew_id] || {})[r.role] = true;
+  const DUE = { "On Vacation": 0, "On board": 1 }; // On Vacation first (feedback due now)
   const rows = [];
   for (const c of crewRows) {
+    if (!(c.status in DUE)) continue;
     const ls = (byCrew[c.agency_id] || []).slice().sort((a, b) => (a.seq || 0) - (b.seq || 0));
-    if (!ls.length) continue;
-    let leg = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1];
-    const off = leg.act_off || leg.proj_off || null; if (!off) continue;
-    const days = Math.round((new Date(off) - new Date(today)) / 86400000);
-    if (days > 45 || days < -30) continue;
+    const leg = ls.length ? (ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1]) : null;
+    const off = leg ? (leg.act_off || leg.proj_off || null) : null;
+    const days = off ? Math.round((new Date(off) - new Date(today)) / 86400000) : null;
     const roles = ["ray", "rolando", "dexter"].map(role => ({ role, answered: !!(respByCrew[c.id] && respByCrew[c.id][role]), status: (reqByCrew[c.id] && reqByCrew[c.id][role]) || "none" }));
-    rows.push({ agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: leg.ship || c.vessel_observed, signOff: off, days, status: c.status, roles, answeredCount: roles.filter(r => r.answered).length });
+    rows.push({ agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: (leg && leg.ship) || c.vessel_observed, signOff: off, days, status: c.status, due: DUE[c.status], roles, answeredCount: roles.filter(r => r.answered).length });
   }
-  rows.sort((a, b) => a.days - b.days);
+  // Feedback-due (On Vacation) first; then by soonest/most-recent off date; unknown dates last.
+  rows.sort((a, b) => a.due - b.due || ((a.days == null) - (b.days == null)) || ((a.days || 0) - (b.days || 0)));
   return json({ today, count: rows.length, rows });
 }
 
@@ -1563,8 +1567,9 @@ function paintFleet(){
   var vs=f.vessels.filter(vmatch);
   var ddBadge=function(s){var c=s==='in_dock'?'red':s==='upcoming'?'amber':'ok';var t=s==='in_dock'?'in dock':s;return '<span class="cchip '+c+'">'+t+'</span>';};
   var dd=(f.dryDock||[]).filter(function(d){if(!q)return true;var s=((d.ship||'')+' '+(d.loc||'')).toLowerCase();return s.indexOf(q)>=0;});
-  var h='<div class=zlabel>Dry-dock schedule'+(q?(' · matching "'+FLT.q+'"'):'')+'</div><table class=tbl><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Days</th><th>Status</th></tr></thead><tbody>'
-    +(dd.length?dd.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.days||'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table>';
+  var h='<details open class=ddwrap><summary class="zlabel ddsum" style="cursor:pointer;user-select:none">Dry-dock schedule'+(q?(' · matching "'+FLT.q+'"'):'')+' <span class=csub style="font-weight:600">('+dd.length+')</span></summary>'
+    +'<table class=tbl style="margin-top:8px"><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Days</th><th>Status</th></tr></thead><tbody>'
+    +(dd.length?dd.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.days||'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table></details>';
   h+='<div class=zlabel style="margin-top:18px">Vessels ('+vs.length+')</div><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Class</th><th>Homeport</th><th>Region</th><th>Lead time</th></tr></thead><tbody>'
     +(vs.length?vs.map(function(v){return '<tr><td>'+v.name+'</td><td>'+v.brand+'</td><td>'+v.cls+'</td><td>'+(v.homeport||'—')+'</td><td>'+(v.region||'—')+'</td><td>'+(v.lead?(v.lead+'d'):'—')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table>'
     +'<p class=muted style="text-align:left;padding:10px 2px">Tap a tile to filter the vessel list; search matches ship, port, region, class, brand. Lead time = Miami PO to delivery at ship location.</p>';
@@ -1610,7 +1615,9 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let DRAGID=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
+let DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
+function dragStart(el,id){dragMoved=true;DRAGID=id;DRAGEL=el;setTimeout(function(){el.classList.add('dragging');},0);}
+function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('.shipdrop.dragover').forEach(function(z){z.classList.remove('dragover');});}
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
 function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
@@ -1626,7 +1633,7 @@ function rotCard(x){
   if(x.onConfirmed)tg+='<span class="rtag on">ON ✓</span>';
   if(x.offConfirmed)tg+='<span class="rtag on">OFF ✓</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
-  return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragMoved=true;DRAGID=\\''+x.agency_id+'\\'" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
+  return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragStart(this,\\''+x.agency_id+'\\')" ondragend="dragEnd(this)" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
     +'<div class=rnm>'+x.name+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
     +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+(x.current?' · ONBOARD':'')+'</div>'
     +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
@@ -1694,7 +1701,17 @@ async function renderRotation(){
   ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
   var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
   var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
-  $('#view').innerHTML='<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
+  $('#view').innerHTML='<style>'
+    +'.rcard{transition:transform .16s ease,box-shadow .16s ease,opacity .18s ease}'
+    +'.rcard:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(20,45,72,.12)}'
+    +'.rcard.dragging{opacity:.45;transform:scale(.97)}'
+    +'.rcard.landing{animation:rland .26s ease}'
+    +'@keyframes rland{0%{transform:scale(.92);opacity:.4}60%{transform:scale(1.02)}100%{transform:scale(1);opacity:1}}'
+    +'.shipdrop{transition:background .15s ease,box-shadow .15s ease}'
+    +'.shipdrop.dragover{background:rgba(95,185,70,.08);box-shadow:inset 0 0 0 2px var(--green);border-radius:10px}'
+    +'.shipbody{transition:max-height .2s ease}'
+    +'</style>'
+    +'<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
     +'<div class=bar style="margin-bottom:8px;flex-wrap:wrap"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:170px">'
     +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All brands</option><option>Royal</option><option>Celebrity</option><option>Azamara</option><option>NCL</option></select>'
@@ -1744,9 +1761,14 @@ function drawRotation(){
   document.querySelectorAll('#rotbody [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
   document.querySelectorAll('#rotbody .rtoggle').forEach(function(el){el.onclick=function(e){e.stopPropagation();var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});};});
   document.querySelectorAll('#rotbody .shipdrop').forEach(function(z){
-    z.ondragover=function(e){e.preventDefault();z.style.outline='2px solid var(--green)';};
-    z.ondragleave=function(){z.style.outline='';};
-    z.ondrop=function(e){e.preventDefault();z.style.outline='';assignCrew(DRAGID,z.getAttribute('data-ship'));};
+    z.ondragover=function(e){e.preventDefault();z.classList.add('dragover');};
+    z.ondragleave=function(){z.classList.remove('dragover');};
+    z.ondrop=function(e){e.preventDefault();z.classList.remove('dragover');
+      var ship=z.getAttribute('data-ship');
+      // Optimistic, animated move: drop the card into the target ship immediately (no full-board flash).
+      if(DRAGEL&&DRAGEL.parentNode!==z){var el=DRAGEL;el.classList.add('landing');z.appendChild(el);setTimeout(function(){el.classList.remove('landing');},260);}
+      assignCrew(DRAGID,ship);
+    };
   });
 }
 async function exportDaysExcel(){
@@ -1761,11 +1783,12 @@ async function exportDaysExcel(){
   }catch(e){alert('Could not export days worked.');}
 }
 async function assignCrew(id,ship){
-  if(!id)return; DRAGID=null;
+  if(!id)return; DRAGID=null; DRAGEL=null;
   try{
     var r=await (await fetch('/api/rotation/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,ship:ship})})).json();
-    if(r.ok)renderRotation();
-  }catch(e){}
+    // Success: keep the optimistic card placement (no jarring full re-render). Reconciles on next load.
+    if(!r||!r.ok)renderRotation();
+  }catch(e){renderRotation();}
 }
 let COMP=null;
 async function renderCompliance(){
@@ -1892,6 +1915,9 @@ var CLIENT_COL={'Royal Caribbean':'#1E6FD0','Celebrity':'#0C8C8C','Azamara':'#7A
 function ageOf(dob){if(!dob)return'';var d=new Date(dob);if(isNaN(d))return'';var t=new Date(),a=t.getFullYear()-d.getFullYear();if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate()))a--;return a>0&&a<100?a:'';}
 function fmtPhone(p){if(!p)return{txt:'',bad:false};var raw=String(p).replace(/[^0-9+]/g,'');var ok=/^\\+?63\\d{10}$/.test(raw)||/^09\\d{9}$/.test(raw);return{txt:String(p).trim(),bad:!ok};}
 function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
+// Rank tag from the REGISTRY rank string (AdvancedQuery: 'Printer Specialist' / 'Junior Printer
+// Specialist'), falling back to count only if no registry rank. Fixes everyone showing 'Jr PS'.
+function rankTag(r,c){var s=String(r||'').toLowerCase();if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s===' ps'||s==='ps')return 'PS';return rankShort(c);}
 function docFlag(exp){if(!exp)return'missing';var days=(new Date(exp)-new Date())/86400000;if(days<0)return'expired';if(days<=90)return'90d';return'ok';}
 function crewMatchesComp(c){
   if(c.status==='Inactive')return false;
@@ -2082,7 +2108,7 @@ function card(c){
    +'<div class=tools><button title="Notes" onclick="notesModal(\\''+c.agency_id+'\\')">🗒</button><button title="Edit" onclick="editCrewModal(\\''+c.agency_id+'\\')">✎</button></div>'
    +'<div class=cname>'+name+'</div>'
    +'<div class=csub>'+sub+'</div>'
-   +'<div class=crow><span class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</span><span class="pill rank">'+rankShort(c.baseline_count)+'</span></div>'
+   +'<div class=crow><span class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</span><span class="pill rank">'+rankTag(c.rank,c.baseline_count)+'</span></div>'
    +'<div class=vessel>'+(c.vessel_observed||'—')+' <small style="color:var(--mut);font-weight:500">· '+(c.client||'')+'</small></div>'
    +(contact?'<div class=cdates>'+contact+'</div>':'')
    +'<div class=cdates>'+span+'</div>'

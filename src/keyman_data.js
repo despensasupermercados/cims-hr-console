@@ -1,9 +1,6 @@
-// Keyman contract history — regenerated 2026-06-13 from 'CIMS Keyman (latest version).xlsx'
-// SOURCE: 'Contract Counter' sheet (HR's authoritative per-crew contract list). Informational only —
-// decoupled from bonus tables; NEVER affects payouts. Bridged Royal km-> SC agency id via existing
-// keyman map + EXACT last+first name match only (no surname-only fallback). 0 bridge conflicts.
-// One ship per crew (most-recent); per-leg ship/ports from the schedule matrices are a separate,
-// flagged enrichment (those tabs are free-text and mix in non-DG3 crew, so not auto-parsed here).
+// Keyman contract history — regenerated 2026-06-13 (v2) from 'CIMS Keyman (latest version).xlsx'
+// SOURCE: 'Contract Counter' sheet. Bridged Royal km->SC via existing map + AdvancedQuery roster
+// (exact last+first, then unique-surname). Informational only; NEVER affects payouts.
 export const KEYMAN_CONTRACTS = [
 {sc:"SC-0016319",km:"542237",ship:"Grandeur",st:"Onboard",seq:1,on:"2022-05-22",proj:"2023-01-21",act:null},
 {sc:"SC-0016319",km:"542237",ship:"Grandeur",st:"Onboard",seq:2,on:"2023-03-05",proj:"2023-11-05",act:null},
@@ -95,13 +92,15 @@ export const KEYMAN_CONTRACTS = [
 {sc:"SC-0038378",km:"333114",ship:"Enchantment",st:"Onboard",seq:1,on:"2023-06-05",proj:"2024-03-30",act:null},
 {sc:"SC-0038378",km:"333114",ship:"Enchantment",st:"Onboard",seq:2,on:"2024-05-31",proj:"2025-02-14",act:null},
 {sc:"SC-0038378",km:"333114",ship:"Enchantment",st:"Onboard",seq:3,on:"2025-05-01",proj:"2025-08-15",act:null},
+{sc:"SC-0038379",km:"339634",ship:"Radiance",st:"Onboard",seq:1,on:"2023-09-03",proj:"2024-06-14",act:null},
+{sc:"SC-0038379",km:"339634",ship:"Radiance",st:"Onboard",seq:2,on:"2024-09-14",proj:"2025-04-06",act:null},
 {sc:"SC-0038380",km:"PCN6141HEL58212",ship:"Journey",st:"Onboard",seq:1,on:"2022-12-20",proj:"2023-01-01",act:null},
 {sc:"SC-0038380",km:"PCN6141HEL58212",ship:"Journey",st:"Onboard",seq:2,on:"2023-01-02",proj:"2023-08-17",act:null},
 {sc:"SC-0038380",km:"PCN6141HEL58212",ship:"Journey",st:"Onboard",seq:3,on:"2023-11-19",proj:"2024-08-19",act:null},
-{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"Transferred",seq:1,on:"2023-10-03",proj:"2024-02-05",act:null},
-{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"Transferred",seq:2,on:"2024-02-05",proj:"2024-06-07",act:null},
-{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"Transferred",seq:3,on:"2024-07-28",proj:"2024-11-08",act:null},
-{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"Transferred",seq:4,on:"2024-12-06",proj:"2025-07-21",act:null},
+{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"No Scheduled",seq:1,on:"2023-10-03",proj:"2024-02-05",act:null},
+{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"No Scheduled",seq:2,on:"2024-02-05",proj:"2024-06-07",act:null},
+{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"No Scheduled",seq:3,on:"2024-07-28",proj:"2024-11-08",act:null},
+{sc:"SC-0038381",km:"339635",ship:"Grandeur",st:"No Scheduled",seq:4,on:"2024-12-06",proj:"2025-07-21",act:null},
 {sc:"SC-0038382",km:"517505",ship:"Adventure",st:"Transferred",seq:1,on:"2021-10-30",proj:"2022-06-30",act:null},
 {sc:"SC-0038382",km:"517505",ship:"Adventure",st:"Transferred",seq:2,on:"2022-08-23",proj:"2023-01-07",act:null},
 {sc:"SC-0038382",km:"517505",ship:"Adventure",st:"Transferred",seq:3,on:"2023-01-08",proj:"2023-05-14",act:null},
@@ -121,6 +120,9 @@ export const KEYMAN_CONTRACTS = [
 {sc:"SC-0038386",km:"559526",ship:"Serenade",st:"Onboard",seq:1,on:"2022-07-20",proj:"2023-04-22",act:null},
 {sc:"SC-0038386",km:"559526",ship:"Serenade",st:"Onboard",seq:2,on:"2023-07-10",proj:"2024-04-08",act:null},
 {sc:"SC-0038386",km:"559526",ship:"Serenade",st:"Onboard",seq:3,on:"2024-06-14",proj:"2024-12-14",act:null},
+{sc:"SC-0038388",km:"travel Ready",ship:"Adventure",st:"Onboard",seq:1,on:"2023-07-29",proj:"2024-03-23",act:null},
+{sc:"SC-0038388",km:"travel Ready",ship:"Adventure",st:"Onboard",seq:2,on:"2024-05-04",proj:"2025-01-18",act:null},
+{sc:"SC-0038388",km:"travel Ready",ship:"Adventure",st:"Onboard",seq:3,on:"2025-03-28",proj:"2025-06-20",act:null},
 {sc:"SC-0038389",km:"529269",ship:"Ovation",st:"Onboard",seq:1,on:"2022-03-11",proj:"2022-09-03",act:null},
 {sc:"SC-0038389",km:"529269",ship:"Ovation",st:"Onboard",seq:2,on:"2022-11-09",proj:"2023-08-04",act:null},
 {sc:"SC-0038389",km:"529269",ship:"Ovation",st:"Onboard",seq:3,on:"2023-11-21",proj:"2024-09-10",act:null},
