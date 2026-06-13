@@ -330,3 +330,27 @@ Shipped the remaining mockup-driven UI in five deploys (all through the test gat
 ### Still open (unchanged + new)
 - Runtime UI verification of the new tabs needs an authenticated session (magic link) — only Miguel/Rita.
 - #17 bonus baselines (Rita reconciliation); R2 bucket for statements; DG3 IT email allowlist.
+
+### SESSION UPDATE — 2026-06-13 (continued: live review + refinements)
+
+After the five tabs above were deployed, Miguel logged in and reviewed live; these refinements followed (all deployed, gate green, 81 tests):
+
+- **Crew notes — delete.** Each entry in the Crew → 🗒 Notes log now has a ✕ (confirm-guarded). Server: `POST /api/crew/notes {delete:<id>}` removes a row from `crew_note_log`. Gold note dot clears when the last note is removed.
+- **Keyman — collapsible Unassigned pool.** The "no Keyman history" pool is now a collapsible `shipsec` header, **collapsed by default** (`ROT_CLOSED.__POOL__=true`). It was eating the screen.
+- **Uniform toolbar controls.** Global rule `.bar input,.bar select,.bar button,.bar .btn{height:38px;box-sizing:border-box;...}` — all toolbars across every tab now have equal-height controls (Miguel flagged the Keyman filters looked uneven).
+- **Travel tab — full analytics rebuild** (replaces the old single-series view):
+  - **YTD same-period comparison**: latest year vs prior year over the *identical* months the latest year has on file (never partial-vs-full-year). Headline total + Δ% + per-category table. Live example 2026: Jan–Jun 2026 $41,690 vs Jan–Jun 2025 $79,630 = −48% (Air is the main driver, −51%).
+  - **Month-by-month LY vs PY** table; total row compares **same period only**; months the latest year hasn't reached / aren't uploaded show **"pending"** (NOT −100%). Prior-year full-year shown as a note.
+  - **Line-item explorer** with filters: name search, year, month, category, kind (crew/shoreside). **Header tiles recompute live** (total, Air %, Hotel, each category, top spender) for exactly the filtered set.
+  - Client helpers added: `usd0`, `pct`, `deltaCell`, `tSum`; globals `TRVALL`, `TF`, `TCATS`, `TCATLAB`. `apiTravel` unchanged (returns all records; filtering is client-side).
+  - **Accuracy note:** the −48% YoY is only valid if Rita has fully uploaded 2026 Jan–Jun. Confirm completeness before reading strategy into it.
+
+### Deploy mechanics reminder (unchanged, for the next session)
+- Edit `src/worker.js` locally → run gate: `node -e "import('./src/worker.js')…"` + `node scripts/checkclient.js` (extracts APP_HTML <script>, `node --check`) + `node --test` (81). Then deploy by uploading `src/worker.js` via GitHub web uploader (Chrome MCP `file_upload` to `/upload/main/src`, JS-click the "Commit changes" button). Push → Workers Builds runs the test gate and deploys to cims.work. Verify live by navigating the authenticated Chrome tab (session cookie is shared) and screenshotting; `/` redirects to `/login` for unauthenticated curl, so curl can't see the app shell.
+- Client-JS string escaping: use `\\'` for single quotes inside single-quoted JS strings; AVOID `\\"` (neither checker nor runtime normalizes it) and `${`.
+
+### Open / next (for the new chat)
+- #17 bonus baselines — still GATED on Rita's reconciliation before any payout; Contracts & Bonus shows "baseline pending" everywhere until then.
+- **Feedback Windows board is empty** because the loaded Keyman snapshot's sign-off dates are mostly 2025 (stale) — nothing falls in the ±45/30-day window as of Jun 2026. Decide: (1) refresh Keyman data, or (2) re-base the trigger on live registry status instead of Keyman off-dates.
+- Dashboard "shoreside $0" for 2026 — likely the 2026 travel upload lacks the CIMS (shoreside) sheet; confirm with Rita.
+- Still: R2 bucket for statement storage; DG3 IT email allowlist for Resend deliverability.
