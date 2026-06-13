@@ -227,19 +227,25 @@ async function logData(env, source, rows, status) {
   } catch {}
 }
 // Bump when KEYMAN_CONTRACTS is regenerated from a new workbook so the deploy actually RELOADS
-// D1 (seed-only-when-empty would otherwise ignore the new data). Reseed is keyman_contract2 only;
+// D1 (seed-only-when-empty would otherwise ignore the new data). Reseed is keyman_contract3 only;
 // per-contract manual edits live in the separate contract_edit table and are preserved.
-const KEYMAN_VERSION = "2026-06-13-contractcounter-v2";
+const KEYMAN_VERSION = "2026-06-13-cc-v3";
 async function ensureKeyman(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract2 (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT)").run();
+  // PRIMARY KEY (sc,seq) + INSERT OR REPLACE = race-proof idempotent seeding. Earlier DELETE+INSERT
+  // reseeds raced under concurrent requests and STACKED rows (3x duplication); this can't.
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq))").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
-  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract2").first()).n;
+  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()).n;
   const ver = await env.DB.prepare("SELECT v FROM data_meta WHERE k='keyman_version'").first();
   const stale = !ver || ver.v !== KEYMAN_VERSION;
   if ((n === 0 || stale) && KEYMAN_CONTRACTS.length) {
-    if (n > 0) await env.DB.prepare("DELETE FROM keyman_contract2").run();
-    const stmt = env.DB.prepare("INSERT INTO keyman_contract2 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
+    const stmt = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
     await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.ship, r.st, r.seq, r.on, r.proj, r.act)));
+    // Prune any (sc,seq) no longer in the dataset (e.g. a crew's contract count shrank on refresh).
+    const keep = new Set(KEYMAN_CONTRACTS.map(r => r.sc + "|" + r.seq));
+    const have = (await env.DB.prepare("SELECT sc, seq FROM keyman_contract3").all()).results;
+    const extra = have.filter(r => !keep.has(r.sc + "|" + r.seq));
+    if (extra.length) await env.DB.batch(extra.map(r => env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=? AND seq=?").bind(r.sc, r.seq)));
     await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
     await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", KEYMAN_CONTRACTS.length, n > 0 ? "refreshed" : "seeded");
   }
@@ -287,7 +293,7 @@ async function apiDataStatus(env) {
   const cnt = async (s) => { try { return (await q(s)).n; } catch { return 0; } };
   const datasets = [
     { name: "Crew registry", source: "AdvancedQuery (TDG, Rita)", count: await cnt("SELECT COUNT(*) n FROM crew") },
-    { name: "Contract history", source: "CIMS Keyman workbook", count: await cnt("SELECT COUNT(*) n FROM keyman_contract2") },
+    { name: "Contract history", source: "CIMS Keyman workbook", count: await cnt("SELECT COUNT(*) n FROM keyman_contract3") },
     { name: "Fleet / vessels", source: "Vessel Deployment reference", count: VESSEL_REF.length },
     { name: "Feedback responses", source: "In-app (contributors)", count: await cnt("SELECT COUNT(*) n FROM feedback_response2") },
     { name: "Bonus outcomes", source: "In-app (committed)", count: await cnt("SELECT COUNT(*) n FROM bonus_outcome") },
@@ -299,7 +305,7 @@ async function apiDataStatus(env) {
 }
 // Read all contract rows in the shape billingReport expects.
 async function keymanRows(env) {
-  const r = await env.DB.prepare("SELECT sc, ship, sign_on on, proj_off proj, act_off act FROM keyman_contract2").all();
+  const r = await env.DB.prepare("SELECT sc, ship, sign_on on, proj_off proj, act_off act FROM keyman_contract3").all();
   return r.results;
 }
 async function apiDaysWorked(env, url) {
@@ -376,7 +382,7 @@ async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
   const q = async (sql, ...b) => (await env.DB.prepare(sql).bind(...b).first());
   await ensureKeyman(env);
-  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on");
+  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on");
   const total = (await q("SELECT COUNT(*) n FROM crew")).n;
   const byStatus = await env.DB.prepare("SELECT status, COUNT(*) n FROM crew GROUP BY status").all();
   const statusMap = {}; for (const r of byStatus.results) statusMap[r.status] = r.n;
@@ -456,7 +462,7 @@ async function apiCrew(env, url) {
   const base = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=0").all()).results;
   const ovs = (await env.DB.prepare("SELECT * FROM crew_override").all()).results;
   const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legs = (await env.DB.prepare("SELECT sc, sign_on, proj_off, act_off, seq FROM keyman_contract2 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const nl = (await env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all()).results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
@@ -485,8 +491,8 @@ async function apiCrewOne(env, url) {
   await ensureKeyman(env); await ensureCrewExtras(env);
   const ov = await env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first();
   const crew = applyOverride(row, ov);
-  const ct = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
-  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
+  const ct = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
+  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
   return json({ crew, contracts: ct, daysWorked: (dw && dw.days) || 0, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, TODAY()) });
 }
 // Manual edit (manual-wins): upsert only the provided fields into crew_override.
@@ -570,7 +576,7 @@ async function apiRotation(env) {
   await ensureContractEdit(env);
   const eds = (await env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all()).results;
   const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
-  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract2 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
   const byCrew = {};
   for (const r of legs) (byCrew[r.sc] = byCrew[r.sc] || []).push(r);
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
@@ -616,7 +622,7 @@ async function apiRotationCrew(env, url) {
   const id = url.searchParams.get("id");
   const c = await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, pp_exp, usv_exp FROM crew WHERE agency_id=?").bind(id).first();
   if (!c) return json({ error: "not_found" }, 404);
-  const legs = (await env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
+  const legs = (await env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
   const r = await env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first();
   return json({ crew: c, legs, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
 }
@@ -706,7 +712,7 @@ async function apiContracts(env) {
   const ovs = (await env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all()).results;
   const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
   const legCounts = {};
-  for (const r of (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract2 WHERE sign_on IS NOT NULL GROUP BY sc").all()).results) legCounts[r.sc] = r.n;
+  for (const r of (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 WHERE sign_on IS NOT NULL GROUP BY sc").all()).results) legCounts[r.sc] = r.n;
   const lastOut = {}, totPay = {};
   for (const o of (await env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all()).results) {
     lastOut[o.crew_id] = o; totPay[o.crew_id] = (totPay[o.crew_id] || 0) + (o.pay_usd || 0);
@@ -734,8 +740,8 @@ async function gatherStatement(env, id) {
   const crew = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first();
   if (!crew) return null;
   await ensureKeyman(env);
-  const contracts = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
-  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
+  const contracts = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
+  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
   const baseline = await effectiveBaseline(env, id, crew.baseline_count);
   const count = await crewCount(env, crew.id, baseline);
   const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
@@ -911,7 +917,7 @@ async function apiFeedbackCrew(env, url) {
 async function apiFeedbackBoard(env) {
   await ensureKeyman(env); await ensureFb(env);
   const today = TODAY();
-  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract2 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
   const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
@@ -1089,6 +1095,42 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .tbl td:nth-child(n+2),.tbl th:nth-child(n+2){text-align:right}
 .tbl td:first-child,.tbl th:first-child{text-align:left}
 .hint{font-size:11.5px;color:var(--mut);margin-top:3px}
+
+/* ===== 2026 refresh — toggle controls + modern surfaces (overrides) ===== */
+/* Checkbox -> iOS-style toggle switch (the "toggle look for the clicks") */
+input[type=checkbox]{appearance:none;-webkit-appearance:none;width:40px;height:23px;border-radius:23px;background:#cfd8e3;position:relative;cursor:pointer;transition:background .2s cubic-bezier(.4,0,.2,1);vertical-align:middle;flex:none;border:0;box-shadow:inset 0 1px 2px rgba(20,45,72,.12)}
+input[type=checkbox]::after{content:'';position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(16,38,64,.3);transition:transform .2s cubic-bezier(.4,0,.2,1)}
+input[type=checkbox]:checked{background:var(--green)}
+input[type=checkbox]:checked::after{transform:translateX(17px)}
+input[type=checkbox]:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.ck input,.bar input[type=checkbox]{width:40px;height:23px}
+.ck{gap:11px;font-size:13.5px;color:var(--ink)}
+/* Inputs / selects — softer, rounded, clear focus ring */
+input,select,textarea{border:1px solid var(--line-2);border-radius:11px;transition:border-color .15s,box-shadow .15s;background:#fff}
+input:not([type=checkbox]):focus,select:focus,textarea:focus{outline:0;border-color:var(--green);box-shadow:0 0 0 3px rgba(95,185,70,.18)}
+select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--mut) 50%),linear-gradient(135deg,var(--mut) 50%,transparent 50%);background-position:calc(100% - 16px) 52%,calc(100% - 11px) 52%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:32px}
+/* Buttons — pill, subtle depth + hover lift */
+.btn{border-radius:11px;font-weight:700;letter-spacing:.005em;transition:transform .12s ease,box-shadow .15s ease,filter .15s ease;box-shadow:0 1px 2px rgba(16,38,64,.14)}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px -4px rgba(16,38,64,.32)}
+.btn:active{transform:translateY(0)}
+.btn.green{box-shadow:0 1px 2px rgba(62,142,42,.3)}.btn.green:hover{box-shadow:0 8px 18px -5px rgba(62,142,42,.5)}
+.btn.ghost{box-shadow:none}.btn.ghost:hover{background:#f6f9fc;box-shadow:0 4px 12px -4px rgba(16,38,64,.18)}
+/* Modals — bigger radius, blurred backdrop, refined shadow + entrance */
+.modwrap,.ov{background:rgba(16,30,48,.42);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+.modcard,.modal{border-radius:22px;box-shadow:0 30px 70px -15px rgba(16,38,64,.45);border:1px solid rgba(255,255,255,.7);animation:modin .22s cubic-bezier(.2,.7,.3,1)}
+@keyframes modin{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+/* Cards / tiles / ship sections — softer shadow + hover lift */
+.tile{border-radius:16px;border-color:var(--line);box-shadow:0 1px 3px rgba(20,45,72,.05);transition:transform .14s ease,box-shadow .14s ease}
+.tile[data-rf],.tile[data-kind],.tile[data-go],.tile[data-fm]{cursor:pointer}
+.tile[data-rf]:hover,.tile[data-kind]:hover,.tile[data-go]:hover,.tile[data-fm]:hover{transform:translateY(-2px);box-shadow:0 10px 24px -8px rgba(20,45,72,.22)}
+.card{border-radius:15px;box-shadow:0 1px 3px rgba(20,45,72,.06);transition:transform .14s ease,box-shadow .14s ease}
+.card[data-crew]:hover{transform:translateY(-2px);box-shadow:0 10px 24px -8px rgba(20,45,72,.2)}
+.shipsec{border-radius:16px}
+.pill{padding:3px 10px;font-weight:700}
+.pill.rank{background:linear-gradient(180deg,#f0f5fb,#e7eef7);box-shadow:inset 0 0 0 1px rgba(27,58,92,.08)}
+.rtag.rtoggle{transition:background .15s,border-color .15s,color .15s}
+summary::-webkit-details-marker{color:var(--mut)}
+details.ddwrap>summary{padding:6px 0}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
