@@ -283,3 +283,50 @@ ever needed, build a scoped role FIRST, then domain-allow into that scoped role 
 - R2 bucket for statement storage; email deliverability (IT allowlist).
 - Optional: parse data.xlsx itinerary; per-nationality visa rules; DMARC record.
 - Data-refresh mechanism (§8) — vessel preview is increment 1; crew refresh live; nightly/auto TBD.
+
+---
+
+## SESSION UPDATE — 2026-06-13 (UI build-out, biggest-first)
+
+Shipped the remaining mockup-driven UI in five deploys (all through the test gate; 81 tests green):
+
+1. **Keyman editable Edit-contract modal** (`4575a9a`). Card click → "Edit contract — [name]"
+   modal: embark/disembark city, sign-on/off dates, ship dropdown, CONFIRMED checkboxes
+   (ECCR/AIR/HOTEL/ON DATE/OFF DATE) that drive the green card tags, + comment. Persists to
+   `contract_edit` (per-contract, manual-wins) and `crew_ready.note`.
+
+2. **Crew tab rebuild** (`d5786d4`). Prototype-matched editable cards: passport + age, rank pill,
+   vessel·client, province·phone with ⚠verify, contract span, contract count, next-bonus pill,
+   doc badges, gold note dot. Tools: ✎ Edit, 🗒 Notes. Filters: status + compliance tiles,
+   client + ship selects, sort (name/sign-off/contracts/ship), search. **+Add crew** and full
+   **Edit** modals. Timestamped **notes log** (separate from the single edit-note).
+
+3. **Dashboard** (`b6071e6`). Three zones (Workforce / Compliance / Cost & Bonus) with
+   **hand-rolled inline-SVG charts** (donut status mix, donut by client, bar of expiring docs,
+   line of travel spend by month) — no CDN dependency. Keeps the with/without-shoreside toggle.
+
+4. **Contracts & Bonus tab** (`96150a3`). Fleet-wide bonus **ledger**: contract count, consecutive
+   count, rank, next rung, last outcome, total paid; filters + sort; per-row **statement PDF** and
+   **Score** shortcut; +New signer. Tab labels: "Contracts & Bonus" (ledger), "Score" (was Bonus).
+
+5. **Feedback Windows tab** (`10531c6`). Near-sign-off board (contract ending ≤45d or ended ≤30d)
+   with per-role window pills (Ray/Rolando/Dexter: green=in, amber=requested, grey=none) that
+   generate single-use links, plus a Score shortcut (pulls window evidence into the Score Card).
+
+### Architecture decisions this session
+- **"Manual wins" via override tables, not in-place edits.** `crew_override` (per-field) is merged
+  over the imported `crew` base row on every read (`applyOverride`); AdvancedQuery imports never
+  touch overrides, so manual edits/added crew survive re-uploads. Same pattern as `contract_edit`.
+  `+Add crew` writes a base row AND an override.
+- **New tables (self-seeding):** `crew_override`, `crew_note_log`, `contract_edit`.
+- **New endpoints:** `/api/crew/save`, `/api/crew/add`, `/api/crew/notes` (GET/POST),
+  `/api/rotation/contract`, `/api/contracts` (ledger), `/api/feedback/board`.
+- **Money honesty:** next-bonus $ is shown ONLY where a baseline is set; otherwise "baseline pending".
+  Bonus math + gating untouched. #17 (Rita baseline reconciliation) still the gate before any payout.
+- **Verification gate now: 81 tests** + worker import + client-JS `node --check`
+  (scripts/checkclient.js). Client JS escaping: `\\'` for quotes; avoid `\\"` (checker/runtime
+  don't normalize it) and `${`.
+
+### Still open (unchanged + new)
+- Runtime UI verification of the new tabs needs an authenticated session (magic link) — only Miguel/Rita.
+- #17 bonus baselines (Rita reconciliation); R2 bucket for statements; DG3 IT email allowlist.
