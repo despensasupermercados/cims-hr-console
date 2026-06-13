@@ -82,6 +82,7 @@ export default {
         if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
+        if (p === "/api/contracts")    return apiContracts(env);
         if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
         if (p === "/api/feedback/crew")  return apiFeedbackCrew(env, url);
         return json({ error: "not found" }, 404);
@@ -665,6 +666,37 @@ async function apiBonusCrew(env, url) {
   const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
   return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: cr.baseline_count != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results });
 }
+// Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
+// last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
+async function apiContracts(env) {
+  await ensureKeyman(env); await ensureCrewExtras(env);
+  const base = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all()).results;
+  const ovs = (await env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all()).results;
+  const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
+  const legCounts = {};
+  for (const r of (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract2 WHERE sign_on IS NOT NULL GROUP BY sc").all()).results) legCounts[r.sc] = r.n;
+  const lastOut = {}, totPay = {};
+  for (const o of (await env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all()).results) {
+    lastOut[o.crew_id] = o; totPay[o.crew_id] = (totPay[o.crew_id] || 0) + (o.pay_usd || 0);
+  }
+  const rows = base.map(b => {
+    const ov = ovm[b.agency_id] || {};
+    const vessel = ov.vessel_observed != null ? ov.vessel_observed : b.vessel_observed;
+    const baseline = ov.baseline_count != null ? ov.baseline_count : b.baseline_count;
+    const lo = lastOut[b.id];
+    const count = lo ? lo.count_after : (baseline == null ? 0 : baseline);
+    return {
+      agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
+      vessel: vessel || null, client: clientOf(vessel), contracts: legCounts[b.agency_id] || 0,
+      count, baseline_set: baseline != null, rank: count >= 1 ? "PS" : "Jr PS", nextRung: ladderValue(count + 1),
+      lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
+      lastGate: lo ? lo.gate : null, lastPay: lo ? lo.pay_usd : null, totalPay: totPay[b.id] || 0
+    };
+  });
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  const totals = { crew: rows.length, paid: rows.reduce((s, r) => s + r.totalPay, 0), baselineSet: rows.filter(r => r.baseline_set).length };
+  return json({ count: rows.length, rows, totals });
+}
 // Assemble everything the PDF statement needs for one crew (crew + contracts + sea-days + bonus).
 async function gatherStatement(env, id) {
   const crew = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first();
@@ -1089,7 +1121,8 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
   <nav>
     <button id=nav-dashboard class=on onclick="show('dashboard')">Dashboard</button>
     <button id=nav-crew onclick="show('crew')">Crew</button>
-    <button id=nav-bonus onclick="show('bonus')">Bonus</button>
+    <button id=nav-contracts onclick="show('contracts')">Contracts &amp; Bonus</button>
+    <button id=nav-bonus onclick="show('bonus')">Score</button>
     <button id=nav-rotation onclick="show('rotation')">Keyman</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
@@ -1134,6 +1167,7 @@ async function show(tab){
   $('#nav-'+tab).classList.add('on');
   if(tab==='dashboard')return renderDashboard();
   if(tab==='crew')return renderCrew();
+  if(tab==='contracts')return renderContracts();
   if(tab==='bonus')return renderBonus();
   if(tab==='rotation')return renderRotation();
   if(tab==='compliance')return renderCompliance();
@@ -2030,6 +2064,36 @@ function computeBonusC(){
   return {score:score,gate:gate,count:count,nextCount:nextCount,pay:pay,rung:ladderValue(nextCount)};
 }
 function rng(id,label,max){return '<div class=fg><label>'+label+' — '+max+'%</label><div class=rng><input type=range id='+id+' min=0 max='+max+' value=0 oninput="recalcScore()"><span class=v id='+id+'v>0</span></div></div>';}
+/* ---- Contracts & Bonus: fleet-wide ledger ---- */
+var CTL=null,CTLF={q:'',client:'',sort:'az'};
+async function renderContracts(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  var d;try{d=await (await fetch('/api/contracts')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderContracts()">Retry</button></div>';return;}
+  CTL=d;CTLF={q:'',client:'',sort:'az'};
+  var clients=Array.from(new Set((d.rows||[]).map(function(r){return r.client;}).filter(Boolean))).sort();
+  $('#view').innerHTML='<div class=bar><h2>Contracts &amp; Bonus</h2>'
+   +'<div class=search style="margin-left:auto"><input id=ctq placeholder="name or crew ID" oninput="CTLF.q=this.value;paintContracts()" style="width:210px"></div>'
+   +'<select id=ctc onchange="CTLF.client=this.value;paintContracts()"><option value="">All clients</option>'+clients.map(function(x){return '<option>'+x+'</option>';}).join('')+'</select>'
+   +'<select id=cts onchange="CTLF.sort=this.value;paintContracts()"><option value="az">Sort: name</option><option value="tenure">Sort: contracts</option><option value="next">Sort: next bonus</option><option value="paid">Sort: total paid</option></select>'
+   +'<button class="btn green" onclick="addCrewModal()">+ New signer</button></div>'
+   +'<div class=tiles style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">'+tile(d.totals.crew,'Crew')+tile(d.totals.baselineSet+' / '+d.totals.crew,'Baselines set',(d.totals.baselineSet<d.totals.crew?'amber':'green'))+tile('$'+Number(d.totals.paid||0).toLocaleString(),'Bonus paid to date','green')+'</div>'
+   +'<div class=hint style="margin:-4px 0 10px">Consecutive count drives the bonus ladder. Where a baseline is not yet confirmed, the next-bonus figure is withheld (shown as "baseline pending").</div>'
+   +'<div id=ctcount class=csub style="margin-bottom:8px"></div><div id=cttable></div>';
+  paintContracts();
+}
+function paintContracts(){
+  if(!CTL)return;var q=CTLF.q.trim().toLowerCase();
+  var rows=(CTL.rows||[]).filter(function(r){if(CTLF.client&&r.client!==CTLF.client)return false;if(q&&((r.name||'')+' '+(r.agency_id||'')).toLowerCase().indexOf(q)<0)return false;return true;});
+  rows.sort(function(a,b){if(CTLF.sort==='tenure')return b.contracts-a.contracts;if(CTLF.sort==='next')return b.nextRung-a.nextRung;if(CTLF.sort==='paid')return b.totalPay-a.totalPay;return a.name.localeCompare(b.name);});
+  $('#ctcount').textContent=rows.length+' of '+CTL.rows.length+' crew';
+  var body=rows.map(function(r){
+    var last=r.lastDate?(r.lastDate+' · '+(r.lastScore!=null?r.lastScore+'%':'—')+(r.lastGate?(' · '+r.lastGate):'')+' · $'+Number(r.lastPay||0).toLocaleString()):'<span class=muted style="padding:0">none yet</span>';
+    var nb=r.baseline_set?('$'+Number(r.nextRung||0).toLocaleString()):'<span class=vchip>baseline pending</span>';
+    return '<tr><td><b>'+r.name+'</b><div class=csub>'+r.agency_id+'</div></td><td>'+(r.vessel||'—')+'<div class=csub>'+(r.client||'')+'</div></td><td style="text-align:center">'+r.contracts+'</td><td style="text-align:center"><span class="pill rank">'+r.rank+'</span> '+r.count+'</td><td>'+nb+'</td><td>'+last+'</td><td style="text-align:right">$'+Number(r.totalPay||0).toLocaleString()+'</td><td style="white-space:nowrap"><button class="btn ghost" onclick="window.open(\\'/api/crew/statement.pdf?id='+encodeURIComponent(r.agency_id)+'\\',\\'_blank\\')">PDF</button> <button class="btn green" onclick="ledgerScore(\\''+r.agency_id+'\\')">Score</button></td></tr>';
+  }).join('')||'<tr><td colspan=8 class=muted>No matches.</td></tr>';
+  $('#cttable').innerHTML='<table class=tbl><thead><tr><th>Crew</th><th>Ship · client</th><th>Contracts</th><th>Consec.</th><th>Next bonus</th><th>Last outcome</th><th style="text-align:right">Paid</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
+}
+function ledgerScore(id){document.querySelectorAll('nav button').forEach(function(b){b.classList.remove('on');});var nb=$('#nav-bonus');if(nb)nb.classList.add('on');openScore(id);}
 async function renderBonus(){
   $('#view').innerHTML='<div class=bar><h2>Bonus — Score a contract</h2>'
    +'<input id=bq placeholder="Search crew to score…" oninput="filterBonus()" style="width:260px"></div>'
