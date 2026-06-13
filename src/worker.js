@@ -618,9 +618,11 @@ async function apiRotation(env) {
   const histByShip = {};
   for (const h of SHIP_HISTORY) { if (!h.ours) continue; const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
   const have = new Set(sections.map(s => normShip(s.ship)));
+  // Only real vessels (guards against junk "ship" names leaked from the schedule grid, e.g. note rows).
+  const validShip = new Set(VESSEL_REF.map(v => normShip(v.name)));
   for (const s of sections) { const cur = new Set(s.crew.map(c => c.agency_id)); s.history = histEntries(histByShip[normShip(s.ship)] || [], cur); }
   for (const k of Object.keys(histByShip)) {
-    if (have.has(k)) continue;
+    if (have.has(k) || !validShip.has(k)) continue;
     const hs = histByShip[k];
     sections.push({ ship: hs[0].ship, brand: brandFor(hs[0].ship), onboard: 0, crew: [], history: histEntries(hs, new Set()) });
   }
