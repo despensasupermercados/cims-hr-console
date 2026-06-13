@@ -226,13 +226,22 @@ async function logData(env, source, rows, status) {
     await env.DB.prepare("INSERT INTO data_log (id,source,rows,status,at) VALUES (?,?,?,?,?)").bind("dl_" + crypto.randomUUID(), source, rows, status, new Date().toISOString()).run();
   } catch {}
 }
+// Bump when KEYMAN_CONTRACTS is regenerated from a new workbook so the deploy actually RELOADS
+// D1 (seed-only-when-empty would otherwise ignore the new data). Reseed is keyman_contract2 only;
+// per-contract manual edits live in the separate contract_edit table and are preserved.
+const KEYMAN_VERSION = "2026-06-13-contractcounter";
 async function ensureKeyman(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract2 (id INTEGER PRIMARY KEY AUTOINCREMENT, sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract2").first()).n;
-  if (n === 0 && KEYMAN_CONTRACTS.length) {
+  const ver = await env.DB.prepare("SELECT v FROM data_meta WHERE k='keyman_version'").first();
+  const stale = !ver || ver.v !== KEYMAN_VERSION;
+  if ((n === 0 || stale) && KEYMAN_CONTRACTS.length) {
+    if (n > 0) await env.DB.prepare("DELETE FROM keyman_contract2").run();
     const stmt = env.DB.prepare("INSERT INTO keyman_contract2 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
     await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.ship, r.st, r.seq, r.on, r.proj, r.act)));
-    await logData(env, "keyman_contract (CIMS Keyman)", KEYMAN_CONTRACTS.length, "seeded");
+    await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
+    await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", KEYMAN_CONTRACTS.length, n > 0 ? "refreshed" : "seeded");
   }
 }
 // Crew refresh from an uploaded AdvancedQuery export. Browser parses the file (SheetJS) and
