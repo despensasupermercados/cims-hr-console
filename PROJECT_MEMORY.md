@@ -354,3 +354,123 @@ After the five tabs above were deployed, Miguel logged in and reviewed live; the
 - **Feedback Windows board is empty** because the loaded Keyman snapshot's sign-off dates are mostly 2025 (stale) — nothing falls in the ±45/30-day window as of Jun 2026. Decide: (1) refresh Keyman data, or (2) re-base the trigger on live registry status instead of Keyman off-dates.
 - Dashboard "shoreside $0" for 2026 — likely the 2026 travel upload lacks the CIMS (shoreside) sheet; confirm with Rita.
 - Still: R2 bucket for statement storage; DG3 IT email allowlist for Resend deliverability.
+
+---
+
+## SESSION UPDATE — 2026-06-13 (session 3: money-hardening, registry-driven rotation, data refresh)
+
+Big session. **Test gate now 92** (was 81). New module `src/policy.js`. Keyman table migrated
+`keyman_contract2` → **`keyman_contract3`** (race-proof). Rotation board fundamentally reworked to
+be **registry-driven**. Crew registry re-imported from a fresh AdvancedQuery. Full 2026 visual
+refresh. Read this section first — it supersedes parts of §3, §5, §6, §10 above.
+
+### A. MONEY-HARDENING BATCH (deployed `f704185` + tests `0a51751`) — was an adversarial bug hunt
+New pure module **`src/policy.js`** (`resolveBaseline`, `isMoneyUser`, `feedbackSubmittable`) +
+**`test/policy.test.js`** (11 tests). `src/bonus.js` UNCHANGED. Fixes (all live):
+1. **Baseline read was split (P0 money bug).** `baseline_count` is in `OVR_FIELDS`, so a baseline set
+   via the crew Edit modal lands in `crew_override`. The ledger/crew-card read the override, but the
+   payout math (`apiBonusCommit`→`crewCount`), `apiBonusCrew`, and the PDF statement read the **base
+   crew row** → would have shown a baseline on screen but paid from 0. Added `effectiveBaseline()`
+   (override-wins) so all read paths agree. 0 is treated as a real baseline, not unset.
+2. **Commit double-submit guard.** `apiBonusCommit` now no-ops if an outcome already exists for the
+   same crew + exact (span_start, span_end) → returns the existing one. Prevents double pay/double count.
+3. **Money-authority gate.** `apiBonusCommit` + baseline writes (`crew/save`, `crew/add`) restricted to
+   MONEY users (Miguel, Rita) via `isMoneyUser` — the 5 contributors are all role 'full' and could
+   otherwise commit payouts. Lowercased set: `miguel.sanmartin@dg3.com`, `rita.berenyi@dg3.com`.
+4. **Feedback links truly single-use.** `apiFeedbackSubmit` rejects a 2nd submission (status not
+   pending → 409); `apiFeedbackForm` returns `locked:true` and no prior answers once answered. The
+   public `/fb` page shows a "✓ Already submitted" state.
+5. **Error hygiene.** Top-level catch no longer leaks `err.message` to the client (logs server-side);
+   null-crew guard in the feedback form.
+**NOTE:** `scripts/checkclient.js` referenced in old notes is NOT in the repo — the real CI gate is
+just `npm test`. Claude replicates the client-JS `node --check` manually (extract rendered
+`LOGIN_HTML/FB_HTML/APP_HTML` <script> blocks from the *evaluated* template, not the raw source).
+
+### B. KEYMAN REFRESH + race-proof reseed (`keyman_contract3`)
+- Regenerated **`src/keyman_data.js`** from the **"Contract Counter"** sheet of the new
+  *CIMS Keyman (latest version).xlsx* (HR's authoritative per-crew contract list). Bridged Royal
+  6-digit km → SC via the existing keyman map + **AdvancedQuery roster** (exact last+first, then
+  unique-surname, then normalized concat). **71 crew, ~204–209 contract legs, 0 bridge conflicts.**
+  The unbridged Contract-Counter rows are mostly genuinely **not our crew** (other-line printers).
+- **CRITICAL BUG FIXED — reseed triplication.** Old `ensureKeyman` did seed-when-empty, then a
+  versioned DELETE+INSERT. Under concurrent requests it **raced and stacked rows** (one crew showed
+  9 legs = 3×3; fleet total 627 vs the correct 209). Fixed by switching to **`keyman_contract3` with
+  `PRIMARY KEY (sc, seq)` + `INSERT OR REPLACE`** — idempotent and race-proof (verified: 6 concurrent
+  hits all return the correct count). `KEYMAN_VERSION` gates reseed; bump it to force a one-time reload
+  + it prunes (sc,seq) no longer in the dataset. **All `keyman_contract2` query refs → `keyman_contract3`.**
+
+### C. ROTATION BOARD — now REGISTRY-DRIVEN (the big rework)
+The board used to build "who's onboard" from stale Keyman contract legs (2024–25 dates) → ships
+showed **empty** or showed inactive long-gone crew as if current. Root fix: **onboard now comes from
+the live registry** (`crew.status` + `crew.vessel_observed`), the source of truth. Keyman/schedule
+only enrich + provide history.
+- **`apiRotation` rebuilt:** prominent per-ship cards = active crew (status ≠ Inactive) whose
+  `vessel_observed` maps to that ship; `current` = status 'On board'. Naturally shows **2-up
+  crew-change overlaps** (verified: Allure=Gorre+Lazo, Constellation=Ramos+Aquitania, Voyager=
+  Batadlan+Gayda). Inactive crew + crew who've moved on drop to greyed **"Also served this ship"** history.
+- **`shipOf(vessel)`** maps a registry vessel string ("MV AZAMARA QUEST") → canonical short ship name
+  ("Quest") via longest VESSEL_REF match, **+ the 4 Azamara short names (Journey/Onward/Quest/Pursuit)**
+  because VESSEL_REF lacks Azamara and the registry uses "MV AZAMARA X" while keyman/schedule use "X".
+  This was the cause of "a lot of them" missing dates (every Azamara ship). Else prettifies the raw name.
+- **Date/length enrichment:** onboard cards get sign-on/off from Keyman legs, **then fall back to the
+  schedule tabs** (`schEnr`). Cards show the **contract number** (`C{n}`) and the **months+days length**
+  (`monthsDays()`). History cards ("Also served") also show on→off + months+days length.
+- **SHORESIDE team:** Miguel's DG3 staff are tagged shoreside and **kept off the ships** + excluded from
+  seafarer counts, shown in a collapsible **"Shoreside team"** group. Hard-coded set in `apiRotation`:
+  `SHORE_IDS = {SC-0038392 Joemar De Leon, SC-0038378 Ohji Miranda}` + `SHORE_NM` name set for the
+  7 (de leon joemar / miranda ohji / guerra ray / abellan rolando / lawrence dexter / sanmartin miguel /
+  berenyi rita). (Ray/Rolando/Dexter Lawrence/Miguel/Rita aren't in the seafarer roster; only Joemar &
+  Ohji needed pulling out. "Adrian Dexter Domingo" SC-0026127 is a *different* person, a real seafarer —
+  do NOT tag him.) To add/remove shoreside, edit these sets.
+- **`src/ship_history.js`** (new): per-ship deployment history parsed from the 3 schedule tabs
+  (Celebrity / "+ + RCCL SCHEDULE + +" / Azamara). `{ship,name,sc,ours,on,off,brand}`. **Filtered to
+  TDG roster crew only** (`ours=true`) per Miguel — former/other-line crew excluded (the schedule
+  free-text was too noisy: ports-as-names, month fragments, typo'd dupes). History-only sections are
+  restricted to real VESSEL_REF ships (guards junk "ship" names like "# of flights:").
+- **Other rotation UX:** smooth optimistic drag-drop (card animates into the new ship, no full-board
+  flash; reverts only on API failure), **cruise-line filter** relabeled "All cruise lines"
+  (Royal Caribbean / Celebrity / Azamara). Pool = active crew with no ship match (now usually empty).
+
+### D. CREW REGISTRY RE-IMPORT (live data refresh)
+Re-imported the fresh **AdvancedQuery-8ba3c8e9.xls** via `POST /api/crew/import` (parsed rows pushed
+from the authenticated tab; apply path, COALESCE so blanks don't clobber, **never touches
+baseline_count**). Result: 9 status/vessel changes + 1 new crew (**Dan Angelo Bo, SC-0046132**). The
+registry now matches the file (51 On board, the 2-up overlaps Constellation/Voyager/Allure/Quest).
+This is the manual-refresh path working end-to-end; the nightly/auto refresh (§8) still needs the
+Drive credential.
+
+### E. OTHER UI FIXES (all deployed this session)
+- **Rank tags fixed:** crew card pill now reads the **registry rank** (`rankTag(c.rank,...)`), showing
+  the real blend (~71 Printer Specialist / ~26 Jr PS) instead of everyone "Jr PS" (was derived from the
+  gated baseline). Bonus/ledger rank stays count-derived per the SOP.
+- **Feedback board re-based on registry status** (§9 old item resolved): shows crew with status
+  'On Vacation' (feedback due now) + 'On board' (upcoming), not stale Keyman off-dates. Was 0 rows → ~64.
+- **2026 visual refresh:** all checkboxes → iOS-style **toggle switches**; rounded inputs with green
+  focus rings; pill buttons with hover lift; blurred modal backdrops + entrance animation; softer
+  cards/tiles with hover. Appended as override block at the end of `STYLE`.
+- **Collapsible Dry-dock schedule** (Fleet tab, native `<details>`).
+
+### F. DEPLOY MECHANICS — updates for next session
+- The GitHub commit button is **flaky via Chrome**: prefer `find` → click `ref` of "Commit changes";
+  if it doesn't navigate, click coordinate ~**(159, 790)** (single-file layout) / ~(160, 841) (multi-file).
+  The commit-message field usually won't take focus → default "Add files via upload" is fine. **Verify
+  the commit landed via the GitHub MCP `list_commits` (HEAD sha), not the screen.**
+- **Cloudflare Workers Builds propagation can be SLOW** — usually 30–60s but this session one build
+  (`ed41384`) took **>4 min** and was still serving the old version when the session paused. GitHub
+  Actions `tests` (#70) went green; the Cloudflare deploy is a separate pipeline. If a change isn't live
+  after a couple minutes, check whether the Workers Build failed vs just queued (Cloudflare dashboard
+  hangs in the automation tab, so this is hard to see — wait it out or push a trivial re-commit).
+
+### G. OPEN / NEXT (session-3)
+- **Last deploy `ed41384` (months+days length on cards, schedule date-enrichment, Azamara `shipOf`
+  fix) was committed + tests-green but had NOT propagated when the session paused.** Verify Santos/
+  Quest + the Azamara ships show dates; ~26/71 onboard cards still lacked sign-on dates (crew with no
+  Keyman leg AND no schedule entry on that ship — a data-coverage limit, not a logic bug).
+- **NO automated tests on the new rotation logic** (`shipOf` matching, shoreside, schedule enrichment,
+  registry onboard). High churn this session via many rapid money-adjacent prod deploys. **Recommended
+  consolidation pass: extract + unit-test these** so they're locked in. (Also still un-tested from
+  session 2: `applyOverride` merge, `apiContracts` ledger math.)
+- Carryover: **#17 bonus baselines** (Rita reconciliation — the core money gate, still NULL);
+  R2 bucket for statement storage; DG3 IT email allowlist for Resend deliverability; data.xlsx
+  itinerary parse; the §8 nightly auto-refresh (needs Drive credential).
+- Shoreside set is hard-coded in `apiRotation` — if the team changes, edit `SHORE_IDS`/`SHORE_NM`.
