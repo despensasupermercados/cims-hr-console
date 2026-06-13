@@ -569,7 +569,10 @@ async function apiRotation(env) {
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
-  const crewRows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override FROM crew WHERE redacted=0").all()).results;
+  const crewRows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all()).results;
+  const ovRows = (await env.DB.prepare("SELECT agency_id, vessel_observed FROM crew_override").all()).results;
+  const ovVessel = {}; for (const o of ovRows) if (o.vessel_observed != null && o.vessel_observed !== "") ovVessel[o.agency_id] = o.vessel_observed;
+  for (const c of crewRows) if (ovVessel[c.agency_id]) c.vessel_observed = ovVessel[c.agency_id]; // manual edits win
   const cmap = {};
   for (const c of crewRows) cmap[c.agency_id] = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.agency_id, status: c.status || "Unknown", rank: c.rank_override || c.rank_observed || null };
   const rd = (await env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all()).results;
@@ -587,8 +590,7 @@ async function apiRotation(env) {
     signOn: o.sign_on || leg.sign_on, signOff: o.sign_off || leg.act_off || leg.proj_off || null,
     offConfirmed: o.off_conf != null ? !!o.off_conf : !!leg.act_off, onConfirmed: !!o.on_conf,
     embark: o.embark || null, disembark: o.disembark || null, eccr: !!o.eccr, air: !!o.air, hotel: !!o.hotel }; };
-  const curIdx = {};
-  for (const sc in byCrew) { const ls = byCrew[sc]; let i = ls.findIndex(r => { const e = eff(r); return e.signOn <= today && (e.signOff || "9999") >= today; }); if (i < 0) i = ls.length - 1; curIdx[sc] = i; }
+  // Latest effective Keyman leg per (ship, crew) — used to ENRICH registry cards (dates) + as history.
   const byShip = {};
   for (const sc in byCrew) {
     const c = cmap[sc]; if (!c) continue;
@@ -596,57 +598,56 @@ async function apiRotation(env) {
     const lastForShip = {};
     ls.forEach((leg, idx) => { const e = eff(leg); if (!e.ship) return; if (lastForShip[e.ship] == null || (ls[lastForShip[e.ship]].seq || 0) < (leg.seq || 0)) lastForShip[e.ship] = idx; });
     for (const ship in lastForShip) {
-      const idx = lastForShip[ship], leg = ls[idx], e = eff(leg), nx = ls[idx + 1] ? eff(ls[idx + 1]) : null, rm = rmap[sc] || {};
-      (byShip[ship] = byShip[ship] || []).push({
-        agency_id: sc, seq: leg.seq, ship: ship, name: c.name, status: c.status, rank: c.rank,
-        signOn: e.signOn, signOff: e.signOff, offConfirmed: e.offConfirmed, onConfirmed: e.onConfirmed,
-        embark: e.embark || shipHome[normShip(ship)] || null,
-        nextShip: nx ? nx.ship : null, disembark: e.disembark || (nx ? (shipHome[normShip(nx.ship)] || null) : null),
-        current: (idx === curIdx[sc]) && (c.status === "On board"),
-        isCurrentShip: idx === curIdx[sc],
-        eccr: e.eccr, air: e.air, hotel: e.hotel, hasNote: !!(rm.note && String(rm.note).trim())
-      });
+      const idx = lastForShip[ship], leg = ls[idx], e = eff(leg), rm = rmap[sc] || {};
+      (byShip[ship] = byShip[ship] || []).push({ agency_id: sc, seq: leg.seq, ship, name: c.name, status: c.status, rank: c.rank, signOn: e.signOn, signOff: e.signOff, offConfirmed: e.offConfirmed, onConfirmed: e.onConfirmed, embark: e.embark || shipHome[normShip(ship)] || null, eccr: e.eccr, air: e.air, hotel: e.hotel, hasNote: !!(rm.note && String(rm.note).trim()) });
     }
   }
-  const sections = Object.keys(byShip).sort().map(ship => {
-    const all = byShip[ship];
-    // Prominent = this is the crew's CURRENT ship AND they're still active. Inactive crew, and crew
-    // who served here but have since moved on, drop to the greyed "Also served" history below.
-    const crew = all.filter(x => x.isCurrentShip && x.status !== "Inactive")
-      .sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.signOn < b.signOn ? 1 : a.signOn > b.signOn ? -1 : 0));
-    const past = all.filter(x => !(x.isCurrentShip && x.status !== "Inactive"));
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, _past: past };
-  });
-  // Merge per-ship deployment history from the 3 schedule tabs: everyone who served each ship —
-  // ours (bridged to a crew card elsewhere) + former/other-line crew (greyed). Display context only.
-  // ONLY our TDG roster crew (ours=true). Former/other-line crew from the schedule tabs are
-  // excluded by request — the registry (AdvancedQuery) is the source of truth for who we show.
+  const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
+  const contracts = {}; for (const sc in byCrew) contracts[sc] = byCrew[sc].length;
+  // Registry vessel string -> canonical short ship name (longest VESSEL_REF match; else prettified).
+  const vesselKeys = VESSEL_REF.map(v => ({ key: normShip(v.name), name: v.name })).sort((a, b) => b.key.length - a.key.length);
+  const shipOf = (vessel) => { const nv = normShip(vessel); if (!nv) return null; for (const v of vesselKeys) if (v.key && nv.indexOf(v.key) >= 0) return v.name; return String(vessel).replace(/^mv\s+/i, "").replace(/\s+of the seas\s*$/i, "").trim() || null; };
+  // Shoreside DG3 team (not seafarers): tagged + kept OFF the ship rotation.
+  const SHORE_IDS = new Set(["SC-0038392", "SC-0038378"]);
+  const SHORE_NM = new Set(["deleonjoemar", "mirandaohji", "guerraray", "abellanrolando", "lawrencedexter", "sanmartinmiguel", "berenyirita"]);
+  const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
+  // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
+  // NOW (incl. 2-up crew-change overlaps). Keyman only enriches dates + contract number.
+  const promByShip = {}, shoreside = [], pool = [];
+  for (const c of crewRows) {
+    const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
+    const rm = rmap[c.agency_id] || {}; base.eccr = !!rm.eccr; base.air = !!rm.air; base.hotel = !!rm.hotel; base.hasNote = !!(rm.note && String(rm.note).trim());
+    if (isShore(c)) { shoreside.push(base); continue; }
+    if (c.status === "Inactive") continue; // inactive -> greyed history only
+    const ship = shipOf(c.vessel_observed);
+    if (!ship) { pool.push(base); continue; }
+    const enr = (legBSC[normShip(ship)] || {})[c.agency_id] || {};
+    (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || null, signOff: enr.signOff || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[normShip(ship)] || null, current: c.status === "On board" }));
+  }
   const histByShip = {};
   for (const h of SHIP_HISTORY) { if (!h.ours) continue; const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
-  const have = new Set(sections.map(s => normShip(s.ship)));
-  // Only real vessels (guards against junk "ship" names leaked from the schedule grid, e.g. note rows).
   const validShip = new Set(VESSEL_REF.map(v => normShip(v.name)));
-  for (const s of sections) {
-    const cur = new Set(s.crew.map(c => c.agency_id));
-    const sched = histEntries(histByShip[normShip(s.ship)] || [], cur);
-    // Demoted keyman crew (inactive / past service on this ship) become greyed history entries.
-    const pastE = (s._past || []).filter(x => !cur.has(x.agency_id)).map(x => ({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff, status: x.status }));
+  // Union of ships: registry-prominent + keyman-history + valid schedule ships.
+  const shipNames = {};
+  for (const s of Object.keys(promByShip)) shipNames[normShip(s)] = s;
+  for (const s of Object.keys(byShip)) if (!shipNames[normShip(s)]) shipNames[normShip(s)] = s;
+  for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histByShip[k][0].ship;
+  const sections = Object.values(shipNames).map(ship => {
+    const k = normShip(ship);
+    const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const cur = new Set(crew.map(c => c.agency_id));
+    const kh = (byShip[ship] || []).filter(x => !cur.has(x.agency_id)).map(x => ({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }));
+    const sched = histEntries(histByShip[k] || [], cur);
     const byk = {};
-    for (const e of [...pastE, ...sched]) { const k = e.sc || ("F:" + e.name); if (!byk[k]) byk[k] = e; else { if (e.on && (!byk[k].on || e.on < byk[k].on)) byk[k].on = e.on; if (e.off && (!byk[k].off || e.off > byk[k].off)) byk[k].off = e.off; } }
-    s.history = Object.values(byk).sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    delete s._past;
-  }
-  for (const k of Object.keys(histByShip)) {
-    if (have.has(k) || !validShip.has(k)) continue;
-    const hs = histByShip[k];
-    sections.push({ ship: hs[0].ship, brand: brandFor(hs[0].ship), onboard: 0, crew: [], history: histEntries(hs, new Set()) });
-  }
+    for (const e of [...kh, ...sched]) { const kk = e.sc || ("F:" + e.name); if (!byk[kk]) byk[kk] = e; else { if (e.on && (!byk[kk].on || e.on < byk[kk].on)) byk[kk].on = e.on; if (e.off && (!byk[kk].off || e.off > byk[kk].off)) byk[kk].off = e.off; } }
+    const history = Object.values(byk).sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, history };
+  });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
-  const pool = crewRows.filter(c => !byCrew[c.agency_id]).map(c => { const rm = rmap[c.agency_id] || {}; return { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: cmap[c.agency_id].status, rank: cmap[c.agency_id].rank, eccr: !!rm.eccr, air: !!rm.air, hotel: !!rm.hotel, hasNote: !!(rm.note && String(rm.note).trim()) }; });
   const counts = {};
-  ["On board", "On Vacation", "Earmarked", "Inactive"].forEach(s => counts[s] = crewRows.filter(c => c.status === s).length);
-  counts.vessels = sections.length;
-  return json({ sections, pool, counts, inDock: inDockNow(DRY_DOCK, today) });
+  ["On board", "On Vacation", "Earmarked", "Inactive"].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
+  counts.shoreside = shoreside.length; counts.vessels = sections.length;
+  return json({ sections, pool, shoreside, counts, inDock: inDockNow(DRY_DOCK, today) });
 }
 // Collapse SHIP_HISTORY rows for one ship into one card per person (min..max span), excluding
 // our crew already shown as a current card on this ship. Ours first, then former/other.
@@ -1734,7 +1735,7 @@ function rotCard(x){
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
   return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragStart(this,\\''+x.agency_id+'\\')" ondragend="dragEnd(this)" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
     +'<div class=rnm>'+x.name+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
-    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+(x.current?' · ONBOARD':'')+'</div>'
+    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+(x.contracts?(' · C'+x.contracts):'')+(x.current?' · ONBOARD':'')+'</div>'
     +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
     +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
     +(dur?'<span class=rdur>'+dur+'</span>':'')
@@ -1821,7 +1822,7 @@ async function renderRotation(){
     +'<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
     +'<div class=bar style="margin-bottom:8px;flex-wrap:wrap"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:170px">'
     +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
-    +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All brands</option><option>Royal</option><option>Celebrity</option><option>Azamara</option><option>NCL</option></select>'
+    +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()">Days worked (Excel)</button></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
@@ -1853,14 +1854,18 @@ function drawRotation(){
   var sfilt=function(arr){return (arr||[]).filter(function(x){return (!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
   var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')+rfTile(c.vessels,'Vessels — show all','','')+'</div>';
+  var shore=(b.shoreside||[]);
+  if(shore.length){var hclosed=ROT_CLOSED['__SHORE__']!==false;
+    h+='<div class=shipsec style="margin-top:4px"><div class=shiphdr data-toggle="__SHORE__" style="border-left-color:#7c879a"><span class=nm>Shoreside team</span><span class=meta>DG3 staff · not seafarers · '+shore.length+' <span class="arw'+(hclosed?' closed':'')+'">▾</span></span></div>'
+     +'<div class="shipbody'+(hclosed?' closed':'')+'">'+shore.map(rotCard).join('')+'</div></div>';}
   var pool=sfilt(b.pool||[]);
   if(pool.length){var pclosed=!!ROT_CLOSED['__POOL__'];
-    h+='<div class=shipsec style="margin-top:4px"><div class=shiphdr data-toggle="__POOL__" style="border-left-color:#9aa7b6"><span class=nm>Unassigned pool</span><span class=meta>no Keyman history · '+pool.length+' crew <span class="arw'+(pclosed?' closed':'')+'">▾</span></span></div>'
+    h+='<div class=shipsec style="margin-top:4px"><div class=shiphdr data-toggle="__POOL__" style="border-left-color:#9aa7b6"><span class=nm>Unassigned pool</span><span class=meta>active · no ship assigned · '+pool.length+' crew <span class="arw'+(pclosed?' closed':'')+'">▾</span></span></div>'
      +'<div class="shipbody shipdrop'+(pclosed?' closed':'')+'" data-ship="__POOL__">'+pool.map(rotCard).join('')+'</div></div>';}
   var secs=(b.sections||[]).slice();
   if(ROT_BRAND)secs=secs.filter(function(s){return s.brand===ROT_BRAND;});
   if(ROT_FIND){var q=ROT_FIND.toLowerCase();secs=secs.filter(function(s){return s.ship.toLowerCase().indexOf(q)>=0;});}
-  secs=secs.map(function(s){return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew)};});
+  secs=secs.map(function(s){return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),history:s.history};});
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0;});
   h+='<div class=zlabel style="margin-top:14px">Ships ('+secs.length+')</div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
