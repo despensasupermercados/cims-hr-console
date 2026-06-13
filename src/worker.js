@@ -510,6 +510,11 @@ async function apiCrewNotes(request, env, session, url) {
   await ensureCrewExtras(env);
   if (request.method === "POST") {
     const b = await request.json().catch(() => ({}));
+    if (b.delete != null) {
+      await env.DB.prepare("DELETE FROM crew_note_log WHERE id=?").bind(+b.delete).run();
+      await logActivity(env, session && session.email, "crew_note_delete", String(b.delete));
+      return json({ ok: true });
+    }
     if (!b.agency_id || !String(b.text || "").trim()) return json({ error: "empty" }, 400);
     await env.DB.prepare("INSERT INTO crew_note_log (agency_id,ts,text) VALUES (?,?,?)").bind(b.agency_id, new Date().toISOString(), String(b.text).slice(0, 2000)).run();
     await logActivity(env, session && session.email, "crew_note_log", b.agency_id);
@@ -987,7 +992,9 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .notedot{position:absolute;bottom:11px;right:12px;width:9px;height:9px;border-radius:50%;background:#f5b301;box-shadow:0 0 0 2px #fff;cursor:pointer}
 .notelog{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto}
 .noteitem{border-left:3px solid var(--royal);background:#f7f9fc;border-radius:0 8px 8px 0;padding:8px 11px}
-.notemeta{font-size:11px;color:var(--mut);font-weight:600}
+.notemeta{font-size:11px;color:var(--mut);font-weight:600;display:flex;align-items:center}
+.notedel{margin-left:auto;color:var(--mut);cursor:pointer;font-weight:700;padding:0 4px;border-radius:5px}
+.notedel:hover{background:#fbe9e7;color:var(--red)}
 .notetext{font-size:13px;color:var(--deep);margin-top:3px;white-space:pre-wrap}
 .fbp{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:#f1f4f9;color:var(--mut);cursor:pointer;display:inline-block;margin:1px}
 .fbp.on{background:#eaf6e6;color:var(--green-d)}
@@ -1603,7 +1610,7 @@ async function saveNote(id){
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
-  ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={};ROT_MONTHS=[];
+  ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
   var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
   var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
   $('#view').innerHTML='<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
@@ -1642,7 +1649,9 @@ function drawRotation(){
   var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')+rfTile(c.vessels,'Vessels — show all','','')+'</div>';
   var pool=sfilt(b.pool||[]);
-  if(pool.length)h+='<div class=zlabel>Unassigned pool — no Keyman history ('+pool.length+')</div><div class="poolwrap shipdrop" data-ship="__POOL__">'+pool.map(rotCard).join('')+'</div>';
+  if(pool.length){var pclosed=!!ROT_CLOSED['__POOL__'];
+    h+='<div class=shipsec style="margin-top:4px"><div class=shiphdr data-toggle="__POOL__" style="border-left-color:#9aa7b6"><span class=nm>Unassigned pool</span><span class=meta>no Keyman history · '+pool.length+' crew <span class="arw'+(pclosed?' closed':'')+'">▾</span></span></div>'
+     +'<div class="shipbody shipdrop'+(pclosed?' closed':'')+'" data-ship="__POOL__">'+pool.map(rotCard).join('')+'</div></div>';}
   var secs=(b.sections||[]).slice();
   if(ROT_BRAND)secs=secs.filter(function(s){return s.brand===ROT_BRAND;});
   if(ROT_FIND){var q=ROT_FIND.toLowerCase();secs=secs.filter(function(s){return s.ship.toLowerCase().indexOf(q)>=0;});}
@@ -2067,8 +2076,16 @@ async function notesModal(id){
 async function loadNoteLog(id){
   var box=document.getElementById('notelog');if(!box)return;
   try{var r=await (await fetch('/api/crew/notes?id='+encodeURIComponent(id))).json();var ns=r.notes||[];
-    box.innerHTML=ns.length?ns.map(function(n){var d=new Date(n.ts);var meta=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});return '<div class=noteitem><div class=notemeta>'+meta+'</div><div class=notetext>'+String(n.text||'').replace(/</g,'&lt;')+'</div></div>';}).join(''):'<div class=muted style="padding:14px">No notes yet — the first one starts the log.</div>';
+    box.innerHTML=ns.length?ns.map(function(n){var d=new Date(n.ts);var meta=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});return '<div class=noteitem><div class=notemeta>'+meta+'<span class=notedel title="Delete note" onclick="deleteCrewNote(\\''+id+'\\','+n.id+')">✕</span></div><div class=notetext>'+String(n.text||'').replace(/</g,'&lt;')+'</div></div>';}).join(''):'<div class=muted style="padding:14px">No notes yet — the first one starts the log.</div>';
   }catch(e){box.innerHTML='<div class=muted style="padding:14px">Could not load notes.</div>';}
+}
+async function deleteCrewNote(id,noteId){
+  if(!confirm('Delete this note? This cannot be undone.'))return;
+  try{await fetch('/api/crew/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delete:noteId})});
+    await loadNoteLog(id);
+    // refresh the gold note dot if no notes remain
+    var rr=await (await fetch('/api/crew/notes?id='+encodeURIComponent(id))).json();var c=crewById(id);if(c){c.hasNote=!!(rr.notes&&rr.notes.length);paintCrew();}
+  }catch(e){}
 }
 async function addCrewNote(id){
   var t=document.getElementById('newNote');if(!t||!t.value.trim())return;
