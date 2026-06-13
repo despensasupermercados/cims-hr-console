@@ -1449,12 +1449,15 @@ function paintTravel(){
   // ---- Month-by-month: this year vs last year ----
   if(LY&&PY){
     var monthsAll=Array.from(new Set(scope.filter(function(r){return r.year===LY||r.year===PY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
+    var monthsLYset=Array.from(new Set(scope.filter(function(r){return r.year===LY;}).map(function(r){return r.month;})));
     h+='<div class=zlabel style="margin-top:18px">Month by month — '+LY+' vs '+PY+'</div>';
     h+='<table class=tbl><thead><tr><th>Month</th><th style="text-align:right">'+PY+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
-    var sumP=0,sumL=0;
-    monthsAll.forEach(function(m){var p=tSum(scope,PY,[m],'total'),l=tSum(scope,LY,[m],'total');sumP+=p;sumL+=l;h+='<tr><td>'+mn[m]+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td><td style="text-align:right">'+(l?usd0(l):'—')+'</td><td style="text-align:right">'+deltaCell(l,p)+'</td></tr>';});
-    h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+usd0(sumP)+'</b></td><td style="text-align:right"><b>'+usd0(sumL)+'</b></td><td style="text-align:right">'+deltaCell(sumL,sumP)+'</td></tr>';
+    var sumPfull=0,sumLfull=0,sumPsame=0,sumLsame=0;
+    monthsAll.forEach(function(m){var p=tSum(scope,PY,[m],'total'),l=tSum(scope,LY,[m],'total');var hasLY=monthsLYset.indexOf(m)>=0;sumPfull+=p;sumLfull+=l;if(hasLY){sumPsame+=p;sumLsame+=l;}
+      h+='<tr><td>'+mn[m]+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td><td style="text-align:right">'+(hasLY?usd0(l):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+(hasLY?deltaCell(l,p):'<span class=muted style="padding:0">—</span>')+'</td></tr>';});
+    h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total — same period</b></td><td style="text-align:right"><b>'+usd0(sumPsame)+'</b></td><td style="text-align:right"><b>'+usd0(sumLsame)+'</b></td><td style="text-align:right">'+deltaCell(sumLsame,sumPsame)+'</td></tr>';
     h+='</tbody></table>';
+    h+='<p class=hint style="margin-top:6px">'+PY+' full year was '+usd0(sumPfull)+'. The Δ total compares only the months '+LY+' has on file, so it stays apples-to-apples — months '+LY+' hasn\\'t reached (or that aren\\'t uploaded yet) show as "pending", not a 100% drop.</p>';
   }
   // ---- Line-item explorer (respects ALL filters) ----
   var rows=TRVALL.filter(function(r){
