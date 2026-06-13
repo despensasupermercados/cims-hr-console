@@ -613,8 +613,10 @@ async function apiRotation(env) {
   });
   // Merge per-ship deployment history from the 3 schedule tabs: everyone who served each ship —
   // ours (bridged to a crew card elsewhere) + former/other-line crew (greyed). Display context only.
+  // ONLY our TDG roster crew (ours=true). Former/other-line crew from the schedule tabs are
+  // excluded by request — the registry (AdvancedQuery) is the source of truth for who we show.
   const histByShip = {};
-  for (const h of SHIP_HISTORY) { const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
+  for (const h of SHIP_HISTORY) { if (!h.ours) continue; const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
   const have = new Set(sections.map(s => normShip(s.ship)));
   for (const s of sections) { const cur = new Set(s.crew.map(c => c.agency_id)); s.history = histEntries(histByShip[normShip(s.ship)] || [], cur); }
   for (const k of Object.keys(histByShip)) {
