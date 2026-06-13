@@ -70,6 +70,7 @@ export default {
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
         if (p === "/api/rotation/note" && request.method === "POST") return apiNote(request, env, session);
+        if (p === "/api/rotation/contract" && request.method === "POST") return apiContractEdit(request, env, session);
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
@@ -451,27 +452,36 @@ async function apiRotation(env) {
   for (const c of crewRows) cmap[c.agency_id] = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.agency_id, status: c.status || "Unknown", rank: c.rank_override || c.rank_observed || null };
   const rd = (await env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all()).results;
   const rmap = {}; for (const r of rd) rmap[r.agency_id] = r;
+  await ensureContractEdit(env);
+  const eds = (await env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all()).results;
+  const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
   const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract2 WHERE sign_on IS NOT NULL").all()).results;
   const byCrew = {};
   for (const r of legs) (byCrew[r.sc] = byCrew[r.sc] || []).push(r);
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
+  // Effective leg = base Keyman leg with any saved per-contract edit applied.
+  const eff = (leg) => { const o = emap[leg.sc + "|" + leg.seq] || {}; return {
+    seq: leg.seq, ship: o.ship || leg.ship,
+    signOn: o.sign_on || leg.sign_on, signOff: o.sign_off || leg.act_off || leg.proj_off || null,
+    offConfirmed: o.off_conf != null ? !!o.off_conf : !!leg.act_off, onConfirmed: !!o.on_conf,
+    embark: o.embark || null, disembark: o.disembark || null, eccr: !!o.eccr, air: !!o.air, hotel: !!o.hotel }; };
   const curIdx = {};
-  for (const sc in byCrew) { const ls = byCrew[sc]; let i = ls.findIndex(r => r.sign_on <= today && (r.act_off || r.proj_off || "9999") >= today); if (i < 0) i = ls.length - 1; curIdx[sc] = i; }
+  for (const sc in byCrew) { const ls = byCrew[sc]; let i = ls.findIndex(r => { const e = eff(r); return e.signOn <= today && (e.signOff || "9999") >= today; }); if (i < 0) i = ls.length - 1; curIdx[sc] = i; }
   const byShip = {};
   for (const sc in byCrew) {
     const c = cmap[sc]; if (!c) continue;
     const ls = byCrew[sc];
     const lastForShip = {};
-    ls.forEach((leg, idx) => { if (!leg.ship) return; if (lastForShip[leg.ship] == null || (ls[lastForShip[leg.ship]].seq || 0) < (leg.seq || 0)) lastForShip[leg.ship] = idx; });
+    ls.forEach((leg, idx) => { const e = eff(leg); if (!e.ship) return; if (lastForShip[e.ship] == null || (ls[lastForShip[e.ship]].seq || 0) < (leg.seq || 0)) lastForShip[e.ship] = idx; });
     for (const ship in lastForShip) {
-      const idx = lastForShip[ship], leg = ls[idx], nx = ls[idx + 1] || null, rm = rmap[sc] || {};
+      const idx = lastForShip[ship], leg = ls[idx], e = eff(leg), nx = ls[idx + 1] ? eff(ls[idx + 1]) : null, rm = rmap[sc] || {};
       (byShip[ship] = byShip[ship] || []).push({
-        agency_id: sc, name: c.name, status: c.status, rank: c.rank,
-        signOn: leg.sign_on, signOff: leg.act_off || leg.proj_off || null, offConfirmed: !!leg.act_off,
-        embark: shipHome[normShip(ship)] || null,
-        nextShip: nx ? nx.ship : null, disembark: nx ? (shipHome[normShip(nx.ship)] || null) : null,
+        agency_id: sc, seq: leg.seq, ship: ship, name: c.name, status: c.status, rank: c.rank,
+        signOn: e.signOn, signOff: e.signOff, offConfirmed: e.offConfirmed, onConfirmed: e.onConfirmed,
+        embark: e.embark || shipHome[normShip(ship)] || null,
+        nextShip: nx ? nx.ship : null, disembark: e.disembark || (nx ? (shipHome[normShip(nx.ship)] || null) : null),
         current: (idx === curIdx[sc]) && (c.status === "On board"),
-        eccr: !!rm.eccr, air: !!rm.air, hotel: !!rm.hotel, hasNote: !!(rm.note && String(rm.note).trim())
+        eccr: e.eccr, air: e.air, hotel: e.hotel, hasNote: !!(rm.note && String(rm.note).trim())
       });
     }
   }
@@ -507,6 +517,20 @@ async function apiNote(request, env, session) {
 async function ensureReady(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_ready (agency_id TEXT PRIMARY KEY, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, note TEXT, updated_at TEXT)").run();
   try { await env.DB.prepare("ALTER TABLE crew_ready ADD COLUMN note TEXT").run(); } catch {}
+}
+async function ensureContractEdit(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, PRIMARY KEY (sc, seq))").run();
+}
+// Per-contract edit (manual-wins): embark/disembark city, sign-on/off, ship, + confirmed flags.
+async function apiContractEdit(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  if (!b.sc || b.seq == null) return json({ error: "no_key" }, 400);
+  await ensureContractEdit(env);
+  const bi = (v) => (v ? 1 : 0);
+  await env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at")
+    .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), new Date().toISOString()).run();
+  await logActivity(env, session && session.email, "contract_edit", b.sc + " #" + b.seq);
+  return json({ ok: true });
 }
 // POST {agency_id, field in [eccr,air,hotel], value} — Rita ticks crew-change readiness.
 async function apiReady(request, env, session) {
@@ -1326,14 +1350,20 @@ function rotCard(x){
   var on=x.signOn?((x.embark?x.embark+' · ':'')+'ON '+x.signOn):'';
   var off=x.signOff?((x.disembark?x.disembark+' · ':'')+'OFF '+x.signOff):'';
   var dur=durLabel(x.signOn,x.signOff);
-  var tags=rtag('ECCR',x.eccr,x.agency_id,'eccr')+rtag('AIR',x.air,x.agency_id,'air')+rtag('HOTEL',x.hotel,x.agency_id,'hotel')+rtag('OFF DATE',!!x.offConfirmed,null,null)+(x.nextShip?rtag('NEXT: '+x.nextShip,true,null,null):rtag('NEXT SHIP',false,null,null));
-  return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" title="click for detail · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragMoved=true;DRAGID=\\''+x.agency_id+'\\'" onclick="cardClick(\\''+x.agency_id+'\\')">'
+  var tg='';
+  if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
+  if(x.air)tg+='<span class="rtag on">AIR</span>';
+  if(x.hotel)tg+='<span class="rtag on">HOTEL</span>';
+  if(x.onConfirmed)tg+='<span class="rtag on">ON ✓</span>';
+  if(x.offConfirmed)tg+='<span class="rtag on">OFF ✓</span>';
+  if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
+  return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragMoved=true;DRAGID=\\''+x.agency_id+'\\'" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
     +'<div class=rnm>'+x.name+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
     +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+(x.current?' · ONBOARD':'')+'</div>'
     +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
     +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
     +(dur?'<span class=rdur>'+dur+'</span>':'')
-    +'<div class=rtags>'+tags+'</div>'
+    +(tg?'<div class=rtags>'+tg+'</div>':'')
     +'</div>';
 }
 function rotShip(sec){
@@ -1343,23 +1373,44 @@ function rotShip(sec){
     +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+'</div></div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
-function cardClick(id){if(dragMoved)return;openRotModal(id);}
-async function openRotModal(id){
-  var d=await (await fetch('/api/rotation/crew?id='+encodeURIComponent(id))).json();
-  if(d.error)return;
-  var c=d.crew,rdy=d.ready||{},name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
-  var doc=function(lab,dt){if(!dt)return '';var days=(new Date(dt)-new Date())/86400000;var cl=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cl+'">'+lab+' '+dt+'</span>';};
-  var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||'—';var basis=l.act_off?'<span class="cchip ok">actual</span>':(l.proj_off?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on||'—')+'</td><td>'+off+'</td><td>'+basis+'</td></tr>';}).join('')||'<tr><td colspan=5 class=muted style="padding:8px">No Keyman contract history.</td></tr>';
-  var note=String(rdy.note||'').replace(/</g,'&lt;');
-  var h='<div class=modcard><div class=modhd><div><div class=cname>'+name+'</div><div class=csub>'+c.agency_id+' · '+(c.rank_override||c.rank_observed||'')+' · '+(c.status||'')+(c.province?(' · '+c.province):'')+(c.dob?(' · DOB '+c.dob):'')+'</div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
-    +'<div class=cchips style="margin:10px 0">'+doc('Medical',c.med_exp)+doc('Passport',c.pp_exp)+doc('US visa',c.usv_exp)+'</div>'
-    +'<div class=zlabel>Crew-change readiness</div><div class=rtags style="margin-bottom:12px">'+rmTag('ECCR','eccr',rdy.eccr,id)+rmTag('AIR','air',rdy.air,id)+rmTag('HOTEL','hotel',rdy.hotel,id)+'</div>'
-    +'<div class=zlabel>Contract history (Keyman)</div><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Sign on</th><th>Sign off</th><th>Basis</th></tr></thead><tbody>'+legs+'</tbody></table>'
-    +'<div class=zlabel style="margin-top:12px">Comment</div><textarea id=cmt rows=3 style="width:100%" placeholder="Add a note for this crew…">'+note+'</textarea>'
-    +'<div style="margin-top:8px;text-align:right"><span id=cmtmsg class=csub style="margin-right:8px"></span><button class="btn" onclick="saveNote(\\''+id+'\\')">Save comment</button></div></div>';
+function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
+async function editContractModal(id,seq){
+  var e=null;(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.agency_id===id&&x.seq===seq)e=x;});});
+  if(!e)return;
+  var d={};try{d=await (await fetch('/api/rotation/crew?id='+encodeURIComponent(id))).json();}catch(_){}
+  var note=String((d.ready&&d.ready.note)||'').replace(/</g,'&lt;');
+  var ships={};(ROT.sections||[]).forEach(function(s){ships[s.ship]=1;});if(e.ship)ships[e.ship]=1;
+  var shipOpts=Object.keys(ships).sort().map(function(s){return '<option'+(s===e.ship?' selected':'')+'>'+s+'</option>';}).join('');
+  var ck=function(i,lab,on){return '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-size:13px"><input type=checkbox id="'+i+'"'+(on?' checked':'')+'> '+lab+'</label>';};
+  var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||'—';return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on||'—')+'</td><td>'+off+'</td></tr>';}).join('');
+  var fld=function(lab,inp){return '<div><label class=csub>'+lab+'</label>'+inp+'</div>';};
+  var h='<div class=modcard><div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+' · contract #'+seq+'</div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
+   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'
+   +fld('Embark city','<input id=eEmb value="'+(e.embark||'')+'" style="width:100%">')
+   +fld('Disembark city','<input id=eDis value="'+(e.disembark||'')+'" style="width:100%">')
+   +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'" style="width:100%">')
+   +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'" style="width:100%">')
+   +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip style="width:100%">'+shipOpts+'</select>')+'</div>'
+   +'</div>'
+   +'<div class=zlabel style="margin-top:12px">Confirmed — shows as green tags on the card</div>'
+   +'<div style="margin:6px 0 8px">'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
+   +'<div class=zlabel>Comment</div><textarea id=cmt rows=2 style="width:100%" placeholder="Note for this crew…">'+note+'</textarea>'
+   +(legs?'<div class=zlabel style="margin-top:12px">Contract history</div><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table>':'')
+   +'<div style="margin-top:12px;text-align:right"><span id=cmtmsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeRotModal()">Cancel</button> <button class="btn green" onclick="saveContract(\\''+id+'\\','+seq+')">Save</button></div></div>';
   var w=document.createElement('div');w.id='rotmodal';w.className='modwrap';w.innerHTML=h;
-  w.onclick=function(e){if(e.target===w)closeRotModal();};
+  w.onclick=function(ev){if(ev.target===w)closeRotModal();};
   document.body.appendChild(w);
+}
+async function saveContract(id,seq){
+  var g=function(x){return document.getElementById(x);};
+  if(g('eOn').value&&g('eOff').value&&g('eOff').value<g('eOn').value){g('cmtmsg').textContent='Sign-off is before sign-on.';return;}
+  g('cmtmsg').textContent='Saving…';
+  var body={sc:id,seq:seq,embark:g('eEmb').value,disembark:g('eDis').value,sign_on:g('eOn').value,sign_off:g('eOff').value,ship:g('eShip').value,eccr:g('cEccr').checked,air:g('cAir').checked,hotel:g('cHotel').checked,on_conf:g('cOn').checked,off_conf:g('cOff').checked};
+  try{
+    await fetch('/api/rotation/contract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:g('cmt').value})});
+    closeRotModal();renderRotation();
+  }catch(e){g('cmtmsg').textContent='Failed to save.';}
 }
 function closeRotModal(){var m=document.getElementById('rotmodal');if(m)m.remove();}
 function rmTag(label,field,on,id){return '<span class="rtag rtoggle'+(on?' on':'')+'" data-crew="'+id+'" data-f="'+field+'" data-v="'+(on?1:0)+'" onclick="rmToggle(this)">'+label+'</span>';}
