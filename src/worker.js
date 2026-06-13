@@ -85,6 +85,7 @@ export default {
         if (p === "/api/contracts")    return apiContracts(env);
         if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
         if (p === "/api/feedback/crew")  return apiFeedbackCrew(env, url);
+        if (p === "/api/feedback/board") return apiFeedbackBoard(env);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -854,6 +855,33 @@ async function apiFeedbackCrew(env, url) {
   const answers = {}; for (const r of resp.results) answers[r.role] = JSON.parse(r.answers_json);
   return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers) });
 }
+// Feedback Windows board: crew whose contract is ending soon (≤45d) or just ended (≤30d ago),
+// with per-role window status so Rita can chase the contributors before scoring.
+async function apiFeedbackBoard(env) {
+  await ensureKeyman(env); await ensureFb(env);
+  const today = TODAY();
+  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract2 WHERE sign_on IS NOT NULL").all()).results;
+  const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
+  const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
+  const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
+  const resp = (await env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all()).results;
+  const reqByCrew = {}, respByCrew = {};
+  for (const r of reqs) (reqByCrew[r.crew_id] = reqByCrew[r.crew_id] || {})[r.role] = r.status;
+  for (const r of resp) (respByCrew[r.crew_id] = respByCrew[r.crew_id] || {})[r.role] = true;
+  const rows = [];
+  for (const c of crewRows) {
+    const ls = (byCrew[c.agency_id] || []).slice().sort((a, b) => (a.seq || 0) - (b.seq || 0));
+    if (!ls.length) continue;
+    let leg = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1];
+    const off = leg.act_off || leg.proj_off || null; if (!off) continue;
+    const days = Math.round((new Date(off) - new Date(today)) / 86400000);
+    if (days > 45 || days < -30) continue;
+    const roles = ["ray", "rolando", "dexter"].map(role => ({ role, answered: !!(respByCrew[c.id] && respByCrew[c.id][role]), status: (reqByCrew[c.id] && reqByCrew[c.id][role]) || "none" }));
+    rows.push({ agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: leg.ship || c.vessel_observed, signOff: off, days, status: c.status, roles, answeredCount: roles.filter(r => r.answered).length });
+  }
+  rows.sort((a, b) => a.days - b.days);
+  return json({ today, count: rows.length, rows });
+}
 
 /* ----------------------- HTML ----------------------- */
 function htmlResponse(body, status = 200) {
@@ -961,6 +989,9 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .noteitem{border-left:3px solid var(--royal);background:#f7f9fc;border-radius:0 8px 8px 0;padding:8px 11px}
 .notemeta{font-size:11px;color:var(--mut);font-weight:600}
 .notetext{font-size:13px;color:var(--deep);margin-top:3px;white-space:pre-wrap}
+.fbp{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:#f1f4f9;color:var(--mut);cursor:pointer;display:inline-block;margin:1px}
+.fbp.on{background:#eaf6e6;color:var(--green-d)}
+.fbp.pend{background:#fff5e6;color:var(--amber)}
 .dzone{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;margin-bottom:6px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
 .panel h3{font-family:'Outfit';font-size:12.5px;color:var(--navy);margin:0 0 10px;font-weight:700}
@@ -1124,6 +1155,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-contracts onclick="show('contracts')">Contracts &amp; Bonus</button>
     <button id=nav-bonus onclick="show('bonus')">Score</button>
     <button id=nav-rotation onclick="show('rotation')">Keyman</button>
+    <button id=nav-feedback onclick="show('feedback')">Feedback</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
@@ -1170,6 +1202,7 @@ async function show(tab){
   if(tab==='contracts')return renderContracts();
   if(tab==='bonus')return renderBonus();
   if(tab==='rotation')return renderRotation();
+  if(tab==='feedback')return renderFeedback();
   if(tab==='compliance')return renderCompliance();
   if(tab==='billing')return renderBilling();
   if(tab==='travel')return renderTravel();
@@ -2094,6 +2127,28 @@ function paintContracts(){
   $('#cttable').innerHTML='<table class=tbl><thead><tr><th>Crew</th><th>Ship · client</th><th>Contracts</th><th>Consec.</th><th>Next bonus</th><th>Last outcome</th><th style="text-align:right">Paid</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
 }
 function ledgerScore(id){document.querySelectorAll('nav button').forEach(function(b){b.classList.remove('on');});var nb=$('#nav-bonus');if(nb)nb.classList.add('on');openScore(id);}
+/* ---- Feedback windows board ---- */
+async function renderFeedback(){
+  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  var d;try{d=await (await fetch('/api/feedback/board')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderFeedback()">Retry</button></div>';return;}
+  var rows=d.rows||[],pn={ray:'Ray',rolando:'Rolando',dexter:'Dexter'};
+  function dlabel(n){return n<0?(Math.abs(n)+'d ago'):(n===0?'today':('in '+n+'d'));}
+  function pill(id,r){var cls=r.answered?'on':(r.status==='pending'?'pend':'');var mark=r.answered?'✓':(r.status==='pending'?'…':'+');var tt=r.answered?'response in':(r.status==='pending'?'requested — awaiting':'click to request a window');return '<span class="fbp '+cls+'" title="'+tt+'" onclick="fbRequest(\\''+id+'\\',\\''+r.role+'\\')">'+pn[r.role]+' '+mark+'</span>';}
+  var body=rows.map(function(x){var due=x.days<=7?'red':(x.days<=21?'amber':'ok');
+    return '<tr><td><b>'+x.name+'</b><div class=csub>'+x.agency_id+'</div></td><td>'+(x.vessel||'—')+'</td><td><span class="cchip '+due+'">'+x.signOff+' · '+dlabel(x.days)+'</span></td><td>'+x.roles.map(function(r){return pill(x.agency_id,r);}).join(' ')+'</td><td style="text-align:center">'+x.answeredCount+'/3</td><td><button class="btn green" onclick="ledgerScore(\\''+x.agency_id+'\\')">Score</button></td></tr>';
+  }).join('')||'<tr><td colspan=6 class=muted>No crew in the feedback window right now.</td></tr>';
+  $('#view').innerHTML='<div class=bar><h2>Feedback windows</h2><span class=csub style="margin-left:auto">'+rows.length+' crew · ending ≤45d or ended ≤30d</span></div>'
+   +'<div class=hint style="margin:-4px 0 12px">Collect contributor feedback before a contract is scored. Click a role pill to generate a single-use window link — green = response in, amber = requested, grey = not yet. Score pulls the evidence into the Score Card.</div>'
+   +'<div id=fbreqout class=csub style="margin-bottom:10px"></div>'
+   +'<table class=tbl><thead><tr><th>Crew</th><th>Ship</th><th>Sign-off</th><th>Windows (Ray · Rolando · Dexter)</th><th style="text-align:center">In</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
+}
+async function fbRequest(id,role){
+  var out=document.getElementById('fbreqout');if(out)out.textContent='Creating link…';
+  try{var r=await (await fetch('/api/feedback/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,role:role})})).json();
+    if(r.ok&&out)out.innerHTML='<b style="color:var(--navy)">'+r.role+'</b> link for '+r.crew+' — send to the contributor: <input readonly value="'+r.link+'" style="width:55%;margin:0 6px" onclick="this.select()"><button class="btn ghost" onclick="renderFeedback()">Refresh board</button>';
+    else if(out)out.textContent='Could not create the link.';
+  }catch(e){if(out)out.textContent='Could not create the link.';}
+}
 async function renderBonus(){
   $('#view').innerHTML='<div class=bar><h2>Bonus — Score a contract</h2>'
    +'<input id=bq placeholder="Search crew to score…" oninput="filterBonus()" style="width:260px"></div>'
