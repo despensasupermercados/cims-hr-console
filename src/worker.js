@@ -12,6 +12,7 @@ import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
+import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -92,7 +93,9 @@ export default {
       if (!session) return Response.redirect(url.origin + "/login", 302);
       return htmlResponse(APP_HTML);
     } catch (err) {
-      return json({ error: "server_error", detail: String(err && err.message || err) }, 500);
+      // Log server-side (Cloudflare tail/logs) but never leak internals to the client.
+      console.error("worker_error", (err && err.stack) || err);
+      return json({ error: "server_error" }, 500);
     }
   }
 };
@@ -481,6 +484,9 @@ async function apiCrewOne(env, url) {
 async function apiCrewSave(request, env, session) {
   const b = await request.json().catch(() => ({}));
   if (!b.agency_id) return json({ error: "no_id" }, 400);
+  // baseline_count is money: only money users may change it. Strip it for everyone else so
+  // an unrelated profile edit can't silently move a bonus baseline.
+  if (!isMoneyUser(session && session.email)) delete b.baseline_count;
   await ensureCrewExtras(env);
   const cols = ["agency_id"], vals = [b.agency_id], up = [];
   for (const f of OVR_FIELDS) { if (b[f] !== undefined) { cols.push(f); vals.push(b[f] === "" ? null : b[f]); up.push(f + "=excluded." + f); } }
@@ -498,10 +504,12 @@ async function apiCrewAdd(request, env, session) {
   if (ex) return json({ error: "exists" }, 409);
   await ensureCrewExtras(env);
   const now = new Date().toISOString();
+  // A starting bonus baseline is money: only money users may seed it on add.
+  const baselineVal = (isMoneyUser(session && session.email) && b.baseline_count != null) ? +b.baseline_count : null;
   await env.DB.prepare("INSERT INTO crew (id,agency_id,agency_code,first_name,middle_name,last_name,status,rank_observed,vessel_observed,dob,pp_no,baseline_count,redacted,created_at,updated_at) VALUES (?,?,'MAN',?,?,?,?,?,?,?,?,?,0,?,?)")
-    .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, b.baseline_count == null ? null : +b.baseline_count, now, now).run();
+    .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now, now).run();
   await env.DB.prepare("INSERT INTO crew_override (agency_id,first_name,middle_name,last_name,status,rank_override,vessel_observed,dob,pp_no,baseline_count,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_id) DO UPDATE SET updated_at=excluded.updated_at")
-    .bind(id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, b.baseline_count == null ? null : +b.baseline_count, now).run();
+    .bind(id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now).run();
   await logActivity(env, session && session.email, "crew_add", id);
   return json({ ok: true, agency_id: id });
 }
@@ -664,13 +672,22 @@ async function crewCount(env, crewRowId, baseline) {
   const last = await env.DB.prepare("SELECT count_after FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(crewRowId).first();
   return last ? last.count_after : (baseline == null ? 0 : baseline);
 }
+// SINGLE baseline read path (fixes the override/base split): a manual baseline saved into
+// crew_override ALWAYS wins, so the Score Card / commit / PDF use the same number the crew
+// card and ledger show. Without this, a baseline set via the Edit modal showed on screen but
+// the payout silently computed from 0.
+async function effectiveBaseline(env, agency_id, baseBaseline) {
+  const ov = await env.DB.prepare("SELECT baseline_count FROM crew_override WHERE agency_id=?").bind(agency_id).first();
+  return resolveBaseline(baseBaseline, ov ? ov.baseline_count : null);
+}
 async function apiBonusCrew(env, url) {
   const id = url.searchParams.get("id");
   const cr = await env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(id).first();
   if (!cr) return json({ error: "not found" }, 404);
-  const count = await crewCount(env, cr.id, cr.baseline_count);
+  const baseline = await effectiveBaseline(env, cr.agency_id, cr.baseline_count);
+  const count = await crewCount(env, cr.id, baseline);
   const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
-  return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: cr.baseline_count != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results });
+  return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -710,9 +727,10 @@ async function gatherStatement(env, id) {
   await ensureKeyman(env);
   const contracts = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract2 WHERE sc=? ORDER BY seq").bind(id).all()).results;
   const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract2 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
-  const count = await crewCount(env, crew.id, crew.baseline_count);
+  const baseline = await effectiveBaseline(env, id, crew.baseline_count);
+  const count = await crewCount(env, crew.id, baseline);
   const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
-  const bonus = { rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", count, baseline_set: crew.baseline_count != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  const bonus = { rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
@@ -759,14 +777,26 @@ async function apiStatementEmail(request, env, session) {
   return json({ ok, stored, sent: ok, to });
 }
 async function apiBonusCommit(request, env, session) {
+  // Money authority gate: committing a payout is restricted to the money users (GM/HR),
+  // even though all console users are role 'full' today.
+  if (!isMoneyUser(session && session.email)) return json({ error: "not_authorised" }, 403);
   const b = await request.json().catch(() => ({}));
   const cr = await env.DB.prepare("SELECT id, agency_id, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(b.agency_id).first();
   if (!cr) return json({ error: "crew_not_found" }, 404);
-  const count = await crewCount(env, cr.id, cr.baseline_count);
+  const baseline = await effectiveBaseline(env, cr.agency_id, cr.baseline_count);
+  const count = await crewCount(env, cr.id, baseline);
   const r = computeBonus({ count, sliders: b.sliders, evalScore: b.evalScore, gates: b.gates });
   if ((r.gate === "rush" || r.gate === "audit") && !(b.gateNote && b.gateNote.trim())) return json({ error: "gate_note_required" }, 400);
   if (!b.spanStart || !b.spanEnd) return json({ error: "span_required" }, 400);
   if (b.spanEnd < b.spanStart) return json({ error: "span_invalid" }, 400);
+  // Idempotency / double-submit guard: an outcome already exists for this crew + exact span.
+  // A retried or double-clicked commit must NOT append a second outcome (double pay + double
+  // count). Return the existing outcome so the UI shows success without re-recording.
+  const dup = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
+  if (dup) {
+    return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"),
+      result: { score: dup.score_pct, gate: dup.gate, pay: dup.pay_usd, count: dup.count_before, nextCount: dup.count_after, rung: ladderValue(dup.count_after) } });
+  }
   const ships = (Array.isArray(b.ships) && b.ships.filter(Boolean).length) ? b.ships.filter(Boolean) : [cr.vessel_observed || "—"];
   const g = b.gates || {};
   const endReason = (!g.complete && g.compassion) ? "compassionate" : (g.complete ? "completed" : (b.endReason || "early_relief"));
@@ -827,8 +857,10 @@ async function apiFeedbackForm(env, url) {
   const req = await env.DB.prepare("SELECT id, status FROM feedback_request2 WHERE token_hash=?").bind(th).first();
   if (!req) return json({ error: "revoked" }, 401);
   const cr = await env.DB.prepare("SELECT first_name, middle_name, last_name, vessel_observed FROM crew WHERE id=?").bind(p.crewId).first();
-  const existing = await env.DB.prepare("SELECT answers_json FROM feedback_response2 WHERE request_id=?").bind(req.id).first();
-  return json({ ok: true, role: p.role, roleLabel: FB_ROLES[p.role], crew: [cr.first_name, cr.middle_name, cr.last_name].filter(Boolean).join(" "), vessel: cr.vessel_observed, status: req.status, answers: existing ? JSON.parse(existing.answers_json) : null });
+  if (!cr) return json({ error: "crew_not_found" }, 404);
+  // Single-use: once the window is answered/N/A, lock it and do NOT echo prior answers back.
+  const locked = !feedbackSubmittable(req.status);
+  return json({ ok: true, role: p.role, roleLabel: FB_ROLES[p.role], crew: [cr.first_name, cr.middle_name, cr.last_name].filter(Boolean).join(" "), vessel: cr.vessel_observed, status: req.status, locked, answers: null });
 }
 // Contributor submits answers (no session; token authenticates).
 async function apiFeedbackSubmit(request, env) {
@@ -837,8 +869,10 @@ async function apiFeedbackSubmit(request, env) {
   const p = await verifyToken(b.t, env.SESSION_SECRET);
   if (!p || p.p !== "fb" || !FB_ROLES[p.role]) return json({ error: "invalid_or_expired" }, 401);
   const th = await sha256hex(b.t);
-  const req = await env.DB.prepare("SELECT id, crew_id, role FROM feedback_request2 WHERE token_hash=?").bind(th).first();
+  const req = await env.DB.prepare("SELECT id, crew_id, role, status FROM feedback_request2 WHERE token_hash=?").bind(th).first();
   if (!req) return json({ error: "revoked" }, 401);
+  // Single-use: reject a second submission instead of overwriting the evidence a bonus was scored on.
+  if (!feedbackSubmittable(req.status)) return json({ ok: false, already: true, error: "already_submitted" }, 409);
   const now = new Date().toISOString();
   const naDexter = req.role === "dexter" && (b.answers && b.answers.assessed === "No (N/A)") && !(b.answers && b.answers.mono);
   await env.DB.prepare("DELETE FROM feedback_response2 WHERE request_id=?").bind(req.id).run();
@@ -1109,6 +1143,7 @@ async function start(){
   if(!T){document.getElementById('fbsub').textContent='Missing link token.';return;}
   var d=await (await fetch('/api/feedback/form?t='+encodeURIComponent(T))).json();
   if(d.error){document.getElementById('fbbody').innerHTML='<div class=card2><b>This link is invalid or has expired.</b><div class=hint style="margin-top:6px">Please ask Rita for a new feedback link.</div></div>';document.getElementById('fbsub').textContent='';return;}
+  if(d.locked){document.getElementById('fbsub').textContent=d.roleLabel+' · '+d.crew;document.getElementById('fbbody').innerHTML='<div class=card2 style="text-align:center"><div style="font-family:Outfit;font-weight:800;color:var(--green-d);font-size:20px">✓ Already submitted</div><div class=hint style="margin-top:6px">This feedback window has been completed and is now closed. Thank you.</div></div>';return;}
   ROLE=d.role;var a=d.answers||{};
   document.getElementById('fbsub').textContent=d.roleLabel+' · '+d.crew+(d.vessel?(' · '+d.vessel):'');
   var f='';
@@ -2280,7 +2315,7 @@ async function commitBonus(){
     gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
     gateNote:$('#gateNote')?$('#gateNote').value:''};
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
-  if(res.error){btn.disabled=false;btn.textContent='Close & commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  if(res.error){btn.disabled=false;btn.textContent='Close & commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.'};alert(msgs[res.error]||('Error: '+res.error));return;}
   var r=res.result;
   $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'bonus\\')">Done</button></div></div></div></div>';
 }
