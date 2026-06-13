@@ -611,8 +611,11 @@ async function apiRotation(env) {
   const SHORE_IDS = new Set(["SC-0038392", "SC-0038378"]);
   const SHORE_NM = new Set(["deleonjoemar", "mirandaohji", "guerraray", "abellanrolando", "lawrencedexter", "sanmartinmiguel", "berenyirita"]);
   const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
+  // Schedule-tab dates per (ship, crew) — fallback enrichment when Keyman has no leg (latest run wins).
+  const schEnr = {};
+  for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; const k = normShip(h.ship); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off }; }
   // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
-  // NOW (incl. 2-up crew-change overlaps). Keyman only enriches dates + contract number.
+  // NOW (incl. 2-up crew-change overlaps). Dates enriched from Keyman, then the schedule tabs.
   const promByShip = {}, shoreside = [], pool = [];
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
@@ -621,8 +624,10 @@ async function apiRotation(env) {
     if (c.status === "Inactive") continue; // inactive -> greyed history only
     const ship = shipOf(c.vessel_observed);
     if (!ship) { pool.push(base); continue; }
-    const enr = (legBSC[normShip(ship)] || {})[c.agency_id] || {};
-    (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || null, signOff: enr.signOff || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[normShip(ship)] || null, current: c.status === "On board" }));
+    const k = normShip(ship);
+    const enr = (legBSC[k] || {})[c.agency_id] || {};
+    const sEnr = (schEnr[k] || {})[c.agency_id] || {};
+    (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[k] || null, current: c.status === "On board" }));
   }
   const histByShip = {};
   for (const h of SHIP_HISTORY) { if (!h.ours) continue; const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1187,6 +1192,7 @@ details.ddwrap>summary{padding:6px 0}
 .hcard .hnm{font-size:11.5px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:6px;justify-content:space-between}
 .hcard.former .hnm{color:#7c879a}
 .hcard .hspan{color:var(--mut);font-size:10px;margin-top:2px}
+.hcard .hdur{color:var(--navy);font-size:10.5px;font-weight:700;margin-top:3px}
 .htag{font-size:8px;font-weight:800;letter-spacing:.05em;padding:1px 6px;border-radius:6px;text-transform:uppercase;flex:none}
 .htag.ours{background:#eaf6e6;color:var(--green-d)}.htag.former{background:#e6e9ef;color:#8a93a3}
 `;
@@ -1725,7 +1731,7 @@ function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<s
 function rotCard(x){
   var on=x.signOn?((x.embark?x.embark+' · ':'')+'ON '+x.signOn):'';
   var off=x.signOff?((x.disembark?x.disembark+' · ':'')+'OFF '+x.signOff):'';
-  var dur=durLabel(x.signOn,x.signOff);
+  var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
   if(x.air)tg+='<span class="rtag on">AIR</span>';
@@ -1751,10 +1757,23 @@ function rotShip(sec){
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+'</div>'+histBlock+'</div>';
 }
+function monthsDays(a,b){
+  if(!a||!b)return '';
+  var d1=new Date(a),d2=new Date(b);
+  if(isNaN(d1)||isNaN(d2)||d2<d1)return '';
+  var m=(d2.getFullYear()-d1.getFullYear())*12+(d2.getMonth()-d1.getMonth());
+  var d=d2.getDate()-d1.getDate();
+  if(d<0){m--;d+=new Date(d2.getFullYear(),d2.getMonth(),0).getDate();}
+  if(m<0)return '';
+  var parts=[];if(m)parts.push(m+' mo'+(m===1?'':'s'));if(d)parts.push(d+' day'+(d===1?'':'s'));
+  return parts.join(' ')||'0 days';
+}
 function histCard(h){
   var span=(h.on||'')+(h.off&&h.off!==h.on?(' → '+h.off):'');
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span><span class="htag ours">served</span></div><div class=hspan>'+span+'</div></div>';
-  return '<div class="hcard former"><div class=hnm><span>'+h.name+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div></div>';
+  var dur=monthsDays(h.on,h.off);
+  var durHtml=dur?('<div class=hdur>'+dur+'</div>'):'';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span><span class="htag ours">served</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
+  return '<div class="hcard former"><div class=hnm><span>'+h.name+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
 function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
