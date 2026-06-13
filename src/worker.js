@@ -603,13 +603,19 @@ async function apiRotation(env) {
         embark: e.embark || shipHome[normShip(ship)] || null,
         nextShip: nx ? nx.ship : null, disembark: e.disembark || (nx ? (shipHome[normShip(nx.ship)] || null) : null),
         current: (idx === curIdx[sc]) && (c.status === "On board"),
+        isCurrentShip: idx === curIdx[sc],
         eccr: e.eccr, air: e.air, hotel: e.hotel, hasNote: !!(rm.note && String(rm.note).trim())
       });
     }
   }
   const sections = Object.keys(byShip).sort().map(ship => {
-    const crew = byShip[ship].sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.signOn < b.signOn ? 1 : a.signOn > b.signOn ? -1 : 0));
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew };
+    const all = byShip[ship];
+    // Prominent = this is the crew's CURRENT ship AND they're still active. Inactive crew, and crew
+    // who served here but have since moved on, drop to the greyed "Also served" history below.
+    const crew = all.filter(x => x.isCurrentShip && x.status !== "Inactive")
+      .sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.signOn < b.signOn ? 1 : a.signOn > b.signOn ? -1 : 0));
+    const past = all.filter(x => !(x.isCurrentShip && x.status !== "Inactive"));
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, _past: past };
   });
   // Merge per-ship deployment history from the 3 schedule tabs: everyone who served each ship —
   // ours (bridged to a crew card elsewhere) + former/other-line crew (greyed). Display context only.
@@ -620,7 +626,16 @@ async function apiRotation(env) {
   const have = new Set(sections.map(s => normShip(s.ship)));
   // Only real vessels (guards against junk "ship" names leaked from the schedule grid, e.g. note rows).
   const validShip = new Set(VESSEL_REF.map(v => normShip(v.name)));
-  for (const s of sections) { const cur = new Set(s.crew.map(c => c.agency_id)); s.history = histEntries(histByShip[normShip(s.ship)] || [], cur); }
+  for (const s of sections) {
+    const cur = new Set(s.crew.map(c => c.agency_id));
+    const sched = histEntries(histByShip[normShip(s.ship)] || [], cur);
+    // Demoted keyman crew (inactive / past service on this ship) become greyed history entries.
+    const pastE = (s._past || []).filter(x => !cur.has(x.agency_id)).map(x => ({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff, status: x.status }));
+    const byk = {};
+    for (const e of [...pastE, ...sched]) { const k = e.sc || ("F:" + e.name); if (!byk[k]) byk[k] = e; else { if (e.on && (!byk[k].on || e.on < byk[k].on)) byk[k].on = e.on; if (e.off && (!byk[k].off || e.off > byk[k].off)) byk[k].off = e.off; } }
+    s.history = Object.values(byk).sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
+    delete s._past;
+  }
   for (const k of Object.keys(histByShip)) {
     if (have.has(k) || !validShip.has(k)) continue;
     const hs = histByShip[k];
