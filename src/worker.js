@@ -13,6 +13,7 @@ import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
+import { SHIP_HISTORY } from "./ship_history.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -610,11 +611,36 @@ async function apiRotation(env) {
     const crew = byShip[ship].sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.signOn < b.signOn ? 1 : a.signOn > b.signOn ? -1 : 0));
     return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew };
   });
+  // Merge per-ship deployment history from the 3 schedule tabs: everyone who served each ship —
+  // ours (bridged to a crew card elsewhere) + former/other-line crew (greyed). Display context only.
+  const histByShip = {};
+  for (const h of SHIP_HISTORY) { const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
+  const have = new Set(sections.map(s => normShip(s.ship)));
+  for (const s of sections) { const cur = new Set(s.crew.map(c => c.agency_id)); s.history = histEntries(histByShip[normShip(s.ship)] || [], cur); }
+  for (const k of Object.keys(histByShip)) {
+    if (have.has(k)) continue;
+    const hs = histByShip[k];
+    sections.push({ ship: hs[0].ship, brand: brandFor(hs[0].ship), onboard: 0, crew: [], history: histEntries(hs, new Set()) });
+  }
+  sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   const pool = crewRows.filter(c => !byCrew[c.agency_id]).map(c => { const rm = rmap[c.agency_id] || {}; return { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: cmap[c.agency_id].status, rank: cmap[c.agency_id].rank, eccr: !!rm.eccr, air: !!rm.air, hotel: !!rm.hotel, hasNote: !!(rm.note && String(rm.note).trim()) }; });
   const counts = {};
   ["On board", "On Vacation", "Earmarked", "Inactive"].forEach(s => counts[s] = crewRows.filter(c => c.status === s).length);
   counts.vessels = sections.length;
   return json({ sections, pool, counts, inDock: inDockNow(DRY_DOCK, today) });
+}
+// Collapse SHIP_HISTORY rows for one ship into one card per person (min..max span), excluding
+// our crew already shown as a current card on this ship. Ours first, then former/other.
+function histEntries(hs, excludeSc) {
+  const byp = {};
+  for (const h of hs) {
+    if (h.ours && excludeSc.has(h.sc)) continue;
+    const key = h.sc || ("F:" + h.name);
+    const e = byp[key] || (byp[key] = { name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off });
+    if (h.on && (!e.on || h.on < e.on)) e.on = h.on;
+    if (h.off && (!e.off || h.off > e.off)) e.off = h.off;
+  }
+  return Object.values(byp).sort((a, b) => (a.ours === b.ours) ? ((a.off || "") < (b.off || "") ? 1 : -1) : (a.ours ? -1 : 1));
 }
 // Full detail for one crew (modal): all contract legs + readiness + note.
 async function apiRotationCrew(env, url) {
@@ -1131,6 +1157,18 @@ select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(
 .rtag.rtoggle{transition:background .15s,border-color .15s,color .15s}
 summary::-webkit-details-marker{color:var(--mut)}
 details.ddwrap>summary{padding:6px 0}
+/* Per-ship deployment history (schedule tabs): ours = light card, former/other = greyed dashed */
+.histsec{padding:2px 14px 13px}.histsec.closed{display:none}
+.histhd{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);margin:0 0 8px;border-top:1px dashed var(--line-2);padding-top:9px}
+.histgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:7px}
+.hcard{border-radius:10px;padding:7px 10px;border:1px solid var(--line);background:#f7f9fc;transition:background .12s,transform .12s}
+.hcard.ours{cursor:pointer}.hcard.ours:hover{background:#eef4fb;transform:translateY(-1px)}
+.hcard.former{background:repeating-linear-gradient(135deg,#f3f4f7,#f3f4f7 8px,#eef0f4 8px,#eef0f4 16px);border-style:dashed;border-color:#d7dce5}
+.hcard .hnm{font-size:11.5px;font-weight:700;color:var(--navy);display:flex;align-items:center;gap:6px;justify-content:space-between}
+.hcard.former .hnm{color:#7c879a}
+.hcard .hspan{color:var(--mut);font-size:10px;margin-top:2px}
+.htag{font-size:8px;font-weight:800;letter-spacing:.05em;padding:1px 6px;border-radius:6px;text-transform:uppercase;flex:none}
+.htag.ours{background:#eaf6e6;color:var(--green-d)}.htag.former{background:#e6e9ef;color:#8a93a3}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -1686,9 +1724,17 @@ function rotCard(x){
 }
 function rotShip(sec){
   var col=BRANDCOL[sec.brand]||'#1E6FD0',closed=!!ROT_CLOSED[sec.ship];
-  var body=sec.crew.length?sec.crew.map(rotCard).join(''):'<div class=hint style="opacity:.55;padding:6px">no crew history</div>';
-  return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' total <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+'</div></div>';
+  var hist=sec.history||[];
+  var body=sec.crew.length?sec.crew.map(rotCard).join(''):'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
+  var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Also served this ship · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
+  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(hist.length?(' · '+hist.length+' history'):'');
+  return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
+    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+'</div>'+histBlock+'</div>';
+}
+function histCard(h){
+  var span=(h.on||'')+(h.off&&h.off!==h.on?(' → '+h.off):'');
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span><span class="htag ours">served</span></div><div class=hspan>'+span+'</div></div>';
+  return '<div class="hcard former"><div class=hnm><span>'+h.name+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div></div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
 function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
