@@ -1389,70 +1389,103 @@ async function renderData(){
   h+='<p class=muted style="text-align:left;padding:10px 2px">Autonomous refresh from the Drive folder activates once the read-only service account is connected. Until then, data loads on deploy. Bonus baselines stay gated for Rita.</p>';
   $('#view').innerHTML=h;
 }
-let TRV=null,TRV_KIND='';
-function usd(n){return n?('$'+Number(n).toLocaleString()):'—';}
+let TRV=null,TRV_KIND='',TRVALL=[],TF={q:'',year:'',month:'',cat:'',kind:''};
+var TCATS=['air','hotel','medical','visa','food','transport','other'];
+var TCATLAB={air:'Air',hotel:'Hotel',medical:'Medical',visa:'Visa',food:'Food',transport:'Transport',other:'Other'};
+function usd(n){return n?('$'+Number(n).toLocaleString(undefined,{maximumFractionDigits:0})):'—';}
+function usd0(n){return '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});}
+function pct(a,b){if(b==null||b===0)return null;return (a-b)/b*100;}
+function deltaCell(a,b){var d=pct(a,b);if(d==null)return '<span class=muted style="padding:0">—</span>';var up=d>=0;return '<span style="color:'+(up?'var(--red)':'var(--green-d)')+';font-weight:700">'+(up?'▲':'▼')+' '+Math.abs(d).toFixed(0)+'%</span>';}
 async function renderTravel(){
+  $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2><span class=muted style="padding:0">Loading…</span></div>';
+  try{ TRV=await (await fetch('/api/travel')).json(); if(TRV&&TRV.error)throw new Error(TRV.error); }
+  catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
+  TRVALL=TRV.records||[];
+  TF={q:'',year:'',month:'',cat:'',kind:''};
+  var years=(TRV.years||[]).slice();
+  var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
-    +'<span class=csub style="margin-left:auto;margin-right:6px">View:</span>'
-    +'<button class="btn ghost trk" data-k="">All</button> <button class="btn ghost trk" data-k="crew">Crew</button> <button class="btn ghost trk" data-k="shoreside">Shoreside mgmt</button></div>'
-    +'<div id=trbody><div class=muted>Loading…</div></div>';
-  document.querySelectorAll('.trk').forEach(function(b){b.onclick=function(){TRV_KIND=b.getAttribute('data-k');document.querySelectorAll('.trk').forEach(function(x){x.classList.remove('on');});b.classList.add('on');loadTravel();};});
-  document.querySelector('.trk').classList.add('on');
-  loadTravel();
+    +'<input id=tq placeholder="filter by name…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:170px">'
+    +'<select id=tyear onchange="TF.year=this.value;paintTravel()"><option value="">All years</option>'+years.map(function(y){return '<option>'+y+'</option>';}).join('')+'</select>'
+    +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+mn.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
+    +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
+    +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="">Crew + shoreside</option><option value="crew">Crew only</option><option value="shoreside">Shoreside only</option></select>'
+    +'</div><div id=trbody></div>';
+  paintTravel();
 }
-async function loadTravel(){
-  $('#trbody').innerHTML='<div class=muted>Loading…</div>';
-  try{
-  TRV=await (await fetch('/api/travel'+(TRV_KIND?('?kind='+TRV_KIND):''))).json();
-  if(TRV&&TRV.error)throw new Error(TRV.error);
-  var s=TRV.summary||{},recs=TRV.records||[],mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  s.byKind=s.byKind||{};s.byCat=s.byCat||{};s.byLeg=s.byLeg||{};s.byMonth=s.byMonth||{};s.total=s.total||0;s.records=s.records||recs.length;s.crew=s.crew||0;
-  // Aggregate by year-month for trend + deltas.
-  var ymTot={},ymCrew={},ymShore={},person={};
-  recs.forEach(function(r){var k=r.year*100+r.month;ymTot[k]=(ymTot[k]||0)+r.total;if(r.kind==='shoreside')ymShore[k]=(ymShore[k]||0)+r.total;else ymCrew[k]=(ymCrew[k]||0)+r.total;person[r.crew_name]=(person[r.crew_name]||0)+r.total;});
-  var keys=Object.keys(ymTot).map(Number).sort(function(a,b){return a-b;});
-  var fy=function(k){return mn[k%100]+' '+String(Math.floor(k/100)).slice(2);};
-  var latest=keys[keys.length-1],prev=keys.length>1?keys[keys.length-2]:null;
-  var mom=(prev&&ymTot[prev])?((ymTot[latest]-ymTot[prev])/ymTot[prev]*100):null;
-  var avg=keys.length?s.total/keys.length:0;
-  var peak=keys.reduce(function(a,b){return ymTot[b]>(ymTot[a]||0)?b:a;},keys[0]);
-  var airShare=s.total?(s.byCat.air/s.total*100):0;
-  var pnames=Object.keys(person).sort(function(a,b){return person[b]-person[a];});
-  var top=pnames[0]||'—';
-  var momTxt=mom==null?'—':((mom>=0?'▲ ':'▼ ')+Math.abs(mom).toFixed(0)+'%');
-  // Decision signals
-  var h='<div class=csub style="margin-bottom:8px">Years on file: '+((TRV.years||[]).join(', ')||'—')+'</div>';
-  h+='<div class=zlabel>Where we are</div><div class=tiles>'
-    +tile('$'+s.total.toLocaleString(),'Total spend')
-    +tile('$'+(s.byKind.crew||0).toLocaleString(),'Crew','green')
-    +tile('$'+(s.byKind.shoreside||0).toLocaleString(),'Shoreside mgmt','amber')
-    +tile('$'+Math.round(avg).toLocaleString(),'Avg / month')+'</div>';
-  h+='<div class=zlabel>Decision signals</div><div class=tiles>'
-    +tile((latest?fy(latest):'—')+' · $'+Math.round(ymTot[latest]||0).toLocaleString(),'Latest month')
-    +tile(momTxt,'Latest vs prev',(mom==null?'':(mom>=0?'red':'green')))
-    +tile(Math.round(airShare)+'%','Air share of spend',(airShare>=70?'amber':''))
-    +tile(fy(peak)+' · $'+Math.round(ymTot[peak]||0).toLocaleString(),'Peak month','red')
-    +tile(top,'Top spender')+'</div>';
-  // Month over month
-  var maxv=keys.reduce(function(a,b){return Math.max(a,ymTot[b]);},0)||1;
-  h+='<div class=zlabel style="margin-top:18px">Month over month</div><table class=tbl><thead><tr><th>Month</th><th>Crew</th><th>Shoreside</th><th>Total</th><th>Δ vs prev</th><th>Trend</th></tr></thead><tbody>';
-  keys.forEach(function(k,i){
-    var pv=i>0?ymTot[keys[i-1]]:null;var dd=(pv?((ymTot[k]-pv)/pv*100):null);
-    var darr=dd==null?'—':((dd>=0?'▲ ':'▼ ')+Math.abs(dd).toFixed(0)+'%');var dcol=dd==null?'var(--mut)':(dd>=0?'var(--red)':'var(--green-d)');
-    var bw=Math.round(ymTot[k]/maxv*100);
-    h+='<tr><td>'+fy(k)+'</td><td>'+usd(ymCrew[k])+'</td><td>'+usd(ymShore[k])+'</td><td><b>'+usd(ymTot[k])+'</b></td><td style="color:'+dcol+'">'+darr+'</td><td><div style="height:9px;background:var(--navy);width:'+bw+'%;border-radius:4px;min-width:2px"></div></td></tr>';
+// Sum a category (or 'total') over rows matching year + month-set, within an already kind/name-scoped list.
+function tSum(rows,yr,months,cat){var t=0;for(var i=0;i<rows.length;i++){var r=rows[i];if(r.year!==yr)continue;if(months&&months.indexOf(r.month)<0)continue;t+=cat==='total'?r.total:(r[cat]||0);}return t;}
+function paintTravel(){
+  var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var q=(TF.q||'').trim().toLowerCase();
+  // Analytics scope = kind + name only (cross-year comparison is the whole point).
+  var scope=TRVALL.filter(function(r){
+    if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;
+    if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;
+    return true;
   });
-  h+='</tbody></table>';
-  // By category
-  h+='<div class=zlabel style="margin-top:18px">By category</div><table class=tbl><thead><tr><th>Air</th><th>Hotel</th><th>Medical</th><th>Visa</th><th>Food</th><th>Transport</th><th>Other</th></tr></thead><tbody><tr>'
-    +['air','hotel','medical','visa','food','transport','other'].map(function(c){return '<td>'+usd(s.byCat[c])+'</td>';}).join('')+'</tr></tbody></table>';
-  // Line items
-  h+='<div class=zlabel style="margin-top:18px">Line items ('+recs.length+')</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Name</th><th>Air</th><th>Hotel</th><th>Med</th><th>Visa</th><th>Food</th><th>Trans</th><th>Other</th><th>Total</th></tr></thead><tbody>'
-    +recs.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td>'+usd(r.air)+'</td><td>'+usd(r.hotel)+'</td><td>'+usd(r.medical)+'</td><td>'+usd(r.visa)+'</td><td>'+usd(r.food)+'</td><td>'+usd(r.transport)+'</td><td>'+usd(r.other)+'</td><td><b>'+usd(r.total)+'</b></td></tr>';}).join('')+'</tbody></table>'
-    +'<p class=muted style="text-align:left;padding:10px 2px">2025 is loaded as history (crew + shoreside management). Newer years: upload in Settings → Data uploads → Travel expenses.</p>';
-  $('#trbody').innerHTML=h;
-  }catch(e){$('#trbody').innerHTML='<div class="card" style="max-width:none"><b>Could not load travel data.</b><div class=csub style="margin-top:6px">'+((e&&e.message)||e)+'</div><button class="btn" style="margin-top:10px" onclick="loadTravel()">Retry</button></div>';}
+  var years=Array.from(new Set(scope.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
+  var LY=years[0],PY=years[1];
+  var h='';
+  // ---- YTD same-period comparison ----
+  if(LY){
+    var monthsLY=Array.from(new Set(scope.filter(function(r){return r.year===LY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
+    var rangeLab=monthsLY.length?(mn[monthsLY[0]]+'–'+mn[monthsLY[monthsLY.length-1]]):'';
+    var ytdLY=tSum(scope,LY,monthsLY,'total'),ytdPY=PY?tSum(scope,PY,monthsLY,'total'):null;
+    var d=pct(ytdLY,ytdPY);
+    h+='<div class=zlabel>Year-to-date — same period</div>';
+    h+='<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
+      +'<div class=csub>YTD '+rangeLab+' · <b style="color:var(--navy)">'+LY+'</b>'+(PY?(' vs '+PY+' (same months)'):' (no prior year on file)')+'</div>'
+      +'<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:6px">'
+      +'<div style="font-family:Outfit;font-size:30px;font-weight:800;color:var(--navy)">'+usd0(ytdLY)+'</div>'
+      +(PY?('<div class=csub>'+LY+' vs '+usd0(ytdPY)+' in '+PY+' &nbsp; '+deltaCell(ytdLY,ytdPY)+' &nbsp; ('+(ytdLY-ytdPY>=0?'+':'')+usd0(ytdLY-ytdPY)+')</div>'):'')
+      +'</div>';
+    // per-category YTD table
+    h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Category</th><th style="text-align:right">'+(PY||'prior')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
+    TCATS.forEach(function(c){var l=tSum(scope,LY,monthsLY,c),p=PY?tSum(scope,PY,monthsLY,c):null;if(!l&&!p)return;h+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+deltaCell(l,p)+'</td></tr>';});
+    h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdPY==null?'—':usd0(ytdPY))+'</b></td><td style="text-align:right"><b>'+usd0(ytdLY)+'</b></td><td style="text-align:right">'+deltaCell(ytdLY,ytdPY)+'</td></tr>';
+    h+='</tbody></table></div>';
+  }
+  // ---- Month-by-month: this year vs last year ----
+  if(LY&&PY){
+    var monthsAll=Array.from(new Set(scope.filter(function(r){return r.year===LY||r.year===PY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
+    h+='<div class=zlabel style="margin-top:18px">Month by month — '+LY+' vs '+PY+'</div>';
+    h+='<table class=tbl><thead><tr><th>Month</th><th style="text-align:right">'+PY+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
+    var sumP=0,sumL=0;
+    monthsAll.forEach(function(m){var p=tSum(scope,PY,[m],'total'),l=tSum(scope,LY,[m],'total');sumP+=p;sumL+=l;h+='<tr><td>'+mn[m]+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td><td style="text-align:right">'+(l?usd0(l):'—')+'</td><td style="text-align:right">'+deltaCell(l,p)+'</td></tr>';});
+    h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+usd0(sumP)+'</b></td><td style="text-align:right"><b>'+usd0(sumL)+'</b></td><td style="text-align:right">'+deltaCell(sumL,sumP)+'</td></tr>';
+    h+='</tbody></table>';
+  }
+  // ---- Line-item explorer (respects ALL filters) ----
+  var rows=TRVALL.filter(function(r){
+    if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;
+    if(TF.year&&r.year!==+TF.year)return false;
+    if(TF.month&&r.month!==+TF.month)return false;
+    if(TF.cat&&!(r[TF.cat]>0))return false;
+    if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;
+    return true;
+  });
+  var ftot=0,fcat={};TCATS.forEach(function(c){fcat[c]=0;});
+  rows.forEach(function(r){ftot+=r.total;TCATS.forEach(function(c){fcat[c]+=r[c]||0;});});
+  var topName='—',topVal=0,byp={};rows.forEach(function(r){byp[r.crew_name]=(byp[r.crew_name]||0)+r.total;});
+  Object.keys(byp).forEach(function(n){if(byp[n]>topVal){topVal=byp[n];topName=n;}});
+  var filtLab=[];if(TF.year)filtLab.push(TF.year);if(TF.month)filtLab.push(mn[+TF.month]);if(TF.cat)filtLab.push(TCATLAB[TF.cat]);if(TF.kind)filtLab.push(TF.kind);if(TF.q)filtLab.push('"'+TF.q+'"');
+  h+='<div class=zlabel style="margin-top:18px">Line items'+(filtLab.length?(' · '+filtLab.join(' · ')):'')+'</div>';
+  // header totals strip (live)
+  h+='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:8px">'
+    +tile(usd0(ftot),rows.length+' items · total')
+    +tile(usd0(fcat.air),'Air ('+(ftot?Math.round(fcat.air/ftot*100):0)+'%)','amber')
+    +tile(usd0(fcat.hotel),'Hotel')
+    +tile(topName+' · '+usd0(topVal),'Top spender (filtered)')+'</div>';
+  h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:10px">'
+    +['medical','visa','food','transport','other'].map(function(c){return tile(usd0(fcat[c]),TCATLAB[c]);}).join('')+'</div>';
+  h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
+    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=13 class=muted>No line items match these filters.</td></tr>';
+  h+='</tbody></table>'
+    +'<p class=muted style="text-align:left;padding:10px 2px">YTD compares the same calendar months in each year (apples-to-apples). 2025 is loaded as history; upload newer years in Settings → Data uploads → Travel.</p>';
+  document.getElementById('trbody').innerHTML=h;
 }
+async function loadTravel(){return renderTravel();}
 let FLEET=null,FLT={mode:'all',q:''};
 async function renderFleet(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
