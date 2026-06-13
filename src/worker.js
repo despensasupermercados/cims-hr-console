@@ -367,9 +367,18 @@ async function apiDashboard(env) {
   const byStatus = await env.DB.prepare("SELECT status, COUNT(*) n FROM crew GROUP BY status").all();
   const statusMap = {}; for (const r of byStatus.results) statusMap[r.status] = r.n;
   const medExp = (await q("SELECT COUNT(*) n FROM crew WHERE med_exp IS NOT NULL AND med_exp < ?", in90)).n;
+  const sirbExp = (await q("SELECT COUNT(*) n FROM crew WHERE sirb_exp IS NOT NULL AND sirb_exp < ?", in90)).n;
   const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
   const usvExp = (await q("SELECT COUNT(*) n FROM crew WHERE usv_exp IS NOT NULL AND usv_exp < ?", in90)).n;
+  const schExp = (await q("SELECT COUNT(*) n FROM crew WHERE sch_exp IS NOT NULL AND sch_exp < ?", in90)).n;
   const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
+  // Workforce split by client/brand (active crew only) for the donut.
+  const vrows = (await env.DB.prepare("SELECT vessel_observed, COUNT(*) n FROM crew WHERE status!='Inactive' GROUP BY vessel_observed").all()).results;
+  const byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0 };
+  for (const r of vrows) byClient[clientOf(r.vessel_observed)] += r.n;
+  // Bonus committed to date (money path — read only).
+  let bonus = { committed: 0, pay: 0 };
+  try { const bo = await q("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome"); bonus = { committed: bo.n || 0, pay: bo.p || 0 }; } catch {}
   // Birthdays today (match MM-DD of dob).
   const md = today.slice(5);
   const bd = (await env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND status='On board' ORDER BY last_name").bind(md).all()).results;
@@ -396,9 +405,10 @@ async function apiDashboard(env) {
       on_vacation: statusMap["On Vacation"] || 0,
       earmarked: statusMap["Earmarked"] || 0,
       inactive: statusMap["Inactive"] || 0,
-      vessels
+      vessels, byClient
     },
-    compliance: { med_exp_90: medExp, pp_exp_90: ppExp, usv_exp_90: usvExp },
+    compliance: { med_exp_90: medExp, sirb_exp_90: sirbExp, pp_exp_90: ppExp, usv_exp_90: usvExp, sch_exp_90: schExp },
+    bonus,
     history: { crew: (hist && hist.crew) || 0, contracts: (hist && hist.contracts) || 0, days: (hist && hist.days) || 0 },
     dryDockNow: inDockNow(DRY_DOCK, today).length
   });
@@ -919,6 +929,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .noteitem{border-left:3px solid var(--royal);background:#f7f9fc;border-radius:0 8px 8px 0;padding:8px 11px}
 .notemeta{font-size:11px;color:var(--mut);font-weight:600}
 .notetext{font-size:13px;color:var(--deep);margin-top:3px;white-space:pre-wrap}
+.dzone{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;margin-bottom:6px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
+.panel h3{font-family:'Outfit';font-size:12.5px;color:var(--navy);margin:0 0 10px;font-weight:700}
+.panel.center{display:flex;flex-direction:column;align-items:center}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:12px;color:var(--deep)}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px;vertical-align:middle}
 .muted{color:var(--mut);font-size:13px;padding:30px;text-align:center}
 .ov{position:fixed;inset:0;background:rgba(20,45,72,.5);display:flex;align-items:center;justify-content:center;z-index:60;padding:20px}
 .modal{background:#fff;border-radius:15px;width:560px;max-width:100%;max-height:92vh;overflow:auto;box-shadow:0 24px 70px rgba(20,45,72,.28)}
@@ -1631,44 +1647,86 @@ function exportCompliance(){
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='compliance_'+COMP.today+'_'+COMP.warnDays+'d.csv';a.click();
 }
+/* ---- hand-rolled inline-SVG charts (no CDN dependency) ---- */
+function donutSVG(segs){
+  var cx=90,cy=90,r=72,ir=46,total=segs.reduce(function(a,b){return a+(b.value||0);},0)||1,ang=-Math.PI/2,out='';
+  segs.forEach(function(s){var v=s.value||0;if(v<=0)return;var a2=ang+v/total*Math.PI*2;
+    var x1=cx+r*Math.cos(ang),y1=cy+r*Math.sin(ang),x2=cx+r*Math.cos(a2),y2=cy+r*Math.sin(a2);
+    var xi2=cx+ir*Math.cos(a2),yi2=cy+ir*Math.sin(a2),xi1=cx+ir*Math.cos(ang),yi1=cy+ir*Math.sin(ang);
+    var lg=(a2-ang)>Math.PI?1:0;
+    out+='<path d="M'+x1.toFixed(1)+' '+y1.toFixed(1)+' A'+r+' '+r+' 0 '+lg+' 1 '+x2.toFixed(1)+' '+y2.toFixed(1)+' L'+xi2.toFixed(1)+' '+yi2.toFixed(1)+' A'+ir+' '+ir+' 0 '+lg+' 0 '+xi1.toFixed(1)+' '+yi1.toFixed(1)+' Z" fill="'+s.color+'"></path>';
+    ang=a2;});
+  return '<svg viewBox="0 0 180 180" width="158" height="158">'+out+'<text x="90" y="86" text-anchor="middle" font-size="28" font-weight="800" fill="#1B3A5C" font-family="Outfit">'+total+'</text><text x="90" y="104" text-anchor="middle" font-size="10" fill="#6B7C93">crew</text></svg>';
+}
+function barSVG(items){
+  var max=items.reduce(function(a,b){return Math.max(a,b.value||0);},0)||1,w=260,bh=24,gap=11,h=items.length*(bh+gap),out='';
+  items.forEach(function(it,i){var y=i*(bh+gap),bw=Math.max(2,(it.value||0)/max*(w-130));
+    out+='<text x="0" y="'+(y+16)+'" font-size="11" fill="#42526a" font-family="DM Sans">'+it.label+'</text>';
+    out+='<rect x="92" y="'+y+'" width="'+bw.toFixed(1)+'" height="'+bh+'" rx="5" fill="'+(it.color||'#1E6FD0')+'"></rect>';
+    out+='<text x="'+(96+bw).toFixed(1)+'" y="'+(y+16)+'" font-size="11" font-weight="700" fill="#1B3A5C">'+(it.value||0)+'</text>';});
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'">'+out+'</svg>';
+}
+function lineSVG(pts){
+  if(!pts.length)return '<div class=muted style="padding:16px">No data on file.</div>';
+  var w=320,h=130,pad=26,max=pts.reduce(function(a,b){return Math.max(a,b.y||0);},0)||1,n=pts.length,dx=(w-pad*2)/Math.max(1,n-1);
+  var co=pts.map(function(p,i){return [pad+i*dx,h-pad-(p.y/max)*(h-pad*2)];});
+  var path=co.map(function(c,i){return (i?'L':'M')+c[0].toFixed(1)+' '+c[1].toFixed(1);}).join(' ');
+  var area=path+' L'+co[n-1][0].toFixed(1)+' '+(h-pad)+' L'+co[0][0].toFixed(1)+' '+(h-pad)+' Z';
+  var dots=co.map(function(c){return '<circle cx="'+c[0].toFixed(1)+'" cy="'+c[1].toFixed(1)+'" r="2.6" fill="#1E6FD0"></circle>';}).join('');
+  var labs=pts.map(function(p,i){return '<text x="'+co[i][0].toFixed(1)+'" y="'+(h-7)+'" text-anchor="middle" font-size="8" fill="#6B7C93">'+p.x+'</text>';}).join('');
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
+}
+function legendH(segs){return '<div class=legend>'+segs.filter(function(s){return (s.value||0)>0;}).map(function(s){return '<span><i style="background:'+s.color+'"></i>'+s.label+' '+s.value+'</span>';}).join('')+'</div>';}
+var DASH=null,DASH_SH=false;
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  const d=await (await fetch('/api/dashboard')).json();
-  const w=d.workforce,c=d.compliance;
-  $('#view').innerHTML=
-   '<div class=zlabel>Workforce</div><div class=tiles>'
-   +tile(w.total,'Total crew','','crew')+tile(w.on_board,'On board','green','rotation')+tile(w.on_vacation,'On vacation','amber','rotation')
-   +tile(w.earmarked,'Earmarked','royal','rotation')+tile(w.inactive,'Inactive','gray','rotation')+tile(w.vessels,'Vessels','','fleet')
-   +tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
-   +'</div>'
-   +((d.birthdays&&d.birthdays.length)?('<div class="card" style="max-width:none;border-left:3px solid var(--green);margin:2px 0 14px"><b style="color:var(--green-d)">🎂 Birthday today:</b> '+d.birthdays.map(function(b){return b.name+(b.vessel?(' · '+b.vessel):'');}).join(' &nbsp;•&nbsp; ')+'</div>'):'')
-   +'<div class=zlabel>Compliance — expiring within 90 days</div><div class=tiles>'
-   +tile(c.med_exp_90,'Medical','red','compliance')+tile(c.pp_exp_90,'Passport','amber','compliance')+tile(c.usv_exp_90,'US visa','amber','compliance')
-   +'</div>'
-   +'<div class=zlabel>Contract history (Keyman)</div><div class=tiles>'
-   +tile(d.history.crew,'Crew w/ history','','data')+tile(d.history.contracts,'Contracts on file','','billing')+tile(d.history.days.toLocaleString(),'Total sea-days','','billing')
-   +'</div>'
-   +'<div class=zlabel>Travel budget'+(d.travel&&d.travel.year?(' · '+d.travel.year):'')+' <button class="btn ghost" id=shtog style="margin-left:8px;padding:2px 10px;font-size:12px">Hide shoreside</button></div><div class=tiles id=trv></div><div id=trvmom class=csub style="margin-top:6px"></div>'
-   +'<p class=muted style="text-align:left;padding:14px 2px">Live from Cloudflare D1 · '+w.total+' crew · as of '+d.today+' · tip: tiles are clickable</p>';
+  var d;try{d=await (await fetch('/api/dashboard')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
+  DASH=d;var w=d.workforce,c=d.compliance,bd=d.birthdays||[],bz=d.bonus||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'}];
+  var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'}];
+  var compBars=[{label:'Medical',value:c.med_exp_90,color:'#BC3B2C'},{label:'Seaman bk',value:c.sirb_exp_90,color:'#B0741A'},{label:'Passport',value:c.pp_exp_90,color:'#B0741A'},{label:'US visa',value:c.usv_exp_90,color:'#B0741A'},{label:'Schengen',value:c.sch_exp_90,color:'#7A5AA8'}];
+  var compTot=compBars.reduce(function(a,b){return a+(b.value||0);},0);
+  var h='<div class=bar><h2>Operational dashboard</h2><span class=csub style="margin-left:auto">as of '+d.today+' · '+w.total+' crew</span></div>';
+  if(bd.length)h+='<div class="card" style="max-width:none;border-left:3px solid var(--green);margin:0 0 14px"><b style="color:var(--green-d)">🎂 Birthday today:</b> '+bd.map(function(b){return b.name+(b.vessel?(' · '+b.vessel):'');}).join(' &nbsp;•&nbsp; ')+'</div>';
+  // ZONE 1 — WORKFORCE
+  h+='<div class=zlabel>Workforce</div><div class=dzone>'
+   +'<div class="panel center"><h3>Status mix</h3>'+donutSVG(statusSegs)+legendH(statusSegs)+'</div>'
+   +'<div class="panel center"><h3>By client</h3>'+donutSVG(clientSegs)+legendH(clientSegs)+'</div>'
+   +'<div class=panel><h3>At a glance</h3><div class=tiles style="grid-template-columns:1fr 1fr">'
+     +tile(w.total,'Total crew','','crew')+tile(w.vessels,'Vessels','','fleet')
+     +tile(w.inactive,'Inactive','gray','crew')+tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
+   +'</div></div></div>';
+  // ZONE 2 — COMPLIANCE
+  h+='<div class=zlabel>Compliance — documents expiring within 90 days</div><div class=dzone>'
+   +'<div class="panel" style="grid-column:span 2"><h3>Expiring documents by type</h3>'+(compTot?barSVG(compBars):'<div class=muted style="padding:16px">All documents valid beyond 90 days.</div>')+'</div>'
+   +'<div class=panel><h3>Action needed</h3><div class=tiles style="grid-template-columns:1fr 1fr">'
+     +tile(compTot,'Total flagged',(compTot?'amber':'green'),'compliance')+tile(c.med_exp_90,'Medical','red','compliance')
+   +'</div><p class=hint style="margin-top:10px">Open the Compliance tab for the crew list and CSV export.</p></div></div>';
+  // ZONE 3 — COST & BONUS
+  h+='<div class=zlabel>Cost &amp; bonus</div><div class=dzone>'
+   +'<div class=panel style="grid-column:span 2"><h3>Travel spend by month'+(d.travel&&d.travel.year?(' · '+d.travel.year):'')+' <button class="btn ghost" id=shtog style="float:right;padding:2px 10px;font-size:11px">'+(DASH_SH?'Show shoreside':'Hide shoreside')+'</button></h3><div id=trvline></div><div id=trvmom class=csub style="margin-top:4px"></div></div>'
+   +'<div class=panel><h3>Budget &amp; bonus</h3><div id=trv class=tiles style="grid-template-columns:1fr 1fr"></div>'
+     +'<div class=tiles style="grid-template-columns:1fr 1fr;margin-top:10px">'+tile(d.history.contracts,'Contracts on file','','billing')+tile(d.history.days.toLocaleString(),'Sea-days','','billing')+'</div>'
+     +'<div class=tiles style="grid-template-columns:1fr;margin-top:10px">'+tile('$'+Number(bz.pay||0).toLocaleString(),(bz.committed||0)+' bonus(es) committed','green','bonus')+'</div>'
+   +'</div></div>'
+   +'<p class=muted style="text-align:left;padding:10px 2px">Live from Cloudflare D1 · tip: tiles are clickable</p>';
+  $('#view').innerHTML=h;
   document.querySelectorAll('#view .tile[data-go]').forEach(function(el){el.onclick=function(){show(el.getAttribute('data-go'));};});
-  (function(){
-    var tv2=d.travel||{},ms=tv2.months||[],el=document.getElementById('trvmom');if(!el||!ms.length)return;
-    var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    var last=ms[ms.length-1],prev=ms.length>1?ms[ms.length-2]:null,max=ms.reduce(function(a,b){return Math.max(a,b.t);},0)||1;
-    var spark=ms.map(function(x){var hh=Math.max(2,Math.round(x.t/max*28));return '<span title="'+mn[x.m]+\': \$'+Math.round(x.t).toLocaleString()+'" style="display:inline-block;width:11px;height:'+hh+'px;background:var(--navy);margin-right:2px;vertical-align:bottom;border-radius:2px;opacity:'+(x===last?1:.45)+'"></span>';}).join('');
-    var mom=(prev&&prev.t)?((last.t-prev.t)/prev.t*100):null,arrow=mom==null?'':(mom>=0?'▲':'▼'),col=mom==null?'var(--mut)':(mom>=0?'var(--red)':'var(--green-d)');
-    var air=tv2.air||0,share=tv2.all?Math.round(air/tv2.all*100):0;
-    el.innerHTML='<div style="height:30px;margin:4px 0 6px">'+spark+'</div>Latest: <b style="color:var(--navy)">'+mn[last.m]+'</b> \$'+Math.round(last.t).toLocaleString()+(mom!=null?(' · <span style="color:'+col+'">'+arrow+' '+Math.abs(mom).toFixed(0)+'% vs '+mn[prev.m]+'</span>'):'')+' · air '+share+'% of spend';
-  }());
-  var tv=d.travel||{},SHHIDE=false;
-  function paintTrv(){
-    var el=document.getElementById('trv'); if(!el)return;
-    var head=SHHIDE?tv.crew:tv.all, lab=SHHIDE?'Crew travel (excl. shoreside)':'Total travel (incl. shoreside)';
-    el.innerHTML=tile('$'+Number(head||0).toLocaleString(),lab,'','travel')+tile('$'+Number(tv.crew||0).toLocaleString(),'Crew','green','travel')+tile('$'+Number(tv.shoreside||0).toLocaleString(),'Shoreside mgmt','amber','travel');
-    el.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});
-  }
-  var bt=document.getElementById('shtog'); if(bt)bt.onclick=function(){SHHIDE=!SHHIDE;bt.textContent=SHHIDE?'Show shoreside':'Hide shoreside';paintTrv();};
-  paintTrv();
+  var bt=document.getElementById('shtog');if(bt)bt.onclick=function(){DASH_SH=!DASH_SH;paintDashCost();};
+  paintDashCost();
+}
+function paintDashCost(){
+  var d=DASH;if(!d)return;var tv=d.travel||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var bt=document.getElementById('shtog');if(bt)bt.textContent=DASH_SH?'Show shoreside':'Hide shoreside';
+  // line: total spend by month (shoreside is annual-only in source, so the toggle adjusts headline tiles)
+  var ms=tv.months||[],lineEl=document.getElementById('trvline');
+  if(lineEl)lineEl.innerHTML=lineSVG(ms.map(function(x){return {x:mn[x.m],y:x.t};}));
+  var momEl=document.getElementById('trvmom');
+  if(momEl&&ms.length){var last=ms[ms.length-1],prev=ms.length>1?ms[ms.length-2]:null;var mom=(prev&&prev.t)?((last.t-prev.t)/prev.t*100):null;var arrow=mom==null?'':(mom>=0?'▲':'▼');var col=mom==null?'var(--mut)':(mom>=0?'var(--red)':'var(--green-d)');var air=tv.air||0,share=tv.all?Math.round(air/tv.all*100):0;
+    momEl.innerHTML='Latest: <b style="color:var(--navy)">'+mn[last.m]+'</b> $'+Math.round(last.t).toLocaleString()+(mom!=null?(' · <span style="color:'+col+'">'+arrow+' '+Math.abs(mom).toFixed(0)+'% vs '+mn[prev.m]+'</span>'):'')+' · air '+share+'% of spend';}
+  var trv=document.getElementById('trv');if(trv){var head=DASH_SH?tv.crew:tv.all,lab=DASH_SH?'Crew only':'Total (incl. shore)';
+    trv.innerHTML=tile('$'+Number(head||0).toLocaleString(),lab,'','travel')+tile('$'+Number(tv.shoreside||0).toLocaleString(),'Shoreside','amber','travel');
+    trv.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});}
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
