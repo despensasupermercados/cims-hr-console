@@ -2,7 +2,7 @@
 // ours=true => bridged to our roster (SC id); ours=false => former/other-line crew (placeholder, shown greyed).
 // Dates are MONTH-granular approximations from the schedule grid. Display/context only; never money.
 export const SHIP_HISTORY = [
-{ship:"# of flights:",name:"Norman Osorio",sc:"SC-0038401",ours:true,on:"2021-06-01",off:"2021-06-01",brand:"Azamara"},
+
 {ship:"Adventure",name:"Cyrus Anthony Talucod",sc:"SC-0038382",ours:true,on:"2022-08-01",off:"2023-01-01",brand:"Royal"},
 {ship:"Adventure",name:"Maria Katrina Rica Murillo",sc:"SC-0038388",ours:true,on:"2023-07-01",off:"2024-03-05",brand:"Royal"},
 {ship:"Adventure",name:"Maria Katrina Rica Murillo",sc:"SC-0038388",ours:true,on:"2024-05-08",off:"2025-01-16",brand:"Royal"},
@@ -378,12 +378,12 @@ export const SHIP_HISTORY = [
 {ship:"Spectrum",name:"Tang, Kristel",sc:null,ours:false,on:"2022-11-01",off:"2023-05-01",brand:"Royal"},
 {ship:"Spectrum",name:"Brazzan, Christian",sc:null,ours:false,on:"2023-11-01",off:"2024-05-08",brand:"Royal"},
 {ship:"Spectrum",name:"Tuazon, Tizar",sc:null,ours:false,on:"2026-08-26",off:"2027-01-01",brand:"Royal"},
-{ship:"Sympony",name:"Raymond Villacortes",sc:"SC-0038350",ours:true,on:"2024-03-05",off:"2024-11-16",brand:"Royal"},
-{ship:"Sympony",name:"Angelo Tolentino",sc:"SC-0038377",ours:true,on:"2024-11-16",off:"2025-06-16",brand:"Royal"},
-{ship:"Sympony",name:"Maria Katrina Rica Murillo",sc:"SC-0038388",ours:true,on:"2025-06-16",off:"2025-12-16",brand:"Royal"},
-{ship:"Sympony",name:"King John Lee Manzano",sc:"SC-0038474",ours:true,on:"2025-12-16",off:"2026-02-16",brand:"Royal"},
-{ship:"Sympony",name:"Jim Olid",sc:"SC-0040153",ours:true,on:"2026-03-16",off:"2026-08-26",brand:"Royal"},
-{ship:"Sympony",name:"Haziel Caag",sc:"SC-0045584",ours:true,on:"2026-08-26",off:"2027-03-01",brand:"Royal"},
+{ship:"Symphony",name:"Raymond Villacortes",sc:"SC-0038350",ours:true,on:"2024-03-05",off:"2024-11-16",brand:"Royal"},
+{ship:"Symphony",name:"Angelo Tolentino",sc:"SC-0038377",ours:true,on:"2024-11-16",off:"2025-06-16",brand:"Royal"},
+{ship:"Symphony",name:"Maria Katrina Rica Murillo",sc:"SC-0038388",ours:true,on:"2025-06-16",off:"2025-12-16",brand:"Royal"},
+{ship:"Symphony",name:"King John Lee Manzano",sc:"SC-0038474",ours:true,on:"2025-12-16",off:"2026-02-16",brand:"Royal"},
+{ship:"Symphony",name:"Jim Olid",sc:"SC-0040153",ours:true,on:"2026-03-16",off:"2026-08-26",brand:"Royal"},
+{ship:"Symphony",name:"Haziel Caag",sc:"SC-0045584",ours:true,on:"2026-08-26",off:"2027-03-01",brand:"Royal"},
 {ship:"Utopia",name:"Angeli Robles",sc:"SC-0038311",ours:true,on:"2024-06-09",off:"2024-09-13",brand:"Royal"},
 {ship:"Utopia",name:"Erik Paygane",sc:"SC-0038385",ours:true,on:"2024-09-13",off:"2025-05-16",brand:"Royal"},
 {ship:"Utopia",name:"Cyrus Anthony Talucod",sc:"SC-0038382",ours:true,on:"2025-05-16",off:"2026-02-16",brand:"Royal"},

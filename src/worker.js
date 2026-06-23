@@ -14,6 +14,7 @@ import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { SHIP_HISTORY } from "./ship_history.js";
+import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -604,16 +605,19 @@ async function apiRotation(env) {
   }
   const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
   const contracts = {}; for (const sc in byCrew) contracts[sc] = byCrew[sc].length;
-  // Registry vessel string -> canonical short ship name (longest VESSEL_REF match; else prettified).
-  const vesselKeys = VESSEL_REF.map(v => ({ key: normShip(v.name), name: v.name })).sort((a, b) => b.key.length - a.key.length);
-  const shipOf = (vessel) => { const nv = normShip(vessel); if (!nv) return null; for (const v of vesselKeys) if (v.key && nv.indexOf(v.key) >= 0) return v.name; return String(vessel).replace(/^mv\s+/i, "").replace(/\s+of the seas\s*$/i, "").trim() || null; };
+  // Registry/keyman/schedule vessel string -> ONE canonical short ship name. Single source of truth
+  // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
+  // three data sources below so their sections key-align instead of fragmenting (Celebrity-prefixed
+  // and Azamara schedule rows used to miss the registry/keyman sections and vanish).
+  const vesselKeys = buildShipKeys(VESSEL_REF);
+  const shipOf = (vessel) => canonShipWith(vessel, vesselKeys);
   // Shoreside DG3 team (not seafarers): tagged + kept OFF the ship rotation.
   const SHORE_IDS = new Set(["SC-0038392", "SC-0038378"]);
   const SHORE_NM = new Set(["deleonjoemar", "mirandaohji", "guerraray", "abellanrolando", "lawrencedexter", "sanmartinmiguel", "berenyirita"]);
   const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
   // Schedule-tab dates per (ship, crew) — fallback enrichment when Keyman has no leg (latest run wins).
   const schEnr = {};
-  for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; const k = normShip(h.ship); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off }; }
+  for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off }; }
   // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
   // NOW (incl. 2-up crew-change overlaps). Dates enriched from Keyman, then the schedule tabs.
   const promByShip = {}, shoreside = [], pool = [];
@@ -629,14 +633,14 @@ async function apiRotation(env) {
     const sEnr = (schEnr[k] || {})[c.agency_id] || {};
     (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[k] || null, current: c.status === "On board" }));
   }
-  const histByShip = {};
-  for (const h of SHIP_HISTORY) { if (!h.ours) continue; const k = normShip(h.ship); (histByShip[k] = histByShip[k] || []).push(h); }
-  const validShip = new Set(VESSEL_REF.map(v => normShip(v.name)));
-  // Union of ships: registry-prominent + keyman-history + valid schedule ships.
+  const histByShip = {}, histDisp = {};
+  for (const h of SHIP_HISTORY) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
+  const validShip = validShipKeys(VESSEL_REF);
+  // Union of ships: registry-prominent + keyman-history + valid (canonical) schedule ships.
   const shipNames = {};
   for (const s of Object.keys(promByShip)) shipNames[normShip(s)] = s;
   for (const s of Object.keys(byShip)) if (!shipNames[normShip(s)]) shipNames[normShip(s)] = s;
-  for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histByShip[k][0].ship;
+  for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histDisp[k];
   const sections = Object.values(shipNames).map(ship => {
     const k = normShip(ship);
     const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
