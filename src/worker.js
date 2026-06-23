@@ -15,6 +15,8 @@ import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { SHIP_HISTORY } from "./ship_history.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
+import { applyOverride, OVR_FIELDS } from "./override.js";
+import { contractLedgerRow } from "./ledger.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -445,13 +447,7 @@ function clientOf(vessel) {
   return "Royal Caribbean";
 }
 // Manual edits live in crew_override and ALWAYS win over the imported base row.
-const OVR_FIELDS = ["first_name", "middle_name", "last_name", "status", "rank_override", "vessel_observed", "dob", "province", "phone", "email", "pp_no", "med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp", "baseline_count", "notes"];
-function applyOverride(base, ov) {
-  if (!ov) return base;
-  const o = { ...base };
-  for (const k of OVR_FIELDS) { if (ov[k] != null && ov[k] !== "") o[k] = ov[k]; }
-  return o;
-}
+// applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
 async function ensureCrewExtras(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_override (agency_id TEXT PRIMARY KEY, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_override TEXT, vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT, baseline_count INTEGER, notes TEXT, updated_at TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)").run();
@@ -775,13 +771,14 @@ async function apiContracts(env) {
   const rows = base.map(b => {
     const ov = ovm[b.agency_id] || {};
     const vessel = ov.vessel_observed != null ? ov.vessel_observed : b.vessel_observed;
-    const baseline = ov.baseline_count != null ? ov.baseline_count : b.baseline_count;
     const lo = lastOut[b.id];
-    const count = lo ? lo.count_after : (baseline == null ? 0 : baseline);
+    // Baseline + count + rank + next rung via the shared ledger helper (override-wins through the
+    // SAME resolveBaseline as the commit/PDF path — no inline copy that could silently drift).
+    const L = contractLedgerRow(b.baseline_count, ov.baseline_count, lo);
     return {
       agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
       vessel: vessel || null, client: clientOf(vessel), contracts: legCounts[b.agency_id] || 0,
-      count, baseline_set: baseline != null, rank: count >= 1 ? "PS" : "Jr PS", nextRung: ladderValue(count + 1),
+      count: L.count, baseline_set: L.baseline_set, rank: L.rank, nextRung: L.nextRung,
       lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
       lastGate: lo ? lo.gate : null, lastPay: lo ? lo.pay_usd : null, totalPay: totPay[b.id] || 0
     };

@@ -42,6 +42,7 @@ export function nextDryDock(shipName, dryDock, today) {
 export function docState(dt, today) {
   if (!dt) return "missing";
   const days = (new Date(dt) - new Date(today)) / 86400000;
+  if (isNaN(days)) return "missing"; // unparseable date -> flag as missing, never silently "ok"
   if (days < 0) return "expired";
   if (days < 90) return "expiring";
   return "ok";

@@ -16,6 +16,7 @@ const fullName = (c) => [c.first_name, c.middle_name, c.last_name].filter(Boolea
 export function docStatus(dt, today) {
   if (!dt) return { txt: "-", color: MUT };
   const days = (new Date(dt) - new Date(today)) / 86400000;
+  if (isNaN(days)) return { txt: dt, color: MUT }; // unparseable date -> show muted, not "ok" black
   if (days < 0) return { txt: dt + "  (EXPIRED)", color: RED };
   if (days < 90) return { txt: dt + "  (<90d)", color: AMBER };
   return { txt: dt, color: [0, 0, 0] };
