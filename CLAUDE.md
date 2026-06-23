@@ -50,8 +50,18 @@ move them. If a task seems to need a secret in code, stop and flag it.
 Every change is a commit with a clear message; every agent run posts a short digest of
 what it checked, fixed, and flagged. Prefer small, reviewable PRs over large ones.
 
+## 9. Verify the deploy is LIVE, not just committed
+A green commit is not a deploy. Cloudflare Workers Builds is a separate pipeline from the
+GitHub CI test gate, and a web-uploader commit can silently no-op. After every deploy the
+agent MUST confirm the change is actually serving by hitting the live API
+(`fetch('/api/…', {cache:'no-store'})`) and checking the behaviour — never trust a
+screenshot of a green commit. (Cautionary case: `ed41384` read as shipped + tests green but
+the fix was never live; found and corrected in Session 4.)
+
 ## Project facts
-- Two human users only (Miguel, Rita). Crew never log in.
+- 7 full users (Miguel, Rita + 5 contributors, added 2026-06-12 by Miguel's explicit decision).
+  **Money actions (bonus commit, baseline) are restricted to Miguel + Rita** (`MONEY_USERS` in
+  `policy.js`). Do NOT widen `@dg3.com` into role 'full'. Crew never log in.
 - Auth: magic-link (stateless HMAC token) + bootstrap dev-login; 12h signed-cookie session.
 - DB: Cloudflare D1 `cims-hr-console` (id f0ac8b6a-deac-4214-8f42-e22b202d7d7d).
 - Bonus count is event-sourced from `bonus_outcome` (append-only); never overwrite history.

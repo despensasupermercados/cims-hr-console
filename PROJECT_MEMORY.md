@@ -63,13 +63,19 @@ delivered to them (server-side), they don't access the app.
 - `auth.js` — `signToken`/`verifyToken` (HMAC stateless; hardened: malformed → null not throw),
   `emailAllowed`.
 - `compliance.js` — `crewComplianceReport`.
-- `rotation.js` — `buildRotationBoard`.
+- `rotation.js` — `buildRotationBoard` (legacy pure helper; the LIVE board is built in `worker.js apiRotation`).
+- `shipname.js` — **NEW (Session 4)** SINGLE SOURCE OF TRUTH for ship-name canonicalization:
+  `canonShip`/`canonShipWith`/`buildShipKeys`/`validShipKeys`. Turns any raw vessel string
+  (registry "MV CELEBRITY REFLECTION", keyman "Reflection", schedule "Celebrity Reflection",
+  "MV AZAMARA QUEST") into ONE canonical short name so the rotation board's three data sources
+  key-align instead of fragmenting. Fixes the dropped-history bug (Session 4 §A).
 - `daysworked.js` — `billingReport` (per-crew + per-vessel, period-clipped, actual>projected>open),
   `contractDays`, `periodDays`, `effectiveOff`.
 - `keyman_data.js` — generated contract history (203 rows / 65 crew): `{sc,km,ship,st,seq,on,proj,act}`.
 - `vessel_ref.js` — `VESSEL_REF` (50 vessels) + `DRY_DOCK` (14 windows).
 - `fleet.js` — `dryDockStatus`, `fleetDryDock`, `inDockNow`, `upcomingDocks`.
-- `test/*.test.js` — bonus, feedback, auth, compliance, rotation, daysworked, fleet.
+- `test/*.test.js` — bonus, feedback, auth, compliance, rotation, daysworked, fleet, deploy,
+  statement, travel, crewimport, policy, **shipname (Session 4)**. **103 tests** (was 92).
 - `migrations/` — 0001 schema (16 tables), 0002 crew seed, 0003 feedback_v2. (Most live data
   now loads via **self-seeding `ensureX()` in code**, not migrations — see §3.)
 - `CLAUDE.md` — agent rules. `.github/workflows/{test,self-maintenance}.yml`. `.github/CODEOWNERS`
@@ -474,3 +480,72 @@ Drive credential.
   R2 bucket for statement storage; DG3 IT email allowlist for Resend deliverability; data.xlsx
   itinerary parse; the §8 nightly auto-refresh (needs Drive credential).
 - Shoreside set is hard-coded in `apiRotation` — if the team changes, edit `SHORE_IDS`/`SHORE_NM`.
+
+---
+
+## SESSION UPDATE — 2026-06-23 (session 4: full code audit + rotation ship-name fix)
+**Mandate:** verify the entire codebase, find and fix bugs, backfill tests, ship. Repo HEAD at
+start `c65217d`; **HEAD at handoff `3eaa360`.** Two commits, both verified live on cims.work.
+
+### A. THE BIG BUG — rotation board was silently dropping 38% of schedule history (FIXED)
+- **Symptom (the real one):** the board keyed ships from THREE sources that name them differently
+  — registry/keyman use the bare hull name ("Reflection", "Quest"); the schedule tabs prefix
+  Celebrity ("Celebrity Reflection") and use Azamara short names absent from `VESSEL_REF`. The
+  `validShip` "junk guard" (session-3 commit 831c109) then discarded every non-exact match.
+- **Measured impact (simulated against live data):** **136 of 362 `ours` history rows dropped** —
+  ALL 14 Celebrity ships showed ZERO history (88 rows), ALL Azamara dropped/fragmented (39 rows),
+  plus typos. Azamara onboard cards also showed the wrong title ("AZAMARA QUEST") and wrong brand
+  colour (Royal, not Azamara), and Celebrity/Azamara onboard cards lost schedule-date enrichment.
+- **CORRECTION to session-3 §G:** this was **a logic bug, NOT the "data-coverage limit" it was filed
+  as.** The §8 claim that `ed41384` shipped an "Azamara `shipOf` fix" was FALSE — at `c65217d`,
+  `shipOf` had zero Azamara handling. The web-uploader commit had silently no-op'd / never contained
+  it, and nobody verified against the API. (See deploy rule below.)
+- **The fix:** new pure module `src/shipname.js` = ONE canonicalizer applied to all three sources so
+  their section keys align (longest `VESSEL_REF` match → Azamara short name → prettify). Plus two
+  data corrections in `ship_history.js`: the `Sympony`→`Symphony` typo (a canonicaliser can't catch a
+  misspelling) and a junk `# of flights:` parse-artifact row. `apiRotation` now canonicalises
+  registry + keyman + schedule names through `shipOf = canonShipWith(...)`, and `validShip` includes
+  the 4 Azamara hulls.
+- **Commit `1e85696`** (worker.js + shipname.js + ship_history.js, one commit per the "import in the
+  same commit" rule). **Commit `3eaa360`** (test/shipname.test.js).
+- **Verified LIVE (`GET /api/rotation`, no-store):** 49 sections; Azamara = Journey/Onward/Quest/
+  Pursuit, all brand=Azamara, all with history; all 14 Celebrity sections now carry history; ZERO
+  malformed titles; 247 history cards total. Bug closed.
+
+### B. FULL AUDIT — everything else reviewed, no other bugs
+- Read & audited every pure module + the worker money/ledger paths. **Clean:** `bonus.js` (locked
+  SOP), `auth.js`, `policy.js`, `compliance.js`, `daysworked.js`, `travel.js`, `crewimport.js`,
+  `fleet.js`, `clientOf`, and the money paths — `apiBonusCommit` (money-user gate + gate-note rule +
+  span validation + double-submit guard), `crewCount` (event-sourced), `effectiveBaseline`/
+  `resolveBaseline`, `applyOverride`. Nothing wrong.
+- **Two non-issues noted, deliberately NOT changed:** (1) `deploy.js docState` / `statement.js
+  docStatus` lack the ISO-date guard the other modules use → a malformed date returns "ok" instead of
+  flagging; never triggers because D1 dates are always normalised ISO or null. (2) `apiContracts`
+  resolves the baseline inline (`ov.baseline_count != null ? … : …`) instead of via `resolveBaseline`
+  — functionally identical, but it's money-adjacent so left for Miguel's call rather than touched
+  silently. (So §6's "all paths use resolveBaseline" is not literally true — the ledger duplicates it.)
+
+### C. TESTS — §9.2 gap closed
+- `test/shipname.test.js` (11 tests, total 92→**103**). Covers Celebrity-prefix mapping, Azamara
+  (registry + short), case/parenthetical noise, longest-match priority, junk/empty handling, and a
+  **regression guard** that FAILS LOUDLY if a future data refresh reintroduces an unmatched ship name
+  (so a silent history-drop can't recur). `applyOverride` and `apiContracts` ledger math remain
+  un-unit-tested (they're async/DB) — candidates for a future extract-and-test pass.
+
+### D. DEPLOY MECHANICS — new standing rule (learned the hard way)
+- The GitHub MCP (authenticated as `despensasupermercados`) can READ + verify commits (`get_commit`,
+  `list_commits`) but the web uploader is still the write path for large files (worker.js is 213KB —
+  too big to inline through the MCP `push_files`/`create_or_update_file` tools).
+- **RULE: every deploy must END with an API check of the LIVE behaviour** (`fetch('/api/…',
+  {cache:'no-store'})` via the Chrome JS tool), not a screenshot of a green commit. `ed41384` is the
+  cautionary tale: it read as "shipped + tests green" but the fix was never actually live.
+
+### E. OPEN / NEXT (session-4) — unchanged blockers, re-stated bluntly
+- **#17 bonus baselines STILL the core unblock — `baseline_count` NULL fleet-wide, blocked on Rita
+  for 4 sessions.** The platform's money function pays out nothing until she reconciles. This is a
+  person problem, not a code problem. Next action proposed to Miguel: a hard-deadline ask + a one-line
+  definition of the "reconciliation delivered" artifact.
+- Carryover: R2 bucket for statement storage; DG3 IT email allowlist for Resend; data.xlsx itinerary
+  (HR context only); §8 nightly auto-refresh (needs Drive read credential).
+- Remaining data-coverage (NOT a bug): some onboard cards still lack sign-on dates where a crew has
+  no Keyman leg AND no schedule entry for that ship — genuinely missing source data.
