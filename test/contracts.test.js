@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { groupContracts, contractSpan, contractCounts, fullContracts, isAzamaraShip } from "../src/contracts.js";
+import { groupContracts, contractSpan, contractCounts, fullContracts, isAzamaraShip, liveState, deriveStatus } from "../src/contracts.js";
 
 test("isAzamaraShip recognises the four Azamara ships", () => {
   ["Journey", "Quest", "Pursuit", "Onward"].forEach(s => assert.equal(isAzamaraShip(s), true));
@@ -55,4 +55,22 @@ test("contractCounts: short segments don't count as full contracts", () => {
 test("missing dates are ignored, empty input is safe", () => {
   assert.deepEqual(contractCounts([]), { contracts: 0, full: 0 });
   assert.deepEqual(contractCounts([{ on: "2024-01-01", end: null, ship: "X" }]), { contracts: 0, full: 0 });
+});
+
+test("liveState: onboard when an assignment spans today, holiday after sign-off, scheduled if only future", () => {
+  const T = "2026-06-24";
+  assert.equal(liveState([{ on: "2026-03-01", off: "2026-11-01" }], T), "onboard");
+  assert.equal(liveState([{ on: "2026-03-01", off: null }], T), "onboard"); // open-ended, still aboard
+  assert.equal(liveState([{ on: "2025-01-01", off: "2025-09-01" }], T), "holiday"); // signed off
+  assert.equal(liveState([{ on: "2026-09-01", off: "2027-03-01" }], T), "scheduled"); // future only
+  assert.equal(liveState([], T), "none");
+});
+
+test("deriveStatus: retired wins; otherwise maps the live state; falls back to imported", () => {
+  const T = "2026-06-24";
+  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, { retired: true }), "Retired");
+  assert.equal(deriveStatus([{ on: "2026-03-01", off: "2026-11-01" }], T, {}), "On board");
+  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, {}), "On Vacation");
+  assert.equal(deriveStatus([], T, { imported: "Earmarked" }), "Earmarked");
+  assert.equal(deriveStatus([{ on: "2026-09-01", off: "2027-03-01" }], T, { imported: "Earmarked" }), "Earmarked");
 });
