@@ -355,11 +355,15 @@ async function apiDaysWorked(env, url) {
     const to = url.searchParams.get("to") || asOf;
     const rows = await keymanRows(env);
     const rep = billingReport(rows, { from, to, asOf });
-    // attach crew names (sc -> name) for the per-crew view
+    // attach crew name + current vessel + customer (cruise line) + status for the per-crew view,
+    // so the monthly billing export can attribute each crew's days to the right customer.
     const names = {};
-    const cr = await env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed FROM crew").all();
-    for (const c of cr.results) names[c.agency_id] = { name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim(), vessel: c.vessel_observed };
-    rep.perCrew = rep.perCrew.map(x => ({ ...x, name: (names[x.sc] && names[x.sc].name) || x.sc }));
+    const cr = await env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed, status FROM crew").all();
+    for (const c of cr.results) names[c.agency_id] = { name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim(), vessel: c.vessel_observed, status: c.status };
+    rep.perCrew = rep.perCrew.map(x => {
+      const nm = names[x.sc] || {};
+      return { ...x, name: nm.name || x.sc, vessel: nm.vessel || null, client: clientOf(nm.vessel), status: nm.status || null };
+    });
     return json(rep);
   } catch (e) {
     console.error("daysworked_error", (e && e.stack) || e);
@@ -2213,7 +2217,7 @@ async function renderRotation(){
     +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
-    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()">Days worked (Excel)</button></div>'
+    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
   drawRotation();
 }
@@ -2274,13 +2278,28 @@ function drawRotation(){
 }
 async function exportDaysExcel(){
   try{
-    var d=await (await fetch('/api/daysworked')).json();
-    var rows=[['CREW DAYS WORKED'],['Crew','Days','Contracts','Basis']];
-    (d.perCrew||[]).forEach(function(c){rows.push([c.name,c.days,c.contracts,c.basis]);});
+    // Current month, month-to-date: days actually WORKED this month by crew active in Keyman now,
+    // so accounting can bill the customer. Window = 1st of this month -> today.
+    var now=new Date();
+    var pad=function(n){return (n<10?'0':'')+n;};
+    var from=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
+    var to=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
+    var monthLabel=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
+    var d=await (await fetch('/api/daysworked?from='+from+'&to='+to)).json();
+    var T=d.totals||{};
+    var rows=[
+      ['DAYS WORKED FOR BILLING — '+monthLabel],
+      ['Period (month-to-date):',from+' to '+to],
+      ['Crew active this month:',(T.crew||0),'Total sea-days:',(T.days||0)],
+      [],
+      ['BY CREW — for customer billing'],
+      ['Crew','Agency ID','Vessel','Customer','Status','Days worked','Basis']
+    ];
+    (d.perCrew||[]).forEach(function(c){rows.push([c.name,c.sc,c.vessel||'',c.client||'',c.status||'',c.days,c.basis]);});
     rows.push([]);rows.push(['BY VESSEL']);rows.push(['Vessel','Crew','Days','Basis']);
     (d.perVessel||[]).forEach(function(v){rows.push([v.ship,v.crew,v.days,v.basis]);});
     var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
-    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='days-worked.csv';a.click();
+    var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='days-worked_'+from.slice(0,7)+'.csv';a.click();
   }catch(e){alert('Could not export days worked.');}
 }
 async function assignCrew(id,ship){
