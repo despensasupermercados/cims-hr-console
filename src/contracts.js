@@ -57,3 +57,27 @@ export function contractCounts(legs, gapDays = GAP_DAYS) {
 
 // Convenience: the full-contract count that feeds the rank tier.
 export function fullContracts(legs, gapDays = GAP_DAYS) { return contractCounts(legs, gapDays).full; }
+
+/* ---- Status auto-tagging (derived from the live schedule assignments) ----
+   On a ship right now (an assignment spans today) -> on board. Signed off, with a past assignment and
+   no current one -> on holiday (the contract ended). Only future assignments / none -> fall back to the
+   imported registry status. A manual "Retired" tag always wins. Schedule legs are {on, off}. */
+export function liveState(legs, today) {
+  const L = (legs || []).filter(l => l && l.on)
+    .map(l => ({ on: l.on, off: l.off || null }))
+    .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
+  if (!L.length) return "none";
+  for (const l of L) if (l.on <= today && (l.off ? today <= l.off : true)) return "onboard";
+  const lastOff = L.reduce((m, l) => (l.off && l.off > m ? l.off : m), "");
+  if (lastOff && lastOff < today) return "holiday"; // signed off -> contract ended
+  return "scheduled";                                // only future assignment(s)
+}
+// Final status string. opts: { retired:bool, imported:string }.
+export function deriveStatus(legs, today, opts) {
+  opts = opts || {};
+  if (opts.retired) return "Retired";
+  const s = liveState(legs, today);
+  if (s === "onboard") return "On board";
+  if (s === "holiday") return "On Vacation";
+  return opts.imported || "Earmarked"; // scheduled / none -> keep what the registry says
+}

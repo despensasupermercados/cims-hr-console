@@ -17,7 +17,7 @@ import { SHIP_HISTORY } from "./ship_history.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank } from "./ledger.js";
-import { contractCounts, fullContracts } from "./contracts.js";
+import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -446,8 +446,14 @@ async function apiDashboard(env) {
   await ensureKeyman(env);
   const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on");
   const total = (await q("SELECT COUNT(*) n FROM crew")).n;
-  const byStatus = await env.DB.prepare("SELECT status, COUNT(*) n FROM crew GROUP BY status").all();
-  const statusMap = {}; for (const r of byStatus.results) statusMap[r.status] = r.n;
+  // Count by EFFECTIVE status (auto-derived from the schedule; retired/manual win) so the dashboard
+  // matches the crew cards and rotation board rather than the raw stored value.
+  await ensureCrewExtras(env);
+  const cs = (await env.DB.prepare("SELECT agency_id, status FROM crew WHERE redacted=0").all()).results;
+  const csOv = {}; for (const o of (await env.DB.prepare("SELECT agency_id, status, retired FROM crew_override").all()).results) csOv[o.agency_id] = o;
+  const csSched = scheduleBySc();
+  const statusMap = {};
+  for (const c of cs) { const s = crewStatus(c, csOv[c.agency_id], csSched[c.agency_id], today); statusMap[s] = (statusMap[s] || 0) + 1; }
   const medExp = (await q("SELECT COUNT(*) n FROM crew WHERE med_exp IS NOT NULL AND med_exp < ?", in90)).n;
   const sirbExp = (await q("SELECT COUNT(*) n FROM crew WHERE sirb_exp IS NOT NULL AND sirb_exp < ?", in90)).n;
   const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
@@ -509,6 +515,21 @@ function clientOf(vessel) {
 async function ensureCrewExtras(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_override (agency_id TEXT PRIMARY KEY, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_override TEXT, vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT, baseline_count INTEGER, notes TEXT, updated_at TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)").run();
+  try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
+}
+// Schedule assignments per crew (from SHIP_HISTORY), for the auto status derivation.
+function scheduleBySc() {
+  const m = {};
+  for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
+  return m;
+}
+// Effective status: manual 'Retired' tag wins; else a manual status edit wins; else auto-derive from
+// the live schedule (on a ship now -> On board; signed off -> On Vacation; only future / none -> registry).
+function crewStatus(base, ov, schedLegs, today) {
+  ov = ov || {};
+  if (ov.retired) return "Retired";
+  if (ov.status != null && ov.status !== "") return ov.status;
+  return deriveStatus(schedLegs || [], today, { imported: base && base.status });
 }
 // Returns the FULL enriched crew list (overrides merged, contract count, active span, client,
 // docs). Filtering/sorting is done client-side (≈100 crew) so the UI stays snappy and consistent.
@@ -522,13 +543,15 @@ async function apiCrew(env, url) {
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const nl = (await env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all()).results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
+  const sched = scheduleBySc();
   const crew = base.map(b => {
     const c = applyOverride(b, ovm[b.agency_id]);
     const ls = (byCrew[b.agency_id] || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
     let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1] || null;
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
-      status: c.status, rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
+      status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
+      rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
       client: clientOf(c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
       med_exp: c.med_exp, sirb_exp: c.sirb_exp, pp_exp: c.pp_exp, usv_exp: c.usv_exp, sch_exp: c.sch_exp,
       baseline_count: c.baseline_count, contract_count: fullContracts(ls.map(legShape)),
@@ -561,6 +584,7 @@ async function apiCrewSave(request, env, session) {
   await ensureCrewExtras(env);
   const cols = ["agency_id"], vals = [b.agency_id], up = [];
   for (const f of OVR_FIELDS) { if (b[f] !== undefined) { cols.push(f); vals.push(b[f] === "" ? null : b[f]); up.push(f + "=excluded." + f); } }
+  if (b.retired !== undefined) { cols.push("retired"); vals.push(b.retired ? 1 : 0); up.push("retired=excluded.retired"); } // manual Retired tag
   cols.push("updated_at"); vals.push(new Date().toISOString()); up.push("updated_at=excluded.updated_at");
   await env.DB.prepare("INSERT INTO crew_override (" + cols.join(",") + ") VALUES (" + cols.map(() => "?").join(",") + ") ON CONFLICT(agency_id) DO UPDATE SET " + up.join(",")).bind(...vals).run();
   await logActivity(env, session && session.email, "crew_edit", b.agency_id);
@@ -629,9 +653,11 @@ async function rotationSections(env) {
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
   const crewRows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all()).results;
-  const ovRows = (await env.DB.prepare("SELECT agency_id, vessel_observed FROM crew_override").all()).results;
-  const ovVessel = {}; for (const o of ovRows) if (o.vessel_observed != null && o.vessel_observed !== "") ovVessel[o.agency_id] = o.vessel_observed;
+  const ovRows = (await env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all()).results;
+  const ovVessel = {}, ovMap = {}; for (const o of ovRows) { ovMap[o.agency_id] = o; if (o.vessel_observed != null && o.vessel_observed !== "") ovVessel[o.agency_id] = o.vessel_observed; }
   for (const c of crewRows) if (ovVessel[c.agency_id]) c.vessel_observed = ovVessel[c.agency_id]; // manual edits win
+  const schedMap = scheduleBySc();
+  for (const c of crewRows) c.status = crewStatus(c, ovMap[c.agency_id], schedMap[c.agency_id], today); // auto status (On board / On Vacation), retired/manual win
   const cmap = {};
   for (const c of crewRows) cmap[c.agency_id] = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.agency_id, status: c.status || "Unknown", rank: c.rank_override || c.rank_observed || null };
   const rd = (await env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all()).results;
@@ -2787,6 +2813,7 @@ async function editCrewModal(id){
    +fg('Passport','<input id=ePp type=date value="'+iv(c.pp_exp)+'">')+fg('US visa','<input id=eUsv type=date value="'+iv(c.usv_exp)+'">')
    +fg('Schengen (Europe only)','<input id=eSch type=date value="'+iv(c.sch_exp)+'">')
    +'</div>'
+   +'<label class=ck style="margin-top:8px;font-weight:600"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+'> Retired (manual — keeps this crew off the auto On board / On Vacation tagging)</label>'
    +'<div style="margin-top:12px;text-align:right"><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
 }
@@ -2794,7 +2821,8 @@ async function saveEditCrew(id){
   var v=function(x){var e=document.getElementById(x);return e?e.value:undefined;};
   document.getElementById('eMsg').textContent='Saving…';
   var cnt=v('eCount');
-  var body={agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:document.getElementById('eShip').value,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===''?null:Number(cnt)};
+  var er=document.getElementById('eRetired');
+  var body={agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:document.getElementById('eShip').value,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===''?null:Number(cnt),retired:er&&er.checked?1:0};
   try{await fetch('/api/crew/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});closeCrewModal();renderCrew();}
   catch(e){document.getElementById('eMsg').textContent='Could not save.';}
 }
