@@ -73,11 +73,17 @@ export function liveState(legs, today) {
   return "scheduled";                                // only future assignment(s)
 }
 // Final status string. opts: { retired:bool, imported:string }.
+// The schedule only toggles ACTIVE crew between On board / On Vacation. Statuses that mean "not in
+// rotation" are preserved: Inactive (left/parked) always stays; Earmarked (recruited, not yet started)
+// only promotes to On board if a real current assignment exists — its old history can't reactivate it.
 export function deriveStatus(legs, today, opts) {
   opts = opts || {};
   if (opts.retired) return "Retired";
+  const imp = opts.imported || "";
+  if (/inactive/i.test(imp)) return imp;
   const s = liveState(legs, today);
+  if (/earmark/i.test(imp)) return s === "onboard" ? "On board" : imp;
   if (s === "onboard") return "On board";
   if (s === "holiday") return "On Vacation";
-  return opts.imported || "Earmarked"; // scheduled / none -> keep what the registry says
+  return imp || "Earmarked"; // scheduled / none -> keep what the registry says
 }
