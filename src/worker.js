@@ -101,6 +101,7 @@ export default {
         if (p === "/api/intel/crew")     return apiIntelCrew(env, url);
         if (p === "/api/intel/review")   return apiIntelReview(env);
         if (p === "/api/intel/resolve" && request.method === "POST") return apiIntelResolve(request, env, session);
+        if (p === "/api/intel/edit" && request.method === "POST") return apiIntelEdit(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -1067,6 +1068,14 @@ async function apiScoreQueue(env, url) {
 async function ensureIntel(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_intel (id TEXT PRIMARY KEY, agency_id TEXT, reporter TEXT, summary TEXT, source TEXT DEFAULT 'email', source_email_id TEXT, confidence TEXT, status TEXT DEFAULT 'filed', candidates TEXT, ts TEXT, created_by TEXT)").run();
+  try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN contract_no INTEGER").run(); } catch (e) {}
+  try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN edited_at TEXT").run(); } catch (e) {}
+}
+// The crew's contract number at the moment a note is filed (total Keyman legs) — lets the timeline
+// show "Contract 3" per entry so issues can be read per-contract over time.
+async function intelContractNo(env, agencyId) {
+  if (!agencyId) return null;
+  try { return (((await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(agencyId).first()) || {}).n) || null; } catch (e) { return null; }
 }
 async function intelRoster(env) {
   const rows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, status FROM crew WHERE redacted=0").all()).results;
@@ -1127,8 +1136,9 @@ async function apiIntelFile(request, env, session) {
   const conf = b.confidence || "low";
   const filed = !!(b.agency_id && (conf === "high" || conf === "med"));
   const id = "ci_" + crypto.randomUUID();
-  await env.DB.prepare("INSERT INTO crew_intel (id,agency_id,reporter,summary,source,source_email_id,confidence,status,candidates,ts,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(id, b.agency_id || null, b.reporter || null, String(b.summary).slice(0, 4000), b.source || "email", b.email_id || null, conf, filed ? "filed" : "pending", JSON.stringify(b.candidates || []), b.ts || new Date().toISOString(), (session && session.email) || "ai").run();
+  const contractNo = await intelContractNo(env, b.agency_id);
+  await env.DB.prepare("INSERT INTO crew_intel (id,agency_id,reporter,summary,source,source_email_id,confidence,status,candidates,ts,created_by,contract_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, b.agency_id || null, b.reporter || null, String(b.summary).slice(0, 4000), b.source || "email", b.email_id || null, conf, filed ? "filed" : "pending", JSON.stringify(b.candidates || []), b.ts || new Date().toISOString(), (session && session.email) || "ai", contractNo).run();
   if (b.email_id) await env.DB.prepare("UPDATE email_inbox SET status='processed', processed_at=? WHERE id=?").bind(new Date().toISOString(), b.email_id).run();
   await logActivity(env, session && session.email, "intel_file", (b.agency_id || "pending") + " " + conf);
   return json({ ok: true, id, status: filed ? "filed" : "pending" });
@@ -1136,7 +1146,7 @@ async function apiIntelFile(request, env, session) {
 // Filed intel timeline for one crew (newest first) — the crew card's "story over time".
 async function apiIntelCrew(env, url) {
   await ensureIntel(env);
-  const rows = (await env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(url.searchParams.get("id")).all()).results;
+  const rows = (await env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no, edited_at FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(url.searchParams.get("id")).all()).results;
   return json({ count: rows.length, intel: rows });
 }
 // Pending (low-confidence / unmatched) notes awaiting human triage, with candidate crew names.
@@ -1155,8 +1165,18 @@ async function apiIntelResolve(request, env, session) {
   if (!b.id) return json({ error: "no_id" }, 400);
   if (b.discard) { await env.DB.prepare("UPDATE crew_intel SET status='discarded' WHERE id=?").bind(b.id).run(); await logActivity(env, session && session.email, "intel_discard", b.id); return json({ ok: true, discarded: true }); }
   if (!b.agency_id) return json({ error: "no_crew" }, 400);
-  await env.DB.prepare("UPDATE crew_intel SET agency_id=?, status='filed', confidence='confirmed' WHERE id=?").bind(b.agency_id, b.id).run();
+  const cNo = await intelContractNo(env, b.agency_id);
+  await env.DB.prepare("UPDATE crew_intel SET agency_id=?, status='filed', confidence='confirmed', contract_no=? WHERE id=?").bind(b.agency_id, cNo, b.id).run();
   await logActivity(env, session && session.email, "intel_resolve", b.id + " -> " + b.agency_id);
+  return json({ ok: true });
+}
+// Edit a filed note's summary (manual correction of the AI summary).
+async function apiIntelEdit(request, env, session) {
+  await ensureIntel(env);
+  const b = await request.json().catch(() => ({}));
+  if (!b.id || !b.summary || !String(b.summary).trim()) return json({ error: "bad_input" }, 400);
+  await env.DB.prepare("UPDATE crew_intel SET summary=?, edited_at=? WHERE id=?").bind(String(b.summary).slice(0, 4000), new Date().toISOString(), b.id).run();
+  await logActivity(env, session && session.email, "intel_edit", b.id);
   return json({ ok: true });
 }
 // Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
@@ -1344,6 +1364,22 @@ label.req::after{content:' *';color:var(--red);font-weight:700}
 .gchip{background:#fbe9e7;color:var(--red);border-radius:7px;padding:2px 8px;font-weight:700;font-size:11px}
 .rbtns{display:flex;gap:8px;flex:none}
 .fbdot{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid rgba(0,0,0,.08)}
+.intcount{color:var(--mut);font-weight:600;text-transform:none;letter-spacing:0}
+.intelcard{background:#fff;border:1px solid var(--line);border-left:3px solid var(--navy);border-radius:11px;padding:11px 13px;margin-bottom:9px;box-shadow:0 1px 4px rgba(20,45,72,.06)}
+.intelhd{display:flex;align-items:flex-start;gap:8px;margin-bottom:7px}
+.intelmeta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;flex:1;font-size:11.5px;color:var(--mut)}
+.intelmeta .intdate{font-weight:600}
+.intelmeta .intrep{font-weight:700;color:var(--navy)}
+.intelmeta .intedited{font-style:italic;opacity:.7}
+.intchip{background:var(--bg);border-radius:6px;padding:2px 7px;font-size:10.5px;font-weight:700;color:var(--mut);white-space:nowrap}
+.intchip.src{background:#eef4ff;color:#1E6FD0;text-transform:capitalize}
+.intchip.ctr{background:#eaf7ee;color:var(--green-d)}
+.intelact{display:flex;gap:4px;flex:none}
+.intelact button{background:transparent;border:1px solid var(--line);border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;color:var(--mut);padding:3px 9px}
+.intelact button:hover{background:var(--bg);color:var(--navy)}
+.intelact button.del:hover{background:#fdecea;color:var(--red);border-color:#f3c0b8}
+.inteltext{font-size:13px;color:var(--ink);line-height:1.55}
+.inteledit{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font-family:inherit;font-size:13px;line-height:1.5}
 .sbadge{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:12px;padding:5px 12px;border-radius:20px;margin-bottom:10px}
 .sbadge.on{background:#e8f6ed;color:var(--green-d)}
 .sbadge.off{background:#fff1de;color:var(--amber)}
@@ -2557,7 +2593,7 @@ async function saveEditCrew(id){
 async function notesModal(id){
   var c=crewById(id);var name=c?[c.first_name,c.last_name].filter(Boolean).join(' '):id;
   var h='<div class=modcard><div class=modhd><div><div class=cname>Notes & field intel — '+name+'</div><div class=csub>The crew\\'s story over time — newest first.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
-   +'<div class=sec style="margin-top:12px">Field intel — summarised from contributor emails</div>'
+   +'<div class=sec style="margin-top:12px">Field intel<span id=intelcount class=intcount></span> — from contributor emails</div>'
    +'<div id=intellog class=notelog><div class=muted style="padding:14px">Loading…</div></div>'
    +'<div class=sec style="margin-top:16px">Manual notes</div>'
    +'<div style="margin-top:8px;display:flex;gap:8px"><textarea id=newNote rows=2 style="flex:1" placeholder="Add a note…"></textarea><button class="btn green" onclick="addCrewNote(\\''+id+'\\')" style="align-self:flex-end">Add note</button></div>'
@@ -2568,8 +2604,36 @@ async function notesModal(id){
 async function loadIntelLog(id){
   var box=document.getElementById('intellog');if(!box)return;
   try{var r=await (await fetch('/api/intel/crew?id='+encodeURIComponent(id))).json();var ns=r.intel||[];
-    box.innerHTML=ns.length?ns.map(function(n){var d=new Date(n.ts);var meta=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+(n.reporter?(' · '+String(n.reporter).replace(/</g,'&lt;')):'')+' · <span class=cchip>email'+(n.confidence&&n.confidence!=='high'?(' · '+n.confidence):'')+'</span>';return '<div class=noteitem><div class=notemeta>'+meta+'</div><div class=notetext>'+String(n.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div></div>';}).join(''):'<div class=muted style="padding:12px">No field intel yet. Forward crew emails to <b>crew-reports@cims.work</b> and they\\'ll be summarised here.</div>';
+    var hdr=document.getElementById('intelcount');if(hdr)hdr.textContent=ns.length?(' · '+ns.length+(ns.length===1?' entry':' entries')):'';
+    box.innerHTML=ns.length?ns.map(function(n){return intelCard(id,n);}).join(''):'<div class=muted style="padding:12px">No field intel yet. Forward crew emails to <b>crew-reports@cims.work</b> and they\\'ll be summarised here.</div>';
   }catch(e){box.innerHTML='<div class=muted style="padding:12px">Could not load intel.</div>';}
+}
+function intelCard(id,n){
+  var d=new Date(n.ts);
+  var dt=isNaN(d)?'':d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  var rep=n.reporter?('<span class=intrep>'+String(n.reporter).replace(/</g,'&lt;')+'</span>'):'';
+  var ctr=(n.contract_no!=null)?('<span class="intchip ctr">Contract '+n.contract_no+'</span>'):'';
+  var edited=n.edited_at?'<span class=intedited>· edited</span>':'';
+  return '<div class=intelcard><div class=intelhd>'
+    +'<div class=intelmeta><span class=intdate>'+dt+'</span>'+rep+'<span class="intchip src">'+(n.source||'email')+'</span>'+ctr+edited+'</div>'
+    +'<div class=intelact><button onclick="intelEdit(\\''+id+'\\',\\''+n.id+'\\')">Edit</button><button class=del onclick="intelDelete(\\''+id+'\\',\\''+n.id+'\\')">Delete</button></div></div>'
+    +'<div class=inteltext id=ictext_'+n.id+'>'+String(n.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div></div>';
+}
+function intelEdit(id,nid){
+  var box=document.getElementById('ictext_'+nid);if(!box)return;
+  var cur=box.innerHTML.replace(/<br>/g,'\\n').replace(/&lt;/g,'<').replace(/&amp;/g,'&');
+  box.innerHTML='<textarea id=icedit_'+nid+' class=inteledit rows=6>'+cur.replace(/</g,'&lt;')+'</textarea>'
+    +'<div style="margin-top:6px;display:flex;gap:6px"><button class="btn green" style="padding:5px 11px;font-size:12px" onclick="intelSave(\\''+id+'\\',\\''+nid+'\\')">Save</button><button class="btn ghost" style="padding:5px 11px;font-size:12px" onclick="loadIntelLog(\\''+id+'\\')">Cancel</button></div>';
+}
+async function intelSave(id,nid){
+  var t=document.getElementById('icedit_'+nid);if(!t||!t.value.trim())return;
+  try{await fetch('/api/intel/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:nid,summary:t.value})});}catch(e){}
+  loadIntelLog(id);
+}
+async function intelDelete(id,nid){
+  if(!confirm('Delete this field-intel entry? This cannot be undone.'))return;
+  try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:nid,discard:true})});}catch(e){}
+  loadIntelLog(id);
 }
 async function loadNoteLog(id){
   var box=document.getElementById('notelog');if(!box)return;
