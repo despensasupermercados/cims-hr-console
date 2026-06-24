@@ -2266,10 +2266,39 @@ async function renderCrew(){
    +'<select id=cShip onchange="CF.ship=this.value;paintCrew()"><option value="">All ships</option></select>'
    +'<select id=cSort onchange="CF.sort=this.value;paintCrew()"><option value="az">Sort: name A–Z</option><option value="soon">Sort: sign-off soonest</option><option value="tenure">Sort: contracts (high→low)</option><option value="ship">Sort: ship</option></select>'
    +'<button class="btn ghost" onclick="clearCrewFilters()">Clear</button>'
+   +'<button class="btn ghost" id=intelReviewBtn onclick="openIntelReview()">Review intel</button>'
    +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
    +'</div><div class=tiles id=crewtiles></div>'
    +'<div id=crewcount class=csub style="margin:8px 0 12px"></div><div id=crewgrid class=grid></div>';
-  crewShipOpts();paintCrew();
+  crewShipOpts();paintCrew();intelReviewCount();
+}
+async function intelReviewCount(){
+  try{var r=await (await fetch('/api/intel/review')).json();var b=document.getElementById('intelReviewBtn');if(b)b.innerHTML='Review intel'+(r.count?(' <span class=vchip>'+r.count+'</span>'):'');}catch(e){}
+}
+async function openIntelReview(){
+  var w=document.createElement('div');w.id='intelmodal';w.className='modwrap';
+  w.innerHTML='<div class=modcard><div class=modhd><div><div class=cname>Field intel — needs review</div><div class=csub>Emails the matcher could not confidently attribute. Assign to a crew, or discard.</div></div><button class="btn ghost" onclick="closeIntelReview()">Close ✕</button></div><div id=intelrev style="margin-top:12px"><div class=muted style="padding:14px">Loading…</div></div></div>';
+  w.onclick=function(e){if(e.target===w)closeIntelReview();};document.body.appendChild(w);loadIntelReview();
+}
+function closeIntelReview(){var w=document.getElementById('intelmodal');if(w)w.remove();}
+async function loadIntelReview(){
+  var box=document.getElementById('intelrev');if(!box)return;
+  var r;try{r=await (await fetch('/api/intel/review')).json();}catch(e){box.innerHTML='<div class=muted style="padding:14px">Could not load.</div>';return;}
+  var ps=r.pending||[];
+  if(!ps.length){box.innerHTML='<div class=muted style="padding:14px">Nothing to review — all clear.</div>';return;}
+  box.innerHTML=ps.map(function(p){
+    var cands=(p.candidates||[]).map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px;margin:2px" onclick="intelAssign(\\''+p.id+'\\',\\''+c.agency_id+'\\')">→ '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('');
+    return '<div class=noteitem><div class=notemeta>'+(p.reporter?(String(p.reporter).replace(/</g,'&lt;')+' · '):'')+'<span class=cchip>'+p.confidence+' match</span></div><div class=notetext>'+String(p.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div><div style="margin-top:6px">'+(cands||'<span class=hint>No candidate names found. </span>')+' <button class="btn ghost" style="padding:6px 10px;font-size:12px;margin:2px" onclick="intelDiscard(\\''+p.id+'\\')">Discard</button></div></div>';
+  }).join('');
+}
+async function intelAssign(id,aid){
+  try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,agency_id:aid})});}catch(e){}
+  loadIntelReview();intelReviewCount();
+}
+async function intelDiscard(id){
+  if(!confirm('Discard this note?'))return;
+  try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,discard:true})});}catch(e){}
+  loadIntelReview();intelReviewCount();
 }
 function crewShipOpts(){
   var sel=document.getElementById('cShip');if(!sel)return;
