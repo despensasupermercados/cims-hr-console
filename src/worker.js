@@ -757,9 +757,22 @@ async function apiBonusCrew(env, url) {
   const baseline = await effectiveBaseline(env, cr.agency_id, cr.baseline_count);
   const count = await crewCount(env, cr.id, baseline);
   const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
-  // Latest Keyman contract leg -> default sign-on/sign-off for the Score Card (manually editable there).
-  const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
-  const lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
+  // Default sign-on/off for the Score Card (manually editable there). Prefer the SCHEDULE deployment
+  // (the Keyman schedule grids — the contract just ended, or the current one), since the Contract
+  // Counter only holds completed-contract dates. Fall back to the latest Contract Counter leg.
+  const td = TODAY();
+  let bestPast = null, bestFut = null;
+  for (const h of SHIP_HISTORY) {
+    if (!h.ours || h.sc !== cr.agency_id || !h.off) continue;
+    if (h.off <= td) { if (!bestPast || h.off > bestPast.off) bestPast = h; }
+    else { if (!bestFut || h.off < bestFut.off) bestFut = h; }
+  }
+  const sched = bestPast || bestFut;
+  let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null;
+  if (!lastLeg) {
+    const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
+    lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
+  }
   return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
@@ -1003,30 +1016,30 @@ async function apiFeedbackScore(request, env, session) {
 // end (next 14 days) — the contracts that need contributor scoring. Effective sign-off = the
 // latest Keyman leg's actual-off, else projected-off. Each carries the per-role feedback status.
 async function apiScoreQueue(env, url) {
-  await ensureKeyman(env); await ensureFb(env);
+  await ensureFb(env);
   const today = TODAY();
   const days = Math.max(1, Math.min(120, parseInt(url.searchParams.get("days")) || 14));
-  const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
+  const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
   const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
-  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
-  const latest = {}; for (const l of legs) { const cur = latest[l.sc]; if (!cur || (l.seq || 0) > (cur.seq || 0)) latest[l.sc] = l; }
   const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
   const resp = (await env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all()).results;
   const fb = {}; for (const r of reqs) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = r.status; }
   for (const r of resp) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = "answered"; }
-  const recent = [], upcoming = [];
-  for (const sc in latest) {
-    const c = byId[sc]; if (!c) continue;
-    const l = latest[sc];
-    const signOff = l.act_off || l.proj_off || null;
-    const w = classifyWindow(signOff, today, days);
+  const keys = buildShipKeys(VESSEL_REF);
+  // SOURCE = the SCHEDULE deployment grids (ship_history), which carry forward-looking sign-off
+  // dates + ship. The Contract Counter is completed-contracts only (no future dates), so it can
+  // never populate "signing off next 14 days" — the schedule is the right Keyman tab for timing.
+  const recBy = {}, upBy = {};
+  for (const h of SHIP_HISTORY) {
+    if (!h.ours || !h.sc || !h.off || !byId[h.sc]) continue;
+    const w = classifyWindow(h.off, today, days);
     if (!w) continue;
-    const f = fb[c.id] || {};
-    const item = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: c.vessel_observed || null, ship: l.ship || null, signOn: l.sign_on || null, signOff, status: c.status, feedback: { ray: f.ray || "none", rolando: f.rolando || "none", dexter: f.dexter || "none" } };
-    (w === "recent" ? recent : upcoming).push(item);
+    if (w === "recent") { const cur = recBy[h.sc]; if (!cur || h.off > cur.off) recBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
+    else { const cur = upBy[h.sc]; if (!cur || h.off < cur.off) upBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
   }
-  recent.sort((a, b) => (a.signOff < b.signOff ? 1 : -1));    // most recently off first
-  upcoming.sort((a, b) => (a.signOff < b.signOff ? -1 : 1));  // soonest off first
+  const mk = (sc, dep) => { const c = byId[sc]; const f = (c && fb[c.id]) || {}; return { agency_id: sc, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || sc, vessel: c.vessel_observed || null, ship: canonShipWith(dep.ship, keys) || dep.ship, signOn: dep.on, signOff: dep.off, status: c.status, feedback: { ray: f.ray || "none", rolando: f.rolando || "none", dexter: f.dexter || "none" } }; };
+  const recent = Object.keys(recBy).map(sc => mk(sc, recBy[sc])).sort((a, b) => (a.signOff < b.signOff ? 1 : -1));    // most recently off first
+  const upcoming = Object.keys(upBy).map(sc => mk(sc, upBy[sc])).sort((a, b) => (a.signOff < b.signOff ? -1 : 1));    // soonest off first
   return json({ today, days, recent, upcoming });
 }
 // Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
