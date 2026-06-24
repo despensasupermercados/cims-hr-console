@@ -1084,12 +1084,38 @@ async function apiIntelIngest(request, env, session) {
   await logActivity(env, session && session.email, "intel_ingest", id);
   return json({ ok: true, id });
 }
+// Decode a raw MIME email down to readable body text: pick the text/plain part, decode
+// quoted-printable / base64, strip HTML tags + URLs. Forwarded crew reports are always encoded,
+// so without this the name matcher (and the AI) only see gibberish.
+function decodeEmailBody(raw) {
+  raw = String(raw || "").replace(/\r/g, "");
+  const low = raw.toLowerCase();
+  let start = 0, cte = "", body = raw;
+  const tp = low.indexOf("content-type: text/plain");
+  if (tp >= 0) {
+    const nl = raw.indexOf("\n\n", tp);
+    start = nl >= 0 ? nl + 2 : tp;
+    const hdr = raw.slice(tp, start).toLowerCase();
+    if (hdr.indexOf("base64") >= 0) cte = "b64"; else if (hdr.indexOf("quoted-printable") >= 0) cte = "qp";
+    let end = raw.indexOf("\n--", start);
+    body = raw.slice(start, end >= 0 ? end : undefined);
+  } else {
+    const nl = raw.indexOf("\n\n");
+    start = nl >= 0 ? nl + 2 : 0;
+    body = raw.slice(start);
+    if (low.indexOf("content-transfer-encoding: base64") >= 0) cte = "b64";
+    else if (low.indexOf("content-transfer-encoding: quoted-printable") >= 0) cte = "qp";
+  }
+  if (cte === "b64") { try { body = decodeURIComponent(escape(atob(body.replace(/\s+/g, "")))); } catch (e) { try { body = atob(body.replace(/\s+/g, "")); } catch (e2) {} } }
+  else { body = body.replace(/=\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))); }
+  return body.replace(/<[^>]+>/g, " ").replace(/https?:\/\/\S+/gi, " ").replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+}
 // Unprocessed inbox + a server-suggested crew match per email (the scheduled AI task confirms it).
 async function apiIntelInbox(env) {
   await ensureIntel(env);
   const roster = await intelRoster(env);
   const rows = (await env.DB.prepare("SELECT id, from_addr, subject, raw, received_at FROM email_inbox WHERE status='new' ORDER BY received_at ASC LIMIT 25").all()).results;
-  const emails = rows.map(r => ({ id: r.id, from: r.from_addr, subject: r.subject, received_at: r.received_at, raw: String(r.raw || "").slice(0, 8000), suggested: matchCrew((r.subject || "") + " \n " + (r.raw || ""), roster) }));
+  const emails = rows.map(r => { const body = decodeEmailBody(r.raw); return { id: r.id, from: r.from_addr, subject: r.subject, received_at: r.received_at, body: body.slice(0, 6000), suggested: matchCrew((r.subject || "") + " \n " + body, roster) }; });
   return json({ count: emails.length, emails });
 }
 // File a processed note: {email_id, agency_id|null, reporter, summary, confidence, candidates}.
