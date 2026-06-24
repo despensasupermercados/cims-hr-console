@@ -18,6 +18,7 @@ import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./sh
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank } from "./ledger.js";
 import { classifyWindow } from "./scorequeue.js";
+import { buildRoster, matchCrew } from "./crewmatch.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -94,6 +95,12 @@ export default {
         if (p === "/api/feedback/board") return apiFeedbackBoard(env);
         if (p === "/api/feedback/score" && request.method === "POST") return apiFeedbackScore(request, env, session);
         if (p === "/api/score/queue")    return apiScoreQueue(env, url);
+        if (p === "/api/intel/inbox")    return apiIntelInbox(env);
+        if (p === "/api/intel/ingest" && request.method === "POST") return apiIntelIngest(request, env, session);
+        if (p === "/api/intel/file" && request.method === "POST") return apiIntelFile(request, env, session);
+        if (p === "/api/intel/crew")     return apiIntelCrew(env, url);
+        if (p === "/api/intel/review")   return apiIntelReview(env);
+        if (p === "/api/intel/resolve" && request.method === "POST") return apiIntelResolve(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -104,6 +111,18 @@ export default {
       console.error("worker_error", (err && err.stack) || err);
       return json({ error: "server_error" }, 500);
     }
+  },
+  // Cloudflare Email Routing delivers crew-report mail here. Store the raw message in email_inbox
+  // for the scheduled AI task to summarise + match to a crew. Defensive: never throw (that bounces).
+  async email(message, env, ctx) {
+    try {
+      await ensureIntel(env);
+      let raw = "";
+      try { raw = await new Response(message.raw).text(); } catch (e) {}
+      const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
+      await env.DB.prepare("INSERT INTO email_inbox (id,from_addr,to_addr,subject,raw,received_at,status) VALUES (?,?,?,?,?,?,'new')")
+        .bind("em_" + crypto.randomUUID(), message.from || null, message.to || null, subject, String(raw).slice(0, 60000), new Date().toISOString()).run();
+    } catch (e) { console.error("email_ingest_error", (e && e.stack) || e); }
   }
 };
 
@@ -1043,6 +1062,76 @@ async function apiScoreQueue(env, url) {
   const recent = Object.keys(recBy).map(sc => mk(sc, recBy[sc])).sort((a, b) => (a.signOff < b.signOff ? 1 : -1));    // most recently off first
   const upcoming = Object.keys(upBy).map(sc => mk(sc, upBy[sc])).sort((a, b) => (a.signOff < b.signOff ? -1 : 1));    // soonest off first
   return json({ today, days, recent, upcoming });
+}
+/* ----------------------- crew intel (email -> AI -> notes) — SEPARATE from the scored bonus ----------------------- */
+async function ensureIntel(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_intel (id TEXT PRIMARY KEY, agency_id TEXT, reporter TEXT, summary TEXT, source TEXT DEFAULT 'email', source_email_id TEXT, confidence TEXT, status TEXT DEFAULT 'filed', candidates TEXT, ts TEXT, created_by TEXT)").run();
+}
+async function intelRoster(env) {
+  const rows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, status FROM crew WHERE redacted=0").all()).results;
+  return buildRoster(rows);
+}
+// Manual/test injector: drop an email into the inbox as if it had arrived via Email Routing.
+async function apiIntelIngest(request, env, session) {
+  await ensureIntel(env);
+  const b = await request.json().catch(() => ({}));
+  const raw = String(b.raw || b.body || "").slice(0, 60000);
+  if (!raw.trim()) return json({ error: "empty" }, 400);
+  const id = "em_" + crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO email_inbox (id,from_addr,to_addr,subject,raw,received_at,status) VALUES (?,?,?,?,?,?,'new')")
+    .bind(id, b.from || (session && session.email) || null, b.to || "crew-reports@cims.work", b.subject || null, raw, new Date().toISOString()).run();
+  await logActivity(env, session && session.email, "intel_ingest", id);
+  return json({ ok: true, id });
+}
+// Unprocessed inbox + a server-suggested crew match per email (the scheduled AI task confirms it).
+async function apiIntelInbox(env) {
+  await ensureIntel(env);
+  const roster = await intelRoster(env);
+  const rows = (await env.DB.prepare("SELECT id, from_addr, subject, raw, received_at FROM email_inbox WHERE status='new' ORDER BY received_at ASC LIMIT 25").all()).results;
+  const emails = rows.map(r => ({ id: r.id, from: r.from_addr, subject: r.subject, received_at: r.received_at, raw: String(r.raw || "").slice(0, 8000), suggested: matchCrew((r.subject || "") + " \n " + (r.raw || ""), roster) }));
+  return json({ count: emails.length, emails });
+}
+// File a processed note: {email_id, agency_id|null, reporter, summary, confidence, candidates}.
+// agency_id + high/med confidence -> filed on the crew; otherwise -> pending (human review queue).
+async function apiIntelFile(request, env, session) {
+  await ensureIntel(env);
+  const b = await request.json().catch(() => ({}));
+  if (!b.summary || !String(b.summary).trim()) return json({ error: "no_summary" }, 400);
+  const conf = b.confidence || "low";
+  const filed = !!(b.agency_id && (conf === "high" || conf === "med"));
+  const id = "ci_" + crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO crew_intel (id,agency_id,reporter,summary,source,source_email_id,confidence,status,candidates,ts,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, b.agency_id || null, b.reporter || null, String(b.summary).slice(0, 4000), b.source || "email", b.email_id || null, conf, filed ? "filed" : "pending", JSON.stringify(b.candidates || []), b.ts || new Date().toISOString(), (session && session.email) || "ai").run();
+  if (b.email_id) await env.DB.prepare("UPDATE email_inbox SET status='processed', processed_at=? WHERE id=?").bind(new Date().toISOString(), b.email_id).run();
+  await logActivity(env, session && session.email, "intel_file", (b.agency_id || "pending") + " " + conf);
+  return json({ ok: true, id, status: filed ? "filed" : "pending" });
+}
+// Filed intel timeline for one crew (newest first) — the crew card's "story over time".
+async function apiIntelCrew(env, url) {
+  await ensureIntel(env);
+  const rows = (await env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(url.searchParams.get("id")).all()).results;
+  return json({ count: rows.length, intel: rows });
+}
+// Pending (low-confidence / unmatched) notes awaiting human triage, with candidate crew names.
+async function apiIntelReview(env) {
+  await ensureIntel(env);
+  const rows = (await env.DB.prepare("SELECT id, reporter, summary, confidence, candidates, ts FROM crew_intel WHERE status='pending' ORDER BY ts DESC LIMIT 100").all()).results;
+  const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew WHERE redacted=0").all()).results;
+  const nm = {}; for (const c of crew) nm[c.agency_id] = [c.first_name, c.last_name].filter(Boolean).join(" ");
+  const pending = rows.map(r => { let cand = []; try { cand = JSON.parse(r.candidates || "[]"); } catch (e) {} return { id: r.id, reporter: r.reporter, summary: r.summary, confidence: r.confidence, ts: r.ts, candidates: cand.map(a => ({ agency_id: a, name: nm[a] || a })) }; });
+  return json({ count: pending.length, pending });
+}
+// Human assigns a pending note to a crew (or discards it).
+async function apiIntelResolve(request, env, session) {
+  await ensureIntel(env);
+  const b = await request.json().catch(() => ({}));
+  if (!b.id) return json({ error: "no_id" }, 400);
+  if (b.discard) { await env.DB.prepare("UPDATE crew_intel SET status='discarded' WHERE id=?").bind(b.id).run(); await logActivity(env, session && session.email, "intel_discard", b.id); return json({ ok: true, discarded: true }); }
+  if (!b.agency_id) return json({ error: "no_crew" }, 400);
+  await env.DB.prepare("UPDATE crew_intel SET agency_id=?, status='filed', confidence='confirmed' WHERE id=?").bind(b.agency_id, b.id).run();
+  await logActivity(env, session && session.email, "intel_resolve", b.id + " -> " + b.agency_id);
+  return json({ ok: true });
 }
 // Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
 // Keyman projected-off dates are an unreliable trigger (often stale), which left the board empty.
@@ -2412,11 +2501,20 @@ async function saveEditCrew(id){
 }
 async function notesModal(id){
   var c=crewById(id);var name=c?[c.first_name,c.last_name].filter(Boolean).join(' '):id;
-  var h='<div class=modcard><div class=modhd><div><div class=cname>Notes — '+name+'</div><div class=csub>Kept with the crew across every contract. Newest first.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
-   +'<div style="margin-top:12px;display:flex;gap:8px"><textarea id=newNote rows=2 style="flex:1" placeholder="Add a note…"></textarea><button class="btn green" onclick="addCrewNote(\\''+id+'\\')" style="align-self:flex-end">Add note</button></div>'
+  var h='<div class=modcard><div class=modhd><div><div class=cname>Notes & field intel — '+name+'</div><div class=csub>The crew\\'s story over time — newest first.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
+   +'<div class=sec style="margin-top:12px">Field intel — summarised from contributor emails</div>'
+   +'<div id=intellog class=notelog><div class=muted style="padding:14px">Loading…</div></div>'
+   +'<div class=sec style="margin-top:16px">Manual notes</div>'
+   +'<div style="margin-top:8px;display:flex;gap:8px"><textarea id=newNote rows=2 style="flex:1" placeholder="Add a note…"></textarea><button class="btn green" onclick="addCrewNote(\\''+id+'\\')" style="align-self:flex-end">Add note</button></div>'
    +'<div id=notelog class=notelog><div class=muted style="padding:14px">Loading…</div></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
-  loadNoteLog(id);
+  loadNoteLog(id); loadIntelLog(id);
+}
+async function loadIntelLog(id){
+  var box=document.getElementById('intellog');if(!box)return;
+  try{var r=await (await fetch('/api/intel/crew?id='+encodeURIComponent(id))).json();var ns=r.intel||[];
+    box.innerHTML=ns.length?ns.map(function(n){var d=new Date(n.ts);var meta=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+(n.reporter?(' · '+String(n.reporter).replace(/</g,'&lt;')):'')+' · <span class=cchip>email'+(n.confidence&&n.confidence!=='high'?(' · '+n.confidence):'')+'</span>';return '<div class=noteitem><div class=notemeta>'+meta+'</div><div class=notetext>'+String(n.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div></div>';}).join(''):'<div class=muted style="padding:12px">No field intel yet. Forward crew emails to <b>crew-reports@cims.work</b> and they\\'ll be summarised here.</div>';
+  }catch(e){box.innerHTML='<div class=muted style="padding:12px">Could not load intel.</div>';}
 }
 async function loadNoteLog(id){
   var box=document.getElementById('notelog');if(!box)return;
