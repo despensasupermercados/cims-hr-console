@@ -61,3 +61,18 @@ test("empty input is safe", () => {
   assert.equal(r.totals.days, 0);
   assert.deepEqual(r.perCrew, []);
 });
+
+// The monthly billing export scopes to [1st-of-month, today]. Only crew with a contract overlapping
+// the current month appear (= "active in Keyman this month"); their days are clipped to the month.
+test("current-month billing window: only this-month crew, days clipped to the month", () => {
+  const rows = [
+    { sc: "SC-ON", ship: "Edge", on: "2026-05-10", proj: null, act: null },          // still onboard, started before the month
+    { sc: "SC-OFF", ship: "Allure", on: "2026-06-05", proj: null, act: "2026-06-18" }, // signed off mid-month
+    { sc: "SC-PREV", ship: "Wonder", on: "2026-03-01", proj: null, act: "2026-05-20" } // ended before June -> excluded
+  ];
+  const r = billingReport(rows, { from: "2026-06-01", to: "2026-06-23", asOf: "2026-06-23" });
+  assert.equal(r.totals.crew, 2);                                  // SC-PREV is not billable this month
+  assert.equal(r.perCrew.find(x => x.sc === "SC-ON").days, 22);    // Jun1 -> Jun23 (onboard, to asOf)
+  assert.equal(r.perCrew.find(x => x.sc === "SC-OFF").days, 13);   // Jun5 -> Jun18 (actual sign-off)
+  assert.equal(r.perCrew.some(x => x.sc === "SC-PREV"), false);
+});
