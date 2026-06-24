@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ledgerCount, contractLedgerRow } from "../src/ledger.js";
+import { ledgerCount, contractLedgerRow, psRank } from "../src/ledger.js";
 import { ladderValue } from "../src/bonus.js";
 
 test("ledgerCount: committed outcome's count_after is authoritative", () => {
@@ -22,16 +22,29 @@ test("contractLedgerRow: baseline resolves override-wins (incl. 0)", () => {
   assert.equal(contractLedgerRow(null, null, null).baseline, null); // nothing set
 });
 
-test("contractLedgerRow: rank threshold + baseline_set + nextRung", () => {
-  const r0 = contractLedgerRow(null, null, null); // unset baseline, no outcome
-  assert.deepEqual({ count: r0.count, set: r0.baseline_set, rank: r0.rank, next: r0.nextRung },
-    { count: 0, set: false, rank: "Jr PS", next: ladderValue(1) });
-  const r1 = contractLedgerRow(0, null, null); // baseline 0 -> set, still Jr PS
-  assert.deepEqual({ count: r1.count, set: r1.baseline_set, rank: r1.rank }, { count: 0, set: true, rank: "Jr PS" });
-  const r2 = contractLedgerRow(3, null, null); // baseline 3 -> PS
-  assert.deepEqual({ count: r2.count, rank: r2.rank, next: r2.nextRung }, { count: 3, rank: "PS", next: ladderValue(4) });
-  const r3 = contractLedgerRow(3, null, { count_after: 6 }); // outcome overrides baseline
-  assert.deepEqual({ count: r3.count, rank: r3.rank, next: r3.nextRung }, { count: 6, rank: "PS", next: ladderValue(7) });
+test("contractLedgerRow: baseline_set + count + nextRung (rank is no longer here)", () => {
+  const r0 = contractLedgerRow(null, null, null);
+  assert.deepEqual({ count: r0.count, set: r0.baseline_set, next: r0.nextRung }, { count: 0, set: false, next: ladderValue(1) });
+  const r1 = contractLedgerRow(0, null, null);
+  assert.deepEqual({ count: r1.count, set: r1.baseline_set }, { count: 0, set: true });
+  const r2 = contractLedgerRow(3, null, null);
+  assert.deepEqual({ count: r2.count, next: r2.nextRung }, { count: 3, next: ladderValue(4) });
+  const r3 = contractLedgerRow(3, null, { count_after: 6 });
+  assert.deepEqual({ count: r3.count, next: r3.nextRung }, { count: 6, next: ladderValue(7) });
+  assert.equal(r0.rank, undefined); // rank moved out of the ledger row into psRank(contracts)
+});
+
+test("psRank: 3 tiers by contracts served — 1st=Jr, 2nd-4th=PS, 5th+=Sr", () => {
+  assert.equal(psRank(0), "Jr PS");
+  assert.equal(psRank(1), "Jr PS");
+  assert.equal(psRank(2), "PS");
+  assert.equal(psRank(4), "PS");
+  assert.equal(psRank(5), "Sr PS");
+  assert.equal(psRank(12), "Sr PS");
+  assert.equal(psRank(null), "Jr PS");
+  assert.equal(psRank(1, true), "Junior Printer Specialist");
+  assert.equal(psRank(3, true), "Printer Specialist");
+  assert.equal(psRank(6, true), "Senior Printer Specialist");
 });
 
 // Behavior-equivalence guard: the new helper must match the exact inline logic that previously
@@ -49,7 +62,6 @@ test("contractLedgerRow matches the original inline apiContracts math", () => {
       baseline: baseline == null ? null : baseline,
       baseline_set: baseline != null,
       count,
-      rank: count >= 1 ? "PS" : "Jr PS",
       nextRung: ladderValue(count + 1),
     };
     // ---- new helper ----
