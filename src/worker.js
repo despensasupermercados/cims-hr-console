@@ -2555,14 +2555,16 @@ function swRow(c){
   var dots=['ray','rolando','dexter'].map(function(r){var ok=(fb[r]==='answered'||fb[r]==='na');return '<span class=fbdot title="'+r+'" style="background:'+(ok?'var(--green)':'#dfe5ec')+'"></span>';}).join('');
   return '<div class=brow onclick="swPickCrew(\\''+c.agency_id+'\\')"><div><div class=cname style="font-size:14px">'+(c.name||c.agency_id)+'</div><div class=csub>'+c.agency_id+' · '+(c.ship||c.vessel||'—')+' · '+(c.signOn||'?')+' → '+(c.signOff||'?')+'</div></div><div style="margin-left:auto;display:flex;gap:5px;align-items:center" title="Ray / Rolando / Dexter">'+dots+'</div></div>';
 }
-var _swt;function swSearch(){clearTimeout(_swt);_swt=setTimeout(swSearchGo,200);}
+var _swt;function swSearch(){clearTimeout(_swt);_swt=setTimeout(swSearchGo,90);}
 async function swSearchGo(){
-  var q=$('#swq')?$('#swq').value.trim():'';
+  var q=$('#swq')?$('#swq').value.trim().toLowerCase():'';
   if(!q){if($('#swSearchOut'))$('#swSearchOut').innerHTML='';return;}
-  var r=await (await fetch('/api/crew?q='+encodeURIComponent(q))).json();
-  var arr=(r.crew||[]).slice(0,12).map(function(c){return {agency_id:c.agency_id,name:[c.first_name,c.last_name].filter(Boolean).join(' '),vessel:c.vessel_observed,ship:null,signOn:c.active_on,signOff:c.active_off,feedback:{}};});
+  // Load the active roster ONCE (status != Inactive ≈ active in service), then filter locally as you type.
+  if(!_SW.allCrew){ try{var r=await (await fetch('/api/crew')).json();_SW.allCrew=(r.crew||[]).filter(function(c){return String(c.status||'').toLowerCase().indexOf('inactive')<0;});}catch(e){_SW.allCrew=[];} }
+  var arr=_SW.allCrew.filter(function(c){var nm=[c.first_name,c.last_name].filter(Boolean).join(' ').toLowerCase();return nm.indexOf(q)>=0||String(c.agency_id||'').toLowerCase().indexOf(q)>=0;})
+    .slice(0,15).map(function(c){return {agency_id:c.agency_id,name:[c.first_name,c.last_name].filter(Boolean).join(' '),vessel:c.vessel_observed,ship:null,signOn:c.active_on,signOff:c.active_off,feedback:{}};});
   swIndex(arr);
-  if($('#swSearchOut'))$('#swSearchOut').innerHTML='<div class=sec>Search results</div>'+(arr.length?arr.map(swRow).join(''):'<div class=hint>No matches.</div>');
+  if($('#swSearchOut'))$('#swSearchOut').innerHTML='<div class=sec>Matches ('+arr.length+')</div>'+(arr.length?arr.map(swRow).join(''):'<div class=hint>No active crew match "'+q+'".</div>');
 }
 async function swPickCrew(id){
   _SW.crew=_SW.byId[id]||{agency_id:id,name:id,feedback:{}};
@@ -2643,7 +2645,9 @@ async function openScore(id){
   var _st=(cr.status||'').toLowerCase();
   var _onship=_st.indexOf('board')>=0;
   var scCls=_onship?'sc-on':'sc-off';
-  var sb=_onship?'<div class="sbadge on">● On board — still serving</div>'
+  var _today=new Date().toISOString().slice(0,10);
+  var _aboard=(_onship&&d.lastLeg&&d.lastLeg.on)?monthsDays(d.lastLeg.on,_today):'';
+  var sb=_onship?('<div class="sbadge on">● On board'+(_aboard?(' — '+_aboard+' aboard'):' — still serving')+'</div>')
        :(_st.indexOf('vac')>=0?'<div class="sbadge off">⚓ Off the ship — on vacation</div>'
        :'<div class="sbadge idle">● '+(cr.status||'status unknown')+'</div>');
   var body=''
@@ -2692,7 +2696,7 @@ async function genLink(id,role){
   if(r.error){alert('Error: '+r.error);return;}
   document.getElementById('fbLink').innerHTML='<div class=hint style="margin-top:6px">Single-use '+role+' link — send to the contributor:<br><input readonly value="'+r.link+'" onclick="this.select()" style="width:100%;margin-top:4px;font-size:11px"></div>';
 }
-function fmtDate(iso){if(!iso)return'—';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).split('-');if(p.length!==3)return iso;return parseInt(p[2],10)+' '+(m[parseInt(p[1],10)-1]||'?')+' '+p[0];}
+function fmtDate(iso){if(!iso)return'—';var m=['January','February','March','April','May','June','July','August','September','October','November','December'];var p=String(iso).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo)return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 function recalcScore(){
   for(var k in FW){var e=$('#'+k);if(e)$('#'+k+'v').textContent=e.value;}
   var de=$('#dateEcho');if(de){var on=$('#spanStart').value,off=$('#spanEnd').value;de.innerHTML=(on||off)?('Reads as <b>'+fmtDate(on)+'</b> → <b>'+fmtDate(off)+'</b>'+((on&&off&&off<on)?' <span style="color:var(--red);font-weight:700">— sign-off is before sign-on!</span>':'')):'';}
