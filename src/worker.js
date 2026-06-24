@@ -3,7 +3,7 @@ import { signToken, verifyToken } from "./auth.js";
 import { crewComplianceReport } from "./compliance.js";
 import { buildRotationBoard } from "./rotation.js";
 import { KEYMAN_CONTRACTS } from "./keyman_data.js";
-import { billingReport } from "./daysworked.js";
+import { billingReport, periodDays } from "./daysworked.js";
 import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
 import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
 import { mapRows, diffCrew } from "./crewimport.js";
@@ -86,6 +86,7 @@ export default {
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
+        if (p === "/api/billing/month") return apiBillingMonth(env);
         if (p === "/api/travel")     return apiTravel(env, url);
         if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
@@ -602,7 +603,11 @@ async function apiCompliance(env, url) {
 // Keyman board grouped by SHIP across the FULL contract history: every crew who has served
 // a ship appears under it, current-onboard first, then back through history. Each card carries
 // the leg dates, embark/disembark ports, next ship, readiness flags, and a note indicator.
-async function apiRotation(env) {
+async function apiRotation(env) { return json(await rotationSections(env)); }
+// Resolve the live Keyman board: ships with their current-onboard roster + resolved sign-on/off
+// dates (registry status + vessel, enriched by contract_edit, Keyman legs, then schedule tabs).
+// Shared so the monthly billing export computes days from the SAME dates the board displays.
+async function rotationSections(env) {
   await ensureKeyman(env); await ensureReady(env);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -696,7 +701,48 @@ async function apiRotation(env) {
   const counts = {};
   ["On board", "On Vacation", "Earmarked", "Inactive"].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length;
-  return json({ sections, pool, shoreside, counts, inDock: inDockNow(DRY_DOCK, today) });
+  return { sections, pool, shoreside, counts, inDock: inDockNow(DRY_DOCK, today) };
+}
+// Days worked THIS MONTH per crew currently active in Keyman, for customer billing. Uses the live
+// board roster (rotationSections) so dates match what's shown on the Keyman page — NOT the historical
+// Contract Counter (keyman_contract3), which holds only closed past contracts. Onboard crew bill from
+// their sign-on through today; crew who signed off this month bill through their sign-off. Days are
+// clipped to [1st-of-month, today]; only crew with >0 days this month appear.
+function clientLabel(brand) {
+  if (brand === "Celebrity") return "Celebrity";
+  if (brand === "Azamara") return "Azamara";
+  if (brand === "NCL") return "NCL";
+  return "Royal Caribbean";
+}
+async function apiBillingMonth(env) {
+  try {
+    const today = TODAY();
+    const monthStart = today.slice(0, 7) + "-01";
+    const { sections } = await rotationSections(env);
+    const crewRows = [];
+    const vesselMap = {};
+    for (const sec of sections) {
+      const client = clientLabel(sec.brand);
+      for (const c of sec.crew || []) {
+        if (!c.signOn) continue;
+        // Onboard -> still working, bill through today; otherwise bill through their sign-off.
+        const off = c.current ? today : c.signOff;
+        if (!off) continue;
+        const days = periodDays(c.signOn, off, monthStart, today);
+        if (days <= 0) continue;
+        crewRows.push({ name: c.name, sc: c.agency_id, ship: sec.ship, client, status: c.status, signOn: c.signOn, days, current: !!c.current });
+        if (!vesselMap[sec.ship]) vesselMap[sec.ship] = { ship: sec.ship, client, crew: 0, days: 0 };
+        vesselMap[sec.ship].crew++; vesselMap[sec.ship].days += days;
+      }
+    }
+    crewRows.sort((a, b) => b.days - a.days);
+    const perVessel = Object.values(vesselMap).sort((a, b) => b.days - a.days);
+    const totalDays = crewRows.reduce((s, x) => s + x.days, 0);
+    return json({ month: today.slice(0, 7), from: monthStart, to: today, totals: { days: totalDays, crew: crewRows.length, vessels: perVessel.length }, perCrew: crewRows, perVessel });
+  } catch (e) {
+    console.error("billingmonth_error", (e && e.stack) || e);
+    return json({ error: "billingmonth_failed", detail: String(e && e.message || e) }, 500);
+  }
 }
 // Collapse SHIP_HISTORY rows for one ship into one card per person (min..max span), excluding
 // our crew already shown as a current card on this ship. Ours first, then former/other.
@@ -2278,26 +2324,22 @@ function drawRotation(){
 }
 async function exportDaysExcel(){
   try{
-    // Current month, month-to-date: days actually WORKED this month by crew active in Keyman now,
-    // so accounting can bill the customer. Window = 1st of this month -> today.
-    var now=new Date();
-    var pad=function(n){return (n<10?'0':'')+n;};
-    var from=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-01';
-    var to=now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate());
-    var monthLabel=now.toLocaleDateString('en-US',{month:'long',year:'numeric'});
-    var d=await (await fetch('/api/daysworked?from='+from+'&to='+to)).json();
-    var T=d.totals||{};
+    // Days actually WORKED this month by crew active in Keyman now (from the live board roster),
+    // so accounting can bill the customer. The server scopes to [1st-of-month -> today].
+    var d=await (await fetch('/api/billing/month')).json();
+    var T=d.totals||{};var from=d.from||'';var to=d.to||'';
+    var monthLabel=new Date((d.month||'')+'-01T00:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'});
     var rows=[
       ['DAYS WORKED FOR BILLING — '+monthLabel],
       ['Period (month-to-date):',from+' to '+to],
       ['Crew active this month:',(T.crew||0),'Total sea-days:',(T.days||0)],
       [],
       ['BY CREW — for customer billing'],
-      ['Crew','Agency ID','Vessel','Customer','Status','Days worked','Basis']
+      ['Crew','Agency ID','Vessel','Customer','Status','Sign-on','Days worked']
     ];
-    (d.perCrew||[]).forEach(function(c){rows.push([c.name,c.sc,c.vessel||'',c.client||'',c.status||'',c.days,c.basis]);});
-    rows.push([]);rows.push(['BY VESSEL']);rows.push(['Vessel','Crew','Days','Basis']);
-    (d.perVessel||[]).forEach(function(v){rows.push([v.ship,v.crew,v.days,v.basis]);});
+    (d.perCrew||[]).forEach(function(c){rows.push([c.name,c.sc,c.ship||'',c.client||'',c.status||'',c.signOn||'',c.days]);});
+    rows.push([]);rows.push(['BY VESSEL / CUSTOMER']);rows.push(['Vessel','Customer','Crew','Days']);
+    (d.perVessel||[]).forEach(function(v){rows.push([v.ship,v.client||'',v.crew,v.days]);});
     var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='days-worked_'+from.slice(0,7)+'.csv';a.click();
   }catch(e){alert('Could not export days worked.');}
