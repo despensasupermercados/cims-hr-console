@@ -341,22 +341,30 @@ async function apiDataStatus(env) {
 }
 // Read all contract rows in the shape billingReport expects.
 async function keymanRows(env) {
-  const r = await env.DB.prepare("SELECT sc, ship, sign_on on, proj_off proj, act_off act FROM keyman_contract3").all();
-  return r.results;
+  // NOTE: 'on' is a reserved SQL keyword, so aliasing sign_on AS on makes D1 reject the query
+  // (this silently broke days-worked from the keyman_contract3 rename onward). Select raw columns
+  // and map to the {on,proj,act} shape billingReport expects in JS instead.
+  const r = await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off FROM keyman_contract3").all();
+  return (r.results || []).map(x => ({ sc: x.sc, ship: x.ship, on: x.sign_on, proj: x.proj_off, act: x.act_off }));
 }
 async function apiDaysWorked(env, url) {
-  await ensureKeyman(env);
-  const asOf = TODAY();
-  const from = url.searchParams.get("from") || null;
-  const to = url.searchParams.get("to") || asOf;
-  const rows = await keymanRows(env);
-  const rep = billingReport(rows, { from, to, asOf });
-  // attach crew names (sc -> name) for the per-crew view
-  const names = {};
-  const cr = await env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed FROM crew").all();
-  for (const c of cr.results) names[c.agency_id] = { name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim(), vessel: c.vessel_observed };
-  rep.perCrew = rep.perCrew.map(x => ({ ...x, name: (names[x.sc] && names[x.sc].name) || x.sc }));
-  return json(rep);
+  try {
+    await ensureKeyman(env);
+    const asOf = TODAY();
+    const from = url.searchParams.get("from") || null;
+    const to = url.searchParams.get("to") || asOf;
+    const rows = await keymanRows(env);
+    const rep = billingReport(rows, { from, to, asOf });
+    // attach crew names (sc -> name) for the per-crew view
+    const names = {};
+    const cr = await env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed FROM crew").all();
+    for (const c of cr.results) names[c.agency_id] = { name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim(), vessel: c.vessel_observed };
+    rep.perCrew = rep.perCrew.map(x => ({ ...x, name: (names[x.sc] && names[x.sc].name) || x.sc }));
+    return json(rep);
+  } catch (e) {
+    console.error("daysworked_error", (e && e.stack) || e);
+    return json({ error: "daysworked_failed", detail: String(e && e.message || e) }, 500);
+  }
 }
 
 // Travel expenses — 2025 seeded as history; 2026+ uploaded in-app by Rita (replace-by-year).
