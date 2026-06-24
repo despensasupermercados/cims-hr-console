@@ -1127,6 +1127,24 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .bigpay{font-family:'Outfit';font-weight:800;font-size:30px;color:var(--green-d);text-align:center;margin:6px 0}.bigpay.zero{color:var(--red)}
 .gateflag{background:#fbe9e7;color:var(--red);border-radius:8px;padding:8px 11px;font-size:12.5px;font-weight:600;margin-top:6px}
 .mf{display:flex;gap:9px;justify-content:flex-end;margin-top:10px}
+.sec{display:flex;align-items:center;font-family:'Outfit';font-weight:700;color:var(--navy);font-size:13px;text-transform:uppercase;letter-spacing:.04em;margin:20px 0 9px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.sec .n{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--navy);color:#fff;font-size:11px;margin-right:8px;flex:none}
+label.req::after{content:' *';color:var(--red);font-weight:700}
+.fg input.bad{border-color:var(--red);background:#fdecea}
+.ckgate{border-left:3px solid var(--amber);padding-left:10px;border-radius:0 8px 8px 0;margin:4px 0;transition:background .15s}
+.ckgate.on{border-left-color:var(--red);background:#fbe9e7}
+.scsec{position:relative;transition:opacity .15s,filter .15s}
+.scsec.gated{opacity:.4;filter:grayscale(.4);pointer-events:none}
+.gateban{display:none;background:#fbe9e7;color:var(--red);border:1px solid #f3c0b8;border-radius:9px;padding:9px 11px;font-size:12.5px;font-weight:600;margin-bottom:10px}
+.scsec.gated .gateban{display:block;pointer-events:auto}
+.resultbar{position:sticky;bottom:0;margin:18px -20px 0;padding:13px 20px;background:#fff;border-top:1px solid var(--line);box-shadow:0 -9px 24px -14px rgba(16,38,64,.32);display:flex;align-items:center;gap:12px;flex-wrap:wrap;z-index:5}
+.resultbar #scoreOut{flex:1;display:flex;align-items:center;gap:12px;min-width:140px}
+.rnums{display:flex;gap:13px;font-size:12px;color:var(--mut);flex-wrap:wrap;align-items:center}
+.rnums b{font-family:'Outfit';color:var(--navy)}
+.rpay{font-family:'Outfit';font-weight:800;font-size:25px;color:var(--green-d);margin-left:auto;white-space:nowrap}
+.rpay.zero{color:var(--red)}
+.gchip{background:#fbe9e7;color:var(--red);border-radius:7px;padding:2px 8px;font-weight:700;font-size:11px}
+.rbtns{display:flex;gap:8px;flex:none}
 .btn{padding:9px 15px;border:0;border-radius:9px;background:var(--navy);color:#fff;font-weight:600;cursor:pointer;font-family:'DM Sans';font-size:13.5px}
 .btn.green{background:var(--green)}.btn.ghost{background:#fff;border:1px solid var(--line);color:var(--navy)}
 .warn{background:#fdf7ec;border:1px solid #ecdfc2;color:var(--amber);border-radius:9px;padding:9px 11px;font-size:12.5px;margin-bottom:12px}
@@ -2427,22 +2445,25 @@ async function openScore(id){
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew — treated as 0. Confirm via the reconciliation sheet before any payout is finalised.</div>';
   var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
   var body=''
-   +'<div class=hint>'+cr.agency_id+' · '+d.rank+' · Contract count <b>'+d.count+'</b> → completing makes it '+(d.count+1)+'. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
+   +'<div class=hint>'+cr.agency_id+' · '+d.rank+' · Contract count <b>'+d.count+'</b> → completing makes it <b>'+(d.count+1)+'</b>. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
    +warn+hist+'<div id=fbPanel></div>'
-   +'<div class=f2 style="margin-top:12px"><div class=fg><label>Sign-on</label><input type=date id=spanStart></div><div class=fg><label>Sign-off</label><input type=date id=spanEnd></div></div>'
+   +'<div class=sec><span class=n>1</span>Contract</div>'
+   +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore()"></div></div>'
    +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
+   +'<div class=sec><span class=n>2</span>Outcome &amp; gates</div>'
    +'<label class=ck><input type=checkbox id=gComplete checked onchange="recalcScore()"> Contract completed in full</label>'
    +'<label class=ck><input type=checkbox id=gCompassion onchange="recalcScore()"> Not completed — approved compassionate leave (treat as completed)</label>'
-   +'<label class=ck><input type=checkbox id=gRush onchange="recalcScore()"> Emergency/rush order from ordering failure (resets count)</label>'
-   +'<label class=ck><input type=checkbox id=gAudit onchange="recalcScore()"> Failed end-of-contract inventory audit (resets count)</label>'
-   +'<div class=fg id=gateNoteWrap style="display:none"><label>Reason &amp; evidence (required for a reset gate)</label><textarea id=gateNote rows=2 placeholder="e.g. Rush airfreight magenta toner 12 Mar — par hit 0, prior order skipped. Zendesk #5843."></textarea></div>'
-   +'<div style="margin:14px 0 6px;font-weight:700;font-family:\\'Outfit\\';color:var(--navy)">Scorecard</div>'
+   +'<label class="ck ckgate" id=rowRush><input type=checkbox id=gRush onchange="recalcScore()"> Emergency/rush order from ordering failure <b>— resets count to 0</b></label>'
+   +'<label class="ck ckgate" id=rowAudit><input type=checkbox id=gAudit onchange="recalcScore()"> Failed end-of-contract inventory audit <b>— resets count to 0</b></label>'
+   +'<div class=fg id=gateNoteWrap style="display:none"><label class=req>Reason &amp; evidence (required for a reset gate)</label><textarea id=gateNote rows=2 placeholder="e.g. Rush airfreight magenta toner 12 Mar — par hit 0, prior order skipped. Zendesk #5843."></textarea></div>'
+   +'<div class=sec><span class=n>3</span>Scorecard</div>'
+   +'<div class=scsec id=scoreSection><div class=gateban id=gateBan></div>'
    +'<div class=hint style="margin:-2px 0 8px">Award each factor from evidence (sliders start at 0).</div>'
    +rng('sOrder','On-time ordering',20)+rng('sAcc','Order accuracy',25)+rng('sPar','Par maintenance',15)
    +rng('sHand','Ship-condition handover',10)+rng('sComm','Communication (manual — Rita)',10)+rng('sMono','Mono click discipline (<20%)',5)
    +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
-   +'<div id=scoreOut></div>'
-   +'<div class=mf><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()">Close &amp; commit</button></div>';
+   +'</div>'
+   +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()">Commit</button></div></div>';
   $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';
   recalcScore();
   applyFeedback(cr.agency_id);
@@ -2468,12 +2489,22 @@ async function genLink(id,role){
 }
 function recalcScore(){
   for(var k in FW){var e=$('#'+k);if(e)$('#'+k+'v').textContent=e.value;}
-  $('#gateNoteWrap').style.display=($('#gRush').checked||$('#gAudit').checked)?'block':'none';
+  var rush=$('#gRush').checked,audit=$('#gAudit').checked;
+  $('#gateNoteWrap').style.display=(rush||audit)?'block':'none';
+  $('#rowRush').className='ck ckgate'+(rush?' on':'');
+  $('#rowAudit').className='ck ckgate'+(audit?' on':'');
   var r=computeBonusC();
-  var note=r.gate?(r.gate==='eval_below_3'?'Forfeited — count holds at '+r.count:'Bonus $0 — count resets to 0'):(r.score<80?'Below 80% floor — $0, count advances to '+r.nextCount:'Ladder $'+r.rung.toLocaleString()+' × '+r.score+'% (proportional)');
-  $('#scoreOut').innerHTML='<div class=scorebox><div class=scorerow><span>Scorecard total</span><b>'+r.score+'%</b></div><div class=scorerow><span>Floor</span><b>80%</b></div><div class=scorerow><span>Count after</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'<div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=hint style="text-align:center">'+note+'</div></div>';
+  var isReset=(r.gate==='rush'||r.gate==='audit'||r.gate==='not_completed');
+  $('#scoreSection').className='scsec'+(isReset?' gated':'');
+  $('#gateBan').innerHTML=isReset?('GATE: '+gateLabel(r.gate)+' → payout $0 and count resets to 0. The scores below are still recorded for the file, but they don\\'t change this outcome.'):'';
+  var msg=r.gate?(r.gate==='eval_below_3'?'Forfeited — count holds at '+r.count:'Resets count to 0'):(r.score<80?'Below 80% floor — count advances to '+r.nextCount:'Ladder $'+r.rung.toLocaleString()+' × '+r.score+'%');
+  var nums='<div class=rnums><span>Score <b>'+r.score+'%</b> / floor 80</span><span>Count <b>'+r.count+' → '+r.nextCount+'</b></span>'+(r.gate?'<span class=gchip>'+gateLabel(r.gate)+'</span>':'<span class=hint style="margin:0">'+msg+'</span>')+'</div>';
+  $('#scoreOut').innerHTML=nums+'<div class="rpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div>';
 }
 async function commitBonus(){
+  var ss=$('#spanStart'),se=$('#spanEnd');
+  ss.classList.toggle('bad',!ss.value);se.classList.toggle('bad',!se.value);
+  if(!ss.value||!se.value){(!ss.value?ss:se).focus();return;}
   var btn=$('#commitBtn');btn.disabled=true;btn.textContent='Committing…';
   var sliders={};for(var k in FW)sliders[k]=parseInt($('#'+k).value);
   var payload={agency_id:_SC.crew.agency_id,spanStart:$('#spanStart').value,spanEnd:$('#spanEnd').value,
@@ -2482,7 +2513,7 @@ async function commitBonus(){
     gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
     gateNote:$('#gateNote')?$('#gateNote').value:''};
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
-  if(res.error){btn.disabled=false;btn.textContent='Close & commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.'};alert(msgs[res.error]||('Error: '+res.error));return;}
   var r=res.result;
   $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'bonus\\')">Done</button></div></div></div></div>';
 }
