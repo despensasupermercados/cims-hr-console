@@ -16,7 +16,7 @@ import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { SHIP_HISTORY } from "./ship_history.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
-import { contractLedgerRow } from "./ledger.js";
+import { contractLedgerRow, psRank } from "./ledger.js";
 import { classifyWindow } from "./scorequeue.js";
 
 /* ============================================================
@@ -774,7 +774,8 @@ async function apiBonusCrew(env, url) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
   }
-  return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  const legN = (((await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).first()) || {}).n) || 0;
+  return json({ crew: cr, count, contracts: legN, rank: psRank(legN, true), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -799,7 +800,7 @@ async function apiContracts(env) {
     return {
       agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
       vessel: vessel || null, client: clientOf(vessel), contracts: legCounts[b.agency_id] || 0,
-      count: L.count, baseline_set: L.baseline_set, rank: L.rank, nextRung: L.nextRung,
+      count: L.count, baseline_set: L.baseline_set, rank: psRank(legCounts[b.agency_id] || 0), nextRung: L.nextRung,
       lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
       lastGate: lo ? lo.gate : null, lastPay: lo ? lo.pay_usd : null, totalPay: totPay[b.id] || 0
     };
@@ -818,7 +819,7 @@ async function gatherStatement(env, id) {
   const baseline = await effectiveBaseline(env, id, crew.baseline_count);
   const count = await crewCount(env, crew.id, baseline);
   const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
-  const bonus = { rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  const bonus = { rank: psRank(contracts.length, true), count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.

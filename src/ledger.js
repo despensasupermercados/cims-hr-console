@@ -23,7 +23,15 @@ export function contractLedgerRow(baseBaseline, overrideBaseline, lastOutcome) {
     baseline,
     baseline_set: baseline != null,
     count,
-    rank: count >= 1 ? "PS" : "Jr PS",
     nextRung: ladderValue(count + 1),
   };
+}
+
+// Printer-specialist rank TIER by contracts served (seniority, independent of the bonus streak):
+//   1st contract -> Junior PS, 2nd-4th -> Printer Specialist, 5th and above -> Senior PS.
+export function psRank(contracts, long) {
+  const n = contracts || 0;
+  if (n >= 5) return long ? "Senior Printer Specialist" : "Sr PS";
+  if (n >= 2) return long ? "Printer Specialist" : "PS";
+  return long ? "Junior Printer Specialist" : "Jr PS";
 }
