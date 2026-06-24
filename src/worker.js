@@ -17,6 +17,7 @@ import { SHIP_HISTORY } from "./ship_history.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow } from "./ledger.js";
+import { classifyWindow } from "./scorequeue.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -91,6 +92,8 @@ export default {
         if (p === "/api/feedback/request" && request.method === "POST") return apiFeedbackRequest(request, env, session, url);
         if (p === "/api/feedback/crew")  return apiFeedbackCrew(env, url);
         if (p === "/api/feedback/board") return apiFeedbackBoard(env);
+        if (p === "/api/feedback/score" && request.method === "POST") return apiFeedbackScore(request, env, session);
+        if (p === "/api/score/queue")    return apiScoreQueue(env, url);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -750,10 +753,14 @@ async function apiBonusCrew(env, url) {
   const id = url.searchParams.get("id");
   const cr = await env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(id).first();
   if (!cr) return json({ error: "not found" }, 404);
+  await ensureKeyman(env);
   const baseline = await effectiveBaseline(env, cr.agency_id, cr.baseline_count);
   const count = await crewCount(env, cr.id, baseline);
   const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
-  return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results });
+  // Latest Keyman contract leg -> default sign-on/sign-off for the Score Card (manually editable there).
+  const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
+  const lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
+  return json({ crew: cr, count, rank: count >= 1 ? "Printer Specialist" : "Junior Printer Specialist", baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -961,6 +968,67 @@ async function apiFeedbackCrew(env, url) {
   const answers = {}; for (const r of resp.results) answers[r.role] = JSON.parse(r.answers_json);
   return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers) });
 }
+// In-app contributor scoring (authenticated, NO token). Ray/Rolando/Dexter pick a crew + their
+// name in the Scoring window and submit; this writes the same feedback_response2 the token form
+// does, so it pre-fills that crew's Score Card. Returns the accumulated sub-scores across all
+// roles answered so far. (Unlike the external token link, the in-app path may be re-submitted —
+// it is the authenticated scoring workflow; committed bonus outcomes are immutable regardless.)
+async function apiFeedbackScore(request, env, session) {
+  await ensureFb(env);
+  const b = await request.json().catch(() => ({}));
+  const role = b.role;
+  if (!FB_ROLES[role]) return json({ error: "bad_role" }, 400);
+  const cr = await env.DB.prepare("SELECT id, agency_id FROM crew WHERE agency_id=?").bind(b.agency_id).first();
+  if (!cr) return json({ error: "crew_not_found" }, 404);
+  const now = new Date().toISOString();
+  let req = await env.DB.prepare("SELECT id FROM feedback_request2 WHERE crew_id=? AND role=?").bind(cr.id, role).first();
+  const rid = req ? req.id : ("fr_" + crypto.randomUUID());
+  if (!req) {
+    await env.DB.prepare("INSERT INTO feedback_request2 (id,crew_id,role,token_hash,status,due_date,requested_by,requested_at) VALUES (?,?,?,?,?,?,?,?)")
+      .bind(rid, cr.id, role, "inapp", "pending", null, (session && session.email) || null, now).run();
+  }
+  const naDexter = role === "dexter" && b.answers && b.answers.assessed === "No (N/A)" && !(b.answers && b.answers.mono);
+  await env.DB.prepare("DELETE FROM feedback_response2 WHERE request_id=?").bind(rid).run();
+  await env.DB.prepare("INSERT INTO feedback_response2 (id,request_id,crew_id,role,answers_json,submitted_at) VALUES (?,?,?,?,?,?)")
+    .bind("fp_" + crypto.randomUUID(), rid, cr.id, role, JSON.stringify(b.answers || {}), now).run();
+  await env.DB.prepare("UPDATE feedback_request2 SET status=? WHERE id=?").bind(naDexter ? "na" : "answered", rid).run();
+  await logActivity(env, session && session.email, "feedback_score", cr.agency_id + " " + role);
+  const resp = (await env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=?").bind(cr.id).all()).results;
+  const answers = {}; for (const r of resp) answers[r.role] = JSON.parse(r.answers_json);
+  const reqs = (await env.DB.prepare("SELECT role, status FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all()).results;
+  const st = { ray: "none", rolando: "none", dexter: "none" }; for (const r of reqs) st[r.role] = r.status;
+  return json({ ok: true, prefill: mapFeedbackToScore(answers), status: st });
+}
+// Scoring queue: crew whose contract just ended (signed off in the last 14 days) or is about to
+// end (next 14 days) — the contracts that need contributor scoring. Effective sign-off = the
+// latest Keyman leg's actual-off, else projected-off. Each carries the per-role feedback status.
+async function apiScoreQueue(env, url) {
+  await ensureKeyman(env); await ensureFb(env);
+  const today = TODAY();
+  const days = Math.max(1, Math.min(120, parseInt(url.searchParams.get("days")) || 14));
+  const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
+  const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
+  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const latest = {}; for (const l of legs) { const cur = latest[l.sc]; if (!cur || (l.seq || 0) > (cur.seq || 0)) latest[l.sc] = l; }
+  const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
+  const resp = (await env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all()).results;
+  const fb = {}; for (const r of reqs) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = r.status; }
+  for (const r of resp) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = "answered"; }
+  const recent = [], upcoming = [];
+  for (const sc in latest) {
+    const c = byId[sc]; if (!c) continue;
+    const l = latest[sc];
+    const signOff = l.act_off || l.proj_off || null;
+    const w = classifyWindow(signOff, today, days);
+    if (!w) continue;
+    const f = fb[c.id] || {};
+    const item = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: c.vessel_observed || null, ship: l.ship || null, signOn: l.sign_on || null, signOff, status: c.status, feedback: { ray: f.ray || "none", rolando: f.rolando || "none", dexter: f.dexter || "none" } };
+    (w === "recent" ? recent : upcoming).push(item);
+  }
+  recent.sort((a, b) => (a.signOff < b.signOff ? 1 : -1));    // most recently off first
+  upcoming.sort((a, b) => (a.signOff < b.signOff ? -1 : 1));  // soonest off first
+  return json({ today, days, recent, upcoming });
+}
 // Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
 // Keyman projected-off dates are an unreliable trigger (often stale), which left the board empty.
 // We now key off live crew status: "On Vacation" = a contract just completed -> feedback due NOW;
@@ -1145,6 +1213,7 @@ label.req::after{content:' *';color:var(--red);font-weight:700}
 .rpay.zero{color:var(--red)}
 .gchip{background:#fbe9e7;color:var(--red);border-radius:7px;padding:2px 8px;font-weight:700;font-size:11px}
 .rbtns{display:flex;gap:8px;flex:none}
+.fbdot{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid rgba(0,0,0,.08)}
 .btn{padding:9px 15px;border:0;border-radius:9px;background:var(--navy);color:#fff;font-weight:600;cursor:pointer;font-family:'DM Sans';font-size:13.5px}
 .btn.green{background:var(--green)}.btn.ghost{background:#fff;border:1px solid var(--line);color:var(--navy)}
 .warn{background:#fdf7ec;border:1px solid #ecdfc2;color:var(--amber);border-radius:9px;padding:9px 11px;font-size:12.5px;margin-bottom:12px}
@@ -2425,8 +2494,9 @@ async function fbRequest(id,role){
 }
 async function renderBonus(){
   $('#view').innerHTML='<div class=bar><h2>Bonus — Score a contract</h2>'
-   +'<input id=bq placeholder="Search crew to score…" oninput="filterBonus()" style="width:260px"></div>'
-   +'<div class=hint style="margin:-6px 0 12px">Pick a crew member to open their contract-completion Score Card. Scoring writes a permanent outcome and updates their consecutive-contract count.</div>'
+   +'<input id=bq placeholder="Search crew to score…" oninput="filterBonus()" style="width:230px">'
+   +'<button class="btn green" style="margin-left:8px" onclick="openScoreWindow()">Contributor scoring →</button></div>'
+   +'<div class=hint style="margin:-6px 0 12px">Pick a crew member to open their contract-completion Score Card — or open the <b>Contributor scoring</b> window where Ray, Rolando &amp; Dexter submit their inputs.</div>'
    +'<div id=blist></div>';
   loadBonus();
 }
@@ -2438,6 +2508,119 @@ async function loadBonus(){
     var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
     return '<div class=brow onclick="openScore(\\''+c.agency_id+'\\')"><div><div class=cname style="font-size:14px">'+name+'</div><div class=csub>'+c.agency_id+' · '+(c.vessel_observed||'—')+'</div></div><div style="margin-left:auto"><span class="btn green" style="pointer-events:none">Score →</span></div></div>';
   }).join('')||'<div class=muted>No matches.</div>';
+}
+/* ---- Contributor Scoring window (Ray / Rolando / Dexter submit their inputs in one place) ---- */
+var _SW={};
+var FBLABEL={ray:'Ray — Inventory & Orders',rolando:'Rolando — Technical',dexter:'Dexter — Field review'};
+function swRender(title,inner){$('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>'+title+'<button onclick="mClose()">×</button></div><div class=mb id=swBody>'+inner+'</div></div></div>';}
+function swSel(id,opts,val){return '<select id='+id+'>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('')+'</select>';}
+function swTa(id,val){return '<textarea id='+id+' rows=2>'+(val||'')+'</textarea>';}
+function sv(id){var e=$('#'+id);return e?e.value:undefined;}
+function swIndex(arr){(arr||[]).forEach(function(c){_SW.byId[c.agency_id]=c;});}
+async function openScoreWindow(){
+  _SW={crew:null,role:null,byId:{}};
+  swRender('Contributor scoring','<div class=muted>Loading crew…</div>');
+  var d;try{d=await (await fetch('/api/score/queue')).json();}catch(e){$('#swBody').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="openScoreWindow()">Retry</button></div>';return;}
+  _SW.queue=d;swIndex(d.recent);swIndex(d.upcoming);
+  swCrewStep();
+}
+function swCrewStep(){
+  var d=_SW.queue||{recent:[],upcoming:[]};
+  var html='<div class=hint style="margin-bottom:8px">Pick the crew member whose contract you are scoring (just signed off, or about to).</div>'
+   +'<div class=fg><input id=swq placeholder="Search any crew by name…" oninput="swSearch()"></div>'
+   +'<div id=swSearchOut></div>'
+   +swList('Just signed off — last 14 days',d.recent)
+   +swList('Signing off soon — next 14 days',d.upcoming);
+  swRender('Contributor scoring · pick crew',html);
+}
+function swList(title,arr){
+  if(!arr||!arr.length)return '<div class=sec>'+title+'</div><div class=hint style="margin-bottom:6px">None in this window.</div>';
+  return '<div class=sec>'+title+'</div>'+arr.map(swRow).join('');
+}
+function swRow(c){
+  var fb=c.feedback||{};
+  var dots=['ray','rolando','dexter'].map(function(r){var ok=(fb[r]==='answered'||fb[r]==='na');return '<span class=fbdot title="'+r+'" style="background:'+(ok?'var(--green)':'#dfe5ec')+'"></span>';}).join('');
+  return '<div class=brow onclick="swPickCrew(\\''+c.agency_id+'\\')"><div><div class=cname style="font-size:14px">'+(c.name||c.agency_id)+'</div><div class=csub>'+c.agency_id+' · '+(c.ship||c.vessel||'—')+' · '+(c.signOn||'?')+' → '+(c.signOff||'?')+'</div></div><div style="margin-left:auto;display:flex;gap:5px;align-items:center" title="Ray / Rolando / Dexter">'+dots+'</div></div>';
+}
+var _swt;function swSearch(){clearTimeout(_swt);_swt=setTimeout(swSearchGo,200);}
+async function swSearchGo(){
+  var q=$('#swq')?$('#swq').value.trim():'';
+  if(!q){if($('#swSearchOut'))$('#swSearchOut').innerHTML='';return;}
+  var r=await (await fetch('/api/crew?q='+encodeURIComponent(q))).json();
+  var arr=(r.crew||[]).slice(0,12).map(function(c){return {agency_id:c.agency_id,name:[c.first_name,c.last_name].filter(Boolean).join(' '),vessel:c.vessel_observed,ship:null,signOn:c.active_on,signOff:c.active_off,feedback:{}};});
+  swIndex(arr);
+  if($('#swSearchOut'))$('#swSearchOut').innerHTML='<div class=sec>Search results</div>'+(arr.length?arr.map(swRow).join(''):'<div class=hint>No matches.</div>');
+}
+async function swPickCrew(id){
+  _SW.crew=_SW.byId[id]||{agency_id:id,name:id,feedback:{}};
+  await swRoleStep();
+}
+async function swRoleStep(){
+  swRender('Contributor scoring · '+_SW.crew.name,'<div class=muted>Loading…</div>');
+  var d={};try{d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(_SW.crew.agency_id))).json();}catch(e){}
+  var st={ray:'none',rolando:'none',dexter:'none'};(d.requests||[]).forEach(function(r){st[r.role]=r.status;});
+  _SW.status=st;_SW.prefill=d.prefill||{sliders:{},gates:{}};_SW.rawAnswers=d.answers||{};
+  var roles=[['ray','Ray — Inventory & Orders'],['rolando','Rolando — Technical'],['dexter','Dexter — Field review']];
+  var btns=roles.map(function(x){var s=st[x[0]];var done=(s==='answered'||s==='na');return '<button class="btn '+(done?'green':'ghost')+'" style="display:block;width:100%;text-align:left;margin-bottom:8px" onclick="swPickRole(\\''+x[0]+'\\')">'+(done?'✓ ':'')+x[1]+(done?' — submitted (tap to edit)':'')+'</button>';}).join('');
+  swRender('Contributor scoring · '+_SW.crew.name,
+   '<button class="btn ghost" onclick="swCrewStep()" style="margin-bottom:10px">← change crew</button>'
+   +'<div class=hint style="margin-bottom:10px">'+_SW.crew.agency_id+' · '+(_SW.crew.ship||_SW.crew.vessel||'—')+' · '+(_SW.crew.signOn||'?')+' → '+(_SW.crew.signOff||'?')+'</div>'
+   +'<div class=sec>Who are you?</div>'+btns+swResultBox(_SW.prefill,_SW.status));
+}
+function swPickRole(role){_SW.role=role;swQuestions();}
+function swQuestions(){
+  var role=_SW.role;var a=(_SW.rawAnswers&&_SW.rawAnswers[role])||{};var f='';
+  if(role==='ray'){
+    f='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+swSel('order',['No','Yes'],a.order)+'</div>'
+     +'<div class=fg><label>If yes — cause</label>'+swSel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause)+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
+     +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
+     +'<div class=fg><label>Orders placed on time (par respected)?</label>'+swSel('ontime',['Always','Mostly','Often late'],a.ontime)+'</div>'
+     +'<div class=fg><label>Order accuracy</label>'+swSel('acc',['Accurate','Minor errors','Frequent errors'],a.acc)+'</div>'
+     +'<div class=fg><label>Par maintained at handover</label>'+swSel('par',['Maintained','Some gaps','Not maintained'],a.par)+'</div>'
+     +'<div class=fg><label>Failed end-of-contract inventory audit?</label>'+swSel('audit',['No','Yes'],a.audit)+'</div>'
+     +'<div class=fg><label>Note / evidence (optional)</label>'+swTa('note',a.note)+'</div>';
+  } else if(role==='rolando'){
+    f='<div class=fg><label>Machine clean &amp; serviceable at handover?</label>'+swSel('clean',['Yes','Minor issues','No'],a.clean)+'</div>'
+     +'<div class=fg><label>Preventive maintenance done correctly?</label>'+swSel('pm',['Yes','Partial','No'],a.pm)+'</div>'
+     +'<div class=fg><label>Unresolved technical issues left for the reliever?</label>'+swSel('unres',['None','Minor','Major'],a.unres)+'</div>'
+     +'<div class=fg><label>Note / evidence (optional)</label>'+swTa('note',a.note)+'</div>';
+  } else {
+    f='<div class=fg><label>Did you assess this crew this contract?</label>'+swSel('assessed',['No (N/A)','Yes'],a.assessed)+'</div>'
+     +'<div class=fg><label>Mono click % this contract (&lt;20% target)</label><input id=mono type=number min=0 max=100 step=0.1 value="'+(a.mono||'')+'" placeholder="e.g. 14"><div class=hint>Feeds the Mono discipline sub-score.</div></div>'
+     +'<div class=fg><label>Inventory observations</label>'+swTa('inv',a.inv)+'</div>'
+     +'<div class=fg><label>Technical observations</label>'+swTa('tech',a.tech)+'</div>'
+     +'<div class=fg><label>Overall impression</label>'+swTa('overall',a.overall)+'</div>';
+  }
+  swRender('Contributor scoring · '+_SW.crew.name,
+   '<button class="btn ghost" onclick="swRoleStep()" style="margin-bottom:10px">← back</button>'
+   +'<div class=hint style="margin-bottom:8px"><b>'+FBLABEL[role]+'</b> · scoring '+_SW.crew.name+'</div>'
+   +f+'<div class=mf><button class="btn ghost" onclick="swRoleStep()">Cancel</button><button class="btn green" id=swSub onclick="swSubmit()">Submit</button></div><div class=hint id=swMsg style="text-align:right"></div>');
+}
+async function swSubmit(){
+  var role=_SW.role;var ans={};
+  if(role==='ray')ans={order:sv('order'),rushcause:sv('rushcause'),rushcost:sv('rushcost'),ontime:sv('ontime'),acc:sv('acc'),par:sv('par'),audit:sv('audit'),note:sv('note')};
+  else if(role==='rolando')ans={clean:sv('clean'),pm:sv('pm'),unres:sv('unres'),note:sv('note')};
+  else ans={assessed:sv('assessed'),mono:sv('mono'),inv:sv('inv'),tech:sv('tech'),overall:sv('overall')};
+  $('#swSub').disabled=true;$('#swMsg').textContent='Saving…';
+  var res;try{res=await (await fetch('/api/feedback/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:_SW.crew.agency_id,role:role,answers:ans})})).json();}catch(e){res={error:'network'};}
+  if(res.error){$('#swSub').disabled=false;$('#swMsg').textContent='Error: '+res.error;return;}
+  _SW.prefill=res.prefill;_SW.status=res.status;_SW.rawAnswers=_SW.rawAnswers||{};_SW.rawAnswers[role]=ans;
+  swRender('Contributor scoring · '+_SW.crew.name,
+   '<div style="text-align:center;font-family:Outfit;font-weight:800;color:var(--green-d);font-size:18px;margin-bottom:4px">✓ '+FBLABEL[role].split(' — ')[0]+' submitted</div>'
+   +'<div class=hint style="text-align:center;margin-bottom:6px">Recorded for '+_SW.crew.name+' — it will pre-fill the Score Card.</div>'
+   +swResultBox(_SW.prefill,_SW.status)
+   +'<div class=mf style="margin-top:12px"><button class="btn ghost" onclick="swRoleStep()">Score another contributor</button><button class="btn green" onclick="mClose()">Done</button></div>');
+}
+function swResultBox(pf,st){
+  pf=pf||{sliders:{},gates:{}};st=st||{ray:'none',rolando:'none',dexter:'none'};
+  var sl=pf.sliders||{};var gates=pf.gates||{};
+  var rows=[['sOrder','On-time ordering',20],['sAcc','Order accuracy',25],['sPar','Par maintenance',15],['sHand','Ship handover',10],['sMono','Mono discipline',5]];
+  var pts=0;var body=rows.map(function(r){var v=(sl[r[0]]!=null)?sl[r[0]]:null;if(v!=null)pts+=v;return '<div class=scorerow><span>'+r[1]+'</span><b>'+(v!=null?v:'—')+' / '+r[2]+'</b></div>';}).join('');
+  var gt=[];if(gates.rush)gt.push('RUSH');if(gates.audit)gt.push('AUDIT');
+  var pending=['ray','rolando','dexter'].filter(function(r){return !(st[r]==='answered'||st[r]==='na');});
+  return '<div class=scorebox style="margin-top:14px"><div class=scorerow style="font-weight:700;color:var(--navy)"><span>Accumulated contributor score</span><b>'+pts+' / 75</b></div>'+body
+   +(gt.length?'<div class=gateflag>Gate armed: '+gt.join(', ')+' — would reset the bonus</div>':'')
+   +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Communication (Rita) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">All three contributors in. Communication + supervisor eval are finalised on the Score Card.</div>')+'</div>';
 }
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
@@ -2465,6 +2648,7 @@ async function openScore(id){
    +'</div>'
    +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()">Commit</button></div></div>';
   $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';
+  if(d.lastLeg){if(d.lastLeg.on)$('#spanStart').value=d.lastLeg.on;if(d.lastLeg.off)$('#spanEnd').value=d.lastLeg.off;}
   recalcScore();
   applyFeedback(cr.agency_id);
 }
