@@ -1744,7 +1744,6 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
     <button id=nav-data onclick="show('data')">Data</button>
-    <button id=nav-settings onclick="show('settings')">Settings</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -1779,7 +1778,7 @@ function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/864
 async function show(tab){
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
-  $('#nav-'+tab).classList.add('on');
+  var _b=$('#nav-'+(tab==='settings'?'data':tab));if(_b)_b.classList.add('on');
   if(tab==='dashboard')return renderDashboard();
   if(tab==='crew')return renderCrew();
   if(tab==='contracts')return renderContracts();
@@ -1789,22 +1788,25 @@ async function show(tab){
   if(tab==='billing')return renderBilling();
   if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
-  if(tab==='data')return renderData();
-  if(tab==='settings')return renderSettings();
+  if(tab==='data'||tab==='settings')return renderData();
 }
-function renderSettings(){
-  $('#view').innerHTML='<div class=bar><h2>Settings</h2></div>'
+// "Data" is now the single home for data status AND uploads/session/about (the old Settings tab was
+// merged in). Left menu: Overview (data sources + load history), Upload data, Session, About.
+function renderSettings(){ return renderData(); }
+function renderData(){
+  $('#view').innerHTML='<div class=bar><h2>Data</h2></div>'
    +'<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">'
    +'<div style="min-width:170px"><div class=zlabel>Menu</div>'
-     +'<button class="btn ghost setmenu" data-set="uploads" style="display:block;width:100%;text-align:left;margin-bottom:6px">Data uploads</button>'
+     +'<button class="btn ghost setmenu" data-set="overview" style="display:block;width:100%;text-align:left;margin-bottom:6px">Overview</button>'
+     +'<button class="btn ghost setmenu" data-set="uploads" style="display:block;width:100%;text-align:left;margin-bottom:6px">Upload data</button>'
      +'<button class="btn ghost setmenu" data-set="session" style="display:block;width:100%;text-align:left;margin-bottom:6px">Session</button>'
      +'<button class="btn ghost setmenu" data-set="about" style="display:block;width:100%;text-align:left">About</button>'
    +'</div><div id=setbody style="flex:1;min-width:320px"></div></div>';
   document.querySelectorAll('.setmenu').forEach(function(b){b.onclick=function(){document.querySelectorAll('.setmenu').forEach(function(x){x.classList.remove('on');});b.classList.add('on');setShow(b.getAttribute('data-set'));};});
   document.querySelector('.setmenu').classList.add('on');
-  setShow('uploads');
+  setShow('overview');
 }
-function setShow(s){ if(s==='uploads')return setUploads(); if(s==='session')return setSession(); return setAbout(); }
+function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='session')return setSession(); return setAbout(); }
 function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
@@ -1849,7 +1851,20 @@ function parseCrewFile(f){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
         var ws=wb.Sheets[wb.SheetNames[0]];
-        IMPROWS=XLSX.utils.sheet_to_json(ws,{raw:true,defval:''});
+        // AdvancedQuery exports can have a blank/title row before the real headers, so don't assume
+        // row 1 is the header. Read as a grid, find the row that has the CREW ID label, and build
+        // objects from there. Without this the parser reads blank keys and the preview shows nothing.
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+        var hi=-1;
+        for(var i=0;i<Math.min(aoa.length,15);i++){ if((aoa[i]||[]).some(function(c){return /crew\\s*id/i.test(String(c));})){hi=i;break;} }
+        if(hi<0)hi=0;
+        var headers=(aoa[hi]||[]).map(function(c){return String(c).trim();});
+        IMPROWS=[];
+        for(var rr=hi+1;rr<aoa.length;rr++){
+          var row=aoa[rr]; if(!row)continue; var o={}, any=false;
+          headers.forEach(function(h,ci){ if(!h)return; var v=row[ci]==null?'':row[ci]; o[h]=v; if(String(v).trim())any=true; });
+          if(any)IMPROWS.push(o);
+        }
         previewImport();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };
@@ -1951,8 +1966,8 @@ async function applyImport(){
   if(r.ok){$('#imp').innerHTML='<span class="cchip ok">Done</span> applied '+r.applied+' ('+r.added+' new, '+r.changed+' changed'+(r.skippedNoStatus?(', '+r.skippedNoStatus+' skipped'):'')+'). <a href="#" onclick="renderData();return false">Reload</a>';IMPROWS=null;}
   else $('#imp').textContent='Import failed.';
 }
-async function renderData(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
+async function dataOverview(){
+  $('#setbody').innerHTML='<div class=muted>Loading…</div>';
   const d=await (await fetch('/api/datastatus')).json();
   let h='<div class=zlabel>Data sources</div><table class=tbl><thead><tr><th>Dataset</th><th>Source</th><th>Records</th></tr></thead><tbody>'
     +d.datasets.map(function(x){return '<tr><td>'+x.name+'</td><td>'+x.source+'</td><td>'+x.count.toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
@@ -1960,8 +1975,8 @@ async function renderData(){
   if(!d.log.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No load events recorded yet.</p>';
   else h+='<table class=tbl><thead><tr><th>Source</th><th>Records</th><th>Status</th><th>When</th></tr></thead><tbody>'
     +d.log.map(function(l){return '<tr><td>'+l.source+'</td><td>'+(l.rows||'')+'</td><td><span class="cchip ok">'+l.status+'</span></td><td>'+(l.at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table>';
-  h+='<p class=muted style="text-align:left;padding:10px 2px">Autonomous refresh from the Drive folder activates once the read-only service account is connected. Until then, data loads on deploy. Bonus baselines stay gated for Rita.</p>';
-  $('#view').innerHTML=h;
+  h+='<p class=muted style="text-align:left;padding:10px 2px">To import a new crew registry, travel workbook, or vessel file, use <b>Upload data</b> in the menu. Bonus baselines stay gated for Rita.</p>';
+  $('#setbody').innerHTML=h;
 }
 let TRV=null,TRV_KIND='',TRVALL=[],TF={q:'',year:'',month:'',cat:'',kind:''};
 var TCATS=['air','hotel','medical','visa','food','transport','other'];
