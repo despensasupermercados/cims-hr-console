@@ -2,6 +2,15 @@ name = "cims-hr-console"
 main = "src/worker.js"
 compatibility_date = "2025-05-01"
 
+# Built-in AI engine for auto-summarising crew-report emails (used when no ANTHROPIC_API_KEY
+# secret is set). No key or setup required; degrades gracefully to manual if unavailable.
+[ai]
+binding = "AI"
+
+# Hourly safety-net sweep of the crew-reports inbox (the email handler also processes on arrival).
+[triggers]
+crons = ["0 * * * *"]
+
 # Production database (already live, holds the 97 crew).
 [[d1_databases]]
 binding = "DB"
