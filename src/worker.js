@@ -2483,7 +2483,7 @@ function paintContracts(){
   var body=rows.map(function(r){
     var last=r.lastDate?(r.lastDate+' · '+(r.lastScore!=null?r.lastScore+'%':'—')+(r.lastGate?(' · '+r.lastGate):'')+' · $'+Number(r.lastPay||0).toLocaleString()):'<span class=muted style="padding:0">none yet</span>';
     var nb=r.baseline_set?('$'+Number(r.nextRung||0).toLocaleString()):'<span class=vchip>baseline pending</span>';
-    return '<tr><td><b>'+r.name+'</b><div class=csub>'+r.agency_id+'</div></td><td>'+(r.vessel||'—')+'<div class=csub>'+(r.client||'')+'</div></td><td style="text-align:center">'+r.contracts+'</td><td style="text-align:center"><span class="pill rank">'+r.rank+'</span> '+r.count+'</td><td>'+nb+'</td><td>'+last+'</td><td style="text-align:right">$'+Number(r.totalPay||0).toLocaleString()+'</td><td style="white-space:nowrap"><button class="btn ghost" onclick="window.open(\\'/api/crew/statement.pdf?id='+encodeURIComponent(r.agency_id)+'\\',\\'_blank\\')">PDF</button> <button class="btn green" onclick="ledgerScore(\\''+r.agency_id+'\\')">Score</button></td></tr>';
+    return '<tr><td><b>'+r.name+'</b><div class=csub>'+r.agency_id+'</div></td><td>'+(r.vessel||'—')+'<div class=csub>'+(r.client||'')+'</div></td><td style="text-align:center">'+r.contracts+'</td><td style="text-align:center"><span class="pill rank">'+r.rank+'</span> '+r.count+'</td><td>'+nb+'</td><td>'+last+'</td><td style="text-align:right">$'+Number(r.totalPay||0).toLocaleString()+'</td><td style="white-space:nowrap"><button class="btn ghost" onclick="window.open(\\'/api/crew/statement.pdf?id='+encodeURIComponent(r.agency_id)+'\\',\\'_blank\\')">PDF</button> <button class="btn ghost" onclick="openFill(\\''+r.agency_id+'\\')" title="Ray / Rolando / Dexter fill in their inputs">Inputs →</button> <button class="btn green" onclick="ledgerScore(\\''+r.agency_id+'\\')">Score</button></td></tr>';
   }).join('')||'<tr><td colspan=8 class=muted>No matches.</td></tr>';
   $('#cttable').innerHTML='<table class=tbl><thead><tr><th>Crew</th><th>Ship · client</th><th>Contracts</th><th>Consec.</th><th>Next bonus</th><th>Last outcome</th><th style="text-align:right">Paid</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
 }
@@ -2526,6 +2526,15 @@ async function openScoreWindow(){
   var d;try{d=await (await fetch('/api/score/queue')).json();}catch(e){$('#swBody').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="openScoreWindow()">Retry</button></div>';return;}
   _SW.queue=d;swIndex(d.recent);swIndex(d.upcoming);
   swCrewStep();
+}
+// Open the contributor-fill page straight to ONE crew (skips the picker) — used by the ledger's
+// "Inputs" button so Ray/Rolando/Dexter go right to their question set for that crew.
+async function openFill(id){
+  var c=((CTL&&CTL.rows)||[]).find(function(r){return r.agency_id===id;})||{agency_id:id,name:id};
+  _SW={crew:{agency_id:id,name:c.name||id,vessel:c.vessel||null,feedback:{}},role:null,byId:{}};
+  _SW.byId[id]=_SW.crew;
+  await swRoleStep();
+  try{var d=await (await fetch('/api/score/queue')).json();_SW.queue=d;swIndex(d.recent);swIndex(d.upcoming);}catch(e){}
 }
 function swCrewStep(){
   var d=_SW.queue||{recent:[],upcoming:[]};
