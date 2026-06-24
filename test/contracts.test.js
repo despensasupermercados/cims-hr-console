@@ -74,3 +74,13 @@ test("deriveStatus: retired wins; otherwise maps the live state; falls back to i
   assert.equal(deriveStatus([], T, { imported: "Earmarked" }), "Earmarked");
   assert.equal(deriveStatus([{ on: "2026-09-01", off: "2027-03-01" }], T, { imported: "Earmarked" }), "Earmarked");
 });
+
+test("deriveStatus preserves Inactive; only promotes Earmarked on a current assignment", () => {
+  const T = "2026-06-24";
+  // Inactive crew with old past schedule stays Inactive (not flipped to On Vacation)
+  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Inactive" }), "Inactive");
+  // Earmarked with only past legs stays Earmarked (history can't reactivate)
+  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Earmarked" }), "Earmarked");
+  // Earmarked WITH a current assignment -> On board
+  assert.equal(deriveStatus([{ on: "2026-03-01", off: "2026-11-01" }], T, { imported: "Earmarked" }), "On board");
+});
