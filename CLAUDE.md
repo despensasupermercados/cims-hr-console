@@ -65,3 +65,17 @@ the fix was never live; found and corrected in Session 4.)
 - Auth: magic-link (stateless HMAC token) + bootstrap dev-login; 12h signed-cookie session.
 - DB: Cloudflare D1 `cims-hr-console` (id f0ac8b6a-deac-4214-8f42-e22b202d7d7d).
 - Bonus count is event-sourced from `bonus_outcome` (append-only); never overwrite history.
+
+## 10. Field intel (crew-reports@cims.work) — qualitative, NEVER money
+The intel pipeline (Session 5) lets anyone email crew-reports@cims.work; AI summarises and files a
+dated card on the crew. Hard rules:
+- **It is SEPARATE from the scored bonus.** Intel is narrative field knowledge — it must never feed,
+  adjust, or be confused with `bonus_outcome`, baselines, or payout. Keep the two code paths apart.
+- **Identity stays deterministic.** Which crew an email is about is decided by `crewmatch.js`
+  (high/med auto-file; low/none → human review queue). The LLM writes the summary only — it must
+  never pick the crew. A wrong match is a false record on the wrong seafarer.
+- **Engine preference:** Claude (`ANTHROPIC_API_KEY` secret, optional) → Workers AI (`[ai]` binding,
+  default, no key) → none (leave email queued for manual). The agent never handles the key (see §7).
+  Currently runs on Workers AI. Adding the Anthropic key in Cloudflare auto-upgrades, no redeploy.
+- `contract_no` on a `crew_intel` row is the crew's contract count snapshotted AT FILING; don't
+  recompute it for already-filed rows (only the lazy backfill of legacy NULLs is allowed).

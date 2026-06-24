@@ -549,3 +549,72 @@ start `c65217d`; **HEAD at handoff `3eaa360`.** Two commits, both verified live 
   (HR context only); §8 nightly auto-refresh (needs Drive read credential).
 - Remaining data-coverage (NOT a bug): some onboard cards still lack sign-on dates where a crew has
   no Keyman leg AND no schedule entry for that ship — genuinely missing source data.
+
+---
+
+## SESSION UPDATE — 2026-06-24 (session 5: field-intel pipeline + AI auto-processing)
+
+**The feature (Miguel's idea):** a crew card should be the "one true source of knowledge" on each
+seafarer. Anyone (Ray, Rolando, Dexter, or anyone) emails crew-reports@cims.work about a crew member;
+AI reads the WHOLE email, identifies the crew by name, summarises it into decision-grade bullets, and
+files it as a dated entry on that crew's card. **Kept entirely SEPARATE from the scored bonus** — this
+is qualitative field intel, not money.
+
+### A. Pipeline, end-to-end (all LIVE + verified)
+1. **Receive** — Cloudflare Email Routing → Worker `email()` handler stores the raw MIME in
+   `email_inbox` (status `new`), then fires `ctx.waitUntil(processIntelInbox(env,5))` so processing
+   starts on arrival (a card appears within seconds, no polling wait).
+2. **Decode** — `decodeEmailBody(raw)` extracts text/plain, decodes quoted-printable/base64, strips
+   HTML+URLs → clean prose (forwarded mail is always encoded; without this the matcher sees gibberish).
+3. **Identify (deterministic, safe)** — `crewmatch.js matchCrew(text, roster)` → high (first+last) /
+   med (unique last) / low (ambiguous) / none. high|med auto-files; low|none → pending review queue.
+   The WHO stays deterministic on purpose; the LLM never decides identity (a wrong match = a false
+   record on the wrong seafarer).
+4. **Summarise (the AI, WHAT only)** — `intelai.js` builds the prompt; `aiSummarize()` calls the
+   engine. Output is 5 decision sections: **Summary / What happened / Impact / Pattern / Recommended
+   action**, plain-text bullets, anti-hallucination ("never invent numbers/dates").
+5. **File** — `crew_intel` row: agency_id, reporter, summary, source, confidence, status,
+   `contract_no` (snapshot of the crew's contract count AT FILING — so the card shows issues-per-
+   contract over time), ts, created_by='ai'.
+6. **Hourly backstop** — Worker `scheduled()` handler (cron `0 * * * *` in wrangler.toml) sweeps any
+   email left `new` (engine briefly down). On-arrival + hourly both call `processIntelInbox`, which
+   atomically CLAIMS each row (`UPDATE … status='processing' WHERE status='new'`) so they can't
+   double-file.
+
+### B. AI engine — preference ladder (no secret handled by the agent)
+`pickEngine(env)`: **(1) Claude** if `ANTHROPIC_API_KEY` secret is set in Cloudflare (best detail,
+model `claude-haiku-4-5`, via `fetch` to api.anthropic.com) → **(2) Workers AI** `[ai] binding="AI"`,
+model `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (no key/setup) → **(3) none** = leave `new` for manual
+(nothing lost). **Currently running on Workers AI** (verified live: `/api/intel/run` returns
+`engine:"workersai"`). Miguel can later paste an Anthropic key into Cloudflare himself and the worker
+auto-upgrades — NO redeploy. The agent never sees or moves the key (CLAUDE.md §7).
+
+### C. UI — the crew card "Notes & field intel" modal (note icon on each crew card)
+Each entry is its own contained `.intelcard`: **date only** ("Jun 24, 2026" — time removed at Miguel's
+request), reporter, source chip, green **"Contract N"** chip, edited marker, and **Edit** (inline
+textarea → `/api/intel/edit`) + **Delete** (`/api/intel/resolve {discard:true}`). Header shows entry
+count. Empty state points to crew-reports@cims.work. Manual notes (`crew_note_log`) live below intel.
+**Lazy backfill:** `apiIntelCrew` stamps any legacy NULL `contract_no` with the crew's current count on
+read (all existing notes are recent, so now == time-of-logging; new notes snapshot at filing so no drift).
+
+### D. New files + tests
+- `src/intelai.js` — pure: `pickEngine`, `intelSystemPrompt`, `intelUserPrompt`, `parseIntelResponse`,
+  model constants. `src/crewmatch.js` — pure matcher (session-4/5). Worker adds: `aiSummarize`,
+  `fromDisplayName`, `processIntelEmail`, `processIntelInbox`, intel API routes (`/api/intel/
+  inbox|file|crew|review|resolve|edit|run`).
+- Tests: `crewmatch.test.js` (8) + `intelai.test.js` (7). **Total 103 → 138, all green.** Pure helpers
+  only (engine calls + DB are integration, verified live instead).
+- Schema: `email_inbox` (raw mail + status), `crew_intel` (filed/pending/discarded; cols added via
+  `ensureIntel` ALTERs incl. `contract_no`, `edited_at`). Self-seeded, no migration.
+
+### E. Verified live (commits 0a2d10b, f550877, 41adad3, c485477, 923024b)
+Injected a realistic test report about Jonathan Alonzo (SC-0041465) → AI filed a high-confidence card
+with all 5 sections, correctly pulled "$240 / June 18 / 3 incidents / 2nd-contract repeat / recommended
+PM conversation", reporter "Rolando Cruz" from the From header. Test card discarded after (record clean).
+
+### F. OPEN / NEXT (session-5)
+- **#17 bonus baselines — STILL the core money unblock, blocked on Rita.** Unchanged from session 4.
+- Optional upgrade: add `ANTHROPIC_API_KEY` in Cloudflare for Claude-grade extraction (Miguel's call;
+  Workers AI is the current default and is good enough to start).
+- The one legacy intel note (Jhocson Jeyuson SC-0038328) now shows "Contract 3" via the lazy backfill.
+- Carryover (unchanged): R2 statement storage; DG3 IT email allowlist for Resend; §8 nightly refresh.
