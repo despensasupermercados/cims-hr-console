@@ -19,6 +19,7 @@ import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank } from "./ledger.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
+import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -102,6 +103,7 @@ export default {
         if (p === "/api/intel/review")   return apiIntelReview(env);
         if (p === "/api/intel/resolve" && request.method === "POST") return apiIntelResolve(request, env, session);
         if (p === "/api/intel/edit" && request.method === "POST") return apiIntelEdit(request, env, session);
+        if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -113,8 +115,9 @@ export default {
       return json({ error: "server_error" }, 500);
     }
   },
-  // Cloudflare Email Routing delivers crew-report mail here. Store the raw message in email_inbox
-  // for the scheduled AI task to summarise + match to a crew. Defensive: never throw (that bounces).
+  // Cloudflare Email Routing delivers crew-report mail here. Store the raw message, then kick off
+  // AI processing immediately (on arrival) so a card appears within seconds. ctx.waitUntil keeps the
+  // SMTP accept fast and lets the summarise+file run in the background. Defensive: never throw (that bounces).
   async email(message, env, ctx) {
     try {
       await ensureIntel(env);
@@ -123,7 +126,13 @@ export default {
       const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
       await env.DB.prepare("INSERT INTO email_inbox (id,from_addr,to_addr,subject,raw,received_at,status) VALUES (?,?,?,?,?,?,'new')")
         .bind("em_" + crypto.randomUUID(), message.from || null, message.to || null, subject, String(raw).slice(0, 60000), new Date().toISOString()).run();
+      if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 5));
     } catch (e) { console.error("email_ingest_error", (e && e.stack) || e); }
+  },
+  // Hourly safety-net sweep: catches any email that arrived while the AI engine was briefly
+  // unavailable (left in 'new'). Configured by [triggers] crons in wrangler.toml.
+  async scheduled(event, env, ctx) {
+    if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
   }
 };
 
@@ -1187,6 +1196,92 @@ async function apiIntelEdit(request, env, session) {
   await env.DB.prepare("UPDATE crew_intel SET summary=?, edited_at=? WHERE id=?").bind(String(b.summary).slice(0, 4000), new Date().toISOString(), b.id).run();
   await logActivity(env, session && session.email, "intel_edit", b.id);
   return json({ ok: true });
+}
+
+/* ---- AI auto-processing: turn a crew-report email into a filed field-intel card ----
+   Runs on email arrival (email handler) and hourly (scheduled handler). The crew is identified
+   by the deterministic matcher; the LLM only writes the decision-grade summary. No engine -> the
+   email is left 'new' (nothing lost) and retried on the next sweep or processed manually. */
+
+// Call the available LLM to summarise one email body. Returns clean summary text, or null on
+// failure / no engine. Never throws.
+async function aiSummarize(env, body, crewName, reporter) {
+  const engine = pickEngine(env);
+  if (engine === "none") return null;
+  const sys = intelSystemPrompt();
+  const usr = intelUserPrompt(crewName, reporter, body);
+  try {
+    if (engine === "claude") {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: INTEL_MODEL_CLAUDE, max_tokens: 600, system: sys, messages: [{ role: "user", content: usr }] })
+      });
+      if (!r.ok) { console.error("claude_http", r.status, (await r.text().catch(() => "")).slice(0, 300)); return null; }
+      const j = await r.json();
+      const txt = (j && j.content && j.content[0] && j.content[0].text) || "";
+      return parseIntelResponse(txt) || null;
+    }
+    if (engine === "workersai") {
+      const j = await env.AI.run(INTEL_MODEL_WORKERSAI, { messages: [{ role: "system", content: sys }, { role: "user", content: usr }], max_tokens: 600 });
+      const txt = (j && (j.response || j.result || (typeof j === "string" ? j : ""))) || "";
+      return parseIntelResponse(txt) || null;
+    }
+  } catch (e) { console.error("ai_summarize_error", (e && e.stack) || e); }
+  return null;
+}
+
+// Pull a display name out of a raw "From:" header — 'Ray Guerra <ray@x>' -> 'Ray Guerra'.
+function fromDisplayName(raw, fallback) {
+  try {
+    const m = String(raw || "").match(/^From:\s*(.+)$/mi);
+    if (m) {
+      let v = m[1].trim();
+      const lt = v.indexOf("<");
+      if (lt > 0) v = v.slice(0, lt).trim();
+      else v = v.replace(/<[^>]*>/g, "").trim();
+      v = v.replace(/^"|"$/g, "").trim();
+      if (v) return v.slice(0, 80);
+    }
+  } catch (e) {}
+  return fallback || null;
+}
+
+// Process one inbox row end-to-end. Claims the row first (so the arrival call and the cron can't
+// both file it), then decodes -> matches crew -> AI summarises -> files (high/med) or pending.
+async function processIntelEmail(env, row, roster) {
+  // Claim: only proceed if this row is still 'new' (atomic guard against double-processing).
+  const claim = await env.DB.prepare("UPDATE email_inbox SET status='processing' WHERE id=? AND status='new'").bind(row.id).run();
+  if (!claim.meta || claim.meta.changes === 0) return false;
+  const body = decodeEmailBody(row.raw);
+  const match = matchCrew((row.subject || "") + " \n " + body, roster);
+  const reporter = fromDisplayName(row.raw, row.from_addr);
+  const summary = await aiSummarize(env, body, match.matchedName, reporter);
+  if (!summary) { // AI unavailable/failed -> release the row back to 'new' for the next sweep
+    await env.DB.prepare("UPDATE email_inbox SET status='new' WHERE id=?").bind(row.id).run();
+    return false;
+  }
+  const filed = !!(match.agency_id && (match.confidence === "high" || match.confidence === "med"));
+  const contractNo = filed ? await intelContractNo(env, match.agency_id) : null;
+  const id = "ci_" + crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO crew_intel (id,agency_id,reporter,summary,source,source_email_id,confidence,status,candidates,ts,created_by,contract_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(id, match.agency_id || null, reporter, summary, "email", row.id, match.confidence, filed ? "filed" : "pending", JSON.stringify(match.candidates || []), new Date().toISOString(), "ai", contractNo).run();
+  await env.DB.prepare("UPDATE email_inbox SET status='processed', processed_at=? WHERE id=?").bind(new Date().toISOString(), row.id).run();
+  await logActivity(env, "ai", "intel_auto", (match.agency_id || "pending") + " " + match.confidence);
+  return true;
+}
+
+// Sweep up to `limit` unprocessed inbox rows. Used on arrival and by the hourly cron. Never throws.
+async function processIntelInbox(env, limit) {
+  try {
+    await ensureIntel(env);
+    if (pickEngine(env) === "none") return 0;
+    const roster = await intelRoster(env);
+    const rows = (await env.DB.prepare("SELECT id, from_addr, subject, raw, received_at FROM email_inbox WHERE status='new' ORDER BY received_at ASC LIMIT ?").bind(limit || 10).all()).results;
+    let n = 0;
+    for (const row of rows) { try { if (await processIntelEmail(env, row, roster)) n++; } catch (e) { console.error("intel_email_error", (e && e.stack) || e); } }
+    return n;
+  } catch (e) { console.error("intel_inbox_error", (e && e.stack) || e); return 0; }
 }
 // Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
 // Keyman projected-off dates are an unreliable trigger (often stale), which left the board empty.
@@ -2619,7 +2714,7 @@ async function loadIntelLog(id){
 }
 function intelCard(id,n){
   var d=new Date(n.ts);
-  var dt=isNaN(d)?'':d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  var dt=isNaN(d)?'':d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
   var rep=n.reporter?('<span class=intrep>'+String(n.reporter).replace(/</g,'&lt;')+'</span>'):'';
   var ctr=(n.contract_no!=null)?('<span class="intchip ctr">Contract '+n.contract_no+'</span>'):'';
   var edited=n.edited_at?'<span class=intedited>· edited</span>':'';
