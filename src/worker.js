@@ -761,13 +761,14 @@ async function apiBonusCrew(env, url) {
   // (the Keyman schedule grids — the contract just ended, or the current one), since the Contract
   // Counter only holds completed-contract dates. Fall back to the latest Contract Counter leg.
   const td = TODAY();
-  let bestPast = null, bestFut = null;
+  let current = null, bestPast = null, bestFut = null;
   for (const h of SHIP_HISTORY) {
     if (!h.ours || h.sc !== cr.agency_id || !h.off) continue;
-    if (h.off <= td) { if (!bestPast || h.off > bestPast.off) bestPast = h; }
-    else { if (!bestFut || h.off < bestFut.off) bestFut = h; }
+    if (h.on && h.on <= td && h.off >= td) { if (!current || h.off > current.off) current = h; } // contract spanning today
+    else if (h.off < td) { if (!bestPast || h.off > bestPast.off) bestPast = h; }                  // last completed
+    else { if (!bestFut || h.off < bestFut.off) bestFut = h; }                                       // next one
   }
-  const sched = bestPast || bestFut;
+  const sched = current || bestPast || bestFut;  // the contract being scored: current first, else most-recent
   let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null;
   if (!lastLeg) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
@@ -1227,6 +1228,12 @@ label.req::after{content:' *';color:var(--red);font-weight:700}
 .gchip{background:#fbe9e7;color:var(--red);border-radius:7px;padding:2px 8px;font-weight:700;font-size:11px}
 .rbtns{display:flex;gap:8px;flex:none}
 .fbdot{display:inline-block;width:9px;height:9px;border-radius:50%;border:1px solid rgba(0,0,0,.08)}
+.sbadge{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:12px;padding:5px 12px;border-radius:20px;margin-bottom:10px}
+.sbadge.on{background:#e8f6ed;color:var(--green-d)}
+.sbadge.off{background:#fff1de;color:var(--amber)}
+.sbadge.idle{background:#eef1f5;color:var(--mut)}
+.modal.sc-off .mh{border-bottom-color:var(--amber)}
+.modal.sc-on .mh{border-bottom-color:var(--green)}
 .btn{padding:9px 15px;border:0;border-radius:9px;background:var(--navy);color:#fff;font-weight:600;cursor:pointer;font-family:'DM Sans';font-size:13.5px}
 .btn.green{background:var(--green)}.btn.ghost{background:#fff;border:1px solid var(--line);color:var(--navy)}
 .warn{background:#fdf7ec;border:1px solid #ecdfc2;color:var(--amber);border-radius:9px;padding:9px 11px;font-size:12.5px;margin-bottom:12px}
@@ -1416,7 +1423,6 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-dashboard class=on onclick="show('dashboard')">Dashboard</button>
     <button id=nav-crew onclick="show('crew')">Crew</button>
     <button id=nav-contracts onclick="show('contracts')">Contracts &amp; Bonus</button>
-    <button id=nav-bonus onclick="show('bonus')">Score</button>
     <button id=nav-rotation onclick="show('rotation')">Keyman</button>
     <button id=nav-feedback onclick="show('feedback')">Feedback</button>
     <button id=nav-compliance onclick="show('compliance')">Compliance</button>
@@ -1463,7 +1469,6 @@ async function show(tab){
   if(tab==='dashboard')return renderDashboard();
   if(tab==='crew')return renderCrew();
   if(tab==='contracts')return renderContracts();
-  if(tab==='bonus')return renderBonus();
   if(tab==='rotation')return renderRotation();
   if(tab==='feedback')return renderFeedback();
   if(tab==='compliance')return renderCompliance();
@@ -2464,7 +2469,7 @@ async function renderContracts(){
    +'<div class=search style="margin-left:auto"><input id=ctq placeholder="name or crew ID" oninput="CTLF.q=this.value;paintContracts()" style="width:210px"></div>'
    +'<select id=ctc onchange="CTLF.client=this.value;paintContracts()"><option value="">All clients</option>'+clients.map(function(x){return '<option>'+x+'</option>';}).join('')+'</select>'
    +'<select id=cts onchange="CTLF.sort=this.value;paintContracts()"><option value="az">Sort: name</option><option value="tenure">Sort: contracts</option><option value="next">Sort: next bonus</option><option value="paid">Sort: total paid</option></select>'
-   +'<button class="btn green" onclick="addCrewModal()">+ New signer</button></div>'
+   +'<button class="btn ghost" onclick="openScoreWindow()">Contributor scoring →</button> <button class="btn green" onclick="addCrewModal()">+ New signer</button></div>'
    +'<div class=tiles style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">'+tile(d.totals.crew,'Crew')+tile(d.totals.baselineSet+' / '+d.totals.crew,'Baselines set',(d.totals.baselineSet<d.totals.crew?'amber':'green'))+tile('$'+Number(d.totals.paid||0).toLocaleString(),'Bonus paid to date','green')+'</div>'
    +'<div class=hint style="margin:-4px 0 10px">Consecutive count drives the bonus ladder. Where a baseline is not yet confirmed, the next-bonus figure is withheld (shown as "baseline pending").</div>'
    +'<div id=ctcount class=csub style="margin-bottom:8px"></div><div id=cttable></div>';
@@ -2482,7 +2487,7 @@ function paintContracts(){
   }).join('')||'<tr><td colspan=8 class=muted>No matches.</td></tr>';
   $('#cttable').innerHTML='<table class=tbl><thead><tr><th>Crew</th><th>Ship · client</th><th>Contracts</th><th>Consec.</th><th>Next bonus</th><th>Last outcome</th><th style="text-align:right">Paid</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
 }
-function ledgerScore(id){document.querySelectorAll('nav button').forEach(function(b){b.classList.remove('on');});var nb=$('#nav-bonus');if(nb)nb.classList.add('on');openScore(id);}
+function ledgerScore(id){openScore(id);}
 /* ---- Feedback windows board ---- */
 async function renderFeedback(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
@@ -2505,23 +2510,8 @@ async function fbRequest(id,role){
     else if(out)out.textContent='Could not create the link.';
   }catch(e){if(out)out.textContent='Could not create the link.';}
 }
-async function renderBonus(){
-  $('#view').innerHTML='<div class=bar><h2>Bonus — Score a contract</h2>'
-   +'<input id=bq placeholder="Search crew to score…" oninput="filterBonus()" style="width:230px">'
-   +'<button class="btn green" style="margin-left:8px" onclick="openScoreWindow()">Contributor scoring →</button></div>'
-   +'<div class=hint style="margin:-6px 0 12px">Pick a crew member to open their contract-completion Score Card — or open the <b>Contributor scoring</b> window where Ray, Rolando &amp; Dexter submit their inputs.</div>'
-   +'<div id=blist></div>';
-  loadBonus();
-}
-let _bt;function filterBonus(){clearTimeout(_bt);_bt=setTimeout(loadBonus,180);}
-async function loadBonus(){
-  var q=$('#bq')?$('#bq').value:'';
-  var r=await (await fetch('/api/crew?q='+encodeURIComponent(q))).json();
-  $('#blist').innerHTML=r.crew.slice(0,40).map(function(c){
-    var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
-    return '<div class=brow onclick="openScore(\\''+c.agency_id+'\\')"><div><div class=cname style="font-size:14px">'+name+'</div><div class=csub>'+c.agency_id+' · '+(c.vessel_observed||'—')+'</div></div><div style="margin-left:auto"><span class="btn green" style="pointer-events:none">Score →</span></div></div>';
-  }).join('')||'<div class=muted>No matches.</div>';
-}
+/* The old "Score" tab (renderBonus) was removed — scoring now lives in the Contracts & Bonus
+   ledger (Score button per row) + the Contributor scoring window opened from that tab. */
 /* ---- Contributor Scoring window (Ray / Rolando / Dexter submit their inputs in one place) ---- */
 var _SW={};
 var FBLABEL={ray:'Ray — Inventory & Orders',rolando:'Rolando — Technical',dexter:'Dexter — Field review'};
@@ -2640,11 +2630,19 @@ async function openScore(id){
   _SC=d; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew — treated as 0. Confirm via the reconciliation sheet before any payout is finalised.</div>';
   var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
+  var _st=(cr.status||'').toLowerCase();
+  var _onship=_st.indexOf('board')>=0;
+  var scCls=_onship?'sc-on':'sc-off';
+  var sb=_onship?'<div class="sbadge on">● On board — still serving</div>'
+       :(_st.indexOf('vac')>=0?'<div class="sbadge off">⚓ Off the ship — on vacation</div>'
+       :'<div class="sbadge idle">● '+(cr.status||'status unknown')+'</div>');
   var body=''
+   +sb
    +'<div class=hint>'+cr.agency_id+' · '+d.rank+' · Contract count <b>'+d.count+'</b> → completing makes it <b>'+(d.count+1)+'</b>. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
    +warn+hist+'<div id=fbPanel></div>'
    +'<div class=sec><span class=n>1</span>Contract</div>'
    +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore()"></div></div>'
+   +'<div class=hint id=dateEcho style="margin:-6px 0 10px"></div>'
    +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
    +'<div class=sec><span class=n>2</span>Outcome &amp; gates</div>'
    +'<label class=ck><input type=checkbox id=gComplete checked onchange="recalcScore()"> Contract completed in full</label>'
@@ -2660,7 +2658,7 @@ async function openScore(id){
    +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
    +'</div>'
    +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()">Commit</button></div></div>';
-  $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class="modal '+scCls+'"><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';
   if(d.lastLeg){if(d.lastLeg.on)$('#spanStart').value=d.lastLeg.on;if(d.lastLeg.off)$('#spanEnd').value=d.lastLeg.off;}
   recalcScore();
   applyFeedback(cr.agency_id);
@@ -2684,8 +2682,10 @@ async function genLink(id,role){
   if(r.error){alert('Error: '+r.error);return;}
   document.getElementById('fbLink').innerHTML='<div class=hint style="margin-top:6px">Single-use '+role+' link — send to the contributor:<br><input readonly value="'+r.link+'" onclick="this.select()" style="width:100%;margin-top:4px;font-size:11px"></div>';
 }
+function fmtDate(iso){if(!iso)return'—';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).split('-');if(p.length!==3)return iso;return parseInt(p[2],10)+' '+(m[parseInt(p[1],10)-1]||'?')+' '+p[0];}
 function recalcScore(){
   for(var k in FW){var e=$('#'+k);if(e)$('#'+k+'v').textContent=e.value;}
+  var de=$('#dateEcho');if(de){var on=$('#spanStart').value,off=$('#spanEnd').value;de.innerHTML=(on||off)?('Reads as <b>'+fmtDate(on)+'</b> → <b>'+fmtDate(off)+'</b>'+((on&&off&&off<on)?' <span style="color:var(--red);font-weight:700">— sign-off is before sign-on!</span>':'')):'';}
   var rush=$('#gRush').checked,audit=$('#gAudit').checked;
   $('#gateNoteWrap').style.display=(rush||audit)?'block':'none';
   $('#rowRush').className='ck ckgate'+(rush?' on':'');
@@ -2712,7 +2712,7 @@ async function commitBonus(){
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
   if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.'};alert(msgs[res.error]||('Error: '+res.error));return;}
   var r=res.result;
-  $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'bonus\\')">Done</button></div></div></div></div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="if(event.target===this)mClose()"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
 function mClose(){$('#modalRoot').innerHTML='';}
 show('dashboard');
