@@ -1146,7 +1146,16 @@ async function apiIntelFile(request, env, session) {
 // Filed intel timeline for one crew (newest first) — the crew card's "story over time".
 async function apiIntelCrew(env, url) {
   await ensureIntel(env);
-  const rows = (await env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no, edited_at FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(url.searchParams.get("id")).all()).results;
+  const agencyId = url.searchParams.get("id");
+  const rows = (await env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no, edited_at FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(agencyId).all()).results;
+  // Lazy backfill: notes filed before contract_no existed have NULL. Stamp them with the crew's
+  // current contract count and persist (existing notes are recent, so now == time-of-logging).
+  if (rows.some(r => r.contract_no == null)) {
+    const cNo = await intelContractNo(env, agencyId);
+    if (cNo != null) {
+      for (const r of rows) if (r.contract_no == null) { r.contract_no = cNo; try { await env.DB.prepare("UPDATE crew_intel SET contract_no=? WHERE id=?").bind(cNo, r.id).run(); } catch (e) {} }
+    }
+  }
   return json({ count: rows.length, intel: rows });
 }
 // Pending (low-confidence / unmatched) notes awaiting human triage, with candidate crew names.
