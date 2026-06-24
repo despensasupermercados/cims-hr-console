@@ -618,3 +618,38 @@ PM conversation", reporter "Rolando Cruz" from the From header. Test card discar
   Workers AI is the current default and is good enough to start).
 - The one legacy intel note (Jhocson Jeyuson SC-0038328) now shows "Contract 3" via the lazy backfill.
 - Carryover (unchanged): R2 statement storage; DG3 IT email allowlist for Resend; §8 nightly refresh.
+
+### G. DAYS-WORKED / BILLING FIXES (session 5, cont.)
+1. **`/api/daysworked` 500 (silent since the keyman_contract3 rename).** `keymanRows` aliased a column
+   to `on` — a reserved SQL keyword — so D1 rejected the query; the route returned the promise WITHOUT
+   `await`, so the rejection escaped the fetch handler's try/catch and Cloudflare served its own error
+   page (the days-worked export AND the billing tab were both dead). Fix: select raw columns + map in
+   JS; wrap the endpoint to return JSON on error. Guard test `test/sqlsafety.test.js` forbids aliasing
+   a column to `on`. (commits b7acef8, cbaf50f)
+2. **"Days worked (Excel)" was billing LIFETIME, not the month.** It hit `/api/daysworked` with no
+   window → all-time sea-days (43,023). Miguel needs *days worked THIS MONTH* per crew active in Keyman
+   now, so accounting can bill the customer. Root insight (same lesson as the score-queue fix):
+   `keyman_contract3` is the historical Contract Counter (closed past contracts only) — current onboard
+   contracts with this-month dates live in the LIVE BOARD roster (registry status + schedule/contract_
+   edit/keyman dates resolved in `apiRotation`). So billing must come from there, NOT keyman_contract3.
+   - Refactored `apiRotation` → `rotationSections(env)` (returns the resolved board object) so billing
+     reuses the EXACT same per-crew sign-on/off dates the board shows. `apiRotation` now just wraps it.
+   - New `apiBillingMonth(env)` + route `/api/billing/month`: for each board-roster crew, days =
+     `periodDays(signOn, off, monthStart, today)` where off = today if On board, else their sign-off;
+     only days>0 this month appear. Returns perCrew {name, sc, ship, client, status, signOn, days} +
+     perVessel {ship, client, crew, days} + totals. Customer = `clientLabel(section.brand)`.
+   - Button renamed "Days worked (Excel)" → **"Bill this month (Excel)"**; `exportDaysExcel` now hits
+     `/api/billing/month` and writes a billing CSV (BY CREW for customer billing + BY VESSEL/CUSTOMER),
+     filename `days-worked_YYYY-MM.csv`. It is **month-to-date** (1st → today); re-run at month-end for
+     the full month. "Active this month" includes crew who signed off mid-month (billable days), so the
+     crew count runs a bit above the currently-onboard count. (commits 8c388be, 34d7f73, 2157f55)
+   - Verified live June 2026: 58 crew, 1,244 sea-days, 47 vessels; Karl Bernard = 23 days on Adventure
+     (Royal Caribbean), matching his board card. New test in `test/daysworked.test.js`. **Total 141.**
+   - NOTE: `/api/daysworked` (historical, arbitrary from/to) still powers the Billing tab — left as is;
+     only its perCrew now also carries vessel/client/status (harmless enrichment).
+
+### H. WHERE THINGS LIVE (so they're findable — Miguel asked)
+- **Email field-intel** (crew-reports@cims.work) → **Crew tab** → a crew card's **note icon** → "Notes
+  & field intel" panel. Low-confidence/unmatched → **"Review intel"** button atop the Crew tab.
+- **"Inputs →"** on Contracts & Bonus → the *contributor scoring* page (bonus questions). This is the
+  MONEY/bonus path and is deliberately SEPARATE from the email field-intel.
