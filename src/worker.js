@@ -17,6 +17,7 @@ import { SHIP_HISTORY } from "./ship_history.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank } from "./ledger.js";
+import { contractCounts, fullContracts } from "./contracts.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -341,6 +342,18 @@ async function apiDataStatus(env) {
   return json({ today: TODAY(), datasets, log });
 }
 // Read all contract rows in the shape billingReport expects.
+// {on,end,ship} shape that contracts.js (full-contract grouping) expects, from a keyman_contract3 row.
+function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, ship: r.ship }; }
+// sc -> number of FULL contracts (legs grouped by the <=3-week transfer rule, each reaching the line
+// duration minimum). This — not the raw leg count — drives the rank tier and the "Contracts" number.
+async function fullContractMap(env) {
+  const rows = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const byCrew = {};
+  for (const r of rows) (byCrew[r.sc] = byCrew[r.sc] || []).push(legShape(r));
+  const map = {};
+  for (const sc in byCrew) map[sc] = contractCounts(byCrew[sc]).full;
+  return map;
+}
 async function keymanRows(env) {
   // NOTE: 'on' is a reserved SQL keyword, so aliasing sign_on AS on makes D1 reject the query
   // (this silently broke days-worked from the keyman_contract3 rename onward). Select raw columns
@@ -505,7 +518,7 @@ async function apiCrew(env, url) {
   const base = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=0").all()).results;
   const ovs = (await env.DB.prepare("SELECT * FROM crew_override").all()).results;
   const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legs = (await env.DB.prepare("SELECT sc, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const nl = (await env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all()).results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
@@ -518,7 +531,7 @@ async function apiCrew(env, url) {
       status: c.status, rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
       client: clientOf(c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
       med_exp: c.med_exp, sirb_exp: c.sirb_exp, pp_exp: c.pp_exp, usv_exp: c.usv_exp, sch_exp: c.sch_exp,
-      baseline_count: c.baseline_count, contract_count: ls.length,
+      baseline_count: c.baseline_count, contract_count: fullContracts(ls.map(legShape)),
       active_on: act ? act.sign_on : null, active_off: act ? (act.act_off || act.proj_off) : null,
       hasNote: !!noteMap[c.agency_id] || !!(c.notes && String(c.notes).trim())
     };
@@ -649,7 +662,7 @@ async function rotationSections(env) {
     }
   }
   const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
-  const contracts = {}; for (const sc in byCrew) contracts[sc] = byCrew[sc].length;
+  const contracts = {}; for (const sc in byCrew) contracts[sc] = fullContracts(byCrew[sc].map(legShape)); // FULL contracts, not raw legs
   // Registry/keyman/schedule vessel string -> ONE canonical short ship name. Single source of truth
   // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
   // three data sources below so their sections key-align instead of fragmenting (Celebrity-prefixed
@@ -861,7 +874,8 @@ async function apiBonusCrew(env, url) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
   }
-  const legN = (((await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).first()) || {}).n) || 0;
+  const legRows = (await env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all()).results;
+  const legN = fullContracts(legRows.map(legShape));
   return json({ crew: cr, count, contracts: legN, rank: psRank(legN, true), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
@@ -871,8 +885,7 @@ async function apiContracts(env) {
   const base = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all()).results;
   const ovs = (await env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all()).results;
   const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legCounts = {};
-  for (const r of (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 WHERE sign_on IS NOT NULL GROUP BY sc").all()).results) legCounts[r.sc] = r.n;
+  const legCounts = await fullContractMap(env); // sc -> FULL-contract count (drives rank + the number shown)
   const lastOut = {}, totPay = {};
   for (const o of (await env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all()).results) {
     lastOut[o.crew_id] = o; totPay[o.crew_id] = (totPay[o.crew_id] || 0) + (o.pay_usd || 0);
@@ -906,7 +919,8 @@ async function gatherStatement(env, id) {
   const baseline = await effectiveBaseline(env, id, crew.baseline_count);
   const count = await crewCount(env, crew.id, baseline);
   const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
-  const bonus = { rank: psRank(contracts.length, true), count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
+  const bonus = { rank: psRank(fc, true), contracts: fc, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
