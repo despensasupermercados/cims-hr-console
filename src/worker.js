@@ -747,7 +747,7 @@ async function rotationSections(env) {
     const k = normShip(ship);
     const enr = (legBSC[k] || {})[c.agency_id] || {};
     const sEnr = (schEnr[k] || {})[c.agency_id] || {};
-    (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[k] || null, current: c.status === "On board" }));
+    (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[k] || null, disembark: enr.disembark || shipHome[k] || null, current: c.status === "On board" }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of SHIP_HISTORY) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
