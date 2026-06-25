@@ -2970,7 +2970,7 @@ function card(c){
   if(c.baseline_count!=null){var nv=ladderValue((c.baseline_count||0)+1);bonusPill='<span class="pill next'+(nv===0?' zero':'')+'">Next bonus: '+(nv===0?'$0 (builds to PS)':'$'+nv.toLocaleString())+'</span>';}
   else bonusPill='<span class="pill next zero">Bonus: baseline pending</span>';
   return '<div class="crew-card card b-'+b+'" data-crew="'+c.agency_id+'">'
-   +'<div class=tools><button title="Documents" onclick="docsModal(\\''+c.agency_id+'\\')">📋</button><button title="Notes" onclick="notesModal(\\''+c.agency_id+'\\')">🗒</button><button title="Edit" onclick="editCrewModal(\\''+c.agency_id+'\\')">✎</button></div>'
+   +'<div class=tools><button title="Documents" style="color:var(--red);font-weight:800" onclick="docsModal(\\''+c.agency_id+'\\')">✚</button><button title="Notes" onclick="notesModal(\\''+c.agency_id+'\\')">🗒</button><button title="Edit" onclick="editCrewModal(\\''+c.agency_id+'\\')">✎</button></div>'
    +'<div class=cname>'+name+'</div>'
    +'<div class=csub>'+sub+'</div>'
    +'<div class=crow><span class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</span><span class="pill rank">'+rankTag(c.rank,c.baseline_count)+'</span></div>'
