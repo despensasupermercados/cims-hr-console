@@ -2333,9 +2333,9 @@ async function editContractModal(id,seq){
   var note=String((d.ready&&d.ready.note)||'').replace(/</g,'&lt;');
   var ships={};(ROT.sections||[]).forEach(function(s){ships[s.ship]=1;});if(e.ship)ships[e.ship]=1;
   var shipOpts=Object.keys(ships).sort().map(function(s){return '<option'+(s===e.ship?' selected':'')+'>'+s+'</option>';}).join('');
-  // input is a SIBLING of its label (linked by for=), not nested inside it. Nesting causes iOS/iPad to
-  // fire the toggle twice per tap (input + label forwarding) so it flips on then off and looks stuck.
-  var ck=function(i,lab,on){return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-size:13px"><input type=checkbox id="'+i+'"'+(on?' checked':'')+'><label for="'+i+'" style="cursor:pointer;margin:0">'+lab+'</label></span>';};
+  // The wrapper handles the tap (tgFlip) and the checkbox is pointer-events:none, so a tap can only
+  // produce ONE flip — fixes the iPad double-toggle where the box landed back where it started.
+  var ck=function(i,lab,on){return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-size:13px;cursor:pointer" onclick="tgFlip(\\''+i+'\\')"><input type=checkbox id="'+i+'"'+(on?' checked':'')+' style="pointer-events:none"> '+lab+'</span>';};
   var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||'—';return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on||'—')+'</td><td>'+off+'</td></tr>';}).join('');
   var fld=function(lab,inp){return '<div><label class=csub>'+lab+'</label>'+inp+'</div>';};
   var h='<div class=modcard><div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+' · contract #'+seq+'</div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
@@ -2885,7 +2885,7 @@ async function editCrewModal(id){
    +fg('Passport','<input id=ePp type=date value="'+iv(c.pp_exp)+'">')+fg('US visa','<input id=eUsv type=date value="'+iv(c.usv_exp)+'">')
    +fg('Schengen (Europe only)','<input id=eSch type=date value="'+iv(c.sch_exp)+'">')
    +'</div>'
-   +'<label class=ck style="margin-top:8px;font-weight:600"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+'> Retired (manual — keeps this crew off the auto On board / On Vacation tagging)</label>'
+   +'<span class=ck style="margin-top:8px;font-weight:600;cursor:pointer;display:flex" onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"> Retired (manual — keeps this crew off the auto On board / On Vacation tagging)</span>'
    +'<div style="margin-top:12px;text-align:right"><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
 }
@@ -3184,10 +3184,10 @@ async function openScore(id){
    +'<div class=hint id=dateEcho style="margin:-6px 0 10px"></div>'
    +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
    +'<div class=sec><span class=n>2</span>Outcome &amp; gates</div>'
-   +'<label class=ck><input type=checkbox id=gComplete checked onchange="recalcScore()"> Contract completed in full</label>'
-   +'<label class=ck><input type=checkbox id=gCompassion onchange="recalcScore()"> Not completed — approved compassionate leave (treat as completed)</label>'
-   +'<label class="ck ckgate" id=rowRush><input type=checkbox id=gRush onchange="recalcScore()"> Emergency/rush order from ordering failure <b>— resets count to 0</b></label>'
-   +'<label class="ck ckgate" id=rowAudit><input type=checkbox id=gAudit onchange="recalcScore()"> Failed end-of-contract inventory audit <b>— resets count to 0</b></label>'
+   +'<span class=ck style="cursor:pointer" onclick="tgFlip(\\'gComplete\\')"><input type=checkbox id=gComplete checked onchange="recalcScore()" style="pointer-events:none"> Contract completed in full</span>'
+   +'<span class=ck style="cursor:pointer" onclick="tgFlip(\\'gCompassion\\')"><input type=checkbox id=gCompassion onchange="recalcScore()" style="pointer-events:none"> Not completed — approved compassionate leave (treat as completed)</span>'
+   +'<span class="ck ckgate" id=rowRush style="cursor:pointer" onclick="tgFlip(\\'gRush\\')"><input type=checkbox id=gRush onchange="recalcScore()" style="pointer-events:none"> Emergency/rush order from ordering failure <b>— resets count to 0</b></span>'
+   +'<span class="ck ckgate" id=rowAudit style="cursor:pointer" onclick="tgFlip(\\'gAudit\\')"><input type=checkbox id=gAudit onchange="recalcScore()" style="pointer-events:none"> Failed end-of-contract inventory audit <b>— resets count to 0</b></span>'
    +'<div class=fg id=gateNoteWrap style="display:none"><label class=req>Reason &amp; evidence (required for a reset gate)</label><textarea id=gateNote rows=2 placeholder="e.g. Rush airfreight magenta toner 12 Mar — par hit 0, prior order skipped. Zendesk #5843."></textarea></div>'
    +'<div class=sec><span class=n>3</span>Scorecard</div>'
    +'<div class=scsec id=scoreSection><div class=gateban id=gateBan></div>'
@@ -3259,11 +3259,11 @@ async function commitBonus(){
 var MODAL_T=0;
 function ovc(e){ if(e.target===e.currentTarget && (Date.now()-MODAL_T)>450) mClose(); }
 function mClose(){$('#modalRoot').innerHTML='';}
-// iPad/iOS fix: a tap on a checkbox that sits INSIDE its <label> can fire twice (the input plus the
-// label forwarding the activation), flipping the toggle on then off so it looks stuck. Swallow the
-// duplicate click that lands on the same checkbox within 70ms of the first. Harmless on desktop (one
-// click per tap). Fixes the contract toggles, bonus gates, and the Retired tag in one place.
-document.addEventListener('click',function(ev){var t=ev.target;if(t&&t.tagName==='INPUT'&&t.type==='checkbox'){var n=Date.now();if(t.__lt&&n-t.__lt<70){ev.preventDefault();ev.stopImmediatePropagation();return;}t.__lt=n;}},true);
+// Toggle a checkbox explicitly from its wrapper's click (the input itself is pointer-events:none, so
+// it never receives a native tap). One tap = exactly one flip + one change event, on every device —
+// avoids the iPad double-toggle where a label-associated checkbox fires twice and lands back where it
+// started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
+function tgFlip(id){var c=document.getElementById(id);if(!c)return;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
 show('dashboard');
 </script>
 <div id=modalRoot></div></body></html>`;
