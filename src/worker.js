@@ -22,7 +22,6 @@ import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
-import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -113,8 +112,6 @@ export default {
         if (p === "/api/intel/resolve" && request.method === "POST") return apiIntelResolve(request, env, session);
         if (p === "/api/intel/edit" && request.method === "POST") return apiIntelEdit(request, env, session);
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
-        if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
-        if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -145,7 +142,6 @@ export default {
   // unavailable (left in 'new'). Configured by [triggers] crons in wrangler.toml.
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
-    if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event));
   }
 };
 
@@ -228,73 +224,6 @@ async function sendMagicLink(env, email, link) {
       html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`
     })
   });
-}
-
-/* -------------------- Seafarer Movements weekly email -------------------- */
-// Build {signOns, signOffs} for the 7-day window from the LIVE Keyman board
-// (rotationSections) so the email matches the console exactly. Our crew only.
-async function movementsData(env, runDate) {
-  const { sections } = await rotationSections(env);
-  const crew = [];
-  for (const s of (sections || [])) for (const c of (s.crew || [])) crew.push(c);
-  return shapeMovements(crew, runDate);
-}
-// Today's date in America/New_York as 'YYYY-MM-DD' (Miami local; DST-correct).
-function nyDateStr(now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-}
-async function renderMovements(env, runDate) {
-  const { signOns, signOffs } = await movementsData(env, runDate);
-  return { html: buildSeafarerMovementEmail({ runDate, signOns, signOffs }), on: signOns.length, off: signOffs.length };
-}
-async function sendMovementsEmail(env, to, runDate) {
-  const { html, on, off } = await renderMovements(env, runDate);
-  if (!env.RESEND_API_KEY) return { ok: false, sent: false, note: "no_mailer", on, off };
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: env.MAIL_FROM || "CIMS <noreply@cims.work>",
-      to: [to],
-      subject: `Seafarer Movements · week of ${runDate} (${on} on / ${off} off)`,
-      html,
-    }),
-  });
-  return { ok: r.ok, sent: r.ok, status: r.status, to, on, off };
-}
-// GET /api/movements/preview?date=YYYY-MM-DD -> rendered HTML, no send (Miami today by default).
-async function apiMovementsPreview(env, url) {
-  const date = url.searchParams.get("date") || nyDateStr();
-  const { html } = await renderMovements(env, date);
-  return htmlResponse(html);
-}
-// POST /api/movements/send {to?, date?} -> send now. Money users only (Miguel/Rita).
-async function apiMovementsSend(request, env, session) {
-  if (!isMoneyUser(session.email)) return json({ error: "forbidden" }, 403);
-  const b = await request.json().catch(() => ({}));
-  const to = b.to || env.MOVEMENTS_TO || "Miguel.Sanmartin@dg3.com";
-  const date = b.date || nyDateStr();
-  const res = await sendMovementsEmail(env, to, date);
-  await logActivity(env, session.email, "movements_send", `${to} ${date} ${res.on}/${res.off}`);
-  return json(res);
-}
-// Hourly-cron gate: fires once when Miami local time is Monday 07:00 (DST-correct via Intl).
-// Stays DARK until env.MOVEMENTS_TO is set in Cloudflare. Idempotent per week via data_meta.
-async function maybeSendMovements(env, event) {
-  try {
-    const to = env.MOVEMENTS_TO;
-    if (!to) return;
-    const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', hour12: false }).formatToParts(now);
-    const get = t => (parts.find(x => x.type === t) || {}).value;
-    if (get('weekday') !== 'Mon' || get('hour') !== '07') return;
-    const runDate = nyDateStr(now);
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
-    const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='movements_last_sent'").first();
-    if (prev && prev.v === runDate) return;
-    const res = await sendMovementsEmail(env, to, runDate);
-    if (res.sent) await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('movements_last_sent',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(runDate).run();
-  } catch (e) { console.error("movements_cron", (e && e.stack) || e); }
 }
 
 // GET /auth/verify?token=...  -> set session cookie
@@ -595,6 +524,16 @@ async function apiDashboard(env) {
     const ms = (await env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=? GROUP BY month ORDER BY month").bind(ty).all()).results;
     travel.months = ms.map(r => ({ m: r.month, t: Math.round((r.t || 0) * 100) / 100 }));
     travel.air = Math.round(ms.reduce((s, r) => s + (r.a || 0), 0) * 100) / 100;
+    const cat = await env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=?").bind(ty).first();
+    const rnd = (x) => Math.round((x || 0) * 100) / 100;
+    travel.cats = { air: rnd(cat.air), hotel: rnd(cat.hotel), medical: rnd(cat.medical), visa: rnd(cat.visa), food: rnd(cat.food), transport: rnd(cat.transport), other: rnd(cat.other) };
+    const curY = +TODAY().slice(0, 4), curM = +TODAY().slice(5, 7);
+    travel.elapsedMo = (ty === curY) ? curM : 12;          // YTD = elapsed calendar months
+    travel.budgetMo = 15000;                               // crew travel budget (source: travel sheet SUMMARY!C55)
+    travel.ytdBudget = travel.budgetMo * travel.elapsedMo;
+    const cy = await env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=? AND kind!='shoreside' AND month<=?").bind(ty, travel.elapsedMo).first();
+    travel.crewYTD = rnd(cy.t);
+    travel.pctUsedYTD = travel.ytdBudget ? Math.round(travel.crewYTD / travel.ytdBudget * 100) : 0;
   }
   return json({
     today, travel, birthdays,
@@ -2735,10 +2674,7 @@ async function renderDashboard(){
   // ZONE 3 — COST & BONUS
   h+='<div class=zlabel>Cost &amp; bonus</div><div class=dzone>'
    +'<div class=panel style="grid-column:span 2"><h3>Travel spend by month'+(d.travel&&d.travel.year?(' · '+d.travel.year):'')+' <button class="btn ghost" id=shtog style="float:right;padding:2px 10px;font-size:11px">'+(DASH_SH?'Show shoreside':'Hide shoreside')+'</button></h3><div id=trvline></div><div id=trvmom class=csub style="margin-top:4px"></div></div>'
-   +'<div class=panel><h3>Budget &amp; bonus</h3><div id=trv class=tiles style="grid-template-columns:1fr 1fr"></div>'
-     +'<div class=tiles style="grid-template-columns:1fr 1fr;margin-top:10px">'+tile(d.history.contracts,'Contracts on file','','billing')+tile(d.history.days.toLocaleString(),'Sea-days','','billing')+'</div>'
-     +'<div class=tiles style="grid-template-columns:1fr;margin-top:10px">'+tile('$'+Number(bz.pay||0).toLocaleString(),(bz.committed||0)+' bonus(es) committed','green','bonus')+'</div>'
-   +'</div></div>'
+   +'<div class=panel><h3>Travel budget</h3><div id=trv class=tiles style="grid-template-columns:1fr 1fr"></div><div id=trvcat style="margin-top:12px"></div></div></div>'
    +'<p class=muted style="text-align:left;padding:10px 2px">Live from Cloudflare D1 · tip: tiles are clickable</p>';
   $('#view').innerHTML=h;
   document.querySelectorAll('#view .tile[data-go]').forEach(function(el){el.onclick=function(){show(el.getAttribute('data-go'));};});
@@ -2754,9 +2690,23 @@ function paintDashCost(){
   var momEl=document.getElementById('trvmom');
   if(momEl&&ms.length){var last=ms[ms.length-1],prev=ms.length>1?ms[ms.length-2]:null;var mom=(prev&&prev.t)?((last.t-prev.t)/prev.t*100):null;var arrow=mom==null?'':(mom>=0?'▲':'▼');var col=mom==null?'var(--mut)':(mom>=0?'var(--red)':'var(--green-d)');var air=tv.air||0,share=tv.all?Math.round(air/tv.all*100):0;
     momEl.innerHTML='Latest: <b style="color:var(--navy)">'+mn[last.m]+'</b> $'+Math.round(last.t).toLocaleString()+(mom!=null?(' · <span style="color:'+col+'">'+arrow+' '+Math.abs(mom).toFixed(0)+'% vs '+mn[prev.m]+'</span>'):'')+' · air '+share+'% of spend';}
-  var trv=document.getElementById('trv');if(trv){var head=DASH_SH?tv.crew:tv.all,lab=DASH_SH?'Crew only':'Total (incl. shore)';
-    trv.innerHTML=tile('$'+Number(head||0).toLocaleString(),lab,'','travel')+tile('$'+Number(tv.shoreside||0).toLocaleString(),'Shoreside','amber','travel');
-    trv.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});}
+  var trv=document.getElementById('trv');
+  if(trv){
+    var pct=(tv.pctUsedYTD!=null)?tv.pctUsedYTD:0;
+    var head=DASH_SH?tv.crew:tv.all,lab=DASH_SH?('Crew spend '+(tv.year||'')):('Total spend '+(tv.year||'')+' · incl shore');
+    trv.innerHTML=
+      tile('<span style="font-size:22px;color:'+(pct<=100?'var(--green-d)':'var(--red)')+'">'+pct+'%</span>','of $'+Number(tv.ytdBudget||0).toLocaleString()+' budget · YTD','','travel')
+      +tile('<span style="font-size:22px">$'+Math.round(head||0).toLocaleString()+'</span>',lab,'','travel');
+    trv.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});
+  }
+  var catEl=document.getElementById('trvcat');
+  if(catEl&&tv.cats){
+    var order=['air','hotel','transport','medical','visa','food','other'];
+    var labs={air:'Air',hotel:'Hotel',transport:'Transport',medical:'Medical',visa:'Visa',food:'Food',other:'Other'};
+    var mx=0;order.forEach(function(k){if((tv.cats[k]||0)>mx)mx=tv.cats[k];});
+    var rh=order.filter(function(k){return (tv.cats[k]||0)>0;}).map(function(k){var v=tv.cats[k]||0,w=mx?Math.round(v/mx*100):0;return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0"><div style="width:62px;font-size:11px;color:var(--mut)">'+labs[k]+'</div><div style="flex:1;background:#eef1f5;border-radius:4px;height:13px"><div style="width:'+w+'%;height:13px;background:var(--navy);border-radius:4px"></div></div><div style="width:64px;text-align:right;font-size:11px;font-weight:700">$'+Math.round(v).toLocaleString()+'</div></div>';}).join('');
+    catEl.innerHTML='<div class=csub style="margin-bottom:4px">Spend by category'+(tv.year?(' · '+tv.year):'')+'</div>'+rh;
+  }
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
