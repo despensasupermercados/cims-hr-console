@@ -29,7 +29,7 @@ export function mariaSystemPrompt(today) {
 export const MARIA_TOOLS = [
   { name: "upcoming_movements", description: "Upcoming crew movements from the LIVE rotation schedule: who signs ON (arrives/embarks) and OFF (departs/debarks) within the next N days, with vessel, port and date. THIS is the correct source for any 'who is debarking/arriving/joining/leaving soon' question. Do NOT use find_crew/contract_ledger sign-off dates for that — those are historical.", input_schema: { type: "object", properties: { days: { type: "number", description: "Look-ahead window in days; default 10" } }, additionalProperties: false } },
   { name: "workforce_summary", description: "Overall workforce: headcount by status (On board / On Vacation / Earmarked / Inactive), split by client/brand, compliance counts, and cost/bonus tiles. Use for 'how many crew...', overall-status questions.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
-  { name: "find_crew", description: "Look up crew by name (partial OK). Returns each match's status, vessel, rank, contract count, and document expiry dates. Use for questions about a specific person. NOTE: any sign-on/off dates here are HISTORICAL (past contracts); for upcoming movements use upcoming_movements.", input_schema: { type: "object", properties: { name: { type: "string", description: "Full or partial crew name" } }, required: ["name"], additionalProperties: false } },
+  { name: "find_crew", description: "Look up crew by name (partial OK). Returns each match's status, vessel, rank, contract count, and document expiry dates. Typo-tolerant: returns the closest-matching crew (handles misspellings, reversed first/last order, accents), each with match_confidence (1.0 = exact). If exact_match is false, treat them as did-you-mean candidates: if one is clearly closest, answer for that person and note the corrected spelling; if several are similar, ask which one. NOTE: sign-on/off dates here are HISTORICAL; for upcoming movements use upcoming_movements.", input_schema: { type: "object", properties: { name: { type: "string", description: "Full or partial crew name" } }, required: ["name"], additionalProperties: false } },
   { name: "list_crew", description: "List crew, optionally filtered by status (On board|On Vacation|Earmarked|Inactive) and/or ship name. Use for 'who is on the Symphony', 'who is on vacation'.", input_schema: { type: "object", properties: { status: { type: "string" }, ship: { type: "string" } }, additionalProperties: false } },
   { name: "contract_ledger", description: "Fleet-wide contract/bonus ledger (READ-ONLY): per crew the full-contract count, consecutive count, rank (Jr PS / PS / Sr PS), whether the bonus baseline is set, the next bonus rung, and total paid. Use for rank and contract-count questions.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
   { name: "compliance_expiring", description: "Crew documents expiring within N days (medical, seaman's book, passport, US visa, Schengen). Use for 'whose documents expire soon'.", input_schema: { type: "object", properties: { days: { type: "number", description: "Window in days; default 90" } }, additionalProperties: false } },
@@ -47,6 +47,24 @@ export const MARIA_TOOLS = [
  *  - today    : 'YYYY-MM-DD' for the system prompt
  *  - fetchImpl: injectable for tests
  */
+// ---- typo-tolerant crew name matching (pure, used by find_crew) ----
+function mnorm(s){return String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();}
+function mlev(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;const d=Array.from({length:m+1},(_,i)=>[i,...Array(n).fill(0)]);for(let j=0;j<=n;j++)d[0][j]=j;for(let i=1;i<=m;i++)for(let j=1;j<=n;j++){const c=a[i-1]===b[j-1]?0:1;d[i][j]=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+c);}return d[m][n];}
+// rows: [{name, ...}]. Returns [{item, score(0..1), exact}] sorted desc. Typo/order/accent tolerant.
+export function rankCrewMatches(rows, query, limit = 6){
+  const q=mnorm(query); const qt=q.split(' ').filter(Boolean);
+  const out=(rows||[]).map(row=>{
+    const nm=mnorm(row.name); const nt=nm.split(' ').filter(Boolean);
+    const exact=q.length>0&&nm.includes(q);
+    let sum=0;
+    for(const t of qt){let best=0;for(const n of nt){let sim;if(n===t)sim=1;else if(n.startsWith(t)||t.startsWith(n))sim=0.88;else{const den=Math.max(t.length,n.length)||1;sim=1-mlev(t,n)/den;}if(sim>best)best=sim;}sum+=best;}
+    let score=qt.length?sum/qt.length:0; if(exact)score=Math.max(score,1);
+    return {item:row, score, exact};
+  });
+  out.sort((a,b)=>b.score-a.score);
+  return out.slice(0,limit);
+}
+
 export async function runMaria({ apiKey, question, history = [], execTool, today, maxSteps = 5, fetchImpl }) {
   const doFetch = fetchImpl || fetch;
   const messages = [];

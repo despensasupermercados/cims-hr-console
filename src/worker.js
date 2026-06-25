@@ -23,7 +23,7 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria } from "./maria.js";
+import { runMaria, rankCrewMatches } from "./maria.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -313,9 +313,12 @@ async function mariaExecTool(env, name, input) {
   if (name === "compliance_expiring") { const d = Number(input.days) || 90; return await J(await apiCompliance(env, new URL(base + "/api/compliance?days=" + d))); }
   if (name === "find_crew") {
     const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    const q = String(input.name || "").toLowerCase().trim();
-    const rows = (all.crew || []).filter(c => fullName(c).toLowerCase().includes(q));
-    return { query: input.name, matches: rows.slice(0, 15).map(c => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, contract_count: c.contract_count, baseline_set: c.baseline_count != null, last_contract_sign_on_historical: c.active_on, last_contract_sign_off_historical: c.active_off, province: c.province, medical_exp: c.med_exp, seamans_book_exp: c.sirb_exp, passport_exp: c.pp_exp, us_visa_exp: c.usv_exp, schengen_exp: c.sch_exp })) };
+    const rows = (all.crew || []).map(c => ({ c, name: fullName(c) }));
+    const ranked = rankCrewMatches(rows, String(input.name || ""), 6);
+    const exact = ranked.length > 0 && ranked[0].exact;
+    const picks = ranked.filter(r => r.exact || r.score >= 0.5);
+    const fields = (c) => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, contract_count: c.contract_count, baseline_set: c.baseline_count != null, last_contract_sign_on_historical: c.active_on, last_contract_sign_off_historical: c.active_off, province: c.province, medical_exp: c.med_exp, seamans_book_exp: c.sirb_exp, passport_exp: c.pp_exp, us_visa_exp: c.usv_exp, schengen_exp: c.sch_exp });
+    return { query: input.name, exact_match: !!exact, matches: (picks.length ? picks : ranked.slice(0, 3)).map(r => Object.assign(fields(r.item.c), { match_confidence: Math.round(r.score * 100) / 100 })) };
   }
   if (name === "list_crew") {
     const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
