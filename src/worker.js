@@ -683,10 +683,24 @@ async function apiCrewNotes(request, env, session, url) {
 async function apiCompliance(env, url) {
   const today = new Date().toISOString().slice(0, 10);
   const warn = parseInt(url.searchParams.get("days")) || 60;
+  await ensureCrewExtras(env);
   const rows = (await env.DB.prepare(
     "SELECT agency_id, first_name, last_name, status, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0"
   ).all()).results;
-  return json({ today, warnDays: warn, report: crewComplianceReport(rows, today, warn) });
+  const ovm = {}; for (const o of (await env.DB.prepare("SELECT * FROM crew_override").all()).results) ovm[o.agency_id] = o;
+  const sched = scheduleBySc();
+  // ACTIVE crew only (on board + on vacation ≤6mo). Retired/Inactive are off the fleet, so their expired
+  // docs are not action items. Uses the SAME derived status + override merge as the Crew tab so all
+  // compliance views agree (manual document edits in crew_override win over the imported row).
+  const active = [];
+  for (const c of rows) {
+    const ov = ovm[c.agency_id];
+    const st = crewStatus(c, ov, sched[c.agency_id], today);
+    if (st === "Retired" || st === "Inactive") continue;
+    const merged = applyOverride(c, ov); merged.status = st;
+    active.push(merged);
+  }
+  return json({ today, warnDays: warn, report: crewComplianceReport(active, today, warn) });
 }
 // Keyman board grouped by SHIP across the FULL contract history: every crew who has served
 // a ship appears under it, current-onboard first, then back through history. Each card carries
