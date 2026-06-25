@@ -2692,10 +2692,11 @@ function paintDashCost(){
     momEl.innerHTML='Latest: <b style="color:var(--navy)">'+mn[last.m]+'</b> $'+Math.round(last.t).toLocaleString()+(mom!=null?(' · <span style="color:'+col+'">'+arrow+' '+Math.abs(mom).toFixed(0)+'% vs '+mn[prev.m]+'</span>'):'')+' · air '+share+'% of spend';}
   var trv=document.getElementById('trv');
   if(trv){
-    var pct=(tv.pctUsedYTD!=null)?tv.pctUsedYTD:0;
+    var annualBud=(tv.budgetMo||15000)*12;                               // the ACTUAL budget ($180k/yr), not the YTD slice
+    var pct=annualBud?Math.round((tv.crewYTD||0)/annualBud*100):0;       // % of full-year budget spent so far
     var head=DASH_SH?tv.crew:tv.all,lab=DASH_SH?('Crew spend '+(tv.year||'')):('Total spend '+(tv.year||'')+' · incl shore');
     trv.innerHTML=
-      tile('<span style="font-size:22px;color:'+(pct<=100?'var(--green-d)':'var(--red)')+'">'+pct+'%</span>','of $'+Number(tv.ytdBudget||0).toLocaleString()+' budget · YTD','','travel')
+      tile('<span style="font-size:22px;color:'+(pct<=100?'var(--green-d)':'var(--red)')+'">'+pct+'%</span>','of $'+Number(annualBud).toLocaleString()+' annual budget used','','travel')
       +tile('<span style="font-size:22px">$'+Math.round(head||0).toLocaleString()+'</span>',lab,'','travel');
     trv.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});
   }
