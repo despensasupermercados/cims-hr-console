@@ -2904,7 +2904,7 @@ async function notesModal(id){
    +'<div class=sec style="margin-top:12px">Field intel<span id=intelcount class=intcount></span> — from contributor emails</div>'
    +'<div id=intellog class=notelog><div class=muted style="padding:14px">Loading…</div></div>'
    +'<div class=sec style="margin-top:16px">Manual notes</div>'
-   +'<div style="margin-top:8px;display:flex;gap:8px"><textarea id=newNote rows=2 style="flex:1" placeholder="Add a note…"></textarea><button class="btn green" onclick="addCrewNote(\\''+id+'\\')" style="align-self:flex-end">Add note</button></div>'
+   +'<div style="margin-top:8px;display:flex;gap:8px;align-items:stretch"><textarea id=newNote rows=2 style="flex:1;padding:9px 12px;line-height:1.45;font-family:inherit;font-size:14px;resize:vertical" placeholder="Add a note…"></textarea><button class="btn green" onclick="addCrewNote(\\''+id+'\\')">Add note</button></div>'
    +'<div id=notelog class=notelog><div class=muted style="padding:14px">Loading…</div></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
   loadNoteLog(id); loadIntelLog(id);
