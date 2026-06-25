@@ -7,6 +7,10 @@ compatibility_date = "2025-05-01"
 # survives every CI deploy. Override per-environment if ever needed.
 [vars]
 MOVEMENTS_TO = "onboardsupport@dg3.com"
+# Sender for ALL CIMS email (magic links, statements, movements). A real monitored
+# address — NOT no-reply — to reduce corporate spam-filtering. Lives here so it survives
+# worker.js overwrites; the worker reads env.MAIL_FROM.
+MAIL_FROM = "CIMS <cims@cims.work>"
 
 # Built-in AI engine for auto-summarising crew-report emails (used when no ANTHROPIC_API_KEY
 # secret is set). No key or setup required; degrades gracefully to manual if unavailable.
