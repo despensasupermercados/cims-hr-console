@@ -2213,9 +2213,9 @@ function paintTravel(){
     h+='<tr><td>'+TMN[m]+'</td><td style="text-align:right">'+(has?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+usd0(TBUD)+'</td><td style="text-align:right">'+(has?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
   h+='<tr style="border-top:2px solid var(--line-2)"><td><b>YTD</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+usd0(ytdB)+'</b></td><td style="text-align:right"><b><span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span></b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
   h+='</tbody></table></div>';
-  h+='<div class=zlabel style="margin-top:18px">YoY by category &amp; top spenders — '+LY+'</div>';
+  h+='<div class=zlabel style="margin-top:18px">STLY — same time last year · '+TMN[1]+'–'+TMN[lastMo]+' ('+LY+' vs '+(PY||'PY')+') · top spenders</div>';
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
-  var yc='<div><table class=tbl><thead><tr><th>Category</th><th style="text-align:right">'+(PY||'PY')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
+  var yc='<div><table class=tbl><thead><tr><th>Category</th><th style="text-align:right">STLY '+(PY||'')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
   TCATS.forEach(function(c){var l=tSum(sc,LY,monthsLY,c),p=PY?tSum(sc,PY,monthsLY,c):null;if(!l&&!p)return;yc+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+(p==null?'—':deltaCell(l,p))+'</td></tr>';});
   yc+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right">'+(ytdP==null?'—':deltaCell(ytdA,ytdP))+'</td></tr></tbody></table></div>';
   TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,12);
