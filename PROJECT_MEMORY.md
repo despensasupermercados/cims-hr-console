@@ -653,3 +653,71 @@ PM conversation", reporter "Rolando Cruz" from the From header. Test card discar
   & field intel" panel. Low-confidence/unmatched → **"Review intel"** button atop the Crew tab.
 - **"Inputs →"** on Contracts & Bonus → the *contributor scoring* page (bonus questions). This is the
   MONEY/bonus path and is deliberately SEPARATE from the email field-intel.
+
+---
+
+## SESSION UPDATE — 2026-06-24 (session 6: full-contract rank, status auto-tag, Keyman import, audit)
+
+This session added several subsystems and ended with a full platform audit. Key things to remember:
+
+### A. FULL-CONTRACT COUNTING drives rank now (`src/contracts.js`, tested)
+- A CONTRACT can span multiple ships (transfers). Ship-legs **≤ 21 days apart = one contract**; a bigger
+  gap is a holiday = the contract ended. A contract counts as FULL only if its total duration reaches the
+  line minimum: **Azamara ≥ 5 months, Royal/Celebrity/NCL ≥ 6 months** (`GAP_DAYS`, `MIN_AZ`, `MIN_RCL`).
+- `fullContracts(legs)` (FULL count) feeds `psRank` (Jr=1st, PS=2nd-4th, Sr=5th+) AND the displayed
+  "Contracts" number, via the server helper `fullContractMap(env)`/`legShape`. The raw Keyman leg count
+  used to over-state seniority (e.g. SC-0038311: 9 legs → 4 full → PS, was Sr PS). Fleet Sr PS 10 → 4.
+
+### B. STATUS AUTO-TAGGING from the SCHEDULE, not the Contract Counter (`deriveStatus` in contracts.js)
+- The Contract Counter (`keyman_contract3`) is HISTORICAL (latest contracts mostly 2024-25; ~0 span
+  today). Current status must come from the **schedule** (`SHIP_HISTORY`, has 2026+ future dates).
+- `scheduleBySc()` + `crewStatus(base, ov, schedLegs, today)`: manual **Retired** tag wins → else manual
+  `crew_override.status` wins → else `deriveStatus`. Derivation: on a ship now → On board; signed off
+  within 6 months → On Vacation; **inactive > 6 months → auto Retired** (`RETIRE_MONTHS`); only-future /
+  none → registry value. Earmarked only promotes to On board with a current assignment.
+- Wired read-time into apiCrew, apiRotation (`rotationSections`), AND apiDashboard so all three agree.
+  New `crew_override.retired` column + a Retired checkbox + an "Auto (from schedule)" status option in
+  the edit modal. Live: On board 49 / On Vacation 22 / Retired 26 / Inactive 1.
+
+### C. LIVE KEYMAN IMPORT (`src/keymanimport.js`, tested) — Data tab → "Keyman contracts"
+- Parses the **Contract Counter** sheet (wide: cols 0-5 = Company/Ship/Status/km/Last/First, then
+  [sign-on, proj-off, ttl] blocks from col 6). Bridges crew to SC **by name** (km is a cruise-line id,
+  not our SC). `apiKeymanImport` dry-run shows matched/unmatched/contracts; apply refreshes
+  keyman_contract3 for MATCHED crew only (delete+insert), pins KEYMAN_VERSION so `ensureKeyman`'s bundled
+  self-seed won't overwrite it. Live: 119 crew in file → 69 matched, 34 unmatched (candidates/former).
+- LIMITATION: the Contract Counter has ONE current ship per crew (no per-contract ship), so imported
+  rows use that ship for all the crew's contracts. Per-contract ships / disembark ports live in the
+  3 SCHEDULE tabs (CELEBRITY / RCCL / AZAMARA), in free-form cells like `MURILLO_OFF_23_PORT CANAVERAL`.
+
+### D. CARD PORTS + iPad TOGGLE FIX
+- Sign-off port falls back to the ship's **homeport** (round-trip), same as embark — Royal/Celebrity now
+  show the port; **Azamara stays TBA** (roams, no homeport) for Rita to type in the Edit-contract
+  **Disembark city** field. FIXED a real bug: the card pipeline carried `embark` but dropped
+  `disembark`, so Rita's typed port never showed — added `disembark` to the byShip card. Missing port
+  renders as amber **TBA**.
+- TOGGLES: native `<input type=checkbox>` styled as pills double-fired per tap (on iPad AND a real
+  click landed back where it started). FIX pattern (use everywhere): wrapper `<span onclick="tgFlip(id)">`
+  + the input is `pointer-events:none` → one tap = exactly one flip. `tgFlip` is the global helper.
+
+### E. FULL CODE AUDIT (this session) — findings + what was fixed
+Ran a deep audit (self + verification subagent). **Confirmed solid:** the money gate (`apiBonusCommit`
+checks `isMoneyUser` before any write; `baseline_count` stripped/gated for non-money users — the only
+two baseline writers); the auth router (session gate above all sensitive routes; feedback form/submit are
+signed-token authed); SQL safety (all values bound; the reserved-word `on` alias is avoided/quoted);
+keyman seeding (PK + INSERT OR REPLACE + version pin, race-proof); intel claim/race (atomic
+UPDATE...WHERE status='new'); feedback single-use.
+**FIXED this session:**
+1. **[HIGH] Async route rejections escaped the fetch try/catch.** Routes do `return apiX()` WITHOUT
+   await, so a rejection bypassed the catch and returned Cloudflare's raw 500 (this bit /api/daysworked).
+   Fix: the whole route block is now wrapped in `return await (async () => { ... })();` so every handler's
+   rejection is caught and returned as clean `{error:"server_error"}` 500.
+2. **[MED] Dashboard donut counted RAW status while the tiles used DERIVED status.** Now both compute from
+   the same `crewStatus()`-derived active set (exclude Retired/Inactive), so the donut and tiles agree.
+3. **[MED] Drag-to-reassign wrote vessel to the BASE crew row**, where a later AdvancedQuery import's
+   COALESCE would clobber it. Now writes to `crew_override` (which always wins, untouched by imports);
+   pool clears both override + base.
+**STILL OPEN (lower priority, not yet fixed):** no DB `UNIQUE(crew_id,span_start,span_end)` on
+`bonus_outcome` (double-commit is TOCTOU; mitigated by client button-disable + 2-user tool — would need
+a migration); client `computeBonusC` doesn't clamp sliders to per-field max (display-only, server
+authoritative); `decodeEmailBody` uses `\n--` heuristic instead of the real MIME boundary (worst case =
+weaker auto-match → human review). **154 tests green.**

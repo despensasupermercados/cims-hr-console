@@ -79,3 +79,24 @@ dated card on the crew. Hard rules:
   Currently runs on Workers AI. Adding the Anthropic key in Cloudflare auto-upgrades, no redeploy.
 - `contract_no` on a `crew_intel` row is the crew's contract count snapshotted AT FILING; don't
   recompute it for already-filed rows (only the lazy backfill of legacy NULLs is allowed).
+
+## 11. Invariants from the Session-6 audit (don't regress these)
+- **Every API route must run under the error boundary.** The fetch handler wraps the whole dispatch in
+  `return await (async () => { ...routes... })();`. Routes use `return apiX(...)` without their own await,
+  so they MUST stay inside that wrapper — an unawaited rejection outside it escapes the try/catch and
+  returns Cloudflare's raw 500 (this bit `/api/daysworked`). Keep new routes inside the wrapper.
+- **Rank + the "Contracts" number come from FULL contracts, not raw Keyman legs** — via
+  `fullContracts()` / `fullContractMap()` (`src/contracts.js`: ≤21-day gap = same contract; full =
+  ≥5mo Azamara / ≥6mo others). Never feed `psRank` a raw leg count again.
+- **Status is derived at read time from the SCHEDULE** (`scheduleBySc` + `crewStatus`/`deriveStatus`),
+  consistently in apiCrew, apiRotation, AND apiDashboard. Don't reintroduce a raw-`crew.status` count in
+  one view only (the donut/tiles must use the same derived set). Manual `crew_override.status` and the
+  `retired` flag win over derivation. Status does NOT come from the historical Contract Counter.
+- **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
+  type=checkbox style="pointer-events:none">`. Native label-wrapped checkboxes double-fire per tap
+  (one flip cancels the other). Don't add a bare clickable checkbox.
+- **Manual reassignment + manual ports go to `crew_override`**, never the base `crew` row — AdvancedQuery
+  imports COALESCE onto the base row and would clobber a manual edit. The card pipeline must carry BOTH
+  `embark` and `disembark` (a dropped field = the port silently never shows).
+- **Keyman import refreshes matched crew only** and re-pins `KEYMAN_VERSION` so the bundled self-seed
+  (`ensureKeyman`) can't overwrite it. Crew bridge is by name (km ≠ SC id).
