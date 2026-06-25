@@ -1787,9 +1787,9 @@ async function start(){
      +'<div class=fg><label>Failed end-of-contract inventory audit?</label>'+sel('audit',['No','Yes'],a.audit||'No')+'</div>'
      +'<div class=fg><label>Note / evidence (optional)</label>'+ta('note',a.note)+'</div>';
   } else if(d.role==='rolando'){
-    f+='<div class=fg><label>Machine clean &amp; serviceable at handover?</label>'+sel('clean',['Yes','Minor issues','No'],a.clean||'Yes')+'</div>'
-     +'<div class=fg><label>Preventive maintenance done correctly?</label>'+sel('pm',['Yes','Partial','No'],a.pm||'Yes')+'</div>'
-     +'<div class=fg><label>Unresolved technical issues left for the reliever?</label>'+sel('unres',['None','Minor','Major'],a.unres||'None')+'</div>'
+    f+='<div class=fg><label>PROD Service Performance</label><div class=hint>Machine clean &amp; serviceable at handover? · Technical ability, error-code resolution.</div>'+sel('clean',['Excellent','Acceptable','Poor'],a.clean||'Excellent')+'</div>'
+     +'<div class=fg><label>MFD Service Performance</label><div class=hint>Preventive maintenance done correctly? · Independent service, SOP adherence &amp; quality.</div>'+sel('pm',['Excellent','Acceptable','Poor'],a.pm||'Excellent')+'</div>'
+     +'<div class=fg><label>Information / Database Knowledge</label><div class=hint>Unresolved technical issues left for the reliever? · Correct part numbers, use of technical data.</div>'+sel('unres',['Excellent','Acceptable','Poor'],a.unres||'Excellent')+'</div>'
      +'<div class=fg><label>Note / evidence (optional)</label>'+ta('note',a.note)+'</div>';
   } else {
     f+='<div class=fg><label>Did you assess this crew this contract?</label>'+sel('assessed',['No (N/A)','Yes'],a.assessed||'No (N/A)')+'</div>'
@@ -3137,9 +3137,9 @@ function swQuestions(){
      +'<div class=fg><label>Failed end-of-contract inventory audit?</label>'+swSel('audit',['No','Yes'],a.audit)+'</div>'
      +'<div class=fg><label>Note / evidence (optional)</label>'+swTa('note',a.note)+'</div>';
   } else if(role==='rolando'){
-    f='<div class=fg><label>Machine clean &amp; serviceable at handover?</label>'+swSel('clean',['Yes','Minor issues','No'],a.clean)+'</div>'
-     +'<div class=fg><label>Preventive maintenance done correctly?</label>'+swSel('pm',['Yes','Partial','No'],a.pm)+'</div>'
-     +'<div class=fg><label>Unresolved technical issues left for the reliever?</label>'+swSel('unres',['None','Minor','Major'],a.unres)+'</div>'
+    f='<div class=fg><label>PROD Service Performance</label><div class=hint>Machine clean &amp; serviceable at handover? · Technical ability, error-code resolution.</div>'+swSel('clean',['Excellent','Acceptable','Poor'],a.clean||'Excellent')+'</div>'
+     +'<div class=fg><label>MFD Service Performance</label><div class=hint>Preventive maintenance done correctly? · Independent service, SOP adherence &amp; quality.</div>'+swSel('pm',['Excellent','Acceptable','Poor'],a.pm||'Excellent')+'</div>'
+     +'<div class=fg><label>Information / Database Knowledge</label><div class=hint>Unresolved technical issues left for the reliever? · Correct part numbers, use of technical data.</div>'+swSel('unres',['Excellent','Acceptable','Poor'],a.unres||'Excellent')+'</div>'
      +'<div class=fg><label>Note / evidence (optional)</label>'+swTa('note',a.note)+'</div>';
   } else {
     f='<div class=fg><label>Did you assess this crew this contract?</label>'+swSel('assessed',['No (N/A)','Yes'],a.assessed)+'</div>'

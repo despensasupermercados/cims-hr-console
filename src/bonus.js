@@ -50,9 +50,19 @@ export function mapFeedbackToScore(answers) {
     out.evidence.push("Ray: order " + ray.order + (ray.order === "Yes" ? (" (" + ray.rushcause + ")") : "") + " · on-time " + ray.ontime + " · acc " + ray.acc + " · par " + ray.par + " · audit " + ray.audit + (ray.note ? (' · "' + ray.note + '"') : ""));
   }
   if (rol) {
-    let h = 10; if (rol.clean === "Minor issues") h -= 3; if (rol.clean === "No") h -= 6; if (rol.pm === "Partial") h -= 2; if (rol.pm === "No") h -= 4; if (rol.unres === "Minor") h -= 1; if (rol.unres === "Major") h -= 3;
+    // Rolando's three technical answers (PROD / MFD / Information-Database) deduct from a 10-pt handover
+    // sub-score. The display labels were relabelled Excellent/Acceptable/Poor (2026-06-25, Rolando), but
+    // the WEIGHTS are unchanged — each question keeps its own deductions, so payouts do not move. We accept
+    // BOTH the new words and the legacy Yes/Minor/No strings so already-stored answers still score the same.
+    let h = 10;
+    if (rol.clean === "Minor issues" || rol.clean === "Acceptable") h -= 3;
+    if (rol.clean === "No"          || rol.clean === "Poor")       h -= 6;
+    if (rol.pm    === "Partial"     || rol.pm    === "Acceptable") h -= 2;
+    if (rol.pm    === "No"          || rol.pm    === "Poor")       h -= 4;
+    if (rol.unres === "Minor"       || rol.unres === "Acceptable") h -= 1;
+    if (rol.unres === "Major"       || rol.unres === "Poor")       h -= 3;
     out.sliders.sHand = Math.max(0, h);
-    out.evidence.push("Rolando: machine " + rol.clean + " · PM " + rol.pm + " · unresolved " + rol.unres + (rol.note ? (' · "' + rol.note + '"') : ""));
+    out.evidence.push("Rolando: PROD " + rol.clean + " · MFD " + rol.pm + " · Info/DB " + rol.unres + (rol.note ? (' · "' + rol.note + '"') : ""));
   }
   if (dex) {
     const m = parseFloat(dex.mono);
