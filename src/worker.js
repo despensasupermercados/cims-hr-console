@@ -2172,19 +2172,22 @@ function paintTravel(){
   var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
   var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
   if(!LY){document.getElementById('trbody').innerHTML='<div class=muted>No travel data for this filter.</div>';return;}
-  var monthsLY=Array.from(new Set(sc.filter(function(r){return r.year===LY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
-  var ytdA=tSum(sc,LY,monthsLY,null), ytdB=TBUD*monthsLY.length, ytdP=PY?tSum(sc,PY,monthsLY,null):null;
+  var now=new Date(),curY=now.getFullYear(),curM=now.getMonth()+1;
+  var lastMo=(LY===curY)?curM:12;                 // YTD = ELAPSED calendar months (not months that merely have a row)
+  var monthsLY=[];for(var mm=1;mm<=lastMo;mm++)monthsLY.push(mm);
+  var dataMo={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){dataMo[r.month]=1;}); // months with any record (for the table)
+  var ytdA=tSum(sc,LY,monthsLY,null), ytdB=TBUD*lastMo, ytdP=PY?tSum(sc,PY,monthsLY,null):null;
   var air=tSum(sc,LY,monthsLY,'air');
   var byp={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){byp[r.crew_name]=(byp[r.crew_name]||0)+r.total;});
-  var topName=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];})[0]||'—';
-  var fullProj=monthsLY.length?(ytdA/monthsLY.length*12):0;
+  var pctUsed=Math.round(ytdA/(TBUD*12)*100);
+  var fullProj=lastMo?(ytdA/lastMo*12):0;
   var h='';
   h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:6px">'
-    +tile(usd0(ytdA),'YTD actual '+LY+' · '+monthsLY.length+' mo')
+    +tile(usd0(ytdA),'YTD actual '+LY+' · '+lastMo+' mo')
     +tile('<span style="color:'+(ytdA<=ytdB?'var(--green-d)':'var(--red)')+'">'+usd0(Math.abs(ytdB-ytdA))+'</span>',(ytdA<=ytdB?'under':'over')+' budget YTD · '+usd0(ytdB))
     +tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same period'+(ytdP!=null?(' · '+usd0(ytdP)):''))
     +tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber')
-    +tile(topName,'Top spender '+LY)+'</div>';
+    +tile('<span style="color:'+(pctUsed<=100?'var(--green-d)':'var(--red)')+'">'+pctUsed+'%</span>','of '+usd0(TBUD*12)+' annual budget used')+'</div>';
   h+='<div class=zlabel>Plan vs actual — budget pacing '+LY+'</div>';
   h+='<div class="card" style="max-width:none">';
   h+='<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px">'
@@ -2205,7 +2208,7 @@ function paintTravel(){
   h+='</div>';
   h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = YTD run-rate × 12.</div>';
   h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">Variance</th><th style="text-align:right">'+(PY||'PY')+'</th></tr></thead><tbody>';
-  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=monthsLY.indexOf(m)>=0;var v=TBUD-a;
+  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;
     if(!has&&!p)continue;
     h+='<tr><td>'+TMN[m]+'</td><td style="text-align:right">'+(has?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+usd0(TBUD)+'</td><td style="text-align:right">'+(has?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
   h+='<tr style="border-top:2px solid var(--line-2)"><td><b>YTD</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+usd0(ytdB)+'</b></td><td style="text-align:right"><b><span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span></b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
