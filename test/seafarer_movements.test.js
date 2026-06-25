@@ -58,3 +58,10 @@ test('buildSeafarerMovementEmail: empty states', () => {
   assert.match(html, /No sign-ons scheduled/);
   assert.match(html, /No sign-offs scheduled/);
 });
+
+test('shapeMovements: days window is configurable (10 vs 7 day reach)', () => {
+  const crew = [{ agency_id:'SC-9', name:'Santos, Christjel', ship:'Quest', embark:'', disembark:'TBA', signOn:'2026-01-01', signOff:'2026-07-08', contracts:2 }];
+  const RUN = '2026-06-29'; // 7-day window ends 06 Jul -> excludes 08 Jul; 10-day ends 09 Jul -> includes
+  assert.equal(shapeMovements(crew, RUN, 7).signOffs.length, 0);
+  assert.equal(shapeMovements(crew, RUN, 10).signOffs.length, 1);
+});

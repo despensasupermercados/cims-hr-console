@@ -64,3 +64,10 @@ test('runMaria: answers directly when no tool needed', async () => {
   assert.match(res.answer, /report/);
   assert.deepEqual(res.sources, []);
 });
+
+test('MARIA_TOOLS: includes schedule-backed upcoming_movements', () => {
+  const t = MARIA_TOOLS.find(x => x.name === 'upcoming_movements');
+  assert.ok(t, 'upcoming_movements tool must exist');
+  assert.match(t.description, /LIVE rotation schedule|debark/i);
+  assert.ok(t.input_schema.properties.days, 'takes a days window');
+});

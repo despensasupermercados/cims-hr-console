@@ -64,9 +64,9 @@ function monthsLabel(on, off){
 // `crew` = array of board entries each like
 //   { agency_id, name, ship, embark, disembark, signOn, signOff, contracts }
 // ---------------------------------------------------------------------------
-function shapeMovements(crew, runDate) {
+function shapeMovements(crew, runDate, days = 7) {
   const start = ymd(runDate);
-  const end = addDaysStr(start, 7);
+  const end = addDaysStr(start, days);
   const inWin = s => { s = s && ymd(s); return s && s >= start && s <= end; };
   const signOns = [], signOffs = [];
   const seenOn = new Set(), seenOff = new Set();
