@@ -71,3 +71,15 @@ test('MARIA_TOOLS: includes schedule-backed upcoming_movements', () => {
   assert.match(t.description, /LIVE rotation schedule|debark/i);
   assert.ok(t.input_schema.properties.days, 'takes a days window');
 });
+
+import { rankCrewMatches } from '../src/maria.js';
+test('rankCrewMatches: typo-tolerant, order-insensitive, exact flag', () => {
+  const rows = [{ name: 'Belhabida, Daniel' }, { name: 'Cruz, Juan' }, { name: 'Santos, Christjel' }];
+  const r1 = rankCrewMatches(rows, 'dan belhbida', 6);   // misspelled + first-name-first
+  assert.equal(r1[0].item.name, 'Belhabida, Daniel');
+  assert.ok(r1[0].score > 0.7, 'typo should still score high, got ' + r1[0].score);
+  const r2 = rankCrewMatches(rows, 'juan cruz', 6);       // reversed order
+  assert.equal(r2[0].item.name, 'Cruz, Juan');
+  const r3 = rankCrewMatches(rows, 'cruz', 6);            // exact substring
+  assert.equal(r3[0].exact, true);
+});
