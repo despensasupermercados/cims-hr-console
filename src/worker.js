@@ -1874,7 +1874,6 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-contracts onclick="show('contracts')">Contracts &amp; Bonus</button>
     <button id=nav-rotation onclick="show('rotation')">Keyman</button>
     <button id=nav-feedback onclick="show('feedback')">Feedback</button>
-    <button id=nav-compliance onclick="show('compliance')">Compliance</button>
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
@@ -2756,6 +2755,7 @@ async function renderCrew(){
    +'<select id=cSort onchange="CF.sort=this.value;paintCrew()"><option value="az">Sort: name A–Z</option><option value="soon">Sort: sign-off soonest</option><option value="tenure">Sort: contracts (high→low)</option><option value="ship">Sort: ship</option></select>'
    +'<button class="btn ghost" onclick="clearCrewFilters()">Clear</button>'
    +'<button class="btn ghost" id=intelReviewBtn onclick="openIntelReview()">Review intel</button>'
+   +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
    +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
    +'</div><div class=tiles id=crewtiles></div>'
    +'<div id=crewcount class=csub style="margin:8px 0 12px"></div><div id=crewgrid class=grid></div>';
@@ -2795,6 +2795,25 @@ function crewShipOpts(){
   sel.innerHTML='<option value="">All ships</option>'+ships.map(function(s){return '<option'+(s===CF.ship?' selected':'')+'>'+s+'</option>';}).join('');
 }
 function clearCrewFilters(){CF.q='';CF.status='';CF.comp='';CF.client='';CF.ship='';CF.sort='az';renderCrew();}
+function docsModal(id){
+  var c=null,i;for(i=0;i<CREW.length;i++){if(CREW[i].agency_id===id){c=CREW[i];break;}}
+  if(!c)return;
+  var name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
+  var docs=[['Medical','med_exp'],['Seaman Bk','sirb_exp'],['Passport','pp_exp'],['US C1/D Visa','usv_exp'],['Schengen','sch_exp']];
+  var map={expired:['Expired','red'],'90d':['Expiring','amber'],ok:['Valid','ok'],missing:['Missing','amber']};
+  var body='<div class=hint style="margin-bottom:8px">'+c.agency_id+' · '+(c.vessel_observed||'—')+' · '+(c.status||'')+'</div>'
+   +'<table class=tbl><thead><tr><th>Document</th><th>Expiry</th><th>Status</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'
+   +docs.map(function(d){var exp=c[d[1]];var g=docFlag(exp);var st=map[g]||map.missing;var days=exp?Math.round((new Date(exp)-new Date())/86400000):null;var dtxt=(days==null)?'—':(days<0?(Math.abs(days)+'d ago'):(days+'d left'));return '<tr><td>'+d[0]+'</td><td>'+(exp||'—')+'</td><td><span class="cchip '+st[1]+'">'+st[0]+'</span></td><td style="text-align:right">'+dtxt+'</td></tr>';}).join('')
+   +'</tbody></table><div class=hint style="margin-top:8px">Fleet-wide list &amp; export: Crew tab → Docs CSV, or click the Docs tiles to filter.</div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Document compliance — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
+}
+async function exportDocsCSV(){
+  var d=await (await fetch('/api/compliance?days=90')).json();
+  var rows=[['Crew','ID','Vessel','Status','Document','Doc status','Expiry','Days']];
+  (d.report||[]).forEach(function(r){r.flags.forEach(function(f){rows.push([r.name,r.agency_id,r.vessel||'',r.status||'',f.doc,f.status,f.exp||'',f.days==null?'':f.days]);});});
+  var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
+  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='compliance_'+(d.today||'')+'.csv';a.click();
+}
 function crewTiles(){
   var on=CREW.filter(function(c){return c.status==='On board';}).length;
   var vac=CREW.filter(function(c){return c.status==='On Vacation';}).length;
@@ -2951,7 +2970,7 @@ function card(c){
   if(c.baseline_count!=null){var nv=ladderValue((c.baseline_count||0)+1);bonusPill='<span class="pill next'+(nv===0?' zero':'')+'">Next bonus: '+(nv===0?'$0 (builds to PS)':'$'+nv.toLocaleString())+'</span>';}
   else bonusPill='<span class="pill next zero">Bonus: baseline pending</span>';
   return '<div class="crew-card card b-'+b+'" data-crew="'+c.agency_id+'">'
-   +'<div class=tools><button title="Notes" onclick="notesModal(\\''+c.agency_id+'\\')">🗒</button><button title="Edit" onclick="editCrewModal(\\''+c.agency_id+'\\')">✎</button></div>'
+   +'<div class=tools><button title="Documents" onclick="docsModal(\\''+c.agency_id+'\\')">📋</button><button title="Notes" onclick="notesModal(\\''+c.agency_id+'\\')">🗒</button><button title="Edit" onclick="editCrewModal(\\''+c.agency_id+'\\')">✎</button></div>'
    +'<div class=cname>'+name+'</div>'
    +'<div class=csub>'+sub+'</div>'
    +'<div class=crow><span class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</span><span class="pill rank">'+rankTag(c.rank,c.baseline_count)+'</span></div>'
