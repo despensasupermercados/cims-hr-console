@@ -45,6 +45,35 @@ test("Rolando: minor issues deduct partially", () => {
   assert.equal(r.sliders.sHand, 4);
 });
 
+// 2026-06-25 relabel: the display words became Excellent/Acceptable/Poor but the WEIGHTS are unchanged.
+// These tests pin that the new words score IDENTICALLY to the legacy words (payouts must not move).
+test("Rolando relabel: Excellent across the board = full 10 (same as old best answers)", () => {
+  const neu = mapFeedbackToScore({ rolando: { clean: "Excellent", pm: "Excellent", unres: "Excellent" } });
+  const old = mapFeedbackToScore({ rolando: { clean: "Yes", pm: "Yes", unres: "None" } });
+  assert.equal(neu.sliders.sHand, 10);
+  assert.equal(neu.sliders.sHand, old.sliders.sHand);
+});
+
+test("Rolando relabel: Acceptable scores same as the old middle answers (4)", () => {
+  const neu = mapFeedbackToScore({ rolando: { clean: "Acceptable", pm: "Acceptable", unres: "Acceptable" } });
+  const old = mapFeedbackToScore({ rolando: { clean: "Minor issues", pm: "Partial", unres: "Minor" } });
+  assert.equal(neu.sliders.sHand, 4);
+  assert.equal(neu.sliders.sHand, old.sliders.sHand);
+});
+
+test("Rolando relabel: Poor scores same as the old worst answers (floored at 0)", () => {
+  const neu = mapFeedbackToScore({ rolando: { clean: "Poor", pm: "Poor", unres: "Poor" } });
+  const old = mapFeedbackToScore({ rolando: { clean: "No", pm: "No", unres: "Major" } });
+  assert.equal(neu.sliders.sHand, 0);
+  assert.equal(neu.sliders.sHand, old.sliders.sHand);
+});
+
+test("Rolando relabel: per-question weights preserved (PROD costs more than Info/DB)", () => {
+  // Poor on PROD (clean) alone = -6 -> 4 ; Poor on Info/DB (unres) alone = -3 -> 7
+  assert.equal(mapFeedbackToScore({ rolando: { clean: "Poor", pm: "Excellent", unres: "Excellent" } }).sliders.sHand, 4);
+  assert.equal(mapFeedbackToScore({ rolando: { clean: "Excellent", pm: "Excellent", unres: "Poor" } }).sliders.sHand, 7);
+});
+
 test("Dexter: mono <=20 -> full 5", () => {
   assert.equal(mapFeedbackToScore({ dexter: { mono: "20" } }).sliders.sMono, 5);
 });
