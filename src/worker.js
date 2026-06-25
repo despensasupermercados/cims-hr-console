@@ -46,6 +46,10 @@ export default {
     const url = new URL(request.url);
     const p = url.pathname;
     try {
+      // Await the whole dispatch so an async handler's rejection is caught here and returned as a
+      // clean JSON 500 — routes do `return apiX(...)` without await, and an unawaited rejection would
+      // otherwise escape this try and surface as Cloudflare's raw error page (this bit /api/daysworked).
+      return await (async () => {
       // ---- public brand icons (no auth) ----
       if (p === "/favicon.ico")          return assetResponse(ICO_B64, "image/x-icon");
       if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png")
@@ -113,6 +117,7 @@ export default {
       // app shell (any non-api path) — gate on session
       if (!session) return Response.redirect(url.origin + "/login", 302);
       return htmlResponse(APP_HTML);
+      })();
     } catch (err) {
       // Log server-side (Cloudflare tail/logs) but never leak internals to the client.
       console.error("worker_error", (err && err.stack) || err);
@@ -481,21 +486,23 @@ async function apiDashboard(env) {
   // Count by EFFECTIVE status (auto-derived from the schedule; retired/manual win) so the dashboard
   // matches the crew cards and rotation board rather than the raw stored value.
   await ensureCrewExtras(env);
-  const cs = (await env.DB.prepare("SELECT agency_id, status FROM crew WHERE redacted=0").all()).results;
-  const csOv = {}; for (const o of (await env.DB.prepare("SELECT agency_id, status, retired FROM crew_override").all()).results) csOv[o.agency_id] = o;
+  const cs = (await env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all()).results;
+  const csOv = {}; for (const o of (await env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all()).results) csOv[o.agency_id] = o;
   const csSched = scheduleBySc();
-  const statusMap = {};
-  for (const c of cs) { const s = crewStatus(c, csOv[c.agency_id], csSched[c.agency_id], today); statusMap[s] = (statusMap[s] || 0) + 1; }
+  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0 };
+  for (const c of cs) {
+    const ov = csOv[c.agency_id], s = crewStatus(c, ov, csSched[c.agency_id], today);
+    statusMap[s] = (statusMap[s] || 0) + 1;
+    // Donut counts the same ACTIVE set as the tiles (exclude Retired/Inactive), by client/brand.
+    if (s !== "Retired" && s !== "Inactive") byClient[clientOf((ov && ov.vessel_observed) || c.vessel_observed)] += 1;
+  }
   const medExp = (await q("SELECT COUNT(*) n FROM crew WHERE med_exp IS NOT NULL AND med_exp < ?", in90)).n;
   const sirbExp = (await q("SELECT COUNT(*) n FROM crew WHERE sirb_exp IS NOT NULL AND sirb_exp < ?", in90)).n;
   const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
   const usvExp = (await q("SELECT COUNT(*) n FROM crew WHERE usv_exp IS NOT NULL AND usv_exp < ?", in90)).n;
   const schExp = (await q("SELECT COUNT(*) n FROM crew WHERE sch_exp IS NOT NULL AND sch_exp < ?", in90)).n;
   const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
-  // Workforce split by client/brand (active crew only) for the donut.
-  const vrows = (await env.DB.prepare("SELECT vessel_observed, COUNT(*) n FROM crew WHERE status!='Inactive' GROUP BY vessel_observed").all()).results;
-  const byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0 };
-  for (const r of vrows) byClient[clientOf(r.vessel_observed)] += r.n;
+  // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   // Bonus committed to date (money path — read only).
   let bonus = { committed: 0, pay: 0 };
   try { const bo = await q("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome"); bonus = { committed: bo.n || 0, pay: bo.p || 0 }; } catch {}
@@ -885,7 +892,17 @@ async function apiRotationAssign(request, env, session) {
   const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(id).first();
   if (!cr) return json({ error: "not_found" }, 404);
   const v = (ship === "__POOL__" || !ship) ? null : ship;
-  await env.DB.prepare("UPDATE crew SET vessel_observed=?, updated_at=? WHERE agency_id=?").bind(v, new Date().toISOString(), id).run();
+  const now = new Date().toISOString();
+  await ensureCrewExtras(env);
+  // Persist the reassignment in crew_override (which always wins and is untouched by AdvancedQuery
+  // imports) instead of the base crew row — otherwise the next import's COALESCE(excluded.vessel,...)
+  // would silently revert a manual drag. Pool = clear both the override and the base vessel.
+  if (v === null) {
+    await env.DB.prepare("UPDATE crew_override SET vessel_observed=NULL, updated_at=? WHERE agency_id=?").bind(now, id).run();
+    await env.DB.prepare("UPDATE crew SET vessel_observed=NULL, updated_at=? WHERE agency_id=?").bind(now, id).run();
+  } else {
+    await env.DB.prepare("INSERT INTO crew_override (agency_id,vessel_observed,updated_at) VALUES (?,?,?) ON CONFLICT(agency_id) DO UPDATE SET vessel_observed=excluded.vessel_observed, updated_at=excluded.updated_at").bind(id, v, now).run();
+  }
   await logActivity(env, session && session.email, "rotation_assign", id + " -> " + (v || "pool"));
   return json({ ok: true });
 }
