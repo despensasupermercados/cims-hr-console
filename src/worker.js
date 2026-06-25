@@ -18,6 +18,7 @@ import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./sh
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
+import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -86,6 +87,7 @@ export default {
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
+        if (p === "/api/keyman/import" && request.method === "POST") return apiKeymanImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/billing/month") return apiBillingMonth(env);
         if (p === "/api/travel")     return apiTravel(env, url);
@@ -323,6 +325,36 @@ async function apiCrewImport(request, env, session) {
   if (batch.length) await env.DB.batch(batch);
   await logData(env, "crew (AdvancedQuery, by " + ((session && session.email) || "?") + ")", batch.length, "refreshed: +" + d.add.length + " ~" + d.change.length);
   return json({ ok: true, applied: batch.length, added: d.add.length, changed: d.change.length, skippedNoStatus: d.needsStatus.length, invalid: invalidCount });
+}
+
+// Keyman "Contract Counter" import. Client sends the sheet as array-of-arrays. We parse the contract
+// blocks, bridge crew to SC by name, and (on apply) refresh keyman_contract3 for the MATCHED crew only
+// (untouched crew keep their rows). This feeds the full-contract count + rank; never a payout input.
+async function apiKeymanImport(request, env, session) {
+  await ensureKeyman(env);
+  const b = await request.json().catch(() => ({}));
+  const parsed = parseContractCounter(b.rows || []);
+  if (!parsed.length) return json({ error: "no_rows" }, 400);
+  const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew WHERE redacted=0").all()).results;
+  const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
+  const currentRows = (((await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()) || {}).n) || 0;
+  if (b.dryRun) {
+    return json({
+      dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
+      contracts: rows.length, currentRows,
+      sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
+    });
+  }
+  // Apply: replace contracts for matched crew only.
+  if (matched.length) await env.DB.batch(matched.map(sc => env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=?").bind(sc)));
+  const ins = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
+  for (let i = 0; i < rows.length; i += 80) {
+    await env.DB.batch(rows.slice(i, i + 80).map(r => ins.bind(r.sc, r.km, r.ship, r.st, r.seq, r.sign_on, r.proj_off, r.act_off)));
+  }
+  // Pin the version so the bundled-snapshot self-seed (ensureKeyman) doesn't overwrite this import.
+  await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
+  await logData(env, "keyman_contract (Contract Counter import, by " + ((session && session.email) || "?") + ")", rows.length, "refreshed " + matched.length + " crew");
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length });
 }
 
 async function apiDataStatus(env) {
@@ -1851,7 +1883,7 @@ function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
    +'<label class=csub>Data type</label><br>'
-   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="" disabled>Keyman contracts — coming soon</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — preview structure (.xls / .xlsx)</option></select>'
+   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="keyman">Keyman contracts — CIMS Keyman workbook (.xlsx)</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — preview structure (.xls / .xlsx)</option></select>'
    +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
      +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop the file here</div>'
      +'<div class=csub style="margin-top:4px">or click to choose · .xls or .xlsx only</div></div>'
@@ -1914,11 +1946,46 @@ function parseCrewFile(f){
 function handleDrop(files){
   var f=files&&files[0]; if(!f)return;
   var t=$('#dstype')?$('#dstype').value:'crew';
-  if(t!=='crew'&&t!=='vessel'&&t!=='travel'){$('#imp').textContent='That data type is not enabled yet.';return;}
+  if(t!=='crew'&&t!=='vessel'&&t!=='travel'&&t!=='keyman'){$('#imp').textContent='That data type is not enabled yet.';return;}
   if(!/\\.(xls|xlsx)$/i.test(f.name)){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
   if(t==='vessel')return parseVesselFile(f);
   if(t==='travel')return parseTravelFile(f);
+  if(t==='keyman')return parseKeymanFile(f);
   parseCrewFile(f);
+}
+var KEYMANUP=null;
+function parseKeymanFile(f){
+  $('#imp').textContent='Reading '+f.name+'…';
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
+        var sn=wb.SheetNames.find(function(n){return n.toLowerCase().indexOf('contract counter')>=0;});
+        if(!sn){$('#imp').innerHTML='<div style="'+BADBOX+'">No "Contract Counter" sheet found in this workbook. Upload the CIMS Keyman file.</div>';return;}
+        KEYMANUP=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:false,dateNF:'yyyy-mm-dd',defval:''});
+        previewKeyman();
+      }catch(err){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not parse that file: '+err.message+'</div>';}
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+async function previewKeyman(){
+  if(!KEYMANUP||!KEYMANUP.length){$('#imp').innerHTML='<div style="'+BADBOX+'">No rows found in the Contract Counter sheet.</div>';return;}
+  $('#imp').textContent='Analysing the Contract Counter…';
+  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP,dryRun:true})})).json();
+  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+r.error+'</div>';return;}
+  var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
+    +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
+  if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">Refresh contract history for '+r.matched+' crew</button>';
+  $('#imp').innerHTML=h;
+}
+async function applyKeyman(){
+  $('#imp').textContent='Refreshing contract history…';
+  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP})})).json();
+  if(r.ok){$('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew. Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
+  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
 }
 var TRAVELUP=null;
 function parseTravelFile(f){
@@ -2771,7 +2838,9 @@ function card(c){
 }
 var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brilliance","Constellation","Eclipse","Edge","Enchantment","Equinox","Explorer","Freedom","Grandeur","Harmony","Icon","Independence","Infinity","Jewel","Legend","Liberty","Mariner","Millennium","Navigator","Oasis","Odyssey","Ovation","Quantum","Radiance","Reflection","Rhapsody","Serenade","Silhouette","Spectrum","Star","Summit","Symphony","Utopia","Vision","Voyager","Wonder","Xcel","Azamara Journey","Azamara Onward","Azamara Pursuit","Azamara Quest"];
 function shipOptions(sel){return '<option value="">—</option>'+SHIP_LIST.map(function(s){var full='MV '+s.toUpperCase();var m=(sel&&(sel===full||sel===s||sel.toUpperCase().indexOf(s.toUpperCase())>=0));return '<option value="'+full+'"'+(m?' selected':'')+'>'+s+'</option>';}).join('');}
-function statusOptions(sel){return ['On board','On Vacation','Earmarked','Inactive'].map(function(s){return '<option'+(s===sel?' selected':'')+'>'+s+'</option>';}).join('');}
+// "" = Auto (let the app derive status from the schedule). A named pick becomes a manual override that
+// wins (e.g. Rita pulling an auto-retired crew back to Earmarked).
+function statusOptions(sel){var auto='<option value=""'+(!sel?' selected':'')+'>Auto (from schedule)</option>';return auto+['On board','On Vacation','Earmarked','Inactive'].map(function(s){return '<option'+(s===sel?' selected':'')+'>'+s+'</option>';}).join('');}
 function crewById(id){return CREW.filter(function(c){return c.agency_id===id;})[0];}
 function closeCrewModal(){var m=document.getElementById('crewmodal');if(m)m.remove();}
 function addCrewModal(){

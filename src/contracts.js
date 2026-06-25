@@ -72,18 +72,22 @@ export function liveState(legs, today) {
   if (lastOff && lastOff < today) return "holiday"; // signed off -> contract ended
   return "scheduled";                                // only future assignment(s)
 }
+export const RETIRE_MONTHS = 6; // inactive (no assignment) longer than this -> auto-retired
+
 // Final status string. opts: { retired:bool, imported:string }.
-// The schedule only toggles ACTIVE crew between On board / On Vacation. Statuses that mean "not in
-// rotation" are preserved: Inactive (left/parked) always stays; Earmarked (recruited, not yet started)
-// only promotes to On board if a real current assignment exists — its old history can't reactivate it.
+//   manual Retired tag wins -> Retired. On a ship now -> On board. Only future assignment(s) -> keep
+//   the registry value (e.g. Earmarked). Signed off: within RETIRE_MONTHS -> On Vacation (on holiday,
+//   contract ended); longer than that -> Retired (auto). No dated schedule -> keep the registry value.
+//   A manual status edit (handled by the caller) still wins, so Rita can pull someone back to Earmarked.
 export function deriveStatus(legs, today, opts) {
   opts = opts || {};
   if (opts.retired) return "Retired";
-  const imp = opts.imported || "";
-  if (/inactive/i.test(imp)) return imp;
-  const s = liveState(legs, today);
-  if (/earmark/i.test(imp)) return s === "onboard" ? "On board" : imp;
-  if (s === "onboard") return "On board";
-  if (s === "holiday") return "On Vacation";
-  return imp || "Earmarked"; // scheduled / none -> keep what the registry says
+  const L = (legs || []).filter(l => l && l.on)
+    .map(l => ({ on: l.on, off: l.off || null }))
+    .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
+  for (const l of L) if (l.on <= today && (l.off ? today <= l.off : true)) return "On board";
+  if (L.length && L.every(l => l.on > today)) return opts.imported || "Earmarked"; // only future
+  const lastOff = L.reduce((m, l) => (l.off && l.off > m ? l.off : m), "");
+  if (lastOff) return months(lastOff, today) > RETIRE_MONTHS ? "Retired" : "On Vacation";
+  return opts.imported || "Earmarked"; // no dated schedule -> registry value
 }
