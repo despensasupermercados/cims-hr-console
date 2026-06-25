@@ -2147,14 +2147,14 @@ async function renderTravel(){
   catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
   TSEL=null;
-  TF={q:'',year:'',month:'',cat:'',kind:''};
+  TF={q:'',year:'',month:'',cat:'',kind:'crew'};
   var years=(TRV.years||[]).slice();
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
     +'<input id=tq placeholder="search a person…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:180px">'
     +'<select id=tyear onchange="TF.year=this.value;paintTravel()"><option value="">All years</option>'+years.map(function(y){return '<option>'+y+'</option>';}).join('')+'</select>'
     +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+TMN.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
     +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
-    +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="">Crew + shoreside</option><option value="crew">Crew only</option><option value="shoreside">Shoreside only</option></select>'
+    +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="crew" selected>Crew only</option><option value="">Crew + shoreside</option><option value="shoreside">Shoreside only</option></select>'
     +'</div><div id=trbody></div>';
   paintTravel();
 }
@@ -2167,6 +2167,7 @@ function travelBack(){TSEL=null;paintTravel();}
 
 function paintTravel(){
   if(TSEL)return paintTravelCrew();
+  if((TF.q||'').trim())return paintTravelSearch();
   var sc=tScope();
   var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
   var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
@@ -2238,11 +2239,10 @@ function paintTravel(){
   document.getElementById('trbody').innerHTML=h;
 }
 
-function paintTravelCrew(){
-  var name=TSEL;var rows=TRVALL.filter(function(r){return r.crew_name===name;});
+function profileHTML(name){
+  var rows=TRVALL.filter(function(r){return r.crew_name===name;});
   var ys=Array.from(new Set(rows.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
-  var h='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back to overview</div>';
-  h+='<div class=zlabel>'+name+'</div>';
+  var h='<div class=zlabel>'+name+'</div>';
   h+='<div class=tiles style="grid-template-columns:repeat('+Math.min(ys.length+1,5)+',1fr);margin-bottom:6px">';
   ys.forEach(function(y){var t=rows.filter(function(r){return r.year===y;}).reduce(function(a,b){return a+b.total;},0);var c=rows.filter(function(r){return r.year===y;}).length;h+=tile(usd0(t),y+' · '+c+' trips');});
   h+=tile(usd0(rows.reduce(function(a,b){return a+b.total;},0)),'All-time');
@@ -2255,7 +2255,23 @@ function paintTravelCrew(){
   h+='<div class=zlabel style="margin-top:14px">All movements</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>';
   rows.sort(function(a,b){return b.year-a.year||b.month-a.month;}).forEach(function(r){var oc=r.medical+r.visa+r.food+r.transport+r.other;h+='<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.leg==='shoreside'?'shore':r.leg)+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(oc)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';});
   h+='</tbody></table>';
-  document.getElementById('trbody').innerHTML=h;
+  return h;
+}
+function paintTravelCrew(){document.getElementById('trbody').innerHTML='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back</div>'+profileHTML(TSEL);}
+function paintTravelSearch(){
+  var q=(TF.q||'').trim().toLowerCase();var sc=tScope();
+  var seen={},names=[],tot={};
+  sc.forEach(function(r){if((r.crew_name||'').toLowerCase().indexOf(q)>=0){if(!seen[r.crew_name]){seen[r.crew_name]=1;names.push(r.crew_name);}tot[r.crew_name]=(tot[r.crew_name]||0)+r.total;}});
+  names.sort(function(a,b){return (tot[b]||0)-(tot[a]||0);});
+  var t=document.getElementById('trbody');if(!t)return;
+  if(names.length===0){t.innerHTML='<div class=muted style="padding:20px 2px">No one matches "'+TF.q+'". Try another name, or change the Crew / shoreside filter.</div>';return;}
+  if(names.length===1){t.innerHTML='<div class=hint style="margin-bottom:8px">Showing every expense for this person · clear the search box to return to the overview.</div>'+profileHTML(names[0]);return;}
+  var h='<div class=zlabel>'+names.length+' people match "'+TF.q+'" — click one for their full history</div>';
+  h+='<table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  TLB=names.slice(0,60);
+  TLB.forEach(function(n,i){var c=sc.filter(function(r){return r.crew_name===n;}).length;var k=(sc.find(function(r){return r.crew_name===n;})||{}).kind;h+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+n+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+c+'</td><td style="text-align:right"><b>'+usd0(tot[n])+'</b></td></tr>';});
+  h+='</tbody></table>';
+  t.innerHTML=h;
 }
 async function loadTravel(){return renderTravel();}
 let FLEET=null,FLT={mode:'all',q:''};
