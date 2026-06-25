@@ -22,7 +22,6 @@ import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
-import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -113,8 +112,6 @@ export default {
         if (p === "/api/intel/resolve" && request.method === "POST") return apiIntelResolve(request, env, session);
         if (p === "/api/intel/edit" && request.method === "POST") return apiIntelEdit(request, env, session);
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
-        if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
-        if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -145,7 +142,6 @@ export default {
   // unavailable (left in 'new'). Configured by [triggers] crons in wrangler.toml.
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
-    if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event));
   }
 };
 
@@ -228,60 +224,6 @@ async function sendMagicLink(env, email, link) {
       html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`
     })
   });
-}
-
-/* -------------------- Seafarer Movements weekly email -------------------- */
-async function movementsData(env, runDate) {
-  const { sections } = await rotationSections(env);
-  const crew = [];
-  for (const s of (sections || [])) for (const c of (s.crew || [])) crew.push(c);
-  return shapeMovements(crew, runDate);
-}
-function nyDateStr(now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-}
-async function renderMovements(env, runDate) {
-  const { signOns, signOffs } = await movementsData(env, runDate);
-  return { html: buildSeafarerMovementEmail({ runDate, signOns, signOffs }), on: signOns.length, off: signOffs.length };
-}
-async function sendMovementsEmail(env, to, runDate) {
-  const { html, on, off } = await renderMovements(env, runDate);
-  if (!env.RESEND_API_KEY) return { ok: false, sent: false, note: "no_mailer", on, off };
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: env.MAIL_FROM || "CIMS <noreply@cims.work>", to: [to], subject: `Seafarer Movements · week of ${runDate} (${on} on / ${off} off)`, html }),
-  });
-  return { ok: r.ok, sent: r.ok, status: r.status, to, on, off };
-}
-async function apiMovementsPreview(env, url) {
-  const date = url.searchParams.get("date") || nyDateStr();
-  const { html } = await renderMovements(env, date);
-  return htmlResponse(html);
-}
-async function apiMovementsSend(request, env, session) {
-  if (!isMoneyUser(session.email)) return json({ error: "forbidden" }, 403);
-  const b = await request.json().catch(() => ({}));
-  const to = b.to || env.MOVEMENTS_TO || "Miguel.Sanmartin@dg3.com";
-  const date = b.date || nyDateStr();
-  const res = await sendMovementsEmail(env, to, date);
-  await logActivity(env, session.email, "movements_send", `${to} ${date} ${res.on}/${res.off}`);
-  return json(res);
-}
-async function maybeSendMovements(env, event) {
-  try {
-    const to = env.MOVEMENTS_TO; if (!to) return;
-    const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', hour12: false }).formatToParts(now);
-    const get = t => (parts.find(x => x.type === t) || {}).value;
-    if (get('weekday') !== 'Mon' || get('hour') !== '07') return;
-    const runDate = nyDateStr(now);
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
-    const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='movements_last_sent'").first();
-    if (prev && prev.v === runDate) return;
-    const res = await sendMovementsEmail(env, to, runDate);
-    if (res.sent) await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('movements_last_sent',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(runDate).run();
-  } catch (e) { console.error("movements_cron", (e && e.stack) || e); }
 }
 
 // GET /auth/verify?token=...  -> set session cookie
@@ -601,6 +543,7 @@ async function apiDashboard(env) {
       on_vacation: statusMap["On Vacation"] || 0,
       earmarked: statusMap["Earmarked"] || 0,
       inactive: statusMap["Inactive"] || 0,
+      retired: statusMap["Retired"] || 0,
       vessels, byClient
     },
     compliance: { med_exp_90: medExp, sirb_exp_90: sirbExp, pp_exp_90: ppExp, usv_exp_90: usvExp, sch_exp_90: schExp },
@@ -2709,7 +2652,7 @@ async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var d;try{d=await (await fetch('/api/dashboard')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
   DASH=d;var w=d.workforce,c=d.compliance,bd=d.birthdays||[],bz=d.bonus||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'}];
+  var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'},{label:'Retired',value:w.retired||0,color:'#9aa7b6'}];
   var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'}];
   var compBars=[{label:'Medical',value:c.med_exp_90,color:'#BC3B2C'},{label:'Seaman bk',value:c.sirb_exp_90,color:'#B0741A'},{label:'Passport',value:c.pp_exp_90,color:'#B0741A'},{label:'US visa',value:c.usv_exp_90,color:'#B0741A'},{label:'Schengen',value:c.sch_exp_90,color:'#7A5AA8'}];
   var compTot=compBars.reduce(function(a,b){return a+(b.value||0);},0);
@@ -2721,7 +2664,7 @@ async function renderDashboard(){
    +'<div class="panel center"><h3>By client</h3>'+donutSVG(clientSegs)+legendH(clientSegs)+'</div>'
    +'<div class=panel><h3>At a glance</h3><div class=tiles style="grid-template-columns:1fr 1fr">'
      +tile(w.total,'Total crew','','crew')+tile(w.vessels,'Vessels','','fleet')
-     +tile(w.inactive,'Inactive','gray','crew')+tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
+     +tile(w.retired||0,'Retired','gray','crew')+tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
    +'</div></div></div>';
   // ZONE 2 — COMPLIANCE
   h+='<div class=zlabel>Compliance — documents expiring within 90 days</div><div class=dzone>'
