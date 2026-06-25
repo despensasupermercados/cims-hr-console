@@ -716,7 +716,7 @@ async function rotationSections(env) {
     ls.forEach((leg, idx) => { const e = eff(leg); if (!e.ship) return; if (lastForShip[e.ship] == null || (ls[lastForShip[e.ship]].seq || 0) < (leg.seq || 0)) lastForShip[e.ship] = idx; });
     for (const ship in lastForShip) {
       const idx = lastForShip[ship], leg = ls[idx], e = eff(leg), rm = rmap[sc] || {};
-      (byShip[ship] = byShip[ship] || []).push({ agency_id: sc, seq: leg.seq, ship, name: c.name, status: c.status, rank: c.rank, signOn: e.signOn, signOff: e.signOff, offConfirmed: e.offConfirmed, onConfirmed: e.onConfirmed, embark: e.embark || shipHome[normShip(ship)] || null, eccr: e.eccr, air: e.air, hotel: e.hotel, hasNote: !!(rm.note && String(rm.note).trim()) });
+      (byShip[ship] = byShip[ship] || []).push({ agency_id: sc, seq: leg.seq, ship, name: c.name, status: c.status, rank: c.rank, signOn: e.signOn, signOff: e.signOff, offConfirmed: e.offConfirmed, onConfirmed: e.onConfirmed, embark: e.embark || shipHome[normShip(ship)] || null, disembark: e.disembark || null, eccr: e.eccr, air: e.air, hotel: e.hotel, hasNote: !!(rm.note && String(rm.note).trim()) });
     }
   }
   const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
