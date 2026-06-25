@@ -2722,7 +2722,7 @@ function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
 function rankTag(r,c){var s=String(r||'').toLowerCase();if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s===' ps'||s==='ps')return 'PS';return rankShort(c);}
 function docFlag(exp){if(!exp)return'missing';var days=(new Date(exp)-new Date())/86400000;if(days<0)return'expired';if(days<=90)return'90d';return'ok';}
 function crewMatchesComp(c){
-  if(c.status==='Inactive')return false;
+  if(c.status==='Inactive'||c.status==='Retired')return false;
   var f=CF.comp;
   if(f==='expired')return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){var g=docFlag(c[k]);return g==='expired'||g==='missing';});
   if(f==='soon')return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){return docFlag(c[k])==='90d';});
@@ -2786,12 +2786,13 @@ function crewTiles(){
   var vac=CREW.filter(function(c){return c.status==='On Vacation';}).length;
   var ear=CREW.filter(function(c){return c.status==='Earmarked';}).length;
   var ina=CREW.filter(function(c){return c.status==='Inactive';}).length;
-  var act=CREW.filter(function(c){return c.status!=='Inactive';});
+  var ret=CREW.filter(function(c){return c.status==='Retired';}).length;
+  var act=CREW.filter(function(c){return c.status!=='Inactive'&&c.status!=='Retired';}); // active = excludes retired & inactive; doc compliance only matters for sailing crew
   var exp=act.filter(function(c){return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){var g=docFlag(c[k]);return g==='expired'||g==='missing';});}).length;
   var soon=act.filter(function(c){return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){return docFlag(c[k])==='90d';});}).length;
   var sch=act.filter(function(c){return c.sch_exp&&['expired','90d'].indexOf(docFlag(c.sch_exp))>=0;}).length;
   function t(n,l,cls,kind,key){var onx=(kind==='st'?CF.status:CF.comp)===key&&key!=='';return '<div class="tile '+(cls||'')+(onx?' on':'')+'" data-kind="'+kind+'" data-key="'+key+'" style="cursor:pointer"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
-  return t(CREW.length,'All crew','','st','')+t(on,'On board','green','st','On board')+t(vac,'On vacation','amber','st','On Vacation')+t(ear,'Earmarked','royal','st','Earmarked')+t(ina,'Inactive','gray','st','Inactive')
+  return t(CREW.length,'All crew','','st','')+t(on,'On board','green','st','On board')+t(vac,'On vacation','amber','st','On Vacation')+t(ret,'Retired','gray','st','Retired')+t(ear,'Earmarked','royal','st','Earmarked')+t(ina,'Inactive','gray','st','Inactive')
    +t(exp,'Docs expired/missing','red','comp','expired')+t(soon,'Docs ≤90 days','amber','comp','soon')+t(sch,'Schengen expiring','amber','comp','schengen');
 }
 function paintCrew(){
