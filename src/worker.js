@@ -22,8 +22,6 @@ import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
-import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria } from "./maria.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -88,6 +86,7 @@ export default {
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
+        if (p === "/api/rotation/upcoming") return apiRotationUpcoming(env, url);
         if (p === "/api/rotation/note" && request.method === "POST") return apiNote(request, env, session);
         if (p === "/api/rotation/contract" && request.method === "POST") return apiContractEdit(request, env, session);
         if (p === "/api/fleet")      return apiFleet();
@@ -114,9 +113,6 @@ export default {
         if (p === "/api/intel/resolve" && request.method === "POST") return apiIntelResolve(request, env, session);
         if (p === "/api/intel/edit" && request.method === "POST") return apiIntelEdit(request, env, session);
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
-        if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
-        if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
-        if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -147,7 +143,6 @@ export default {
   // unavailable (left in 'new'). Configured by [triggers] crons in wrangler.toml.
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
-    if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event));
   }
 };
 
@@ -230,99 +225,6 @@ async function sendMagicLink(env, email, link) {
       html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`
     })
   });
-}
-
-/* -------------------- Seafarer Movements weekly email -------------------- */
-async function movementsData(env, runDate) {
-  const { sections } = await rotationSections(env);
-  const crew = [];
-  for (const s of (sections || [])) for (const c of (s.crew || [])) crew.push(c);
-  return shapeMovements(crew, runDate);
-}
-function nyDateStr(now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
-}
-async function renderMovements(env, runDate) {
-  const { signOns, signOffs } = await movementsData(env, runDate);
-  return { html: buildSeafarerMovementEmail({ runDate, signOns, signOffs }), on: signOns.length, off: signOffs.length };
-}
-async function sendMovementsEmail(env, to, runDate) {
-  const { html, on, off } = await renderMovements(env, runDate);
-  if (!env.RESEND_API_KEY) return { ok: false, sent: false, note: "no_mailer", on, off };
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: env.MAIL_FROM || "CIMS <cims@cims.work>", to: [to], subject: `Seafarer Movements · week of ${runDate} (${on} on / ${off} off)`, html }),
-  });
-  return { ok: r.ok, sent: r.ok, status: r.status, to, on, off };
-}
-async function apiMovementsPreview(env, url) {
-  const date = url.searchParams.get("date") || nyDateStr();
-  const { html } = await renderMovements(env, date);
-  return htmlResponse(html);
-}
-async function apiMovementsSend(request, env, session) {
-  if (!isMoneyUser(session.email)) return json({ error: "forbidden" }, 403);
-  const b = await request.json().catch(() => ({}));
-  const to = b.to || env.MOVEMENTS_TO || "Miguel.Sanmartin@dg3.com";
-  const date = b.date || nyDateStr();
-  const res = await sendMovementsEmail(env, to, date);
-  await logActivity(env, session.email, "movements_send", `${to} ${date} ${res.on}/${res.off}`);
-  return json(res);
-}
-async function maybeSendMovements(env, event) {
-  try {
-    const to = env.MOVEMENTS_TO; if (!to) return;
-    const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
-    const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', hour12: false }).formatToParts(now);
-    const get = t => (parts.find(x => x.type === t) || {}).value;
-    if (get('weekday') !== 'Mon' || get('hour') !== '07') return;
-    const runDate = nyDateStr(now);
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
-    const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='movements_last_sent'").first();
-    if (prev && prev.v === runDate) return;
-    const res = await sendMovementsEmail(env, to, runDate);
-    if (res.sent) await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('movements_last_sent',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(runDate).run();
-  } catch (e) { console.error("movements_cron", (e && e.stack) || e); }
-}
-
-/* -------------------- Ask Maria: read-only AI Q&A over CIMS data -------------------- */
-// Maps Maria's tool calls to the SAME read-only data functions the UI uses. No writes, ever.
-async function mariaExecTool(env, name, input) {
-  const base = "https://cims.work";
-  const J = async (resp) => { try { return await resp.json(); } catch (e) { return { error: "parse_failed" }; } };
-  const fullName = (c) => [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
-  if (name === "workforce_summary") return await J(await apiDashboard(env));
-  if (name === "fleet_status") return await J(await apiFleet());
-  if (name === "billing_month") return await J(await apiBillingMonth(env));
-  if (name === "contract_ledger") return await J(await apiContracts(env));
-  if (name === "travel_summary") return await J(await apiTravel(env, new URL(base + "/api/travel")));
-  if (name === "compliance_expiring") { const d = Number(input.days) || 90; return await J(await apiCompliance(env, new URL(base + "/api/compliance?days=" + d))); }
-  if (name === "find_crew") {
-    const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    const q = String(input.name || "").toLowerCase().trim();
-    const rows = (all.crew || []).filter(c => fullName(c).toLowerCase().includes(q));
-    return { query: input.name, matches: rows.slice(0, 15).map(c => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, contract_count: c.contract_count, baseline_set: c.baseline_count != null, active_on: c.active_on, active_off: c.active_off, province: c.province, medical_exp: c.med_exp, seamans_book_exp: c.sirb_exp, passport_exp: c.pp_exp, us_visa_exp: c.usv_exp, schengen_exp: c.sch_exp })) };
-  }
-  if (name === "list_crew") {
-    const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    let rows = all.crew || [];
-    if (input.status) rows = rows.filter(c => String(c.status || "").toLowerCase() === String(input.status).toLowerCase());
-    if (input.ship) rows = rows.filter(c => String(c.vessel_observed || "").toLowerCase().includes(String(input.ship).toLowerCase()));
-    return { count: rows.length, crew: rows.slice(0, 60).map(c => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, active_on: c.active_on, active_off: c.active_off })) };
-  }
-  return { error: "unknown tool: " + name };
-}
-// POST /api/ask {question, history?} -> { answer, sources } (session-gated, read-only)
-async function apiAsk(request, env, session) {
-  if (!env.ANTHROPIC_API_KEY) return json({ error: "Ask Maria is not configured yet (no AI key set)." }, 503);
-  const b = await request.json().catch(() => ({}));
-  const question = String(b.question || "").slice(0, 1000).trim();
-  if (!question) return json({ error: "Please type a question." }, 400);
-  const history = Array.isArray(b.history) ? b.history.slice(-6) : [];
-  const res = await runMaria({ apiKey: env.ANTHROPIC_API_KEY, question, history, today: TODAY(), execTool: (n, i) => mariaExecTool(env, n, i) });
-  await logActivity(env, session.email, "maria_ask", question.slice(0, 120));
-  return json(res);
 }
 
 // GET /auth/verify?token=...  -> set session cookie
@@ -1365,6 +1267,38 @@ async function apiScoreQueue(env, url) {
   const upcoming = Object.keys(upBy).map(sc => mk(sc, upBy[sc])).sort((a, b) => (a.signOff < b.signOff ? -1 : 1));    // soonest off first
   return json({ today, days, recent, upcoming });
 }
+
+// Upcoming debarkations from the LIVE SCHEDULE (ship_history) — the forward-looking sign-off dates.
+// Read-only. ?days=N (default 10). THIS is the correct source for "who debarks in the next N days":
+// the historical Contract Counter holds completed contracts only (past dates) and can never answer it.
+async function apiRotationUpcoming(env, url) {
+  const today = TODAY();
+  const days = Math.max(1, Math.min(180, parseInt(url.searchParams.get("days")) || 10));
+  const todayTs = Date.parse(today + "T00:00:00Z");
+  const endTs = todayTs + days * 86400000;
+  const crewRows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
+  const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
+  const keys = buildShipKeys(VESSEL_REF);
+  const best = {};
+  for (const h of SHIP_HISTORY) {
+    if (!h.ours || !h.sc || !h.off || !byId[h.sc]) continue;
+    const offTs = Date.parse(h.off + "T00:00:00Z");
+    if (isNaN(offTs) || offTs < todayTs || offTs > endTs) continue;     // sign-off within [today, today+days]
+    const cur = best[h.sc];
+    if (!cur || h.off < cur.off) best[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; // soonest per crew
+  }
+  const crew = Object.keys(best).map(sc => {
+    const c = byId[sc], dep = best[sc];
+    return {
+      agency_id: sc, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || sc,
+      vessel: c.vessel_observed || null, ship: canonShipWith(dep.ship, keys) || dep.ship,
+      signOn: dep.on, signOff: dep.off,
+      daysUntil: Math.round((Date.parse(dep.off + "T00:00:00Z") - todayTs) / 86400000),
+      status: c.status
+    };
+  }).sort((a, b) => (a.signOff < b.signOff ? -1 : a.signOff > b.signOff ? 1 : 0));
+  return json({ today, days, count: crew.length, crew });
+}
 /* ----------------------- crew intel (email -> AI -> notes) — SEPARATE from the scored bonus ----------------------- */
 async function ensureIntel(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)").run();
@@ -1977,7 +1911,6 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
     <button id=nav-data onclick="show('data')">Data</button>
-    <button id=nav-ask onclick="show('ask')">Ask Maria</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
 </header>
@@ -2023,53 +1956,9 @@ async function show(tab){
   if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
   if(tab==='data'||tab==='settings')return renderData();
-  if(tab==='ask')return renderAsk();
 }
 // "Data" is now the single home for data status AND uploads/session/about (the old Settings tab was
 // merged in). Left menu: Overview (data sources + load history), Upload data, Session, About.
-function renderAsk(){
-  $('#view').innerHTML='<div class=bar><h2>Ask Maria</h2></div>'
-   +'<div class=csub style="margin:-6px 0 14px">Maria answers questions about CIMS data — crew, contracts, compliance, billing, fleet, travel. Read-only: she reports, she never changes anything.</div>'
-   +'<div id=mchat style="max-width:820px;border:1px solid var(--line-2);border-radius:12px;padding:14px;min-height:200px;max-height:55vh;overflow:auto;background:#fff"></div>'
-   +'<div style="max-width:820px;display:flex;gap:8px;margin-top:10px"><input id=mq placeholder="Ask about crew, contracts, compliance, billing, fleet, travel..." style="flex:1;padding:11px 12px;border:1px solid var(--line-2);border-radius:10px"><button class=btn id=masend>Ask</button></div>'
-   +'<div style="max-width:820px;margin-top:8px" id=mchips></div>';
-  var chips=['How many crew are on board right now?','Whose documents expire in the next 60 days?','Who are the Sr PS crew?','Which ships are in dry dock?'];
-  var mc=$('#mchips'); mc.innerHTML='';
-  chips.forEach(function(c){var btn=document.createElement('button');btn.className='btn ghost';btn.style.cssText='margin:3px 6px 3px 0;font-size:12px';btn.textContent=c;btn.onclick=function(){$('#mq').value=c;mariaSend();};mc.appendChild(btn);});
-  $('#masend').onclick=mariaSend;
-  $('#mq').onkeydown=function(e){if(e.key==='Enter')mariaSend();};
-  window.MARIA_HIST=window.MARIA_HIST||[];
-  mariaRender();
-}
-function mariaEsc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
-function mariaRender(){
-  var box=$('#mchat'); if(!box)return;
-  var h=(window.MARIA_HIST||[]).map(function(m){
-    var who=m.role==='user'?'You':'Maria';
-    var col=m.role==='user'?'var(--navy)':'var(--green)';
-    var src=(m.sources&&m.sources.length)?'<div class=csub style="margin-top:4px;opacity:.65">source: '+m.sources.join(', ')+'</div>':'';
-    return '<div style="margin:0 0 12px"><div style="font-weight:700;color:'+col+';font-size:12px">'+who+'</div><div style="white-space:pre-wrap;line-height:1.5">'+(m.html||'')+'</div>'+src+'</div>';
-  }).join('');
-  box.innerHTML=h||'<div class=csub style="opacity:.6">Ask a question to get started.</div>';
-  box.scrollTop=box.scrollHeight;
-}
-async function mariaSend(){
-  var i=$('#mq'); if(!i)return; var q=(i.value||'').trim(); if(!q)return;
-  i.value='';
-  window.MARIA_HIST=window.MARIA_HIST||[];
-  var hist=window.MARIA_HIST.filter(function(m){return m.text;}).slice(-6).map(function(m){return {role:m.role,content:m.text};});
-  window.MARIA_HIST.push({role:'user',html:mariaEsc(q),text:q});
-  window.MARIA_HIST.push({role:'assistant',html:'<span class=csub style="opacity:.6">Maria is thinking…</span>'});
-  mariaRender();
-  try{
-    var r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:hist})});
-    var j=await r.json();
-    window.MARIA_HIST.pop();
-    if(j&&j.answer){window.MARIA_HIST.push({role:'assistant',html:mariaEsc(j.answer),text:j.answer,sources:j.sources||[]});}
-    else{window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc((j&&(j.error||j.detail))||'No answer returned.')+'</span>'});}
-  }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
-  mariaRender();
-}
 function renderSettings(){ return renderData(); }
 function renderData(){
   $('#view').innerHTML='<div class=bar><h2>Data</h2></div>'
