@@ -238,19 +238,20 @@ async function authVerify(request, env, url) {
   return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": sessionCookie(sess) } });
 }
 
-// GET /auth/dev?key=BOOTSTRAP_KEY&email=...  -> bootstrap session (until email is wired)
+// POST /auth/dev {key, email} -> bootstrap session (until email is wired).
+// POST-ONLY by design: a long-lived shared secret must never travel in a URL query string
+// (it would leak into CF request logs, browser history, and referrer headers). The login form POSTs.
 async function authDev(request, env, url) {
-  let key, email;
-  if (request.method === "POST") { const b = await request.json().catch(() => ({})); key = b.key; email = b.email; }
-  else { key = url.searchParams.get("key"); email = url.searchParams.get("email"); }
+  if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+  const b = await request.json().catch(() => ({}));
+  const key = b.key, email = b.email;
   if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
   await ensureUsers(env).catch(() => {});
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
   await logActivity(env, email, "login", "bootstrap");
   const cookie = sessionCookie(sess);
-  if (request.method === "POST") return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Set-Cookie": cookie, "Content-Type": "application/json" } });
-  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": cookie } });
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Set-Cookie": cookie, "Content-Type": "application/json" } });
 }
 function logout() {
   return new Response(null, { status: 302, headers: { "Location": "/login", "Set-Cookie": `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0` } });
@@ -1049,6 +1050,16 @@ async function apiBonusCommit(request, env, session) {
   const cr = await env.DB.prepare("SELECT id, agency_id, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(b.agency_id).first();
   if (!cr) return json({ error: "crew_not_found" }, 404);
   const baseline = await effectiveBaseline(env, cr.agency_id, cr.baseline_count);
+  // Money safety (#17): never finalize a payout against an UNCONFIRMED starting count. If the crew has
+  // no prior committed outcome to event-source from AND no reconciled baseline, the count is unknown —
+  // committing would anchor the immutable ledger to a wrong base (a veteran silently reset toward 0).
+  // 0 is a valid *confirmed* baseline and is unaffected; only NULL (never reconciled) is blocked.
+  const hasHistory = !!(await env.DB.prepare("SELECT 1 FROM bonus_outcome WHERE crew_id=? LIMIT 1").bind(cr.id).first());
+  if (!hasHistory && baseline == null) return json({ error: "baseline_pending" }, 400);
+  // Supervisor evaluation is required and must be 1..5. The server is the authority, not the form,
+  // so a missing/garbage eval is rejected rather than scored as 0 (which the engine would now gate anyway).
+  const evNum = parseInt(b.evalScore);
+  if (!(evNum >= 1 && evNum <= 5)) return json({ error: "eval_required" }, 400);
   const count = await crewCount(env, cr.id, baseline);
   const r = computeBonus({ count, sliders: b.sliders, evalScore: b.evalScore, gates: b.gates });
   if ((r.gate === "rush" || r.gate === "audit") && !(b.gateNote && b.gateNote.trim())) return json({ error: "gate_note_required" }, 400);
@@ -1075,8 +1086,18 @@ async function apiBonusCommit(request, env, session) {
       .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now).run();
   }
   const oid = "bo_" + crypto.randomUUID();
-  await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(oid, cid, groupId, cr.id, 1, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now).run();
+  try {
+    await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(oid, cid, groupId, cr.id, 1, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now).run();
+  } catch (e) {
+    // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
+    // SELECT trips UNIQUE(crew_id,span_start,span_end) (migration 0004, primary outcomes only). Return the
+    // already-recorded outcome as a duplicate instead of double-paying / double-counting.
+    const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
+    if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
+      result: { score: ex.score_pct, gate: ex.gate, pay: ex.pay_usd, count: ex.count_before, nextCount: ex.count_after, rung: ladderValue(ex.count_after) } });
+    throw e;
+  }
   await logActivity(env, (session && session.email), "commit_outcome", groupId + " pay=" + r.pay + " gate=" + (r.gate || "none"));
   return json({ ok: true, group: groupId, ships, result: r });
 }
@@ -2115,96 +2136,125 @@ function usd(n){return n?('$'+Number(n).toLocaleString(undefined,{maximumFractio
 function usd0(n){return '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});}
 function pct(a,b){if(b==null||b===0)return null;return (a-b)/b*100;}
 function deltaCell(a,b){var d=pct(a,b);if(d==null)return '<span class=muted style="padding:0">—</span>';var up=d>=0;return '<span style="color:'+(up?'var(--red)':'var(--green-d)')+';font-weight:700">'+(up?'▲':'▼')+' '+Math.abs(d).toFixed(0)+'%</span>';}
+var TBUD=15000; // monthly travel budget — source: travel workbook SUMMARY!C55 ($15k/mo, $180k/yr). Edit here if the budget changes.
+var TSEL=null;  // drilled-down crew name (null = overview)
+var TLB=[];     // current leaderboard names (drill-click target by index)
+var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
 async function renderTravel(){
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2><span class=muted style="padding:0">Loading…</span></div>';
   try{ TRV=await (await fetch('/api/travel')).json(); if(TRV&&TRV.error)throw new Error(TRV.error); }
   catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
+  TSEL=null;
   TF={q:'',year:'',month:'',cat:'',kind:''};
   var years=(TRV.years||[]).slice();
-  var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
-    +'<input id=tq placeholder="filter by name…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:170px">'
+    +'<input id=tq placeholder="search a person…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:180px">'
     +'<select id=tyear onchange="TF.year=this.value;paintTravel()"><option value="">All years</option>'+years.map(function(y){return '<option>'+y+'</option>';}).join('')+'</select>'
-    +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+mn.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
+    +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+TMN.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
     +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
     +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="">Crew + shoreside</option><option value="crew">Crew only</option><option value="shoreside">Shoreside only</option></select>'
     +'</div><div id=trbody></div>';
   paintTravel();
 }
-// Sum a category (or 'total') over rows matching year + month-set, within an already kind/name-scoped list.
-function tSum(rows,yr,months,cat){var t=0;for(var i=0;i<rows.length;i++){var r=rows[i];if(r.year!==yr)continue;if(months&&months.indexOf(r.month)<0)continue;t+=cat==='total'?r.total:(r[cat]||0);}return t;}
+
+function tScope(){return TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.q&&(r.crew_name||'').toLowerCase().indexOf(TF.q.toLowerCase())<0)return false;return true;});}
+function tSum(rows,yr,months,cat){var t=0;for(var i=0;i<rows.length;i++){var r=rows[i];if(yr&&r.year!==yr)continue;if(months&&months.indexOf(r.month)<0)continue;t+=cat?(r[cat]||0):r.total;}return t;}
+function pv(v,l,col){return '<div><div style="font-family:Outfit;font-size:24px;font-weight:800;color:'+(col||'var(--navy)')+'">'+v+'</div><div class=hint style="margin-top:0">'+l+'</div></div>';}
+function travelDrill(i){TSEL=TLB[i];paintTravel();window.scrollTo(0,0);}
+function travelBack(){TSEL=null;paintTravel();}
+
 function paintTravel(){
-  var mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var q=(TF.q||'').trim().toLowerCase();
-  // Analytics scope = kind + name only (cross-year comparison is the whole point).
-  var scope=TRVALL.filter(function(r){
-    if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;
-    if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;
-    return true;
-  });
-  var years=Array.from(new Set(scope.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
-  var LY=years[0],PY=years[1];
+  if(TSEL)return paintTravelCrew();
+  var sc=tScope();
+  var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
+  var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
+  if(!LY){document.getElementById('trbody').innerHTML='<div class=muted>No travel data for this filter.</div>';return;}
+  var monthsLY=Array.from(new Set(sc.filter(function(r){return r.year===LY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
+  var ytdA=tSum(sc,LY,monthsLY,null), ytdB=TBUD*monthsLY.length, ytdP=PY?tSum(sc,PY,monthsLY,null):null;
+  var air=tSum(sc,LY,monthsLY,'air');
+  var byp={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){byp[r.crew_name]=(byp[r.crew_name]||0)+r.total;});
+  var topName=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];})[0]||'—';
+  var fullProj=monthsLY.length?(ytdA/monthsLY.length*12):0;
   var h='';
-  // ---- YTD same-period comparison ----
-  if(LY){
-    var monthsLY=Array.from(new Set(scope.filter(function(r){return r.year===LY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
-    var rangeLab=monthsLY.length?(mn[monthsLY[0]]+'–'+mn[monthsLY[monthsLY.length-1]]):'';
-    var ytdLY=tSum(scope,LY,monthsLY,'total'),ytdPY=PY?tSum(scope,PY,monthsLY,'total'):null;
-    var d=pct(ytdLY,ytdPY);
-    h+='<div class=zlabel>Year-to-date — same period</div>';
-    h+='<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
-      +'<div class=csub>YTD '+rangeLab+' · <b style="color:var(--navy)">'+LY+'</b>'+(PY?(' vs '+PY+' (same months)'):' (no prior year on file)')+'</div>'
-      +'<div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-top:6px">'
-      +'<div style="font-family:Outfit;font-size:30px;font-weight:800;color:var(--navy)">'+usd0(ytdLY)+'</div>'
-      +(PY?('<div class=csub>'+LY+' vs '+usd0(ytdPY)+' in '+PY+' &nbsp; '+deltaCell(ytdLY,ytdPY)+' &nbsp; ('+(ytdLY-ytdPY>=0?'+':'')+usd0(ytdLY-ytdPY)+')</div>'):'')
-      +'</div>';
-    // per-category YTD table
-    h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Category</th><th style="text-align:right">'+(PY||'prior')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
-    TCATS.forEach(function(c){var l=tSum(scope,LY,monthsLY,c),p=PY?tSum(scope,PY,monthsLY,c):null;if(!l&&!p)return;h+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+deltaCell(l,p)+'</td></tr>';});
-    h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdPY==null?'—':usd0(ytdPY))+'</b></td><td style="text-align:right"><b>'+usd0(ytdLY)+'</b></td><td style="text-align:right">'+deltaCell(ytdLY,ytdPY)+'</td></tr>';
-    h+='</tbody></table></div>';
-  }
-  // ---- Month-by-month: this year vs last year ----
-  if(LY&&PY){
-    var monthsAll=Array.from(new Set(scope.filter(function(r){return r.year===LY||r.year===PY;}).map(function(r){return r.month;}))).sort(function(a,b){return a-b;});
-    var monthsLYset=Array.from(new Set(scope.filter(function(r){return r.year===LY;}).map(function(r){return r.month;})));
-    h+='<div class=zlabel style="margin-top:18px">Month by month — '+LY+' vs '+PY+'</div>';
-    h+='<table class=tbl><thead><tr><th>Month</th><th style="text-align:right">'+PY+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
-    var sumPfull=0,sumLfull=0,sumPsame=0,sumLsame=0;
-    monthsAll.forEach(function(m){var p=tSum(scope,PY,[m],'total'),l=tSum(scope,LY,[m],'total');var hasLY=monthsLYset.indexOf(m)>=0;sumPfull+=p;sumLfull+=l;if(hasLY){sumPsame+=p;sumLsame+=l;}
-      h+='<tr><td>'+mn[m]+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td><td style="text-align:right">'+(hasLY?usd0(l):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+(hasLY?deltaCell(l,p):'<span class=muted style="padding:0">—</span>')+'</td></tr>';});
-    h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total — same period</b></td><td style="text-align:right"><b>'+usd0(sumPsame)+'</b></td><td style="text-align:right"><b>'+usd0(sumLsame)+'</b></td><td style="text-align:right">'+deltaCell(sumLsame,sumPsame)+'</td></tr>';
+  h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:6px">'
+    +tile(usd0(ytdA),'YTD actual '+LY+' · '+monthsLY.length+' mo')
+    +tile('<span style="color:'+(ytdA<=ytdB?'var(--green-d)':'var(--red)')+'">'+usd0(Math.abs(ytdB-ytdA))+'</span>',(ytdA<=ytdB?'under':'over')+' budget YTD · '+usd0(ytdB))
+    +tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same period'+(ytdP!=null?(' · '+usd0(ytdP)):''))
+    +tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber')
+    +tile(topName,'Top spender '+LY)+'</div>';
+  h+='<div class=zlabel>Plan vs actual — budget pacing '+LY+'</div>';
+  h+='<div class="card" style="max-width:none">';
+  h+='<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px">'
+    +pv(usd0(ytdA),'YTD actual','var(--navy)')
+    +pv(usd0(ytdB),'YTD budget','var(--muted)')
+    +pv((ytdA<=ytdB?'+':'')+usd0(ytdB-ytdA),'variance ('+(ytdA<=ytdB?'under':'over')+')',ytdA<=ytdB?'var(--green-d)':'var(--red)')
+    +pv(usd0(fullProj),'projected FY vs '+usd0(TBUD*12),fullProj<=TBUD*12?'var(--green-d)':'var(--red)')
+    +'</div>';
+  var maxv=TBUD;for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);if(a>maxv)maxv=a;}
+  var budTop=(1-TBUD/maxv)*100;
+  h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
+  h+='<div style="position:absolute;left:0;right:0;top:'+budTop.toFixed(1)+'%;border-top:2px dashed var(--amber)"></div>';
+  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var hp=(a/maxv*100).toFixed(1);var over=a>TBUD;
+    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1">'
+      +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a?usd0(a):'')+'</div>'
+      +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+hp+'%;background:'+(over?'var(--red)':'var(--navy)')+'"></div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';}
+  h+='</div>';
+  h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = YTD run-rate × 12.</div>';
+  h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">Variance</th><th style="text-align:right">'+(PY||'PY')+'</th></tr></thead><tbody>';
+  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=monthsLY.indexOf(m)>=0;var v=TBUD-a;
+    if(!has&&!p)continue;
+    h+='<tr><td>'+TMN[m]+'</td><td style="text-align:right">'+(has?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+usd0(TBUD)+'</td><td style="text-align:right">'+(has?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
+  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>YTD</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+usd0(ytdB)+'</b></td><td style="text-align:right"><b><span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span></b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
+  h+='</tbody></table></div>';
+  h+='<div class=zlabel style="margin-top:18px">YoY by category &amp; top spenders — '+LY+'</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
+  var yc='<div><table class=tbl><thead><tr><th>Category</th><th style="text-align:right">'+(PY||'PY')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
+  TCATS.forEach(function(c){var l=tSum(sc,LY,monthsLY,c),p=PY?tSum(sc,PY,monthsLY,c):null;if(!l&&!p)return;yc+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+(p==null?'—':deltaCell(l,p))+'</td></tr>';});
+  yc+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right">'+(ytdP==null?'—':deltaCell(ytdA,ytdP))+'</td></tr></tbody></table></div>';
+  TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,12);
+  var lh='<div><table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  TLB.forEach(function(n,i){var c=sc.filter(function(r){return r.year===LY&&r.crew_name===n;}).length;var k=(sc.find(function(r){return r.crew_name===n;})||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+n+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+c+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
+  lh+='</tbody></table><div class=hint style="margin-top:6px">Click a name for their full history.</div></div>';
+  h+=yc+lh+'</div>';
+  var yrRows=sc.filter(function(r){return r.year===LY&&r.total>0;});
+  var tt=yrRows.map(function(r){return r.total;}).sort(function(a,b){return a-b;});
+  var med=tt.length?tt[Math.floor(tt.length/2)]:0;
+  var outs=yrRows.filter(function(r){return r.total>med*2.5;}).sort(function(a,b){return b.total-a.total;}).slice(0,8);
+  if(outs.length){
+    h+='<div class=zlabel style="margin-top:18px">Anomalies — single movements &gt; 2.5× median ('+usd0(med)+')</div>';
+    h+='<table class=tbl><thead><tr><th>Mo</th><th>Person</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+r.crew_name+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(r.total)+'</b></td></tr>';});
     h+='</tbody></table>';
-    h+='<p class=hint style="margin-top:6px">'+PY+' full year was '+usd0(sumPfull)+'. The Δ total compares only the months '+LY+' has on file, so it stays apples-to-apples — months '+LY+' hasn\\'t reached (or that aren\\'t uploaded yet) show as "pending", not a 100% drop.</p>';
   }
-  // ---- Line-item explorer (respects ALL filters) ----
-  var rows=TRVALL.filter(function(r){
-    if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;
-    if(TF.year&&r.year!==+TF.year)return false;
-    if(TF.month&&r.month!==+TF.month)return false;
-    if(TF.cat&&!(r[TF.cat]>0))return false;
-    if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;
-    return true;
-  });
-  var ftot=0,fcat={};TCATS.forEach(function(c){fcat[c]=0;});
-  rows.forEach(function(r){ftot+=r.total;TCATS.forEach(function(c){fcat[c]+=r[c]||0;});});
-  var topName='—',topVal=0,byp={};rows.forEach(function(r){byp[r.crew_name]=(byp[r.crew_name]||0)+r.total;});
-  Object.keys(byp).forEach(function(n){if(byp[n]>topVal){topVal=byp[n];topName=n;}});
-  var filtLab=[];if(TF.year)filtLab.push(TF.year);if(TF.month)filtLab.push(mn[+TF.month]);if(TF.cat)filtLab.push(TCATLAB[TF.cat]);if(TF.kind)filtLab.push(TF.kind);if(TF.q)filtLab.push('"'+TF.q+'"');
-  h+='<div class=zlabel style="margin-top:18px">Line items'+(filtLab.length?(' · '+filtLab.join(' · ')):'')+'</div>';
-  // header totals strip (live)
-  h+='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:8px">'
-    +tile(usd0(ftot),rows.length+' items · total')
-    +tile(usd0(fcat.air),'Air ('+(ftot?Math.round(fcat.air/ftot*100):0)+'%)','amber')
-    +tile(usd0(fcat.hotel),'Hotel')
-    +tile(topName+' · '+usd0(topVal),'Top spender (filtered)')+'</div>';
-  h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:10px">'
-    +['medical','visa','food','transport','other'].map(function(c){return tile(usd0(fcat[c]),TCATLAB[c]);}).join('')+'</div>';
+  var q=(TF.q||'').toLowerCase();
+  var rows=TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;return true;});
+  h+='<div class=zlabel style="margin-top:18px">Line items'+(rows.length?(' · '+rows.length):'')+'</div>';
   h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
-    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+mn[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=13 class=muted>No line items match these filters.</td></tr>';
-  h+='</tbody></table>'
-    +'<p class=muted style="text-align:left;padding:10px 2px">YTD compares the same calendar months in each year (apples-to-apples). 2025 is loaded as history; upload newer years in Settings → Data uploads → Travel.</p>';
+    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=13 class=muted>No line items match these filters.</td></tr>';
+  h+='</tbody></table>';
+  document.getElementById('trbody').innerHTML=h;
+}
+
+function paintTravelCrew(){
+  var name=TSEL;var rows=TRVALL.filter(function(r){return r.crew_name===name;});
+  var ys=Array.from(new Set(rows.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
+  var h='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back to overview</div>';
+  h+='<div class=zlabel>'+name+'</div>';
+  h+='<div class=tiles style="grid-template-columns:repeat('+Math.min(ys.length+1,5)+',1fr);margin-bottom:6px">';
+  ys.forEach(function(y){var t=rows.filter(function(r){return r.year===y;}).reduce(function(a,b){return a+b.total;},0);var c=rows.filter(function(r){return r.year===y;}).length;h+=tile(usd0(t),y+' · '+c+' trips');});
+  h+=tile(usd0(rows.reduce(function(a,b){return a+b.total;},0)),'All-time');
+  h+='</div>';
+  h+='<div class=zlabel style="margin-top:8px">Monthly spend by year</div><table class=tbl><thead><tr><th>Year</th>'+TMN.slice(1).map(function(m){return '<th style="text-align:right">'+m+'</th>';}).join('')+'<th style="text-align:right">Total</th></tr></thead><tbody>';
+  ys.forEach(function(y){h+='<tr><td><b>'+y+'</b></td>';var tt=0;for(var m=1;m<=12;m++){var v=rows.filter(function(r){return r.year===y&&r.month===m;}).reduce(function(a,b){return a+b.total;},0);tt+=v;h+='<td style="text-align:right">'+(v?usd0(v):'·')+'</td>';}h+='<td style="text-align:right"><b>'+usd0(tt)+'</b></td></tr>';});
+  h+='</tbody></table>';
+  h+='<div class=zlabel style="margin-top:14px">By category (all-time)</div><table class=tbl><thead><tr>'+TCATS.map(function(c){return '<th style="text-align:right">'+TCATLAB[c]+'</th>';}).join('')+'<th style="text-align:right">Total</th></tr></thead><tbody><tr>';
+  var gt=0;TCATS.forEach(function(c){var v=rows.reduce(function(a,b){return a+(b[c]||0);},0);gt+=v;h+='<td style="text-align:right">'+(v?usd0(v):'·')+'</td>';});h+='<td style="text-align:right"><b>'+usd0(gt)+'</b></td></tr></tbody></table>';
+  h+='<div class=zlabel style="margin-top:14px">All movements</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  rows.sort(function(a,b){return b.year-a.year||b.month-a.month;}).forEach(function(r){var oc=r.medical+r.visa+r.food+r.transport+r.other;h+='<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.leg==='shoreside'?'shore':r.leg)+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(oc)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';});
+  h+='</tbody></table>';
   document.getElementById('trbody').innerHTML=h;
 }
 async function loadTravel(){return renderTravel();}
@@ -3182,7 +3232,9 @@ function swResultBox(pf,st){
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
   _SC=d; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
-  var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew — treated as 0. Confirm via the reconciliation sheet before any payout is finalised.</div>';
+  var _hasHist=!!(d.outcomes&&d.outcomes.length);
+  var _blockCommit=(!d.baseline_set&&!_hasHist);
+  var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
   var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
   var _st=(cr.status||'').toLowerCase();
   var _onship=_st.indexOf('board')>=0;
@@ -3213,7 +3265,7 @@ async function openScore(id){
    +rng('sHand','Ship-condition handover',10)+rng('sComm','Communication (manual — Rita)',10)+rng('sMono','Mono click discipline (<20%)',5)
    +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
    +'</div>'
-   +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()">Commit</button></div></div>';
+   +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()"'+(_blockCommit?' disabled title="Baseline pending — reconcile the starting count first"':'')+'>Commit</button></div></div>';
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class="modal '+scCls+'"><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
   if(d.lastLeg){if(d.lastLeg.on)$('#spanStart').value=d.lastLeg.on;if(d.lastLeg.off)$('#spanEnd').value=d.lastLeg.off;}
   recalcScore();
@@ -3266,7 +3318,7 @@ async function commitBonus(){
     gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
     gateNote:$('#gateNote')?$('#gateNote').value:''};
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
-  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
