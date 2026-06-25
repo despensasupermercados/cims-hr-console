@@ -2277,8 +2277,9 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
 function rotCard(x){
-  var on=x.signOn?((x.embark?x.embark+' · ':'')+'ON '+x.signOn):'';
-  var off=x.signOff?((x.disembark?x.disembark+' · ':'')+'OFF '+x.signOff):'';
+  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
+  var on=x.signOn?((x.embark?x.embark:tba)+' · ON '+x.signOn):'';
+  var off=x.signOff?((x.disembark?x.disembark:tba)+' · OFF '+x.signOff):'';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
@@ -2332,7 +2333,9 @@ async function editContractModal(id,seq){
   var note=String((d.ready&&d.ready.note)||'').replace(/</g,'&lt;');
   var ships={};(ROT.sections||[]).forEach(function(s){ships[s.ship]=1;});if(e.ship)ships[e.ship]=1;
   var shipOpts=Object.keys(ships).sort().map(function(s){return '<option'+(s===e.ship?' selected':'')+'>'+s+'</option>';}).join('');
-  var ck=function(i,lab,on){return '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-size:13px"><input type=checkbox id="'+i+'"'+(on?' checked':'')+'> '+lab+'</label>';};
+  // input is a SIBLING of its label (linked by for=), not nested inside it. Nesting causes iOS/iPad to
+  // fire the toggle twice per tap (input + label forwarding) so it flips on then off and looks stuck.
+  var ck=function(i,lab,on){return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-size:13px"><input type=checkbox id="'+i+'"'+(on?' checked':'')+'><label for="'+i+'" style="cursor:pointer;margin:0">'+lab+'</label></span>';};
   var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||'—';return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on||'—')+'</td><td>'+off+'</td></tr>';}).join('');
   var fld=function(lab,inp){return '<div><label class=csub>'+lab+'</label>'+inp+'</div>';};
   var h='<div class=modcard><div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+' · contract #'+seq+'</div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
@@ -3256,6 +3259,11 @@ async function commitBonus(){
 var MODAL_T=0;
 function ovc(e){ if(e.target===e.currentTarget && (Date.now()-MODAL_T)>450) mClose(); }
 function mClose(){$('#modalRoot').innerHTML='';}
+// iPad/iOS fix: a tap on a checkbox that sits INSIDE its <label> can fire twice (the input plus the
+// label forwarding the activation), flipping the toggle on then off so it looks stuck. Swallow the
+// duplicate click that lands on the same checkbox within 70ms of the first. Harmless on desktop (one
+// click per tap). Fixes the contract toggles, bonus gates, and the Retired tag in one place.
+document.addEventListener('click',function(ev){var t=ev.target;if(t&&t.tagName==='INPUT'&&t.type==='checkbox'){var n=Date.now();if(t.__lt&&n-t.__lt<70){ev.preventDefault();ev.stopImmediatePropagation();return;}t.__lt=n;}},true);
 show('dashboard');
 </script>
 <div id=modalRoot></div></body></html>`;
