@@ -2,6 +2,12 @@ name = "cims-hr-console"
 main = "src/worker.js"
 compatibility_date = "2025-05-01"
 
+# Weekly Seafarer Movements email recipient. The hourly cron (below) sends ONCE on
+# Monday 07:00 America/New_York to this address. Kept here (not the dashboard) so it
+# survives every CI deploy. Override per-environment if ever needed.
+[vars]
+MOVEMENTS_TO = "onboardsupport@dg3.com"
+
 # Built-in AI engine for auto-summarising crew-report emails (used when no ANTHROPIC_API_KEY
 # secret is set). No key or setup required; degrades gracefully to manual if unavailable.
 [ai]
