@@ -66,21 +66,19 @@ test("liveState: onboard when an assignment spans today, holiday after sign-off,
   assert.equal(liveState([], T), "none");
 });
 
-test("deriveStatus: retired wins; otherwise maps the live state; falls back to imported", () => {
+test("deriveStatus: retired wins; on board now; future-only keeps registry", () => {
   const T = "2026-06-24";
   assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, { retired: true }), "Retired");
   assert.equal(deriveStatus([{ on: "2026-03-01", off: "2026-11-01" }], T, {}), "On board");
-  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, {}), "On Vacation");
   assert.equal(deriveStatus([], T, { imported: "Earmarked" }), "Earmarked");
   assert.equal(deriveStatus([{ on: "2026-09-01", off: "2027-03-01" }], T, { imported: "Earmarked" }), "Earmarked");
 });
 
-test("deriveStatus preserves Inactive; only promotes Earmarked on a current assignment", () => {
+test("deriveStatus: recently signed off -> On Vacation; inactive > 6 months -> auto Retired", () => {
   const T = "2026-06-24";
-  // Inactive crew with old past schedule stays Inactive (not flipped to On Vacation)
-  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Inactive" }), "Inactive");
-  // Earmarked with only past legs stays Earmarked (history can't reactivate)
-  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Earmarked" }), "Earmarked");
-  // Earmarked WITH a current assignment -> On board
-  assert.equal(deriveStatus([{ on: "2026-03-01", off: "2026-11-01" }], T, { imported: "Earmarked" }), "On board");
+  assert.equal(deriveStatus([{ on: "2026-01-01", off: "2026-05-01" }], T, {}), "On Vacation");  // ~1.8 mo ago
+  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, {}), "Retired");        // ~9.7 mo ago
+  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Inactive" }), "Retired"); // long inactive -> retired
+  // a current assignment still wins over the retire rule
+  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }, { on: "2026-03-01", off: "2026-11-01" }], T, {}), "On board");
 });
