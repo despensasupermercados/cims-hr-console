@@ -954,7 +954,7 @@ async function rotationSections(env) {
   // Union of ships: registry-prominent + keyman-history + valid (canonical) schedule ships.
   const shipNames = {};
   for (const s of Object.keys(promByShip)) shipNames[normShip(s)] = s;
-  for (const s of Object.keys(byShip)) if (!shipNames[normShip(s)]) shipNames[normShip(s)] = s;
+  for (const s of Object.keys(byShip)) { const ks = normShip(s); if (!shipNames[ks] && validShip.has(ks)) shipNames[ks] = s; } // only REAL vessels anchor a section (a cruise-line name like 'Azamara' from a mis-recorded leg must not create a phantom ship)
   for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histDisp[k];
   const sections = Object.values(shipNames).map(ship => {
     const k = normShip(ship);
