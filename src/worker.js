@@ -916,17 +916,36 @@ async function rotationSections(env) {
   for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off }; }
   // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
   // NOW (incl. 2-up crew-change overlaps). Dates enriched from Keyman, then the schedule tabs.
+  // SELF-HEAL placement: where the SCHEDULE actually puts each crew (current leg spanning today, else
+  // their last completed leg). Used to override a STALE registry vessel that points to a ship the crew
+  // has no contract on (which otherwise renders an empty/wrong card). Future-only legs are ignored.
+  const schedEff = {};
+  for (const h of SHIP_HISTORY) {
+    if (!h.ours || !h.sc || !h.on || !h.off) continue;
+    const isCur = h.on <= today && today <= h.off, isPast = h.off < today, e = schedEff[h.sc];
+    if (isCur) { if (!e || !e.cur || h.off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: true }; }
+    else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: false }; else if (!e.cur && h.off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: false }; }
+  }
   const promByShip = {}, shoreside = [], pool = [];
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
     const rm = rmap[c.agency_id] || {}; base.eccr = !!rm.eccr; base.air = !!rm.air; base.hotel = !!rm.hotel; base.hasNote = !!(rm.note && String(rm.note).trim());
     if (isShore(c)) { shoreside.push(base); continue; }
     if (c.status === "Inactive") continue; // inactive -> greyed history only
-    const ship = shipOf(c.vessel_observed);
+    let ship = shipOf(c.vessel_observed);
+    let k = ship ? normShip(ship) : null;
+    let enr = k ? ((legBSC[k] || {})[c.agency_id] || {}) : {};
+    let sEnr = k ? ((schEnr[k] || {})[c.agency_id] || {}) : {};
+    // If the registry vessel has NO contract leg for this crew but the schedule places them somewhere, use that.
+    if ((!ship || (!enr.signOn && !sEnr.on)) && schedEff[c.agency_id]) {
+      const effShip = shipOf(schedEff[c.agency_id].ship) || schedEff[c.agency_id].ship;
+      if (effShip && (!ship || normShip(effShip) !== k)) {
+        ship = effShip; k = normShip(ship); base.shipCorrected = true;
+        enr = (legBSC[k] || {})[c.agency_id] || {};
+        sEnr = (schEnr[k] || {})[c.agency_id] || {};
+      }
+    }
     if (!ship) { pool.push(base); continue; }
-    const k = normShip(ship);
-    const enr = (legBSC[k] || {})[c.agency_id] || {};
-    const sEnr = (schEnr[k] || {})[c.agency_id] || {};
     (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || shipHome[k] || null, disembark: enr.disembark || shipHome[k] || null, current: c.status === "On board" }));
   }
   const histByShip = {}, histDisp = {};
