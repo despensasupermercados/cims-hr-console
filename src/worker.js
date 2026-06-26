@@ -941,11 +941,17 @@ async function rotationSections(env) {
     const k = normShip(ship);
     const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const cur = new Set(crew.map(c => c.agency_id));
-    const kh = (byShip[ship] || []).filter(x => !cur.has(x.agency_id)).map(x => ({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }));
-    const sched = histEntries(histByShip[k] || [], cur);
-    const byk = {};
-    for (const e of [...kh, ...sched]) { const kk = e.sc || ("F:" + e.name); if (!byk[kk]) byk[kk] = e; else { if (e.on && (!byk[kk].on || e.on < byk[kk].on)) byk[kk].on = e.on; if (e.off && (!byk[kk].off || e.off > byk[kk].off)) byk[kk].off = e.off; } }
-    const history = Object.values(byk).sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
+    // Also-served = ACTUAL per-contract legs from the SCHEDULE (ship_history): one entry per contract
+    // with its real sign-on/off. No min-on/max-off collapse and no merge with the Contract Counter,
+    // which previously fused several contracts into one bogus 20-30 month span. Zero-day parse artifacts
+    // (on===off) are dropped from the display but still suppress the keyman fallback for that crew.
+    const scheduleLegs = (histByShip[k] || []).filter(h => !(h.ours && cur.has(h.sc)));
+    const schedScs = new Set(scheduleLegs.filter(h => h.ours && h.sc).map(h => h.sc));
+    const history = scheduleLegs
+      .filter(h => h.on && h.off && h.off !== h.on)
+      .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off }));
+    for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
+    history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
     return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
@@ -2577,6 +2583,7 @@ function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
 function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
+function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
 function rotCard(x){
   var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
@@ -2591,11 +2598,10 @@ function rotCard(x){
   if(x.offConfirmed)tg+='<span class="rtag on">OFF ✓</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
   return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragStart(this,\\''+x.agency_id+'\\')" ondragend="dragEnd(this)" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
-    +'<div class=rnm>'+x.name+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
-    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(x.rank?(' · '+x.rank):'')+(x.contracts?(' · C'+x.contracts):'')+(x.current?' · ONBOARD':'')+'</div>'
+    +'<div class=rnm>'+x.name+(x.rank?(' <span style="color:var(--mut);font-weight:600;font-size:11px">'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
+    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' · '+dur):'')+'</div>'
     +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
     +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
-    +(dur?'<span class=rdur>'+dur+'</span>':'')
     +(tg?'<div class=rtags>'+tg+'</div>':'')
     +'</div>';
 }
@@ -2623,7 +2629,7 @@ function histCard(h){
   var span=(h.on||'')+(h.off&&h.off!==h.on?(' → '+h.off):'');
   var dur=monthsDays(h.on,h.off);
   var durHtml=dur?('<div class=hdur>'+dur+'</div>'):'';
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span><span class="htag ours">served</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
   return '<div class="hcard former"><div class=hnm><span>'+h.name+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
