@@ -721,3 +721,60 @@ UPDATE...WHERE status='new'); feedback single-use.
 a migration); client `computeBonusC` doesn't clamp sliders to per-field max (display-only, server
 authoritative); `decodeEmailBody` uses `\n--` heuristic instead of the real MIME boundary (worst case =
 weaker auto-match → human review). **154 tests green.**
+
+---
+
+## SESSION 2026-06-26 — travel/dashboard/keyman overhaul + data-integrity fixes
+
+### External sources / links (KEEP — reusable)
+- **Azamara itinerary (intranet):** https://itinerary.azamara.com/intra/intranet/ — filter by Ship + From/To
+  date → daily Location (port), ETA/ETD. THE source for Azamara embark/disembark ports (Azamara ships roam,
+  no homeport). Caveat: our schedule sign-on/off dates are 1st-of-month APPROXIMATIONS, so a direct date
+  lookup often lands on a sea day — the real changeover date+port is in the Excel AZAMARA SCHEDULE cells
+  ("ON: NAME MM/DD PORT"). Use the Excel cell for the real date, the site to confirm the port.
+- Source workbooks Rita uploads: AdvancedQuery.xls (registry, SC-ids), CIMS Keyman workbook
+  (Contract Counter + 3 SCHEDULE tabs), Travel Expenses xlsx (SUMMARY has the budget at C55 = $15k/mo).
+
+### Shipped this session (all via GitHub web uploader → main → Cloudflare; verified live; node --test green)
+- **Travel tab → decision page:** budget pacing vs the real $180k/yr budget (source SUMMARY!C55 $15k/mo),
+  per-crew search→full history, leaderboard, anomalies, **STLY** (Same-Time-Last-Year) framing, monthly
+  bars w/ budget line. Importer verified against the 2026 file (parses; per-crew detail is authoritative;
+  source had a Feb/May ship-block-vs-crew-detail mismatch ~$2.3k — Rita to reconcile).
+- **Dashboard:** "Travel budget" card (29% of $180k annual used + crew spend + category bars; shoreside
+  shown separately/unbudgeted; whole-dollar). Surfaced **Retired** count (26) on At-a-glance + donut shows
+  active set (71 = on board + on vacation ≤6mo). Removed sea-days/contracts/bonus-committed tiles.
+- **Compliance:** made active-only + derived-status + override-aware EVERYWHERE (Crew tab tiles, dedicated
+  tab). **Hid the standalone Compliance tab**; per-crew docs now on the crew card via a **red-cross (✚) icon**
+  → modal (all 5 docs, expiry, days left); fleet list + CSV moved to Crew tab "Docs CSV". (Dashboard
+  compliance zone STILL counts all crew + its hint says "open the Compliance tab" — TODO: align to active-only.)
+- **New endpoint** `GET /api/rotation/upcoming?days=N` — debarkations from the live SCHEDULE (the right
+  source; the Contract Counter is closed contracts only). "Maria" / any assistant should use THIS for
+  "who debarks in N days", NOT active_off (historical).
+- **Keyman board redesign:** rank abbrev by name (Jr PS/PS/Sr PS); status line = status + duration
+  ("On board · 7 mos 21 days"); removed SERVED word + duration pill. **Fixed inflated also-served spans**
+  (were min-on/max-off merged across schedule+ContractCounter → 20–30mo; now one entry per real contract
+  from the schedule, 0-day artifacts dropped). **Self-heal placement:** if a crew's registry vessel has no
+  contract leg, place them on their actual schedule ship (current else last) — fixed Purnama (Apex→Xcel)
+  & Cyrus (Allure→Utopia); prevents recurrence. **Phantom-ship guard:** only real vessels (validShipKeys)
+  anchor a section — killed the phantom "Azamara"/"Unassigned" sections.
+- **Azamara ports** added to schedule (Domingo Port Louis→Berlin, Medidas Barcelona, Jugao
+  Barcelona→Hong Kong, Santos Miami→Edinburgh); board now shows schedule embark/disembark before TBA.
+
+### Decisions made
+- Money/auth governance HONORED: nothing on the money path auto-merged. The money/auth hardening lives on
+  branch **`fix/money-auth-hardening`** (baseline-pending commit block; POST-only /auth/dev; eval-gate
+  NaN-safety; UNIQUE(crew_id,span_start,span_end) migration 0004) — **awaiting Miguel's explicit go**.
+- Auth: team uses the **magic link** (emails already in ALLOWLIST_SEED); access-key login kept POST-only.
+- "Active" crew = on board + on-vacation **≤6 months** since sign-off; >6mo auto-Retired (RETIRE_MONTHS=6).
+- Budget % shows against the **annual** $180k (not the YTD slice, which was misleading). Crew-only
+  (shoreside is unbudgeted, tracked separately).
+
+### OPEN ITEMS / GOALS
+- **#17 BASELINES = THE money unblock (still open).** No real bonus payout until per-crew baselines are
+  reconciled with Rita vs the golden Contract Counter. A reconciliation worksheet was generated for her
+  (CIMS_baseline_reconciliation.xlsx) — derive from Keyman contract dates; ~31 rows need her judgment
+  (trailing-short = likely current contract; mid-history shorts; name-bridge confidence). The fix-1 branch
+  makes commit HARD-BLOCK on a NULL baseline (fail-safe) once merged.
+- For Rita to correct in the source files: the two 14-month fused legs (Resposo/Reflection, Cucio/Journey);
+  Gibas seq-1 ship = "Azamara" (should be a real vessel); Feb/May travel ship-total vs crew-detail mismatch.
+- TODO: align the Dashboard compliance zone to active-only + fix its "open the Compliance tab" hint.
