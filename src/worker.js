@@ -331,6 +331,34 @@ async function mariaExecTool(env, name, input) {
     if (input.ship) rows = rows.filter(c => String(c.vessel_observed || "").toLowerCase().includes(String(input.ship).toLowerCase()));
     return { scope: (input.include_retired === true || String(input.status || "").toLowerCase() === "retired") ? "all crew" : "active crew only", count: rows.length, crew: rows.slice(0, 60).map(c => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client })) };
   }
+  const resolveCrewId = async (inp) => {
+    if (inp.agency_id) return String(inp.agency_id);
+    if (inp.name) { const all = await J(await apiCrew(env, new URL(base + "/api/crew"))); const rows = (all.crew || []).map(c => ({ c, name: fullName(c) })); const r = rankCrewMatches(rows, String(inp.name), 1)[0]; return r ? r.item.c.agency_id : null; }
+    return null;
+  };
+  if (name === "crew_intel") {
+    const id = await resolveCrewId(input);
+    if (!id) return { error: "no crew matched; provide a name or agency_id" };
+    const intel = await J(await apiIntelCrew(env, new URL(base + "/api/intel/crew?id=" + encodeURIComponent(id))));
+    const notes = await J(await apiCrewNotes({ method: "GET" }, env, null, new URL(base + "/api/crew/notes?id=" + encodeURIComponent(id))));
+    return { agency_id: id, field_intel: intel.intel || [], manual_notes: notes.notes || [] };
+  }
+  if (name === "crew_contract_history") {
+    const id = await resolveCrewId(input);
+    if (!id) return { error: "no crew matched; provide a name or agency_id" };
+    return await J(await apiRotationCrew(env, new URL(base + "/api/rotation/crew?id=" + encodeURIComponent(id))));
+  }
+  if (name === "scoring_board") {
+    const board = await J(await apiFeedbackBoard(env));
+    const queue = await J(await apiScoreQueue(env, new URL(base + "/api/score/queue")));
+    return { feedback_board: board, score_queue: queue };
+  }
+  if (name === "billing_range") {
+    const u = new URL(base + "/api/daysworked");
+    if (input.from) u.searchParams.set("from", String(input.from));
+    if (input.to) u.searchParams.set("to", String(input.to));
+    return await J(await apiDaysWorked(env, u));
+  }
   return { error: "unknown tool: " + name };
 }
 // POST /api/ask {question, history?} -> { answer, sources } (session-gated, read-only)
