@@ -317,7 +317,7 @@ async function mariaExecTool(env, name, input) {
     const ranked = rankCrewMatches(rows, String(input.name || ""), 6);
     const exact = ranked.length > 0 && ranked[0].exact;
     const picks = ranked.filter(r => r.exact || r.score >= 0.5);
-    const fields = (c) => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, contract_count: c.contract_count, baseline_set: c.baseline_count != null, last_contract_sign_on_historical: c.active_on, last_contract_sign_off_historical: c.active_off, province: c.province, phone: c.phone, email: c.email, medical_exp: c.med_exp, seamans_book_exp: c.sirb_exp, passport_exp: c.pp_exp, us_visa_exp: c.usv_exp, schengen_exp: c.sch_exp });
+    const fields = (c) => ({ agency_id: c.agency_id, name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, contract_count: c.contract_count, baseline_set: c.baseline_count != null, dob: c.dob, passport_no: c.pp_no, province: c.province, phone: c.phone, email: c.email, last_contract_sign_on_historical: c.active_on, last_contract_sign_off_historical: c.active_off, medical_exp: c.med_exp, seamans_book_exp: c.sirb_exp, passport_exp: c.pp_exp, us_visa_exp: c.usv_exp, schengen_exp: c.sch_exp });
     return { query: input.name, exact_match: !!exact, matches: (picks.length ? picks : ranked.slice(0, 3)).map(r => Object.assign(fields(r.item.c), { match_confidence: Math.round(r.score * 100) / 100 })) };
   }
   if (name === "list_crew") {
