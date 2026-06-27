@@ -1,0 +1,17 @@
+name = "cims-parts-mailer"
+main = "src/worker.js"
+compatibility_date = "2026-06-27"
+
+# Sender for parts-request emails. A cims.work address so it sends from the
+# already-verified CIMS domain (not despensa). Lives here so it survives deploys.
+[vars]
+MAIL_FROM = "CIMS Parts <parts@cims.work>"
+
+# Dedicated hostname for the mailer. wrangler provisions DNS + cert on deploy.
+# The form (order.cims.work) POSTs here; CORS in the worker allows that origin.
+[[routes]]
+pattern = "parts-api.cims.work"
+custom_domain = true
+
+# RESEND_API_KEY is a SECRET — added once in the dashboard, never in git:
+#   Settings -> Variables and secrets -> Add -> Secret -> RESEND_API_KEY
