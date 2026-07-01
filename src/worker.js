@@ -488,7 +488,7 @@ async function apiKeymanImport(request, env, session) {
   const b = await request.json().catch(() => ({}));
   const parsed = parseContractCounter(b.rows || []);
   if (!parsed.length) return json({ error: "no_rows" }, 400);
-  const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew WHERE redacted=0").all()).results;
+  const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all()).results;
   const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
   const currentRows = (((await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()) || {}).n) || 0;
   if (b.dryRun) {
