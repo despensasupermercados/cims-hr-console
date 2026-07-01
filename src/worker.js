@@ -25,6 +25,7 @@ import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INT
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
 import { runMaria, rankCrewMatches } from "./maria.js";
 import { installAck } from "./signoff_ack.js";
+import { installInstr } from "./signoff_instructions.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -74,6 +75,7 @@ export default {
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
       { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF })(p, request, env, url, session); if (_a) return _a; }
+      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF })(p, request, env, url, session); if (_i) return _i; }
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
         if (p === "/api/me")        return json({ email: session.email });
