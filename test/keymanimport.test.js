@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normDate, parseContractCounter, buildBridge, bridgeName, buildKeymanRows } from "../src/keymanimport.js";
 
+// ---------------- EXISTING GOLDEN TESTS (unchanged) ----------------
 test("normDate handles ISO, datetime strings, M/D/YYYY, Date objects, and junk", () => {
   assert.equal(normDate("2024-05-01"), "2024-05-01");
   assert.equal(normDate("2024-05-01 00:00:00"), "2024-05-01");
@@ -51,4 +52,51 @@ test("buildKeymanRows: matched crew -> keyman rows; unmatched listed", () => {
   assert.equal(rows[0].act_off, null);
   assert.equal(unmatched.length, 1);
   assert.equal(unmatched[0].last, "Nobody");
+});
+
+// ---------------- NEW: persistent cruise-line id (ship_crew_id) bridge ----------------
+const ROSTER_KM = [
+  { agency_id: "SC-0038391", last_name: "Mangulabnan", first_name: "Jomar", ship_crew_id: "526444" },
+  { agency_id: "SC-0099999", last_name: "Santos", first_name: "Mark", ship_crew_id: "111222" },
+  { agency_id: "SC-0044444", last_name: "Cruz", first_name: "Juan", ship_crew_id: null }, // not filled yet
+];
+
+test("km bridge: exact cruise-line id wins even when the sheet misspells the name", () => {
+  const b = buildBridge(ROSTER_KM);
+  assert.equal(bridgeName({ last: "Mangulabnann", first: "Jomarr", km: "526444" }, b), "SC-0038391");
+});
+
+test("km bridge: id wins over a name that would match a DIFFERENT crew (kills mis-bridge)", () => {
+  const b = buildBridge(ROSTER_KM);
+  // The row's NAME is 'Santos, Mark' (SC-0099999) but its km 526444 is Jomar's. The id must win.
+  assert.equal(bridgeName({ last: "Santos", first: "Mark", km: "526444" }, b), "SC-0038391");
+});
+
+test("km bridge: normalises a trailing .0 spreadsheet float artifact on either side", () => {
+  const b = buildBridge([{ agency_id: "SC-1", last_name: "A", first_name: "B", ship_crew_id: "526444.0" }]);
+  assert.equal(bridgeName({ last: "X", first: "Y", km: "526444" }, b), "SC-1");
+  assert.equal(bridgeName({ last: "X", first: "Y", km: "526444.0" }, b), "SC-1");
+});
+
+test("fallback preserved: crew with no ship_crew_id still match by name (today's behavior)", () => {
+  const b = buildBridge(ROSTER_KM);
+  assert.equal(bridgeName({ last: "Cruz", first: "Juan", km: "" }, b), "SC-0044444");
+  assert.equal(bridgeName({ last: "Cruz", first: "Juan" }, b), "SC-0044444"); // no km field at all
+});
+
+test("safety preserved: unknown km + no name match -> null (never invented)", () => {
+  const b = buildBridge(ROSTER_KM);
+  assert.equal(bridgeName({ last: "Ghost", first: "Nobody", km: "000000" }, b), null);
+});
+
+test("buildKeymanRows end-to-end: a km-only match still produces contract rows keyed by the right SC", () => {
+  const aoa = [
+    ["Company", "Ship", "Status", "Ships's Crew ID", "Last Name", "Name", "Sign on", "Proj", "Ttl"],
+    ["RCCL", "Radiance", "Onboard", "526444", "MISSPELLED", "WRONG", "2022-02-11", "2022-11-19", "9 mos"],
+  ];
+  const { rows, matched, unmatched } = buildKeymanRows(parseContractCounter(aoa), ROSTER_KM);
+  assert.deepEqual(matched, ["SC-0038391"]);   // matched by km despite wrong name
+  assert.equal(unmatched.length, 0);
+  assert.equal(rows[0].sc, "SC-0038391");
+  assert.equal(rows[0].km, "526444");
 });
