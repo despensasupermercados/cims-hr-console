@@ -2681,6 +2681,7 @@ async function editContractModal(id,seq){
    +'<div style="margin:6px 0 8px">'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
    +'<div class=zlabel>Comment</div><textarea id=cmt rows=2 style="width:100%" placeholder="Note for this crew…">'+note+'</textarea>'
    +(legs?'<div class=zlabel style="margin-top:12px">Contract history</div><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table>':'')
+      +'<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><div class=csub style="margin-bottom:6px">SIGN-OFF WORKFLOW</div><button class="btn ghost" style="font-size:12px" onclick="sendSignoffInstructions(\''+id+'\','+seq+')">Send instructions</button> <button class="btn ghost" style="font-size:12px" onclick="sendSignoffLink(\''+id+'\','+seq+')">Send sign-off link</button></div>'
    +'<div style="margin-top:12px;text-align:right"><span id=cmtmsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeRotModal()">Cancel</button> <button class="btn green" onclick="saveContract(\\''+id+'\\','+seq+')">Save</button></div></div>';
   var w=document.createElement('div');w.id='rotmodal';w.className='modwrap';w.innerHTML=h;
   w.onclick=function(ev){if(ev.target===w)closeRotModal();};
@@ -2697,6 +2698,8 @@ async function saveContract(id,seq){
     closeRotModal();renderRotation();
   }catch(e){g('cmtmsg').textContent='Failed to save.';}
 }
+async function sendSignoffInstructions(id,seq){try{var r=await (await fetch('/api/instructions/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error?('Error: '+r.error):(r.emailed?'Instructions emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send instructions.');}}
+async function sendSignoffLink(id,seq){try{var r=await (await fetch('/api/ack/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error?('Error: '+r.error):(r.emailed?'Sign-off request emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send.');}}
 function closeRotModal(){var m=document.getElementById('rotmodal');if(m)m.remove();}
 function rmTag(label,field,on,id){return '<span class="rtag rtoggle'+(on?' on':'')+'" data-crew="'+id+'" data-f="'+field+'" data-v="'+(on?1:0)+'" onclick="rmToggle(this)">'+label+'</span>';}
 function rmToggle(el){var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});}
