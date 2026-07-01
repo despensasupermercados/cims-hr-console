@@ -24,6 +24,7 @@ import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
 import { runMaria, rankCrewMatches } from "./maria.js";
+import { installAck } from "./signoff_ack.js";
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -72,6 +73,7 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
+      { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF })(p, request, env, url, session); if (_a) return _a; }
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
         if (p === "/api/me")        return json({ email: session.email });
