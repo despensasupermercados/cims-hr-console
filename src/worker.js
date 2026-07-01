@@ -3094,6 +3094,8 @@ async function openCrew(id){
   CURRENT_CREW=c.agency_id; CURD={crew:c,contracts:(d.contracts||[]),bonus:bz};
   let h='<div class="bar noprint"><h2>'+name+'</h2>'
     +'<button class="btn ghost" style="margin-left:auto" onclick="renderCrew()">← Back</button>'
+    +'<button class="btn ghost" onclick="sendSignoffInstructions(\\''+c.agency_id+'\\','+((d.contracts&&d.contracts.length)?d.contracts[d.contracts.length-1].seq:0)+')">Send instructions</button>'
+    +'<button class="btn ghost" onclick="sendSignoffLink(\\''+c.agency_id+'\\','+((d.contracts&&d.contracts.length)?d.contracts[d.contracts.length-1].seq:0)+')">Send sign-off link</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<button class="btn ghost" onclick="emailStatement()">Email statement</button>'
     +'<button class="btn" onclick="downloadStatement()">Download PDF</button></div>'
