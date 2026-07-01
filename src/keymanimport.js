@@ -2,10 +2,14 @@
 // 7 contract blocks across the columns:
 //   col 0 Company · 1 Ship · 2 Status · 3 Ships's Crew ID (km) · 4 Last Name · 5 Name (first) ·
 //   then repeating [Sign-on, Projected sign-off, Ttl months] from col 6 (6/7/8, 9/10/11, ...).
-// The sheet's "km" is a cruise-line crew ID, not our SC agency id, so crew are bridged to SC by NAME
-// against the current roster. Informational only — NEVER a payout input.
+// The sheet's "km" is a cruise-line crew ID, not our SC agency id. Crew are bridged to SC by their
+// PERSISTENT cruise-line id (crew.ship_crew_id) when we have it — exact and immune to name drift —
+// and fall back to NAME matching only for crew whose ship_crew_id isn't filled yet.
+// Informational only — NEVER a payout input.
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z]/g, "");
+// Normalise a cruise-line crew id for comparison: string, trimmed, drop a trailing ".0" spreadsheet float artifact.
+const normKm = (v) => String(v == null ? "" : v).trim().replace(/\.0$/, "");
 
 export function normDate(v) {
   if (v == null || v === "") return null;
@@ -45,21 +49,30 @@ export function parseContractCounter(aoa) {
   return out;
 }
 
-// roster: [{agency_id, last_name, first_name}] -> name lookup helpers.
+// roster: [{agency_id, last_name, first_name, ship_crew_id}] -> id + name lookup helpers.
+//   byKm  : persistent cruise-line id -> SC agency id (authoritative)
+//   full  : "last|first" -> SC agency id (fallback)
+//   byLast: last -> [SC agency id, ...] (fallback)
 export function buildBridge(roster) {
-  const full = {}, byLast = {};
+  const full = {}, byLast = {}, byKm = {};
   for (const c of (roster || [])) {
+    const km = normKm(c.ship_crew_id);
+    if (km && c.agency_id) byKm[km] = c.agency_id; // authoritative bridge, when the persistent id is known
     const ln = norm(c.last_name), fn = norm(c.first_name);
     if (!c.agency_id || !ln) continue;
     full[ln + "|" + fn] = c.agency_id;
     (byLast[ln] = byLast[ln] || []).push(c.agency_id);
   }
-  return { full, byLast };
+  return { full, byLast, byKm };
 }
 
-// Match one parsed crew to an SC id: full last+first, then last+first-token, then unique surname,
-// then a swapped last/first (some rows have the columns reversed). null if no confident match.
+// Match one parsed crew to an SC id.
+//   0) AUTHORITATIVE: exact cruise-line crew id (km) -> SC. Persistent, immune to name spelling/drift.
+//   fallback (only when km is blank/unknown): full last+first, then last+first-token, then unique
+//   surname, then a swapped last/first (some rows have the columns reversed). null if no confident match.
 export function bridgeName(pc, bridge) {
+  const km = normKm(pc && pc.km);
+  if (km && bridge.byKm && Object.prototype.hasOwnProperty.call(bridge.byKm, km)) return bridge.byKm[km];
   const ln = norm(pc.last), fn = norm(pc.first);
   let sc = bridge.full[ln + "|" + fn];
   if (!sc) { const f0 = norm(String(pc.first).split(" ")[0]); sc = bridge.full[ln + "|" + f0]; }
