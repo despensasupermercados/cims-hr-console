@@ -29,7 +29,18 @@ import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
-const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
+const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
+// Live legs for auto-timing: the SAME resolved dates the Keyman board displays
+// and billing uses (rotationSections), NOT the historical keyman_contract3.
+async function autoSendBoardLegs(env) {
+  const { sections } = await rotationSections(env);
+  const out = [];
+  for (const s of (sections || [])) for (const c of (s.crew || [])) {
+    if (!c || !c.agency_id || !c.signOff) continue;
+    out.push({ sc: c.agency_id, name: c.name || null, ship: c.ship || null, off: String(c.signOff).slice(0, 10), port: c.disembark || null });
+  }
+  return out;
+}
 
 async function apiAutoSend(request, env, session) {
   if (!session) return json({ error: "unauthorized" }, 401);
