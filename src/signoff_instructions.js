@@ -53,8 +53,8 @@ export function installInstr(deps) {
   }
 
   // Same resolution the sign-off ack uses: crew name/email, vessel, sign-off date, port.
-  async function resolveInstr(env, sc, seq) {
-    var leg = await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
+  async function resolveInstr(env, sc, seq, ovr) {
+    var leg = ovr || await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
     if (!leg) return null;
     var ed = (await env.DB.prepare("SELECT ship, sign_off, disembark FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {};
     var base = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(sc).first();
@@ -62,7 +62,7 @@ export function installInstr(deps) {
     var c = base ? applyOverride(base, ov) : {};
     var vessel = ed.ship || leg.ship || null;
     var sign_off = ed.sign_off || leg.act_off || leg.proj_off || null;
-    var port = ed.disembark || instrHomeport(vessel);
+    var port = ed.disembark || (ovr && ovr.port) || instrHomeport(vessel);
     var name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
     return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, email: c.email || null, vessel: vessel, port: port, sign_off_date: sign_off };
   }
@@ -241,9 +241,9 @@ export function installInstr(deps) {
     }
     return null;
   }
-  async function sendInstructionsFor(env, sc, seq, origin) {
+  async function sendInstructionsFor(env, sc, seq, origin, ovr) {
     await ensureInstr(env);
-    var r = await resolveInstr(env, String(sc), parseInt(seq));
+    var r = await resolveInstr(env, String(sc), parseInt(seq), ovr || null);
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
     var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
