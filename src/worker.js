@@ -31,6 +31,19 @@ const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sh
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 
+async function apiAutoSend(request, env, session) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run();
+  if (request.method === "POST") {
+    if (!session) return json({ error: "unauthorized" }, 401);
+    const b = await request.json().catch(function () { return {}; });
+    const v = b.enabled ? "true" : "false";
+    await env.DB.prepare("INSERT INTO app_setting (k,v) VALUES ('auto_send_enabled',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(v).run();
+    return json({ ok: true, enabled: v === "true" });
+  }
+  const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first();
+  return json({ enabled: !!(r && r.v === "true") });
+}
+
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
    Single-file ES module. Paste into the dashboard Worker editor.
@@ -100,6 +113,7 @@ export default {
         if (p === "/api/rotation/contract" && request.method === "POST") return apiContractEdit(request, env, session);
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
+        if (p === "/api/autosend") return apiAutoSend(request, env, session);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
         if (p === "/api/keyman/import" && request.method === "POST") return apiKeymanImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
