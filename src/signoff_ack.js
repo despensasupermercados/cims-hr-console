@@ -51,8 +51,8 @@ export function installAck(deps) {
     for (var j = 0; j < VESSEL_REF.length; j++) { var rn = ackNormShip(VESSEL_REF[j].name); if (rn && n.indexOf(rn) >= 0) return VESSEL_REF[j].homeport || null; }
     return null;
   }
-  async function resolveSignoff(env, sc, seq) {
-    var leg = await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
+  async function resolveSignoff(env, sc, seq, ovr) {
+    var leg = ovr || await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
     if (!leg) return null;
     var ed = (await env.DB.prepare("SELECT ship, sign_off, disembark FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {};
     var base = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(sc).first();
@@ -60,7 +60,7 @@ export function installAck(deps) {
     var c = base ? applyOverride(base, ov) : {};
     var vessel = ed.ship || leg.ship || null;
     var sign_off = ed.sign_off || leg.act_off || leg.proj_off || null;
-    var port = ed.disembark || ackHomeport(vessel);
+    var port = ed.disembark || (ovr && ovr.port) || ackHomeport(vessel);
     var name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
     return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, first_name: c.first_name || "", email: c.email || null, agency_id: sc, vessel: vessel, port: port, sign_off_date: sign_off };
   }
@@ -161,9 +161,9 @@ export function installAck(deps) {
     }
     return null;
   }
-  async function sendSignoffLinkFor(env, sc, seq, origin) {
+  async function sendSignoffLinkFor(env, sc, seq, origin, ovr) {
     await ensureAck(env);
-    var r = await resolveSignoff(env, String(sc), parseInt(seq));
+    var r = await resolveSignoff(env, String(sc), parseInt(seq), ovr || null);
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
     var token = await signToken({ p: "ack", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + ACK_TTL }, env.SESSION_SECRET);
