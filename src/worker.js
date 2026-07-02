@@ -26,6 +26,10 @@ import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements
 import { runMaria, rankCrewMatches } from "./maria.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
+import { installAutoSend } from "./auto_send.js";
+const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
@@ -153,6 +157,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
   }
 };
 
