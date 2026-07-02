@@ -7,13 +7,13 @@
 // USAGE (src/worker.js): import { installAck } from "./signoff_ack.js";
 //   inside fetch(request, env), AFTER  const session = await getSession(request, env);  add:
 //   { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex,
-//       logActivity, applyOverride, VESSEL_REF })(url.pathname, request, env, url, session);
+//       logActivity, applyOverride, VESSEL_REF, sendViaMailer })(url.pathname, request, env, url, session);
 //     if (_a) return _a; }
 // Env ACK_NOTIFY (default onboardsupport@dg3.com).
 // ============================================================================
 
 export function installAck(deps) {
-  const { json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF } = deps;
+  const { json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer } = deps;
 
   var ACK_TTL = 60 * 60 * 24 * 30; // 30 days (mirrors FB_TTL)
 
@@ -77,12 +77,13 @@ export function installAck(deps) {
     var th = await sha256hex(token);
     var now = new Date().toISOString();
     await env.DB.prepare("DELETE FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).run();
+    var ackId = "ack_" + crypto.randomUUID();
     await env.DB.prepare("INSERT INTO ack_request (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)")
-      .bind("ack_" + crypto.randomUUID(), r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, (session && session.email) || null, now).run();
+      .bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, (session && session.email) || null, now).run();
     var link = new URL(request.url).origin + "/ack?t=" + token;
     var emailed = false;
     if (b.send && r.email) {
-      try { await sendAckRequest(env, { to: r.email, crew_first_name: r.first_name || r.crew_name, vessel: r.vessel, sign_off_date: r.sign_off_date, link: link }); emailed = true; }
+      try { await sendAckRequest(env, { to: r.email, crew_first_name: r.first_name || r.crew_name, vessel: r.vessel, sign_off_date: r.sign_off_date, link: link, ack_id: ackId }); emailed = true; }
       catch (e) { await logActivity(env, session && session.email, "ack_request_send_failed", r.sc + " #" + r.seq); }
     }
     await logActivity(env, session && session.email, "ack_request", r.sc + " #" + r.seq);
@@ -115,7 +116,7 @@ export function installAck(deps) {
     await env.DB.prepare("UPDATE ack_request SET status='acknowledged', ack_at=?, ack_ip=?, ack_ua=? WHERE token_hash=?")
       .bind(now, request.headers.get("cf-connecting-ip") || null, request.headers.get("user-agent") || null, th).run();
     try {
-      await sendAckConfirmation(env, { crew_name: row.crew_name, agency_id: row.sc, vessel: row.vessel, sign_off_port: row.port, sign_off_date: row.sign_off_date, acknowledged_at: now });
+      await sendAckConfirmation(env, { crew_name: row.crew_name, agency_id: row.sc, vessel: row.vessel, sign_off_port: row.port, sign_off_date: row.sign_off_date, acknowledged_at: now, ack_id: row.id });
     } catch (e) {
       await logActivity(env, null, "ack_confirm_send_failed", row.sc + " #" + row.seq); // record ack anyway, don't swallow silently
     }
@@ -123,25 +124,27 @@ export function installAck(deps) {
     return json({ ok: true });
   }
 
-  // ---- Email senders (direct Resend; verified MAIL_FROM required — spec §8) -----
+  // ---- Email senders (central cims-mailer service binding; this module only builds content — spec §8) -----
   async function sendAckRequest(env, o) {
-    if (!env.RESEND_API_KEY) throw new Error("no_mailer");
+    if (!env.MAILER) throw new Error("no_mailer");
     var html = ackFill(ACK_REQUEST_EMAIL, { crew_first_name: o.crew_first_name, vessel: o.vessel, sign_off_date: o.sign_off_date, ack_link: o.link });
-    var r = await fetch("https://api.resend.com/emails", {
-      method: "POST", headers: { Authorization: "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM || "CIMS <onboarding@resend.dev>", to: [o.to], subject: "Confirm your sign-off — " + (o.vessel || ""), html: html })
+    var out = await sendViaMailer(env, {
+      to: [o.to], subject: "Confirm your sign-off — " + (o.vessel || ""), html: html,
+      templateId: "hr.signoff.ack-request.v1", critical: true,
+      idempotencyKey: "hr.signoff.ack-request.v1:" + o.ack_id
     });
-    if (!r.ok) throw new Error("resend_" + r.status);
+    if (!out.ok) throw new Error("mailer_" + (out.error || out.status || "failed"));
   }
   async function sendAckConfirmation(env, o) {
-    if (!env.RESEND_API_KEY) throw new Error("no_mailer");
+    if (!env.MAILER) throw new Error("no_mailer");
     var to = env.ACK_NOTIFY || "onboardsupport@dg3.com";
     var html = ackFill(ACK_CONFIRM_EMAIL, { crew_name: o.crew_name, agency_id: o.agency_id, vessel: o.vessel, sign_off_port: o.sign_off_port, sign_off_date: o.sign_off_date, acknowledged_at: o.acknowledged_at });
-    var r = await fetch("https://api.resend.com/emails", {
-      method: "POST", headers: { Authorization: "Bearer " + env.RESEND_API_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM || "CIMS <onboarding@resend.dev>", to: [to], subject: "Sign-off acknowledged — " + (o.crew_name || "") + " (" + (o.vessel || "") + ")", html: html })
+    var out = await sendViaMailer(env, {
+      to: [to], subject: "Sign-off acknowledged — " + (o.crew_name || "") + " (" + (o.vessel || "") + ")", html: html,
+      templateId: "hr.signoff.ack-confirm.v1", critical: true,
+      idempotencyKey: "hr.signoff.ack-confirm.v1:" + o.ack_id
     });
-    if (!r.ok) throw new Error("resend_" + r.status);
+    if (!out.ok) throw new Error("mailer_" + (out.error || out.status || "failed"));
   }
 
   const ACK_REQUEST_EMAIL = "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<meta name=\"x-apple-disable-message-reformatting\">\n<title>Confirm your sign-off</title>\n</head>\n<body style=\"margin:0;padding:0;background:#EEF1F4;\">\n<div style=\"display:none;max-height:0;overflow:hidden;opacity:0;\">Please confirm you have read and agree to your end-of-contract sign-off summary.</div>\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" bgcolor=\"#EEF1F4\" style=\"background:#EEF1F4;\">\n <tr><td align=\"center\" style=\"padding:24px 12px;\">\n  <table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"width:600px;max-width:600px;\">\n\n   <!-- brand bar -->\n   <tr><td bgcolor=\"#16314F\" style=\"background:#16314F;padding:18px 24px;border-radius:8px 8px 0 0;\">\n     <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>\n       <td style=\"font-family:Arial,Helvetica,sans-serif;font-size:18px;font-weight:bold;color:#FFFFFF;letter-spacing:1px;\">CIMS</td>\n       <td align=\"right\" style=\"font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#AEC1D6;letter-spacing:.5px;\">CREW SIGN-OFF</td>\n     </tr></table>\n   </td></tr>\n\n   <!-- title -->\n   <tr><td bgcolor=\"#FFFFFF\" style=\"background:#FFFFFF;padding:26px 28px 6px 28px;\">\n     <div style=\"font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:bold;color:#1B3A5C;line-height:1.25;\">Confirm your sign-off</div>\n   </td></tr>\n\n   <!-- body -->\n   <tr><td bgcolor=\"#FFFFFF\" style=\"background:#FFFFFF;padding:8px 28px 4px 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#1A2430;\">\n     <p style=\"margin:0 0 14px 0;\">Hi {{crew_first_name}},</p>\n     <p style=\"margin:0 0 14px 0;\">Your contract aboard <strong>{{vessel}}</strong> is closing, with a recorded sign-off date of <strong>{{sign_off_date}}</strong>.</p>\n     <p style=\"margin:0 0 8px 0;\">Before we finalise it, please review your sign-off summary and confirm that you have read and agree to it. It only takes a moment.</p>\n   </td></tr>\n\n   <!-- CTA -->\n   <tr><td bgcolor=\"#FFFFFF\" style=\"background:#FFFFFF;padding:18px 28px 10px 28px;\" align=\"left\">\n     <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>\n       <td bgcolor=\"#5FB946\" style=\"background:#5FB946;border-radius:10px;\">\n         <a href=\"{{ack_link}}\" target=\"_blank\"\n            style=\"display:inline-block;padding:14px 30px;font-family:Arial,Helvetica,sans-serif;font-size:16px;font-weight:bold;color:#FFFFFF;text-decoration:none;border-radius:10px;\">\n            Review &amp; acknowledge &rarr;</a>\n       </td>\n     </tr></table>\n   </td></tr>\n\n   <tr><td bgcolor=\"#FFFFFF\" style=\"background:#FFFFFF;padding:6px 28px 22px 28px;font-family:Arial,Helvetica,sans-serif;font-size:12.5px;line-height:1.6;color:#6B7280;\">\n     <p style=\"margin:0 0 6px 0;\">This is a secure, single-use link for you only. If the button does not work, copy and paste this address into your browser:</p>\n     <p style=\"margin:0;word-break:break-all;color:#1E6FD0;\">{{ack_link}}</p>\n   </td></tr>\n\n   <!-- footer -->\n   <tr><td bgcolor=\"#FFFFFF\" style=\"background:#FFFFFF;padding:16px 28px 26px 28px;border-top:1px solid #E5E7EB;border-radius:0 0 8px 8px;\">\n     <div style=\"font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6B7280;line-height:1.6;\">\n       DG3 Cruise Industry Managed Services &middot; Crew Operations.<br>\n       You are receiving this because a sign-off has been recorded for you in CIMS. Questions? Reply to this email.\n     </div>\n   </td></tr>\n\n  </table>\n </td></tr>\n</table>\n</body></html>\n";
