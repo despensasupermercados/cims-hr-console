@@ -148,6 +148,7 @@ export function installAutoSend(deps) {
     if (hourIn(GATE_TZ, now) !== GATE_HOUR) return { skipped: "not_gate_hour" };
     await ensureLog(env);
     var DRY = String(env.AUTO_SEND_DRY_RUN || "").toLowerCase() === "true";
+    { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) return { skipped: "disabled" }; DRY = false; }
     var today = todayStr(), t14 = plus(14), t7 = plus(7);
     var sent = [], alerts = [];
     await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
