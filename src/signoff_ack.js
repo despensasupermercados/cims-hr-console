@@ -161,5 +161,22 @@ export function installAck(deps) {
     }
     return null;
   }
+  async function sendSignoffLinkFor(env, sc, seq, origin) {
+    await ensureAck(env);
+    var r = await resolveSignoff(env, String(sc), parseInt(seq));
+    if (!r) return { emailed: false, error: "signoff_not_found" };
+    if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
+    var token = await signToken({ p: "ack", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + ACK_TTL }, env.SESSION_SECRET);
+    var th = await sha256hex(token);
+    var now = new Date().toISOString();
+    await env.DB.prepare("DELETE FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).run();
+    var ackId = "ack_" + crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO ack_request (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
+    var link = origin + "/ack?t=" + token;
+    try { await sendAckRequest(env, { to: r.email, crew_first_name: r.first_name || r.crew_name, vessel: r.vessel, sign_off_date: r.sign_off_date, link: link, ack_id: ackId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
+    catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+  }
+  ackHandle.sendSignoffLinkFor = sendSignoffLinkFor;
+
   return ackHandle;
 }
