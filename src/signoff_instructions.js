@@ -143,6 +143,30 @@ export function installInstr(deps) {
       "<p><strong>" + instrEsc(o.crew_name) + "</strong> (" + instrEsc(o.agency_id) + ") has acknowledged the <strong>sign-off instructions</strong> for <strong>" + instrEsc(o.vessel || "") + "</strong>.</p>" +
       "<p style=\"color:#6B7280\">Sign-off date: " + instrEsc(o.sign_off_date || "") + " &middot; Port: " + instrEsc(o.port || "") + "<br>Acknowledged at: " + instrEsc(o.acknowledged_at || "") + "</p>" +
       "<p style=\"font-size:11px;color:#6B7280\">Automated &middot; DG3 CIMS Crew Operations.</p></div>";
+    var _ackFmt = "";
+    try { if (o.acknowledged_at) _ackFmt = new Date(o.acknowledged_at).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) + " (Miami)"; }
+    catch (e) { _ackFmt = o.acknowledged_at || ""; }
+    var _nm = instrEsc(o.crew_name || ""), _ai = instrEsc(o.agency_id || ""), _ve = instrEsc(o.vessel || ""), _dt = instrEsc(o.sign_off_date || ""), _pt = instrEsc(o.port || ""), _ak = instrEsc(_ackFmt);
+    var _rw = function (k, v, last) { var b = last ? "" : "border-bottom:1px solid #EEF1F5;"; return '<tr><td style="padding:10px 14px;' + b + 'font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6B7C93;width:42%;">' + k + '</td><td style="padding:10px 14px;' + b + 'font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#16293D;font-weight:bold;">' + v + '</td></tr>'; };
+    html = '<div style="margin:0;padding:0;background:#E9EDF3;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#E9EDF3;"><tr><td align="center" style="padding:28px 12px;">' +
+      '<table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="width:560px;max-width:560px;">' +
+      '<tr><td style="padding:0 4px 14px 4px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td align="center" valign="middle" width="34" height="34" style="width:34px;height:34px;background:#5FB946;border-radius:9px;font-family:Arial,Helvetica,sans-serif;font-weight:bold;font-size:18px;color:#ffffff;line-height:34px;">D</td>' +
+      '<td style="padding-left:10px;font-family:Arial,Helvetica,sans-serif;"><div style="font-weight:bold;font-size:15px;color:#1B3A5C;line-height:1.2;">DG3 CIMS</div>' +
+      '<div style="font-size:9px;font-weight:bold;letter-spacing:1.2px;color:#6B7C93;text-transform:uppercase;">Sign-off instructions</div></td>' +
+      '</tr></table></td></tr>' +
+      '<tr><td style="background:#ffffff;border:1px solid #E4E9F0;border-radius:16px;padding:32px 30px;">' +
+      '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>' +
+      '<td align="center" valign="middle" width="44" height="44" style="width:44px;height:44px;background:#E8F6ED;border-radius:50%;font-family:Arial,Helvetica,sans-serif;font-size:22px;color:#3E8E2A;font-weight:bold;line-height:44px;">&#10003;</td>' +
+      '<td valign="middle" style="padding-left:14px;font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:bold;color:#3E8E2A;">Instructions acknowledged</td>' +
+      '</tr></table>' +
+      '<p style="margin:18px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#16293D;"><strong>' + _nm + '</strong> (' + _ai + ') has acknowledged the <strong>sign-off instructions</strong> for <strong>' + _ve + '</strong>.</p>' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:18px;border:1px solid #E4E9F0;border-radius:10px;">' +
+      _rw("Crew member", _nm) + _rw("Agency ID", _ai) + _rw("Vessel", _ve) + _rw("Sign-off date", _dt) + _rw("Port", _pt) + _rw("Acknowledged", _ak, true) +
+      '</table>' +
+      '<p style="margin:16px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6B7C93;">Automated &middot; DG3 CIMS Crew Operations.</p>' +
+      '</td></tr></table></td></tr></table></div>';
     var out = await sendViaMailer(env, {
       to: [to], subject: "Instructions acknowledged — " + (o.crew_name || "") + " (" + (o.vessel || "") + ")", html: html,
       templateId: "hr.signoff.instructions-confirm.v1", critical: true,
