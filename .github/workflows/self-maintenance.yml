@@ -1,6 +1,6 @@
 name: nightly-self-maintenance
-# Runs the agent each morning to review, health-check, repair the safe class, and
-# flag the rest. Requires repo secret ANTHROPIC_API_KEY. Honors CLAUDE.md rules:
+# Repair-only guardian: health-check and fix what is broken. Explicitly NO
+# feature-building. Requires repo secret ANTHROPIC_API_KEY. Honors CLAUDE.md rules:
 # money/auth/schema changes are PRs for Miguel, never auto-merges.
 on:
   schedule:
@@ -23,23 +23,26 @@ jobs:
         with: { node-version: "22" }
       - name: Run test gate (record current health)
         run: npm test || echo "TESTS_RED" >> $GITHUB_ENV
-      - name: Agent review + maintenance
+      - name: Agent health-check + repair
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # The standing brief. The agent must obey CLAUDE.md.
           prompt: |
-            You are the nightly maintainer for the CIMS HR Console. Follow CLAUDE.md strictly.
+            You are the nightly REPAIR-ONLY guardian for the CIMS HR Console. Follow CLAUDE.md strictly.
+            Your sole mandate: health-check the system and fix only what is BROKEN. You must NOT
+            build, extend, refactor, or improve any feature, UI, or code path that is working.
+            No new endpoints, no new emails, no schema additions, no opportunistic changes.
+            If nothing is broken, change nothing and open nothing except the digest.
             Do, in order:
-            1. Review the diff since the last successful nightly run and any open issues.
-            2. Run `npm test`. If red, open an issue titled "Nightly: test gate RED" with the failing cases and a proposed fix as a PR. Do not merge.
-            3. Run data-integrity checks and report anomalies that could affect a bonus count
-               or a billing figure (crew-ID name-bridge mismatches, orphan contracts, crew with
-               no agency, bonus counts that do not reconcile to bonus_outcome history). Flag —
-               do not silently fix — anything money-affecting.
-            4. Auto-fix only the CLAUDE.md whitelist (deps that keep tests green, lint/format,
-               docs, regenerated export data) via a PR; auto-merge only if tests pass AND the
-               change is entirely within the whitelist.
-            5. Anything touching money, auth, schema, or crew data -> open a PR addressed to
-               Miguel with a written diagnosis and recommended fix. Never auto-merge it.
-            6. Post a <=5 line digest: checked / fixed / waiting-on-Miguel / red tests.
+            1. Run npm test. If red, open an issue titled "Nightly: test gate RED" with the
+               failing cases and propose the minimal fix as a PR. Do not merge.
+            2. Health-check the deployed worker: build status, endpoint availability, and
+               email-send failures in mail_log. If something is down or failing, open an issue
+               with the diagnosis and propose the minimal repair as a PR. Do not merge.
+            3. Check for DB drift (schema vs code expectations, orphan contracts, crew with no
+               agency, counts that do not reconcile to history). Flag - never silently fix -
+               anything money-affecting or crew-data-affecting.
+            4. Anything touching money, auth, schema, or crew data -> open a PR addressed to
+               Miguel with a written diagnosis and recommended fix. Never auto-merge anything.
+            5. Post a <=5 line digest: checked / broken-found / fixed-via-PR / waiting-on-Miguel.
