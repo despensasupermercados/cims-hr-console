@@ -2744,6 +2744,8 @@ async function saveNote(id){
   var t=document.getElementById('cmt').value;document.getElementById('cmtmsg').textContent='Saving…';
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();var b=document.getElementById('autoToggle');if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}}catch(e){}}
+async function autoToggleClick(){var b=document.getElementById('autoToggle');var on=/ON/.test(b?b.textContent:'');try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Auto-timing is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
@@ -2765,9 +2767,9 @@ async function renderRotation(){
     +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
-    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button></div>'
+    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><button class="btn ghost" id="autoToggle" onclick="autoToggleClick()" style="margin-left:8px">Auto-timing: &hellip;</button></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
-  drawRotation();
+  drawRotation(); loadAutoToggle();
 }
 function rmonthChips(){
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
