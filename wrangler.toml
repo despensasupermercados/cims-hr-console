@@ -11,6 +11,7 @@ MOVEMENTS_TO = "onboardsupport@dg3.com"
 # address — NOT no-reply — to reduce corporate spam-filtering. Lives here so it survives
 # worker.js overwrites; the worker reads env.MAIL_FROM.
 MAIL_FROM = "CIMS <cims@cims.work>"
+AUTO_SEND_DRY_RUN = "true"
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,
