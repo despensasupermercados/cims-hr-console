@@ -35,7 +35,7 @@ import { installInstr } from "./signoff_instructions.js";
    Secrets (set in dashboard → Settings → Variables and Secrets):
      - SESSION_SECRET  (required) long random string; signs login + session tokens
      - BOOTSTRAP_KEY   (required for first login w/o email) long random string
-     - RESEND_API_KEY  (optional) enables emailing the magic link via Resend
+     - MAILER service binding (cims-mailer) delivers ALL email; RESEND_API_KEY is no longer read
      - MAIL_FROM       (optional) "CIMS <noreply@cims.work>" (cims.work is the verified Resend domain)
    Auth model: two full users (allowlist = rows in `users`). Magic-link via
    stateless signed token (15 min). Session = signed cookie (12h). Crew never log in.
@@ -74,8 +74,8 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
-      { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF })(p, request, env, url, session); if (_a) return _a; }
-      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF })(p, request, env, url, session); if (_i) return _i; }
+      { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer })(p, request, env, url, session); if (_a) return _a; }
+      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer })(p, request, env, url, session); if (_i) return _i; }
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
         if (p === "/api/me")        return json({ email: session.email });
@@ -214,7 +214,7 @@ async function authRequest(request, env, url) {
   }
   const token = await signToken({ email, p: "login", exp: Math.floor(Date.now() / 1000) + LOGIN_TTL }, env.SESSION_SECRET);
   const link = `${url.origin}/auth/verify?token=${token}`;
-  if (env.RESEND_API_KEY) {
+  if (env.MAILER) {
     await sendMagicLink(env, email, link).catch(() => {});
     await logActivity(env, email, "login_request", "emailed");
     return json({ ok: true, sent: true });
@@ -224,16 +224,33 @@ async function authRequest(request, env, url) {
   return json({ ok: true, sent: false, note: "Email sending is not configured yet. Use the bootstrap link." });
 }
 
+// ---- Central transport (cims-mailer service binding) -----------------------
+// This app builds content; cims-mailer owns the Resend key, retries/outbox,
+// and mail_log. Injected into signoff modules via deps.
+// Envelope contract: cims-mailer/docs/EMAIL-CONVENTION.md
+async function sendViaMailer(env, envelope) {
+  if (!env.MAILER) return { ok: false, error: "MAILER binding missing" };
+  try {
+    const res = await env.MAILER.fetch("https://mailer/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ app: "cims-hr-console", from: env.MAIL_FROM || "CIMS <cims@cims.work>", ...envelope })
+    });
+    const out = await res.json().catch(() => ({}));
+    return out && typeof out === "object" ? out : { ok: false, error: "bad mailer response" };
+  } catch (e) {
+    return { ok: false, error: "mailer call threw: " + String(e && e.message || e).slice(0, 300) };
+  }
+}
+
 async function sendMagicLink(env, email, link) {
-  await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: env.MAIL_FROM || "CIMS <onboarding@resend.dev>",
-      to: [email],
-      subject: "Your CIMS Console sign-in link",
-      html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`
-    })
+  // NOT critical: a magic link delivered an hour late is useless — fail fast.
+  await sendViaMailer(env, {
+    templateId: "hr.magiclink.v1",
+    to: [email],
+    subject: "Your CIMS Console sign-in link",
+    html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`,
+    critical: false
   });
 }
 
@@ -253,13 +270,17 @@ async function renderMovements(env, runDate) {
 }
 async function sendMovementsEmail(env, to, runDate) {
   const { html, on, off } = await renderMovements(env, runDate);
-  if (!env.RESEND_API_KEY) return { ok: false, sent: false, note: "no_mailer", on, off };
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: env.MAIL_FROM || "CIMS <cims@cims.work>", to: [to], subject: `Seafarer Movements · week of ${runDate} (${on} on / ${off} off)`, html }),
+  if (!env.MAILER) return { ok: false, sent: false, note: "no_mailer", on, off };
+  // CRITICAL: the Monday movements email queues + retries centrally if the
+  // provider is down (late > lost). Cron dedup stays in data_meta as before.
+  const out = await sendViaMailer(env, {
+    templateId: "hr.movements.v1",
+    to: [to],
+    subject: `Seafarer Movements · week of ${runDate} (${on} on / ${off} off)`,
+    html,
+    critical: true
   });
-  return { ok: r.ok, sent: r.ok, status: r.status, to, on, off };
+  return { ok: !!out.ok, sent: !!out.ok, status: out.status || (out.ok ? "sent" : "failed"), to, on, off };
 }
 async function apiMovementsPreview(env, url) {
   const date = url.searchParams.get("date") || nyDateStr();
@@ -1224,22 +1245,19 @@ async function apiStatementEmail(request, env, session) {
   const key = `statements/${id}/${data.generatedAt.slice(0, 10)}.pdf`;
   let stored = false;
   if (env.STATEMENTS) { try { await env.STATEMENTS.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } }); stored = true; } catch (e) {} }
-  if (!env.RESEND_API_KEY) {
+  if (!env.MAILER) {
     await logActivity(env, session && session.email, "statement_email", id + " no_mailer");
-    return json({ ok: false, stored, sent: false, note: "Email is not configured yet (RESEND_API_KEY). PDF " + (stored ? "was stored in R2." : "generated but not stored — no R2 bucket bound yet.") });
+    return json({ ok: false, stored, sent: false, note: "Email is not configured yet (MAILER binding). PDF " + (stored ? "was stored in R2." : "generated but not stored — no R2 bucket bound yet.") });
   }
-  const r = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: env.MAIL_FROM || "CIMS <onboarding@resend.dev>",
-      to: [to],
-      subject: "Your DG3 CIMS crew statement",
-      html: `<p>Please find your CIMS crew statement attached.</p><p>DG3 Cruise Industry Managed Services</p>`,
-      attachments: [{ filename: `CIMS_Statement_${id}.pdf`, content: b64 }],
-    }),
-  }).catch(() => null);
-  const ok = !!(r && r.ok);
+  const out = await sendViaMailer(env, {
+    templateId: "hr.statement.v1",
+    to: [to],
+    subject: "Your DG3 CIMS crew statement",
+    html: `<p>Please find your CIMS crew statement attached.</p><p>DG3 Cruise Industry Managed Services</p>`,
+    attachments: [{ filename: `CIMS_Statement_${id}.pdf`, content: b64 }],
+    critical: false
+  });
+  const ok = !!(out && out.ok);
   await logActivity(env, session && session.email, "statement_email", id + " -> " + to + (ok ? " sent" : " send_failed") + (stored ? " stored" : ""));
   return json({ ok, stored, sent: ok, to });
 }

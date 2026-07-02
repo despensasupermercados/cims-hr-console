@@ -12,6 +12,17 @@ MOVEMENTS_TO = "onboardsupport@dg3.com"
 # worker.js overwrites; the worker reads env.MAIL_FROM.
 MAIL_FROM = "CIMS <cims@cims.work>"
 
+# Central transport — all email goes through cims-mailer (service binding).
+# This worker builds content only; cims-mailer owns the Resend key,
+# retries/outbox, and mail_log. See cims-mailer/docs/EMAIL-CONVENTION.md
+[[services]]
+binding = "MAILER"
+service = "cims-mailer"
+
+# DEPRECATED: the RESEND_API_KEY secret is no longer read by this worker — email
+# delivery moved to the MAILER binding above. Delete the secret after verifying
+# mail flows end-to-end:  wrangler secret delete RESEND_API_KEY
+
 # Built-in AI engine for auto-summarising crew-report emails (used when no ANTHROPIC_API_KEY
 # secret is set). No key or setup required; degrades gracefully to manual if unavailable.
 [ai]
