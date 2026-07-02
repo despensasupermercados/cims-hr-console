@@ -241,5 +241,22 @@ export function installInstr(deps) {
     }
     return null;
   }
+  async function sendInstructionsFor(env, sc, seq, origin) {
+    await ensureInstr(env);
+    var r = await resolveInstr(env, String(sc), parseInt(seq));
+    if (!r) return { emailed: false, error: "signoff_not_found" };
+    if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
+    var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
+    var th = await sha256hex(token);
+    var now = new Date().toISOString();
+    await env.DB.prepare("DELETE FROM instr_ack WHERE sc=? AND seq=?").bind(r.sc, r.seq).run();
+    var insId = "ins_" + crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
+    var link = origin + "/instr?t=" + token;
+    try { await sendInstructions(env, { to: r.email, specialist_name: r.crew_name, sign_off_date: r.sign_off_date, port: r.port, link: link, instr_id: insId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
+    catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+  }
+  instrHandle.sendInstructionsFor = sendInstructionsFor;
+
   return instrHandle;
 }
