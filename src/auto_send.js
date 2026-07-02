@@ -32,7 +32,7 @@
 // ============================================================================
 
 export function installAutoSend(deps) {
-  const { sendInstructionsFor, sendSignoffLinkFor, sendViaMailer, ORIGIN, DIGEST_TO, DIGEST_CC } = deps;
+  const { sendInstructionsFor, sendSignoffLinkFor, sendViaMailer, BOARD_LEGS, ORIGIN, DIGEST_TO, DIGEST_CC } = deps;
 
   const GATE_TZ = "Europe/Budapest";
   const GATE_HOUR = "08";
@@ -52,14 +52,22 @@ export function installAutoSend(deps) {
     ).run();
   }
 
-  // legs whose effective sign-off date is within [today, upper], crew not redacted
+  // Legs due within [today, upper] - sourced from the LIVE Keyman board
+  // (rotationSections via BOARD_LEGS): the same resolved sign-off dates the
+  // board displays and billing uses. NOT keyman_contract3 (historical only).
+  // seq is the numeric sign-off date (YYYYMMDD) - stable per leg for the
+  // auto_send_log / instr_ack (sc,seq) keys, never colliding with Keyman seqs.
   async function dueWithin(env, today, upper) {
-    return (await env.DB.prepare(
-      "SELECT k.sc AS sc, k.seq AS seq, COALESCE(k.act_off, k.proj_off) AS off, k.ship AS ship, c.email AS email " +
-      "FROM keyman_contract3 k JOIN crew c ON c.agency_id = k.sc " +
-      "WHERE c.redacted = 0 AND COALESCE(k.act_off, k.proj_off) >= ? AND COALESCE(k.act_off, k.proj_off) <= ? " +
-      "ORDER BY off ASC"
-    ).bind(today, upper).all()).results || [];
+    var legs = BOARD_LEGS ? await BOARD_LEGS(env) : [];
+    var em = {}, red = {};
+    for (var r of (await env.DB.prepare("SELECT agency_id, email, redacted FROM crew").all()).results || []) { em[r.agency_id] = r.email || null; red[r.agency_id] = !!r.redacted; }
+    var out = [];
+    for (var l of legs) {
+      if (!l.off || l.off < today || l.off > upper || red[l.sc]) continue;
+      out.push({ sc: l.sc, seq: parseInt(String(l.off).replace(/-/g, ""), 10) || 0, off: l.off, ship: l.ship || null, port: l.port || null, name: l.name || null, email: em[l.sc] || null });
+    }
+    out.sort(function (a, b) { return a.off < b.off ? -1 : a.off > b.off ? 1 : 0; });
+    return out;
   }
 
   async function already(env, sc, seq, kind) {
@@ -73,19 +81,19 @@ export function installAutoSend(deps) {
   // A manual send (crew-page button) already created a request row for this leg.
   // Never re-send on top of it: re-sending would DELETE + re-insert the row,
   // invalidating the emailed link and wiping any acknowledgement.
-  async function manualExists(env, sc, seq, kind) {
+  async function manualExists(env, sc, off, kind) {
     var tbl = kind === "instructions" ? "instr_ack" : "ack_request";
-    try { return !!(await env.DB.prepare("SELECT 1 FROM " + tbl + " WHERE sc=? AND seq=?").bind(sc, seq).first()); } catch (e) { return false; }
+    try { return !!(await env.DB.prepare("SELECT 1 FROM " + tbl + " WHERE sc=? AND sign_off_date IS NOT NULL AND abs(julianday(sign_off_date) - julianday(?)) <= 21").bind(sc, off).first()); } catch (e) { return false; }
   }
 
   async function processKind(env, today, upper, kind, sender, DRY, sent, alerts) {
     for (const leg of await dueWithin(env, today, upper)) {
       if (await already(env, leg.sc, leg.seq, kind)) continue;                 // already handled
-      if (await manualExists(env, leg.sc, leg.seq, kind)) {                 // manual send on file - skip, do not wipe its ack
+      if (await manualExists(env, leg.sc, leg.off, kind)) {                 // manual send on file - skip, do not wipe its ack
         if (!DRY) await markSent(env, leg.sc, leg.seq, kind, "manual-preexisting");
         continue;
       }
-      var rec = { kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: null, to: leg.email || null, emailed: false, error: null };
+      var rec = { kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: leg.name || null, to: leg.email || null, emailed: false, error: null };
 
       if (!leg.email) {                                                        // NO EMAIL — flag, do not send, do not log (re-surfaces daily)
         rec.error = "no_email";
@@ -95,7 +103,7 @@ export function installAutoSend(deps) {
       if (DRY) { sent.push(rec); continue; }                                   // report only
 
       try {
-        var res = await sender(env, leg.sc, leg.seq, ORIGIN);
+        var res = await sender(env, leg.sc, leg.seq, ORIGIN, { ship: leg.ship, proj_off: leg.off, act_off: null, port: leg.port || null });
         rec.emailed = !!(res && res.emailed);
         rec.name = (res && res.crew_name) || null;
         rec.to = (res && res.to) || leg.email;
