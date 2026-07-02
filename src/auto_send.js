@@ -70,9 +70,21 @@ export function installAutoSend(deps) {
       .bind(sc, seq, kind, new Date().toISOString(), note || null).run();
   }
 
+  // A manual send (crew-page button) already created a request row for this leg.
+  // Never re-send on top of it: re-sending would DELETE + re-insert the row,
+  // invalidating the emailed link and wiping any acknowledgement.
+  async function manualExists(env, sc, seq, kind) {
+    var tbl = kind === "instructions" ? "instr_ack" : "ack_request";
+    try { return !!(await env.DB.prepare("SELECT 1 FROM " + tbl + " WHERE sc=? AND seq=?").bind(sc, seq).first()); } catch (e) { return false; }
+  }
+
   async function processKind(env, today, upper, kind, sender, DRY, sent, alerts) {
     for (const leg of await dueWithin(env, today, upper)) {
       if (await already(env, leg.sc, leg.seq, kind)) continue;                 // already handled
+      if (await manualExists(env, leg.sc, leg.seq, kind)) {                 // manual send on file - skip, do not wipe its ack
+        if (!DRY) await markSent(env, leg.sc, leg.seq, kind, "manual-preexisting");
+        continue;
+      }
       var rec = { kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: null, to: leg.email || null, emailed: false, error: null };
 
       if (!leg.email) {                                                        // NO EMAIL — flag, do not send, do not log (re-surfaces daily)
@@ -90,7 +102,7 @@ export function installAutoSend(deps) {
         if (!rec.emailed) rec.error = (res && res.error) || "not_sent";
       } catch (e) { rec.error = String(e).slice(0, 160); }
 
-      if (rec.emailed) markSent(env, leg.sc, leg.seq, kind, null);             // log ONLY on success -> failures retry next day
+      if (rec.emailed) await markSent(env, leg.sc, leg.seq, kind, null);             // log ONLY on success -> failures retry next day
       (rec.emailed ? sent : alerts).push(rec);
     }
   }
@@ -148,7 +160,7 @@ export function installAutoSend(deps) {
     if (hourIn(GATE_TZ, now) !== GATE_HOUR) return { skipped: "not_gate_hour" };
     await ensureLog(env);
     var DRY = String(env.AUTO_SEND_DRY_RUN || "").toLowerCase() === "true";
-    { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) return { skipped: "disabled" }; DRY = false; }
+    { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) return { skipped: "disabled" }; }
     var today = todayStr(), t14 = plus(14), t7 = plus(7);
     var sent = [], alerts = [];
     await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
