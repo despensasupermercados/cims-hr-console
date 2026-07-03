@@ -77,7 +77,15 @@ async function apiAutoSend(request, env, session) {
     const wasOn = !!(prev && prev.v === "true");
     await env.DB.prepare("INSERT INTO app_setting (k,v) VALUES ('auto_send_enabled',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(v).run();
     let seeded = 0;
-    if (v === "true" && !wasOn) { try { seeded = await autoSendSeed(env); } catch (e) { seeded = -1; } }
+    if (v === "true" && !wasOn) {
+      try { seeded = await autoSendSeed(env); }
+      catch (e) {
+        // FAIL CLOSED: if history cannot be seeded, do not arm the sender - an
+        // unseeded first run would email the entire in-window backlog.
+        await env.DB.prepare("INSERT INTO app_setting (k,v) VALUES ('auto_send_enabled','false') ON CONFLICT(k) DO UPDATE SET v=excluded.v").run();
+        return json({ ok: false, enabled: false, error: "seeding failed - auto-timing left OFF, try again" }, 500);
+      }
+    }
     return json({ ok: true, enabled: v === "true", seeded: seeded });
   }
   const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first();
@@ -2785,7 +2793,7 @@ async function saveNote(id){
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
 async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();var b=document.getElementById('autoToggle');if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}}catch(e){}}
-async function autoToggleClick(){var b=document.getElementById('autoToggle');var on=/ON/.test(b?b.textContent:'');if(!on&&!confirm('Turn auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?('\n'+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
+async function autoToggleClick(){var b=document.getElementById('autoToggle');var on=/ON/.test(b?b.textContent:'');if(!on&&!confirm('Turn auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?('\n'+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
