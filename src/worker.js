@@ -41,6 +41,30 @@ async function autoSendBoardLegs(env) {
   }
   return out;
 }
+// Called when the toggle flips OFF->ON: mark everything already inside the T-14/T-7
+// windows as handled (note 'seeded') so enabling never emails historical crossings.
+// Only legs that cross into a window AFTER enabling will fire.
+async function autoSendSeed(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS auto_send_log (sc TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL, sent_at TEXT NOT NULL, note TEXT, PRIMARY KEY (sc, seq, kind))").run();
+  const legs = await autoSendBoardLegs(env);
+  const today = new Date().toISOString().slice(0, 10);
+  const plus = (d) => { const x = new Date(); x.setDate(x.getDate() + d); return x.toISOString().slice(0, 10); };
+  const t14 = plus(14), t7 = plus(7);
+  const now = new Date().toISOString();
+  let n = 0;
+  for (const l of legs) {
+    if (!l.off || l.off < today || l.off > t14) continue;
+    const seq = parseInt(String(l.off).replace(/-/g, ""), 10) || 0;
+    const r1 = await env.DB.prepare("INSERT OR IGNORE INTO auto_send_log (sc,seq,kind,sent_at,note) VALUES (?,?,'instructions',?,'seeded')").bind(l.sc, seq, now).run();
+    if (r1.meta && r1.meta.changes) n += r1.meta.changes;
+    if (l.off <= t7) {
+      const r2 = await env.DB.prepare("INSERT OR IGNORE INTO auto_send_log (sc,seq,kind,sent_at,note) VALUES (?,?,'signoff',?,'seeded')").bind(l.sc, seq, now).run();
+      if (r2.meta && r2.meta.changes) n += r2.meta.changes;
+    }
+  }
+  return n;
+}
+
 
 async function apiAutoSend(request, env, session) {
   if (!session) return json({ error: "unauthorized" }, 401);
@@ -49,8 +73,12 @@ async function apiAutoSend(request, env, session) {
     if (!session) return json({ error: "unauthorized" }, 401);
     const b = await request.json().catch(function () { return {}; });
     const v = b.enabled === true ? "true" : "false";
+    const prev = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first();
+    const wasOn = !!(prev && prev.v === "true");
     await env.DB.prepare("INSERT INTO app_setting (k,v) VALUES ('auto_send_enabled',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(v).run();
-    return json({ ok: true, enabled: v === "true" });
+    let seeded = 0;
+    if (v === "true" && !wasOn) { try { seeded = await autoSendSeed(env); } catch (e) { seeded = -1; } }
+    return json({ ok: true, enabled: v === "true", seeded: seeded });
   }
   const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first();
   return json({ enabled: !!(r && r.v === "true") });
@@ -2757,7 +2785,7 @@ async function saveNote(id){
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
 async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();var b=document.getElementById('autoToggle');if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}}catch(e){}}
-async function autoToggleClick(){var b=document.getElementById('autoToggle');var on=/ON/.test(b?b.textContent:'');if(!on&&!confirm('Turn auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Auto-timing is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
+async function autoToggleClick(){var b=document.getElementById('autoToggle');var on=/ON/.test(b?b.textContent:'');if(!on&&!confirm('Turn auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?('\n'+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
