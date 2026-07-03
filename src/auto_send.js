@@ -95,6 +95,19 @@ export function installAutoSend(deps) {
     try { return !!(await env.DB.prepare("SELECT 1 FROM " + tbl + " WHERE sc=? AND sign_off_date IS NOT NULL AND abs(julianday(sign_off_date) - julianday(?)) <= 21").bind(sc, off).first()); } catch (e) { return false; }
   }
 
+  // Legs seeded at enable in the last 36h - listed once in the next digest for transparency.
+  async function recentSeeded(env) {
+    try {
+      var cutoff = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+      var rows = (await env.DB.prepare("SELECT l.sc AS sc, l.seq AS seq, l.kind AS kind, c.first_name AS fn, c.last_name AS ln FROM auto_send_log l LEFT JOIN crew c ON c.agency_id = l.sc WHERE l.note = 'seeded' AND l.sent_at >= ?").bind(cutoff).all()).results || [];
+      return rows.map(function (r) {
+        var s = String(r.seq);
+        var off = s.length === 8 ? s.slice(0, 4) + "-" + s.slice(4, 6) + "-" + s.slice(6, 8) : null;
+        return { kind: r.kind, sc: r.sc, seq: r.seq, off: off, ship: null, name: [r.fn, r.ln].filter(Boolean).join(" ") || null, to: null, emailed: false, error: "seeded" };
+      });
+    } catch (e) { return []; }
+  }
+
   async function processKind(env, today, upper, kind, sender, DRY, sent, alerts) {
     for (const leg of await dueWithin(env, today, upper)) {
       if (await already(env, leg.sc, leg.seq, kind)) continue;                 // already handled
@@ -125,8 +138,8 @@ export function installAutoSend(deps) {
   }
 
   function rowHtml(r, kind_label, DRY) {
-    var status = r.error === "no_email" ? "NO EMAIL — add address" : (DRY ? "would send" : (r.emailed ? "sent" : ("not sent — " + esc(r.error || "error"))));
-    var color = r.error === "no_email" ? "#B4232A" : (DRY ? "#6B7C93" : (r.emailed ? "#3E8E2A" : "#B4232A"));
+    var status = r.error === "no_email" ? "NO EMAIL — add address" : (r.error === "seeded" ? "seeded — not auto-emailed" : (DRY ? "would send" : (r.emailed ? "sent" : ("not sent — " + esc(r.error || "error")))));
+    var color = r.error === "no_email" ? "#B4232A" : (r.error === "seeded" ? "#6B7C93" : (DRY ? "#6B7C93" : (r.emailed ? "#3E8E2A" : "#B4232A")));
     var cell = 'padding:9px 12px;border-bottom:1px solid #EEF1F5;font-family:Arial,Helvetica,sans-serif;font-size:13px;';
     return '<tr>' +
       '<td style="' + cell + 'color:#16293D;">' + kind_label[r.kind] + '</td>' +
@@ -138,7 +151,7 @@ export function installAutoSend(deps) {
       '</tr>';
   }
 
-  function digestHtml(sent, alerts, meta) {
+  function digestHtml(sent, alerts, seeded, meta) {
     var L = { instructions: "Instructions (T-14)", signoff: "Sign-off link (T-7)" };
     var head = '<tr>' + ["Type", "Crew", "Vessel", "Sign-off", "Recipient", "Status"].map(function (h) {
       return '<td style="padding:9px 12px;border-bottom:1px solid #EEF1F5;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#6B7C93;">' + h + '</td>';
@@ -148,7 +161,8 @@ export function installAutoSend(deps) {
       ? '<div style="background:#FCEBEC;border:1px solid #F1B9BE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8A1C24;"><strong>&#9888; ' + alerts.length + ' crew need an email on file</strong> — they qualified but have no address, so nothing was sent. They will keep appearing here until fixed.</div>'
       : "";
     var body = (sent.length ? tbl(sent) : '<p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16293D;">Nothing qualified today (no crew reached T-14 or T-7).</p>') +
-      (alerts.length ? '<div style="height:14px"></div>' + tbl(alerts) : "");
+      (alerts.length ? '<div style="height:14px"></div>' + tbl(alerts) : "") +
+      (seeded && seeded.length ? '<div style="height:14px"></div>' + tbl(seeded) : "");
     return '<div style="margin:0;padding:0;background:#E9EDF3;">' +
       '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#E9EDF3;"><tr><td align="center" style="padding:26px 12px;">' +
       '<table role="presentation" width="660" cellpadding="0" cellspacing="0" border="0" style="width:660px;max-width:660px;">' +
@@ -164,12 +178,12 @@ export function installAutoSend(deps) {
       '</td></tr></table></td></tr></table></div>';
   }
 
-  async function sendDigest(env, sent, alerts, meta) {
+  async function sendDigest(env, sent, alerts, seeded, meta) {
     var n = sent.length, a = alerts.length;
     var subj = "CIMS auto-timing " + (meta.dry ? "(dry run) " : "") + meta.date + " — " + n + " sent" + (a ? ", " + a + " need email" : "");
-    var envelope = { to: DIGEST_TO, subject: subj, html: digestHtml(sent, alerts, meta), templateId: "hr.autosend.digest.v1", critical: false };
+    var envelope = { to: DIGEST_TO, subject: subj, html: digestHtml(sent, alerts, seeded, meta), templateId: "hr.autosend.digest.v1", critical: false };
     if (DIGEST_CC && DIGEST_CC.length) envelope.cc = DIGEST_CC;
-    try { await sendViaMailer(env, envelope); } catch (e) { /* digest best-effort */ }
+    try { await sendViaMailer(env, envelope); } catch (e) { await logRun(env, "digest_failed", meta.dry, sent.length, alerts.length); }
   }
 
   async function runAutoSend(env, event) {
@@ -182,7 +196,8 @@ export function installAutoSend(deps) {
     var sent = [], alerts = [];
     await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
     await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts);
-    await sendDigest(env, sent, alerts, { dry: DRY, date: today, t14: t14, t7: t7 });
+    var seeded = await recentSeeded(env);
+    await sendDigest(env, sent, alerts, seeded, { dry: DRY, date: today, t14: t14, t7: t7 });
     await logRun(env, "ran", DRY, sent.length, alerts.length);
     return { ran: true, dry: DRY, sent: sent.length, alerts: alerts.length };
   }
