@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CIMS · GSM Survey Emails — invite (T−7) & reminder (T−4)</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#1B3A5C;--deep:#142D48;--ink:#16293D;--green:#5FB946;--green-d:#3E8E2A;--line:#E4E9F0;--line-2:#D5DDE9;--mut:#6B7C93;--bg:#E9EDF3}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:32px 16px 80px}
+.page{max-width:1320px;margin:0 auto}
+.pagehead{max-width:1320px;margin:0 auto 26px}
+.pagehead h1{font-family:'Outfit';font-size:22px;color:var(--deep)}
+.pagehead p{color:var(--mut);font-size:14px;margin-top:6px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:28px}
+.stage{background:#DCE3EC;border:1px solid var(--line-2);border-radius:16px;padding:22px}
+.stage>h2{font-family:'Outfit';font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:14px}
+.chrome{background:#fff;border:1px solid var(--line-2);border-radius:12px 12px 0 0;padding:14px 18px;font-size:13px;color:var(--mut);line-height:1.7}
+.chrome b{color:var(--ink)}
+.chrome .subj{font-size:14.5px;font-weight:700;color:var(--deep)}
+/* email body — table-safe inline-ish styles */
+.email{background:#F4F6F9;border:1px solid var(--line-2);border-top:none;border-radius:0 0 12px 12px;padding:26px 0}
+.card{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E4E9F0}
+.ehead{background:var(--navy);padding:20px 28px;display:flex;align-items:center;gap:11px}
+.mark{width:30px;height:30px;border-radius:7px;background:var(--green);display:grid;place-items:center;font-family:'Outfit';font-weight:700;font-size:15px;color:#fff}
+.ehead .wm{font-family:'Outfit';font-weight:700;font-size:16px;color:#fff}
+.ehead .ws{font-size:10px;color:#B9C7D8;letter-spacing:.05em}
+.ebody{padding:28px}
+.ebody h1{font-family:'Outfit';font-size:20px;color:var(--deep);margin-bottom:14px}
+.ebody p{font-size:14.5px;line-height:1.65;color:var(--ink);margin-bottom:14px}
+.ebody .mut{color:var(--mut);font-size:13px}
+.who{background:#F4F8FD;border:1px solid #DCE7F5;border-radius:10px;padding:14px 18px;margin:18px 0;font-size:14px;line-height:1.7}
+.who b{color:var(--deep)}
+.cta{text-align:center;margin:24px 0 10px}
+.cta a{display:inline-block;font-family:'Outfit';font-weight:600;font-size:15.5px;color:#fff;background:var(--green);text-decoration:none;padding:13px 34px;border-radius:10px}
+.cta .sub{display:block;margin-top:10px;font-size:12px;color:var(--mut)}
+.efoot{border-top:1px solid var(--line);padding:16px 28px;font-size:11.5px;color:var(--mut);line-height:1.6}
+.sig{margin-top:4px}
+</style>
+</head>
+<body>
+<div class="pagehead">
+  <h1>GSM Survey — Email Mockups</h1>
+  <p>Sent via cims-mailer (Resend) from <b>CIMS &lt;cims@cims.work&gt;</b>. Left: invite at T−7 before sign-off. Right: single gentle reminder at T−4, only if not yet submitted. Both suppressed automatically if the crew member has signed off or the survey was completed.</p>
+</div>
+
+<div class="page cols">
+
+  <!-- ================= INVITE ================= -->
+  <div class="stage">
+    <h2>① Invite · 7 days before sign-off</h2>
+    <div class="chrome">
+      <div><b>From:</b> CIMS &lt;cims@cims.work&gt;</div>
+      <div><b>To:</b> Guest Services Manager · Navigator of the Seas</div>
+      <div class="subj">A quick word about Maria, before she signs off ✍️</div>
+    </div>
+    <div class="email"><div class="card">
+      <div class="ehead">
+        <div class="mark">C</div>
+        <div><div class="wm">CIMS</div><div class="ws">DG3 · CRUISE INDUSTRY MANAGED SERVICES</div></div>
+      </div>
+      <div class="ebody">
+        <h1>Hello! 👋</h1>
+        <p>We're the team behind the Printer Specialist working with you onboard. In about a week, <b>Maria Katrina Rica Murillo</b> completes her contract on <b>Navigator of the Seas</b> — and before she goes, we'd love to hear how she did, from the person who saw her work every day.</p>
+        <div class="who">
+          <b>Maria Katrina Rica Murillo</b> · Printer Specialist<br>
+          Navigator of the Seas · signs off <b>10 July 2026</b>
+        </div>
+        <p>It takes <b>under 3 minutes</b>. One rating is all we need — anything more is a gift. Your words go into her service record and help us recognize great work.</p>
+        <div class="cta">
+          <a href="#">Share your feedback</a>
+          <span class="sub">Private, single-use link · expires on her sign-off date</span>
+        </div>
+        <p class="mut">We know this isn't part of your job, and we don't take your time for granted. Thank you for helping us take better care of the people who take care of your ship.</p>
+        <p class="sig">Warm regards,<br><b>Miguel San Martin</b><br>General Manager, DG3 Cruise Industry Managed Services</p>
+      </div>
+      <div class="efoot">You're receiving this because a DG3 Printer Specialist is completing their assignment on your vessel. This link is unique to you — please don't forward it. Questions? Just reply to this email.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= REMINDER ================= -->
+  <div class="stage">
+    <h2>② Gentle reminder · 4 days before sign-off (only if unanswered)</h2>
+    <div class="chrome">
+      <div><b>From:</b> CIMS &lt;cims@cims.work&gt;</div>
+      <div><b>To:</b> Guest Services Manager · Navigator of the Seas</div>
+      <div class="subj">4 days left — 3 minutes for Maria? 🙏</div>
+    </div>
+    <div class="email"><div class="card">
+      <div class="ehead">
+        <div class="mark">C</div>
+        <div><div class="wm">CIMS</div><div class="ws">DG3 · CRUISE INDUSTRY MANAGED SERVICES</div></div>
+      </div>
+      <div class="ebody">
+        <h1>Just a friendly nudge 🕊️</h1>
+        <p>No pressure at all — we know how full your days are. <b>Maria</b> signs off <b>Navigator of the Seas</b> in four days, and her review is still open if you'd like to add a word before she goes.</p>
+        <p>If you only have ten seconds: a single overall rating is genuinely enough. It still counts, and it still helps her.</p>
+        <div class="cta">
+          <a href="#">Open Maria's review</a>
+          <span class="sub">Closes automatically on 10 July · we won't ask again</span>
+        </div>
+        <p class="mut">If it slips by, that's completely fine — this is the only reminder we'll send. Thank you for everything you do for our crew onboard.</p>
+        <p class="sig">With appreciation,<br><b>Miguel San Martin</b><br>General Manager, DG3 Cruise Industry Managed Services</p>
+      </div>
+      <div class="efoot">This is the last message about this review. The link is unique to you — please don't forward it. Questions? Just reply.</div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>
