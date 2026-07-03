@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DG3 CIMS · Shipboard Management Review — Email Set</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#1B3A5C;--deep:#142D48;--ink:#16293D;--green:#5FB946;--green-d:#3E8E2A;--red:#BC3B2C;--line:#E4E9F0;--line-2:#D5DDE9;--mut:#6B7C93;--bg:#E9EDF3}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:0 16px 90px}
+.wrap{max-width:720px;margin:0 auto}
+
+/* ---------- page header ---------- */
+.pagehead{padding:34px 0 8px;display:flex;align-items:center;gap:14px}
+.logoimg{width:44px;height:44px;display:block;flex:none}
+.pagehead h1{font-family:'Outfit';font-size:23px;color:var(--deep);line-height:1.15}
+.pagehead .sub{font-size:13px;color:var(--mut);margin-top:3px}
+
+/* ---------- workflow timeline ---------- */
+.flow{display:flex;align-items:stretch;gap:0;background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 10px;margin:20px 0 8px}
+.fstep{flex:1;text-align:center;padding:0 8px;position:relative;text-decoration:none;color:inherit;display:block}
+.fstep+.fstep:before{content:"";position:absolute;left:-14px;top:17px;width:28px;height:2px;background:var(--line-2)}
+.fnum{width:34px;height:34px;border-radius:50%;background:var(--navy);color:#fff;font-family:'Outfit';font-weight:700;font-size:15px;display:grid;place-items:center;margin:0 auto 8px}
+.fstep.int .fnum{background:var(--green-d)}
+.flab{font-family:'Outfit';font-weight:600;font-size:13.5px;color:var(--deep)}
+.fsub{font-size:11.5px;color:var(--mut);margin-top:2px;line-height:1.45}
+.flownote{font-size:12px;color:var(--mut);margin:10px 2px 30px;line-height:1.6}
+.flownote b{color:var(--ink)}
+
+/* ---------- email sections ---------- */
+.stage{margin-bottom:44px}
+.stagehead{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.snum{width:30px;height:30px;border-radius:50%;background:var(--navy);color:#fff;font-family:'Outfit';font-weight:700;font-size:14px;display:grid;place-items:center;flex:none}
+.stage.int .snum{background:var(--green-d)}
+.stitle{font-family:'Outfit';font-weight:700;font-size:17px;color:var(--deep)}
+.facts{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px 42px}
+.facts span{font-size:11.5px;color:var(--mut);background:#fff;border:1px solid var(--line-2);border-radius:99px;padding:4px 12px}
+.facts b{color:var(--deep);font-weight:600}
+
+/* mail client chrome */
+.chrome{background:#fff;border:1px solid var(--line-2);border-bottom:none;border-radius:14px 14px 0 0;padding:16px 22px;font-size:13px;color:var(--mut);line-height:1.8}
+.chrome b{color:var(--ink)}
+.chrome .subj{font-size:15px;font-weight:700;color:var(--deep);padding-top:2px}
+
+/* email body */
+.email{background:#DDE4EE;border:1px solid var(--line-2);border-top:1px solid var(--line);border-radius:0 0 14px 14px;padding:30px 14px}
+.card{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E4E9F0;box-shadow:0 2px 10px rgba(20,45,72,.08)}
+.ehead{background:var(--navy);padding:24px 32px;display:flex;align-items:center;gap:12px}
+.eh-logo{width:34px;height:34px;display:block;flex:none}
+.ehead .wm{font-family:'Outfit';font-weight:700;font-size:16px;color:#fff}
+.ehead .ws{font-size:10px;color:#B9C7D8;letter-spacing:.06em;margin-top:2px}
+.ebody{padding:34px 32px 28px}
+.ebody h1{font-family:'Outfit';font-size:21px;color:var(--deep);margin-bottom:16px}
+.ebody p{font-size:14.5px;line-height:1.7;color:var(--ink);margin-bottom:15px}
+.ebody .mut{color:var(--mut);font-size:13px}
+.who{background:#F4F8FD;border:1px solid #DCE7F5;border-radius:10px;padding:16px 20px;margin:20px 0;font-size:14px;line-height:1.75}
+.who b{color:var(--deep)}
+.cta{text-align:center;margin:28px 0 14px}
+.cta a{display:inline-block;font-family:'Outfit';font-weight:600;font-size:15.5px;color:#fff;background:var(--green);text-decoration:none;padding:14px 38px;border-radius:10px}
+.cta .sub{display:block;margin-top:11px;font-size:12px;color:var(--mut)}
+.sig{margin-top:12px;line-height:1.7}
+.efoot{border-top:1px solid var(--line);padding:16px 32px 18px;font-size:11.5px;color:var(--mut);line-height:1.6}
+
+/* internal notification extras */
+.scorerow{display:flex;align-items:center;gap:18px;background:#F4F8FD;border:1px solid #DCE7F5;border-radius:10px;padding:18px 20px;margin:20px 0}
+.scorebig{font-family:'Outfit';font-weight:700;font-size:34px;color:var(--green-d);line-height:1;text-align:center}
+.scorebig small{display:block;font-family:'DM Sans';font-weight:400;font-size:10.5px;color:var(--mut);margin-top:5px;letter-spacing:.04em}
+.scoremeta{font-size:13.5px;line-height:1.7;color:var(--ink)}
+.scoremeta b{color:var(--deep)}
+.okpill{display:inline-block;font-size:11.5px;font-weight:700;color:var(--green-d);background:#EAF6E4;border-radius:99px;padding:3px 10px;margin-top:5px}
+.qa{border-left:3px solid var(--line-2);padding:3px 0 3px 14px;margin:14px 0;font-size:13.5px;line-height:1.6}
+.qa .ql{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="pagehead">
+    <svg class="logoimg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="DG3 CIMS">
+      <rect x="1" y="1" width="98" height="98" rx="24" fill="#1B3A5C"/>
+      <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+        <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+        <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+        <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+      </g>
+    </svg>
+    <div>
+      <h1>Shipboard Management Review — Email Set</h1>
+      <div class="sub">Sent via cims-mailer (Resend) from <b>CIMS &lt;cims@cims.work&gt;</b> · keyed to the seafarer sign-off date</div>
+    </div>
+  </div>
+
+  <div class="flow">
+    <a class="fstep" href="#e1">
+      <div class="fnum">1</div>
+      <div class="flab">Invite</div>
+      <div class="fsub">T−7 before sign-off<br>to the shipboard manager</div>
+    </a>
+    <a class="fstep" href="#e2">
+      <div class="fnum">2</div>
+      <div class="flab">Gentle reminder</div>
+      <div class="fsub">T−4 · only if<br>unanswered · sent once</div>
+    </a>
+    <a class="fstep int" href="#e3">
+      <div class="fnum">3</div>
+      <div class="flab">Internal alert</div>
+      <div class="fsub">on submission<br>to Rita, cc Miguel</div>
+    </a>
+  </div>
+  <p class="flownote"><b>Suppression:</b> ① and ② are cancelled automatically if the crew member has already signed off, the response is in, the sign-off date moves out of window, or the contract is cancelled. No response by sign-off = nothing breaks — the Score Card falls back to manual evaluation, as today.</p>
+
+  <!-- ================= 1 · INVITE ================= -->
+  <div class="stage" id="e1">
+    <div class="stagehead"><div class="snum">1</div><div class="stitle">Invite</div></div>
+    <div class="facts">
+      <span>When: <b>7 days before sign-off</b></span>
+      <span>To: <b>shipboard manager</b></span>
+      <span>Link: <b>single-use token</b></span>
+    </div>
+    <div class="chrome">
+      <div><b>From:</b> CIMS &lt;cims@cims.work&gt;</div>
+      <div><b>To:</b> Shipboard Manager · Navigator of the Seas</div>
+      <div class="subj">A quick word about Maria, before she signs off ✍️</div>
+    </div>
+    <div class="email"><div class="card">
+      <div class="ehead">
+        <svg class="eh-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1.5" y="1.5" width="97" height="97" rx="24" fill="#24486E" stroke="rgba(255,255,255,.30)" stroke-width="3"/>
+          <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+            <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+            <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+            <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+          </g>
+        </svg>
+        <div><div class="wm">DG3 CIMS</div><div class="ws">CRUISE INDUSTRY MANAGED SERVICES</div></div>
+      </div>
+      <div class="ebody">
+        <h1>Hello! 👋</h1>
+        <p>We're the team behind the Printer Specialist working with you onboard. In about a week, <b>Maria Katrina Rica Murillo</b> completes her contract on <b>Navigator of the Seas</b> — and before she goes, we'd love to hear how she did, from the person who saw her work every day.</p>
+        <div class="who">
+          <b>Maria Katrina Rica Murillo</b> · Printer Specialist<br>
+          Navigator of the Seas · signs off <b>10 July 2026</b>
+        </div>
+        <p>It takes <b>under 3 minutes</b>. One rating is all we need — anything more is a gift. Your words go into her service record and help us recognize great work.</p>
+        <div class="cta">
+          <a href="#">Share your feedback</a>
+          <span class="sub">Private, single-use link · expires on her sign-off date</span>
+        </div>
+        <p class="mut">We know this isn't part of your job, and we don't take your time for granted. Thank you for helping us take better care of the people who take care of your ship.</p>
+        <p class="sig">With appreciation,<br><b>Rita Berenyi</b><br>Head of HR<br><span class="mut">DG3 Cruise Industry Managed Services</span></p>
+      </div>
+      <div class="efoot">You're receiving this because a DG3 Printer Specialist is completing their assignment on your vessel. This link is unique to you — please don't forward it. Questions? Just reply to this email.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= 2 · REMINDER ================= -->
+  <div class="stage" id="e2">
+    <div class="stagehead"><div class="snum">2</div><div class="stitle">Gentle reminder</div></div>
+    <div class="facts">
+      <span>When: <b>4 days before sign-off</b></span>
+      <span>Condition: <b>only if unanswered</b></span>
+      <span>Frequency: <b>once, never again</b></span>
+    </div>
+    <div class="chrome">
+      <div><b>From:</b> CIMS &lt;cims@cims.work&gt;</div>
+      <div><b>To:</b> Shipboard Manager · Navigator of the Seas</div>
+      <div class="subj">4 days left — 3 minutes for Maria? 🙏</div>
+    </div>
+    <div class="email"><div class="card">
+      <div class="ehead">
+        <svg class="eh-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1.5" y="1.5" width="97" height="97" rx="24" fill="#24486E" stroke="rgba(255,255,255,.30)" stroke-width="3"/>
+          <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+            <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+            <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+            <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+          </g>
+        </svg>
+        <div><div class="wm">DG3 CIMS</div><div class="ws">CRUISE INDUSTRY MANAGED SERVICES</div></div>
+      </div>
+      <div class="ebody">
+        <h1>Just a friendly nudge 🕊️</h1>
+        <p>No pressure at all — we know how full your days are. <b>Maria</b> signs off <b>Navigator of the Seas</b> in four days, and her review is still open if you'd like to add a word before she goes.</p>
+        <p>If you only have ten seconds: a single overall rating is genuinely enough. It still counts, and it still helps her.</p>
+        <div class="cta">
+          <a href="#">Open Maria's review</a>
+          <span class="sub">Closes automatically on 10 July · we won't ask again</span>
+        </div>
+        <p class="mut">If it slips by, that's completely fine — this is the only reminder we'll send. Thank you for everything you do for our crew onboard.</p>
+        <p class="sig">With appreciation,<br><b>Rita Berenyi</b><br>Head of HR<br><span class="mut">DG3 Cruise Industry Managed Services</span></p>
+      </div>
+      <div class="efoot">This is the last message about this review. The link is unique to you — please don't forward it. Questions? Just reply.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= 3 · INTERNAL ================= -->
+  <div class="stage int" id="e3">
+    <div class="stagehead"><div class="snum">3</div><div class="stitle">Internal notification</div></div>
+    <div class="facts">
+      <span>When: <b>on submission</b></span>
+      <span>To: <b>Rita · cc Miguel + team</b></span>
+      <span>Crew copy: <b>ship email · feedback only</b></span>
+    </div>
+    <div class="chrome">
+      <div><b>From:</b> CIMS &lt;cims@cims.work&gt;</div>
+      <div><b>To:</b> rita.berenyi@dg3.com &nbsp;·&nbsp; <b>Cc:</b> miguel.sanmartin@dg3.com · CIMS team list · specialist's ship email (crew-facing copy)</div>
+      <div class="subj">Shipboard review in — Murillo · Navigator · 4/5 ✔</div>
+    </div>
+    <div class="email"><div class="card">
+      <div class="ehead">
+        <svg class="eh-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1.5" y="1.5" width="97" height="97" rx="24" fill="#24486E" stroke="rgba(255,255,255,.30)" stroke-width="3"/>
+          <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+            <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+            <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+            <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+          </g>
+        </svg>
+        <div><div class="wm">DG3 CIMS</div><div class="ws">CRUISE INDUSTRY MANAGED SERVICES</div></div>
+      </div>
+      <div class="ebody">
+        <h1>New shipboard management review</h1>
+        <div class="scorerow">
+          <div class="scorebig">4/5<small>OVERALL</small></div>
+          <div class="scoremeta">
+            <b>Maria Katrina Rica Murillo</b> · Printer Specialist<br>
+            Navigator of the Seas · Royal Caribbean · signs off 10 Jul 2026<br>
+            <span class="okpill">EVAL ≥ 3 — prefills sEval 15/15 on the Score Card</span>
+          </div>
+        </div>
+        <div class="qa"><div class="ql">Guests come first</div>"Always helpful and she knows what is right and wrong"</div>
+        <div class="qa"><div class="ql">Final thoughts</div>"Polite, diligent, great work ethics… I would like to work with her again."</div>
+        <p class="mut">Full response filed on Maria's crew card. The rating only prefills the supervisor evaluation — you review and commit on the Score Card as usual. If the rating had been 1–2, this email would carry a red freeze-gate warning instead.</p>
+        <div class="cta">
+          <a href="#">Open Maria's Score Card</a>
+          <span class="sub">cims.work · HR console (login required)</span>
+        </div>
+      </div>
+      <div class="efoot">Automated notification from the shipboard review pipeline. Full version to the CIMS team; the specialist receives a crew-facing copy (feedback only, no score mechanics) at their ship email.</div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>
