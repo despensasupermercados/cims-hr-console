@@ -4,6 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "predeploy": "node scripts/apply_hotfix.mjs",
     "test": "node --test",
     "migrate": "wrangler d1 migrations apply cims-hr-console --remote",
     "migrate:staging": "wrangler d1 migrations apply cims-hr-console-staging --remote",
