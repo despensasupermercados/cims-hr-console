@@ -9,11 +9,11 @@
 :root{--navy:#1B3A5C;--deep:#142D48;--ink:#16293D;--green:#5FB946;--green-d:#3E8E2A;--line:#E4E9F0;--line-2:#D5DDE9;--mut:#6B7C93;--bg:#E9EDF3}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);padding:32px 16px 80px}
-.page{max-width:1320px;margin:0 auto}
-.pagehead{max-width:1320px;margin:0 auto 26px}
+.page{max-width:720px;margin:0 auto}
+.pagehead{max-width:720px;margin:0 auto 26px}
 .pagehead h1{font-family:'Outfit';font-size:22px;color:var(--deep)}
 .pagehead p{color:var(--mut);font-size:14px;margin-top:6px}
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:28px}
+.cols{display:grid;grid-template-columns:1fr;gap:34px}
 .stage{background:#DCE3EC;border:1px solid var(--line-2);border-radius:16px;padding:22px}
 .stage>h2{font-family:'Outfit';font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:14px}
 .chrome{background:#fff;border:1px solid var(--line-2);border-radius:12px 12px 0 0;padding:14px 18px;font-size:13px;color:var(--mut);line-height:1.7}
@@ -23,7 +23,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .email{background:#F4F6F9;border:1px solid var(--line-2);border-top:none;border-radius:0 0 12px 12px;padding:26px 0}
 .card{max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E4E9F0}
 .ehead{background:var(--navy);padding:26px 34px;display:flex;align-items:center;gap:12px}
-.mark{width:30px;height:30px;border-radius:8px;background:var(--green);display:grid;place-items:center;font-family:'Outfit';font-weight:700;font-size:15px;color:#fff}
+.logoimg{width:36px;height:36px;display:block;flex:none}
 .ehead .wm{font-family:'Outfit';font-weight:700;font-size:16px;color:#fff}
 .ehead .ws{font-size:10px;color:#B9C7D8;letter-spacing:.06em;margin-top:2px}
 .ebody{padding:36px 34px 30px}
@@ -37,12 +37,21 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .cta .sub{display:block;margin-top:12px;font-size:12px;color:var(--mut)}
 .efoot{border-top:1px solid var(--line);padding:18px 34px 20px;font-size:11.5px;color:var(--mut);line-height:1.6}
 .sig{margin-top:10px;line-height:1.7}
+/* internal notification (email 3) */
+.scorerow{display:flex;align-items:center;gap:16px;background:#F4F8FD;border:1px solid #DCE7F5;border-radius:10px;padding:16px 20px;margin:22px 0}
+.scorebig{font-family:'Outfit';font-weight:700;font-size:34px;color:var(--green-d);line-height:1}
+.scorebig small{display:block;font-family:'DM Sans';font-weight:400;font-size:11px;color:var(--mut);margin-top:4px}
+.scoremeta{font-size:13.5px;line-height:1.7;color:var(--ink)}
+.scoremeta b{color:var(--deep)}
+.qa{border-left:3px solid var(--line-2);padding:2px 0 2px 14px;margin:14px 0;font-size:13.5px;line-height:1.6}
+.qa .ql{color:var(--mut);font-size:12px}
+.okpill{display:inline-block;font-size:11.5px;font-weight:700;color:var(--green-d);background:#EAF6E4;border-radius:99px;padding:3px 10px;vertical-align:middle}
 </style>
 </head>
 <body>
 <div class="pagehead">
   <h1>GSM Survey — Email Mockups</h1>
-  <p>Sent via cims-mailer (Resend) from <b>CIMS &lt;cims@cims.work&gt;</b>. Left: invite at T−7 before sign-off. Right: single gentle reminder at T−4, only if not yet submitted. Both suppressed automatically if the crew member has signed off or the survey was completed.</p>
+  <p>Sent via cims-mailer (Resend) from <b>CIMS &lt;cims@cims.work&gt;</b>. ① Invite at T−7 before sign-off · ② single gentle reminder at T−4, only if unanswered · ③ internal notification to Rita when a response is submitted. ① and ② are suppressed automatically if the crew member has signed off or the survey was completed.</p>
 </div>
 
 <div class="page cols">
@@ -57,7 +66,14 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
     </div>
     <div class="email"><div class="card">
       <div class="ehead">
-        <div class="mark">D</div>
+        <svg class="logoimg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="DG3 CIMS">
+          <rect x="1.5" y="1.5" width="97" height="97" rx="24" fill="#24486E" stroke="rgba(255,255,255,.30)" stroke-width="3"/>
+          <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+            <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+            <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+            <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+          </g>
+        </svg>
         <div><div class="wm">DG3 CIMS</div><div class="ws">CRUISE INDUSTRY MANAGED SERVICES</div></div>
       </div>
       <div class="ebody">
@@ -89,7 +105,14 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
     </div>
     <div class="email"><div class="card">
       <div class="ehead">
-        <div class="mark">D</div>
+        <svg class="logoimg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="DG3 CIMS">
+          <rect x="1.5" y="1.5" width="97" height="97" rx="24" fill="#24486E" stroke="rgba(255,255,255,.30)" stroke-width="3"/>
+          <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+            <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+            <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+            <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+          </g>
+        </svg>
         <div><div class="wm">DG3 CIMS</div><div class="ws">CRUISE INDUSTRY MANAGED SERVICES</div></div>
       </div>
       <div class="ebody">
@@ -104,6 +127,48 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
         <p class="sig">With appreciation,<br><b>Rita Berenyi</b><br>Head of HR<br><span class="mut">DG3 Cruise Industry Managed Services</span></p>
       </div>
       <div class="efoot">This is the last message about this review. The link is unique to you — please don't forward it. Questions? Just reply.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= INTERNAL NOTIFICATION ================= -->
+  <div class="stage">
+    <h2>③ Internal · to Rita when a response is submitted</h2>
+    <div class="chrome">
+      <div><b>From:</b> CIMS &lt;cims@cims.work&gt;</div>
+      <div><b>To:</b> rita.berenyi@dg3.com &nbsp;·&nbsp; <b>Cc:</b> miguel.sanmartin@dg3.com</div>
+      <div class="subj">GSM review in — Murillo · Navigator · 4/5 ✔</div>
+    </div>
+    <div class="email"><div class="card">
+      <div class="ehead">
+        <svg class="logoimg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-label="DG3 CIMS">
+          <rect x="1.5" y="1.5" width="97" height="97" rx="24" fill="#24486E" stroke="rgba(255,255,255,.30)" stroke-width="3"/>
+          <g fill="none" stroke="#5FB946" stroke-width="9" stroke-linecap="round">
+            <path d="M22 42 C31 34 41 34 50 40 S69 48 79 40"/>
+            <path d="M20 56 C29 48 39 48 48 54 S67 62 78 54"/>
+            <path d="M22 70 C31 62 41 62 50 68 S69 76 79 68"/>
+          </g>
+        </svg>
+        <div><div class="wm">DG3 CIMS</div><div class="ws">CRUISE INDUSTRY MANAGED SERVICES</div></div>
+      </div>
+      <div class="ebody">
+        <h1>New GSM review received</h1>
+        <div class="scorerow">
+          <div class="scorebig">4/5<small>OVERALL</small></div>
+          <div class="scoremeta">
+            <b>Maria Katrina Rica Murillo</b> · Printer Specialist<br>
+            Navigator of the Seas · Royal Caribbean · signs off 10 Jul 2026<br>
+            <span class="okpill">EVAL ≥ 3 — prefills sEval 15/15 on the Score Card</span>
+          </div>
+        </div>
+        <div class="qa"><div class="ql">Guests come first</div>"Always helpful and she knows what is right and wrong"</div>
+        <div class="qa"><div class="ql">Final thoughts</div>"Polite, diligent, great work ethics… I would like to work with her again."</div>
+        <p class="mut">Full response filed on Maria's crew card. The rating only prefills the supervisor evaluation — you review and commit on the Score Card as usual. If the rating had been 1–2, this email would carry a red freeze-gate warning instead.</p>
+        <div class="cta">
+          <a href="#">Open Maria's Score Card</a>
+          <span class="sub">cims.work · HR console (login required)</span>
+        </div>
+      </div>
+      <div class="efoot">Automated notification from the GSM survey pipeline. Sent only to money users (Rita + Miguel).</div>
     </div></div>
   </div>
 

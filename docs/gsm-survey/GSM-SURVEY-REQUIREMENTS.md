@@ -28,7 +28,7 @@ Outcomes:
 
 1. **T−7 days before sign-off** — system generates a single-use token and emails the GSM the invite (via cims-mailer / Resend, sender `CIMS <cims@cims.work>`).
 2. **T−4 days** — if not submitted, send ONE gentle reminder. Warm tone, no pressure — GSMs don't work for us; this is a courtesy ask.
-3. **All emails signed by Rita Berenyi, Head of HR** ("With appreciation, Rita Berenyi / Head of HR / DG3 Cruise Industry Managed Services") — Miguel's decision 2026-07-03. Logo/wordmark = the estate-standard green "D" mark + "DG3 CIMS" (same as auto-timing digest emails).
+3. **All emails signed by Rita Berenyi, Head of HR** ("With appreciation, Rita Berenyi / Head of HR / DG3 Cruise Industry Managed Services") — Miguel's decision 2026-07-03. Logo = the estate brand icon (navy squircle + green waves, same asset as the cims.work favicon / `src/icons.js`), reproduced as inline SVG in survey + all emails; wordmark "DG3 CIMS". Third email in the set: internal notification to Rita (cc Miguel) on each submission, with score, gate status, and Score Card link — money users only.
 4. **Suppression rules** — do NOT send (and cancel any pending reminder) if: crew already signed off, sign-off date moved out of window, response already submitted, contract cancelled, or crew marked retired/inactive.
 5. **On submit** — store response, file crew-history card, prefill `sEval` on the Score Card for that contract, notify Rita/Miguel.
 6. **No response by sign-off** — nothing breaks: Score Card behaves exactly as today (Rita sets the eval manually). A missed survey must never zero a bonus.
