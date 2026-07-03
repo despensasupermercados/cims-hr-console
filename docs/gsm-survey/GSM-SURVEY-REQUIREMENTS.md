@@ -28,17 +28,18 @@ Outcomes:
 
 1. **T−7 days before sign-off** — system generates a single-use token and emails the GSM the invite (via cims-mailer / Resend, sender `CIMS <cims@cims.work>`).
 2. **T−4 days** — if not submitted, send ONE gentle reminder. Warm tone, no pressure — GSMs don't work for us; this is a courtesy ask.
-3. **Suppression rules** — do NOT send (and cancel any pending reminder) if: crew already signed off, sign-off date moved out of window, response already submitted, contract cancelled, or crew marked retired/inactive.
-4. **On submit** — store response, file crew-history card, prefill `sEval` on the Score Card for that contract, notify Rita/Miguel.
-5. **No response by sign-off** — nothing breaks: Score Card behaves exactly as today (Rita sets the eval manually). A missed survey must never zero a bonus.
+3. **All emails signed by Rita Berenyi, Head of HR** ("With appreciation, Rita Berenyi / Head of HR / DG3 Cruise Industry Managed Services") — Miguel's decision 2026-07-03. Logo/wordmark = the estate-standard green "D" mark + "DG3 CIMS" (same as auto-timing digest emails).
+4. **Suppression rules** — do NOT send (and cancel any pending reminder) if: crew already signed off, sign-off date moved out of window, response already submitted, contract cancelled, or crew marked retired/inactive.
+5. **On submit** — store response, file crew-history card, prefill `sEval` on the Score Card for that contract, notify Rita/Miguel.
+6. **No response by sign-off** — nothing breaks: Score Card behaves exactly as today (Rita sets the eval manually). A missed survey must never zero a bonus.
 
 ## 4. Survey content (unchanged from Forms, restructured)
 
 | # | Field | Type | Required |
 |---|---|---|---|
-| 1 | Ship | **Prefilled from contract** — GSM confirms, can correct | Yes |
-| 2 | Date of review | Prefilled today, editable | Yes |
-| 3 | Printer Specialist name | **Prefilled from contract** — confirm | Yes |
+| 1 | Ship | **Prefilled from contract** — GSM confirms; corrections go via a `mailto:rita.berenyi@dg3.com` link | Yes |
+| 2 | Date of review | **Removed from the form** — submission timestamp captured automatically server-side (Miguel, 2026-07-03) | Auto |
+| 3 | Printer Specialist name | **Prefilled from contract** — displayed prominently (avatar + name hero block) | Yes |
 | 4 | Overall performance | 1–5 selector | Yes |
 | 5–10 | Six qualitative questions (business sense, guests first, helps us grow, integrity, teamwork, energy) | Free text + example hint | No |
 | 11 | Final thoughts | Free text | No |
