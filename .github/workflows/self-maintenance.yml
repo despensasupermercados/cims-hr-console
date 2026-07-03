@@ -40,9 +40,15 @@ jobs:
             2. Health-check the deployed worker: build status, endpoint availability, and
                email-send failures in mail_log. If something is down or failing, open an issue
                with the diagnosis and propose the minimal repair as a PR. Do not merge.
-            3. Check for DB drift (schema vs code expectations, orphan contracts, crew with no
+            3. Auto-timing heartbeat: the D1 table auto_send_run must contain a row whose
+               run_at falls on YESTERDAY (UTC) with outcome disabled or ran - one row is
+               written at every 08:00 Europe/Budapest gate run. A missing row means the
+               hourly cron or the gate is dead: open an issue titled "Nightly: auto-timing
+               heartbeat MISSING". An outcome digest_failed row means the mailer failed:
+               flag it in the digest. Do not modify auto_send_log or auto_send_run.
+            4. Check for DB drift (schema vs code expectations, orphan contracts, crew with no
                agency, counts that do not reconcile to history). Flag - never silently fix -
                anything money-affecting or crew-data-affecting.
-            4. Anything touching money, auth, schema, or crew data -> open a PR addressed to
+            5. Anything touching money, auth, schema, or crew data -> open a PR addressed to
                Miguel with a written diagnosis and recommended fix. Never auto-merge anything.
-            5. Post a <=5 line digest: checked / broken-found / fixed-via-PR / waiting-on-Miguel.
+            6. Post a <=5 line digest: checked / broken-found / fixed-via-PR / waiting-on-Miguel.
