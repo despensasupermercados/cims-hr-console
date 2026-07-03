@@ -11,7 +11,11 @@ MOVEMENTS_TO = "onboardsupport@dg3.com"
 # address — NOT no-reply — to reduce corporate spam-filtering. Lives here so it survives
 # worker.js overwrites; the worker reads env.MAIL_FROM.
 MAIL_FROM = "CIMS <cims@cims.work>"
-AUTO_SEND_DRY_RUN = "true"
+# Auto-timing rehearsal switch. "false" = the Keyman toggle is the SINGLE live switch:
+# enabling it sends real crew email at T-14/T-7 (it auto-seeds in-window history on
+# enable, so nobody is emailed retroactively). Set to "true" to rehearse instead:
+# the daily digest reports what WOULD send, nothing goes to seafarers, nothing is logged.
+AUTO_SEND_DRY_RUN = "false"
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,
