@@ -778,3 +778,23 @@ weaker auto-match → human review). **154 tests green.**
 - For Rita to correct in the source files: the two 14-month fused legs (Resposo/Reflection, Cucio/Journey);
   Gibas seq-1 ship = "Azamara" (should be a real vessel); Feb/May travel ship-total vs crew-detail mismatch.
 - TODO: align the Dashboard compliance zone to active-only + fix its "open the Compliance tab" hint.
+
+---
+
+## Session — 2026-07-03: GSM Feedback Survey (requirements + mockups v2; AWAITING GREEN LIGHT)
+
+**What this is.** Replacing the Microsoft Forms "Crew Feedback Survey – Printer Specialist" with a CIMS-native survey at **cims.work/gsm**, auto-sent to the ship's Guest Services Manager before a specialist signs off. Miguel's instruction: mock up first, iterate, integrate ONLY after his explicit green light. Mockups v2 delivered (v1 + Miguel's feedback applied); NOT yet integrated.
+
+**Workflow (agreed):** invite email at T−7 before seafarer sign-off; ONE gentle reminder at T−4 if unanswered; suppress if crew signed off / already submitted / contract cancelled. Single-use signed token link (same pattern as /fb), no login for GSM. Sender `CIMS <cims@cims.work>` via cims-mailer. Rollout: Royal Caribbean first, then Celebrity Cruises and Azamara variants (Miguel to provide per-brand supervisor email lists — still pending).
+
+**Miguel's feedback 2026-07-03 (applied in v2):** (1) brand chip naming the customer — keep; (2) specialist display upgraded to a hero block (avatar initials + prominent name); (3) "date of review" field REMOVED — submission timestamp captured server-side; (4) "details wrong? let us know" → `mailto:rita.berenyi@dg3.com`; (5) logo = estate-standard green "D" mark + "DG3 CIMS" wordmark (same as auto-timing digest); (6) ALL emails signed "With appreciation, Rita Berenyi / Head of HR / DG3 Cruise Industry Managed Services" (not Miguel); (7) emails given more whitespace.
+
+**Money linkage (CRITICAL):** survey Q4 (1–5 overall) = Supervisor Evaluation input. It only PREFILLS `sEval` on the Score Card (≥3 → 15 pts; 1–2 → 0 + `eval_below_3` freeze). It must NOT write `bonus_outcome`. Rita/Miguel keep override + commit. Wiring it in is a money change → PR + Miguel's approval. A missing response must never zero a bonus — manual eval fallback as today. Multiple responses per contract: average Q4, raw responses in evidence panel. Keep fully separate from crew-intel (§10: intel is never-money; this IS a money input).
+
+**Survey content:** same 11 questions as the Forms original; ship + specialist prefilled from token (no 29-ship dropdown; Forms completion observed 8:18 → target <3 min). Only the rating required. Numeric anchor dropped from the Q4 example (Forms' "4 – Does a great job!" anchors responses at 4 — bias flagged to Miguel).
+
+**Responses also file a dated "GSM Review" card into crew history** (proposed tables: `gsm_survey_request`, `gsm_survey_response`, append-only).
+
+**Artifacts:** `docs/gsm-survey/` in this repo (requirements + survey + email mockups, v2). Backups in Miguel's Google Drive folder "Crew feedback GSM" (id 1L_VA5ppEICP1FCYNXxb6uiNVfC3VMbNp). Mockup brand switcher accents: RCI #1E6FD0 / Celebrity #33415C / Azamara #0E8C8C — CEL/AZ are placeholders, confirm at integration. Standard CIMS tokens (navy #1B3A5C, green #5FB946, Outfit/DM Sans).
+
+**Open items for Miguel:** (1) per-brand/per-ship GSM email list; (2) import historical MS Forms responses into crew history (recommended: yes, one-time CSV); (3) GSM-rotation edge case near sign-off; (4) GREEN LIGHT to integrate (`/gsm` route, D1 tables, scheduler on sign-off dates, cims-mailer templates, Score Card prefill via money PR).
