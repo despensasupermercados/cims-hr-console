@@ -52,6 +52,15 @@ export function installAutoSend(deps) {
     ).run();
   }
 
+  // Run audit: one row per gate-hour invocation (outcome: disabled | ran), so a
+  // dead cron and "nothing qualified" are distinguishable. Best-effort, never throws.
+  async function logRun(env, outcome, dry, sentN, alertsN) {
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS auto_send_run (run_at TEXT NOT NULL, outcome TEXT NOT NULL, dry INTEGER, sent INTEGER, alerts INTEGER)").run();
+      await env.DB.prepare("INSERT INTO auto_send_run (run_at,outcome,dry,sent,alerts) VALUES (?,?,?,?,?)").bind(new Date().toISOString(), outcome, dry == null ? null : (dry ? 1 : 0), sentN, alertsN).run();
+    } catch (e) {}
+  }
+
   // Legs due within [today, upper] - sourced from the LIVE Keyman board
   // (rotationSections via BOARD_LEGS): the same resolved sign-off dates the
   // board displays and billing uses. NOT keyman_contract3 (historical only).
@@ -168,12 +177,13 @@ export function installAutoSend(deps) {
     if (hourIn(GATE_TZ, now) !== GATE_HOUR) return { skipped: "not_gate_hour" };
     await ensureLog(env);
     var DRY = String(env.AUTO_SEND_DRY_RUN || "").toLowerCase() === "true";
-    { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) return { skipped: "disabled" }; }
+    { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) { await logRun(env, "disabled", null, null, null); return { skipped: "disabled" }; } }
     var today = todayStr(), t14 = plus(14), t7 = plus(7);
     var sent = [], alerts = [];
     await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
     await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts);
     await sendDigest(env, sent, alerts, { dry: DRY, date: today, t14: t14, t7: t7 });
+    await logRun(env, "ran", DRY, sent.length, alerts.length);
     return { ran: true, dry: DRY, sent: sent.length, alerts: alerts.length };
   }
 
