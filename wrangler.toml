@@ -2,6 +2,15 @@ name = "cims-hr-console"
 main = "src/worker.js"
 compatibility_date = "2025-05-01"
 
+# HOTFIX HOOK (2026-07-03): wrangler runs this before every bundle/deploy, no
+# matter how wrangler is invoked (Workers Builds, local, CI). Repairs the
+# autoToggleClick alert-string SyntaxError in src/worker.js and hard-verifies
+# every inline <script> parses. Idempotent no-op once the source is fixed --
+# then delete this [build] block, scripts/apply_hotfix.mjs, and the
+# "predeploy" entry in package.json.
+[build]
+command = "node scripts/apply_hotfix.mjs"
+
 # Weekly Seafarer Movements email recipient. The hourly cron (below) sends ONCE on
 # Monday 07:00 America/New_York to this address. Kept here (not the dashboard) so it
 # survives every CI deploy. Override per-environment if ever needed.
@@ -27,9 +36,6 @@ service = "cims-mailer"
 # DEPRECATED: the RESEND_API_KEY secret is no longer read by this worker — email
 # delivery moved to the MAILER binding above. Delete the secret after verifying
 # mail flows end-to-end:  wrangler secret delete RESEND_API_KEY
-
-# Built-in AI engine for auto-summarising crew-report emails (used when no ANTHROPIC_API_KEY
-# secret is set). No key or setup required; degrades gracefully to manual if unavailable.
 [ai]
 binding = "AI"
 
