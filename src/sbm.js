@@ -48,7 +48,8 @@ export function esc(s) {
 // re-derives the IDENTICAL token (same payload -> same HMAC) and the invite
 // link and reminder link are one and the same single-use link.
 export function sbmExpiryFor(signoffDate) {
-  return Math.floor(Date.parse(String(signoffDate) + "T23:59:59Z") / 1000);
+  const t = Date.parse(String(signoffDate) + "T23:59:59Z");
+  return Number.isFinite(t) ? Math.floor(t / 1000) : null; // malformed date -> null (caller skips), never exp:NaN
 }
 
 // Single-use signed token — SAME mechanism as /fb: HMAC payload signed with
@@ -99,6 +100,16 @@ export function sbmPickRecipient(get, ship, brand) {
   if (byShip) return byShip;
   const byBrand = brand ? get("recipient:" + brand) : null;
   return byBrand || null;
+}
+
+// Humans seed sbm_config keys with whatever ship name is at hand: the board
+// name ("Navigator of the Seas"), the canonical SHORT name the live board
+// emits ("Navigator"), sometimes an "MV " prefix. sbmNormShip folds all of
+// these to one form so lookups can tolerate any of them; stored keys are never
+// rewritten (lookup-side tolerance only -- accepted key forms documented in
+// migrations/0013_sbm_review.sql).
+export function sbmNormShip(s) {
+  return String(s == null ? "" : s).trim().replace(/^mv\s+/i, "").replace(/\s+of\s+the\s+seas\s*$/i, "").replace(/\s+/g, " ").toLowerCase();
 }
 
 /* ------------------------- suppression matrix --------------------------- */
@@ -474,6 +485,7 @@ export function sbmClosedHtml(kind) {
 //   ORIGIN                                     public origin for links
 //   NOTIFY_TO / NOTIFY_CC                      internal notification (defaults below)
 //   today() -> 'YYYY-MM-DD'                    injectable clock for tests
+//   GATE_TZ / GATE_HOUR                        hour gate (default 08 Europe/Budapest; null = no gate, tests)
 
 export function installSbm(deps) {
   const sendViaMailer = deps.sendViaMailer;
@@ -482,6 +494,12 @@ export function installSbm(deps) {
   const NOTIFY_TO = deps.NOTIFY_TO || ["rita.berenyi@dg3.com"];
   const NOTIFY_CC = deps.NOTIFY_CC || ["miguel.sanmartin@dg3.com"];
   const todayStr = deps.today || (() => new Date().toISOString().slice(0, 10));
+  const GATE_TZ = deps.GATE_TZ || "Europe/Budapest";                          // auto_send's hour gate, reused
+  const GATE_HOUR = deps.GATE_HOUR === undefined ? "08" : deps.GATE_HOUR;     // null disables the gate (tests)
+  function hourIn(tz, now) {
+    return new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).formatToParts(now)
+      .reduce(function (a, p) { if (p.type === "hour") a = p.value; return a; }, "");
+  }
 
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
   const html = (body, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -489,7 +507,7 @@ export function installSbm(deps) {
   // Belt-and-suspenders alongside migrations/0013_sbm_review.sql (ensureFb pattern).
   async function ensureSbm(env) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_review_request (id TEXT PRIMARY KEY, crew_id TEXT, agency_id TEXT NOT NULL, contract_signon TEXT, contract_signoff TEXT NOT NULL, ship TEXT, brand TEXT, recipient_email TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, sent_at TEXT, reminder_at TEXT, status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent','reminded','submitted','expired','suppressed')), created_at TEXT NOT NULL, UNIQUE (agency_id, contract_signoff))").run();
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_review_response (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), q_business TEXT, q_guests TEXT, q_grow TEXT, q_integrity TEXT, q_teams TEXT, q_energy TEXT, q_final TEXT, submitted_at TEXT NOT NULL, ip TEXT, ua TEXT)").run();
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_review_response (id TEXT PRIMARY KEY, request_id TEXT NOT NULL REFERENCES sbm_review_request(id), rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), q_business TEXT, q_guests TEXT, q_grow TEXT, q_integrity TEXT, q_teams TEXT, q_energy TEXT, q_final TEXT, submitted_at TEXT NOT NULL, ip TEXT, ua TEXT)").run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_config (key TEXT PRIMARY KEY, value TEXT)").run();
   }
 
@@ -499,6 +517,23 @@ export function installSbm(deps) {
     return v !== "" ? v : null;
   }
   function splitList(v) { return String(v || "").split(/[,;\s]+/).map(s => s.trim()).filter(s => s.indexOf("@") > 0); }
+
+  // S1: tolerant '<prefix>:<ship>' config lookup -- the exact key first, then
+  // the sbmNormShip-folded name against every stored '<prefix>:...' key.
+  async function cfgGetShip(env, prefix, ship) {
+    if (!ship) return null;
+    const exact = await cfgGet(env, prefix + ":" + ship);
+    if (exact) return exact;
+    const want = sbmNormShip(ship);
+    if (!want) return null;
+    const rows = (await env.DB.prepare("SELECT key, value FROM sbm_config WHERE key LIKE ?").bind(prefix + ":%").all()).results || [];
+    for (const r of rows) {
+      if (sbmNormShip(String(r.key).slice(prefix.length + 1)) !== want) continue;
+      const v = r.value != null ? String(r.value).trim() : "";
+      if (v !== "") return v;
+    }
+    return null;
+  }
 
   async function crewByAgencyId(env, sc) {
     return env.DB.prepare("SELECT id, first_name, middle_name, last_name FROM crew WHERE agency_id=?").bind(sc).first();
@@ -566,7 +601,7 @@ export function installSbm(deps) {
       const internal = sbmInternalEmail(ctx);
       await sendViaMailer(env, { templateId: "hr.sbm.notify.v1", to: NOTIFY_TO, cc: NOTIFY_CC.concat(teamList),
         subject: internal.subject, html: internal.html, critical: true });
-      const shipMail = req.ship ? await cfgGet(env, "shipmail:" + req.ship) : null;
+      const shipMail = await cfgGetShip(env, "shipmail", req.ship); // exact key, then sbmNormShip key (S1)
       if (shipMail) {
         const crewCopy = sbmCrewEmail(ctx);
         await sendViaMailer(env, { templateId: "hr.sbm.crewcopy.v1", to: [shipMail],
@@ -580,7 +615,11 @@ export function installSbm(deps) {
   // T-7: create request + send invite. T-4: remind once if still 'sent'.
   // Idempotent: UNIQUE(agency_id, contract_signoff) + status transitions make
   // a second run the same day a no-op. Suppression matrix per spec §4.
-  async function sbmDailySweep(env) {
+  async function sbmDailySweep(env, event) {
+    // S4 -- hour gate (auto_send rule): the cron ticks hourly; act once a day
+    // at 08:00 Europe/Budapest. Status transitions keep the run idempotent.
+    const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
+    if (GATE_HOUR != null && hourIn(GATE_TZ, now) !== GATE_HOUR) return { skipped: "not_gate_hour" };
     await ensureSbm(env);
     const today = todayStr();
     const t7 = sbmPlusDays(today, 7), t4 = sbmPlusDays(today, 4);
@@ -611,21 +650,29 @@ export function installSbm(deps) {
       const dup = await env.DB.prepare("SELECT id FROM sbm_review_request WHERE agency_id=? AND contract_signoff=?").bind(leg.sc, leg.off).first();
       if (dup) continue;                                        // already handled (any status) -> sweep is idempotent
       const brand = sbmBrandForShip(leg.ship, deps.VESSEL_REF);
-      const byShip = leg.ship ? await cfgGet(env, "recipient:" + leg.ship) : null;
+      const byShip = await cfgGetShip(env, "recipient", leg.ship); // exact key, then sbmNormShip key (S1)
       const byBrand = brand ? await cfgGet(env, "recipient:" + brand) : null;
       const recipient = byShip || byBrand || null;              // sbmPickRecipient rule, pre-fetched
       if (!recipient) {                                         // skip + log, never error (list pending from Miguel)
         out.skipped.push({ sc: leg.sc, ship: leg.ship, reason: "no_recipient_configured" });
         try { console.log("sbm_sweep: no recipient configured for", leg.ship, "/", brand, "- skipped", leg.sc); } catch {}
+        await logActivity(env, null, "sbm_no_recipient", leg.sc + " " + (leg.ship || "?") + " / " + (brand || "?"));
         continue;
       }
+      const exp = sbmExpiryFor(leg.off);                        // N6: malformed date -> skip leg, never exp:NaN
+      if (exp == null) { out.skipped.push({ sc: leg.sc, reason: "bad_signoff_date" }); continue; }
       const rid = "sbmr_" + crypto.randomUUID();
-      const token = await sbmToken(env, rid, sbmExpiryFor(leg.off));
+      const token = await sbmToken(env, rid, exp);
       const link = ORIGIN + "/sbm?t=" + token;                  // token is base64url — URL-safe as-is
       const cn = fullName(cr, leg.name);
       const mail = sbmInviteEmail({ name: cn, firstName: firstName(cr, cn), ship: leg.ship, off: leg.off, link });
       const res = await sendViaMailer(env, { templateId: "hr.sbm.invite.v1", to: [recipient], subject: mail.subject, html: mail.html, critical: false });
-      if (!res || !res.ok) { out.skipped.push({ sc: leg.sc, reason: "send_failed" }); continue; } // row only on success (auto_send rule)
+      if (!res || !res.ok) {                                    // row only on success (auto_send rule)
+        out.skipped.push({ sc: leg.sc, reason: "send_failed" });
+        try { console.error("sbm_sweep: invite send failed", leg.sc, leg.off); } catch {}
+        await logActivity(env, null, "sbm_invite_send_failed", leg.sc + " " + leg.off);
+        continue;
+      }
       const now = new Date().toISOString();
       await env.DB.prepare("INSERT INTO sbm_review_request (id,crew_id,agency_id,contract_signon,contract_signoff,ship,brand,recipient_email,token_hash,sent_at,reminder_at,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
         .bind(rid, (cr && cr.id) || null, leg.sc, leg.signOnDate, leg.off, leg.ship, brand, recipient, await sha256hex(token), now, null, "sent", now).run();
@@ -651,11 +698,17 @@ export function installSbm(deps) {
       const cn = fullName(cr, req.agency_id);
       const mail = sbmReminderEmail({ name: cn, firstName: firstName(cr, cn), ship: req.ship, off: req.contract_signoff, link: ORIGIN + "/sbm?t=" + token });
       const res = await sendViaMailer(env, { templateId: "hr.sbm.reminder.v1", to: [req.recipient_email], subject: mail.subject, html: mail.html, critical: false });
-      if (!res || !res.ok) { out.skipped.push({ sc: req.agency_id, reason: "reminder_send_failed" }); continue; }
+      if (!res || !res.ok) {
+        out.skipped.push({ sc: req.agency_id, reason: "reminder_send_failed" });
+        try { console.error("sbm_sweep: reminder send failed", req.agency_id, req.contract_signoff); } catch {}
+        await logActivity(env, null, "sbm_reminder_send_failed", req.agency_id + " " + req.contract_signoff);
+        continue;
+      }
       await env.DB.prepare("UPDATE sbm_review_request SET status='reminded', reminder_at=? WHERE id=?").bind(new Date().toISOString(), req.id).run();
       out.reminded++;
       await logActivity(env, null, "sbm_reminder", req.agency_id + " " + req.contract_signoff);
     }
+    try { console.log("sbm_sweep " + today + ": invited=" + out.invited + " reminded=" + out.reminded + " suppressed=" + out.suppressed + " expired=" + out.expired + " skipped=" + out.skipped.length); } catch {}
     return out;
   }
 
@@ -665,7 +718,10 @@ export function installSbm(deps) {
   async function sbmCrewCards(env, crewId) {
     await ensureSbm(env);
     const id = String(crewId || "").trim();
-    if (!id) return { ok: false, error: "missing_id", cards: [] };
+    // N7: same JSON shape as apiFeedbackCrew's 404 ({ error: "not_found" }).
+    // The worker.js caller wraps this in a 200 -- the HTTP 404 status itself
+    // is deferred to a worker.js change (worker.js is frozen in this PR).
+    if (!id) return { ok: false, error: "not_found", cards: [] };
     const rows = (await env.DB.prepare(
       "SELECT q.ship AS ship, q.brand AS brand, q.contract_signon AS contract_signon, q.contract_signoff AS contract_signoff, r.rating AS rating, r.q_business AS q_business, r.q_guests AS q_guests, r.q_grow AS q_grow, r.q_integrity AS q_integrity, r.q_teams AS q_teams, r.q_energy AS q_energy, r.q_final AS q_final, r.submitted_at AS submitted_at FROM sbm_review_response r JOIN sbm_review_request q ON q.id = r.request_id WHERE q.agency_id=? OR q.crew_id=? ORDER BY r.submitted_at DESC"
     ).bind(id, id).all()).results || [];

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { signToken } from "../src/auth.js";
 import { VESSEL_REF } from "../src/vessel_ref.js";
 import {
-  installSbm, sbmToken, sbmVerify, sbmExpiryFor, sbmBrandForShip, sbmPickRecipient,
+  installSbm, sbmToken, sbmVerify, sbmExpiryFor, sbmBrandForShip, sbmPickRecipient, sbmNormShip,
   sbmSuppressReason, sbmValidRating, sbmLegsFromSections, sbmPlusDays, sbmDateLong,
   sbmInviteEmail, sbmReminderEmail, sbmInternalEmail, sbmCrewEmail, sbmSurveyHtml,
 } from "../src/sbm.js";
@@ -76,6 +76,10 @@ function fakeDB(state) {
         throw new Error("fakeDB first: unhandled SQL: " + S);
       };
       s.all = async () => {
+        if (S.includes("FROM sbm_config WHERE key LIKE")) {
+          const pre = String(s.args[0]).replace(/%$/, "");
+          return { results: Object.keys(state.config).filter(k => k.startsWith(pre)).map(k => ({ key: k, value: state.config[k] })) };
+        }
         if (S.includes("FROM crew_override")) return { results: state.overrides.slice() };
         if (S.includes("redacted FROM crew")) return { results: state.crew.slice() };
         if (S.includes("FROM sbm_review_request WHERE status='sent'")) return { results: state.requests.filter(r => r.status === "sent").map(r => ({ ...r })) };
@@ -112,17 +116,20 @@ function rig(opts = {}) {
     requests: [], responses: [],
   };
   const outbox = [];
+  const activity = [];
+  const flags = { mailFail: !!opts.mailFail };
   const env = { SESSION_SECRET: SECRET, DB: fakeDB(state) };
   const deps = {
-    sendViaMailer: async (_env, envelope) => { outbox.push(envelope); return opts.mailFail ? { ok: false, error: "down" } : { ok: true }; },
-    logActivity: async () => {},
+    sendViaMailer: async (_env, envelope) => { outbox.push(envelope); return flags.mailFail ? { ok: false, error: "down" } : { ok: true }; },
+    logActivity: async (_env, _email, action, detail) => { activity.push({ action, detail }); },
     SECTIONS: async () => ({ sections: [{ ship: "board", crew: state.board }] }),
     VESSEL_REF,
     ORIGIN: "https://cims.test",
     today: () => state.today,
+    GATE_HOUR: "GATE_HOUR" in opts ? opts.GATE_HOUR : null, // un-gated in tests unless a test opts in (S4)
   };
   const sbm = installSbm(deps);
-  return { state, env, deps, sbm, outbox };
+  return { state, env, deps, sbm, outbox, activity, flags };
 }
 function linkToken(html) {
   const m = /\/sbm\?t=([A-Za-z0-9_\-.]+)/.exec(html);
@@ -466,4 +473,87 @@ test("legs adapter + date helpers", () => {
   assert.equal(sbmPlusDays("2026-07-03", 7), "2026-07-10");
   assert.equal(sbmPlusDays("2026-12-29", 4), "2027-01-02");
   assert.equal(sbmDateLong("2026-07-10"), "10 Jul 2026");
+});
+
+/* ------------------------- adversarial-review fixes ---------------------- */
+
+test("S1: sbmNormShip folds board names, short names and MV prefixes to one key", () => {
+  assert.equal(sbmNormShip("Navigator of the Seas"), "navigator");
+  assert.equal(sbmNormShip("Navigator"), "navigator");
+  assert.equal(sbmNormShip("MV Navigator of the Seas"), "navigator");
+  assert.equal(sbmNormShip("  Navigator   of the Seas  "), "navigator");
+  assert.equal(sbmNormShip(""), "");
+});
+
+test("S1: config seeded with the board name still reaches a SHORT-named board leg", async () => {
+  const r = rig({
+    board: [{ agency_id: "SC-0038865", name: "Maria Murillo", ship: "Navigator", signOn: "2026-01-14", signOff: T7_OFF }],
+    config: { "recipient:Navigator of the Seas": "gsm.navigator@rccl.example" },
+  });
+  const res = await r.sbm.sbmDailySweep(r.env);
+  assert.equal(res.invited, 1);
+  assert.equal(r.state.requests[0].recipient_email, "gsm.navigator@rccl.example");
+  assert.deepEqual(r.outbox[0].to, ["gsm.navigator@rccl.example"]);
+});
+
+test("S1: short-key seeding still works, for recipient and shipmail alike", async () => {
+  const r = rig({
+    board: [{ agency_id: "SC-0038865", name: "Maria Murillo", ship: "Navigator", signOn: "2026-01-14", signOff: T7_OFF }],
+    config: { "recipient:Navigator": "gsm.short@rccl.example", "shipmail:Navigator of the Seas": "printer.navigator@ship.example" },
+  });
+  const res = await r.sbm.sbmDailySweep(r.env);
+  assert.equal(res.invited, 1);
+  assert.equal(r.state.requests[0].recipient_email, "gsm.short@rccl.example");
+  // shipmail seeded with the board name is found for the SHORT req.ship too
+  await r.sbm.sbmSubmit(postSubmit({ t: linkToken(r.outbox[0].html), rating: 5 }), r.env);
+  const crewCopy = r.outbox.find(e => e.templateId === "hr.sbm.crewcopy.v1");
+  assert.deepEqual(crewCopy.to, ["printer.navigator@ship.example"]);
+});
+
+test("S3: send failures and missing recipients reach the activity log", async () => {
+  let r = rig({ config: {} });                         // no recipient configured
+  await r.sbm.sbmDailySweep(r.env);
+  assert.ok(r.activity.some(a => a.action === "sbm_no_recipient" && a.detail.includes("Navigator of the Seas")));
+  r = rig({ mailFail: true });                         // invite send failure
+  await r.sbm.sbmDailySweep(r.env);
+  assert.ok(r.activity.some(a => a.action === "sbm_invite_send_failed" && a.detail.includes("SC-0038865")));
+  r = rig();                                           // reminder send failure
+  await r.sbm.sbmDailySweep(r.env);                    // T-7 invite goes out fine
+  r.flags.mailFail = true;
+  r.state.today = "2026-07-06";                        // T-4
+  const res = await r.sbm.sbmDailySweep(r.env);
+  assert.equal(res.skipped[0].reason, "reminder_send_failed");
+  assert.ok(r.activity.some(a => a.action === "sbm_reminder_send_failed" && a.detail.includes("SC-0038865")));
+  assert.equal(r.state.requests[0].status, "sent");    // still eligible for a clean retry
+});
+
+test("S4: sweep acts only at 08:00 Europe/Budapest (auto_send's gate, default on)", async () => {
+  const r = rig({ GATE_HOUR: undefined });             // undefined -> module default "08"
+  // 12:00 UTC in July = 14:00 Budapest (CEST) -> gated out, nothing happens
+  const off = await r.sbm.sbmDailySweep(r.env, { scheduledTime: Date.parse(TODAY + "T12:00:00Z") });
+  assert.equal(off.skipped, "not_gate_hour");
+  assert.equal(r.outbox.length, 0);
+  assert.equal(r.state.requests.length, 0);
+  // 06:00 UTC in July = 08:00 Budapest -> runs and invites
+  const on = await r.sbm.sbmDailySweep(r.env, { scheduledTime: Date.parse(TODAY + "T06:00:00Z") });
+  assert.equal(on.invited, 1);
+  assert.equal(r.outbox.length, 1);
+});
+
+test("N6: sbmExpiryFor returns null for malformed dates -- never exp:NaN", () => {
+  assert.equal(typeof sbmExpiryFor("2026-07-10"), "number");
+  assert.equal(sbmExpiryFor("garbage"), null);
+  assert.equal(sbmExpiryFor(""), null);
+  assert.equal(sbmExpiryFor(null), null);
+  assert.equal(sbmExpiryFor(undefined), null);
+});
+
+test("N7: sbmCrewCards without an id returns apiFeedbackCrew's not_found shape", async () => {
+  const r = rig();
+  for (const bad of ["", "   ", null, undefined]) {
+    const res = await r.sbm.sbmCrewCards(r.env, bad);
+    assert.equal(res.ok, false);
+    assert.equal(res.error, "not_found");
+    assert.deepEqual(res.cards, []);
+  }
 });

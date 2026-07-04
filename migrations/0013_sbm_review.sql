@@ -56,6 +56,12 @@ CREATE INDEX IF NOT EXISTS idx_sbm_response_request ON sbm_review_response(reque
 --   recipient:<brand>  brand-level fallback recipient
 --   team_list          comma-separated cc list for the internal notification
 --   shipmail:<ship>    specialist's working-ship mailbox (crew-facing copy)
+-- Accepted <ship> key forms (S1): the board name ('Navigator of the Seas'),
+-- the canonical short name the live board emits ('Navigator'), or an
+-- 'MV '-prefixed variant. Lookups try the exact key first, then a normalized
+-- form (lowercased, leading 'MV ' and trailing ' of the Seas' stripped,
+-- whitespace collapsed) -- see sbmNormShip in src/sbm.js. Keys are stored
+-- exactly as seeded; normalization is lookup-side only.
 -- No rows are seeded here: the per-ship list is still pending from Miguel
 -- (spec #11.1). With no recipient configured the sweep skips and logs -- it
 -- never errors and never guesses an address.
