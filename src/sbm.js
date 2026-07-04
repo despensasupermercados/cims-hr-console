@@ -486,6 +486,7 @@ export function sbmClosedHtml(kind) {
 //   NOTIFY_TO / NOTIFY_CC                      internal notification (defaults below)
 //   today() -> 'YYYY-MM-DD'                    injectable clock for tests
 //   GATE_TZ / GATE_HOUR                        hour gate (default 08 Europe/Budapest; null = no gate, tests)
+//   isEnabled(env) -> bool                     master switch override (default: app_setting 'sbm_enabled')
 
 export function installSbm(deps) {
   const sendViaMailer = deps.sendViaMailer;
@@ -496,6 +497,15 @@ export function installSbm(deps) {
   const todayStr = deps.today || (() => new Date().toISOString().slice(0, 10));
   const GATE_TZ = deps.GATE_TZ || "Europe/Budapest";                          // auto_send's hour gate, reused
   const GATE_HOUR = deps.GATE_HOUR === undefined ? "08" : deps.GATE_HOUR;     // null disables the gate (tests)
+  // Master ON/OFF switch (Rita's toggle on the Keyman page). SAME mechanism as
+  // auto_send_enabled: app_setting key 'sbm_enabled', flipped via /api/sbmtoggle.
+  // Absent row / anything but "true" = OFF, so a fresh deploy ships disarmed.
+  const isEnabled = deps.isEnabled || (async function (env) {
+    try {
+      const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='sbm_enabled'").first();
+      return !!(r && r.v === "true");
+    } catch (e) { return false; }
+  });
   function hourIn(tz, now) {
     return new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).formatToParts(now)
       .reduce(function (a, p) { if (p.type === "hour") a = p.value; return a; }, "");
@@ -616,6 +626,10 @@ export function installSbm(deps) {
   // Idempotent: UNIQUE(agency_id, contract_signoff) + status transitions make
   // a second run the same day a no-op. Suppression matrix per spec §4.
   async function sbmDailySweep(env, event) {
+    // Master switch FIRST -- checked BEFORE the hour gate: while shipboard
+    // reviews are OFF the sweep must not touch the schedule, the DB or the
+    // mailer at any hour (mirrors auto_send's `disabled` short-circuit).
+    if (!(await isEnabled(env))) return { skipped: "disabled" };
     // S4 -- hour gate (auto_send rule): the cron ticks hourly; act once a day
     // at 08:00 Europe/Budapest. Status transitions keep the run idempotent.
     const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
