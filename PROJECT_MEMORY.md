@@ -810,3 +810,13 @@ Miguel supplied "Email addresses - Fleet.xlsx". **The addresses themselves are s
 **Discovery:** the same workbook's 16 monthly sheets (Jan 2025–Apr 2026) contain per-ship crew performance evaluations (Exceed/Meets/Needs-Improvement per crew member) — a untapped historical performance dataset, separate from the 37 Forms survey responses. Parked for Miguel.
 
 **ACTIVATION STATE: sbm_config still UNSEEDED — sweep dormant.** Seeding = go-live: at the next 08:00 Europe/Budapest sweep, invites fire for any specialist with sign-off exactly T−7. Requires Miguel's explicit go. Still pending besides the go: `team_list` (internal distribution for notification ③), the 5 unresolved history-match rows, Phase B money PR.
+
+### SBM go-live state (2026-07-04, end of day) — ARMED, SWITCH OFF, RITA CONTROLS
+
+**PR #9 MERGED (342cdec) and deploy VERIFIED** (live worker code contains sbmtoggle/installSbm; worker modified 20:54Z): `sbm_enabled` master switch in `app_setting` (mirrors auto-timing exactly — same storage/auth/UI pattern); route `/api/sbmtoggle`; **"Shipboard reviews: ON/OFF" button next to the auto-timing button on the Keyman page** (confirm-on-arm). `sbmDailySweep` no-ops while OFF, checked before the 08:00 Europe/Budapest gate. Suite 220/220. worker.js wired via GitHub web editor again (4 pure insertions, branch blob matched predicted `1e0c0bb7…` exactly; insertion spec backed up in Drive as sbm-toggle-worker-spec2.json, id 1VVWgAmivuc6pRW-LQRD-xpOpiEI9nn1S).
+
+**Production D1 seeded and verified (SELECT-confirmed):** `sbm_config` has 48 `recipient:` + 48 `shipmail:` rows (keys are "MV <NAME>" full board names; sbmNormShip lookup bridges to sections' short names); `app_setting.sbm_enabled = 'false'`; `sbm_review_request` count 0 (nothing ever sent). **Rationale (Miguel):** deploy everything ready but OFF — he wants Keyman dates validated first; Rita flips the console button when ready. SEQUENCING RULE FOR FUTURE SESSIONS: never seed recipients on a deploy that lacks the master switch; switch first, seed second.
+
+**Legend of the Seas (launched Jul 2026):** already present in VESSEL_REF, SHIP_LIST, shipname canonicalization, ship_history, parts-portal ship lists + port schedule; migration `0014_legend_of_the_seas.sql` merged for older DBs; prod `vessel` row verified ('ves_legend','Legend','Royal Caribbean'). Fleet roster covers it (GSM + specialist mailbox).
+
+**Remaining open:** `team_list` for internal notification ③ (still pending from Miguel); 5 history-match rows awaiting Miguel's confirmation, then the Forms-import PR; Phase B money PR (sEval default-3 / auto / manual per spec §6); sbm_config console editor (G6); N1 outbox fallback for notification ③; Celebrity/Azamara accent confirmation.
