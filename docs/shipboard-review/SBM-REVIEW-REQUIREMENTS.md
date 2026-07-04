@@ -11,6 +11,8 @@ The term **"GSM" is retired everywhere** — templates, UI, code, docs. The prog
 
 Public route: **cims.work/sbm** (token-gated, single use).
 
+**Onboard roles (Miguel, 2026-07-04):** the *shipboard manager* (survey recipient/supervisor) is the **GSM** (Guest Services Manager) on all Royal Caribbean ships, the **BOM** (Business Operations Manager) on all Azamara ships, and the **RDM** (Revenue Marketing Director) for Celebrity Cruises seafarers. Separately, the **Crew Admin Manager** and **Crew Admin** work onboard handling seafarer sign-on/sign-off logistics — they are NOT the review recipients.
+
 ## 2. Purpose
 
 Replace the Microsoft Forms "Crew Feedback Survey – Printer Specialist" with a CIMS-native review, auto-triggered from the HR console around each specialist's sign-off. Three outcomes:
@@ -67,7 +69,9 @@ The Score Card's Supervisor Evaluation field carries a **value + source**, one o
 |---|---|---|
 | `auto` | From SBM review(s) for this contract | Value shown automatically, badge "from shipboard review", link to the response(s) |
 | `manual` | Entered or overridden by a money user | Value + badge "manual — {user}, {date}", reason on hover |
-| `none` | No review received, nothing entered | Empty — Rita enters manually, as today |
+| `default` | No review received | **Field defaults to 3** (neutral — full 15 pts, no gate). Badge "default" |
+
+**Default rule (Miguel, 2026-07-04):** the Supervisor Evaluation is never empty. It starts at **3** for every contract. A submitted review replaces the default with the survey rating (source `auto`). Rita/Miguel can always override manually with a reason (source `manual`) — manual wins over everything and is never overwritten by a later survey. Whatever value the field holds at Commit is what feeds the bonus.
 
 ### 6.2 Precedence — no ambiguity
 
