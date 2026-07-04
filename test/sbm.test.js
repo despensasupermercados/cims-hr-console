@@ -21,6 +21,7 @@ const SECRET = "sbm-test-secret";
 // anything else throws loudly so a drifted query fails the suite instead of
 // silently returning nothing. UNIQUE constraints are simulated like D1's.
 function fakeDB(state) {
+  state.settings = state.settings || {};
   state.requests = state.requests || [];
   state.responses = state.responses || [];
   state.config = state.config || {};
@@ -65,6 +66,10 @@ function fakeDB(state) {
         throw new Error("fakeDB run: unhandled SQL: " + S);
       };
       s.first = async () => {
+        if (S.includes("FROM app_setting WHERE k='sbm_enabled'")) {
+          const v = state.settings.sbm_enabled;
+          return v == null ? null : { v: v };
+        }
         if (S.includes("FROM sbm_config")) { const v = state.config[s.args[0]]; return v == null ? null : { value: v }; }
         if (S.includes("FROM crew WHERE agency_id=?")) {
           const c = state.crew.find(x => x.agency_id === s.args[0]);
@@ -112,6 +117,9 @@ function rig(opts = {}) {
     crew: opts.crew || [{ agency_id: "SC-0038865", id: "u-maria", first_name: "Maria", middle_name: "Katrina Rica", last_name: "Murillo", status: "On board", redacted: 0 }],
     overrides: opts.overrides || [],
     config: opts.config || { "recipient:Navigator of the Seas": "gsm.navigator@rccl.example" },
+    // Master switch ON for the suite (mirrors prod once Rita flips the toggle);
+    // the ON/OFF tests below pass their own `settings` to exercise default-OFF.
+    settings: "settings" in opts ? opts.settings : { sbm_enabled: "true" },
     board: opts.board || [{ agency_id: "SC-0038865", name: "Maria Murillo", ship: "Navigator of the Seas", signOn: "2026-01-14", signOff: T7_OFF }],
     requests: [], responses: [],
   };
@@ -556,4 +564,43 @@ test("N7: sbmCrewCards without an id returns apiFeedbackCrew's not_found shape",
     assert.equal(res.error, "not_found");
     assert.deepEqual(res.cards, []);
   }
+});
+
+/* --------------------------- master ON/OFF switch ------------------------ */
+
+test("master switch OFF by default: absent flag -> sweep does nothing, even at the gate hour", async () => {
+  const r = rig({ settings: {} });                     // no app_setting row seeded
+  const res = await r.sbm.sbmDailySweep(r.env);
+  assert.deepEqual(res, { skipped: "disabled" });
+  assert.equal(r.outbox.length, 0);
+  assert.equal(r.state.requests.length, 0);
+  // checked BEFORE the hour gate: 06:00 UTC in July = 08:00 Budapest would pass
+  // the S4 gate, but the switch still wins
+  const g = rig({ settings: {}, GATE_HOUR: undefined });
+  const res2 = await g.sbm.sbmDailySweep(g.env, { scheduledTime: Date.parse(TODAY + "T06:00:00Z") });
+  assert.deepEqual(res2, { skipped: "disabled" });
+  assert.equal(g.outbox.length, 0);
+  assert.equal(g.state.requests.length, 0);
+  // an explicit "false" row is just as OFF
+  const f = rig({ settings: { sbm_enabled: "false" } });
+  assert.deepEqual(await f.sbm.sbmDailySweep(f.env), { skipped: "disabled" });
+});
+
+test("master switch: flipping ON arms the sweep, flipping OFF disarms it again", async () => {
+  const r = rig({ settings: {} });
+  assert.deepEqual(await r.sbm.sbmDailySweep(r.env), { skipped: "disabled" });
+  r.state.settings.sbm_enabled = "true";               // Rita flips the toggle ON
+  const on = await r.sbm.sbmDailySweep(r.env);
+  assert.equal(on.invited, 1);
+  assert.equal(r.outbox.length, 1);
+  r.state.settings.sbm_enabled = "false";              // and back OFF
+  assert.deepEqual(await r.sbm.sbmDailySweep(r.env), { skipped: "disabled" });
+  assert.equal(r.outbox.length, 1);                    // nothing more went out
+});
+
+test("master switch: deps.isEnabled override is honoured (test seam)", async () => {
+  const r = rig({ settings: {} });                     // flag absent...
+  const sbm2 = installSbm({ ...r.deps, isEnabled: async () => true }); // ...but override says ON
+  const res = await sbm2.sbmDailySweep(r.env);
+  assert.equal(res.invited, 1);
 });
