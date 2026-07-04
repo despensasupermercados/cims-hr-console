@@ -30,17 +30,17 @@ Invariants respected (CLAUDE.md §11):
 | 4 | `async scheduled(event, env, ctx)` | `grep -n '_runAutoSend(env, event)' src/worker.js` | guarded `_sbm.sbmDailySweep(env)` |
 | 5 | crew tab, below Contract history (inside the APP_HTML template literal) | `grep -n 'No Keyman contract history on file' src/worker.js` | "Manager Feedback" section + `loadSbmCards()` renderer |
 
-Hunk 5 lives inside the APP_HTML **template literal**: client-side escapes are
-written `…`-style (consumed at template evaluation, so the browser gets
-the real character inside a string literal), there are no
-backticks or `${` in the inserted client code, and `test/client_script_syntax.test.js`
-parses the shipped inline script — it is green with this diff.
+Hunk 5 lives inside the APP_HTML **template literal**: the inserted client
+code uses literal UTF-8 characters inside single-quoted strings and contains
+no backticks and no `${`, so the template evaluates it unchanged and
+`test/client_script_syntax.test.js` (which parses the shipped inline script)
+is green with this diff.
 
 ## The exact unified diff (3 lines of context per hunk)
 
 ```diff
 diff --git a/src/worker.js b/src/worker.js
-index 359cec3..c53f0de 100644
+index 359cec3..8f75f42 100644
 --- a/src/worker.js
 +++ b/src/worker.js
 @@ -27,9 +27,14 @@ import { runMaria, rankCrewMatches } from "./maria.js";
