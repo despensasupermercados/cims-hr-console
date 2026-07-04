@@ -27,9 +27,14 @@ import { runMaria, rankCrewMatches } from "./maria.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
+import { installSbm } from "./sbm.js";
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
+// Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
+// crew cards. Same install pattern as auto-send. NO money code here -- the
+// Score Card / sEval integration is a separate human-approved Phase B PR.
+const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections, VESSEL_REF, ORIGIN: "https://cims.work" });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 async function autoSendBoardLegs(env) {
@@ -137,6 +142,10 @@ export default {
       if (p === "/api/feedback/form")    return apiFeedbackForm(env, url);
       if (p === "/api/feedback/submit" && request.method === "POST") return apiFeedbackSubmit(request, env);
 
+      // ---- public shipboard management review (token-authenticated, no login) ----
+      if (p === "/sbm")                  return _sbm.sbmFormPage(request, env, url);
+      if (p === "/api/sbm/submit" && request.method === "POST") return _sbm.sbmSubmit(request, env);
+
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
       { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer })(p, request, env, url, session); if (_a) return _a; }
@@ -175,6 +184,7 @@ export default {
         if (p === "/api/feedback/crew")  return apiFeedbackCrew(env, url);
         if (p === "/api/feedback/board") return apiFeedbackBoard(env);
         if (p === "/api/feedback/score" && request.method === "POST") return apiFeedbackScore(request, env, session);
+        if (p === "/api/sbm/crew")       return json(await _sbm.sbmCrewCards(env, url.searchParams.get("id")));
         if (p === "/api/score/queue")    return apiScoreQueue(env, url);
         if (p === "/api/intel/inbox")    return apiIntelInbox(env);
         if (p === "/api/intel/ingest" && request.method === "POST") return apiIntelIngest(request, env, session);
@@ -220,6 +230,8 @@ export default {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event));
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
+    // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
   }
 };
 
@@ -3230,9 +3242,28 @@ async function openCrew(id){
   if(!ct.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No Keyman contract history on file.</p>';
   else h+='<table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Sign on</th><th>Sign off</th><th>Basis</th></tr></thead><tbody>'
     +ct.map(function(x){var off=x.act||x.proj||'—';var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td>'+x.on+'</td><td>'+off+'</td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
+  h+='<div class=zlabel style="margin-top:16px">Manager Feedback</div><div id=sbmcards><p class=muted style="text-align:left;padding:8px 2px">Loading…</p></div>';
   h+='</div>';
   $('#view').innerHTML=h;
   document.querySelectorAll('#view .rf').forEach(function(b){b.onclick=function(){reqFeedback(b.getAttribute('data-role'));};});
+  loadSbmCards(c.agency_id);
+}
+// Shipboard Management Review responses -> permanent "Manager Feedback" cards (below Contract history).
+async function loadSbmCards(id){
+  var el=document.getElementById('sbmcards'); if(!el)return;
+  function ev(v){return String(v==null?'':v).replace(/[&<>"]/g,function(ch){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch];});}
+  try{
+    var r=await (await fetch('/api/sbm/crew?id='+encodeURIComponent(id))).json();
+    var cards=(r&&r.cards)||[];
+    if(!cards.length){el.innerHTML='<p class=muted style="text-align:left;padding:8px 2px">No shipboard management reviews yet.</p>';return;}
+    el.innerHTML=cards.map(function(x){
+      var qs=[['Smart with work',x.q_business],['Guests come first',x.q_guests],['Helps us grow',x.q_grow],['Acts with care',x.q_integrity],['Team player',x.q_teams],['High energy',x.q_energy],['Final thoughts',x.q_final]]
+        .filter(function(pr){return pr[1];}).map(function(pr){return '<div style="margin-top:6px;font-size:13px"><span class=csub>'+pr[0]+':</span> “'+ev(pr[1])+'”</div>';}).join('');
+      return '<div class="card" style="max-width:none;margin-bottom:10px;border-left:3px solid var(--navy)">'
+        +'<div class=csub>'+ev(x.ship||'—')+' · '+ev(x.brand||'—')+' · '+ev((x.contract_signon||'?')+' → '+(x.contract_signoff||'?'))+' · submitted '+ev(String(x.submitted_at||'').slice(0,10))+'</div>'
+        +'<div style="font-weight:700;margin-top:4px">Overall '+ev(x.rating)+'/5</div>'+qs+'</div>';
+    }).join('');
+  }catch(e){el.innerHTML='<p class=muted style="text-align:left;padding:8px 2px">Could not load shipboard reviews.</p>';}
 }
 async function reqFeedback(role){
   $('#fbout').textContent='Creating link…';
