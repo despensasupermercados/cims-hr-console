@@ -97,6 +97,22 @@ async function apiAutoSend(request, env, session) {
   return json({ enabled: !!(r && r.v === "true") });
 }
 
+async function apiSbmToggle(request, env, session) {
+  // SBM (shipboard reviews) master switch — mirrors apiAutoSend exactly:
+  // same storage (app_setting), same authorization (any signed-in session).
+  // src/sbm.js sbmDailySweep reads 'sbm_enabled' and no-ops while it is OFF.
+  if (!session) return json({ error: "unauthorized" }, 401);
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run();
+  if (request.method === "POST") {
+    const b = await request.json().catch(function () { return {}; });
+    const v = b.enabled === true ? "true" : "false";
+    await env.DB.prepare("INSERT INTO app_setting (k,v) VALUES ('sbm_enabled',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(v).run();
+    return json({ ok: true, enabled: v === "true" });
+  }
+  const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='sbm_enabled'").first();
+  return json({ enabled: !!(r && r.v === "true") });
+}
+
 /* ============================================================
    DG3 CIMS — HR Operational Console · Cloudflare Worker (v1)
    Single-file ES module. Paste into the dashboard Worker editor.
@@ -171,6 +187,7 @@ export default {
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/autosend") return apiAutoSend(request, env, session);
+        if (p === "/api/sbmtoggle") return apiSbmToggle(request, env, session);
         if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
         if (p === "/api/keyman/import" && request.method === "POST") return apiKeymanImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
@@ -2806,6 +2823,9 @@ async function saveNote(id){
 }
 async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();var b=document.getElementById('autoToggle');if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}}catch(e){}}
 async function autoToggleClick(){var b=document.getElementById('autoToggle');var on=/ON/.test(b?b.textContent:'');if(!on&&!confirm('Turn auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}if(b){b.textContent='Auto-timing: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?('\n'+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
+function ensureSbmToggle(){var a=document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('button');b.className='btn ghost';b.id='sbmToggle';b.style.marginLeft='8px';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='Shipboard reviews: &hellip;';a.insertAdjacentElement('afterend',b);}return b;}
+async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();var b=ensureSbmToggle();if(b){b.textContent='Shipboard reviews: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}}catch(e){}}
+async function sbmToggleClick(){var b=document.getElementById('sbmToggle');var on=/ON/.test(b?b.textContent:'');if(!on&&!confirm('Turn shipboard reviews ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(b){b.textContent='Shipboard reviews: '+(r.enabled?'ON':'OFF');b.style.background=r.enabled?'#5FB946':'';b.style.color=r.enabled?'#fff':'';}alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   ROT=await (await fetch('/api/rotation')).json();
@@ -2830,6 +2850,7 @@ async function renderRotation(){
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><button class="btn ghost" id="autoToggle" onclick="autoToggleClick()" style="margin-left:8px">Auto-timing: &hellip;</button></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
   drawRotation(); loadAutoToggle();
+  loadSbmToggle();
 }
 function rmonthChips(){
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
