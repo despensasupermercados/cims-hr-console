@@ -99,9 +99,11 @@ async function apiAutoSend(request, env, session) {
 
 async function apiSbmToggle(request, env, session) {
   // SBM (shipboard reviews) master switch — mirrors apiAutoSend exactly:
-  // same storage (app_setting), same authorization (any signed-in session).
+  // same storage (app_setting). Reading is any-session; FLIPPING is MONEY_USERS
+  // only (Miguel 2026-07-04) — arming customer-facing sends is a money-adjacent control.
   // src/sbm.js sbmDailySweep reads 'sbm_enabled' and no-ops while it is OFF.
   if (!session) return json({ error: "unauthorized" }, 401);
+  if (request.method === "POST" && !isMoneyUser(session && session.email)) return json({ error: "money_users_only" }, 403);
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run();
   if (request.method === "POST") {
     const b = await request.json().catch(function () { return {}; });
