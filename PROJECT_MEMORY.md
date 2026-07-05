@@ -820,3 +820,7 @@ Miguel supplied "Email addresses - Fleet.xlsx". **The addresses themselves are s
 **Legend of the Seas (launched Jul 2026):** already present in VESSEL_REF, SHIP_LIST, shipname canonicalization, ship_history, parts-portal ship lists + port schedule; migration `0014_legend_of_the_seas.sql` merged for older DBs; prod `vessel` row verified ('ves_legend','Legend','Royal Caribbean'). Fleet roster covers it (GSM + specialist mailbox).
 
 **Remaining open:** `team_list` for internal notification ③ (still pending from Miguel); 5 history-match rows awaiting Miguel's confirmation, then the Forms-import PR; Phase B money PR (sEval default-3 / auto / manual per spec §6); sbm_config console editor (G6); N1 outbox fallback for notification ③; Celebrity/Azamara accent confirmation.
+
+### SBM toggle auth hardening (2026-07-05) — PR #10 MERGED (0d1c3ec), deploy verified
+
+Miguel's call: arming customer-facing sends is a money-adjacent control. `/api/sbmtoggle` **GET (read state / button display) = any signed-in session; POST (flip) = MONEY_USERS only** (`isMoneyUser`, house pattern from bonus routes) — non-money sessions get 403 `money_users_only`, flag untouched (test-pinned). Suite 221/221. worker.js changed via GitHub web editor again (single replacement; branch blob matched predicted `86f442d6…` exactly); deploy verified in live worker code (modified 07:10Z, guard present). NOTE: the auto-timing toggle (`/api/autosend`) still allows any session to flip — intentional asymmetry for now; flag to Miguel if he wants it matched.
