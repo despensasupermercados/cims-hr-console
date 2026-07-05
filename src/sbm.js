@@ -618,6 +618,10 @@ export function installSbm(deps) {
           subject: crewCopy.subject, html: crewCopy.html, critical: false });
       }
     } catch (e) { try { console.error("sbm_notify", (e && e.stack) || e); } catch {} }
+    // Score Card sEval auto-apply (spec §6): a submitted review prefills the
+    // supervisor evaluation. Manual-wins + post-commit flagging live inside the
+    // hook; a failure here must never fail the manager's submission.
+    try { if (deps.onReviewStored) await deps.onReviewStored(env, req.agency_id, req.contract_signoff, req.crew_id); } catch (e) { try { console.error("seval_autoapply", (e && e.stack) || e); } catch {} }
     return json({ ok: true });
   }
 

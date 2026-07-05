@@ -28,13 +28,15 @@ import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
+import { installSeval } from "./seval.js";
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
 // crew cards. Same install pattern as auto-send. NO money code here -- the
 // Score Card / sEval integration is a separate human-approved Phase B PR.
-const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections, VESSEL_REF, ORIGIN: "https://cims.work" });
+const _seval = installSeval({});
+const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections, VESSEL_REF, ORIGIN: "https://cims.work", onReviewStored: _seval.sevalAutoApply });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 async function autoSendBoardLegs(env) {
@@ -205,6 +207,8 @@ export default {
         if (p === "/api/feedback/score" && request.method === "POST") return apiFeedbackScore(request, env, session);
         if (p === "/api/sbm/crew")       return json(await _sbm.sbmCrewCards(env, url.searchParams.get("id")));
         if (p === "/api/score/queue")    return apiScoreQueue(env, url);
+        if (p === "/api/score/seval")    return _seval.apiSevalGet(env, url);
+        if (p === "/api/score/seval/override" && request.method === "POST") return _seval.apiSevalOverride(request, env, session, isMoneyUser);
         if (p === "/api/intel/inbox")    return apiIntelInbox(env);
         if (p === "/api/intel/ingest" && request.method === "POST") return apiIntelIngest(request, env, session);
         if (p === "/api/intel/file" && request.method === "POST") return apiIntelFile(request, env, session);
@@ -3692,7 +3696,7 @@ async function openScore(id){
    +'<div class=hint>'+cr.agency_id+' · '+d.rank+' · Contract count <b>'+d.count+'</b> → completing makes it <b>'+(d.count+1)+'</b>. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
    +warn+hist+'<div id=fbPanel></div>'
    +'<div class=sec><span class=n>1</span>Contract</div>'
-   +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore()"></div></div>'
+   +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore();applySeval(_SEVAL.sc)"></div></div>'
    +'<div class=hint id=dateEcho style="margin:-6px 0 10px"></div>'
    +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
    +'<div class=sec><span class=n>2</span>Outcome &amp; gates</div>'
@@ -3706,13 +3710,14 @@ async function openScore(id){
    +'<div class=hint style="margin:-2px 0 8px">Award each factor from evidence (sliders start at 0).</div>'
    +rng('sOrder','On-time ordering',20)+rng('sAcc','Order accuracy',25)+rng('sPar','Par maintenance',15)
    +rng('sHand','Ship-condition handover',10)+rng('sComm','Communication (manual — Rita)',10)+rng('sMono','Mono click discipline (<20%)',5)
-   +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
+   +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore();sevalDirty()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div id=sevalBadge class=hint style="margin-top:5px"></div><div id=sevalReview></div><div class=fg id=sevalReasonWrap style="display:none;margin-top:6px"><label class=req>Reason for overriding the review (10+ chars)</label><textarea id=sevalReason rows=2 placeholder="e.g. guest complaint substantiated on final cruise"></textarea></div><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
    +'</div>'
    +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()"'+(_blockCommit?' disabled title="Baseline pending — reconcile the starting count first"':'')+'>Commit</button></div></div>';
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class="modal '+scCls+'"><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
   if(d.lastLeg){if(d.lastLeg.on)$('#spanStart').value=d.lastLeg.on;if(d.lastLeg.off)$('#spanEnd').value=d.lastLeg.off;}
   recalcScore();
   applyFeedback(cr.agency_id);
+  applySeval(cr.agency_id);
 }
 async function applyFeedback(id){
   var d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(id))).json();
@@ -3749,10 +3754,45 @@ function recalcScore(){
   var nums='<div class=rnums><span>Score <b>'+r.score+'%</b> / floor 80</span><span>Count <b>'+r.count+' → '+r.nextCount+'</b></span>'+(r.gate?'<span class=gchip>'+gateLabel(r.gate)+'</span>':'<span class=hint style="margin:0">'+msg+'</span>')+'</div>';
   $('#scoreOut').innerHTML=nums+'<div class="rpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div>';
 }
+var _SEVAL={sc:null,value:null,source:'none'};
+async function applySeval(sc){
+  _SEVAL.sc=sc;_SEVAL.value=null;_SEVAL.source='none';
+  var badge=$('#sevalBadge');if(badge)badge.innerHTML='';
+  var rev=$('#sevalReview');if(rev)rev.innerHTML='';
+  var rw=$('#sevalReasonWrap');if(rw)rw.style.display='none';
+  var off=$('#spanEnd')?$('#spanEnd').value:'';
+  if(!sc||!off)return;
+  var d;try{d=await (await fetch('/api/score/seval?agency_id='+encodeURIComponent(sc)+'&signoff='+encodeURIComponent(off))).json();}catch(e){return;}
+  if(!d||d.error)return;
+  _SEVAL.value=d.value;_SEVAL.source=d.source;
+  if(d.value){var s=$('#sEval');if(s)s.value=String(d.value);recalcScore();}
+  if(!badge)return;
+  var link=d.reviewCount?(' · <a href="#" onclick="viewSeval();return false" style="color:var(--navy,#1B3A5C)">view review</a>'):'';
+  if(d.source==='auto'){badge.innerHTML='<span style="color:var(--green,#5FB946);font-weight:700">● from shipboard review</span>'+(d.reviewCount>1?(' · avg of '+d.reviewCount+' reviews'):'')+link;}
+  else if(d.source==='manual'){badge.innerHTML='<span style="color:#b0740a;font-weight:700">● manual — '+(d.set_by||'?')+(d.set_at?(', '+String(d.set_at).slice(0,10)):'')+'</span>'+link;}
+}
+function sevalDirty(){var s=$('#sEval');if(!s)return;var rw=$('#sevalReasonWrap');if(!rw)return;rw.style.display=(_SEVAL.value!=null&&parseInt(s.value)!==parseInt(_SEVAL.value))?'block':'none';}
+async function viewSeval(){
+  var off=$('#spanEnd')?$('#spanEnd').value:'';var sc=_SEVAL.sc;if(!sc)return;
+  var box=$('#sevalReview');if(!box)return;box.innerHTML='<div class=hint>Loading review…</div>';
+  var d;try{d=await (await fetch('/api/sbm/crew?id='+encodeURIComponent(sc))).json();}catch(e){box.innerHTML='<div class=hint>Could not load the review.</div>';return;}
+  var cards=(d&&d.cards)||[];var c=null;for(var i=0;i<cards.length;i++){if(String(cards[i].contract_signoff)===String(off)){c=cards[i];break;}}
+  if(!c){box.innerHTML='<div class=hint>No shipboard review on file for this contract.</div>';return;}
+  var qs=[['Business sense',c.q_business],['Guests first',c.q_guests],['Helps us grow',c.q_grow],['Integrity',c.q_integrity],['Teamwork',c.q_teams],['Energy',c.q_energy],['Final thoughts',c.q_final]];
+  var h='<div class=hint style="border-left:3px solid var(--green,#5FB946);padding-left:8px;margin-top:4px"><b>Shipboard review</b> — '+(c.ship||'')+' · rating '+c.rating+'/5';
+  for(var j=0;j<qs.length;j++){if(qs[j][1])h+='<br><b>'+qs[j][0]+':</b> '+String(qs[j][1]).replace(/</g,'&lt;');}
+  h+='</div>';box.innerHTML=h;
+}
 async function commitBonus(){
   var ss=$('#spanStart'),se=$('#spanEnd');
   ss.classList.toggle('bad',!ss.value);se.classList.toggle('bad',!se.value);
   if(!ss.value||!se.value){(!ss.value?ss:se).focus();return;}
+  var _sev=$('#sEval'),_sevVal=parseInt(_sev.value);
+  if(_SEVAL.value!=null&&_sevVal!==parseInt(_SEVAL.value)){
+    var _rsn=$('#sevalReason')?$('#sevalReason').value.trim():'';
+    if(_rsn.length<10){alert('Changing the supervisor evaluation away from the shipboard review needs a reason (10+ characters).');if($('#sevalReason'))$('#sevalReason').focus();return;}
+    try{var _ov=await (await fetch('/api/score/seval/override',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:_SC.crew.agency_id,signoff:se.value,value:_sevVal,reason:_rsn})})).json();if(_ov&&_ov.error){alert(_ov.error==='not_authorised'?'Only Miguel or Rita can override the supervisor evaluation.':('Could not record the override: '+_ov.error));return;}_SEVAL.value=_sevVal;_SEVAL.source='manual';}catch(e){alert('Could not record the override.');return;}
+  }
   var btn=$('#commitBtn');btn.disabled=true;btn.textContent='Committing…';
   var sliders={};for(var k in FW)sliders[k]=parseInt($('#'+k).value);
   var payload={agency_id:_SC.crew.agency_id,spanStart:$('#spanStart').value,spanEnd:$('#spanEnd').value,
