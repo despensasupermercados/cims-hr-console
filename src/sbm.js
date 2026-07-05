@@ -746,5 +746,66 @@ export function installSbm(deps) {
     return { ok: true, cards: rows };
   }
 
-  return { ensureSbm, sbmFormPage, sbmSubmit, sbmDailySweep, sbmCrewCards };
+  // ---- POST /api/sbm/invite (session-gated) — manual single review invite --
+  // Fire ONE shipboard-manager review invite on demand for a specific crew +
+  // contract, for the cases the T-7 sweep deliberately skips: a sign-off date
+  // that moved late, a missed window, or an ad-hoc ask. Reuses the SAME invite
+  // email / token / recipient machinery as the sweep. Deliberately works
+  // regardless of the master switch (the switch only governs the automated
+  // sweep; this is a human pressing a button). Idempotent on
+  // (agency_id, contract_signoff): an existing open row keeps its identity
+  // (same payload -> same single-use token); a submitted review is never re-sent.
+  async function sbmInviteRequest(request, env, session) {
+    await ensureSbm(env);
+    // Master switch is the SINGLE safety: the manual button must not send while
+    // GSM review is OFF (real customers). Mirrors the sweep's isEnabled gate.
+    if (!(await isEnabled(env))) return json({ error: "sbm_disabled" }, 409);
+    const b = await request.json().catch(() => ({}));
+    const sc = String(b.sc || "").trim();
+    const seq = b.seq == null ? null : parseInt(b.seq, 10);
+    if (!sc || seq == null || Number.isNaN(seq)) return json({ error: "missing_sc_seq" }, 400);
+    // Resolve ship + sign-off EXACTLY as the sign-off flows do: the keyman leg,
+    // with a manual contract_edit override winning (CLAUDE.md §11 override rule).
+    const leg = await env.DB.prepare("SELECT ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
+    const ed = (await env.DB.prepare("SELECT ship, sign_off FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {};
+    const ship = ed.ship || (leg && leg.ship) || null;
+    const off = ed.sign_off || (leg && (leg.act_off || leg.proj_off)) || null;
+    if (!off) return json({ error: "no_signoff_date" }, 400);
+    // Past sign-off: the single-use link would already be expired -> refuse
+    // rather than send a dead link (matches sbmFormPage's expiry check).
+    if (String(off) < todayStr()) return json({ error: "signoff_passed", off }, 409);
+    const exp = sbmExpiryFor(off);
+    if (exp == null) return json({ error: "bad_signoff_date" }, 400);
+    // Recipient: per-ship first, then per-brand (same fallback as the sweep).
+    const brand = sbmBrandForShip(ship, deps.VESSEL_REF);
+    const byShip = await cfgGetShip(env, "recipient", ship);
+    const byBrand = brand ? await cfgGet(env, "recipient:" + brand) : null;
+    const recipient = byShip || byBrand || null;
+    if (!recipient) return json({ error: "no_recipient_configured", ship, brand }, 409);
+    const existing = await env.DB.prepare("SELECT id, status FROM sbm_review_request WHERE agency_id=? AND contract_signoff=?").bind(sc, off).first();
+    if (existing && existing.status === "submitted") return json({ ok: false, already: true, error: "already_submitted" }, 409);
+    const rid = existing ? existing.id : ("sbmr_" + crypto.randomUUID());
+    const token = await sbmToken(env, rid, exp);              // existing row: same rid+exp -> IDENTICAL token
+    const link = ORIGIN + "/sbm?t=" + token;
+    const cr = await crewByAgencyId(env, sc);
+    const cn = fullName(cr, sc);
+    const mail = sbmInviteEmail({ name: cn, firstName: firstName(cr, cn), ship, off, link });
+    const res = await sendViaMailer(env, { templateId: "hr.sbm.invite.v1", to: [recipient], subject: mail.subject, html: mail.html, critical: false });
+    if (!res || !res.ok) {                                    // row only on success (auto_send / sweep rule)
+      try { await logActivity(env, session && session.email, "sbm_manual_invite_send_failed", sc + " " + off); } catch {}
+      return json({ ok: false, emailed: false, error: "send_failed", recipient }, 502);
+    }
+    const now = new Date().toISOString();
+    if (existing) {
+      // Re-open a prior sent/reminded/expired/suppressed row for this contract.
+      await env.DB.prepare("UPDATE sbm_review_request SET recipient_email=?, token_hash=?, sent_at=?, reminder_at=NULL, status='sent' WHERE id=?").bind(recipient, await sha256hex(token), now, existing.id).run();
+    } else {
+      await env.DB.prepare("INSERT INTO sbm_review_request (id,crew_id,agency_id,contract_signon,contract_signoff,ship,brand,recipient_email,token_hash,sent_at,reminder_at,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(rid, (cr && cr.id) || null, sc, null, off, ship, brand, recipient, await sha256hex(token), now, null, "sent", now).run();
+    }
+    try { await logActivity(env, session && session.email, "sbm_manual_invite", sc + " " + off + " -> " + recipient); } catch {}
+    return json({ ok: true, emailed: true, recipient, link });
+  }
+
+  return { ensureSbm, sbmFormPage, sbmSubmit, sbmDailySweep, sbmCrewCards, sbmInviteRequest };
 }
