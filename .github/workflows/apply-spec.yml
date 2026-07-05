@@ -1,0 +1,43 @@
+name: apply-spec
+
+# Rebuild large source files (e.g. src/worker.js) from small base64 specs pushed
+# to apply/*.json. Runs ONLY on branches (never main), commits the rebuilt file
+# back to the same branch, and the normal test workflow then runs on the result.
+# The bot's commit touches src/** (not apply/**), so it does not re-trigger itself.
+
+on:
+  push:
+    paths:
+      - "apply/**.json"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Apply every spec under apply/
+        run: |
+          shopt -s nullglob
+          for f in apply/*.json; do
+            node scripts/apply-spec.mjs "$f"
+          done
+      - name: Commit rebuilt files
+        run: |
+          git config user.name "apply-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to commit."
+          else
+            git add -A
+            git commit -m "apply-bot: rebuild targets from specs"
+            git push
+          fi
