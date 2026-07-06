@@ -52,6 +52,12 @@ database_name = "cims-hr-console"
 database_id = "f0ac8b6a-deac-4214-8f42-e22b202d7d7d"
 migrations_dir = "migrations"
 
+# Daily Keyman board backup (spec §14.3). The hourly cron writes one dated CSV per day
+# to this R2 bucket (off-D1 disaster-recovery snapshot). Free tier; a daily CSV is ~KB.
+[[r2_buckets]]
+binding = "EXPORTS"
+bucket_name = "cims-hr-exports"
+
 # ---- Staging: a separate Worker + separate D1 copy. Nothing reaches prod data
 # that has not run green here first. Create the staging DB once with:
 #   wrangler d1 create cims-hr-console-staging
