@@ -1,1 +1,1 @@
-deploy trigger 2026-07-07 — force Workers Builds to deploy P3.12 (boardLegs / ship_leg read path)
+deploy trigger 2026-07-07b — force Workers Builds to deploy P4.16 (maybeExportBackup → cims-hr-exports R2, §14.3 daily CSV)
