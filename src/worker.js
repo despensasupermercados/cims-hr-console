@@ -252,7 +252,7 @@ export default {
   // unavailable (left in 'new'). Configured by [triggers] crons in wrangler.toml.
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
-    if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
@@ -406,6 +406,24 @@ async function apiMovementsSend(request, env, session) {
   await logActivity(env, session.email, "movements_send", `${to} ${date} ${res.on}/${res.off}`);
   return json(res);
 }
+async function maybeExportBackup(env, event) {
+  try {
+    if (!env.EXPORTS) return;
+    const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
+    const day = nyDateStr(now);
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
+    const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='export_last_date'").first();
+    if (prev && prev.v === day) return;
+    const rows = (await env.DB.prepare("SELECT l.ship_short AS ship, l.brand, l.sc, l.embark, l.on_date, l.off_date, l.disembark, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew FROM ship_leg l LEFT JOIN crew c ON c.id = l.crew_id WHERE l.is_current = 1 ORDER BY l.brand, l.ship_short").all()).results;
+    const esc = (x) => { x = String(x == null ? "" : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+    const head = ["Ship","Brand","Keyman","Agency ID","Embark port","Sign-on","Sign-off","Debark port","Reliever","Reliever embark","Reliever sign-off","Reliever debark"];
+    const lines = [head.join(",")];
+    for (const r of rows) lines.push([r.ship, r.brand, r.crew, r.sc, r.embark, r.on_date, r.off_date || "TBA", r.disembark, "", "", "", ""].map(esc).join(","));
+    await env.EXPORTS.put("keyman/keyman_board_" + day + ".csv", lines.join("\n"), { httpMetadata: { contentType: "text/csv" } });
+    await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('export_last_date',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(day).run();
+  } catch (e) { console.error("export_backup", (e && e.stack) || e); }
+}
+
 async function maybeSendMovements(env, event) {
   try {
     const to = env.MOVEMENTS_TO; if (!to) return;
