@@ -1,3 +1,5 @@
+# cims-hr-console — Cloudflare Worker
+
 name = "cims-hr-console"
 main = "src/worker.js"
 compatibility_date = "2025-05-01"
@@ -60,5 +62,5 @@ name = "cims-hr-console-staging"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "cims-hr-console-staging"
-database_id = "REPLACE_WITH_STAGING_DB_ID"
+database_id = "84ad4352-9979-4cd8-9bd2-fec887591257"
 migrations_dir = "migrations"
