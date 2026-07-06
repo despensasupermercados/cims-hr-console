@@ -9,11 +9,13 @@ import { SHIP_HISTORY } from "../src/ship_history.js";
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const BRANDS = new Set(["Royal", "Celebrity", "Azamara", "NCL"]);
 
-test("every entry has valid ISO on/off dates with on <= off", () => {
+// Dates are ISO when present. off:null = TBA sign-off (spec §5.1/§9.4/§18/§20-B); on:null = a
+// sign-on the roster left blank (Rita fills in-app). on <= off enforced only when BOTH are set.
+test("dates are valid ISO (or null for TBA/blank) with on <= off when both set", () => {
   for (const e of SHIP_HISTORY) {
-    assert.match(e.on, ISO, `bad on-date for ${e.ship}/${e.name}: ${e.on}`);
-    assert.match(e.off, ISO, `bad off-date for ${e.ship}/${e.name}: ${e.off}`);
-    assert.ok(e.on <= e.off, `on after off for ${e.ship}/${e.name}: ${e.on} > ${e.off}`);
+    if (e.on != null) assert.match(e.on, ISO, `bad on-date for ${e.ship}/${e.name}: ${e.on}`);
+    if (e.off != null) assert.match(e.off, ISO, `bad off-date for ${e.ship}/${e.name}: ${e.off}`);
+    if (e.on != null && e.off != null) assert.ok(e.on <= e.off, `on after off for ${e.ship}/${e.name}: ${e.on} > ${e.off}`);
   }
 });
 
@@ -41,8 +43,14 @@ test("no exact-duplicate rows (ship+sc+on+off)", () => {
   }
 });
 
-// NOTE (known debt): SHIP_HISTORY is a month-granular schedule snapshot with ~75 legitimate
-// handover/rounding overlaps, most pre-existing. The board renders these fine, so we deliberately
-// do NOT assert single-onboard here — the source never held that invariant. Overlap cleanup is a
-// data task tracked in the scaling note, not a unit-test concern (a magic baseline would be its
-// own fragile "bad code"). The structural guards above are the ones that catch real rot.
+// §10 board invariants (history wiped; one current keyman per ship): exactly one row per ship,
+// all bridged to our roster. This is a real invariant now that only the current legs are seeded
+// (the old month-granular snapshot with handover overlaps is gone).
+test("one current keyman per ship, all ours=true (spec §10)", () => {
+  const ships = new Set();
+  for (const e of SHIP_HISTORY) {
+    assert.ok(e.ours === true, `non-ours row in a wiped-history board: ${e.ship}/${e.name}`);
+    assert.ok(!ships.has(e.ship), `two current legs on ${e.ship}`);
+    ships.add(e.ship);
+  }
+});
