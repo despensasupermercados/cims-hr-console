@@ -13,7 +13,7 @@ import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
-import { SHIP_HISTORY } from "./ship_history.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, legsFromShipLeg } from "./ship_leg_source.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank } from "./ledger.js";
@@ -844,9 +844,9 @@ async function ensureCrewExtras(env) {
   try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
 }
 // Schedule assignments per crew (from SHIP_HISTORY), for the auto status derivation.
-function scheduleBySc() {
+async function boardLegs(env) { return (await boardSource(env)) === "ship_leg" ? await legsFromShipLeg(env) : SHIP_HISTORY; } function scheduleBySc(legs) {
   const m = {};
-  for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
+  for (const h of (legs || SHIP_HISTORY)) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
   return m;
 }
 // Effective status: manual 'Retired' tag wins; else a manual status edit wins; else auto-derive from
@@ -988,7 +988,7 @@ async function rotationSections(env) {
   await ensureKeyman(env); await ensureReady(env);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const AZ = ["journey", "onward", "quest", "pursuit"];
+  const AZ = ["journey", "onward", "quest", "pursuit"]; const HIST = await boardLegs(env);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
@@ -996,7 +996,7 @@ async function rotationSections(env) {
   const ovRows = (await env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all()).results;
   const ovVessel = {}, ovMap = {}; for (const o of ovRows) { ovMap[o.agency_id] = o; if (o.vessel_observed != null && o.vessel_observed !== "") ovVessel[o.agency_id] = o.vessel_observed; }
   for (const c of crewRows) if (ovVessel[c.agency_id]) c.vessel_observed = ovVessel[c.agency_id]; // manual edits win
-  const schedMap = scheduleBySc();
+  const schedMap = scheduleBySc(HIST);
   for (const c of crewRows) c.status = crewStatus(c, ovMap[c.agency_id], schedMap[c.agency_id], today); // auto status (On board / On Vacation), retired/manual win
   const cmap = {};
   for (const c of crewRows) cmap[c.agency_id] = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.agency_id, status: c.status || "Unknown", rank: c.rank_override || c.rank_observed || null };
@@ -1041,7 +1041,7 @@ async function rotationSections(env) {
   const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
   // Schedule-tab dates per (ship, crew) — fallback enrichment when Keyman has no leg (latest run wins).
   const schEnr = {};
-  for (const h of SHIP_HISTORY) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
+  for (const h of HIST) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
   // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
   // NOW (incl. 2-up crew-change overlaps). Dates enriched from Keyman, then the schedule tabs.
   // SELF-HEAL placement: where the SCHEDULE actually puts each crew (current leg spanning today, else
@@ -1077,7 +1077,7 @@ async function rotationSections(env) {
     (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board" }));
   }
   const histByShip = {}, histDisp = {};
-  for (const h of SHIP_HISTORY) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
+  for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
   const validShip = validShipKeys(VESSEL_REF);
   // Union of ships: registry-prominent + keyman-history + valid (canonical) schedule ships.
   const shipNames = {};
