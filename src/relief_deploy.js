@@ -1,105 +1,166 @@
 // src/relief_deploy.js
-// Loader for the vessel deployment itinerary. Served at GET /api/relief/deploy (session-gated).
-// Accepts the NATIVE wide export straight from RCCL/CEL (the "Export" sheet, data.xlsx / vessel
-// deployment.xlsx) — no pre-processing. It decodes the wide matrix client-side (SheetJS) into long
-// rows and POSTs them to /api/relief/vpd-load in chunks; the server validates every row. A clean
-// long .tsv is also accepted. After loading it calls /api/relief/vpd-status and shows what landed +
-// coverage gaps (incl. the 12-month forward floor).
+// Vessel-deployment loader — served at GET /api/relief/deploy (session-gated).
 //
-// The decoder is proven identical to the validated pipeline: 37,592 rows, 0 miss / 0 extra vs the
-// reference TSV. Wide layout: sheet "Export"; col0 = berth date ("- Stop N" suffix for multi-stop
-// days); repeating 7-col blocks from col 2 (| PORT RANK "PORT NAME" ARRIVE DEPART TENDER); brand in
-// row 0, ship in row 2. is_sea = RANK 'S' or port AT SEA/CRUISING; is_turnaround = RANK ends 'T'.
+// Drag & drop a deployment file; it AUTO-RECOGNIZES the format by structure (never by filename) and
+// loads it into vessel_port_day. Two formats today, NCL slots in as a third:
+//   • Celebrity / Royal Caribbean — wide "Export" sheet (brand in row 0, ship in row 2, 7-col blocks
+//     from col 2: | PORT RANK "PORT NAME" ARRIVE DEPART TENDER). is_sea = RANK 'S' / AT SEA; is_turn
+//     = RANK ends 'T'.
+//   • Azamara — long "Itinerary" sheet (Ship, Date, Cruise Nr, Day, Location, Country ...). Brand is
+//     always Azamara; ship_short = ship minus the "Azamara " prefix (NAMES CHANGE, so we key off the
+//     file's structure, not a fixed list). is_sea = Location/Country 'At sea'; is_turn = embark
+//     (Day 1) or the last day of a cruise (Cruise Nr changes next).
+// Decoders are proven identical to the validated pipeline (CEL/RCI 37,592 rows 0/0; Azamara 2,208).
+// Load is chunked to /api/relief/vpd-load with resetBrands = the brands the file carries, so each
+// file cleanly replaces only its own ships (no stale rows). Then it self-verifies (12-month floor).
 export const DEPLOY_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Load vessel deployment</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1b2a4a}
-h1{font-size:20px}p{color:#5b6472;font-size:14px}code{background:#f4f3ee;padding:1px 5px;border-radius:4px;font-size:12.5px}
-input[type=file]{margin:14px 0;font-size:14px}
-.log{margin-top:16px;font-size:13px;font-family:ui-monospace,Menlo,monospace;background:#f4f3ee;border-radius:8px;padding:12px 14px;max-height:360px;overflow:auto}
-.log div{padding:1px 0}.ok{color:#1f7a3d}.err{color:#b0342f;font-weight:600}.hd{font-weight:600;margin-top:6px}
-.bar{height:8px;background:#e8f1fb;border-radius:20px;overflow:hidden;margin:10px 0}.bar>i{display:block;height:100%;width:0;background:#1f5fa8;transition:width .2s}
-</style></head><body>
-<h1>Load vessel deployment</h1>
-<p>Drop the <b>native deployment export</b> (the RCCL/CEL <code>.xlsx</code> with the wide "Export" sheet — e.g. <i>vessel deployment.xlsx</i>). It's decoded here and loaded into <code>vessel_port_day</code>, the schedule the relief board derives from. Every row is validated server-side; malformed rows are skipped, never inserted. Replaces CEL/RCI ports, keeps Azamara. Safe to re-run.</p>
-<input type="file" id="f" accept=".xlsx,.xls,.tsv,.txt,.csv">
-<div class="bar"><i id="pi"></i></div>
-<div class="log" id="log"></div>
+:root{--ink:#1b2a4a;--sub:#5b6472;--line:#c9d2df;--bg:#eef1f6;--card:#fff;--accent:#1f5fa8;--ok:#1f7a3d;--warn:#b0342f;--amber:#8a6d1a}
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;margin:0;background:var(--bg);color:var(--ink)}
+.wrap{max-width:680px;margin:48px auto;padding:0 20px}
+h1{font-size:21px;margin:0 0 4px}
+.sub{color:var(--sub);font-size:13.5px;line-height:1.5;margin:0 0 22px}
+.card{background:var(--card);border-radius:16px;padding:26px;box-shadow:0 1px 3px rgba(20,30,55,.06)}
+#dz{border:2px dashed var(--line);border-radius:13px;padding:44px 20px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+#dz.over{border-color:var(--accent);background:#f2f7fd}
+#dz .big{font-size:16px;font-weight:600}
+#dz .small{font-size:12.5px;color:var(--sub);margin-top:5px}
+.badge{display:none;margin:18px 0 4px;padding:11px 14px;border-radius:10px;font-size:13.5px;font-weight:600}
+.badge.show{display:block}
+.badge.rec{background:#eaf5ee;color:var(--ok)}
+.badge.bad{background:#fbeceb;color:var(--warn)}
+.bar{height:7px;background:#e6edf6;border-radius:20px;overflow:hidden;margin:14px 0 0;display:none}
+.bar.show{display:block}.bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .18s}
+.result{margin-top:18px;font-size:13.5px;line-height:1.6;display:none}
+.result.show{display:block}
+.result .hd{font-weight:700;margin-bottom:6px}
+.chip{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600;margin:3px 6px 3px 0}
+.chip.b{background:#eef3fb;color:var(--accent)}
+.warnline{padding:9px 12px;border-radius:9px;margin-top:8px;font-size:12.5px}
+.warnline.red{background:#fbeceb;color:var(--warn)}
+.warnline.amber{background:#fbf5e6;color:var(--amber)}
+.warnline.good{background:#eaf5ee;color:var(--ok)}
+.foot{margin-top:16px;font-size:12px;color:var(--sub)}
+</style></head><body><div class="wrap">
+<h1>Vessel deployment</h1>
+<p class="sub">Drop the deployment file — the system recognizes it automatically (Celebrity/Royal Caribbean or Azamara; NCL coming). Every row is validated; each file cleanly replaces only its own brand. Safe to re-run anytime.</p>
+<div class="card">
+ <div id="dz"><div class="big">Drag &amp; drop the deployment file</div><div class="small">or click to choose · .xls / .xlsx</div></div>
+ <input type="file" id="f" accept=".xlsx,.xls" style="display:none">
+ <div class="badge" id="badge"></div>
+ <div class="bar" id="bar"><i id="pi"></i></div>
+ <div class="result" id="result"></div>
+</div>
+<div class="foot" id="foot"></div>
+</div>
 <script>
-const log=(m,cls)=>{const d=document.getElementById("log");d.innerHTML+='<div class="'+(cls||"")+'">'+m+'</div>';d.scrollTop=d.scrollHeight;};
-const BRAND={CEL:"Celebrity",RCI:"Royal Caribbean"};
+var $=function(id){return document.getElementById(id);};
+var BRANDW={CEL:"Celebrity",RCI:"Royal Caribbean"};
 function fmtDate(v){
- if(v instanceof Date)return v.getUTCFullYear()+"-"+String(v.getUTCMonth()+1).padStart(2,"0")+"-"+String(v.getUTCDate()).padStart(2,"0");
- const m=String(v).match(/(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})/);
- return m?m[3]+"-"+String(m[1]).padStart(2,"0")+"-"+String(m[2]).padStart(2,"0"):null;
+ if(v instanceof Date){var d=new Date(v.getTime()+12*3600*1000);return d.getUTCFullYear()+"-"+String(d.getUTCMonth()+1).padStart(2,"0")+"-"+String(d.getUTCDate()).padStart(2,"0");}
+ var m=String(v).match(/^(\\d{4})-(\\d{2})-(\\d{2})/);if(m)return m[1]+"-"+m[2]+"-"+m[3];
+ m=String(v).match(/(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})/);return m?m[3]+"-"+String(m[1]).padStart(2,"0")+"-"+String(m[2]).padStart(2,"0"):null;
 }
-function parseCol0(v){
- if(v instanceof Date)return{date:fmtDate(v),stop:1};
- const parts=String(v).split(" - Stop ");
- return{date:fmtDate(parts[0]),stop:parts[1]?(parseInt(parts[1],10)||1):1};
-}
-// Decode the native wide "Export" sheet → long rows [brand,ship,date,stop,port,is_sea,is_turn].
+// --- Celebrity / Royal Caribbean wide "Export" ---
 function decodeWide(A){
- const row0=A[0]||[],row2=A[2]||[];
- const nblocks=Math.floor(((A[3]||[]).length-2)/7);
- const out=[];
- for(let r=4;r<A.length;r++){
-  const raw=(A[r]||[])[0]; if(raw===""||raw==null)continue;
-  const pc=parseCol0(raw); if(!pc.date)continue;
-  for(let b=0;b<nblocks;b++){
-   const base=2+b*7;
-   const ship=String(row2[base]||"").trim();
-   const rank=String(A[r][base+2]||"").trim();
-   const port=String(A[r][base+3]||"").trim();
+ var row0=A[0]||[],row2=A[2]||[],nb=Math.floor(((A[3]||[]).length-2)/7),out=[];
+ function pc(v){if(v instanceof Date)return{date:fmtDate(v),stop:1};var p=String(v).split(" - Stop ");return{date:fmtDate(p[0]),stop:p[1]?(parseInt(p[1],10)||1):1};}
+ for(var r=4;r<A.length;r++){
+  var raw=(A[r]||[])[0];if(raw===""||raw==null)continue;var d=pc(raw);if(!d.date)continue;
+  for(var b=0;b<nb;b++){var base=2+b*7;
+   var ship=String(row2[base]||"").trim(),rank=String(A[r][base+2]||"").trim(),port=String(A[r][base+3]||"").trim();
    if(!ship||!port)continue;
-   const brand=BRAND[String(row0[base]||"").trim()]||String(row0[base]||"").trim();
-   const is_sea=(rank==="S"||port==="AT SEA"||port==="CRUISING")?1:0;
-   const is_turn=/T$/.test(rank)?1:0;
-   out.push([brand,ship,pc.date,pc.stop,port,is_sea,is_turn]);
+   var brand=BRANDW[String(row0[base]||"").trim()]||String(row0[base]||"").trim();
+   out.push([brand,ship,d.date,d.stop,port,(rank==="S"||port==="AT SEA"||port==="CRUISING")?1:0,/T$/.test(rank)?1:0]);
   }
  }
  return out;
 }
-async function getRows(file){
- const name=file.name.toLowerCase();
- if(name.endsWith(".xlsx")||name.endsWith(".xls")){
-  const buf=await file.arrayBuffer();
-  const wb=XLSX.read(buf,{type:"array",cellDates:true});
-  const sheet=wb.Sheets["Export"]||wb.Sheets[wb.SheetNames[0]];
-  const A=XLSX.utils.sheet_to_json(sheet,{header:1,raw:true,cellDates:true,defval:""});
-  return decodeWide(A);
+// --- Azamara long "Itinerary" ---
+function decodeAzamara(A){
+ var H=(A[0]||[]).map(function(x){return String(x).trim().toLowerCase();});
+ var ci=function(n){return H.indexOf(n);};
+ var cShip=ci("ship"),cDate=ci("date"),cCruise=ci("cruise nr"),cDay=ci("day"),cLoc=ci("location"),cCountry=ci("country");
+ var recs=[];
+ for(var r=1;r<A.length;r++){var row=A[r];if(!row||!row[cShip])continue;
+  var ship=String(row[cShip]).replace(/^Azamara\\s+/i,"").trim();
+  var date=fmtDate(row[cDate]);if(!date)continue;
+  var loc=String(row[cLoc]||"").trim(),country=String(row[cCountry]||"").trim();
+  var sea=(/^at sea$/i.test(loc)||/^at sea$/i.test(country))?1:0;
+  var port=sea?"AT SEA":(country&&!/^at sea$/i.test(country)?(loc+", "+country).toUpperCase():loc.toUpperCase());
+  recs.push({ship:ship,date:date,cruise:String(row[cCruise]||"").trim(),day:parseInt(row[cDay],10),port:port,sea:sea,i:r});
  }
- // long tsv fallback
- let lines=(await file.text()).split(/\\r?\\n/).filter(x=>x.trim());
- if(lines.length&&/brand/i.test(lines[0]))lines.shift();
- return lines.map(l=>l.split("\\t")).filter(r=>r.length>=6);
+ var byShip={};recs.forEach(function(x){(byShip[x.ship]=byShip[x.ship]||[]).push(x);});
+ var out=[];
+ Object.keys(byShip).forEach(function(ship){
+  var list=byShip[ship].sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:a.i-b.i;});
+  var seq={};
+  for(var k=0;k<list.length;k++){var x=list[k];seq[x.date]=(seq[x.date]||0)+1;
+   var next=list[k+1],cruiseEnd=next?(next.cruise!==x.cruise):true;
+   var turn=((x.day===1)||cruiseEnd)&&x.sea===0?1:0;
+   out.push(["Azamara",ship,x.date,seq[x.date],x.port,x.sea,turn]);
+  }
+ });
+ return out;
 }
-document.getElementById("f").onchange=async e=>{
- const file=e.target.files[0];if(!file)return;
- document.getElementById("log").innerHTML="";document.getElementById("pi").style.width="0";
- let rows;try{rows=await getRows(file);}catch(x){log("Could not read file: "+x.message,"err");return;}
- if(!rows.length){log("No rows found. Is this the native Export sheet?","err");return;}
- log(rows.length+" port-day rows decoded. Loading…");
- const today=new Date().toISOString().slice(0,10);
- const CH=600;let done=0,skipped=0;
- for(let i=0;i<rows.length;i+=CH){
-  const chunk=rows.slice(i,i+CH);
-  let res;try{res=await fetch("/api/relief/vpd-load",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({rows:chunk,reset:i===0,asof:today})}).then(r=>r.json());}catch(x){res={ok:false,error:"network"};}
-  if(!res||!res.ok){log("ERROR at row "+i+": "+((res&&res.error)||"?"),"err");return;}
-  done+=res.inserted||0;skipped+=res.skipped||0;
-  document.getElementById("pi").style.width=Math.round((i+chunk.length)/rows.length*100)+"%";
+// --- recognizer: structure, not filename ---
+function recognize(wb){
+ var names=wb.SheetNames;
+ // CEL/RCI: an "Export" sheet whose row 3 carries the PORT NAME sub-headers
+ for(var i=0;i<names.length;i++){
+  var A=XLSX.utils.sheet_to_json(wb.Sheets[names[i]],{header:1,raw:true,cellDates:true,defval:""});
+  var r3=(A[3]||[]).map(function(x){return String(x).trim().toUpperCase();});
+  if(names[i].toLowerCase()==="export"&&r3.indexOf("PORT NAME")>=0){return{fmt:"CEL/RCI",label:"Celebrity / Royal Caribbean — Vessel Deployment",rows:decodeWide(A)};}
+  var h=(A[0]||[]).map(function(x){return String(x).trim().toLowerCase();});
+  if(h.indexOf("ship")>=0&&h.indexOf("location")>=0&&h.indexOf("cruise nr")>=0){return{fmt:"Azamara",label:"Azamara — Itinerary",rows:decodeAzamara(A)};}
  }
- log("DONE — "+done+" port-days loaded"+(skipped?(" · "+skipped+" skipped (malformed)"):""),"ok");
- let st;try{st=await fetch("/api/relief/vpd-status").then(r=>r.json());}catch(x){st=null;}
- if(st){
-  log("Verify — "+st.total+" rows · "+st.turnarounds+" turnarounds · "+st.ships+" ships · "+(st.first_date||"?")+" → "+(st.last_date||"?"),"ok hd");
-  const noP=st.fleet_without_ports||[],shortC=st.fleet_short_coverage||[];
-  if(noP.length){log("⚠ Fleet ships with NO deployment ("+noP.length+"): "+noP.join(", ")+"  (Azamara uses a separate file — expected.)","err");}
-  if(shortC.length){log("⚠ Fleet ships with < "+(st.min_coverage_months||12)+" months forward ("+shortC.length+"): "+shortC.map(s=>s.ship_short+" (ends "+s.last_date+")").join(", "),"err");}
-  if(!noP.length&&!shortC.length){log("All fleet ships have ≥ "+(st.min_coverage_months||12)+" months forward coverage.","ok");}
+ return null;
+}
+function badge(cls,txt){var b=$("badge");b.className="badge show "+cls;b.textContent=txt;}
+function brandsOf(rows){var s={};rows.forEach(function(r){s[r[0]]=1;});return Object.keys(s);}
+async function handle(file){
+ $("result").className="result";$("foot").textContent="";
+ badge("rec","Reading "+file.name+" …");
+ var wb;try{wb=XLSX.read(await file.arrayBuffer(),{type:"array",cellDates:true});}catch(x){badge("bad","Could not read the file.");return;}
+ var rec=recognize(wb);
+ if(!rec||!rec.rows.length){badge("bad","Unrecognized file. Expected the Celebrity/RCCL Export sheet or the Azamara Itinerary sheet. (NCL not wired yet — send me a sample.)");return;}
+ var brands=brandsOf(rec.rows),ships={};rec.rows.forEach(function(r){ships[r[1]]=1;});
+ badge("rec","✓ Recognized: "+rec.label+" · "+Object.keys(ships).length+" ships · "+rec.rows.length+" port-days — loading…");
+ $("bar").className="bar show";
+ var today=new Date().toISOString().slice(0,10),CH=600,done=0,skip=0,rows=rec.rows;
+ for(var i=0;i<rows.length;i+=CH){
+  var body={rows:rows.slice(i,i+CH),reset:i===0,resetBrands:brands,asof:today};
+  var res;try{res=await fetch("/api/relief/vpd-load",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();});}catch(x){res={ok:false,error:"network"};}
+  if(!res||!res.ok){badge("bad","Load failed at row "+i+": "+((res&&res.error)||"?"));return;}
+  done+=res.inserted||0;skip+=res.skipped||0;$("pi").style.width=Math.round((i+CH)/rows.length*100)+"%";
  }
- log("Done — reload the relief board.","ok");
-};
+ $("pi").style.width="100%";
+ badge("rec","✓ Loaded "+rec.label+" — "+done+" port-days"+(skip?(" ("+skip+" skipped)"):""));
+ var st;try{st=await fetch("/api/relief/vpd-status").then(function(r){return r.json();});}catch(x){st=null;}
+ render(st,rec);
+}
+function render(st,rec){
+ var R=$("result");R.className="result show";
+ if(!st){R.innerHTML="Loaded. (Could not fetch verification.)";return;}
+ var h='<div class="hd">In the database now</div>';
+ h+='<div>'+st.total+' port-days · '+st.turnarounds+' turnarounds · '+st.ships+' ships · '+(st.first_date||"?")+' → '+(st.last_date||"?")+'</div>';
+ h+='<div style="margin-top:8px">'+(st.by_brand||[]).map(function(b){return '<span class="chip b">'+b.brand+': '+b.ships+' ships</span>';}).join("")+'</div>';
+ var noP=st.fleet_without_ports||[],sc=st.fleet_short_coverage||[];
+ if(noP.length){h+='<div class="warnline red">No deployment for: '+noP.join(", ")+' — load that brand\\'s file. (Azamara names change; that\\'s expected until its file is loaded.)</div>';}
+ if(sc.length){h+='<div class="warnline amber">Under '+(st.min_coverage_months||12)+' months forward: '+sc.map(function(s){return s.ship_short+" (ends "+s.last_date+")";}).join(", ")+' — reload once a newer export is available.</div>';}
+ if(!noP.length&&!sc.length){h+='<div class="warnline good">Every fleet ship has ≥ '+(st.min_coverage_months||12)+' months of forward coverage.</div>';}
+ R.innerHTML=h;
+ $("foot").textContent="Reload the Keyman relief board to see updated ports.";
+}
+// wiring: click + drag & drop
+var dz=$("dz"),fi=$("f");
+dz.onclick=function(){fi.click();};
+fi.onchange=function(e){if(e.target.files[0])handle(e.target.files[0]);};
+["dragenter","dragover"].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add("over");});});
+["dragleave","drop"].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove("over");});});
+dz.addEventListener("drop",function(e){var f=e.dataTransfer.files[0];if(f)handle(f);});
 </script></body></html>`;
