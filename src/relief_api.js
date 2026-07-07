@@ -61,6 +61,14 @@ export async function saveReliefAssignment(env, payload) {
   if (!ok) return { ok: false, error: "rejected_fields", rejected };
   const now = new Date().toISOString();
 
+  // Resolve vessel_id from vessel_name so the board can key by (brand|ship_short) and derive cities.
+  // Applies to both reassign (update) and create (insert) — a name without an id would otherwise
+  // group under "?|Ship" and never pair with its printer.
+  if (cleaned.vessel_name && !cleaned.vessel_id) {
+    const v = await env.DB.prepare("SELECT id FROM vessel WHERE name=?").bind(cleaned.vessel_name).first();
+    if (v) cleaned.vessel_id = v.id;
+  }
+
   if (payload.id) {
     const sets = [], binds = [];
     for (const k of Object.keys(cleaned)) {
