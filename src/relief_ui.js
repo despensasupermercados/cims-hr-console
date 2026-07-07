@@ -1,8 +1,8 @@
 // src/relief_ui.js
-// Relief board — front end (Phase 3). Served at GET /relief by handleRelief (session-gated).
-// Reliever dates are chosen by PORT (a grouped select of real port-days; sea days excluded), not a
-// free date field — invalid dates are impossible. Sign-on defaults to "follows printer's sign-off".
-// A subtle "custom date" escape allows manual override. Saves post STORED fields only (never a city).
+// Relief board — front end (Phase 3). Served at GET /relief (session-gated).
+// Crew change at TURNAROUND ports only: sign-on and sign-off selects offer turnaround ports (rank T).
+// Sign-on defaults to "follows printer's sign-off". Sign-off defaults to the first turnaround port
+// at/after the minimum contract length (6 months; Azamara 5). "custom" escape allows manual override.
 export const RELIEF_HTML = `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -54,7 +54,7 @@ select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(
 </style></head><body>
 <div class="wrap">
   <h1>Relief board</h1>
-  <p class="sub">Printers come from the Keyman board (read-only). Add relievers by port — a reliever follows the printer's sign-off unless you pick another port. Drag a reliever to reassign · ⠿ to reorder (resets on reload) · Esc to close. <span id="today"></span></p>
+  <p class="sub">Crew change at turnaround ports. A reliever follows the printer's sign-off, then signs off at the next turnaround ~6 months out. Drag a reliever to reassign · ⠿ to reorder · Esc to close. <span id="today"></span></p>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><span id="reset" class="reset" onclick="RB.resetSort()"><i class="ti ti-arrow-back-up"></i> Reset to urgency</span></div>
   <div class="metrics" id="metrics"></div>
   <div id="board"></div>
@@ -86,7 +86,7 @@ const RB=(()=>{
  const $=id=>document.getElementById(id);
  const shipName=k=>String(k||"").split("|")[1]||k;
  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
- const fmtDate=d=>{if(!d)return"";const p=d.split("-");return MON[(+p[1])-1]+" "+(+p[2]);};
+ const fmtDate=d=>{if(!d)return"";const p=d.split("-");return MON[(+p[1])-1]+" "+(+p[2])+" "+p[0];};
  const monLabel=ym=>{const p=ym.split("-");return MON[(+p[1])-1]+" "+p[0];};
  const CONF={derived:["var(--bg-success)","var(--text-success)","derived"],provisional:["var(--bg-warning)","var(--text-warning)","provisional"],seed:["var(--bg-danger)","var(--text-danger)","seed"],override:["var(--bg-accent)","var(--text-accent)","override"],TBA:["var(--surface-1)","var(--text-muted)","TBA"]};
  const col=c=>c==="muted"?["var(--surface-1)","var(--text-muted)"]:["var(--bg-"+c+")","var(--text-"+c+")"];
@@ -129,7 +129,6 @@ const RB=(()=>{
    return '<div class="ship" data-key="'+r.vessel_key+'" ondragover="RB.sov(event,\\''+r.vessel_key+'\\')" ondragleave="RB.sl(event)" ondrop="RB.sd(event,\\''+r.vessel_key+'\\')"><h3><span class="grip" draggable="true" title="Drag to reorder" ondragstart="RB.rs(event,\\''+r.vessel_key+'\\')" ondragend="RB.re(event)">⠿</span>'+shipName(r.vessel_key)+'</h3><div class="row">'+printer+reliever+'</div><div class="hand" style="background:'+hc[0]+';color:'+hc[1]+'"><i class="ti '+ht.ic+'"></i>'+ht.t+'</div></div>';
   }).join("");
  }
- // drag
  function cds(e,k,role){drag={kind:"card",key:k,role};e.currentTarget.classList.add("cdrag");e.stopPropagation();}
  function cde(e){e.currentTarget.classList.remove("cdrag");document.querySelectorAll(".over").forEach(x=>x.classList.remove("over"));}
  function rs(e,k){drag={kind:"reorder",key:k};const b=e.currentTarget.closest(".ship");if(b)b.classList.add("drag");e.stopPropagation();}
@@ -137,8 +136,7 @@ const RB=(()=>{
  function sov(e,k){if(!drag)return;e.preventDefault();if(drag.key!==k)e.currentTarget.classList.add("over");}
  function sl(e){e.currentTarget.classList.remove("over");}
  async function sd(e,target){if(!drag)return;e.preventDefault();document.querySelectorAll(".over").forEach(x=>x.classList.remove("over"));
-  if(drag.kind==="reorder"){reorder(drag.key,target);}
-  else if(drag.kind==="card"){await reassign(drag.key,drag.role,target);}
+  if(drag.kind==="reorder"){reorder(drag.key,target);}else if(drag.kind==="card"){await reassign(drag.key,drag.role,target);}
   drag=null;}
  function reorder(from,to){const base=order().map(r=>r.vessel_key);const fi=base.indexOf(from),ti=base.indexOf(to);base.splice(fi,1);base.splice(ti,0,from);manualOrder=base;render();}
  function resetSort(){manualOrder=null;render();}
@@ -148,37 +146,44 @@ const RB=(()=>{
   const target=BOARD.find(r=>r.vessel_key===toKey);if(target&&target.reliever){alert(shipName(toKey)+" already has a reliever.");return;}
   await post({id:node.id,vessel_name:shipName(toKey)});await load();
  }
- // ---- ports ----
+ // ---- turnaround-port picker ----
  async function fetchPorts(ship){try{const r=await fetch("/api/relief/ports?ship="+encodeURIComponent(ship));const j=await r.json();PORTS=(j&&j.ports)||[];}catch(e){PORTS=[];}}
- function portOptions(selDate,followLbl){
-  const ports=(PORTS||[]).filter(p=>!p.is_sea&&p.port_name).slice().sort((a,b)=>a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0);
-  let h='<option value="">'+followLbl+'</option>';let cm=null;
-  for(const p of ports){const m=p.berth_date.slice(0,7);if(m!==cm){if(cm)h+='</optgroup>';h+='<optgroup label="'+monLabel(m)+'">';cm=m;}
+ function taPorts(){return (PORTS||[]).filter(p=>Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name).slice().sort((a,b)=>a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0);}
+ function addMonths(d,n){if(!d)return"";const dt=new Date(d+"T00:00:00Z");dt.setUTCMonth(dt.getUTCMonth()+n);return dt.toISOString().slice(0,10);}
+ function brandOf(ship){const row=BOARD.find(r=>shipName(r.vessel_key)===ship);return row?String(row.vessel_key).split("|")[0]:"";}
+ function minMonths(){const b=brandOf($("mship")?$("mship").value:shipName(cur&&cur.key));return /azamara/i.test(b)?5:6;}
+ function portOpts(list,selDate,lead){let h=lead;let cm=null;
+  for(const p of list){const m=p.berth_date.slice(0,7);if(m!==cm){if(cm)h+='</optgroup>';h+='<optgroup label="'+monLabel(m)+'">';cm=m;}
    h+='<option value="'+p.berth_date+'"'+(p.berth_date===selDate?' selected':'')+'>'+fmtDate(p.berth_date)+' · '+p.port_name+'</option>';}
-  if(cm)h+='</optgroup>';
-  h+='<option value="__c">Custom date…</option>';
-  return h;
- }
- function buildDates(node,role,ro){
-  const el=$("mdates");
-  if(ro){
-   el.innerHTML='<div style="display:flex;gap:14px"><div style="flex:1"><div class="lbl">Sign-on</div><div class="chip">'+(node.on_city||"— no port —")+' · '+(node.on_date||"TBA")+'</div></div><div style="flex:1"><div class="lbl">Sign-off</div><div class="chip">'+(node.off_city||"— no port —")+' · '+(node.off_date||"TBA")+'</div></div></div>';
-   return;
-  }
+  if(cm)h+='</optgroup>';h+='<option value="__c">Custom date…</option>';return h;}
+ function buildDates(node,role,ro){const el=$("mdates");
+  if(ro){el.innerHTML='<div style="display:flex;gap:14px"><div style="flex:1"><div class="lbl">Sign-on</div><div class="chip">'+(node.on_city||"— no port —")+' · '+(node.on_date||"TBA")+'</div></div><div style="flex:1"><div class="lbl">Sign-off</div><div class="chip">'+(node.off_city||"— no port —")+' · '+(node.off_date||"TBA")+'</div></div></div>';return;}
   const onDate=(node&&node.on_date&&!node.auto_on)?node.on_date:"";
   const offDate=(node&&node.off_date)||"";
-  const followLbl=(role==="reliever"&&cur.printerOff&&cur.printerOff.date)?("↳ follows printer — "+fmtDate(cur.printerOff.date)+" · "+(cur.printerOff.city||"—")):"— TBA —";
-  const onIsPort=(PORTS||[]).some(p=>!p.is_sea&&p.berth_date===onDate);
-  const offIsPort=(PORTS||[]).some(p=>!p.is_sea&&p.berth_date===offDate);
+  const ta=taPorts();const onIsTA=ta.some(p=>p.berth_date===onDate);
+  const followLbl=(role==="reliever"&&cur.printerOff&&cur.printerOff.date)?("↳ follows printer — "+fmtDate(cur.printerOff.date)+" · "+(cur.printerOff.city||"—")):"— pick a turnaround —";
   el.innerHTML='<div style="display:flex;gap:14px">'
-   +'<div style="flex:1"><div class="lbl">Sign-on · port <span class="mut" onclick="RB.custom(\\'on\\')">custom date</span></div><select id="mon-sel" onchange="RB.onSel(\\'on\\')">'+portOptions(onIsPort?onDate:"",followLbl)+'</select><input type="date" id="mon-cust" value="'+(onDate&&!onIsPort?onDate:"")+'" style="margin-top:6px;display:'+(onDate&&!onIsPort?"block":"none")+'"></div>'
-   +'<div style="flex:1"><div class="lbl">Sign-off · port <span class="mut" onclick="RB.custom(\\'off\\')">custom date</span></div><select id="moff-sel" onchange="RB.onSel(\\'off\\')">'+portOptions(offIsPort?offDate:"","— TBA —")+'</select><input type="date" id="moff-cust" value="'+(offDate&&!offIsPort?offDate:"")+'" style="margin-top:6px;display:'+(offDate&&!offIsPort?"block":"none")+'"></div>'
+   +'<div style="flex:1"><div class="lbl">Sign-on · turnaround <span class="mut" onclick="RB.custom(\\'on\\')">custom</span></div><select id="mon-sel" onchange="RB.onSel(\\'on\\')">'+portOpts(ta,onIsTA?onDate:"",'<option value="">'+followLbl+'</option>')+'</select><input type="date" id="mon-cust" value="'+(onDate&&!onIsTA?onDate:"")+'" onchange="RB.rebuildOff()" style="margin-top:6px;display:'+(onDate&&!onIsTA?"block":"none")+'"></div>'
+   +'<div style="flex:1"><div class="lbl">Sign-off · turnaround <span class="mut" onclick="RB.custom(\\'off\\')">custom</span></div><select id="moff-sel" onchange="RB.onSel(\\'off\\')"></select><input type="date" id="moff-cust" value="" style="margin-top:6px;display:none"></div>'
    +'</div>';
-  if(onDate&&!onIsPort)$("mon-sel").value="__c";
-  if(offDate&&!offIsPort)$("moff-sel").value="__c";
+  if(onDate&&!onIsTA)$("mon-sel").value="__c";
+  rebuildOff(offDate);
+ }
+ function rebuildOff(preselect){
+  const ta=taPorts();
+  const base=dateVal("on")||(cur&&cur.printerOff&&cur.printerOff.date)||"";
+  const target=base?addMonths(base,minMonths()):"";
+  const list=target?ta.filter(p=>p.berth_date>=target):ta;
+  const sel=$("moff-sel"),cust=$("moff-cust");if(!sel)return;
+  let want=(preselect!==undefined)?preselect:(sel.value==="__c"?cust.value:sel.value);want=want||"";
+  const inList=list.some(p=>p.berth_date===want);
+  sel.innerHTML=portOpts(list,inList?want:"",'<option value="">— pick a turnaround —</option>');
+  if(want&&!inList){sel.value="__c";cust.value=want;cust.style.display="block";}
+  else{cust.style.display="none";sel.value=inList?want:(list[0]?list[0].berth_date:"");}
  }
  function onSel(which){const sel=$(which==="on"?"mon-sel":"moff-sel");const cust=$(which==="on"?"mon-cust":"moff-cust");
-  if(sel.value==="__c"){cust.style.display="block";cust.focus();}else{cust.style.display="none";}}
+  if(sel.value==="__c"){cust.style.display="block";cust.focus();}else{cust.style.display="none";}
+  if(which==="on")rebuildOff();}
  function custom(which){const sel=$(which==="on"?"mon-sel":"moff-sel");sel.value="__c";onSel(which);}
  function dateVal(which){const sel=$(which==="on"?"mon-sel":"moff-sel");const cust=$(which==="on"?"mon-cust":"moff-cust");
   if(!sel)return"";if(sel.value==="__c")return cust.value||"";return sel.value||"";}
@@ -220,6 +225,6 @@ const RB=(()=>{
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
  document.getElementById("modal").addEventListener("click",close);
  load();
- return {open,close,save,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom};
+ return {open,close,save,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff};
 })();
 </script></body></html>`;
