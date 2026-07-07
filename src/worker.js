@@ -1,5 +1,6 @@
 import { ladderValue, computeBonus, mapFeedbackToScore } from "./bonus.js";
 import { signToken, verifyToken } from "./auth.js";
+import { magicLinkEmail } from "./emails/hr.magiclink.v2.js";
 import { crewComplianceReport } from "./compliance.js";
 import { buildRotationBoard } from "./rotation.js";
 import { KEYMAN_CONTRACTS } from "./keyman_data.js";
@@ -227,6 +228,10 @@ export default {
       }
       // app shell (any non-api path) — gate on session
       if (!session) return Response.redirect(url.origin + "/login", 302);
+      if (p === "/preview/hr.magiclink.v2") {
+        const { html } = magicLinkEmail({ link: "https://cims.work/auth/verify?token=SAMPLE.PREVIEW" });
+        return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+      }
       if (p === "/relief") { const rr = await handleRelief(request, url, env); if (rr) return rr; }
 
       return htmlResponse(APP_HTML);
@@ -351,11 +356,11 @@ async function sendViaMailer(env, envelope) {
 
 async function sendMagicLink(env, email, link) {
   // NOT critical: a magic link delivered an hour late is useless — fail fast.
+  const { subject, html, text } = magicLinkEmail({ link });
   await sendViaMailer(env, {
-    templateId: "hr.magiclink.v1",
+    templateId: "hr.magiclink.v2",
     to: [email],
-    subject: "Your CIMS Console sign-in link",
-    html: `<p>Click to sign in to the DG3 CIMS HR Console:</p><p><a href="${link}">${link}</a></p><p>This link expires in 15 minutes.</p>`,
+    subject, html, text,
     critical: false
   });
 }
