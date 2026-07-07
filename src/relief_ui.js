@@ -1,9 +1,8 @@
 // src/relief_ui.js
 // Relief board — front end (Phase 3). Served at GET /relief by handleRelief (session-gated).
-// Data-driven from /api/relief/board; cities/handover/urgency arrive pre-derived from the server.
-// Modal derives cities live as dates are picked (/api/relief/ports). A new reliever's sign-on
-// FOLLOWS the printer's sign-off unless Rita sets a date (override). Sea days are flagged.
-// Saves post STORED fields only (never a city).
+// Reliever dates are chosen by PORT (a grouped select of real port-days; sea days excluded), not a
+// free date field — invalid dates are impossible. Sign-on defaults to "follows printer's sign-off".
+// A subtle "custom date" escape allows manual override. Saves post STORED fields only (never a city).
 export const RELIEF_HTML = `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -14,15 +13,16 @@ export const RELIEF_HTML = `<!DOCTYPE html>
 @media(prefers-color-scheme:dark){:root{--surface-2:#1c212b;--surface-1:#252b36;--surface-0:#161a22;--border:rgba(255,255,255,.12);--border-strong:rgba(255,255,255,.24);--text-primary:#e7ebf2;--text-secondary:#a7b0be;--text-muted:#7c8697;--text-accent:#79b0e8;--bg-accent:#16324e;--border-accent:#2f6ba3;--text-success:#6ed08d;--bg-success:#173a24;--border-success:#2f7d47;--text-warning:#e2b268;--bg-warning:#3d2f14;--text-danger:#e88a86;--bg-danger:#3d1f1e}}
 *{box-sizing:border-box}body{margin:0;background:var(--surface-0);color:var(--text-primary);font-family:var(--font-sans);line-height:1.6}
 .wrap{max-width:1040px;margin:0 auto;padding:24px 22px 60px}
-h1{font-size:19px;margin:0 0 2px}.sub{font-size:12.5px;color:var(--text-secondary);margin:0 0 16px}
+h1{font-size:19px;margin:0 0 2px;font-weight:600}.sub{font-size:12.5px;color:var(--text-secondary);margin:0 0 16px}
 input,select,button{font-family:inherit}
 input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;font-size:14px;border:.5px solid var(--border);border-radius:var(--radius);background:var(--surface-2);color:var(--text-primary);outline:none}
+select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(--text-accent)}
 .btn{cursor:pointer;background:var(--surface-2);border:.5px solid var(--border-strong);border-radius:var(--radius);color:var(--text-primary);font-size:13px;padding:7px 12px;margin:0 6px 6px 0}
 .btn:hover{background:var(--surface-1)}
 .metrics{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.metric{background:var(--surface-1);border-radius:var(--radius);padding:9px 12px;font-size:13px}.mn{font-size:18px;font-weight:600}
 .reset{font-size:12px;color:var(--text-accent);background:var(--bg-accent);border:.5px solid var(--border-accent);border-radius:20px;padding:4px 11px;cursor:pointer;display:none}
 .ship{background:var(--surface-2);border:.5px solid var(--border);border-radius:12px;padding:.85rem 1rem;margin-bottom:10px}
-.ship h3{margin:0 0 9px;font-size:15px;display:flex;align-items:center;gap:8px}
+.ship h3{margin:0 0 9px;font-size:15px;display:flex;align-items:center;gap:8px;font-weight:600}
 .grip{cursor:grab;color:var(--text-muted);padding:2px 4px;border-radius:5px}.grip:hover{background:var(--surface-1)}
 .ship.over{box-shadow:0 0 0 2px var(--text-accent)}.ship.drag{opacity:.45}
 .row{display:flex;flex-wrap:wrap;gap:9px}
@@ -38,12 +38,12 @@ input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;f
 .hand{margin-top:9px;font-size:12px;padding:6px 11px;border-radius:var(--radius);display:flex;align-items:center;gap:7px}
 .modal{position:fixed;inset:0;background:rgba(10,14,24,.44);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50}
 .modal.show{display:flex}
-.cc{background:var(--surface-2);border:.5px solid var(--border);border-radius:12px;width:100%;max-width:620px;box-shadow:0 18px 50px rgba(10,14,24,.28)}
+.cc{background:var(--surface-2);border:.5px solid var(--border);border-radius:12px;width:100%;max-width:600px;box-shadow:0 18px 50px rgba(10,14,24,.28)}
 .cchd{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 11px;border-bottom:.5px solid var(--border)}
 .x{cursor:pointer;font-size:13px;color:var(--text-secondary);border:.5px solid var(--border-strong);border-radius:var(--radius);padding:5px 9px}
-.lbl{font-size:12px;color:var(--text-muted);margin:14px 0 5px;text-transform:uppercase;letter-spacing:.03em}
-.chip{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:var(--radius);font-size:14px;margin-top:6px;min-height:20px;background:var(--surface-1);color:var(--text-muted)}
-.pill{font-size:11px;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em;margin-left:auto;font-weight:500}
+.lbl{font-size:11px;color:var(--text-muted);margin:14px 0 5px;text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+.mut{font-size:10.5px;color:var(--text-accent);cursor:pointer;text-transform:none;letter-spacing:0}
+.chip{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:var(--radius);font-size:13.5px;margin-top:2px;background:var(--surface-1);color:var(--text-secondary)}
 .tog{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 10px;border:.5px solid var(--border);border-radius:20px;margin:0 6px 6px 0;cursor:pointer;color:var(--text-secondary)}
 .tog.on{border-color:var(--text-success);color:var(--text-success);background:var(--bg-success)}
 .sw{width:24px;height:14px;border-radius:20px;background:var(--border-strong);position:relative}.sw.on{background:var(--text-success)}
@@ -54,7 +54,7 @@ input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;f
 </style></head><body>
 <div class="wrap">
   <h1>Relief board</h1>
-  <p class="sub">Cities are derived from deployment data, not stored. Printers come from the Keyman board (read-only); add relievers here. A new reliever follows the printer's sign-off unless you set a date. Drag a reliever to reassign · drag ⠿ to reorder (resets on reload) · Esc to close. <span id="today"></span></p>
+  <p class="sub">Printers come from the Keyman board (read-only). Add relievers by port — a reliever follows the printer's sign-off unless you pick another port. Drag a reliever to reassign · ⠿ to reorder (resets on reload) · Esc to close. <span id="today"></span></p>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><span id="reset" class="reset" onclick="RB.resetSort()"><i class="ti ti-arrow-back-up"></i> Reset to urgency</span></div>
   <div class="metrics" id="metrics"></div>
   <div id="board"></div>
@@ -62,7 +62,7 @@ input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;f
   <div class="modal" id="modal">
     <div class="cc" onclick="event.stopPropagation()">
       <div class="cchd"><div><div id="mtitle" style="font-size:16px;font-weight:600">Contract</div><div id="msub" style="font-size:12px;color:var(--text-muted);margin-top:2px"></div></div>
-        <div style="display:flex;gap:10px;align-items:center"><span style="font-size:11px;color:var(--text-muted)"><i class="ti ti-command"></i> Esc closes</span><span class="x" onclick="RB.close()"><i class="ti ti-x"></i> Close</span></div></div>
+        <div style="display:flex;gap:10px;align-items:center"><span style="font-size:11px;color:var(--text-muted)"><i class="ti ti-command"></i> Esc</span><span class="x" onclick="RB.close()"><i class="ti ti-x"></i> Close</span></div></div>
       <div style="padding:6px 16px 16px">
         <div id="mbanner" style="display:none"></div>
         <div class="lbl">Crew member</div>
@@ -70,12 +70,9 @@ input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;f
         <div id="mdrop" class="drop"></div>
         <div id="mpicked" style="display:none;margin-top:6px;font-size:14px"></div>
         <div class="lbl">Ship</div><select id="mship" onchange="RB.shipChange()"></select>
-        <div style="display:flex;gap:14px">
-          <div style="flex:1"><div class="lbl">Sign-on date</div><input type="date" id="mon" onchange="RB.der('on')"><div id="moncity" class="chip">—</div></div>
-          <div style="flex:1"><div class="lbl">Sign-off date</div><input type="date" id="moff" onchange="RB.der('off')"><div id="moffcity" class="chip">—</div></div>
-        </div>
+        <div id="mdates"></div>
         <div class="lbl">Confirmed</div><div id="mtogs"></div>
-        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:.5px solid var(--border)">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;padding-top:12px;border-top:.5px solid var(--border)">
           <button class="btn" onclick="RB.close()">Cancel</button>
           <button class="btn" id="msave" style="border-color:var(--text-success);color:var(--text-success)" onclick="RB.save()"><i class="ti ti-check"></i> Save</button>
         </div>
@@ -88,7 +85,10 @@ const RB=(()=>{
  let BOARD=[],CREW=[],CFG={critical_days:14,due_days:30},manualOrder=null,cur=null,drag=null,PORTS=[];
  const $=id=>document.getElementById(id);
  const shipName=k=>String(k||"").split("|")[1]||k;
- const CONF={derived:["var(--bg-success)","var(--text-success)","derived"],provisional:["var(--bg-warning)","var(--text-warning)","provisional"],seed:["var(--bg-danger)","var(--text-danger)","seed · check"],override:["var(--bg-accent)","var(--text-accent)","override"],TBA:["var(--surface-1)","var(--text-muted)","TBA"]};
+ const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+ const fmtDate=d=>{if(!d)return"";const p=d.split("-");return MON[(+p[1])-1]+" "+(+p[2]);};
+ const monLabel=ym=>{const p=ym.split("-");return MON[(+p[1])-1]+" "+p[0];};
+ const CONF={derived:["var(--bg-success)","var(--text-success)","derived"],provisional:["var(--bg-warning)","var(--text-warning)","provisional"],seed:["var(--bg-danger)","var(--text-danger)","seed"],override:["var(--bg-accent)","var(--text-accent)","override"],TBA:["var(--surface-1)","var(--text-muted)","TBA"]};
  const col=c=>c==="muted"?["var(--surface-1)","var(--text-muted)"]:["var(--bg-"+c+")","var(--text-"+c+")"];
  async function load(){
   try{
@@ -143,27 +143,49 @@ const RB=(()=>{
  function reorder(from,to){const base=order().map(r=>r.vessel_key);const fi=base.indexOf(from),ti=base.indexOf(to);base.splice(fi,1);base.splice(ti,0,from);manualOrder=base;render();}
  function resetSort(){manualOrder=null;render();}
  async function reassign(fromKey,role,toKey){
-  if(fromKey===toKey||role!=="reliever")return; // only relievers reassign
+  if(fromKey===toKey||role!=="reliever")return;
   const row=BOARD.find(r=>r.vessel_key===fromKey);const node=row&&row.reliever;if(!node)return;
   const target=BOARD.find(r=>r.vessel_key===toKey);if(target&&target.reliever){alert(shipName(toKey)+" already has a reliever.");return;}
   await post({id:node.id,vessel_name:shipName(toKey)});await load();
  }
- // ---- city derivation in the modal (mirrors the server resolver over vessel_port_day) ----
- function dd(a,b){const t1=Date.parse(a),t2=Date.parse(b);if(isNaN(t1)||isNaN(t2))return NaN;return Math.round((t1-t2)/864e5);}
+ // ---- ports ----
  async function fetchPorts(ship){try{const r=await fetch("/api/relief/ports?ship="+encodeURIComponent(ship));const j=await r.json();PORTS=(j&&j.ports)||[];}catch(e){PORTS=[];}}
- function resolveLocal(date){if(!date)return{city:null,conf:"TBA",sea:false};
-  const ex=PORTS.find(p=>p.berth_date===date);
-  if(ex){if(ex.is_sea||!ex.port_name)return{city:null,conf:"TBA",sea:true};return{city:ex.port_name,conf:"derived",sea:false};}
-  const near=PORTS.find(p=>p.port_name&&!p.is_sea&&Math.abs(dd(p.berth_date,date))<=1);
-  if(near)return{city:near.port_name,conf:"provisional",sea:false};
-  return{city:null,conf:"TBA",sea:false};}
- function setChip2(id,city,conf,note){const el=$(id);const c=CONF[conf]||CONF.TBA;el.style.background=c[0];el.style.color=c[1];
-  el.innerHTML='<i class="ti ti-map-pin"></i><span>'+(city||"— no port —")+'</span>'+(note?'<span style="font-size:10.5px;margin-left:6px;color:var(--text-warning)">'+note+'</span>':'')+'<span class="pill" style="background:var(--surface-2);color:'+c[1]+'">'+c[2]+'</span>';el.dataset.city=city||"";el.dataset.conf=conf;}
- function der(which){const date=(which==="on"?$("mon"):$("moff")).value;const id=which==="on"?"moncity":"moffcity";
-  if(which==="on"&&!date&&cur&&cur.role==="reliever"&&cur.printerOff){setChip2(id,cur.printerOff.city,cur.printerOff.conf||"derived","follows printer OFF");return;}
-  if(!date){const el=$(id);el.textContent="Pick a date";el.style.background="var(--surface-1)";el.style.color="var(--text-muted)";return;}
-  const r=resolveLocal(date);setChip2(id,r.city,r.conf,r.sea?"⚠ sea day — no handover port; pick a port date or override":"");}
- async function shipChange(){await fetchPorts($("mship").value);der("on");der("off");}
+ function portOptions(selDate,followLbl){
+  const ports=(PORTS||[]).filter(p=>!p.is_sea&&p.port_name).slice().sort((a,b)=>a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0);
+  let h='<option value="">'+followLbl+'</option>';let cm=null;
+  for(const p of ports){const m=p.berth_date.slice(0,7);if(m!==cm){if(cm)h+='</optgroup>';h+='<optgroup label="'+monLabel(m)+'">';cm=m;}
+   h+='<option value="'+p.berth_date+'"'+(p.berth_date===selDate?' selected':'')+'>'+fmtDate(p.berth_date)+' · '+p.port_name+'</option>';}
+  if(cm)h+='</optgroup>';
+  h+='<option value="__c">Custom date…</option>';
+  return h;
+ }
+ function buildDates(node,role,ro){
+  const el=$("mdates");
+  if(ro){
+   el.innerHTML='<div style="display:flex;gap:14px"><div style="flex:1"><div class="lbl">Sign-on</div><div class="chip">'+(node.on_city||"— no port —")+' · '+(node.on_date||"TBA")+'</div></div><div style="flex:1"><div class="lbl">Sign-off</div><div class="chip">'+(node.off_city||"— no port —")+' · '+(node.off_date||"TBA")+'</div></div></div>';
+   return;
+  }
+  const onDate=(node&&node.on_date&&!node.auto_on)?node.on_date:"";
+  const offDate=(node&&node.off_date)||"";
+  const followLbl=(role==="reliever"&&cur.printerOff&&cur.printerOff.date)?("↳ follows printer — "+fmtDate(cur.printerOff.date)+" · "+(cur.printerOff.city||"—")):"— TBA —";
+  const onIsPort=(PORTS||[]).some(p=>!p.is_sea&&p.berth_date===onDate);
+  const offIsPort=(PORTS||[]).some(p=>!p.is_sea&&p.berth_date===offDate);
+  el.innerHTML='<div style="display:flex;gap:14px">'
+   +'<div style="flex:1"><div class="lbl">Sign-on · port <span class="mut" onclick="RB.custom(\\'on\\')">custom date</span></div><select id="mon-sel" onchange="RB.onSel(\\'on\\')">'+portOptions(onIsPort?onDate:"",followLbl)+'</select><input type="date" id="mon-cust" value="'+(onDate&&!onIsPort?onDate:"")+'" style="margin-top:6px;display:'+(onDate&&!onIsPort?"block":"none")+'"></div>'
+   +'<div style="flex:1"><div class="lbl">Sign-off · port <span class="mut" onclick="RB.custom(\\'off\\')">custom date</span></div><select id="moff-sel" onchange="RB.onSel(\\'off\\')">'+portOptions(offIsPort?offDate:"","— TBA —")+'</select><input type="date" id="moff-cust" value="'+(offDate&&!offIsPort?offDate:"")+'" style="margin-top:6px;display:'+(offDate&&!offIsPort?"block":"none")+'"></div>'
+   +'</div>';
+  if(onDate&&!onIsPort)$("mon-sel").value="__c";
+  if(offDate&&!offIsPort)$("moff-sel").value="__c";
+ }
+ function onSel(which){const sel=$(which==="on"?"mon-sel":"moff-sel");const cust=$(which==="on"?"mon-cust":"moff-cust");
+  if(sel.value==="__c"){cust.style.display="block";cust.focus();}else{cust.style.display="none";}}
+ function custom(which){const sel=$(which==="on"?"mon-sel":"moff-sel");sel.value="__c";onSel(which);}
+ function dateVal(which){const sel=$(which==="on"?"mon-sel":"moff-sel");const cust=$(which==="on"?"mon-cust":"moff-cust");
+  if(!sel)return"";if(sel.value==="__c")return cust.value||"";return sel.value||"";}
+ async function shipChange(){const s=$("mship").value;await fetchPorts(s);
+  const row=BOARD.find(r=>shipName(r.vessel_key)===s);const pr=row&&row.printer;
+  cur.printerOff=(cur.role==="reliever"&&pr)?{city:pr.off_city,conf:pr.off_conf,date:pr.off_date}:null;
+  buildDates(null,cur.role,false);}
  // modal
  async function open(key,role){const row=BOARD.find(r=>r.vessel_key===key);const node=row?row[role]:null;const printer=row?row.printer:null;
   const ro=!!(node&&String(node.id||"").startsWith("leg:"));
@@ -173,17 +195,12 @@ const RB=(()=>{
   $("msave").style.display=ro?"none":"inline-block";
   const banner=$("mbanner");
   if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div>';}else banner.style.display="none";
-  // crew
   if(node){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+(node.crew_name||"—")+'</b>';cur.crew_id=null;}
   else{$("mcrew").style.display="block";$("mcrew").value="";$("mpicked").style.display="none";}
-  // ship select
   const ships=[...new Set(BOARD.map(r=>shipName(r.vessel_key)))];$("mship").innerHTML=ships.map(s=>'<option'+(s===shipName(key)?" selected":"")+'>'+s+'</option>').join("")||'<option>'+shipName(key)+'</option>';
-  // dates: an auto-following reliever shows a blank sign-on (keeps following); manual/printer dates show.
-  $("mon").value=(node&&node.on_date&&!node.auto_on)?node.on_date:"";
-  $("moff").value=(node&&node.off_date)||"";
-  togs();
+  $("mdates").innerHTML="";togs();
   $("modal").classList.add("show");
-  await fetchPorts(shipName(key));der("on");der("off");
+  await fetchPorts(shipName(key));buildDates(node,role,ro);
  }
  function togs(){const lbl={eccr:"ECCR",air:"AIR",hotel:"HOTEL",on_date_conf:"ON DATE",off_date_conf:"OFF DATE"};$("mtogs").innerHTML=Object.keys(cur.tags).map(k=>'<span class="tog '+(cur.tags[k]?"on":"")+'" onclick="RB.tog(\\''+k+'\\')"><span class="sw '+(cur.tags[k]?"on":"")+'"></span>'+lbl[k]+'</span>').join("");}
  function tog(k){if(cur.readonly)return;cur.tags[k]=!cur.tags[k];togs();}
@@ -191,8 +208,8 @@ const RB=(()=>{
  function pick(id,name){cur.crew_id=id;$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>';}
  function close(){$("modal").classList.remove("show");}
  async function save(){
-  if(cur.readonly){alert("This keyman is managed on the Keyman board. Add or edit the reliever on this ship instead.");return;}
-  const payload={sign_on:$("mon").value||null,planned_sign_off:$("moff").value||null,
+  if(cur.readonly){close();return;}
+  const payload={sign_on:dateVal("on")||null,planned_sign_off:dateVal("off")||null,
    eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
   if(cur.id){payload.id=cur.id;}
   else{if(!cur.crew_id){alert("Pick a crew member first.");return;}payload.crew_id=cur.crew_id;payload.role=cur.role;payload.vessel_name=$("mship").value;}
@@ -203,6 +220,6 @@ const RB=(()=>{
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
  document.getElementById("modal").addEventListener("click",close);
  load();
- return {open,close,save,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,der,shipChange};
+ return {open,close,save,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom};
 })();
 </script></body></html>`;
