@@ -14,6 +14,10 @@ test("no SELECT column aliased to the reserved word `on` (unquoted)", () => {
   assert.equal(bad.test(SRC), false, "found a column aliased to reserved word `on` — quote it or rename");
 });
 
-test("days-worked reads keyman_contract3 raw columns (no keyword alias)", () => {
-  assert.match(SRC, /SELECT sc, ship, sign_on, proj_off, act_off FROM keyman_contract3/);
+// P3.13: the board (rotationSections) AND the billing/days-worked surfaces now read the single
+// source of truth `ship_leg` — NOT keyman_contract3. kc3 remains only for the bonus/score (sbm).
+// This still guards against the reserved-word-alias breakage the old test caught: the mapped
+// columns (ship_short AS ship, on_date AS sign_on, off_date AS proj_off) use no reserved aliases.
+test("days-worked / board legs read ship_leg mapped columns (no keyword alias)", () => {
+  assert.match(SRC, /SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off FROM ship_leg/);
 });
