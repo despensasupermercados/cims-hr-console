@@ -227,6 +227,8 @@ export default {
       }
       // app shell (any non-api path) — gate on session
       if (!session) return Response.redirect(url.origin + "/login", 302);
+      if (p === "/relief") { const rr = await handleRelief(request, url, env); if (rr) return rr; }
+
       return htmlResponse(APP_HTML);
       })();
     } catch (err) {
