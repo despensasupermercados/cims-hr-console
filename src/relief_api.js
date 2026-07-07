@@ -4,6 +4,7 @@
 import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
+import { DEPLOY_HTML } from "./relief_deploy.js";
 
 // READ — one call returns the whole board (spec §6). Cities/handover/urgency all derived here.
 export async function reliefBoardData(env, today) {
@@ -73,14 +74,11 @@ const ASSIGN_COLS = new Set([
 ]);
 
 // SAVE — stored fields only. Rejects any derived city/confidence write (spec §6).
-//   payload.id present  → UPDATE that assignment.
-//   payload.id absent   → INSERT (requires crew_id + vessel_name + role); creates a contract row.
 export async function saveReliefAssignment(env, payload) {
   const { ok, cleaned, rejected } = validateWrite(payload || {});
   if (!ok) return { ok: false, error: "rejected_fields", rejected };
   const now = new Date().toISOString();
 
-  // Resolve vessel_id from vessel_name so the board can key by (brand|ship_short) and derive cities.
   if (cleaned.vessel_name && !cleaned.vessel_id) {
     const v = await env.DB.prepare("SELECT id FROM vessel WHERE name=?").bind(cleaned.vessel_name).first();
     if (v) cleaned.vessel_id = v.id;
@@ -98,7 +96,6 @@ export async function saveReliefAssignment(env, payload) {
     return { ok: true, id: payload.id, mode: "update" };
   }
 
-  // INSERT — needs a crew + a vessel + a role.
   if (!cleaned.crew_id) return { ok: false, error: "crew_id_required_for_insert" };
   if (!cleaned.vessel_name && !cleaned.vessel_id) return { ok: false, error: "vessel_required_for_insert" };
   if (!cleaned.role) return { ok: false, error: "role_required_for_insert" };
@@ -126,15 +123,13 @@ function jsonResp(obj, status = 200) {
 }
 
 // Single dispatcher — the ONLY thing worker.js calls. Returns a Response for our routes, else null.
-//   GET  /relief            → the board page (HTML)
-//   GET  /api/relief/board  → the whole board (derived cities/handover/urgency)
-//   GET  /api/relief/crew   → crew list for the picker
-//   GET  /api/relief/ports  → a vessel's port-days (for live in-modal city derivation)
-//   POST /api/relief/save   → stored-fields-only write (rejects city writes)
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
   if (p === "/relief" && request.method === "GET") {
     return new Response(RELIEF_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+  if (p === "/api/relief/deploy" && request.method === "GET") {
+    return new Response(DEPLOY_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
   }
   if (p === "/api/relief/board" && request.method === "GET") {
     const today = new Date().toISOString().slice(0, 10);
@@ -152,6 +147,23 @@ export async function handleRelief(request, url, env) {
       "SELECT berth_date, port_name, is_sea FROM vessel_port_day WHERE ship_short=? ORDER BY berth_date"
     ).bind(ship).all()).results;
     return jsonResp({ ports: rows });
+  }
+  if (p === "/api/relief/vpd-load" && request.method === "POST") {
+    let body;
+    try { body = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
+    const rows = body.rows || [];
+    if (body.reset) await env.DB.prepare("DELETE FROM vessel_port_day WHERE source='CEL_RCI'").run();
+    if (rows.length) {
+      const esc = (s) => String(s == null ? "" : s).replace(/'/g, "''");
+      const vals = rows.map((r) =>
+        "('" + esc(r[0]) + "','" + esc(r[1]) + "','" + esc(r[2]) + "'," + (parseInt(r[3], 10) || 1) +
+        ",'" + esc(r[4]) + "'," + (String(r[5]) === "1" ? 1 : 0) + ",'CEL_RCI','" + esc(body.asof || "") + "')"
+      ).join(",");
+      await env.DB.prepare(
+        "INSERT OR REPLACE INTO vessel_port_day (brand,ship_short,berth_date,stop_seq,port_name,is_sea,source,source_asof) VALUES " + vals
+      ).run();
+    }
+    return jsonResp({ ok: true, inserted: rows.length });
   }
   if (p === "/api/relief/save" && request.method === "POST") {
     let payload;
