@@ -1799,7 +1799,7 @@ async function processIntelInbox(env, limit) {
 async function apiFeedbackBoard(env) {
   await ensureKeyman(env); await ensureFb(env);
   const today = TODAY();
-  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
   const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
