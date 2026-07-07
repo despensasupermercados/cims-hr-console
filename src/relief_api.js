@@ -1,12 +1,10 @@
 // src/relief_api.js
 // Relief board — data layer over D1. Read assembles the board; save writes STORED fields only.
-// Kept out of worker.js so the wire-in is one router line. Pure SQL + the pure modules.
 import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
 
-// READ — one call returns the whole board (spec §6). Cities/handover/urgency all derived here.
 export async function reliefBoardData(env, today) {
   const cfg = (await env.DB.prepare(
     "SELECT critical_days, due_days FROM relief_window_config WHERE key='default'"
@@ -17,9 +15,7 @@ export async function reliefBoardData(env, today) {
   ).all()).results;
   const portDaysByShip = groupPortDays(pd);
 
-  // PRINTERS — the current keymen, read at request time from ship_leg (display only; NOT written
-  // into the relief model). Rita adds relievers on top; grouping by vessel pairs them. id "leg:*"
-  // marks these read-only (they're owned by the Keyman board).
+  // PRINTERS — current keymen from ship_leg (display only; NOT written into the relief model).
   const legs = (await env.DB.prepare(
     `SELECT l.brand, l.ship_short, l.on_date, l.off_date, l.embark, l.disembark,
             TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
@@ -34,7 +30,6 @@ export async function reliefBoardData(env, today) {
     on_port_seed: l.embark || null, off_port_seed: l.disembark || null,
   }));
 
-  // RELIEVERS (and any manual assignment rows) — the relief model.
   const rows = (await env.DB.prepare(
     `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.actual_sign_off,
             a.on_port_seed, a.off_port_seed, a.override_on_city, a.override_off_city,
@@ -65,7 +60,6 @@ export async function reliefBoardData(env, today) {
   return { board, config: cfg, today: today || null, count: assignments.length };
 }
 
-// Columns that live on `assignment` (crew_id lives on `contract`, handled separately on insert).
 const ASSIGN_COLS = new Set([
   "role", "vessel_id", "vessel_name", "succeeds_assignment_id",
   "sign_on", "planned_sign_off", "actual_sign_off", "on_port_seed", "off_port_seed",
@@ -73,7 +67,6 @@ const ASSIGN_COLS = new Set([
   "instructions_sent_at", "signoff_link_sent_at", "review_invite_sent_at", "end_reason", "readiness",
 ]);
 
-// SAVE — stored fields only. Rejects any derived city/confidence write (spec §6).
 export async function saveReliefAssignment(env, payload) {
   const { ok, cleaned, rejected } = validateWrite(payload || {});
   if (!ok) return { ok: false, error: "rejected_fields", rejected };
@@ -122,7 +115,6 @@ function jsonResp(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 }
 
-// Single dispatcher — the ONLY thing worker.js calls. Returns a Response for our routes, else null.
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
   if (p === "/relief" && request.method === "GET") {
@@ -144,7 +136,7 @@ export async function handleRelief(request, url, env) {
   if (p === "/api/relief/ports" && request.method === "GET") {
     const ship = url.searchParams.get("ship") || "";
     const rows = (await env.DB.prepare(
-      "SELECT berth_date, port_name, is_sea FROM vessel_port_day WHERE ship_short=? ORDER BY berth_date"
+      "SELECT berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day WHERE ship_short=? ORDER BY berth_date"
     ).bind(ship).all()).results;
     return jsonResp({ ports: rows });
   }
@@ -157,10 +149,11 @@ export async function handleRelief(request, url, env) {
       const esc = (s) => String(s == null ? "" : s).replace(/'/g, "''");
       const vals = rows.map((r) =>
         "('" + esc(r[0]) + "','" + esc(r[1]) + "','" + esc(r[2]) + "'," + (parseInt(r[3], 10) || 1) +
-        ",'" + esc(r[4]) + "'," + (String(r[5]) === "1" ? 1 : 0) + ",'CEL_RCI','" + esc(body.asof || "") + "')"
+        ",'" + esc(r[4]) + "'," + (String(r[5]) === "1" ? 1 : 0) + "," + (String(r[6]) === "1" ? 1 : 0) +
+        ",'CEL_RCI','" + esc(body.asof || "") + "')"
       ).join(",");
       await env.DB.prepare(
-        "INSERT OR REPLACE INTO vessel_port_day (brand,ship_short,berth_date,stop_seq,port_name,is_sea,source,source_asof) VALUES " + vals
+        "INSERT OR REPLACE INTO vessel_port_day (brand,ship_short,berth_date,stop_seq,port_name,is_sea,is_turnaround,source,source_asof) VALUES " + vals
       ).run();
     }
     return jsonResp({ ok: true, inserted: rows.length });
@@ -171,5 +164,5 @@ export async function handleRelief(request, url, env) {
     const res = await saveReliefAssignment(env, payload);
     return jsonResp(res, res.ok ? 200 : 400);
   }
-  return null; // not our route
+  return null;
 }
