@@ -5,6 +5,11 @@ import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
 
+// Minimum forward itinerary we require in the DB, per fleet ship, for the relief picker to never run
+// dry. Sign-off projects ~6 months out (Azamara 5); 12 months gives the picker turnarounds to land on
+// well past that horizon. The verify endpoint flags any fleet ship whose coverage ends sooner.
+export const MIN_COVERAGE_MONTHS = 12;
+
 export async function reliefBoardData(env, today) {
   const cfg = (await env.DB.prepare(
     "SELECT critical_days, due_days FROM relief_window_config WHERE key='default'"
@@ -114,8 +119,6 @@ function jsonResp(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 }
 
-// Vessel-deployment ingestion: validate every row before it lands, so a malformed upload can never
-// silently corrupt vessel_port_day. Rows failing validation are skipped and counted, not inserted.
 const VPD_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const VPD_BRANDS = new Set(["Celebrity", "Royal Caribbean", "Azamara", "NCL"]);
 
@@ -144,8 +147,10 @@ export async function handleRelief(request, url, env) {
     ).bind(ship).all()).results;
     return jsonResp({ ports: rows });
   }
-  // Verify what actually landed — the "did it arrive correctly" check.
+  // Verify what actually landed + enforce the forward-coverage floor. This is the "did it arrive
+  // correctly AND is there enough runway" check the loader shows after every upload.
   if (p === "/api/relief/vpd-status" && request.method === "GET") {
+    const today = new Date().toISOString().slice(0, 10);
     const s = (await env.DB.prepare(
       `SELECT (SELECT COUNT(*) FROM vessel_port_day) AS total,
               (SELECT COUNT(*) FROM vessel_port_day WHERE is_turnaround=1) AS turnarounds,
@@ -153,20 +158,29 @@ export async function handleRelief(request, url, env) {
               (SELECT MIN(berth_date) FROM vessel_port_day) AS first_date,
               (SELECT MAX(berth_date) FROM vessel_port_day) AS last_date`
     ).first()) || {};
+    // Fleet ships with NO deployment at all.
     const noPorts = (await env.DB.prepare(
       `SELECT DISTINCT l.ship_short FROM ship_leg l
          WHERE l.is_current=1 AND l.ours=1
            AND NOT EXISTS (SELECT 1 FROM vessel_port_day v WHERE v.ship_short = l.ship_short)
          ORDER BY l.ship_short`
     ).all()).results.map((r) => r.ship_short);
-    return jsonResp({ ...s, fleet_without_ports: noPorts });
+    // Fleet ships whose itinerary runs out BEFORE today + 12 months (about to run dry).
+    const shortCov = (await env.DB.prepare(
+      `SELECT l.ship_short, MAX(v.berth_date) AS last_date
+         FROM ship_leg l JOIN vessel_port_day v ON v.ship_short = l.ship_short
+        WHERE l.is_current=1 AND l.ours=1
+        GROUP BY l.ship_short
+       HAVING MAX(v.berth_date) < date(?, '+' || ? || ' months')
+        ORDER BY last_date`
+    ).bind(today, String(MIN_COVERAGE_MONTHS)).all()).results;
+    return jsonResp({ ...s, today, min_coverage_months: MIN_COVERAGE_MONTHS, fleet_without_ports: noPorts, fleet_short_coverage: shortCov });
   }
   if (p === "/api/relief/vpd-load" && request.method === "POST") {
     let body;
     try { body = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const rows = body.rows || [];
     if (body.reset) await env.DB.prepare("DELETE FROM vessel_port_day WHERE source='CEL_RCI'").run();
-    // Validate EVERY row; skip (and count) anything malformed so it can never corrupt the table.
     const good = [];
     let skipped = 0;
     for (const r of rows) {
