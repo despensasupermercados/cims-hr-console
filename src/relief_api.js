@@ -15,7 +15,6 @@ export async function reliefBoardData(env, today) {
   ).all()).results;
   const portDaysByShip = groupPortDays(pd);
 
-  // PRINTERS — current keymen from ship_leg (display only; NOT written into the relief model).
   const legs = (await env.DB.prepare(
     `SELECT l.brand, l.ship_short, l.on_date, l.off_date, l.embark, l.disembark,
             TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
@@ -115,6 +114,11 @@ function jsonResp(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 }
 
+// Vessel-deployment ingestion: validate every row before it lands, so a malformed upload can never
+// silently corrupt vessel_port_day. Rows failing validation are skipped and counted, not inserted.
+const VPD_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const VPD_BRANDS = new Set(["Celebrity", "Royal Caribbean", "Azamara", "NCL"]);
+
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
   if (p === "/relief" && request.method === "GET") {
@@ -140,14 +144,40 @@ export async function handleRelief(request, url, env) {
     ).bind(ship).all()).results;
     return jsonResp({ ports: rows });
   }
+  // Verify what actually landed — the "did it arrive correctly" check.
+  if (p === "/api/relief/vpd-status" && request.method === "GET") {
+    const s = (await env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM vessel_port_day) AS total,
+              (SELECT COUNT(*) FROM vessel_port_day WHERE is_turnaround=1) AS turnarounds,
+              (SELECT COUNT(DISTINCT ship_short) FROM vessel_port_day) AS ships,
+              (SELECT MIN(berth_date) FROM vessel_port_day) AS first_date,
+              (SELECT MAX(berth_date) FROM vessel_port_day) AS last_date`
+    ).first()) || {};
+    const noPorts = (await env.DB.prepare(
+      `SELECT DISTINCT l.ship_short FROM ship_leg l
+         WHERE l.is_current=1 AND l.ours=1
+           AND NOT EXISTS (SELECT 1 FROM vessel_port_day v WHERE v.ship_short = l.ship_short)
+         ORDER BY l.ship_short`
+    ).all()).results.map((r) => r.ship_short);
+    return jsonResp({ ...s, fleet_without_ports: noPorts });
+  }
   if (p === "/api/relief/vpd-load" && request.method === "POST") {
     let body;
     try { body = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const rows = body.rows || [];
     if (body.reset) await env.DB.prepare("DELETE FROM vessel_port_day WHERE source='CEL_RCI'").run();
-    if (rows.length) {
+    // Validate EVERY row; skip (and count) anything malformed so it can never corrupt the table.
+    const good = [];
+    let skipped = 0;
+    for (const r of rows) {
+      if (!Array.isArray(r) || r.length < 6) { skipped++; continue; }
+      const brand = String(r[0] || "").trim(), ship = String(r[1] || "").trim(), date = String(r[2] || "").trim(), port = String(r[4] || "").trim();
+      if (!VPD_BRANDS.has(brand) || !ship || !VPD_DATE.test(date) || !port) { skipped++; continue; }
+      good.push(r);
+    }
+    if (good.length) {
       const esc = (s) => String(s == null ? "" : s).replace(/'/g, "''");
-      const vals = rows.map((r) =>
+      const vals = good.map((r) =>
         "('" + esc(r[0]) + "','" + esc(r[1]) + "','" + esc(r[2]) + "'," + (parseInt(r[3], 10) || 1) +
         ",'" + esc(r[4]) + "'," + (String(r[5]) === "1" ? 1 : 0) + "," + (String(r[6]) === "1" ? 1 : 0) +
         ",'CEL_RCI','" + esc(body.asof || "") + "')"
@@ -156,7 +186,7 @@ export async function handleRelief(request, url, env) {
         "INSERT OR REPLACE INTO vessel_port_day (brand,ship_short,berth_date,stop_seq,port_name,is_sea,is_turnaround,source,source_asof) VALUES " + vals
       ).run();
     }
-    return jsonResp({ ok: true, inserted: rows.length });
+    return jsonResp({ ok: true, inserted: good.length, skipped });
   }
   if (p === "/api/relief/save" && request.method === "POST") {
     let payload;
