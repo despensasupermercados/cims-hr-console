@@ -94,3 +94,26 @@ export async function saveReliefAssignment(env, payload) {
   await env.DB.prepare("INSERT INTO assignment (" + cols.join(",") + ") VALUES (" + ph + ")").bind(...vals).run();
   return { ok: true, id: asId, mode: "insert" };
 }
+
+function jsonResp(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+}
+
+// Single dispatcher — the ONLY thing worker.js calls. Returns a Response for our routes, else null.
+// Mount it INSIDE the console's authenticated section so crew PII stays session-gated.
+//   GET  /api/relief/board  → the whole board (derived cities/handover/urgency)
+//   POST /api/relief/save   → stored-fields-only write (rejects city writes)
+export async function handleRelief(request, url, env) {
+  const p = url.pathname;
+  if (p === "/api/relief/board" && request.method === "GET") {
+    const today = new Date().toISOString().slice(0, 10);
+    return jsonResp(await reliefBoardData(env, today));
+  }
+  if (p === "/api/relief/save" && request.method === "POST") {
+    let payload;
+    try { payload = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
+    const res = await saveReliefAssignment(env, payload);
+    return jsonResp(res, res.ok ? 200 : 400);
+  }
+  return null; // not our route
+}
