@@ -129,6 +129,7 @@ function jsonResp(obj, status = 200) {
 //   GET  /relief            → the board page (HTML)
 //   GET  /api/relief/board  → the whole board (derived cities/handover/urgency)
 //   GET  /api/relief/crew   → crew list for the picker
+//   GET  /api/relief/ports  → a vessel's port-days (for live in-modal city derivation)
 //   POST /api/relief/save   → stored-fields-only write (rejects city writes)
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
@@ -144,6 +145,13 @@ export async function handleRelief(request, url, env) {
       "SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name FROM crew WHERE redacted=0 ORDER BY name"
     ).all()).results;
     return jsonResp({ crew: rows });
+  }
+  if (p === "/api/relief/ports" && request.method === "GET") {
+    const ship = url.searchParams.get("ship") || "";
+    const rows = (await env.DB.prepare(
+      "SELECT berth_date, port_name, is_sea FROM vessel_port_day WHERE ship_short=? ORDER BY berth_date"
+    ).bind(ship).all()).results;
+    return jsonResp({ ports: rows });
   }
   if (p === "/api/relief/save" && request.method === "POST") {
     let payload;
