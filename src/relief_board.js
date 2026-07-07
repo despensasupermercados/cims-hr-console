@@ -72,13 +72,20 @@ export function buildReliefBoard({ assignments = [], portDaysByShip = {}, config
         on_city: on.city, on_conf: on.conf, off_city: off.city, off_conf: off.conf,
         days_to_off: a.off_date ? dayDiff(a.off_date, today) : null,
         succeeds_assignment_id: a.succeeds_assignment_id || null,
+        auto_on: !!a.auto_on,
         tags: { eccr: !!a.eccr, air: !!a.air, hotel: !!a.hotel, on_date_conf: !!a.on_date_conf, off_date_conf: !!a.off_date_conf },
         workflow: workflowStatus(a),
       };
     };
 
     const printer = enrich(printerRaw);
-    const reliever = enrich(relieverRaw);
+    // Auto-handover: a reliever with no stored sign-on date FOLLOWS the printer's sign-off (date + port),
+    // and keeps tracking it if the printer's OFF later changes. Rita sets a date only to override.
+    let relieverInput = relieverRaw;
+    if (relieverRaw && !relieverRaw.on_date && printer && printer.off_date) {
+      relieverInput = Object.assign({}, relieverRaw, { on_date: printer.off_date, auto_on: true });
+    }
+    const reliever = enrich(relieverInput);
     const handover = handoverStatus(printer, reliever);
     const daysToOff = printer ? printer.days_to_off : null;
     const urg = urgency(daysToOff, config);
