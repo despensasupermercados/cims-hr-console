@@ -2,7 +2,7 @@
 // Loader for the vessel deployment itinerary. Served at GET /api/relief/deploy (session-gated).
 // Accepts the tab-separated export (brand, ship_short, berth_date, stop_seq, port_name, is_sea,
 // is_turnaround) and POSTs it to /api/relief/vpd-load in chunks. Server validates every row.
-// After loading it calls /api/relief/vpd-status and shows exactly what landed + any coverage gaps.
+// After loading it calls /api/relief/vpd-status and shows what landed + coverage gaps (12-mo floor).
 export const DEPLOY_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Load vessel deployment</title>
@@ -40,12 +40,13 @@ document.getElementById("f").onchange=async e=>{
   document.getElementById("pi").style.width=Math.round((i+chunk.length)/rows.length*100)+"%";
  }
  log("DONE — "+done+" port-days loaded"+(skipped?(" · "+skipped+" skipped (malformed)"):""),"ok");
- // verify what actually landed
  let st;try{st=await fetch("/api/relief/vpd-status").then(r=>r.json());}catch(x){st=null;}
  if(st){
   log("Verify — "+st.total+" rows · "+st.turnarounds+" turnarounds · "+st.ships+" ships · "+(st.first_date||"?")+" → "+(st.last_date||"?"),"ok hd");
-  if(st.fleet_without_ports&&st.fleet_without_ports.length){log("⚠ Fleet ships with NO deployment ("+st.fleet_without_ports.length+"): "+st.fleet_without_ports.join(", "),"err");log("   (Azamara ships use a separate deployment file — expected.)");}
-  else{log("All fleet ships have deployment coverage.","ok");}
+  const noP=st.fleet_without_ports||[], shortC=st.fleet_short_coverage||[];
+  if(noP.length){log("⚠ Fleet ships with NO deployment ("+noP.length+"): "+noP.join(", ")+"  (Azamara uses a separate file — expected.)","err");}
+  if(shortC.length){log("⚠ Fleet ships with < "+(st.min_coverage_months||12)+" months forward ("+shortC.length+"): "+shortC.map(s=>s.ship_short+" (ends "+s.last_date+")").join(", "),"err");}
+  if(!noP.length&&!shortC.length){log("All fleet ships have ≥ "+(st.min_coverage_months||12)+" months forward coverage.","ok");}
  }
  log("Done — reload the relief board.","ok");
 };
