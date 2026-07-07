@@ -16,6 +16,24 @@ export async function reliefBoardData(env, today) {
   ).all()).results;
   const portDaysByShip = groupPortDays(pd);
 
+  // PRINTERS — the current keymen, read at request time from ship_leg (display only; NOT written
+  // into the relief model). Rita adds relievers on top; grouping by vessel pairs them. id "leg:*"
+  // marks these read-only (they're owned by the Keyman board).
+  const legs = (await env.DB.prepare(
+    `SELECT l.brand, l.ship_short, l.on_date, l.off_date, l.embark, l.disembark,
+            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
+       FROM ship_leg l LEFT JOIN crew c ON c.id = l.crew_id
+      WHERE l.is_current = 1 AND l.ours = 1`
+  ).all()).results;
+  const printers = legs.map((l) => ({
+    id: "leg:" + l.brand + "|" + l.ship_short,
+    role: "printer", crew_name: l.crew_name,
+    vessel_key: l.brand + "|" + l.ship_short,
+    on_date: l.on_date || null, off_date: l.off_date || null,
+    on_port_seed: l.embark || null, off_port_seed: l.disembark || null,
+  }));
+
+  // RELIEVERS (and any manual assignment rows) — the relief model.
   const rows = (await env.DB.prepare(
     `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.actual_sign_off,
             a.on_port_seed, a.off_port_seed, a.override_on_city, a.override_off_city,
@@ -29,7 +47,7 @@ export async function reliefBoardData(env, today) {
        LEFT JOIN vessel v ON v.id = a.vessel_id`
   ).all()).results;
 
-  const assignments = rows.map((r) => ({
+  const relievers = rows.map((r) => ({
     id: r.id, role: r.role, crew_name: r.crew_name,
     vessel_key: (r.brand || "?") + "|" + (r.ship_short || "?"),
     on_date: r.sign_on || null,
@@ -41,6 +59,7 @@ export async function reliefBoardData(env, today) {
     instructions_sent_at: r.instructions_sent_at, signoff_link_sent_at: r.signoff_link_sent_at, review_invite_sent_at: r.review_invite_sent_at,
   }));
 
+  const assignments = printers.concat(relievers);
   const board = buildReliefBoard({ assignments, portDaysByShip, config: cfg, today });
   return { board, config: cfg, today: today || null, count: assignments.length };
 }
@@ -62,8 +81,6 @@ export async function saveReliefAssignment(env, payload) {
   const now = new Date().toISOString();
 
   // Resolve vessel_id from vessel_name so the board can key by (brand|ship_short) and derive cities.
-  // Applies to both reassign (update) and create (insert) — a name without an id would otherwise
-  // group under "?|Ship" and never pair with its printer.
   if (cleaned.vessel_name && !cleaned.vessel_id) {
     const v = await env.DB.prepare("SELECT id FROM vessel WHERE name=?").bind(cleaned.vessel_name).first();
     if (v) cleaned.vessel_id = v.id;
@@ -109,7 +126,6 @@ function jsonResp(obj, status = 200) {
 }
 
 // Single dispatcher — the ONLY thing worker.js calls. Returns a Response for our routes, else null.
-// Mount it INSIDE the console's authenticated section so crew PII stays session-gated.
 //   GET  /relief            → the board page (HTML)
 //   GET  /api/relief/board  → the whole board (derived cities/handover/urgency)
 //   GET  /api/relief/crew   → crew list for the picker
