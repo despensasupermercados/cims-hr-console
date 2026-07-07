@@ -678,7 +678,7 @@ function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, shi
 // sc -> number of FULL contracts (legs grouped by the <=3-week transfer rule, each reaching the line
 // duration minimum). This — not the raw leg count — drives the rank tier and the "Contracts" number.
 async function fullContractMap(env) {
-  const rows = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const rows = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
   const byCrew = {};
   for (const r of rows) (byCrew[r.sc] = byCrew[r.sc] || []).push(legShape(r));
   const map = {};
@@ -775,7 +775,7 @@ async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
   const q = async (sql, ...b) => (await env.DB.prepare(sql).bind(...b).first());
   await ensureKeyman(env);
-  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on");
+  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(off_date)-julianday(on_date))) AS INTEGER) days FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL AND off_date IS NOT NULL AND off_date>on_date");
   const total = (await q("SELECT COUNT(*) n FROM crew")).n;
   // Count by EFFECTIVE status (auto-derived from the schedule; retired/manual win) so the dashboard
   // matches the crew cards and rotation board rather than the raw stored value.
@@ -883,7 +883,7 @@ async function apiCrew(env, url) {
   const base = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=0").all()).results;
   const ovs = (await env.DB.prepare("SELECT * FROM crew_override").all()).results;
   const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const nl = (await env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all()).results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
@@ -1023,7 +1023,7 @@ async function rotationSections(env) {
   await ensureContractEdit(env);
   const eds = (await env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all()).results;
   const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
-  const legs = (await env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all()).results;
+  const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
   const byCrew = {};
   for (const r of legs) (byCrew[r.sc] = byCrew[r.sc] || []).push(r);
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
