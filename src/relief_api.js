@@ -3,6 +3,7 @@
 // Kept out of worker.js so the wire-in is one router line. Pure SQL + the pure modules.
 import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
+import { RELIEF_HTML } from "./relief_ui.js";
 
 // READ — one call returns the whole board (spec §6). Cities/handover/urgency all derived here.
 export async function reliefBoardData(env, today) {
@@ -101,13 +102,24 @@ function jsonResp(obj, status = 200) {
 
 // Single dispatcher — the ONLY thing worker.js calls. Returns a Response for our routes, else null.
 // Mount it INSIDE the console's authenticated section so crew PII stays session-gated.
+//   GET  /relief            → the board page (HTML)
 //   GET  /api/relief/board  → the whole board (derived cities/handover/urgency)
+//   GET  /api/relief/crew   → crew list for the picker
 //   POST /api/relief/save   → stored-fields-only write (rejects city writes)
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
+  if (p === "/relief" && request.method === "GET") {
+    return new Response(RELIEF_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+  }
   if (p === "/api/relief/board" && request.method === "GET") {
     const today = new Date().toISOString().slice(0, 10);
     return jsonResp(await reliefBoardData(env, today));
+  }
+  if (p === "/api/relief/crew" && request.method === "GET") {
+    const rows = (await env.DB.prepare(
+      "SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name FROM crew WHERE redacted=0 ORDER BY name"
+    ).all()).results;
+    return jsonResp({ crew: rows });
   }
   if (p === "/api/relief/save" && request.method === "POST") {
     let payload;
