@@ -52,7 +52,7 @@ input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;f
 </style></head><body>
 <div class="wrap">
   <h1>Relief board</h1>
-  <p class="sub">Cities are derived from deployment data, not stored. Drag a card to reassign · drag ⠿ to reorder (resets on reload) · click a card to open, Esc to close. <span id="today"></span></p>
+  <p class="sub">Cities are derived from deployment data, not stored. Printers come from the Keyman board (read-only); add relievers here. Drag a reliever to reassign · drag ⠿ to reorder (resets on reload) · Esc to close. <span id="today"></span></p>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><span id="reset" class="reset" onclick="RB.resetSort()"><i class="ti ti-arrow-back-up"></i> Reset to urgency</span></div>
   <div class="metrics" id="metrics"></div>
   <div id="board"></div>
@@ -75,7 +75,7 @@ input[type=text],input[type=date],select{width:100%;height:36px;padding:0 10px;f
         <div class="lbl">Confirmed</div><div id="mtogs"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:.5px solid var(--border)">
           <button class="btn" onclick="RB.close()">Cancel</button>
-          <button class="btn" style="border-color:var(--text-success);color:var(--text-success)" onclick="RB.save()"><i class="ti ti-check"></i> Save</button>
+          <button class="btn" id="msave" style="border-color:var(--text-success);color:var(--text-success)" onclick="RB.save()"><i class="ti ti-check"></i> Save</button>
         </div>
       </div>
     </div>
@@ -114,12 +114,12 @@ const RB=(()=>{
   return{c:"muted",ic:"ti-circle-dashed",t:d!=null?("Slot open — printer signs off in "+d+" days"):"Slot open"};}
  function render(){
   metrics();
-  if(!BOARD.length){$("board").innerHTML='<div class="empty">No contracts yet. Rita adds printers and relievers — they’ll appear here.</div>';return;}
+  if(!BOARD.length){$("board").innerHTML='<div class="empty">No ships yet.</div>';return;}
   $("board").innerHTML=order().map(r=>{
    const p=r.printer,rel=r.reliever,d=r.days_to_off;
    const bc=d==null?"muted":d<=CFG.critical_days?"danger":d<=CFG.due_days?"warning":"muted",bcol=col(bc);
    let printer="";
-   if(p){printer='<div class="card printer" draggable="true" ondragstart="RB.cds(event,\\''+r.vessel_key+'\\',\\'printer\\')" ondragend="RB.cde(event)" onclick="RB.open(\\''+r.vessel_key+'\\',\\'printer\\')">'+(d!=null?'<span class="badge" style="background:'+bcol[0]+';color:'+bcol[1]+'">OFF in '+d+'d</span>':'')+'<div style="font-size:15px;font-weight:600;padding-right:64px">'+(p.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">PS</span></div><div class="line"><span class="dot" style="background:var(--text-success)"></span>On board</div><div class="line">'+cityLine(p,"off")+' · OFF '+(p.off_date||"TBA")+'</div>'+tagStrip(p.tags)+'</div>';}
+   if(p){printer='<div class="card printer" onclick="RB.open(\\''+r.vessel_key+'\\',\\'printer\\')">'+(d!=null?'<span class="badge" style="background:'+bcol[0]+';color:'+bcol[1]+'">OFF in '+d+'d</span>':'')+'<div style="font-size:15px;font-weight:600;padding-right:64px">'+(p.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">PS</span></div><div class="line"><span class="dot" style="background:var(--text-success)"></span>On board</div><div class="line">'+cityLine(p,"off")+' · OFF '+(p.off_date||"TBA")+'</div>'+tagStrip(p.tags)+'</div>';}
    let reliever;
    if(rel){reliever='<div class="card relief" draggable="true" ondragstart="RB.cds(event,\\''+r.vessel_key+'\\',\\'reliever\\')" ondragend="RB.cde(event)" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:14px;font-weight:600">'+(rel.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">reliever</span></div><div class="line"><span class="dot" style="background:var(--text-accent)"></span>Signs on</div><div class="line">'+cityLine(rel,"on")+' · ON '+(rel.on_date||"TBA")+'</div>'+tagStrip(rel.tags)+'</div>';}
    else{reliever='<div class="card ghost" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:13px;font-weight:500"><i class="ti ti-plus"></i> Add reliever</div><div style="font-size:11px;opacity:.8;margin-top:2px">empty slot · drop a card to fill</div></div>';}
@@ -149,9 +149,11 @@ const RB=(()=>{
  }
  // modal
  function open(key,role){const row=BOARD.find(r=>r.vessel_key===key);const node=row?row[role]:null;const printer=row?row.printer:null;
-  cur={key,role,id:node?node.id:null,isNew:!node,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
-  $("mtitle").textContent=(node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract");
-  $("msub").textContent=(node?(node.id||""):shipName(key)+" · unassigned")+(role==="reliever"?" · reliever":" · printer");
+  const ro=!!(node&&String(node.id||"").startsWith("leg:"));
+  cur={key,role,id:node?node.id:null,isNew:!node,readonly:ro,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
+  $("mtitle").textContent=ro?(node.crew_name||"Keyman"):((node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract"));
+  $("msub").textContent=ro?"Managed on the Keyman board — read-only here":((node?(node.id||""):shipName(key)+" · unassigned")+(role==="reliever"?" · reliever":" · printer"));
+  $("msave").style.display=ro?"none":"inline-block";
   const banner=$("mbanner");
   if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div>';}else banner.style.display="none";
   // crew
@@ -167,11 +169,12 @@ const RB=(()=>{
   const city=which==="on"?node.on_city:node.off_city,conf=which==="on"?node.on_conf:node.off_conf,c=CONF[conf]||CONF.TBA;
   el.style.background=c[0];el.style.color=c[1];el.innerHTML='<i class="ti ti-map-pin"></i><span>'+(city||"— no coverage —")+'</span><span class="pill" style="background:var(--surface-2);color:'+c[1]+'">'+c[2]+'</span>';}
  function togs(){const lbl={eccr:"ECCR",air:"AIR",hotel:"HOTEL",on_date_conf:"ON DATE",off_date_conf:"OFF DATE"};$("mtogs").innerHTML=Object.keys(cur.tags).map(k=>'<span class="tog '+(cur.tags[k]?"on":"")+'" onclick="RB.tog(\\''+k+'\\')"><span class="sw '+(cur.tags[k]?"on":"")+'"></span>'+lbl[k]+'</span>').join("");}
- function tog(k){cur.tags[k]=!cur.tags[k];togs();}
+ function tog(k){if(cur.readonly)return;cur.tags[k]=!cur.tags[k];togs();}
  function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+(c.name||c.id)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
  function pick(id,name){cur.crew_id=id;$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>';}
  function close(){$("modal").classList.remove("show");}
  async function save(){
+  if(cur.readonly){alert("This keyman is managed on the Keyman board. Add or edit the reliever on this ship instead.");return;}
   const payload={sign_on:$("mon").value||null,planned_sign_off:$("moff").value||null,
    eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
   if(cur.id){payload.id=cur.id;}
