@@ -202,10 +202,10 @@ const RB=(()=>{
   buildDates(null,cur.role,false);}
  async function open(key,role){const row=BOARD.find(r=>r.vessel_key===key);const node=row?row[role]:null;const printer=row?row.printer:null;
   const ro=!!(node&&String(node.id||"").startsWith("leg:"));
-  cur={key,role,id:node?node.id:null,isNew:!node,readonly:ro,printerOff:(role==="reliever"&&printer)?{city:printer.off_city,conf:printer.off_conf,date:printer.off_date}:null,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
+  cur={key,role,id:node?node.id:null,isNew:!node,readonly:ro,crewName:node?node.crew_name:null,printerOff:(role==="reliever"&&printer)?{city:printer.off_city,conf:printer.off_conf,date:printer.off_date}:null,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
   $("mtitle").textContent=ro?(node.crew_name||"Keyman"):((node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract"));
-  $("msub").textContent=ro?"Managed on the Keyman board — read-only here":((node?(node.id||""):shipName(key)+" · unassigned")+(role==="reliever"?" · reliever":" · printer"));
-  $("msave").style.display=ro?"none":"inline-block";
+  $("msub").textContent=ro?"Rotation from the Keyman board · confirmations editable here":((node?(node.id||""):shipName(key)+" · unassigned")+(role==="reliever"?" · reliever":" · printer"));
+  $("msave").style.display="inline-block";
   const banner=$("mbanner");
   if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div>';}else banner.style.display="none";
   if(node){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+(node.crew_name||"—")+'</b>';cur.crew_id=null;}
@@ -214,7 +214,7 @@ const RB=(()=>{
   $("mdates").innerHTML="";togs();
   $("mcrew").previousElementSibling.style.display=ro?"none":"";
   $("mship").previousElementSibling.style.display=ro?"none":"";$("mship").style.display=ro?"none":"";
-  $("mtogs").previousElementSibling.style.display=ro?"none":"";$("mtogs").style.display=ro?"none":"";
+  $("mtogs").previousElementSibling.style.display="";$("mtogs").style.display="";
   if(ro){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="none";}
   $("modal").classList.add("show");
   await fetchPorts(shipName(key));buildDates(node,role,ro);
@@ -225,7 +225,11 @@ const RB=(()=>{
  function pick(id,name){cur.crew_id=id;$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>';}
  function close(){$("modal").classList.remove("show");}
  async function save(){
-  if(cur.readonly){close();return;}
+  if(cur.readonly){
+   const fl={vessel_key:cur.key,crew_name:cur.crewName||"",eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
+   try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){close();await load();}else{alert("Save failed");}}catch(e){alert("network");}
+   return;
+  }
   const payload={sign_on:dateVal("on")||null,planned_sign_off:dateVal("off")||null,
    eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
   if(cur.id){payload.id=cur.id;}
