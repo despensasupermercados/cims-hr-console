@@ -2200,7 +2200,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
-    <button id=nav-data onclick="show('data')">Data</button>
+    <button id=nav-data onclick="show('data')">Data</button><button id=nav-relief onclick="show('relief')">Relief</button>
     <button id=nav-ask onclick="show('ask')">Ask Maria</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
@@ -2247,7 +2247,7 @@ async function show(tab){
   if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
   if(tab==='data'||tab==='settings')return renderData();
-  if(tab==='ask')return renderAsk();
+  if(tab==='ask')return renderAsk();if(tab==='relief')return renderRelief();
 }
 // "Data" is now the single home for data status AND uploads/session/about (the old Settings tab was
 // merged in). Left menu: Overview (data sources + load history), Upload data, Session, About.
@@ -2294,7 +2294,7 @@ async function mariaSend(){
   }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
   mariaRender();
 }
-function renderSettings(){ return renderData(); }
+function renderSettings(){ return renderData(); }function renderRelief(){ $('#view').innerHTML='<iframe src="/relief" style="width:100%;height:80vh;border:0;border-radius:12px;background:#fff"></iframe>'; }
 function renderData(){
   $('#view').innerHTML='<div class=bar><h2>Data</h2></div>'
    +'<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">'
