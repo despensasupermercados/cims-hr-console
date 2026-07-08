@@ -90,7 +90,7 @@ select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(
 </div>
 <script>
 const RB=(()=>{
- let BOARD=[],CREW=[],CFG={critical_days:14,due_days:30},manualOrder=null,cur=null,drag=null,PORTS=[];
+ let BOARD=[],CREW=[],CFG={critical_days:14,due_days:30},manualOrder=null,cur=null,drag=null,PORTS=[],_CHG=false;
  const $=id=>document.getElementById(id);
  const shipName=k=>String(k||"").split("|")[1]||k;
  const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -103,6 +103,8 @@ const RB=(()=>{
    BOARD=b.board||[];CFG=b.config||CFG;CREW=(c&&c.crew)||[];$("today").textContent="· today "+(b.today||"");
   }catch(e){BOARD=[];}
   render();
+  var _op=new URLSearchParams(location.search).get("open");
+  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;}))open(_op,"reliever");}
  }
  function order(){ if(manualOrder){const extra=BOARD.filter(r=>!manualOrder.includes(r.vessel_key));return manualOrder.map(k=>BOARD.find(r=>r.vessel_key===k)).filter(Boolean).concat(extra);} return BOARD; }
  function metrics(){
@@ -246,13 +248,13 @@ const RB=(()=>{
  function tog(k){if(cur.readonly)return;cur.tags[k]=!cur.tags[k];togs();}
  function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+(c.name||c.id)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
  function pick(id,name){cur.crew_id=id;$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>';}
- function close(){$("modal").classList.remove("show");}
+ function close(){$("modal").classList.remove("show");if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefClose",changed:_CHG},"*");}catch(e){}}}
  function azTouch(){cur.azTouched=true;}
  async function save(){
   if(cur.readonly){
    const fl={vessel_key:cur.key,crew_name:cur.crewName||"",eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
    var pa=$("pazoff");if(pa&&cur.azTouched){fl.override_off_date=(pa.value==="__auto"?"":pa.value);}
-   try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){close();await load();}else{alert("Save failed");}}catch(e){alert("network");}
+   try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){_CHG=true;close();await load();}else{alert("Save failed");}}catch(e){alert("network");}
    return;
   }
   const payload={sign_on:dateVal("on")||null,planned_sign_off:dateVal("off")||null,
@@ -260,7 +262,7 @@ const RB=(()=>{
   if(cur.id){payload.id=cur.id;}
   else{if(!cur.crew_id){alert("Pick a crew member first.");return;}payload.crew_id=cur.crew_id;payload.role=cur.role;payload.vessel_name=$("mship").value;}
   const res=await post(payload);
-  if(res&&res.ok){close();await load();}else{alert("Save rejected: "+(res&&(res.error||(res.rejected||[]).join(","))||"error"));}
+  if(res&&res.ok){_CHG=true;close();await load();}else{alert("Save rejected: "+(res&&(res.error||(res.rejected||[]).join(","))||"error"));}
  }
  async function post(payload){try{const r=await fetch("/api/relief/save",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});return await r.json();}catch(e){return{ok:false,error:"network"};}}
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
