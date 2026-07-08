@@ -159,7 +159,11 @@ const RB=(()=>{
    const on=tp(node.on_date),off=tp(node.off_date);
    const onTxt=(on?on.port_name:(node.on_city||"— no port —"))+" · "+(node.on_date?fmtDate(node.on_date):"TBA");
    const offTxt=(off?off.port_name:(node.off_city||"— no port —"))+" · "+(node.off_date?fmtDate(node.off_date):"TBA");
-   el.innerHTML='<div style="display:flex;gap:14px"><div style="flex:1"><div class="lbl">Sign-on'+(on?" · turnaround":"")+'</div><div class="chip">'+onTxt+'</div></div><div style="flex:1"><div class="lbl">Sign-off'+(off?" · turnaround":"")+'</div><div class="chip">'+offTxt+'</div></div></div>';return;
+   const leg=(cap,txt)=>'<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">'+cap+'</div><div style="background:var(--surface-1);border-radius:10px;padding:10px 12px;font-size:13.5px;font-weight:500;line-height:1.4">'+txt+'</div></div>';
+   el.innerHTML='<div class="lbl">Ship</div><div style="font-size:15px;font-weight:600">'+shipName(cur.key)+' <span style="font-size:11px;color:var(--text-accent);font-weight:600">PS</span></div>'
+    +'<div class="lbl" style="margin-top:16px">Rotation</div>'
+    +'<div style="display:flex;align-items:center;gap:10px">'+leg("Sign-on"+(on?" · turnaround":""),onTxt)+'<div style="color:var(--text-muted);flex:0 0 auto"><i class="ti ti-arrow-right"></i></div>'+leg("Sign-off"+(off?" · turnaround":""),offTxt)+'</div>';
+   return;
   }
   const onDate=(node&&node.on_date&&!node.auto_on)?node.on_date:"";
   const offDate=(node&&node.off_date)||"";
@@ -208,6 +212,10 @@ const RB=(()=>{
   else{$("mcrew").style.display="block";$("mcrew").value="";$("mpicked").style.display="none";}
   const ships=[...new Set(BOARD.map(r=>shipName(r.vessel_key)))];$("mship").innerHTML=ships.map(s=>'<option'+(s===shipName(key)?" selected":"")+'>'+s+'</option>').join("")||'<option>'+shipName(key)+'</option>';
   $("mdates").innerHTML="";togs();
+  $("mcrew").previousElementSibling.style.display=ro?"none":"";
+  $("mship").previousElementSibling.style.display=ro?"none":"";$("mship").style.display=ro?"none":"";
+  $("mtogs").previousElementSibling.style.display=ro?"none":"";$("mtogs").style.display=ro?"none":"";
+  if(ro){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="none";}
   $("modal").classList.add("show");
   await fetchPorts(shipName(key));buildDates(node,role,ro);
  }
