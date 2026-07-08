@@ -1,0 +1,25 @@
+# Deploy cims-hr-console (production) on push to main.
+# Requires repo Actions secret: CLOUDFLARE_API_TOKEN
+# Targets the top-level env; wrangler.toml also defines [env.staging] which this does NOT touch.
+name: Deploy cims-hr-console
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'wrangler.toml'
+      - 'migrations/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy with Wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --env=""
