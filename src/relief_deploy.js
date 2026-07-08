@@ -7,10 +7,12 @@
 //     from col 2: | PORT RANK "PORT NAME" ARRIVE DEPART TENDER). is_sea = RANK 'S' / AT SEA; is_turn
 //     = RANK ends 'T'.
 //   • Azamara — long "Itinerary" sheet (Ship, Date, Cruise Nr, Day, Location, Country ...). Brand is
-//     always Azamara; ship_short = ship minus the "Azamara " prefix (NAMES CHANGE, so we key off the
-//     file's structure, not a fixed list). is_sea = Location/Country 'At sea'; is_turn = embark
-//     (Day 1) or the last day of a cruise (Cruise Nr changes next).
-// Decoders are proven identical to the validated pipeline (CEL/RCI 37,592 rows 0/0; Azamara 2,208).
+//     always Azamara; ship_short = ship minus the "Azamara " prefix (NAMES CHANGE, so key off the
+//     file's structure, not a fixed list). is_sea = Location/Country 'At sea'. TURNAROUND RULE (per
+//     operator): the "Day" column marks the cruise day; a cell that is "1" or ends in "/1" (e.g.
+//     "12/1" = day 12 of the ending cruise AND day 1 of the next) is the crew-change turnaround day.
+//     Cruise lengths vary — so the Day cell must be read as a STRING (parseInt would drop the "/1").
+// Decoders verified against source: CEL/RCI 37,592 rows (0 miss/0 extra); Azamara 2,961 rows / 261 turnarounds.
 // Load is chunked to /api/relief/vpd-load with resetBrands = the brands the file carries, so each
 // file cleanly replaces only its own ships (no stale rows). Then it self-verifies (12-month floor).
 export const DEPLOY_HTML = `<!DOCTYPE html>
@@ -81,30 +83,23 @@ function decodeWide(A){
  return out;
 }
 // --- Azamara long "Itinerary" ---
+// Turnaround = Day cell "1" or ending in "/1" (e.g. "12/1"). Day read as STRING (parseInt drops "/1").
 function decodeAzamara(A){
  var H=(A[0]||[]).map(function(x){return String(x).trim().toLowerCase();});
  var ci=function(n){return H.indexOf(n);};
- var cShip=ci("ship"),cDate=ci("date"),cCruise=ci("cruise nr"),cDay=ci("day"),cLoc=ci("location"),cCountry=ci("country");
- var recs=[];
+ var cShip=ci("ship"),cDate=ci("date"),cDay=ci("day"),cLoc=ci("location"),cCountry=ci("country");
+ var isTurn=function(dv){return /(^|[/])1$/.test(String(dv).trim());};
+ var out=[],seqKey={};
  for(var r=1;r<A.length;r++){var row=A[r];if(!row||!row[cShip])continue;
   var ship=String(row[cShip]).replace(/^Azamara\\s+/i,"").trim();
   var date=fmtDate(row[cDate]);if(!date)continue;
   var loc=String(row[cLoc]||"").trim(),country=String(row[cCountry]||"").trim();
   var sea=(/^at sea$/i.test(loc)||/^at sea$/i.test(country))?1:0;
   var port=sea?"AT SEA":(country&&!/^at sea$/i.test(country)?(loc+", "+country).toUpperCase():loc.toUpperCase());
-  recs.push({ship:ship,date:date,cruise:String(row[cCruise]||"").trim(),day:parseInt(row[cDay],10),port:port,sea:sea,i:r});
+  var turn=(!sea&&isTurn(row[cDay]))?1:0;
+  var key=ship+"|"+date;seqKey[key]=(seqKey[key]||0)+1;
+  out.push(["Azamara",ship,date,seqKey[key],port,sea,turn]);
  }
- var byShip={};recs.forEach(function(x){(byShip[x.ship]=byShip[x.ship]||[]).push(x);});
- var out=[];
- Object.keys(byShip).forEach(function(ship){
-  var list=byShip[ship].sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:a.i-b.i;});
-  var seq={};
-  for(var k=0;k<list.length;k++){var x=list[k];seq[x.date]=(seq[x.date]||0)+1;
-   var next=list[k+1],cruiseEnd=next?(next.cruise!==x.cruise):true;
-   var turn=((x.day===1)||cruiseEnd)&&x.sea===0?1:0;
-   out.push(["Azamara",ship,x.date,seq[x.date],x.port,x.sea,turn]);
-  }
- });
  return out;
 }
 // --- recognizer: structure, not filename ---
