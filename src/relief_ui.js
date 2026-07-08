@@ -153,7 +153,14 @@ const RB=(()=>{
  function minMonths(){const b=brandOf($("mship")?$("mship").value:shipName(cur&&cur.key));return /azamara/i.test(b)?5:6;}
  function portOpts(list,selDate,lead){let h=lead;for(const p of list){h+='<option value="'+p.berth_date+'"'+(p.berth_date===selDate?' selected':'')+'>'+p.port_name+' · '+fmtDate(p.berth_date)+'</option>';}h+='<option value="__c">Custom date…</option>';return h;}
  function buildDates(node,role,ro){const el=$("mdates");
-  if(ro){el.innerHTML='<div style="display:flex;gap:14px"><div style="flex:1"><div class="lbl">Sign-on</div><div class="chip">'+(node.on_city||"— no port —")+' · '+(node.on_date||"TBA")+'</div></div><div style="flex:1"><div class="lbl">Sign-off</div><div class="chip">'+(node.off_city||"— no port —")+' · '+(node.off_date||"TBA")+'</div></div></div>';return;}
+  if(ro){
+   const ta=taPorts();
+   const tp=date=>date?ta.find(p=>p.berth_date===date):null;
+   const on=tp(node.on_date),off=tp(node.off_date);
+   const onTxt=(on?on.port_name:(node.on_city||"— no port —"))+" · "+(node.on_date?fmtDate(node.on_date):"TBA");
+   const offTxt=(off?off.port_name:(node.off_city||"— no port —"))+" · "+(node.off_date?fmtDate(node.off_date):"TBA");
+   el.innerHTML='<div style="display:flex;gap:14px"><div style="flex:1"><div class="lbl">Sign-on'+(on?" · turnaround":"")+'</div><div class="chip">'+onTxt+'</div></div><div style="flex:1"><div class="lbl">Sign-off'+(off?" · turnaround":"")+'</div><div class="chip">'+offTxt+'</div></div></div>';return;
+  }
   const onDate=(node&&node.on_date&&!node.auto_on)?node.on_date:"";
   const offDate=(node&&node.off_date)||"";
   const ta=taPorts();const onIsTA=ta.some(p=>p.berth_date===onDate);
