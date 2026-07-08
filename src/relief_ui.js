@@ -165,7 +165,7 @@ const RB=(()=>{
    if(isAz){
     var opts='<option value="__auto" selected>↳ auto · 5-month projection ('+(node.off_date?fmtDate(node.off_date):"TBA")+')</option>';
     for(var qi=0;qi<ta.length;qi++){opts+='<option value="'+ta[qi].berth_date+'">'+ta[qi].port_name+' · '+fmtDate(ta[qi].berth_date)+'</option>';}
-    offBlock='<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Sign-off · Azamara (adjustable)</div><select id="pazoff">'+opts+'</select></div>';
+    offBlock='<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Sign-off · Azamara (adjustable)</div><select id="pazoff" onchange="RB.azTouch()">'+opts+'</select></div>';
    }else{
     offBlock=leg("Sign-off"+(off?" · turnaround":""),offTxt);
    }
@@ -226,17 +226,18 @@ const RB=(()=>{
   $("mtogs").previousElementSibling.style.display="";$("mtogs").style.display="";
   if(ro){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="none";}
   $("modal").classList.add("show");
-  await fetchPorts(shipName(key));buildDates(node,role,ro);
+  await fetchPorts(shipName(key));buildDates(node,role,ro);cur.azTouched=false;
  }
  function togs(){const lbl={eccr:"ECCR",air:"AIR",hotel:"HOTEL",on_date_conf:"ON DATE",off_date_conf:"OFF DATE"};$("mtogs").innerHTML=Object.keys(cur.tags).map(k=>'<span class="tog '+(cur.tags[k]?"on":"")+'" onclick="RB.tog(\\''+k+'\\')"><span class="sw '+(cur.tags[k]?"on":"")+'"></span>'+lbl[k]+'</span>').join("");}
  function tog(k){if(cur.readonly)return;cur.tags[k]=!cur.tags[k];togs();}
  function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+(c.name||c.id)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
  function pick(id,name){cur.crew_id=id;$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>';}
  function close(){$("modal").classList.remove("show");}
+ function azTouch(){cur.azTouched=true;}
  async function save(){
   if(cur.readonly){
    const fl={vessel_key:cur.key,crew_name:cur.crewName||"",eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
-   var pa=$("pazoff");if(pa){fl.override_off_date=(pa.value==="__auto"?"":pa.value);}
+   var pa=$("pazoff");if(pa&&cur.azTouched){fl.override_off_date=(pa.value==="__auto"?"":pa.value);}
    try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){close();await load();}else{alert("Save failed");}}catch(e){alert("network");}
    return;
   }
@@ -251,6 +252,6 @@ const RB=(()=>{
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
  document.getElementById("modal").addEventListener("click",close);
  load();
- return {open,close,save,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff};
+ return {open,close,save,azTouch,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff};
 })();
 </script></body></html>`;
