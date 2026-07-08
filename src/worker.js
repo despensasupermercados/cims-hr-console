@@ -2,7 +2,7 @@ import { ladderValue, computeBonus, mapFeedbackToScore } from "./bonus.js";
 import { signToken, verifyToken } from "./auth.js";
 import { magicLinkEmail } from "./emails/hr.magiclink.v2.js";
 import { crewComplianceReport } from "./compliance.js";
-import { buildRotationBoard } from "./rotation.js";
+import { buildRotationBoard } from "./rotation.js";import { resolveCity, groupPortDays } from "./city_resolver.js";
 import { KEYMAN_CONTRACTS } from "./keyman_data.js";
 import { billingReport, periodDays } from "./daysworked.js";
 import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
@@ -1029,7 +1029,7 @@ async function rotationSections(env) {
   const rd = (await env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all()).results;
   const rmap = {}; for (const r of rd) rmap[r.agency_id] = r;
   await ensureContractEdit(env);
-  const eds = (await env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all()).results;
+  const eds = (await env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all()).results;const _vpd=(await env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all()).results;const _pdBy=groupPortDays(_vpd);
   const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
   const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
   const byCrew = {};
@@ -1100,7 +1100,7 @@ async function rotationSections(env) {
       }
     }
     if (!ship) { pool.push(base); continue; }
-    (promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board" }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -2757,8 +2757,8 @@ function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.index
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
 function rotCard(x){
   var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
-  var on=x.signOn?((x.embark?x.embark:tba)+' · ON '+x.signOn):'';
-  var off=x.signOff?((x.disembark?x.disembark:tba)+' · OFF '+x.signOff):'';
+  var _cf2=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc2=function(ct,cf){return '<b style="color:'+_cf2(cf)+'">'+ct+'</b>';};var on=x.signOn?((x.on_city?_oc2(x.on_city,x.on_conf):(x.embark?x.embark:tba))+' · ON '+x.signOn):'';
+  var off=x.signOff?((x.off_city?_oc2(x.off_city,x.off_conf):(x.disembark?x.disembark:tba))+' · OFF '+x.signOff):'';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
