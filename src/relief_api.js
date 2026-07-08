@@ -119,7 +119,8 @@ const ASSIGN_COLS = new Set([
 ]);
 
 export async function saveReliefAssignment(env, payload) {
-  const { ok, cleaned, rejected } = validateWrite(payload || {});
+  const { id: _keyId, ...toValidate } = (payload || {});
+  const { ok, cleaned, rejected } = validateWrite(toValidate);
   if (!ok) return { ok: false, error: "rejected_fields", rejected };
   const now = new Date().toISOString();
 
@@ -188,6 +189,12 @@ export async function saveLegFlags(env, b) {
 
 function jsonResp(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
+}
+
+async function ensureCommentTable(env) {
+  await env.DB.prepare(
+    "CREATE TABLE IF NOT EXISTS relief_comment (id TEXT PRIMARY KEY, assignment_id TEXT, vessel_key TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL)"
+  ).run();
 }
 
 const VPD_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -289,6 +296,27 @@ export async function handleRelief(request, url, env) {
     try { payload = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const res = await saveReliefAssignment(env, payload);
     return jsonResp(res, res.ok ? 200 : 400);
+  }
+  if (p === "/api/relief/comments" && request.method === "GET") {
+    await ensureCommentTable(env);
+    const aid = url.searchParams.get("assignment_id") || "";
+    const vk = url.searchParams.get("vessel_key") || "";
+    const q = aid
+      ? env.DB.prepare("SELECT id, body, created_at FROM relief_comment WHERE assignment_id=? ORDER BY created_at DESC").bind(aid)
+      : env.DB.prepare("SELECT id, body, created_at FROM relief_comment WHERE vessel_key=? ORDER BY created_at DESC").bind(vk);
+    const rows = (await q.all()).results || [];
+    return jsonResp({ ok: true, comments: rows });
+  }
+  if (p === "/api/relief/comment" && request.method === "POST") {
+    await ensureCommentTable(env);
+    let b; try { b = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
+    const body = String((b && b.body) || "").trim();
+    if (!body) return jsonResp({ ok: false, error: "empty" }, 400);
+    const now = new Date().toISOString();
+    const id = "rc_" + crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO relief_comment (id, assignment_id, vessel_key, body, created_at) VALUES (?,?,?,?,?)")
+      .bind(id, String((b && b.assignment_id) || ""), String((b && b.vessel_key) || ""), body, now).run();
+    return jsonResp({ ok: true, id });
   }
   return null;
 }
