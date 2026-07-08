@@ -2313,11 +2313,11 @@ function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
    +'<label class=csub>Data type</label><br>'
-   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="keyman">Keyman contracts — CIMS Keyman workbook (.xlsx)</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — preview structure (.xls / .xlsx)</option></select>'
+   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="keyman">Keyman contracts — CIMS Keyman workbook (.xlsx)</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — Celebrity / RCCL + Azamara</option></select>'
    +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
      +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop the file here</div>'
      +'<div class=csub style="margin-top:4px">or click to choose · .xls or .xlsx only</div></div>'
-   +'<input type=file id=crewfile accept=".xls,.xlsx" style="display:none" onchange="handleDrop(this.files)">'
+   +'<div id=vesselframe style="display:none;margin-top:12px"></div>'+'<input type=file id=crewfile accept=".xls,.xlsx" style="display:none" onchange="handleDrop(this.files)">'
    +'<div id=imp class=csub style="margin-top:12px"></div>'
    +'<p class=muted style="text-align:left;margin-top:10px">Only the data types listed above are accepted — nothing else is read. You\\'ll see a preview before anything is saved, and bonus baselines are never affected.</p>'
    +'</div>';
@@ -2325,7 +2325,7 @@ function setUploads(){
   dz.onclick=function(){fi.click();};
   dz.ondragover=function(e){e.preventDefault();dz.style.borderColor='var(--green)';dz.style.background='#F2F8EF';};
   dz.ondragleave=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';};
-  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};
+  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};var ds=$('#dstype'),vf=$('#vesselframe');function dstypeChanged(){if(ds.value==='vessel'){dz.style.display='none';if(vf&&!vf.firstChild)vf.innerHTML='<iframe src="/api/relief/deploy" title="Vessel deployment loader" style="width:100%;height:540px;border:0;border-radius:12px;background:#fff"></iframe>';if(vf)vf.style.display='';}else{if(vf){vf.style.display='none';vf.innerHTML='';}dz.style.display='';}}if(ds)ds.onchange=dstypeChanged;dstypeChanged();
 }
 async function setSession(){
   var me={}; try{me=await (await fetch('/api/me')).json();}catch(e){}
@@ -2378,7 +2378,7 @@ function handleDrop(files){
   var t=$('#dstype')?$('#dstype').value:'crew';
   if(t!=='crew'&&t!=='vessel'&&t!=='travel'&&t!=='keyman'){$('#imp').textContent='That data type is not enabled yet.';return;}
   if(!/\\.(xls|xlsx)$/i.test(f.name)){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
-  if(t==='vessel')return parseVesselFile(f);
+  if(t==='vessel')return;
   if(t==='travel')return parseTravelFile(f);
   if(t==='keyman')return parseKeymanFile(f);
   parseCrewFile(f);
