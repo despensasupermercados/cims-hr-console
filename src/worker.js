@@ -1876,7 +1876,7 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .shiphdr .nm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:15px}
 .shiphdr .meta{margin-left:auto;color:var(--mut);font-size:12.5px;display:flex;align-items:center;gap:8px}
 .shiphdr .arw{display:inline-block;transition:transform .15s}.shiphdr .arw.closed{transform:rotate(-90deg)}
-.shipbody{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;padding:6px 14px 14px}
+.shipbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;padding:6px 14px 14px}
 .shipbody.closed{display:none}
 .rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:grab}
 .rcard:active{cursor:grabbing}.rcard:hover{border-color:var(--navy)}
@@ -1886,7 +1886,7 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .rcard .rleg2{font-size:11.5px;color:#3a4a5e;display:flex;align-items:center;gap:6px;margin-top:2px}
 .rcard .rleg2 i{width:7px;height:7px;border-radius:50%;display:inline-block}
 .rcard .rleg2 i.ondot{background:var(--green)}.rcard .rleg2 i.offdot{background:var(--amber)}
-.rcard .rdur{display:inline-block;margin-top:6px;background:#eef2f7;color:var(--mut);font-size:10.5px;padding:2px 8px;border-radius:20px}
+.rcard .rdur{display:inline-block;margin-top:6px;background:#eef2f7;color:var(--mut);font-size:10.5px;padding:2px 8px;border-radius:20px}.rcard{position:relative}.rcard .offchip{position:absolute;top:9px;right:9px;font-size:10px;font-weight:800;letter-spacing:.02em;padding:2px 8px;border-radius:20px;background:#eef2f7;color:var(--mut)}.rcard .offchip.crit{background:#fbe7e6;color:var(--danger)}.rcard .offchip.due{background:#fbeed6;color:#9a6410}.rcard.cur .rnm{padding-right:62px}
 .rtags{margin-top:7px;display:flex;flex-wrap:wrap;gap:4px}
 .rtag{font-size:9px;font-weight:800;letter-spacing:.03em;padding:2px 6px;border-radius:6px;border:1px solid var(--line-2);color:var(--mut);background:#fff}
 .rtag.on{background:#EAF6E6;border-color:#bfe0b0;color:var(--green-d)}
@@ -2756,9 +2756,9 @@ function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
 function rotCard(x){
-  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
-  var _cf2=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc2=function(ct,cf){return '<b style="color:'+_cf2(cf)+'">'+ct+'</b>';};var on=x.signOn?((x.on_city?_oc2(x.on_city,x.on_conf):(x.embark?x.embark:tba))+' · ON '+x.signOn):'';
-  var off=x.signOff?((x.off_city?_oc2(x.off_city,x.off_conf):(x.disembark?x.disembark:tba))+' · OFF '+x.signOff):'';
+  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';var _chip='';if(x.current&&x.signOff){var _dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var _cc=_dd<=14?' crit':_dd<=30?' due':'';_chip='<span class="offchip'+_cc+'">OFF in '+_dd+'d</span>';}
+  var _cf2=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc2=function(ct,cf){return '<b style="color:'+_cf2(cf)+'">'+ct+'</b>';};var on=x.signOn?((x.on_city?_oc2(x.on_city,x.on_conf):(x.embark?x.embark:tba))+'<span style="white-space:nowrap"> · ON '+x.signOn+'</span>'):'';
+  var off=x.signOff?((x.off_city?_oc2(x.off_city,x.off_conf):(x.disembark?x.disembark:tba))+'<span style="white-space:nowrap"> · OFF '+x.signOff+'</span>'):'';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
@@ -2768,7 +2768,7 @@ function rotCard(x){
   if(x.offConfirmed)tg+='<span class="rtag on">OFF ✓</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
   return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragStart(this,\\''+x.agency_id+'\\')" ondragend="dragEnd(this)" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
-    +'<div class=rnm>'+x.name+(x.rank?(' <span style="color:var(--mut);font-weight:600;font-size:11px">'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
+    +_chip+'<div class=rnm>'+x.name+(x.rank?(' <span style="color:var(--mut);font-weight:600;font-size:11px">'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
     +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' · '+dur):'')+'</div>'
     +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
     +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
