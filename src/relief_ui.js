@@ -154,15 +154,24 @@ const RB=(()=>{
  function portOpts(list,selDate,lead){let h=lead;for(const p of list){h+='<option value="'+p.berth_date+'"'+(p.berth_date===selDate?' selected':'')+'>'+p.port_name+' · '+fmtDate(p.berth_date)+'</option>';}h+='<option value="__c">Custom date…</option>';return h;}
  function buildDates(node,role,ro){const el=$("mdates");
   if(ro){
+   const isAz=String(cur.key).split("|")[0]==="Azamara";
    const ta=taPorts();
    const tp=date=>date?ta.find(p=>p.berth_date===date):null;
    const on=tp(node.on_date),off=tp(node.off_date);
    const onTxt=(on?on.port_name:(node.on_city||"— no port —"))+" · "+(node.on_date?fmtDate(node.on_date):"TBA");
    const offTxt=(off?off.port_name:(node.off_city||"— no port —"))+" · "+(node.off_date?fmtDate(node.off_date):"TBA");
    const leg=(cap,txt)=>'<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">'+cap+'</div><div style="background:var(--surface-1);border-radius:10px;padding:10px 12px;font-size:13.5px;font-weight:500;line-height:1.4">'+txt+'</div></div>';
+   var offBlock;
+   if(isAz){
+    var opts='<option value="__auto" selected>↳ auto · 5-month projection ('+(node.off_date?fmtDate(node.off_date):"TBA")+')</option>';
+    for(var qi=0;qi<ta.length;qi++){opts+='<option value="'+ta[qi].berth_date+'">'+ta[qi].port_name+' · '+fmtDate(ta[qi].berth_date)+'</option>';}
+    offBlock='<div style="flex:1;min-width:0"><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Sign-off · Azamara (adjustable)</div><select id="pazoff">'+opts+'</select></div>';
+   }else{
+    offBlock=leg("Sign-off"+(off?" · turnaround":""),offTxt);
+   }
    el.innerHTML='<div class="lbl">Ship</div><div style="font-size:15px;font-weight:600">'+shipName(cur.key)+' <span style="font-size:11px;color:var(--text-accent);font-weight:600">PS</span></div>'
     +'<div class="lbl" style="margin-top:16px">Rotation</div>'
-    +'<div style="display:flex;align-items:center;gap:10px">'+leg("Sign-on"+(on?" · turnaround":""),onTxt)+'<div style="color:var(--text-muted);flex:0 0 auto"><i class="ti ti-arrow-right"></i></div>'+leg("Sign-off"+(off?" · turnaround":""),offTxt)+'</div>';
+    +'<div style="display:flex;align-items:center;gap:10px">'+leg("Sign-on"+(on?" · turnaround":""),onTxt)+'<div style="color:var(--text-muted);flex:0 0 auto"><i class="ti ti-arrow-right"></i></div>'+offBlock+'</div>';
    return;
   }
   const onDate=(node&&node.on_date&&!node.auto_on)?node.on_date:"";
@@ -227,6 +236,7 @@ const RB=(()=>{
  async function save(){
   if(cur.readonly){
    const fl={vessel_key:cur.key,crew_name:cur.crewName||"",eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
+   var pa=$("pazoff");if(pa){fl.override_off_date=(pa.value==="__auto"?"":pa.value);}
    try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){close();await load();}else{alert("Save failed");}}catch(e){alert("network");}
    return;
   }
