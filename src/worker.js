@@ -2200,7 +2200,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
-    <button id=nav-data onclick="show('data')">Data</button><button id=nav-relief onclick="show('relief')">Relief</button>
+    <button id=nav-data onclick="show('data')">Data</button>
     <button id=nav-ask onclick="show('ask')">Ask Maria</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
@@ -2247,7 +2247,7 @@ async function show(tab){
   if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
   if(tab==='data'||tab==='settings')return renderData();
-  if(tab==='ask')return renderAsk();if(tab==='relief')return renderRelief();
+  if(tab==='ask')return renderAsk();
 }
 // "Data" is now the single home for data status AND uploads/session/about (the old Settings tab was
 // merged in). Left menu: Overview (data sources + load history), Upload data, Session, About.
@@ -2294,7 +2294,7 @@ async function mariaSend(){
   }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
   mariaRender();
 }
-function renderSettings(){ return renderData(); }function renderRelief(){ $('#view').innerHTML='<iframe src="/relief" style="width:100%;height:80vh;border:0;border-radius:12px;background:#fff"></iframe>'; }
+function renderSettings(){ return renderData(); }
 function renderData(){
   $('#view').innerHTML='<div class=bar><h2>Data</h2></div>'
    +'<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">'
@@ -2780,9 +2780,9 @@ function rotShip(sec){
   var hist=sec.history||[];
   var body=sec.crew.length?sec.crew.map(rotCard).join(''):'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Also served this ship · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
-  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(hist.length?(' · '+hist.length+' history'):'');
+  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+(_rb.printer.off_city||'TBA')+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+'</div>'+histBlock+'</div>';
+    +_rban+'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+'</div>'+histBlock+'</div>';
 }
 function monthsDays(a,b){
   if(!a||!b)return '';
@@ -2862,7 +2862,7 @@ async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).j
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  ROT=await (await fetch('/api/rotation')).json();
+  ROT=await (await fetch('/api/rotation')).json();window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};try{var _rel=await (await fetch('/api/relief/board')).json();(_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});}catch(_){}
   ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
   var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
   var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
