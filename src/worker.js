@@ -2818,8 +2818,8 @@ async function editContractModal(id,seq){
   var fld=function(lab,inp){return '<div><label class=csub>'+lab+'</label>'+inp+'</div>';};
   var h='<div class=modcard><div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+' · contract #'+seq+'</div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'
-   +fld('Embark city','<input id=eEmb value="'+(e.embark||'')+'" style="width:100%">')
-   +fld('Disembark city','<input id=eDis value="'+(e.disembark||'')+'" style="width:100%">')
+   +fld('Embark city · from itinerary','<input id=eEmb value="'+(e.on_city||e.embark||'')+'" readonly style="width:100%;background:var(--surface-1);color:var(--mut)">')
+   +fld('Disembark city · from itinerary','<input id=eDis value="'+(e.off_city||e.disembark||'')+'" readonly style="width:100%;background:var(--surface-1);color:var(--mut)">')
    +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'" style="width:100%">')
    +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'" style="width:100%">')
    +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip style="width:100%">'+shipOpts+'</select>')+'</div>'
