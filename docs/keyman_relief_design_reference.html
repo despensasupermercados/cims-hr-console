@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CIMS Keyman / Relief — Design Reference (final)</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/3.31.0/tabler-icons.min.css">
+<style>
+:root{
+ --navy:#1b2a4a;--green:#1f7a3d;--green-d:#27500A;--amber:#9a6410;--danger:#b0342f;
+ --mut:#8b93a1;--line:rgba(20,24,38,.11);--line-2:rgba(20,24,38,.20);--surface-1:#f4f3ee;
+ --page:#eef0f4;--accent:#1f5fa8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--navy);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;line-height:1.5}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 22px 80px}
+h1{font-size:22px;font-weight:600;margin:0 0 4px}
+h2{font-size:16px;font-weight:600;margin:34px 0 4px;color:var(--navy)}
+.sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+.note{background:#fff;border:.5px solid var(--line);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;padding:10px 14px;font-size:13px;color:#3a4a5e;margin:10px 0 18px}
+.shipsec{background:#fff;border:.5px solid var(--line);border-radius:14px;margin-bottom:14px;overflow:hidden}
+.shiphdr{display:flex;align-items:center;gap:10px;padding:12px 16px;border-left:3px solid #1E6FD0}
+.shiphdr .nm{font-size:15px;font-weight:600}
+.shiphdr .meta{margin-left:auto;color:var(--mut);font-size:12px}
+.shipbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;padding:0 16px 6px}
+.rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:12px 14px;position:relative}
+.rcard.cur{box-shadow:0 0 0 2px var(--green) inset}
+.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
+.rhead{display:flex;align-items:center;gap:10px}
+.ravatar{width:36px;height:36px;border-radius:50%;background:#eef2f7;color:var(--mut);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12.5px;flex:0 0 auto}
+.ravatar.cur{background:#e3f5e8;color:var(--green)}
+.rhcol{min-width:0}
+.rnm{font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:2px}
+.rrank{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.04em;border:.5px solid var(--line-2);border-radius:4px;padding:1px 5px;vertical-align:1px}
+.rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}
+.rleg{font-size:11.5px;color:var(--mut);display:flex;align-items:center;gap:6px}
+.rleg i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.offchip{position:absolute;top:9px;right:9px;font-size:10px;font-weight:800;letter-spacing:.02em;padding:2px 8px;border-radius:20px;background:#eef2f7;color:var(--mut)}
+.offchip.crit{background:#fbe7e6;color:var(--danger)}
+.offchip.due{background:#fbeed6;color:#9a6410}
+.rrot{margin-top:10px;padding-top:9px;border-top:.5px solid var(--line);display:flex;flex-direction:column;gap:6px}
+.rrow{display:flex;align-items:baseline;gap:8px;font-size:12.5px;line-height:1.3}
+.rlbl{flex:0 0 auto;width:22px;color:var(--mut);text-transform:uppercase;font-size:10px;letter-spacing:.04em;font-weight:700}
+.rcity{min-width:0;color:#3a4a5e}.rcity b{font-weight:700}
+.rdate{margin-left:auto;white-space:nowrap;color:var(--mut);font-size:11.5px}
+.rtags{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px}
+.rtag{font-size:9px;font-weight:800;letter-spacing:.03em;padding:2px 8px;border-radius:6px;background:#EAF6E6;border:1px solid #bfe0b0;color:var(--green-d)}
+.ghostslot{border:1.5px dashed var(--line-2);background:#fafbfc;border-radius:11px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;min-height:118px;cursor:pointer}
+.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}
+.ghostslot .gt{font-weight:700;font-size:13px;color:var(--navy)}
+.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}
+.ghostslot.crit{border-color:var(--danger);background:#fdf3f2}.ghostslot.crit .gp,.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}
+.ghostslot.due{border-color:#d9a441;background:#fdf9f0}.ghostslot.due .gp,.ghostslot.due .gc{background:#fbeed6;color:#9a6410}
+.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 16px 14px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}
+.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.modcard{background:#fff;border:.5px solid var(--line);border-radius:14px;max-width:640px;padding:18px 20px;box-shadow:0 18px 50px rgba(10,14,24,.14)}
+.modhd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px}
+.cname{font-size:17px;font-weight:600}.csub{font-size:12px;color:var(--mut)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+label.f{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;display:block;margin:10px 0 4px}
+select,input[type=text],input[type=date]{width:100%;height:38px;border:.5px solid var(--line-2);border-radius:9px;padding:0 10px;font-size:14px;background:#fff;color:var(--navy);font-family:inherit}
+.zlabel{font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:16px 0 8px;display:flex;align-items:center;gap:12px}
+.zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
+.tog{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 10px;border:.5px solid var(--line);border-radius:20px;margin:0 6px 6px 0;color:var(--mut)}
+.tog.on{border-color:var(--green);color:var(--green);background:#e3f5e8}
+.sw{width:24px;height:14px;border-radius:20px;background:var(--line-2);position:relative}.sw.on{background:var(--green)}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:#fff}.sw.on::after{left:12px}
+.btn{cursor:pointer;background:#fff;border:.5px solid var(--line-2);border-radius:9px;color:var(--navy);font-size:13px;padding:8px 13px;font-family:inherit}
+.btn.green{border-color:var(--green);color:#fff;background:#2e9e4f}
+.wrow{display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border:.5px solid var(--line);border-radius:9px;margin-top:6px;font-size:13.5px}
+.mbanner{background:#e8f1fb;border-radius:9px;padding:10px 12px;font-size:13px;margin:6px 0}
+.match{cursor:pointer;background:#fff;border:.5px solid #9cc3ec;color:var(--accent);border-radius:9px;font-size:12.5px;padding:6px 11px;margin-top:9px;display:inline-flex;align-items:center;gap:6px}
+.derive{font-size:12px;color:var(--mut);margin-top:6px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#3a4a5e;margin:6px 0 18px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dotv{width:10px;height:10px;border-radius:50%;display:inline-block}
+</style></head><body>
+<div class="wrap">
+
+<h1>CIMS Keyman / Relief — design reference</h1>
+<p class="sub">Final deployed design (realizes the approved mockup). Console palette. States shown: calm, urgent, and reliever-assigned; plus both modals. This is a static reference — not the live app.</p>
+
+<div class="legend">
+  <span><i class="dotv" style="background:#eef2f7;border:1px solid var(--line-2)"></i> grey = plenty of runway</span>
+  <span><i class="dotv" style="background:#fbeed6"></i> amber = due (&le;30d)</span>
+  <span><i class="dotv" style="background:#fbe7e6"></i> red = needed (&le;14d)</span>
+  <span><i class="dotv" style="background:#e3f5e8"></i> green = clean handover</span>
+</div>
+
+<h2>1 · Ship row — slot open (calm)</h2>
+<div class="shipsec">
+  <div class="shiphdr"><span class="nm">Adventure</span><span class="meta">Royal · 1 onboard · 1 current</span></div>
+  <div class="shipbody">
+    <div class="rcard cur">
+      <span class="offchip">OFF in 143d</span>
+      <div class="rhead"><div class="ravatar cur">KB</div><div class="rhcol">
+        <div class="rnm">Karl Bernard Marc Lanuza <span class="rrank">PS</span></div>
+        <div class="rleg"><i style="background:var(--green)"></i> On board · 8 mos 1 day</div>
+      </div></div>
+      <div class="rrot">
+        <div class="rrow"><span class="rlbl">on</span><span class="rcity"><b style="color:var(--green)">ORLANDO (PORT CANAVERAL), FLORIDA</b></span><span class="rdate">2026-03-28</span></div>
+        <div class="rrow"><span class="rlbl">off</span><span class="rcity"><b style="color:var(--green)">FORT LAUDERDALE, FLORIDA</b></span><span class="rdate">2026-11-29</span></div>
+      </div>
+    </div>
+    <div class="ghostslot"><div class="gp">+</div><div class="gt">Add reliever</div><div class="gc">OFF IN 143D</div></div>
+  </div>
+  <div class="rbanner" style="background:#eef2f7;color:#5a6472"><span class="bdot" style="background:#9aa3b0"></span>Slot open · signs off in 143 days</div>
+</div>
+
+<h2>2 · Ship row — reliever needed (urgent)</h2>
+<div class="shipsec">
+  <div class="shiphdr"><span class="nm">Independence</span><span class="meta">Royal · 1 onboard · 1 current</span></div>
+  <div class="shipbody">
+    <div class="rcard cur">
+      <span class="offchip crit">OFF in 8d</span>
+      <div class="rhead"><div class="ravatar cur">JM</div><div class="rhcol">
+        <div class="rnm">Janet Magana <span class="rrank">PS</span></div>
+        <div class="rleg"><i style="background:var(--green)"></i> On board · 5 mos 22 days</div>
+      </div></div>
+      <div class="rrot">
+        <div class="rrow"><span class="rlbl">on</span><span class="rcity"><b style="color:var(--green)">BARCELONA, SPAIN</b></span><span class="rdate">2026-01-25</span></div>
+        <div class="rrow"><span class="rlbl">off</span><span class="rcity"><b style="color:var(--amber)">SOUTHAMPTON, UK</b></span><span class="rdate">2026-07-16</span></div>
+      </div>
+      <div class="rtags"><span class="rtag">ECCR</span><span class="rtag">ON DATE</span></div>
+    </div>
+    <div class="ghostslot crit"><div class="gp">+</div><div class="gt">Add reliever</div><div class="gc">OFF IN 8D</div></div>
+  </div>
+  <div class="rbanner" style="background:#fbe7e6;color:var(--danger)"><span class="bdot" style="background:var(--danger)"></span>Reliever needed · signs off in 8 days</div>
+</div>
+
+<h2>3 · Ship row — reliever assigned (clean handover)</h2>
+<div class="shipsec">
+  <div class="shiphdr"><span class="nm">Quest</span><span class="meta">Azamara · 1 onboard · 1 reliever</span></div>
+  <div class="shipbody">
+    <div class="rcard cur">
+      <span class="offchip due">OFF in 33d</span>
+      <div class="rhead"><div class="ravatar cur">RB</div><div class="rhcol">
+        <div class="rnm">Rudy Bugarin <span class="rrank">PS</span></div>
+        <div class="rleg"><i style="background:var(--green)"></i> On board · 4 mos 18 days</div>
+      </div></div>
+      <div class="rrot">
+        <div class="rrow"><span class="rlbl">off</span><span class="rcity"><b style="color:var(--green)">PIRAEUS (ATHENS), GREECE</b></span><span class="rdate">2026-08-10</span></div>
+      </div>
+      <div class="rtags"><span class="rtag">ECCR</span><span class="rtag">AIR</span><span class="rtag">ON DATE</span></div>
+    </div>
+    <div class="rcard rlvr">
+      <div class="rhead"><div class="ravatar">OC</div><div class="rhcol">
+        <div class="rnm">Orlan Calang <span class="rlab">RELIEVER</span></div>
+        <div class="rleg"><i style="background:var(--navy)"></i> Signs on</div>
+      </div></div>
+      <div class="rrot">
+        <div class="rrow"><span class="rlbl">on</span><span class="rcity"><b style="color:var(--green)">PIRAEUS (ATHENS), GREECE</b></span><span class="rdate">2026-08-10</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="rbanner" style="background:#e3f5e8;color:var(--green)"><span class="bdot" style="background:var(--green)"></span>Clean handover · Piraeus (Athens), Greece · 2026-08-10</div>
+</div>
+
+<div class="note"><b>Card anatomy:</b> initials avatar (green when onboard) · name + PS chip · status + tenure · "OFF in Nd" urgency chip top-right (grey/amber/red) · rotation block with labeled on/off rows (city left in confidence colour, date right, never wraps) · green confirmed pills · reliever card carries the navy RELIEVER chip · full-width status pill below. The onboard card + reliever slot fill the row (CSS grid auto-fit).</div>
+
+<h2>4 · Edit-contract modal (Keyman) — final</h2>
+<p class="sub">Embark / Disembark are itinerary-seeded port dropdowns (turnaround days), matched to the Rita-verified sign-on / sign-off date; picking a turnaround sets the date. No free-typing.</p>
+<div class="modcard">
+  <div class="modhd"><div><div class="cname">Edit contract — Karl Bernard Marc Lanuza</div><div class="csub">SC-0039963 · contract #1</div></div><button class="btn">Close ✕</button></div>
+  <div class="grid2">
+    <div><label class="f">Embark city · from itinerary</label>
+      <select><option>ORLANDO (PORT CANAVERAL), FLORIDA · 2026-03-28</option><option>ORLANDO (PORT CANAVERAL), FLORIDA · 2026-04-03</option><option>ORLANDO (PORT CANAVERAL), FLORIDA · 2026-04-11</option><option>ORLANDO (PORT CANAVERAL), FLORIDA · 2026-04-17</option><option>ORLANDO (PORT CANAVERAL), FLORIDA · 2026-04-25</option><option>ORLANDO (PORT CANAVERAL), FLORIDA · 2026-05-01</option></select></div>
+    <div><label class="f">Disembark city · from itinerary</label>
+      <select><option>FORT LAUDERDALE, FLORIDA · 2026-11-29</option><option>FORT LAUDERDALE, FLORIDA · 2026-12-05</option><option>FORT LAUDERDALE, FLORIDA · 2026-12-13</option><option>FORT LAUDERDALE, FLORIDA · 2026-12-19</option><option>FORT LAUDERDALE, FLORIDA · 2026-12-27</option><option>FORT LAUDERDALE, FLORIDA · 2027-01-02</option></select></div>
+    <div><label class="f">Sign-on</label><input type="date" value="2026-03-28"></div>
+    <div><label class="f">Sign-off</label><input type="date" value="2026-11-29"></div>
+    <div style="grid-column:1/3"><label class="f">Ship</label><select><option>Adventure</option></select></div>
+  </div>
+  <div class="zlabel">Confirmed — shows as green tags on the card</div>
+  <div><span class="tog"><span class="sw"></span>ECCR</span><span class="tog"><span class="sw"></span>AIR</span><span class="tog"><span class="sw"></span>HOTEL</span><span class="tog"><span class="sw"></span>ON DATE</span><span class="tog"><span class="sw"></span>OFF DATE</span></div>
+  <div class="zlabel">Comment</div><input type="text" placeholder="Note for this crew…">
+  <div class="zlabel">Sign-off workflow</div>
+  <div><button class="btn">Send instructions</button> <button class="btn">Send sign-off link</button> <button class="btn">Send review invite</button></div>
+  <div style="margin-top:16px;text-align:right"><button class="btn">Cancel</button> <button class="btn green">Save</button></div>
+</div>
+
+<h2>5 · New-reliever modal (Relief) — final</h2>
+<p class="sub">Opens inline as an overlay on the Keyman board. "Match handover" sets the reliever's sign-on = the printer's sign-off day/port. Dates live-derive the city (green = turnaround, amber = nearest).</p>
+<div class="modcard">
+  <div class="modhd"><div><div class="cname">New reliever</div><div class="csub">Quest · unassigned slot</div></div><button class="btn">Close ✕</button></div>
+  <div class="mbanner"><b style="color:var(--accent)"><i class="ti ti-arrows-left-right"></i> Relieving Rudy Bugarin</b><div style="color:#5a6472;margin-top:3px">Printer OFF · Piraeus (Athens), Greece · 2026-08-10</div><button class="match"><i class="ti ti-wand"></i> Match handover</button></div>
+  <label class="f">Crew member <span style="color:var(--danger);text-transform:none;letter-spacing:0">— required to activate</span></label>
+  <input type="text" placeholder="Search crew…">
+  <label class="f">Ship</label><select><option>Quest</option></select>
+  <div class="derive">Preloaded from the slot. Change it to reassign — cities re-derive.</div>
+  <div class="grid2">
+    <div><label class="f">Sign-on date</label><input type="date" value="2026-08-10"><div class="derive"><i class="dotv" style="background:var(--green)"></i> Piraeus (Athens), Greece · turnaround</div></div>
+    <div><label class="f">Sign-off date</label><input type="date" value="2027-01-07"><div class="derive"><i class="dotv" style="background:var(--green)"></i> Piraeus (Athens), Greece · turnaround</div></div>
+  </div>
+  <div class="zlabel">Confirmed — shows as green tags on the card</div>
+  <div><span class="tog on"><span class="sw on"></span>ECCR</span><span class="tog"><span class="sw"></span>AIR</span><span class="tog"><span class="sw"></span>HOTEL</span><span class="tog on"><span class="sw on"></span>ON DATE</span><span class="tog"><span class="sw"></span>OFF DATE</span></div>
+  <div class="zlabel">Sign-off workflow</div>
+  <div class="wrow"><span>Send instructions</span><span style="color:var(--mut);font-size:12px">not sent</span></div>
+  <div class="wrow"><span>Send sign-off link</span><span style="color:var(--mut);font-size:12px">not sent</span></div>
+  <div class="wrow"><span>Send review invite</span><span style="color:var(--mut);font-size:12px">not sent</span></div>
+  <div class="zlabel">Comment</div>
+  <div style="display:flex;gap:8px"><input type="text" placeholder="Add a note…"><button class="btn">+ Post</button></div>
+  <div style="margin-top:16px;text-align:right"><button class="btn">Cancel</button> <button class="btn green">Save</button></div>
+</div>
+
+<div class="note" style="margin-top:24px">Reference only. Live logic in <code>src/worker.js</code> (card + Keyman modal), <code>src/relief_ui.js</code> (relief board + reliever modal), <code>src/relief_api.js</code>, <code>src/relief_board.js</code>, <code>src/city_resolver.js</code>. See <code>docs/RELIEF_KEYMAN_CANONICAL.md</code> and <code>docs/CIMS_SESSION_TRANSFER.md</code>.</div>
+
+</div></body></html>
