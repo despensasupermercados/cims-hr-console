@@ -20,19 +20,35 @@ export async function reliefBoardData(env, today) {
   ).all()).results;
   const portDaysByShip = groupPortDays(pd);
 
+  // Per-leg confirmation flags (ECCR/AIR/HOTEL/ON/OFF) for the CURRENT keyman. Stored separately from
+  // ship_leg so the Keyman board keeps owning the dates; keyed by vessel_key + crew so a rotation
+  // (new keyman on the same ship) starts with clean flags.
+  const flagRows = (await env.DB.prepare(
+    "SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf FROM leg_flags"
+  ).all()).results;
+  const flagsByKey = {};
+  for (const f of flagRows) flagsByKey[f.vessel_key] = f;
+
   const legs = (await env.DB.prepare(
     `SELECT l.brand, l.ship_short, l.on_date, l.off_date, l.embark, l.disembark,
             TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
        FROM ship_leg l LEFT JOIN crew c ON c.id = l.crew_id
       WHERE l.is_current = 1 AND l.ours = 1`
   ).all()).results;
-  const printers = legs.map((l) => ({
-    id: "leg:" + l.brand + "|" + l.ship_short,
-    role: "printer", crew_name: l.crew_name,
-    vessel_key: l.brand + "|" + l.ship_short,
-    on_date: l.on_date || null, off_date: l.off_date || null,
-    on_port_seed: l.embark || null, off_port_seed: l.disembark || null,
-  }));
+  const printers = legs.map((l) => {
+    const vk = l.brand + "|" + l.ship_short;
+    const f = flagsByKey[vk];
+    const on = f && (f.crew_name || "") === (l.crew_name || ""); // only apply flags to the same keyman
+    return {
+      id: "leg:" + vk,
+      role: "printer", crew_name: l.crew_name,
+      vessel_key: vk,
+      on_date: l.on_date || null, off_date: l.off_date || null,
+      on_port_seed: l.embark || null, off_port_seed: l.disembark || null,
+      eccr: on ? f.eccr : 0, air: on ? f.air : 0, hotel: on ? f.hotel : 0,
+      on_date_conf: on ? f.on_date_conf : 0, off_date_conf: on ? f.off_date_conf : 0,
+    };
+  });
 
   const rows = (await env.DB.prepare(
     `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.actual_sign_off,
@@ -115,6 +131,19 @@ export async function saveReliefAssignment(env, payload) {
   return { ok: true, id: asId, mode: "insert" };
 }
 
+// Printer confirmation flags — upsert keyed by vessel_key (stores crew_name so a rotation resets).
+export async function saveLegFlags(env, b) {
+  const vk = String((b && b.vessel_key) || "");
+  if (!vk) return { ok: false, error: "vessel_key_required" };
+  const g = (k) => (b[k] ? 1 : 0);
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO leg_flags (vessel_key,crew_name,eccr,air,hotel,on_date_conf,off_date_conf,updated_at) VALUES (?,?,?,?,?,?,?,?) " +
+    "ON CONFLICT(vessel_key) DO UPDATE SET crew_name=excluded.crew_name,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_date_conf=excluded.on_date_conf,off_date_conf=excluded.off_date_conf,updated_at=excluded.updated_at"
+  ).bind(vk, String((b && b.crew_name) || ""), g("eccr"), g("air"), g("hotel"), g("on_date_conf"), g("off_date_conf"), now).run();
+  return { ok: true };
+}
+
 function jsonResp(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 }
@@ -147,7 +176,6 @@ export async function handleRelief(request, url, env) {
     ).bind(ship).all()).results;
     return jsonResp({ ports: rows });
   }
-  // Verify what landed + enforce the 12-month forward-coverage floor per fleet ship.
   if (p === "/api/relief/vpd-status" && request.method === "GET") {
     const today = new Date().toISOString().slice(0, 10);
     const s = (await env.DB.prepare(
@@ -171,7 +199,6 @@ export async function handleRelief(request, url, env) {
        HAVING MAX(v.berth_date) < date(?, '+' || ? || ' months')
         ORDER BY last_date`
     ).bind(today, String(MIN_COVERAGE_MONTHS)).all()).results;
-    // Per-brand row counts — so the loader can confirm each file's brands landed.
     const byBrand = (await env.DB.prepare(
       "SELECT brand, COUNT(*) AS rows, COUNT(DISTINCT ship_short) AS ships FROM vessel_port_day GROUP BY brand ORDER BY brand"
     ).all()).results;
@@ -181,8 +208,6 @@ export async function handleRelief(request, url, env) {
     let body;
     try { body = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const rows = body.rows || [];
-    // Brand-aware reset: on the first chunk, clear exactly the brands this upload carries, so a file
-    // cleanly replaces its own ships and NO stale rows survive. Brands validated against the enum.
     if (body.reset) {
       const brands = (body.resetBrands || []).filter((b) => VPD_BRANDS.has(b));
       if (brands.length) {
@@ -210,6 +235,12 @@ export async function handleRelief(request, url, env) {
       ).run();
     }
     return jsonResp({ ok: true, inserted: good.length, skipped });
+  }
+  if (p === "/api/relief/leg-flags" && request.method === "POST") {
+    let b;
+    try { b = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
+    const res = await saveLegFlags(env, b);
+    return jsonResp(res, res.ok ? 200 : 400);
   }
   if (p === "/api/relief/save" && request.method === "POST") {
     let payload;
