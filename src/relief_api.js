@@ -5,10 +5,19 @@ import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
 
-// Minimum forward itinerary we require in the DB, per fleet ship, for the relief picker to never run
-// dry. Sign-off projects ~6 months out (Azamara 5); 12 months gives the picker turnarounds well past
-// that horizon. The verify endpoint flags any fleet ship whose coverage ends sooner.
 export const MIN_COVERAGE_MONTHS = 12;
+// Azamara crew run ~5-month contracts (vs 6 for CEL/RCI). Their ship_leg off-dates sit mid-cruise, so
+// the printer sign-off is PROJECTED: the next real turnaround on/after sign-on + AZAMARA_MONTHS
+// (lands at ~5–5.5 months). Never before today (an overdue keyman snaps to the next turnaround from
+// now). Rita's override (leg_flags.override_off_date) always wins.
+export const AZAMARA_MONTHS = 5;
+
+function addMonthsISO(d, n) {
+  if (!d) return null;
+  const dt = new Date(d + "T00:00:00Z");
+  dt.setUTCMonth(dt.getUTCMonth() + n);
+  return dt.toISOString().slice(0, 10);
+}
 
 export async function reliefBoardData(env, today) {
   const cfg = (await env.DB.prepare(
@@ -16,15 +25,20 @@ export async function reliefBoardData(env, today) {
   ).first()) || { critical_days: 14, due_days: 30 };
 
   const pd = (await env.DB.prepare(
-    "SELECT brand, ship_short, berth_date, port_name, is_sea FROM vessel_port_day"
+    "SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day"
   ).all()).results;
   const portDaysByShip = groupPortDays(pd);
+  // Turnarounds per ship (crew-change ports), sorted ascending — the projection candidates.
+  const taByShip = {};
+  for (const r of pd) {
+    if (Number(r.is_turnaround) === 1 && Number(r.is_sea) !== 1 && r.port_name) {
+      (taByShip[r.ship_short] = taByShip[r.ship_short] || []).push({ berth_date: r.berth_date, port_name: r.port_name });
+    }
+  }
+  for (const k in taByShip) taByShip[k].sort((a, b) => (a.berth_date < b.berth_date ? -1 : a.berth_date > b.berth_date ? 1 : 0));
 
-  // Per-leg confirmation flags (ECCR/AIR/HOTEL/ON/OFF) for the CURRENT keyman. Stored separately from
-  // ship_leg so the Keyman board keeps owning the dates; keyed by vessel_key + crew so a rotation
-  // (new keyman on the same ship) starts with clean flags.
   const flagRows = (await env.DB.prepare(
-    "SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf FROM leg_flags"
+    "SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags"
   ).all()).results;
   const flagsByKey = {};
   for (const f of flagRows) flagsByKey[f.vessel_key] = f;
@@ -38,15 +52,32 @@ export async function reliefBoardData(env, today) {
   const printers = legs.map((l) => {
     const vk = l.brand + "|" + l.ship_short;
     const f = flagsByKey[vk];
-    const on = f && (f.crew_name || "") === (l.crew_name || ""); // only apply flags to the same keyman
+    const applyF = f && (f.crew_name || "") === (l.crew_name || "");
+    let off_date = l.off_date || null;
+    let off_seed = l.disembark || null;
+    // AZAMARA sign-off projection (see AZAMARA_MONTHS). CEL/RCI keep their stored, turnaround-aligned off.
+    if (l.brand === "Azamara") {
+      const ov = applyF ? f.override_off_date : null;
+      const ta = taByShip[l.ship_short] || [];
+      if (ov) {
+        off_date = ov;
+        const hit = ta.find((x) => x.berth_date === ov);
+        if (hit) off_seed = hit.port_name;
+      } else {
+        let base = l.on_date ? addMonthsISO(l.on_date, AZAMARA_MONTHS) : (l.off_date || today);
+        if (today && base && base < today) base = today;           // never project a sign-off in the past
+        const hit = base ? ta.find((x) => x.berth_date >= base) : null;
+        if (hit) { off_date = hit.berth_date; off_seed = hit.port_name; }
+      }
+    }
     return {
       id: "leg:" + vk,
       role: "printer", crew_name: l.crew_name,
       vessel_key: vk,
-      on_date: l.on_date || null, off_date: l.off_date || null,
-      on_port_seed: l.embark || null, off_port_seed: l.disembark || null,
-      eccr: on ? f.eccr : 0, air: on ? f.air : 0, hotel: on ? f.hotel : 0,
-      on_date_conf: on ? f.on_date_conf : 0, off_date_conf: on ? f.off_date_conf : 0,
+      on_date: l.on_date || null, off_date: off_date,
+      on_port_seed: l.embark || null, off_port_seed: off_seed,
+      eccr: applyF ? f.eccr : 0, air: applyF ? f.air : 0, hotel: applyF ? f.hotel : 0,
+      on_date_conf: applyF ? f.on_date_conf : 0, off_date_conf: applyF ? f.off_date_conf : 0,
     };
   });
 
@@ -131,16 +162,27 @@ export async function saveReliefAssignment(env, payload) {
   return { ok: true, id: asId, mode: "insert" };
 }
 
-// Printer confirmation flags — upsert keyed by vessel_key (stores crew_name so a rotation resets).
+// Printer leg flags — PARTIAL upsert keyed by vessel_key (stores crew_name so a rotation resets).
+// Only the fields present in the body are written, so a confirmations-save and an Azamara off-override
+// save don't clobber each other. Pass override_off_date:"" or null to clear the override (→ projection).
 export async function saveLegFlags(env, b) {
-  const vk = String((b && b.vessel_key) || "");
+  b = b || {};
+  const vk = String(b.vessel_key || "");
   if (!vk) return { ok: false, error: "vessel_key_required" };
-  const g = (k) => (b[k] ? 1 : 0);
   const now = new Date().toISOString();
+  const cols = ["vessel_key", "crew_name"], vals = [vk, String(b.crew_name || "")];
+  for (const k of ["eccr", "air", "hotel", "on_date_conf", "off_date_conf"]) {
+    if (Object.prototype.hasOwnProperty.call(b, k)) { cols.push(k); vals.push(b[k] ? 1 : 0); }
+  }
+  if (Object.prototype.hasOwnProperty.call(b, "override_off_date")) {
+    cols.push("override_off_date"); vals.push(b.override_off_date || null);
+  }
+  cols.push("updated_at"); vals.push(now);
+  const ph = cols.map(() => "?").join(",");
+  const upd = cols.filter((c) => c !== "vessel_key").map((c) => c + "=excluded." + c).join(",");
   await env.DB.prepare(
-    "INSERT INTO leg_flags (vessel_key,crew_name,eccr,air,hotel,on_date_conf,off_date_conf,updated_at) VALUES (?,?,?,?,?,?,?,?) " +
-    "ON CONFLICT(vessel_key) DO UPDATE SET crew_name=excluded.crew_name,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_date_conf=excluded.on_date_conf,off_date_conf=excluded.off_date_conf,updated_at=excluded.updated_at"
-  ).bind(vk, String((b && b.crew_name) || ""), g("eccr"), g("air"), g("hotel"), g("on_date_conf"), g("off_date_conf"), now).run();
+    "INSERT INTO leg_flags (" + cols.join(",") + ") VALUES (" + ph + ") ON CONFLICT(vessel_key) DO UPDATE SET " + upd
+  ).bind(...vals).run();
   return { ok: true };
 }
 
