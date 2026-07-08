@@ -2882,7 +2882,7 @@ async function renderRotation(){
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
-    +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
+    +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div><div style="margin-top:28px"><div class="zlabel">Relief board</div><iframe src="/relief" title="Relief board" style="width:100%;height:1400px;border:0;border-radius:12px;background:#fff"></iframe></div>';
   drawRotation(); loadAutoToggle();
   loadSbmToggle();
 }
