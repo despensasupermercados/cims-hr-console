@@ -104,7 +104,7 @@ const RB=(()=>{
   }catch(e){BOARD=[];}
   render();
   var _op=new URLSearchParams(location.search).get("open");
-  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;}))open(_op,"reliever");}
+  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";var _m=document.getElementById("modal");if(_m)_m.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;})){open(_op,"reliever");if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefReady"},"*");}catch(e){}}}}
  }
  function order(){ if(manualOrder){const extra=BOARD.filter(r=>!manualOrder.includes(r.vessel_key));return manualOrder.map(k=>BOARD.find(r=>r.vessel_key===k)).filter(Boolean).concat(extra);} return BOARD; }
  function metrics(){
