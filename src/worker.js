@@ -24,11 +24,12 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria, rankCrewMatches } from "./maria.js";
+import { runMaria, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
+import { installSeval } from "./seval.js";
 import { installSeval } from "./seval.js";
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
@@ -209,7 +210,10 @@ export default {
         if (p === "/api/feedback/score" && request.method === "POST") return apiFeedbackScore(request, env, session);
         if (p === "/api/sbm/crew")       return json(await _sbm.sbmCrewCards(env, url.searchParams.get("id")));
         if (p === "/api/sbm/invite" && request.method === "POST") return _sbm.sbmInviteRequest(request, env, session);
+        if (p === "/api/sbm/invite" && request.method === "POST") return _sbm.sbmInviteRequest(request, env, session);
         if (p === "/api/score/queue")    return apiScoreQueue(env, url);
+        if (p === "/api/score/seval")    return _seval.apiSevalGet(env, url);
+        if (p === "/api/score/seval/override" && request.method === "POST") return _seval.apiSevalOverride(request, env, session, isMoneyUser);
         if (p === "/api/score/seval")    return _seval.apiSevalGet(env, url);
         if (p === "/api/score/seval/override" && request.method === "POST") return _seval.apiSevalOverride(request, env, session, isMoneyUser);
         if (p === "/api/intel/inbox")    return apiIntelInbox(env);
@@ -512,6 +516,29 @@ async function mariaExecTool(env, name, input) {
     if (input.from) u.searchParams.set("from", String(input.from));
     if (input.to) u.searchParams.set("to", String(input.to));
     return await J(await apiDaysWorked(env, u));
+  }
+  // ---- Hybrid reach (2026-07): whole-database read access, gated in maria.js ----
+  if (name === "describe_schema") {
+    if (input && input.table) {
+      const t = String(input.table);
+      if (isHiddenTable(t)) return { error: "that table is hidden (backup/stale/config)" };
+      const exists = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ?").bind(t).all();
+      if (!exists.results.length) return { error: "no such table: " + t };
+      const safeName = t.replace(/[^a-zA-Z0-9_]/g, "");
+      const cols = await env.DB.prepare("PRAGMA table_info(" + safeName + ")").all();
+      return { table: t, columns: cols.results.map(c => ({ name: c.name, type: c.type })) };
+    }
+    const rows = await env.DB.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name").all();
+    return { tables: rows.results.filter(r => !isHiddenTable(r.name)) };
+  }
+  if (name === "run_sql") {
+    let safe;
+    try { safe = assertReadOnlySql((input && input.sql) || "", { maxRows: SQL_MAX_ROWS }); }
+    catch (e) { return { error: "query_rejected: " + String((e && e.message) || e) }; }
+    try {
+      const rs = await env.DB.prepare(safe).all();
+      return { sql: safe, rows: rs.results, row_count: rs.results.length };
+    } catch (e) { return { error: "query_failed: " + String((e && e.message) || e).slice(0, 200) }; }
   }
   return { error: "unknown tool: " + name };
 }
@@ -2847,6 +2874,7 @@ async function saveContract(id,seq){
 }
 async function sendSignoffInstructions(id,seq){try{var r=await (await fetch('/api/instructions/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error?('Error: '+r.error):(r.emailed?'Instructions emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send instructions.');}}
 async function sendSignoffLink(id,seq){try{var r=await (await fetch('/api/ack/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error?('Error: '+r.error):(r.emailed?'Sign-off request emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send.');}}
+async function sendReviewInvite(id,seq){if(!confirm('Send a shipboard-management review invite for this contract now?'))return;try{var r=await (await fetch('/api/sbm/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq})})).json();if(r&&r.error){var m={sbm_disabled:'GSM review is OFF. Turn the GSM review switch ON first, then send the invite.',no_recipient_configured:'No shipboard-manager email is configured for this ship yet.',signoff_passed:'That sign-off date has already passed - the review link would be expired.',already_submitted:'A review for this contract was already submitted.',no_signoff_date:'No sign-off date on file for this contract.',send_failed:'The email could not be sent. Please try again.'}[r.error]||('Could not send: '+r.error);alert(m);return;}alert('Review invite emailed to '+(r.recipient||'the shipboard manager')+'.');}catch(e){alert('Could not send the review invite.');}}
 async function sendReviewInvite(id,seq){if(!confirm('Send a shipboard-management review invite for this contract now?'))return;try{var r=await (await fetch('/api/sbm/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq})})).json();if(r&&r.error){var m={sbm_disabled:'GSM review is OFF. Turn the GSM review switch ON first, then send the invite.',no_recipient_configured:'No shipboard-manager email is configured for this ship yet.',signoff_passed:'That sign-off date has already passed - the review link would be expired.',already_submitted:'A review for this contract was already submitted.',no_signoff_date:'No sign-off date on file for this contract.',send_failed:'The email could not be sent. Please try again.'}[r.error]||('Could not send: '+r.error);alert(m);return;}alert('Review invite emailed to '+(r.recipient||'the shipboard manager')+'.');}catch(e){alert('Could not send the review invite.');}}
 function closeRotModal(){var m=document.getElementById('rotmodal');if(m)m.remove();}
 function rmTag(label,field,on,id){return '<span class="rtag rtoggle'+(on?' on':'')+'" data-crew="'+id+'" data-f="'+field+'" data-v="'+(on?1:0)+'" onclick="rmToggle(this)">'+label+'</span>';}
