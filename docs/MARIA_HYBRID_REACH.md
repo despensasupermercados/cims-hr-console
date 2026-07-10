@@ -43,3 +43,15 @@ baselines, and payouts are readable but untouchable — same as every curated to
 ## Not a money change
 Nothing here writes; `bonus.js` and `bonus_outcome` are untouched. `run_sql` cannot
 write by construction (single SELECT/WITH statement, enforced in code + tests).
+
+## Open follow-up: make apply-spec consume its specs (Miguel, 1 edit)
+The 2026-07-10 incident (stale specs re-applied and corrupted worker.js on this
+branch) is fixed here, but the systemic guard needs a workflow edit the GitHub
+connector cannot push (no `workflow` scope). In `.github/workflows/apply-spec.yml`,
+in the "Commit rebuilt files" step, delete the applied specs inside the bot commit:
+
+    git rm -q apply/*.json 2>/dev/null || true
+    # then include the deletions in the same add/commit/push
+
+That makes every spec one-shot by construction — a spent spec can never lie in
+wait for the next branch's bot run again.
