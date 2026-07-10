@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runMaria, MARIA_TOOLS, mariaSystemPrompt } from '../src/maria.js';
+import { runMaria, MARIA_TOOLS, mariaSystemPrompt, assertReadOnlySql, isBackupTable, SQL_MAX_ROWS, MARIA_MODEL } from '../src/maria.js';
 
 test('MARIA_TOOLS: read-only catalogue is well-formed', () => {
   assert.ok(MARIA_TOOLS.length >= 6);
@@ -25,13 +25,11 @@ test('runMaria: executes a tool then answers from the result', async () => {
     call++;
     const body = JSON.parse(opts.body);
     if (call === 1) {
-      // model decides to call find_crew
       assert.ok(body.tools && body.tools.length, 'tools must be sent');
       return { ok: true, json: async () => ({ stop_reason: 'tool_use', content: [
         { type: 'tool_use', id: 'tu_1', name: 'find_crew', input: { name: 'Cruz' } }
       ] }) };
     }
-    // second call: the tool_result must have been appended
     const last = body.messages[body.messages.length - 1];
     assert.equal(last.role, 'user');
     assert.equal(last.content[0].type, 'tool_result');
@@ -75,11 +73,143 @@ test('MARIA_TOOLS: includes schedule-backed upcoming_movements', () => {
 import { rankCrewMatches } from '../src/maria.js';
 test('rankCrewMatches: typo-tolerant, order-insensitive, exact flag', () => {
   const rows = [{ name: 'Belhabida, Daniel' }, { name: 'Cruz, Juan' }, { name: 'Santos, Christjel' }];
-  const r1 = rankCrewMatches(rows, 'dan belhbida', 6);   // misspelled + first-name-first
+  const r1 = rankCrewMatches(rows, 'dan belhbida', 6);
   assert.equal(r1[0].item.name, 'Belhabida, Daniel');
   assert.ok(r1[0].score > 0.7, 'typo should still score high, got ' + r1[0].score);
-  const r2 = rankCrewMatches(rows, 'juan cruz', 6);       // reversed order
+  const r2 = rankCrewMatches(rows, 'juan cruz', 6);
   assert.equal(r2[0].item.name, 'Cruz, Juan');
-  const r3 = rankCrewMatches(rows, 'cruz', 6);            // exact substring
+  const r3 = rankCrewMatches(rows, 'cruz', 6);
   assert.equal(r3[0].exact, true);
+});
+
+// ---------------------------------------------------------------------------
+// 2026-07 upgrade: hybrid reach (describe_schema + run_sql) and the SQL gate.
+// ---------------------------------------------------------------------------
+
+test('upgrade: model is Sonnet, and the two reach tools exist and are shaped right', () => {
+  assert.match(MARIA_MODEL, /sonnet/i, 'engine should be upgraded to Sonnet');
+  const ds = MARIA_TOOLS.find(t => t.name === 'describe_schema');
+  const rs = MARIA_TOOLS.find(t => t.name === 'run_sql');
+  assert.ok(ds && rs, 'both describe_schema and run_sql must be exposed');
+  assert.ok(ds.input_schema.properties.table, 'describe_schema takes an optional table');
+  assert.deepEqual(rs.input_schema.required, ['sql'], 'run_sql requires a sql string');
+});
+
+test('system prompt: teaches the schema->sql path and forbids backup tables', () => {
+  const p = mariaSystemPrompt('2026-07-10');
+  assert.match(p, /describe_schema/);
+  assert.match(p, /run_sql/);
+  assert.match(p, /never internal or backup tables|backup tables/i);
+});
+
+test('assertReadOnlySql: allows a plain SELECT and appends a LIMIT', () => {
+  const out = assertReadOnlySql('SELECT name FROM crew WHERE status = \'On board\'');
+  assert.match(out, /LIMIT 500$/);
+});
+
+test('assertReadOnlySql: allows a WITH ... SELECT (CTE)', () => {
+  const out = assertReadOnlySql('WITH x AS (SELECT 1 AS n) SELECT n FROM x LIMIT 10');
+  assert.match(out, /^WITH/i);
+  assert.match(out, /LIMIT 10/);
+});
+
+test('assertReadOnlySql: clamps an oversized LIMIT down to the cap', () => {
+  const out = assertReadOnlySql('SELECT * FROM travel_expense LIMIT 999999');
+  assert.match(out, /LIMIT 500/);
+  assert.doesNotMatch(out, /999999/);
+});
+
+test('assertReadOnlySql: does NOT false-positive on legit read functions/columns', () => {
+  // REPLACE() is a scalar function; created_at contains "create" but is a column, not DDL.
+  assert.doesNotThrow(() => assertReadOnlySql("SELECT REPLACE(name,'a','b') AS n, created_at FROM crew"));
+});
+
+test('assertReadOnlySql: blocks writes, DDL, multi-statement, PRAGMA/ATTACH, and non-SELECT', () => {
+  const bad = [
+    'UPDATE crew SET status = \'Inactive\'',
+    'DELETE FROM crew',
+    'INSERT INTO crew (name) VALUES (\'x\')',
+    'DROP TABLE crew',
+    'ALTER TABLE crew ADD COLUMN x',
+    'SELECT 1; DROP TABLE crew',            // stacked statement
+    'PRAGMA table_info(crew)',
+    'ATTACH DATABASE \'x\' AS y',
+    'VACUUM',
+    '',                                     // empty
+  ];
+  for (const q of bad) {
+    assert.throws(() => assertReadOnlySql(q), undefined, 'should reject: ' + q);
+  }
+});
+
+test('assertReadOnlySql: a comment cannot smuggle a second statement', () => {
+  assert.throws(() => assertReadOnlySql('SELECT 1 --\n; DROP TABLE crew'));
+});
+
+test('assertReadOnlySql / isBackupTable: stale backup tables are refused', () => {
+  assert.equal(isBackupTable('contract_edit_preclean_20260706'), true);
+  assert.equal(isBackupTable('keyman_contract3_preimport_20260706'), true);
+  assert.equal(isBackupTable('keyman_contract_predrop_20260707'), true);
+  assert.equal(isBackupTable('crew'), false);
+  assert.equal(isBackupTable('bonus_outcome'), false);
+  // and the gate blocks querying them even if the model tries
+  assert.throws(() => assertReadOnlySql('SELECT * FROM contract_edit_preclean_20260706'), /backup_table_forbidden/);
+});
+
+test('runMaria: drives the schema->sql path end to end', async () => {
+  let call = 0;
+  const seen = [];
+  const fetchImpl = async (_url, opts) => {
+    call++;
+    const body = JSON.parse(opts.body);
+    if (call === 1) return { ok: true, json: async () => ({ stop_reason: 'tool_use', content: [
+      { type: 'tool_use', id: 't1', name: 'describe_schema', input: {} }
+    ] }) };
+    if (call === 2) return { ok: true, json: async () => ({ stop_reason: 'tool_use', content: [
+      { type: 'tool_use', id: 't2', name: 'run_sql', input: { sql: 'SELECT count(*) AS n FROM candidate' } }
+    ] }) };
+    return { ok: true, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'There are 12 candidates in the pipeline (table: candidate).' }] }) };
+  };
+  const execTool = async (name, input) => {
+    seen.push(name);
+    if (name === 'describe_schema') return { tables: [{ name: 'candidate', type: 'table' }] };
+    if (name === 'run_sql') {
+      const safe = assertReadOnlySql(input.sql);   // the Worker's real gate, exercised here
+      return { sql: safe, rows: [{ n: 12 }], row_count: 1 };
+    }
+    return {};
+  };
+  const res = await runMaria({ apiKey: 'k', question: 'how many candidates?', execTool, fetchImpl, today: '2026-07-10' });
+  assert.match(res.answer, /12 candidates/);
+  assert.deepEqual(seen, ['describe_schema', 'run_sql']);
+  assert.deepEqual(res.sources, ['describe_schema', 'run_sql']);
+});
+
+// The drift guard I flagged: every tool Maria can call must have a live Worker handler.
+// EXEC_TOOL_HANDLERS mirrors the switch in worker.js — keep them in lockstep.
+const EXEC_TOOL_HANDLERS = new Set([
+  'crew_intel','crew_contract_history','scoring_board','billing_range','upcoming_movements',
+  'workforce_summary','find_crew','list_crew','contract_ledger','compliance_expiring',
+  'billing_month','fleet_status','travel_summary','describe_schema','run_sql',
+]);
+test('drift guard: every MARIA_TOOLS name has a declared execTool handler', () => {
+  for (const t of MARIA_TOOLS) {
+    assert.ok(EXEC_TOOL_HANDLERS.has(t.name), 'no execTool handler declared for tool: ' + t.name);
+  }
+  assert.equal(EXEC_TOOL_HANDLERS.size, MARIA_TOOLS.length, 'handler set and tool list must match 1:1');
+});
+
+// CLAUDE.md §7: key/value config stores (where a secret could land) are denylisted.
+import { isHiddenTable, SQL_DENY_TABLES } from '../src/maria.js';
+test('denylist: config k/v stores are hidden and unqueryable; canonical tables are not', () => {
+  assert.deepEqual(SQL_DENY_TABLES, ['app_config', 'app_setting']);
+  assert.equal(isHiddenTable('app_config'), true);
+  assert.equal(isHiddenTable('APP_SETTING'), true);
+  assert.equal(isHiddenTable('contract_edit_preclean_20260706'), true); // backups still hidden
+  assert.equal(isHiddenTable('crew'), false);
+  assert.equal(isHiddenTable('users'), false);
+  assert.equal(isHiddenTable('bonus_outcome'), false);
+  assert.throws(() => assertReadOnlySql('SELECT value FROM app_config'), /table_forbidden/);
+  assert.throws(() => assertReadOnlySql('SELECT v FROM app_setting WHERE k=\'x\''), /table_forbidden/);
+  assert.doesNotThrow(() => assertReadOnlySql('SELECT email, role FROM users'));
 });

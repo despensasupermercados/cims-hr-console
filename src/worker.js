@@ -24,7 +24,7 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria, rankCrewMatches } from "./maria.js";
+import { runMaria, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
@@ -512,6 +512,29 @@ async function mariaExecTool(env, name, input) {
     if (input.from) u.searchParams.set("from", String(input.from));
     if (input.to) u.searchParams.set("to", String(input.to));
     return await J(await apiDaysWorked(env, u));
+  }
+  // ---- Hybrid reach (2026-07): whole-database read access, gated in maria.js ----
+  if (name === "describe_schema") {
+    if (input && input.table) {
+      const t = String(input.table);
+      if (isHiddenTable(t)) return { error: "that table is hidden (backup/stale/config)" };
+      const exists = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ?").bind(t).all();
+      if (!exists.results.length) return { error: "no such table: " + t };
+      const safeName = t.replace(/[^a-zA-Z0-9_]/g, "");
+      const cols = await env.DB.prepare("PRAGMA table_info(" + safeName + ")").all();
+      return { table: t, columns: cols.results.map(c => ({ name: c.name, type: c.type })) };
+    }
+    const rows = await env.DB.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name").all();
+    return { tables: rows.results.filter(r => !isHiddenTable(r.name)) };
+  }
+  if (name === "run_sql") {
+    let safe;
+    try { safe = assertReadOnlySql((input && input.sql) || "", { maxRows: SQL_MAX_ROWS }); }
+    catch (e) { return { error: "query_rejected: " + String((e && e.message) || e) }; }
+    try {
+      const rs = await env.DB.prepare(safe).all();
+      return { sql: safe, rows: rs.results, row_count: rs.results.length };
+    } catch (e) { return { error: "query_failed: " + String((e && e.message) || e).slice(0, 200) }; }
   }
   return { error: "unknown tool: " + name };
 }
