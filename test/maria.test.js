@@ -192,11 +192,12 @@ const EXEC_TOOL_HANDLERS = new Set([
   'workforce_summary','find_crew','list_crew','contract_ledger','compliance_expiring',
   'billing_month','fleet_status','travel_summary','describe_schema','run_sql',
 ]);
-test('drift guard: every MARIA_TOOLS name has a declared execTool handler', () => {
+const MODULE_TOOLS_NAMES = new Set(['glossary']);
+test('drift guard: every MARIA_TOOLS name has a declared handler (worker or module)', () => {
   for (const t of MARIA_TOOLS) {
-    assert.ok(EXEC_TOOL_HANDLERS.has(t.name), 'no execTool handler declared for tool: ' + t.name);
+    assert.ok(EXEC_TOOL_HANDLERS.has(t.name) || MODULE_TOOLS_NAMES.has(t.name), 'no handler declared for tool: ' + t.name);
   }
-  assert.equal(EXEC_TOOL_HANDLERS.size, MARIA_TOOLS.length, 'handler set and tool list must match 1:1');
+  assert.equal(EXEC_TOOL_HANDLERS.size + MODULE_TOOLS_NAMES.size, MARIA_TOOLS.length, 'handler sets and tool list must match 1:1');
 });
 
 // CLAUDE.md §7: key/value config stores (where a secret could land) are denylisted.
@@ -212,4 +213,79 @@ test('denylist: config k/v stores are hidden and unqueryable; canonical tables a
   assert.throws(() => assertReadOnlySql('SELECT value FROM app_config'), /table_forbidden/);
   assert.throws(() => assertReadOnlySql('SELECT v FROM app_setting WHERE k=\'x\''), /table_forbidden/);
   assert.doesNotThrow(() => assertReadOnlySql('SELECT email, role FROM users'));
+});
+
+// ---------------------------------------------------------------------------
+// 2026-07 foundation: glossary (semantic layer), truncation guard, tracing.
+// ---------------------------------------------------------------------------
+import { MARIA_GLOSSARY, MODULE_TOOLS, MARIA_RESULT_MAX } from '../src/maria.js';
+
+test('glossary: tool exists, is module-handled, and states the locked rules', () => {
+  const g = MARIA_TOOLS.find(t => t.name === 'glossary');
+  assert.ok(g, 'glossary tool must be exposed');
+  assert.ok(MODULE_TOOLS.glossary, 'glossary must be handled in-module');
+  const text = MODULE_TOOLS.glossary({}).glossary;
+  assert.equal(text, MARIA_GLOSSARY);
+  // the rules that burned humans must be stated verbatim enough to steer SQL
+  assert.match(text, /21 days/);                       // contract grouping gap
+  assert.match(text, /5 months on Azamara/);           // full-contract minimums
+  assert.match(text, /9\+->2000/);                     // bonus ladder top rung
+  assert.match(text, /floor 80%/);                     // payout floor
+  assert.match(text, /ship_leg — TRUTH/);              // authoritative source
+  assert.match(text, /APPEND-ONLY money ledger/);      // bonus_outcome semantics
+  assert.match(text, /baseline pending/);              // money guardrail
+});
+
+test('system prompt: teaches glossary-first and the truncation rule', () => {
+  const p = mariaSystemPrompt('2026-07-10');
+  assert.match(p, /glossary/);
+  assert.match(p, /truncated=true/);
+});
+
+test('runMaria: glossary is answered in-module without hitting execTool', async () => {
+  let call = 0; let execHit = 0;
+  const fetchImpl = async () => {
+    call++;
+    if (call === 1) return { ok: true, json: async () => ({ stop_reason: 'tool_use', usage: { input_tokens: 100, output_tokens: 20 }, content: [
+      { type: 'tool_use', id: 'g1', name: 'glossary', input: {} }
+    ] }) };
+    return { ok: true, json: async () => ({ stop_reason: 'end_turn', usage: { input_tokens: 200, output_tokens: 50 }, content: [{ type: 'text', text: 'kc3 is the bonus layer.' }] }) };
+  };
+  const res = await runMaria({ apiKey: 'k', question: 'what is kc3?', execTool: async () => { execHit++; return {}; }, fetchImpl });
+  assert.equal(execHit, 0, 'glossary must not round-trip through the Worker');
+  assert.deepEqual(res.sources, ['glossary']);
+  assert.deepEqual(res.toolCalls, [{ name: 'glossary', input: {} }]);
+  assert.deepEqual(res.usage, { input_tokens: 300, output_tokens: 70 });
+  assert.equal(res.steps, 2);
+});
+
+test('runMaria: oversized tool result becomes an explicit truncated signal, not cut JSON', async () => {
+  let call = 0; let seenContent = null;
+  const fetchImpl = async (_u, opts) => {
+    call++;
+    const body = JSON.parse(opts.body);
+    if (call === 1) return { ok: true, json: async () => ({ stop_reason: 'tool_use', content: [
+      { type: 'tool_use', id: 't1', name: 'run_sql', input: { sql: 'SELECT * FROM travel_expense' } }
+    ] }) };
+    seenContent = body.messages[body.messages.length - 1].content[0].content;
+    return { ok: true, json: async () => ({ stop_reason: 'end_turn', content: [{ type: 'text', text: 'The result was too large; I will aggregate instead.' }] }) };
+  };
+  const big = { rows: Array.from({ length: 5000 }, (_, i) => ({ id: i, name: 'crew-' + i, total: 123.45 })) };
+  const res = await runMaria({ apiKey: 'k', question: 'dump travel', execTool: async () => big, fetchImpl });
+  const parsed = JSON.parse(seenContent);              // must be VALID json — the old slice() was not
+  assert.equal(parsed.truncated, true);
+  assert.ok(parsed.original_bytes > MARIA_RESULT_MAX);
+  assert.match(parsed.note, /aggregation/);
+  assert.ok(res.answer.length > 0);
+});
+
+test('drift guard v2: module tools + worker handlers cover the whole catalogue', () => {
+  const workerHandlers = new Set([
+    'crew_intel','crew_contract_history','scoring_board','billing_range','upcoming_movements',
+    'workforce_summary','find_crew','list_crew','contract_ledger','compliance_expiring',
+    'billing_month','fleet_status','travel_summary','describe_schema','run_sql',
+  ]);
+  for (const t of MARIA_TOOLS) {
+    assert.ok(workerHandlers.has(t.name) || MODULE_TOOLS[t.name], 'no handler anywhere for tool: ' + t.name);
+  }
 });
