@@ -108,8 +108,12 @@ function fakeDB(state) {
 }
 
 /* ------------------------------ harness ---------------------------------- */
-const TODAY = "2026-07-03"; // sign-off 2026-07-10 = T-7; 2026-07-07 = T-4
-const T7_OFF = "2026-07-10", T4_OFF = "2026-07-07";
+// Dynamic timeline anchored to the REAL clock: sbmVerify checks token expiry against
+// Date.now, so fixture sign-offs must stay in the future or every live-token test dies
+// the night the hardcoded date passes (that exact time bomb fired on 2026-07-11).
+const dayN = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+const TODAY = dayN(0);                       // sweep "today"
+const T7_OFF = dayN(7), T4_OFF = dayN(4);    // sign-offs at T-7 / T-4 from TODAY
 
 function rig(opts = {}) {
   const state = {
@@ -215,11 +219,11 @@ test("suppression matrix: every spec case", () => {
   const crew = { status: "On board", retired: false };
   assert.equal(sbmSuppressReason(req, leg, crew, TODAY), null);                          // healthy -> not suppressed
   assert.equal(sbmSuppressReason(req, null, crew, TODAY), "cancelled");                  // contract gone from schedule
-  assert.equal(sbmSuppressReason(req, { off: "2026-08-01" }, crew, TODAY), "date_moved"); // sign-off moved
+  assert.equal(sbmSuppressReason(req, { off: dayN(60) }, crew, TODAY), "date_moved"); // sign-off moved
   assert.equal(sbmSuppressReason(req, leg, { status: "On board", retired: true }, TODAY), "retired");
   assert.equal(sbmSuppressReason(req, leg, { status: "Inactive", retired: false }, TODAY), "retired");
   assert.equal(sbmSuppressReason(req, leg, null, TODAY), "retired");                     // unknown crew: never email
-  assert.equal(sbmSuppressReason({ contract_signoff: "2026-07-01" }, { off: "2026-07-01" }, crew, TODAY), "signed_off");
+  assert.equal(sbmSuppressReason({ contract_signoff: dayN(-2) }, { off: dayN(-2) }, crew, TODAY), "signed_off");
 });
 
 /* ------------------------------ validation ------------------------------- */
@@ -247,7 +251,7 @@ test("sweep at T-7 creates the request and sends ONE invite; running twice sends
   assert.equal(state.requests[0].status, "sent");
   assert.equal(state.requests[0].recipient_email, "gsm.navigator@rccl.example");
   assert.equal(state.requests[0].brand, "Royal Caribbean");
-  assert.equal(state.requests[0].contract_signoff, "2026-07-10");
+  assert.equal(state.requests[0].contract_signoff, T7_OFF);
   assert.equal(outbox.length, 1);
   assert.equal(outbox[0].to[0], "gsm.navigator@rccl.example");
   assert.match(outbox[0].html, /\/sbm\?t=/);
@@ -293,7 +297,7 @@ test("reminder fires at T-4, exactly once, and reuses the SAME single-use link",
   const r = rig();
   await r.sbm.sbmDailySweep(r.env);                    // T-7 invite
   const inviteToken = linkToken(r.outbox[0].html);
-  r.state.today = "2026-07-06";                        // T-4 for 2026-07-10
+  r.state.today = dayN(3);                             // T-4 for T7_OFF
   const res = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res.reminded, 1);
   assert.equal(r.outbox.length, 2);
@@ -303,7 +307,7 @@ test("reminder fires at T-4, exactly once, and reuses the SAME single-use link",
   // once, ever: same day re-run and later days send nothing more
   const res2 = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res2.reminded, 0);
-  r.state.today = "2026-07-07";
+  r.state.today = dayN(4);
   const res3 = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res3.reminded, 0);
   assert.equal(r.outbox.length, 2);
@@ -312,15 +316,15 @@ test("reminder fires at T-4, exactly once, and reuses the SAME single-use link",
 test("reminder suppression: moved sign-off cancels, and a cancelled reminder never un-cancels", async () => {
   const r = rig();
   await r.sbm.sbmDailySweep(r.env);                    // invite
-  r.state.board[0].signOff = "2026-08-20";             // date moves out of window
-  r.state.today = "2026-07-06";                        // reminder day for the OLD date
+  r.state.board[0].signOff = dayN(48);                 // date moves out of window
+  r.state.today = dayN(3);                             // reminder day for the OLD date
   const res = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res.suppressed, 1);
   assert.equal(res.reminded, 0);
   assert.equal(r.state.requests[0].status, "suppressed");
   assert.equal(r.outbox.length, 1);                    // invite only
   // even if the date moves BACK, the suppressed request stays terminal
-  r.state.board[0].signOff = "2026-07-10";
+  r.state.board[0].signOff = T7_OFF;
   const res2 = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res2.reminded, 0);
   assert.equal(r.state.requests[0].status, "suppressed");
@@ -329,7 +333,7 @@ test("reminder suppression: moved sign-off cancels, and a cancelled reminder nev
 test("sweep expires open requests whose sign-off date has passed", async () => {
   const r = rig();
   await r.sbm.sbmDailySweep(r.env);
-  r.state.today = "2026-07-11"; // day after sign-off
+  r.state.today = dayN(8); // day after sign-off
   const res = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res.expired, 1);
   assert.equal(r.state.requests[0].status, "expired");
@@ -421,7 +425,7 @@ test("GET /sbm renders the prefilled survey for a live token", async () => {
   assert.match(page, /Maria Katrina Rica Murillo/);
   assert.match(page, /Navigator of the Seas/);
   assert.match(page, /ROYAL CARIBBEAN INTERNATIONAL/);
-  assert.match(page, /10 Jul 2026/);
+  assert.ok(page.includes(sbmDateLong(T7_OFF)), "rendered sign-off must show the leg's long date");
   assert.match(page, /On board since Jan 2026/);
   assert.match(page, /rita\.berenyi@dg3\.com/);           // corrections mailto
   assert.doesNotMatch(page, /Brand variant|mocktool/);     // no mockup brand-switcher toolbar
@@ -465,7 +469,7 @@ test("sbmCrewCards returns the Manager Feedback cards, newest first, by agency o
   assert.equal(card.rating, 4);
   assert.equal(card.q_teams, "Helps Housekeeping with signs");
   assert.equal(card.contract_signon, "2026-01-14");
-  assert.equal(card.contract_signoff, "2026-07-10");
+  assert.equal(card.contract_signoff, T7_OFF);
   const byUuid = await r.sbm.sbmCrewCards(r.env, "u-maria");
   assert.equal(byUuid.cards.length, 1);
   const nobody = await r.sbm.sbmCrewCards(r.env, "SC-0000000");
@@ -475,9 +479,9 @@ test("sbmCrewCards returns the Manager Feedback cards, newest first, by agency o
 /* ------------------------------ helpers ---------------------------------- */
 
 test("legs adapter + date helpers", () => {
-  const legs = sbmLegsFromSections([{ crew: [{ agency_id: "SC-1", name: "A", ship: "Quest", signOn: "2026-01-01", signOff: "2026-07-10" }, { agency_id: "SC-2" }] }]);
+  const legs = sbmLegsFromSections([{ crew: [{ agency_id: "SC-1", name: "A", ship: "Quest", signOn: "2026-01-01", signOff: T7_OFF }, { agency_id: "SC-2" }] }]);
   assert.equal(legs.length, 1); // undated legs dropped
-  assert.deepEqual(legs[0], { sc: "SC-1", name: "A", ship: "Quest", signOnDate: "2026-01-01", off: "2026-07-10" });
+  assert.deepEqual(legs[0], { sc: "SC-1", name: "A", ship: "Quest", signOnDate: "2026-01-01", off: T7_OFF });
   assert.equal(sbmPlusDays("2026-07-03", 7), "2026-07-10");
   assert.equal(sbmPlusDays("2026-12-29", 4), "2027-01-02");
   assert.equal(sbmDateLong("2026-07-10"), "10 Jul 2026");
@@ -528,7 +532,7 @@ test("S3: send failures and missing recipients reach the activity log", async ()
   r = rig();                                           // reminder send failure
   await r.sbm.sbmDailySweep(r.env);                    // T-7 invite goes out fine
   r.flags.mailFail = true;
-  r.state.today = "2026-07-06";                        // T-4
+  r.state.today = dayN(3);                             // T-4
   const res = await r.sbm.sbmDailySweep(r.env);
   assert.equal(res.skipped[0].reason, "reminder_send_failed");
   assert.ok(r.activity.some(a => a.action === "sbm_reminder_send_failed" && a.detail.includes("SC-0038865")));

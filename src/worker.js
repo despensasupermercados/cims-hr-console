@@ -545,9 +545,21 @@ async function apiAsk(request, env, session) {
   const question = String(b.question || "").slice(0, 1000).trim();
   if (!question) return json({ error: "Please type a question." }, 400);
   const history = Array.isArray(b.history) ? b.history.slice(-6) : [];
-  const res = await runMaria({ apiKey: env.ANTHROPIC_API_KEY, question, history, today: TODAY(), execTool: (n, i) => mariaExecTool(env, n, i) });
+  const t0 = Date.now();
+  // session is passed through to the tool layer so a future role-based filter is a
+  // policy change in maria.js, not a rewire (mariaExecTool may ignore it today).
+  const res = await runMaria({ apiKey: env.ANTHROPIC_API_KEY, question, history, today: TODAY(), execTool: (n, i) => mariaExecTool(env, n, i, session) });
+  const ms = Date.now() - t0;
+  // Full Q&A trace — the raw material for the golden-question eval set and the
+  // correction loop. Never blocks the answer; failures are logged and swallowed.
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run();
+    const sqlRun = (res.toolCalls || []).filter(c => c.name === "run_sql").map(c => String((c.input && c.input.sql) || "")).join("\n---\n");
+    await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms).run();
+  } catch (e) { console.error("maria_log", (e && e.message) || e); }
   await logActivity(env, session.email, "maria_ask", question.slice(0, 120));
-  return json(res);
+  return json({ answer: res.answer, sources: res.sources, error: res.error, detail: res.detail });
 }
 
 // GET /auth/verify?token=...  -> set session cookie
