@@ -25,6 +25,7 @@ import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
 import { runMaria, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
+import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
@@ -224,6 +225,8 @@ export default {
         if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
         if (p === "/api/rotation/upcoming") return apiRotationUpcoming(env, url);
         if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
+        if (p === "/api/maria/feedback" && request.method === "POST") return apiMariaFeedback(request, env, session);
+        if (p === "/api/maria/eval" && request.method === "POST") return apiMariaEval(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -552,14 +555,46 @@ async function apiAsk(request, env, session) {
   const ms = Date.now() - t0;
   // Full Q&A trace — the raw material for the golden-question eval set and the
   // correction loop. Never blocks the answer; failures are logged and swallowed.
+  let logId = null;
   try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run();
     const sqlRun = (res.toolCalls || []).filter(c => c.name === "run_sql").map(c => String((c.input && c.input.sql) || "")).join("\n---\n");
-    await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms).run();
+    logId = (ins && ins.meta && ins.meta.last_row_id) || null;
   } catch (e) { console.error("maria_log", (e && e.message) || e); }
   await logActivity(env, session.email, "maria_ask", question.slice(0, 120));
-  return json({ answer: res.answer, sources: res.sources, error: res.error, detail: res.detail });
+  return json({ answer: res.answer, sources: res.sources, error: res.error, detail: res.detail, log_id: logId });
+}
+
+// POST /api/maria/feedback {id, verdict:1|0, note?} — the correction loop's write path.
+// Users may only grade THEIR OWN questions (WHERE user_email = session.email).
+async function apiMariaFeedback(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const id = parseInt(b.id, 10);
+  if (!id) return json({ error: "id required" }, 400);
+  const verdict = b.verdict === 1 || b.verdict === "1" || b.verdict === "up" ? "up" : "down";
+  const note = String(b.note || "").slice(0, 500) || null;
+  const r = await env.DB.prepare("UPDATE maria_log SET verdict=?, note=? WHERE id=? AND user_email=?")
+    .bind(verdict, note, id, session.email || "").run();
+  return json({ ok: true, changed: (r && r.meta && r.meta.changes) || 0 });
+}
+
+// POST /api/maria/eval — run the golden-question suite LIVE against prod data and
+// store the scorecard. Money users only: it spends real model tokens (~8 questions).
+// A pass-rate drop after a prompt/glossary/model change is a regression — treat as red.
+async function apiMariaEval(request, env, session) {
+  if (!isMoneyUser(session && session.email)) return json({ error: "money_users_only" }, 403);
+  if (!env.ANTHROPIC_API_KEY) return json({ error: "no AI key set" }, 503);
+  const t0 = Date.now();
+  const out = await runEvals({ apiKey: env.ANTHROPIC_API_KEY, today: TODAY(), execTool: (n, i) => mariaExecTool(env, n, i, session) });
+  try {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_eval (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), model TEXT, pass INTEGER, fail INTEGER, results_json TEXT, ms INTEGER, run_by TEXT)").run();
+    await env.DB.prepare("INSERT INTO maria_eval (model, pass, fail, results_json, ms, run_by) VALUES (?,?,?,?,?,?)")
+      .bind(out.model, out.pass, out.fail, JSON.stringify(out.results).slice(0, 60000), Date.now() - t0, session.email || "").run();
+  } catch (e) { console.error("maria_eval", (e && e.message) || e); }
+  await logActivity(env, session.email, "maria_eval", out.pass + "/" + out.total + " passed");
+  return json(out);
 }
 
 // GET /auth/verify?token=...  -> set session cookie
@@ -2307,10 +2342,21 @@ function mariaRender(){
     var who=m.role==='user'?'You':'Maria';
     var col=m.role==='user'?'var(--navy)':'var(--green)';
     var src=(m.sources&&m.sources.length)?'<div class=csub style="margin-top:4px;opacity:.65">source: '+m.sources.join(', ')+'</div>':'';
-    return '<div style="margin:0 0 12px"><div style="font-weight:700;color:'+col+';font-size:12px">'+who+'</div><div style="white-space:pre-wrap;line-height:1.5">'+(m.html||'')+'</div>'+src+'</div>';
+    var fb='';
+    if(m.role==='assistant'&&m.logId){
+      fb=m.voted?'<div class=csub style="margin-top:4px;opacity:.6">feedback saved '+(m.voted===1?'&#128077;':'&#128078;')+'</div>'
+        :'<div class=csub style="margin-top:4px"><button class="btn ghost" style="font-size:11px;padding:2px 8px" onclick="mariaVote('+m.logId+',1)">&#128077;</button><button class="btn ghost" style="font-size:11px;padding:2px 8px;margin-left:6px" onclick="mariaVote('+m.logId+',0)">&#128078;</button></div>';
+    }
+    return '<div style="margin:0 0 12px"><div style="font-weight:700;color:'+col+';font-size:12px">'+who+'</div><div style="white-space:pre-wrap;line-height:1.5">'+(m.html||'')+'</div>'+src+fb+'</div>';
   }).join('');
   box.innerHTML=h||'<div class=csub style="opacity:.6">Ask a question to get started.</div>';
   box.scrollTop=box.scrollHeight;
+}
+async function mariaVote(id,v){
+  try{await fetch('/api/maria/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,verdict:v})});}catch(e){}
+  var h=window.MARIA_HIST||[];
+  for(var k=0;k<h.length;k++){if(h[k].logId===id)h[k].voted=(v===1?1:2);}
+  mariaRender();
 }
 async function mariaSend(){
   var i=$('#mq'); if(!i)return; var q=(i.value||'').trim(); if(!q)return;
@@ -2324,7 +2370,7 @@ async function mariaSend(){
     var r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:hist})});
     var j=await r.json();
     window.MARIA_HIST.pop();
-    if(j&&j.answer){window.MARIA_HIST.push({role:'assistant',html:mariaEsc(j.answer),text:j.answer,sources:j.sources||[]});}
+    if(j&&j.answer){window.MARIA_HIST.push({role:'assistant',html:mariaEsc(j.answer),text:j.answer,sources:j.sources||[],logId:j.log_id||null});}
     else{window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc((j&&(j.error||j.detail))||'No answer returned.')+'</span>'});}
   }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
   mariaRender();
