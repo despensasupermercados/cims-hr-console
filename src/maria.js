@@ -22,6 +22,54 @@ export const MARIA_MODEL = "claude-sonnet-4-5-20250929";
 export const MARIA_MAX_TOKENS = 2048;
 export const MARIA_MAX_STEPS = 8;
 export const SQL_MAX_ROWS = 500;
+export const MARIA_RESULT_MAX = 60000; // bytes of a tool result the model is allowed to see
+
+/**
+ * MARIA_GLOSSARY — the CIMS data dictionary: the single source of MEANING for Maria.
+ * Served verbatim by the `glossary` tool (handled in-module, no Worker round-trip).
+ * Every fact here was verified against the live D1 schema and the locked SOP modules
+ * (contracts.js grouping rules, bonus.js ladder/floor) on 2026-07-10. When schema or
+ * rules change, update THIS string in the same PR — it is the semantic contract.
+ */
+export const MARIA_GLOSSARY = [
+  "CIMS DATA DICTIONARY (canonical meaning — trust this over guesses)",
+  "",
+  "IDENTITY & JOIN KEYS",
+  "- agency_id / sc: 'SC-00NNNNN' agency crew id (TDG/AdvancedQuery) — the PRIMARY crew key across tables.",
+  "- crew.ship_crew_id: 6-digit Royal Caribbean id bridging to client systems; may be null.",
+  "- km (keyman_contract3.km): the crew agency_id bound to a keyman leg.",
+  "- Ships: vessel.id is canonical; ship_leg uses ship_short + brand (short names repeat across brands — ALWAYS brand-qualify in cross-brand queries).",
+  "- brand vocabulary (verbatim values): 'Royal Caribbean', 'Celebrity', 'Azamara', 'NCL' (displayed RCCL/CCI/AZA/NCL).",
+  "",
+  "AUTHORITATIVE SOURCES (which table is truth for what)",
+  "- ship_leg — TRUTH for rotation/board/billing/movements. One row per crew leg (on_date/off_date, embark/disembark, is_current, ours). This is the LIVE schedule.",
+  "- keyman_contract3 (kc3) — bonus/scoring layer ONLY (sc, seq, sign_on, proj_off, act_off). NEVER use for movements or billing.",
+  "- contract + assignment — normalized contract history; assignment carries per-leg detail (ports, travel flags eccr/air/hotel, instruction/review timestamps).",
+  "- crew — identity + documents (med/sirb/pp/usv/sch numbers + expiries), rank_observed/rank_override, baseline_count.",
+  "- crew_override — manual corrections; WINS over the crew base row (imports COALESCE onto base). The retired flag lives here.",
+  "- bonus_outcome — APPEND-ONLY money ledger: committed scorecards, pay_usd, count_before/after. Truth for bonus history; corrections are new rows via corrects_id, never edits.",
+  "- bonus_policy — versioned rules (ladder_json, floor_pct, weights_json, gates_json).",
+  "- travel_expense — travel spend line items per crew/leg: year, month, air, hotel, medical, visa, food, transport, total, kind.",
+  "- orders / ups_shipment — parts orders (grand_total, freight, clearance) and UPS freight invoices (cost side).",
+  "- vessel_port_day — full itineraries: one row per ship per berth_date (port_name, country, is_turnaround, is_sea).",
+  "- crew_intel + crew_note_log — qualitative field intel and manual notes. NEVER a payout input; keep separate from bonus in any answer.",
+  "- sbm_review_request/response — shipboard-management (GSM) review invites and submitted ratings.",
+  "- seval_state — supervisor evaluation per (crew, contract_signoff): the ONLY field that touches pay.",
+  "- feedback_request2/response2 — contributor scoring windows (logistics/technical/field roles).",
+  "- candidate — recruitment pipeline (stage, agency_ready, checklist_json).",
+  "- users — console users (email, role). Money actions are restricted to the money users (Miguel, Rita).",
+  "- activity_log / notification_log / outbox / email_inbox — audit and mail trails.",
+  "",
+  "BUSINESS RULES (locked SOP — do not improvise)",
+  "- Contract grouping: consecutive legs <= 21 days apart = SAME contract (a transfer); a gap > 21 days = holiday = new contract.",
+  "- FULL contract: total duration >= 5 months on Azamara (Journey/Quest/Pursuit/Onward) or >= 6 months on all other brands. Rank tier (Jr PS / PS / Sr PS) derives from the FULL-contract count, never the raw leg count. Informational; never a payout input.",
+  "- Bonus ladder (USD, keyed by NEXT full-contract count): 2->250, 3->500, 4->750, 5->1000, 6->1250, 7->1500, 8->1750, 9+->2000. Score floor 80% — below floor pays nothing. Committed outcomes live ONLY in bonus_outcome. If crew.baseline_count is null, the bonus is 'baseline pending' — never state an amount.",
+  "- Crew status is DERIVED from the live schedule at read time (plus crew_override); never trust a stored raw status column for headcounts — use workforce_summary or list_crew.",
+  "",
+  "QUERY GUIDANCE",
+  "- Movements/arrivals/departures -> upcoming_movements (ship_leg). Money -> curated tools or bonus_outcome.",
+  "- Aggregate in SQL (COUNT/SUM/GROUP BY); never sum a row list that may be truncated.",
+].join("\n");
 
 export function mariaSystemPrompt(today) {
   return [
@@ -35,6 +83,8 @@ export function mariaSystemPrompt(today) {
     "1d. You can read essentially all CIMS data: crew profiles, contracts/rank/bonus ledger, per-contract history (crew_contract_history), field intel & notes (crew_intel), compliance, billing this month or any range (billing_range), fleet, travel, upcoming movements, and the scoring board (scoring_board). Pick the most specific curated tool for the question.",
     "1e. For anything the curated tools above do NOT cover, you can explore the whole database: call describe_schema with no arguments to list every real table/view, call describe_schema with a table name to see its columns, then call run_sql with a SINGLE read-only SELECT. ALWAYS prefer a curated tool when one fits — the curated tools encode the correct joins for crew, bonus, rotation, billing, compliance, fleet and travel, and are the trusted source for those numbers. Use run_sql only for the long tail the curated tools don't answer.",
     "1f. run_sql is SELECT-only and its results are row-capped. Never attempt to write, update, or delete. Only query tables that describe_schema returned — never internal or backup tables. If a query errors or returns no rows, say so plainly; never invent rows or totals.",
+    "1g. BEFORE writing SQL against a table you haven't used this conversation, call the glossary tool. It is the canonical dictionary: join keys, which table is authoritative for what, and the locked business rules (contract grouping, full-contract minimums, bonus ladder). When the glossary and your intuition disagree, the glossary wins.",
+    "1h. If a tool result comes back with truncated=true, the data was too large to show you. Do NOT answer from the preview — re-query with SQL aggregation (COUNT/SUM/GROUP BY) or tighter filters instead.",
     "2. If the tools don't contain the answer, say so plainly — do not fabricate.",
     "3. You are strictly READ-ONLY. You cannot change data, commit a bonus payout, or write a baseline. If asked to, explain you can only report, not act.",
     "4. Bonus money: only state a dollar figure when the data gives one. If a crew's baseline is not set (baseline_set=false), say the bonus is 'baseline pending' — never invent an amount.",
@@ -62,7 +112,11 @@ export const MARIA_TOOLS = [
   // ---- Hybrid reach: whole-database access, safely ----
   { name: "describe_schema", description: "Map the CIMS database so you can answer questions the curated tools don't cover. Call with NO arguments to list every real table and view (backups and internal tables are hidden). Call with a table name to get that table's columns and types. Use this to discover where data lives, then read it with run_sql. Prefer a curated tool whenever one fits.", input_schema: { type: "object", properties: { table: { type: "string", description: "Optional: a table/view name to describe its columns. Omit to list all tables." } }, additionalProperties: false } },
   { name: "run_sql", description: "Run ONE read-only SQL SELECT against the CIMS database and get the rows back. SELECT-only and row-capped; you cannot write, update, delete, or run PRAGMA/ATTACH. Only query tables that describe_schema returned. Use this for ad-hoc questions the curated tools don't answer (e.g. joins across candidate, assignment, sbm_review_request, seval_state, orders, travel_expense, notification_log). Always add a WHERE/LIMIT to keep results focused. If the query returns nothing, report that honestly.", input_schema: { type: "object", properties: { sql: { type: "string", description: "A single read-only SELECT statement (or WITH ... SELECT). No semicolons chaining multiple statements." } }, required: ["sql"], additionalProperties: false } },
+  { name: "glossary", description: "The CIMS data dictionary: identity/join keys (agency_id 'SC-00NNNNN', km, ship_short+brand), which table is AUTHORITATIVE for what (ship_leg vs keyman_contract3 vs bonus_outcome...), and the locked business rules (21-day contract grouping, 5/6-month full-contract minimums, bonus ladder + 80% floor, derived status). Call this BEFORE writing SQL against unfamiliar tables, and whenever a question involves contracts, rank, bonus, or money.", input_schema: { type: "object", properties: {}, additionalProperties: false } },
 ];
+
+// Tools answered inside this module (static knowledge) — no Worker execTool round-trip.
+export const MODULE_TOOLS = { glossary: () => ({ glossary: MARIA_GLOSSARY }) };
 
 /**
  * isBackupTable — true for the stale/backup/scratch tables Maria must never see or query.
@@ -167,14 +221,17 @@ export async function runMaria({ apiKey, question, history = [], execTool, today
   messages.push({ role: "user", content: String(question || "") });
 
   const sources = [];
+  const toolCalls = [];                                    // [{name, input}] — full trace for maria_log
+  const usage = { input_tokens: 0, output_tokens: 0 };     // accumulated across steps
   for (let step = 0; step < maxSteps; step++) {
     const r = await doFetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({ model: MARIA_MODEL, max_tokens: MARIA_MAX_TOKENS, system: mariaSystemPrompt(today), tools: MARIA_TOOLS, messages }),
     });
-    if (!r.ok) { const t = await r.text().catch(() => ""); return { answer: null, error: "model_http_" + r.status, detail: String(t).slice(0, 300), sources }; }
+    if (!r.ok) { const t = await r.text().catch(() => ""); return { answer: null, error: "model_http_" + r.status, detail: String(t).slice(0, 300), sources, toolCalls, usage, steps: step + 1 }; }
     const j = await r.json();
+    if (j && j.usage) { usage.input_tokens += j.usage.input_tokens || 0; usage.output_tokens += j.usage.output_tokens || 0; }
     const blocks = (j && j.content) || [];
     messages.push({ role: "assistant", content: blocks });
 
@@ -183,17 +240,27 @@ export async function runMaria({ apiKey, question, history = [], execTool, today
       for (const b of blocks) {
         if (b && b.type === "tool_use") {
           sources.push(b.name);
+          toolCalls.push({ name: b.name, input: b.input || {} });
           let data;
-          try { data = await execTool(b.name, b.input || {}); }
+          try { data = MODULE_TOOLS[b.name] ? MODULE_TOOLS[b.name](b.input || {}) : await execTool(b.name, b.input || {}); }
           catch (e) { data = { error: String((e && e.message) || e) }; }
-          results.push({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(data).slice(0, 60000) });
+          // Truncation guard: never hand the model a string cut mid-JSON — it reads partial
+          // data as complete and extrapolates. Oversized results become an explicit signal.
+          const raw = JSON.stringify(data);
+          const content = raw.length <= MARIA_RESULT_MAX ? raw : JSON.stringify({
+            truncated: true,
+            original_bytes: raw.length,
+            note: "Result too large to show. Re-query with SQL aggregation (COUNT/SUM/GROUP BY) or tighter filters/LIMIT — do NOT answer from this preview.",
+            preview: raw.slice(0, 4000),
+          });
+          results.push({ type: "tool_result", tool_use_id: b.id, content });
         }
       }
       messages.push({ role: "user", content: results });
       continue;
     }
     const text = blocks.filter(b => b && b.type === "text").map(b => b.text).join("\n").trim();
-    return { answer: text || "(no answer)", sources: Array.from(new Set(sources)) };
+    return { answer: text || "(no answer)", sources: Array.from(new Set(sources)), toolCalls, usage, steps: step + 1 };
   }
-  return { answer: "I couldn't finish that within the step limit — try a more specific question.", sources: Array.from(new Set(sources)) };
+  return { answer: "I couldn't finish that within the step limit — try a more specific question.", sources: Array.from(new Set(sources)), toolCalls, usage, steps: maxSteps };
 }
