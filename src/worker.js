@@ -2336,16 +2336,20 @@ function renderAsk(){
   mariaRender();
 }
 function mariaEsc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+// Plain-English labels for Maria's data sources — the team should read "Fleet + dry dock",
+// never internal tool names like fleet_status. Unknown tools fall back to their raw name.
+var MARIA_SRC_LABELS={crew_intel:'Crew notes + intel',crew_contract_history:'Contract history',scoring_board:'Scoring board',billing_range:'Billing',billing_month:'Billing',upcoming_movements:'Live rotation schedule',workforce_summary:'Workforce overview',find_crew:'Crew registry',list_crew:'Crew registry',contract_ledger:'Contract + bonus ledger',compliance_expiring:'Document compliance',fleet_status:'Fleet + dry dock',travel_summary:'Travel spend',describe_schema:'Database lookup',run_sql:'Database lookup',glossary:'CIMS dictionary'};
+function mariaSrcLabel(list){var out=[];(list||[]).forEach(function(s){var L=MARIA_SRC_LABELS[s]||s;if(out.indexOf(L)<0)out.push(L);});return out.join(' · ');}
 function mariaRender(){
   var box=$('#mchat'); if(!box)return;
   var h=(window.MARIA_HIST||[]).map(function(m){
     var who=m.role==='user'?'You':'Maria';
     var col=m.role==='user'?'var(--navy)':'var(--green)';
-    var src=(m.sources&&m.sources.length)?'<div class=csub style="margin-top:4px;opacity:.65">source: '+m.sources.join(', ')+'</div>':'';
+    var src=(m.sources&&m.sources.length)?'<div class=csub style="margin-top:4px;opacity:.65">Checked: '+mariaSrcLabel(m.sources)+'</div>':'';
     var fb='';
     if(m.role==='assistant'&&m.logId){
-      fb=m.voted?'<div class=csub style="margin-top:4px;opacity:.6">feedback saved '+(m.voted===1?'&#128077;':'&#128078;')+'</div>'
-        :'<div class=csub style="margin-top:4px"><button class="btn ghost" style="font-size:11px;padding:2px 8px" onclick="mariaVote('+m.logId+',1)">&#128077;</button><button class="btn ghost" style="font-size:11px;padding:2px 8px;margin-left:6px" onclick="mariaVote('+m.logId+',0)">&#128078;</button></div>';
+      fb=m.voted?'<div class=csub style="margin-top:4px;opacity:.6">Thanks — your feedback was saved '+(m.voted===1?'&#128077;':'&#128078;')+'</div>'
+        :'<div class=csub style="margin-top:6px">Was this answer helpful? <button class="btn ghost" style="font-size:11px;padding:2px 8px;margin-left:4px" onclick="mariaVote('+m.logId+',1)">&#128077; Yes</button><button class="btn ghost" style="font-size:11px;padding:2px 8px;margin-left:6px" onclick="mariaVote('+m.logId+',0)">&#128078; No</button></div>';
     }
     return '<div style="margin:0 0 12px"><div style="font-weight:700;color:'+col+';font-size:12px">'+who+'</div><div style="white-space:pre-wrap;line-height:1.5">'+(m.html||'')+'</div>'+src+fb+'</div>';
   }).join('');
