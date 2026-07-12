@@ -2200,6 +2200,42 @@ details.ddwrap>summary{padding:6px 0}
 .hcard .hdur{color:var(--navy);font-size:10.5px;font-weight:700;margin-top:3px}
 .htag{font-size:8px;font-weight:800;letter-spacing:.05em;padding:1px 6px;border-radius:6px;text-transform:uppercase;flex:none}
 .htag.ours{background:#eaf6e6;color:var(--green-d)}.htag.former{background:#e6e9ef;color:#8a93a3}
+/* ---- Ask Maria V2: command-bar overlay (Cmd/Ctrl+K) ---- */
+.mkbtn{flex:none;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:10px;padding:7px 12px;font-size:12.5px;cursor:pointer;display:flex;gap:7px;align-items:center;font-family:'Outfit';font-weight:600}
+.mkbtn:hover{background:rgba(255,255,255,.18)}
+.mkbtn .mkk{font-size:10px;background:rgba(255,255,255,.15);border-radius:5px;padding:2px 6px;letter-spacing:.05em}
+#mkovl{position:fixed;inset:0;background:rgba(14,23,38,.45);backdrop-filter:blur(3px);display:none;justify-content:center;align-items:flex-start;padding:8vh 14px 0;z-index:80}
+#mkovl.open{display:flex}
+.mkbar{width:680px;max-width:100%;background:#fff;border-radius:18px;box-shadow:0 24px 80px rgba(14,23,38,.35);overflow:hidden;display:flex;flex-direction:column;max-height:82vh}
+.mkrow{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.mkav{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--green),var(--green-d));display:flex;align-items:center;justify-content:center;color:#fff;font-family:'Outfit';font-weight:700;font-size:13px;flex:none}
+.mkq{flex:1;border:0;font-size:16.5px;font-family:'DM Sans',system-ui,sans-serif;color:var(--ink);min-width:0;background:transparent}
+.mkq:focus{outline:none}
+.mkesc{font-size:10px;color:var(--mut);border:1px solid var(--line-2);border-radius:5px;padding:2px 6px;cursor:pointer;background:#fff}
+.mkbody{overflow-y:auto}
+.mkprev{padding:6px 18px 0}
+.mkpq{font-size:12px;color:var(--mut);padding:6px 0;border-bottom:1px dashed var(--line);cursor:pointer}
+.mkpq:hover{color:var(--navy)}
+.mkans{padding:16px 18px}
+.mkuq{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin-bottom:7px}
+.mkbig{font-size:15.5px;line-height:1.6;color:var(--ink);white-space:pre-wrap}
+.mksrc{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;align-items:center}
+.mksrclab{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--mut);text-transform:uppercase;margin-right:2px}
+.mkchip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--navy);background:#F7F9FC;border:1px solid var(--line-2);border-radius:20px;padding:3px 9px}
+.mkchip .mkdot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.mkchip.doc .mkdot{background:var(--royal)}
+.mkfb{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--mut);margin-top:12px}
+.mkfbb{border:1px solid var(--line-2);background:#fff;border-radius:8px;padding:3px 10px;cursor:pointer;font-size:12px}
+.mkfbb:hover{border-color:var(--green)}
+.mksec{padding:8px 18px 14px;border-top:1px solid var(--line)}
+.mksec.first{border-top:0;padding-top:14px}
+.mkslab{font-size:10px;font-weight:700;letter-spacing:.1em;color:var(--mut);text-transform:uppercase;padding:6px 0}
+.mkitem{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;font-size:13.5px;color:var(--ink)}
+.mkitem:hover{background:#F2F6FB}
+.mkic{width:26px;height:26px;border-radius:8px;background:#EAF1FA;display:flex;align-items:center;justify-content:center;font-size:13px;flex:none}
+.mkhint{margin-left:auto;font-size:11px;color:var(--mut)}
+.mkfoot{padding:8px 18px;border-top:1px solid var(--line);display:flex;gap:14px;font-size:11px;color:var(--mut);background:#FAFBFD;flex-wrap:wrap}
+@media(max-width:700px){#mkovl{padding:0;align-items:flex-end}.mkbar{border-radius:18px 18px 0 0;max-height:92vh}.mkbtn .mkk{display:none}}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -2329,8 +2365,16 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-ask onclick="show('ask')">Ask Maria</button>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
+  <button class=mkbtn onclick="mkOpen()" title="Ask Maria (Cmd/Ctrl+K)">Ask Maria <span class=mkk>⌘K</span></button>
 </header>
 <div class=wrap id=view></div>
+<div id=mkovl onclick="if(event.target===this)mkClose()">
+  <div class=mkbar>
+    <div class=mkrow><div class=mkav>M</div><input class=mkq id=mkq placeholder="Ask Maria anything about CIMS…" autocomplete=off><span class=mkesc onclick="mkClose()">ESC</span></div>
+    <div class=mkbody id=mkbody></div>
+    <div class=mkfoot><span>Answers come only from CIMS data — sources always shown</span></div>
+  </div>
+</div>
 <script>
 const $=s=>document.querySelector(s);
 let CREW=[];
@@ -2393,7 +2437,7 @@ function renderAsk(){
 function mariaEsc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
 // Plain-English labels for Maria's data sources — the team should read "Fleet + dry dock",
 // never internal tool names like fleet_status. Unknown tools fall back to their raw name.
-var MARIA_SRC_LABELS={crew_intel:'Crew notes + intel',crew_contract_history:'Contract history',scoring_board:'Scoring board',billing_range:'Billing',billing_month:'Billing',upcoming_movements:'Live rotation schedule',workforce_summary:'Workforce overview',find_crew:'Crew registry',list_crew:'Crew registry',contract_ledger:'Contract + bonus ledger',compliance_expiring:'Document compliance',fleet_status:'Fleet + dry dock',travel_summary:'Travel spend',describe_schema:'Database lookup',run_sql:'Database lookup',glossary:'CIMS dictionary'};
+var MARIA_SRC_LABELS={crew_intel:'Crew notes + intel',crew_contract_history:'Contract history',scoring_board:'Scoring board',billing_range:'Billing',billing_month:'Billing',upcoming_movements:'Live rotation schedule',workforce_summary:'Workforce overview',find_crew:'Crew registry',list_crew:'Crew registry',contract_ledger:'Contract + bonus ledger',compliance_expiring:'Document compliance',fleet_status:'Fleet + dry dock',travel_summary:'Travel spend',describe_schema:'Database lookup',run_sql:'Database lookup',glossary:'CIMS dictionary',search_knowledge:'Knowledge library'};
 function mariaSrcLabel(list){var out=[];(list||[]).forEach(function(s){var L=MARIA_SRC_LABELS[s]||s;if(out.indexOf(L)<0)out.push(L);});return out.join(' · ');}
 function mariaRender(){
   var box=$('#mchat'); if(!box)return;
@@ -2417,14 +2461,14 @@ async function mariaVote(id,v){
   for(var k=0;k<h.length;k++){if(h[k].logId===id)h[k].voted=(v===1?1:2);}
   mariaRender();
 }
-async function mariaSend(){
-  var i=$('#mq'); if(!i)return; var q=(i.value||'').trim(); if(!q)return;
-  i.value='';
+// Single ask pipeline shared by the Ask Maria tab AND the V2 command bar (Cmd/Ctrl+K).
+// Both surfaces read/write the same MARIA_HIST, so context carries across them.
+async function mariaAskCore(q){
   window.MARIA_HIST=window.MARIA_HIST||[];
   var hist=window.MARIA_HIST.filter(function(m){return m.text;}).slice(-6).map(function(m){return {role:m.role,content:m.text};});
   window.MARIA_HIST.push({role:'user',html:mariaEsc(q),text:q});
   window.MARIA_HIST.push({role:'assistant',html:'<span class=csub style="opacity:.6">Maria is thinking…</span>'});
-  mariaRender();
+  mariaRender();mkRender();
   try{
     var r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q,history:hist})});
     var j=await r.json();
@@ -2432,8 +2476,60 @@ async function mariaSend(){
     if(j&&j.answer){window.MARIA_HIST.push({role:'assistant',html:mariaEsc(j.answer),text:j.answer,sources:j.sources||[],logId:j.log_id||null});}
     else{window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc((j&&(j.error||j.detail))||'No answer returned.')+'</span>'});}
   }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
-  mariaRender();
+  mariaRender();mkRender();
 }
+async function mariaSend(){
+  var i=$('#mq'); if(!i)return; var q=(i.value||'').trim(); if(!q)return;
+  i.value='';
+  await mariaAskCore(q);
+}
+/* ---- Ask Maria V2 command bar: additive overlay, existing tab untouched as fallback ---- */
+var MK_SUGG=[['&#128674;','Who signs off in the next 14 days?','rotation'],['&#128196;','Whose documents expire in the next 60 days?','compliance'],['&#128202;','Billing this month per ship','billing'],['&#128736;','Which ships are in dry dock?','fleet']];
+function mkSuggHtml(){var out='<div class=mkslab>Suggested</div>';for(var i=0;i<MK_SUGG.length;i++){out+='<div class=mkitem onclick="mkAsk('+i+')"><div class=mkic>'+MK_SUGG[i][0]+'</div>'+MK_SUGG[i][1]+'<span class=mkhint>'+MK_SUGG[i][2]+'</span></div>';}return out;}
+function mkIsOpen(){var o=$('#mkovl');return !!(o&&o.classList.contains('open'));}
+function mkOpen(){var o=$('#mkovl');if(!o)return;o.classList.add('open');mkRender();var q=$('#mkq');if(q){q.value='';setTimeout(function(){q.focus();},60);}}
+function mkClose(){var o=$('#mkovl');if(o)o.classList.remove('open');}
+function mkAsk(i){var s=MK_SUGG[i];if(!s)return;var q=$('#mkq');if(q)q.value='';mariaAskCore(s[1]);}
+function mkReask(el){mariaAskCore(el.textContent||'');}
+async function mkSend(){var i=$('#mkq');if(!i)return;var q=(i.value||'').trim();if(!q)return;i.value='';await mariaAskCore(q);}
+async function mkVote(id,v){await mariaVote(id,v);mkRender();}
+function mkSrcChips(list){
+  var out='',seen=[];
+  (list||[]).forEach(function(s){
+    var L=MARIA_SRC_LABELS[s]||s;if(seen.indexOf(L)>=0)return;seen.push(L);
+    var doc=(s==='search_knowledge')?' doc':'';
+    out+='<span class="mkchip'+doc+'"><span class=mkdot></span>'+mariaEsc(L)+'</span>';
+  });
+  return out;
+}
+function mkRender(){
+  var box=$('#mkbody'); if(!box)return;
+  var H=window.MARIA_HIST||[];
+  var la=-1;for(var k=H.length-1;k>=0;k--){if(H[k].role==='assistant'){la=k;break;}}
+  if(la<0){box.innerHTML='<div class="mksec first">'+mkSuggHtml()+'</div>';return;}
+  var uqi=-1;for(var u=la-1;u>=0;u--){if(H[u].role==='user'){uqi=u;break;}}
+  var html='';
+  var earlier=[];
+  for(var p=0;p<(uqi<0?0:uqi);p++){if(H[p].role==='user'&&H[p].text)earlier.push(H[p].text);}
+  if(earlier.length){html+='<div class=mkprev>'+earlier.slice(-3).map(function(t){return '<div class=mkpq onclick="mkReask(this)" title="Ask again">'+mariaEsc(t)+'</div>';}).join('')+'</div>';}
+  html+='<div class=mkans>';
+  if(uqi>=0)html+='<div class=mkuq>'+(H[uqi].html||'')+'</div>';
+  var m=H[la];
+  html+='<div class=mkbig>'+(m.html||'')+'</div>';
+  if(m.sources&&m.sources.length)html+='<div class=mksrc><span class=mksrclab>Checked</span>'+mkSrcChips(m.sources)+'</div>';
+  if(m.logId){
+    html+=m.voted?'<div class=mkfb>Thanks — your feedback was saved '+(m.voted===1?'&#128077;':'&#128078;')+'</div>'
+      :'<div class=mkfb>Helpful?<button class=mkfbb onclick="mkVote('+m.logId+',1)">&#128077; Yes</button><button class=mkfbb onclick="mkVote('+m.logId+',0)">&#128078; No</button></div>';
+  }
+  html+='</div><div class=mksec>'+mkSuggHtml()+'</div>';
+  box.innerHTML=html;
+  box.scrollTop=0;
+}
+document.addEventListener('keydown',function(e){
+  if((e.metaKey||e.ctrlKey)&&(e.key==='k'||e.key==='K')){e.preventDefault();if(mkIsOpen())mkClose();else mkOpen();return;}
+  if(e.key==='Escape'&&mkIsOpen()){mkClose();return;}
+  if(e.key==='Enter'&&mkIsOpen()&&e.target&&e.target.id==='mkq'){mkSend();}
+});
 function renderSettings(){ return renderData(); }
 function renderData(){
   $('#view').innerHTML='<div class=bar><h2>Data</h2></div>'
