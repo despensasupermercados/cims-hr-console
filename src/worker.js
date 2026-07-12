@@ -227,6 +227,7 @@ export default {
         if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
         if (p === "/api/maria/feedback" && request.method === "POST") return apiMariaFeedback(request, env, session);
         if (p === "/api/maria/eval" && request.method === "POST") return apiMariaEval(request, env, session);
+        if (p === "/api/maria/knowledge" && request.method === "POST") return apiMariaKnowledge(request, env, session);
         return json({ error: "not found" }, 404);
       }
       // app shell (any non-api path) — gate on session
@@ -516,6 +517,21 @@ async function mariaExecTool(env, name, input) {
     if (input.to) u.searchParams.set("to", String(input.to));
     return await J(await apiDaysWorked(env, u));
   }
+  if (name === "search_knowledge") {
+    await ensureMariaKB(env);
+    const q = String((input && input.query) || "").trim();
+    if (!q) return { error: "query required" };
+    const lim = Math.min(Math.max(parseInt((input && input.limit) || 5, 10) || 5, 1), 10);
+    try {
+      const r = await env.DB.prepare(
+        "SELECT k.id, k.title, k.doc_date, k.source, k.tags, k.added_by, k.ts, snippet(maria_knowledge_fts, 1, '[', ']', ' … ', 12) AS hit " +
+        "FROM maria_knowledge_fts JOIN maria_knowledge k ON k.id = maria_knowledge_fts.rowid " +
+        "WHERE maria_knowledge_fts MATCH ? AND k.status = 'active' ORDER BY rank LIMIT ?"
+      ).bind(q, lim).all();
+      if (!r.results.length) return { query: q, matches: [], note: "No knowledge documents match. The knowledge base may simply not contain this yet." };
+      return { query: q, matches: r.results.map(m => ({ id: m.id, title: m.title, doc_date: m.doc_date, source: m.source, tags: m.tags, added: (m.ts || "").slice(0, 10), snippet: m.hit })) };
+    } catch (e) { return { error: "knowledge_search_failed: " + String((e && e.message) || e).slice(0, 160) }; }
+  }
   // ---- Hybrid reach (2026-07): whole-database read access, gated in maria.js ----
   if (name === "describe_schema") {
     if (input && input.table) {
@@ -583,6 +599,45 @@ async function apiMariaFeedback(request, env, session) {
 // POST /api/maria/eval — run the golden-question suite LIVE against prod data and
 // store the scorecard. Money users only: it spends real model tokens (~8 questions).
 // A pass-rate drop after a prompt/glossary/model change is a regression — treat as red.
+// maria_knowledge: curated document knowledge + FTS5 index. Schema is the contract shared
+// with the nightly Drive sweep — change BOTH together. Documents are context, never money.
+async function ensureMariaKB(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), title TEXT NOT NULL, body TEXT NOT NULL, doc_date TEXT, source TEXT DEFAULT 'console', tags TEXT, ship TEXT, added_by TEXT, status TEXT DEFAULT 'active')").run();
+  await env.DB.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS maria_knowledge_fts USING fts5(title, body, content='maria_knowledge', content_rowid='id')").run();
+  await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ai AFTER INSERT ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END").run();
+  await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ad AFTER DELETE ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(maria_knowledge_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); END").run();
+  await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_au AFTER UPDATE ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(maria_knowledge_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END").run();
+}
+
+// POST /api/maria/knowledge — add / list / retire knowledge documents. Money users only:
+// knowledge shapes what Maria tells all 7 users, so curation stays with Miguel + Rita.
+async function apiMariaKnowledge(request, env, session) {
+  if (!isMoneyUser(session && session.email)) return json({ error: "money_users_only" }, 403);
+  await ensureMariaKB(env);
+  const b = await request.json().catch(() => ({}));
+  const action = String(b.action || "add");
+  if (action === "list") {
+    const r = await env.DB.prepare("SELECT id, ts, title, doc_date, source, tags, status, length(body) AS bytes FROM maria_knowledge ORDER BY id DESC LIMIT 200").all();
+    return json({ docs: r.results });
+  }
+  if (action === "retire" || action === "restore") {
+    const id = parseInt(b.id, 10);
+    if (!id) return json({ error: "id required" }, 400);
+    const st = action === "retire" ? "retired" : "active";
+    const r = await env.DB.prepare("UPDATE maria_knowledge SET status=? WHERE id=?").bind(st, id).run();
+    await logActivity(env, session.email, "maria_kb_" + action, "doc " + id);
+    return json({ ok: true, changed: (r && r.meta && r.meta.changes) || 0 });
+  }
+  const title = String(b.title || "").slice(0, 200).trim();
+  const body = String(b.body || "").slice(0, 200000).trim();
+  if (!title || !body) return json({ error: "title and body required" }, 400);
+  if (body.length < 20) return json({ error: "body too short to be useful" }, 400);
+  const ins = await env.DB.prepare("INSERT INTO maria_knowledge (title, body, doc_date, source, tags, ship, added_by) VALUES (?,?,?,?,?,?,?)")
+    .bind(title, body, String(b.doc_date || "").slice(0, 10) || null, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
+  await logActivity(env, session.email, "maria_kb_add", title.slice(0, 100));
+  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null });
+}
+
 async function apiMariaEval(request, env, session) {
   if (!isMoneyUser(session && session.email)) return json({ error: "money_users_only" }, 403);
   if (!env.ANTHROPIC_API_KEY) return json({ error: "no AI key set" }, 503);
@@ -2386,6 +2441,7 @@ function renderData(){
    +'<div style="min-width:170px"><div class=zlabel>Menu</div>'
      +'<button class="btn ghost setmenu" data-set="overview" style="display:block;width:100%;text-align:left;margin-bottom:6px">Overview</button>'
      +'<button class="btn ghost setmenu" data-set="uploads" style="display:block;width:100%;text-align:left;margin-bottom:6px">Upload data</button>'
+     +'<button class="btn ghost setmenu" data-set="knowledge" style="display:block;width:100%;text-align:left;margin-bottom:6px">Maria knowledge</button>'
      +'<button class="btn ghost setmenu" data-set="session" style="display:block;width:100%;text-align:left;margin-bottom:6px">Session</button>'
      +'<button class="btn ghost setmenu" data-set="about" style="display:block;width:100%;text-align:left">About</button>'
    +'</div><div id=setbody style="flex:1;min-width:320px"></div></div>';
@@ -2393,7 +2449,57 @@ function renderData(){
   document.querySelector('.setmenu').classList.add('on');
   setShow('overview');
 }
-function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='session')return setSession(); return setAbout(); }
+function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='knowledge')return setKnowledge(); if(s==='session')return setSession(); return setAbout(); }
+function setKnowledge(){
+  $('#setbody').innerHTML='<div class=zlabel>Maria knowledge</div>'
+   +'<div class="card" style="max-width:none;border-left:3px solid var(--green)">'
+   +'<p class=csub style="margin:0 0 10px">Documents Maria can search when answering questions — manuals, SOPs, notes, reference reports. Text is context only: the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</p>'
+   +'<label class=csub>Title</label><br><input id=kbtitle type=text maxlength=200 style="width:100%;margin:4px 0 10px" placeholder="e.g. Konica C3350i dry-dock checklist"><br>'
+   +'<label class=csub>Document date (optional)</label><br><input id=kbdate type=date style="margin:4px 0 10px"><br>'
+   +'<label class=csub>Text</label><br><textarea id=kbbody rows=8 style="width:100%;margin:4px 0 10px" placeholder="Paste the document text here, or choose a .txt/.csv/.md file below"></textarea>'
+   +'<div id=kbdrop style="border:2px dashed var(--line-2);border-radius:12px;padding:14px;text-align:center;cursor:pointer;margin-bottom:10px"><span class=csub>Drag &amp; drop a .txt / .csv / .md file here, or click to choose</span></div>'
+   +'<input type=file id=kbfile accept=".txt,.csv,.md,.text" style="display:none">'
+   +'<button class=btn id=kbsave>Add to knowledge</button> <span id=kbmsg class=csub></span>'
+   +'</div>'
+   +'<div class=zlabel style="margin-top:18px">Documents</div><div id=kblist class=csub>Loading…</div>';
+  var dz=$('#kbdrop'), fi=$('#kbfile');
+  function readKbFile(f){ if(!f)return; if(f.size>500000){$('#kbmsg').textContent='File too large (max 500 KB of text).';return;} var rd=new FileReader(); rd.onload=function(){ $('#kbbody').value=String(rd.result||''); if(!$('#kbtitle').value){var nm=f.name;var di=nm.lastIndexOf('.');if(di>0)nm=nm.slice(0,di);$('#kbtitle').value=nm;} }; rd.readAsText(f); }
+  dz.onclick=function(){fi.click();};
+  dz.ondragover=function(e){e.preventDefault();};
+  dz.ondrop=function(e){e.preventDefault(); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
+  fi.onchange=function(){readKbFile(fi.files&&fi.files[0]);};
+  $('#kbsave').onclick=async function(){
+    var t=$('#kbtitle').value.trim(), bd=$('#kbbody').value.trim();
+    if(!t||bd.length<20){$('#kbmsg').textContent='Need a title and at least a paragraph of text.';return;}
+    $('#kbmsg').textContent='Saving…';
+    try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t,body:bd,doc_date:$('#kbdate').value||null,source:'console'})});
+      var j=await r.json();
+      if(j&&j.ok){$('#kbmsg').textContent='Saved — Maria can use it now.';$('#kbtitle').value='';$('#kbbody').value='';kbList();}
+      else{$('#kbmsg').textContent=(j&&j.error)||'Could not save.';}
+    }catch(e){$('#kbmsg').textContent='Network error.';}
+  };
+  kbList();
+}
+async function kbList(){
+  var el=$('#kblist'); if(!el)return;
+  try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'list'})});
+    var j=await r.json();
+    if(!j||!j.docs){el.textContent=(j&&j.error)||'Not available.';return;}
+    if(!j.docs.length){el.textContent='No documents yet.';return;}
+    el.innerHTML=j.docs.map(function(d){
+      var dim=d.status!=='active';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--line);'+(dim?'opacity:.45':'')+'">'
+        +'<b>'+mariaEsc(d.title)+'</b>'
+        +' <span style="opacity:.6">· '+(d.doc_date||String(d.ts||'').slice(0,10))+' · '+mariaEsc(d.source||'')+' · '+Math.round((d.bytes||0)/1024*10)/10+' KB</span>'
+        +' <button class="btn ghost" style="font-size:11px;padding:1px 8px;margin-left:8px" onclick="kbFlip('+d.id+','+(dim?0:1)+')">'+(dim?'Restore':'Retire')+'</button>'
+        +'</div>';
+    }).join('');
+  }catch(e){el.textContent='Could not load list.';}
+}
+async function kbFlip(id,retire){
+  try{ await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:(retire===1?'retire':'restore'),id:id})}); }catch(e){}
+  kbList();
+}
 function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
