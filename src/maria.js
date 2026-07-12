@@ -215,6 +215,32 @@ export function rankCrewMatches(rows, query, limit = 6){
  * - today : 'YYYY-MM-DD' for the system prompt
  * - fetchImpl: injectable for tests
  */
+// One-shot document titler for the knowledge base: given raw text, return a short human
+// title. No tools, tiny token budget. Returns null on ANY failure (geo-block, credit, parse)
+// so the caller can fall back to a first-line heuristic — naming must NEVER block a save.
+export async function mariaQuickTitle({ apiKey, text, fetchImpl }) {
+  if (!apiKey || !text || !String(text).trim()) return null;
+  const doFetch = fetchImpl || fetch;
+  const snippet = String(text).slice(0, 3000);
+  try {
+    const r = await doFetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: MARIA_MODEL,
+        max_tokens: 30,
+        system: "You name documents for a maritime cruise-print operations knowledge base. Given the document text, reply with ONLY a concise, specific title of 3 to 8 words. No quotes, no file extension, no trailing punctuation, no preamble.",
+        messages: [{ role: "user", content: snippet }],
+      }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const t = ((j && j.content) || []).filter(b => b && b.type === "text").map(b => b.text).join(" ").trim();
+    if (!t) return null;
+    return t.replace(/^["'\s]+/, "").replace(/["'\s.]+$/, "").slice(0, 200) || null;
+  } catch (e) { return null; }
+}
+
 export async function runMaria({ apiKey, question, history = [], execTool, today, maxSteps = MARIA_MAX_STEPS, fetchImpl }) {
   const doFetch = fetchImpl || fetch;
   const messages = [];

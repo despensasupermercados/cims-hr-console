@@ -24,7 +24,7 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
+import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
@@ -628,14 +628,30 @@ async function apiMariaKnowledge(request, env, session) {
     await logActivity(env, session.email, "maria_kb_" + action, "doc " + id);
     return json({ ok: true, changed: (r && r.meta && r.meta.changes) || 0 });
   }
-  const title = String(b.title || "").slice(0, 200).trim();
+  let title = String(b.title || "").slice(0, 200).trim();
   const body = String(b.body || "").slice(0, 200000).trim();
-  if (!title || !body) return json({ error: "title and body required" }, 400);
-  if (body.length < 20) return json({ error: "body too short to be useful" }, 400);
+  if (!body) return json({ error: "Please paste some text or drop a file first." }, 400);
+  if (body.length < 20) return json({ error: "That's too short to be useful — add a bit more text." }, 400);
+  // Title is optional: if the user didn't name it, Maria names it from the content. If the
+  // AI naming call is unavailable (e.g. geo-blocked from where the Worker ran), fall back to
+  // the document's first line so a save is never blocked by the model being unreachable.
+  let named = false;
+  if (!title) {
+    title = (await mariaQuickTitle({ apiKey: env.ANTHROPIC_API_KEY, text: body })) || firstLineTitle(body);
+    named = true;
+  }
+  // Date is auto-stamped to today unless the user supplied the document's own date.
+  const docDate = String(b.doc_date || "").slice(0, 10) || TODAY();
   const ins = await env.DB.prepare("INSERT INTO maria_knowledge (title, body, doc_date, source, tags, ship, added_by) VALUES (?,?,?,?,?,?,?)")
-    .bind(title, body, String(b.doc_date || "").slice(0, 10) || null, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
+    .bind(title, body, docDate, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
   await logActivity(env, session.email, "maria_kb_add", title.slice(0, 100));
-  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null });
+  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null, title, doc_date: docDate, named });
+}
+// Fallback titler when the AI naming call is unavailable: first non-empty line, cleaned of
+// leading markdown heading marks and clipped to a sensible length.
+function firstLineTitle(body) {
+  const line = String(body || "").split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) || "Untitled note";
+  return line.replace(/^#+\s*/, "").slice(0, 80);
 }
 
 async function apiMariaEval(request, env, session) {
@@ -2236,6 +2252,18 @@ details.ddwrap>summary{padding:6px 0}
 .mkhint{margin-left:auto;font-size:11px;color:var(--mut)}
 .mkfoot{padding:8px 18px;border-top:1px solid var(--line);display:flex;gap:14px;font-size:11px;color:var(--mut);background:#FAFBFD;flex-wrap:wrap}
 @media(max-width:700px){#mkovl{padding:0;align-items:flex-end}.mkbar{border-radius:18px 18px 0 0;max-height:92vh}.mkbtn .mkk{display:none}}
+/* ---- Maria knowledge: drop-first add panel ---- */
+.kbdrop{border:2px dashed var(--line-2);border-radius:14px;padding:26px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;background:#FBFCFE}
+.kbdrop:hover,.kbdrop.drag{border-color:var(--green);background:#F2F9EF}
+.kbdrop .kbdi{font-size:22px;line-height:1;margin-bottom:6px;opacity:.7}
+.kbdrop b{color:var(--navy);font-weight:700}
+.kbfile{margin-top:8px;font-size:12px;color:var(--green-d);font-weight:600;min-height:16px}
+.kbopt{margin:12px 0 4px;border-top:1px dashed var(--line);padding-top:10px}
+.kbopt>summary{cursor:pointer;color:var(--mut);font-size:12.5px;font-weight:600;list-style:none}
+.kbopt>summary::-webkit-details-marker{display:none}
+.kbopt>summary:before{content:"▸ ";color:var(--mut)}
+.kbopt[open]>summary:before{content:"▾ "}
+.kbnamed{color:var(--green-d);font-weight:600}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -2549,28 +2577,34 @@ function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')r
 function setKnowledge(){
   $('#setbody').innerHTML='<div class=zlabel>Maria knowledge</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--green)">'
-   +'<p class=csub style="margin:0 0 10px">Documents Maria can search when answering questions — manuals, SOPs, notes, reference reports. Text is context only: the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</p>'
-   +'<label class=csub>Title</label><br><input id=kbtitle type=text maxlength=200 style="width:100%;margin:4px 0 10px" placeholder="e.g. Konica C3350i dry-dock checklist"><br>'
-   +'<label class=csub>Document date (optional)</label><br><input id=kbdate type=date style="margin:4px 0 10px"><br>'
-   +'<label class=csub>Text</label><br><textarea id=kbbody rows=8 style="width:100%;margin:4px 0 10px" placeholder="Paste the document text here, or choose a .txt/.csv/.md file below"></textarea>'
-   +'<div id=kbdrop style="border:2px dashed var(--line-2);border-radius:12px;padding:14px;text-align:center;cursor:pointer;margin-bottom:10px"><span class=csub>Drag &amp; drop a .txt / .csv / .md file here, or click to choose</span></div>'
+   +'<p class=csub style="margin:0 0 12px">Drop a document and Maria reads it, <b>names it</b>, and <b>dates it</b> for you — manuals, SOPs, notes, reference reports. Text is context only: the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</p>'
+   +'<div id=kbdrop class=kbdrop><div class=kbdi>&#128196;</div><b>Drag &amp; drop a file</b> — or click to choose<div class=csub style="margin-top:2px">.txt · .csv · .md</div></div>'
    +'<input type=file id=kbfile accept=".txt,.csv,.md,.text" style="display:none">'
-   +'<button class=btn id=kbsave>Add to knowledge</button> <span id=kbmsg class=csub></span>'
+   +'<div id=kbfile_lbl class=kbfile></div>'
+   +'<textarea id=kbbody rows=7 style="width:100%;margin:8px 0 4px" placeholder="…or paste the document text here"></textarea>'
+   +'<details class=kbopt><summary>Name &amp; date (optional — Maria fills these in)</summary>'
+     +'<div style="padding:8px 0 2px">'
+     +'<label class=csub>Title</label><br><input id=kbtitle type=text maxlength=200 style="width:100%;margin:4px 0 10px" placeholder="Leave blank and Maria names it from the content"><br>'
+     +'<label class=csub>Document date</label><br><input id=kbdate type=date style="margin:4px 0 2px"> <span class=csub>defaults to today</span>'
+     +'</div></details>'
+   +'<div style="margin-top:10px"><button class=btn id=kbsave>Add to knowledge</button> <span id=kbmsg class=csub></span></div>'
    +'</div>'
    +'<div class=zlabel style="margin-top:18px">Documents</div><div id=kblist class=csub>Loading…</div>';
   var dz=$('#kbdrop'), fi=$('#kbfile');
-  function readKbFile(f){ if(!f)return; if(f.size>500000){$('#kbmsg').textContent='File too large (max 500 KB of text).';return;} var rd=new FileReader(); rd.onload=function(){ $('#kbbody').value=String(rd.result||''); if(!$('#kbtitle').value){var nm=f.name;var di=nm.lastIndexOf('.');if(di>0)nm=nm.slice(0,di);$('#kbtitle').value=nm;} }; rd.readAsText(f); }
+  try{ $('#kbdate').value=new Date().toISOString().slice(0,10); }catch(e){}
+  function readKbFile(f){ if(!f)return; if(f.size>500000){$('#kbmsg').textContent='File too large (max 500 KB of text).';return;} var rd=new FileReader(); rd.onload=function(){ $('#kbbody').value=String(rd.result||''); var kb=Math.round((f.size||0)/1024*10)/10; $('#kbfile_lbl').textContent='Loaded '+f.name+' · '+kb+' KB — Maria will name it on save.'; }; rd.readAsText(f); }
   dz.onclick=function(){fi.click();};
-  dz.ondragover=function(e){e.preventDefault();};
-  dz.ondrop=function(e){e.preventDefault(); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
+  dz.ondragover=function(e){e.preventDefault();dz.classList.add('drag');};
+  dz.ondragleave=function(){dz.classList.remove('drag');};
+  dz.ondrop=function(e){e.preventDefault();dz.classList.remove('drag'); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
   fi.onchange=function(){readKbFile(fi.files&&fi.files[0]);};
   $('#kbsave').onclick=async function(){
     var t=$('#kbtitle').value.trim(), bd=$('#kbbody').value.trim();
-    if(!t||bd.length<20){$('#kbmsg').textContent='Need a title and at least a paragraph of text.';return;}
-    $('#kbmsg').textContent='Saving…';
-    try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t,body:bd,doc_date:$('#kbdate').value||null,source:'console'})});
+    if(bd.length<20){$('#kbmsg').textContent='Add at least a paragraph of text, or drop a file.';return;}
+    $('#kbmsg').textContent=t?'Saving…':'Maria is reading and naming it…';
+    try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t||null,body:bd,doc_date:$('#kbdate').value||null,source:'console'})});
       var j=await r.json();
-      if(j&&j.ok){$('#kbmsg').textContent='Saved — Maria can use it now.';$('#kbtitle').value='';$('#kbbody').value='';kbList();}
+      if(j&&j.ok){var nm=mariaEsc(j.title||'');var saved=j.named?'Saved as <span class=kbnamed>'+nm+'</span> · '+(j.doc_date||''):'Saved — Maria can use it now.';$('#kbmsg').innerHTML=saved;$('#kbtitle').value='';$('#kbbody').value='';$('#kbfile_lbl').textContent='';kbList();}
       else{$('#kbmsg').textContent=(j&&j.error)||'Could not save.';}
     }catch(e){$('#kbmsg').textContent='Network error.';}
   };
