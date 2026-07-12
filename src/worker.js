@@ -2252,6 +2252,43 @@ details.ddwrap>summary{padding:6px 0}
 .mkhint{margin-left:auto;font-size:11px;color:var(--mut)}
 .mkfoot{padding:8px 18px;border-top:1px solid var(--line);display:flex;gap:14px;font-size:11px;color:var(--mut);background:#FAFBFD;flex-wrap:wrap}
 @media(max-width:700px){#mkovl{padding:0;align-items:flex-end}.mkbar{border-radius:18px 18px 0 0;max-height:92vh}.mkbtn .mkk{display:none}}
+/* ---- Maria knowledge: "Focus Drop" ---- */
+.kbwrap{max-width:600px}
+.kbhead{font-family:'Outfit';font-weight:700;font-size:22px;letter-spacing:-.02em;color:var(--navy)}
+.kbsub{color:var(--mut);font-size:13.5px;margin:6px 0 22px;line-height:1.5}
+.kbhero{position:relative;background:#fff;border:1px solid var(--line-2);border-radius:22px;padding:42px 24px;text-align:center;cursor:pointer;transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s,border-color .18s;box-shadow:0 1px 2px rgba(20,41,61,.04)}
+.kbhero:hover{transform:translateY(-2px);box-shadow:0 14px 40px rgba(20,41,61,.09);border-color:#CFE7C4}
+.kbhero.drag{transform:translateY(-2px);border-color:var(--green);box-shadow:0 0 0 4px rgba(95,185,70,.14),0 14px 40px rgba(20,41,61,.10)}
+.kbglyph{width:54px;height:54px;margin:0 auto 15px;border-radius:17px;background:linear-gradient(160deg,#EAF6E4,#F3FAF0);display:flex;align-items:center;justify-content:center;font-size:23px;color:var(--green-d);box-shadow:inset 0 0 0 1px #DDEED4}
+.kbhero h3{font-family:'Outfit';font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-.01em}
+.kbhero .kbp{color:var(--mut);font-size:13px;margin-top:5px}
+.kbhero .kbor{margin-top:15px;font-size:12.5px;color:var(--mut)}
+.kbhero .kbor b{color:var(--green-d);font-weight:600}
+.kbpaste{margin-top:12px}
+.kbpaste textarea{width:100%;border:1px solid var(--line-2);border-radius:14px;padding:13px 15px;font:inherit;font-size:14px;resize:vertical;min-height:96px}
+.kbpaste textarea:focus{outline:none;border-color:var(--green)}
+.kbpaste .prow{display:flex;gap:8px;align-items:center;margin-top:8px}
+.kbjust{margin-top:14px;background:#fff;border:1px solid var(--line-2);border-radius:18px;padding:15px 17px;display:flex;align-items:center;gap:13px;box-shadow:0 10px 30px rgba(20,41,61,.07);animation:kbrise .4s cubic-bezier(.2,.8,.2,1)}
+@keyframes kbrise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.kbtick{width:33px;height:33px;border-radius:11px;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex:none}
+.kbtick.wait{background:#EAF1FA;color:var(--royal);animation:kbpulse 1.3s ease-in-out infinite}
+@keyframes kbpulse{0%,100%{opacity:1}50%{opacity:.5}}
+.kbjust .jb{flex:1;min-width:0}
+.kbjust .jn{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.kbspark{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--green-d);background:#EAF6E4;border-radius:20px;padding:2px 8px}
+.kbjust .jm{color:var(--mut);font-size:12.5px;margin-top:3px}
+.kblbl{font-family:'Outfit';font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin:28px 2px 10px}
+.kbrow{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 15px;display:flex;align-items:center;gap:12px;margin-bottom:8px;transition:border-color .15s}
+.kbrow:hover{border-color:var(--line-2)}
+.kbrow .kd{width:8px;height:8px;border-radius:50%;background:var(--green);flex:none}
+.kbrow.off .kd{background:#CFD6E0}
+.kbrow .kt{flex:1;min-width:0}
+.kbrow .kt .kh{font-family:'Outfit';font-weight:600;font-size:14.5px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbrow.off .kt .kh{color:#9AA6B4}
+.kbrow .kt .km{color:var(--mut);font-size:12px;margin-top:2px}
+.kbrow .ka{font-size:12px;color:var(--mut);cursor:pointer;flex:none;opacity:.7}
+.kbrow .ka:hover{opacity:1;color:var(--navy)}
+.kbfoot{margin-top:22px;color:var(--mut);font-size:11.5px;text-align:center}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
