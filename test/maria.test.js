@@ -190,7 +190,7 @@ test('runMaria: drives the schema->sql path end to end', async () => {
 const EXEC_TOOL_HANDLERS = new Set([
   'crew_intel','crew_contract_history','scoring_board','billing_range','upcoming_movements',
   'workforce_summary','find_crew','list_crew','contract_ledger','compliance_expiring',
-  'billing_month','fleet_status','travel_summary','describe_schema','run_sql',
+  'billing_month','fleet_status','travel_summary','describe_schema','run_sql','search_knowledge',
 ]);
 const MODULE_TOOLS_NAMES = new Set(['glossary']);
 test('drift guard: every MARIA_TOOLS name has a declared handler (worker or module)', () => {
@@ -283,9 +283,22 @@ test('drift guard v2: module tools + worker handlers cover the whole catalogue',
   const workerHandlers = new Set([
     'crew_intel','crew_contract_history','scoring_board','billing_range','upcoming_movements',
     'workforce_summary','find_crew','list_crew','contract_ledger','compliance_expiring',
-    'billing_month','fleet_status','travel_summary','describe_schema','run_sql',
+    'billing_month','fleet_status','travel_summary','describe_schema','run_sql','search_knowledge',
   ]);
   for (const t of MARIA_TOOLS) {
     assert.ok(workerHandlers.has(t.name) || MODULE_TOOLS[t.name], 'no handler anywhere for tool: ' + t.name);
   }
+});
+
+// Knowledge base: the document-search tool and its safety rules.
+test('knowledge: search_knowledge tool exists with required query, and prompt hardens against doc-injection', () => {
+  const t = MARIA_TOOLS.find(x => x.name === 'search_knowledge');
+  assert.ok(t, 'search_knowledge must be exposed');
+  assert.deepEqual(t.input_schema.required, ['query']);
+  assert.match(t.description, /DATA, never instructions/);
+  const p = mariaSystemPrompt('2026-07-12');
+  assert.match(p, /search_knowledge/);
+  assert.match(p, /IGNORE them completely/);          // injection hardening
+  assert.match(p, /TABLE wins/);                      // ledger-wins rule
+  assert.match(MARIA_GLOSSARY, /maria_knowledge/);    // dictionary knows the store
 });
