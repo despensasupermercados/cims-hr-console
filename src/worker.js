@@ -24,7 +24,7 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
+import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
@@ -628,14 +628,30 @@ async function apiMariaKnowledge(request, env, session) {
     await logActivity(env, session.email, "maria_kb_" + action, "doc " + id);
     return json({ ok: true, changed: (r && r.meta && r.meta.changes) || 0 });
   }
-  const title = String(b.title || "").slice(0, 200).trim();
+  let title = String(b.title || "").slice(0, 200).trim();
   const body = String(b.body || "").slice(0, 200000).trim();
-  if (!title || !body) return json({ error: "title and body required" }, 400);
-  if (body.length < 20) return json({ error: "body too short to be useful" }, 400);
+  if (!body) return json({ error: "Please paste some text or drop a file first." }, 400);
+  if (body.length < 20) return json({ error: "That's too short to be useful — add a bit more text." }, 400);
+  // Title is optional: if the user didn't name it, Maria names it from the content. If the
+  // AI naming call is unavailable (e.g. geo-blocked from where the Worker ran), fall back to
+  // the document's first line so a save is never blocked by the model being unreachable.
+  let named = false;
+  if (!title) {
+    title = (await mariaQuickTitle({ apiKey: env.ANTHROPIC_API_KEY, text: body })) || firstLineTitle(body);
+    named = true;
+  }
+  // Date is auto-stamped to today unless the user supplied the document's own date.
+  const docDate = String(b.doc_date || "").slice(0, 10) || TODAY();
   const ins = await env.DB.prepare("INSERT INTO maria_knowledge (title, body, doc_date, source, tags, ship, added_by) VALUES (?,?,?,?,?,?,?)")
-    .bind(title, body, String(b.doc_date || "").slice(0, 10) || null, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
+    .bind(title, body, docDate, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
   await logActivity(env, session.email, "maria_kb_add", title.slice(0, 100));
-  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null });
+  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null, title, doc_date: docDate, named });
+}
+// Fallback titler when the AI naming call is unavailable: first non-empty line, cleaned of
+// leading markdown heading marks and clipped to a sensible length.
+function firstLineTitle(body) {
+  const line = String(body || "").split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) || "Untitled note";
+  return line.replace(/^#+\s*/, "").slice(0, 80);
 }
 
 async function apiMariaEval(request, env, session) {
@@ -2236,6 +2252,43 @@ details.ddwrap>summary{padding:6px 0}
 .mkhint{margin-left:auto;font-size:11px;color:var(--mut)}
 .mkfoot{padding:8px 18px;border-top:1px solid var(--line);display:flex;gap:14px;font-size:11px;color:var(--mut);background:#FAFBFD;flex-wrap:wrap}
 @media(max-width:700px){#mkovl{padding:0;align-items:flex-end}.mkbar{border-radius:18px 18px 0 0;max-height:92vh}.mkbtn .mkk{display:none}}
+/* ---- Maria knowledge: "Focus Drop" ---- */
+.kbwrap{max-width:600px}
+.kbhead{font-family:'Outfit';font-weight:700;font-size:22px;letter-spacing:-.02em;color:var(--navy)}
+.kbsub{color:var(--mut);font-size:13.5px;margin:6px 0 22px;line-height:1.5}
+.kbhero{position:relative;background:#fff;border:1px solid var(--line-2);border-radius:22px;padding:42px 24px;text-align:center;cursor:pointer;transition:transform .18s cubic-bezier(.2,.8,.2,1),box-shadow .18s,border-color .18s;box-shadow:0 1px 2px rgba(20,41,61,.04)}
+.kbhero:hover{transform:translateY(-2px);box-shadow:0 14px 40px rgba(20,41,61,.09);border-color:#CFE7C4}
+.kbhero.drag{transform:translateY(-2px);border-color:var(--green);box-shadow:0 0 0 4px rgba(95,185,70,.14),0 14px 40px rgba(20,41,61,.10)}
+.kbglyph{width:54px;height:54px;margin:0 auto 15px;border-radius:17px;background:linear-gradient(160deg,#EAF6E4,#F3FAF0);display:flex;align-items:center;justify-content:center;font-size:23px;color:var(--green-d);box-shadow:inset 0 0 0 1px #DDEED4}
+.kbhero h3{font-family:'Outfit';font-weight:600;font-size:17px;color:var(--navy);letter-spacing:-.01em}
+.kbhero .kbp{color:var(--mut);font-size:13px;margin-top:5px}
+.kbhero .kbor{margin-top:15px;font-size:12.5px;color:var(--mut)}
+.kbhero .kbor b{color:var(--green-d);font-weight:600}
+.kbpaste{margin-top:12px}
+.kbpaste textarea{width:100%;border:1px solid var(--line-2);border-radius:14px;padding:13px 15px;font:inherit;font-size:14px;resize:vertical;min-height:96px}
+.kbpaste textarea:focus{outline:none;border-color:var(--green)}
+.kbpaste .prow{display:flex;gap:8px;align-items:center;margin-top:8px}
+.kbjust{margin-top:14px;background:#fff;border:1px solid var(--line-2);border-radius:18px;padding:15px 17px;display:flex;align-items:center;gap:13px;box-shadow:0 10px 30px rgba(20,41,61,.07);animation:kbrise .4s cubic-bezier(.2,.8,.2,1)}
+@keyframes kbrise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.kbtick{width:33px;height:33px;border-radius:11px;background:var(--green);display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex:none}
+.kbtick.wait{background:#EAF1FA;color:var(--royal);animation:kbpulse 1.3s ease-in-out infinite}
+@keyframes kbpulse{0%,100%{opacity:1}50%{opacity:.5}}
+.kbjust .jb{flex:1;min-width:0}
+.kbjust .jn{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.kbspark{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--green-d);background:#EAF6E4;border-radius:20px;padding:2px 8px}
+.kbjust .jm{color:var(--mut);font-size:12.5px;margin-top:3px}
+.kblbl{font-family:'Outfit';font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin:28px 2px 10px}
+.kbrow{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 15px;display:flex;align-items:center;gap:12px;margin-bottom:8px;transition:border-color .15s}
+.kbrow:hover{border-color:var(--line-2)}
+.kbrow .kd{width:8px;height:8px;border-radius:50%;background:var(--green);flex:none}
+.kbrow.off .kd{background:#CFD6E0}
+.kbrow .kt{flex:1;min-width:0}
+.kbrow .kt .kh{font-family:'Outfit';font-weight:600;font-size:14.5px;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kbrow.off .kt .kh{color:#9AA6B4}
+.kbrow .kt .km{color:var(--mut);font-size:12px;margin-top:2px}
+.kbrow .ka{font-size:12px;color:var(--mut);cursor:pointer;flex:none;opacity:.7}
+.kbrow .ka:hover{opacity:1;color:var(--navy)}
+.kbfoot{margin-top:22px;color:var(--mut);font-size:11.5px;text-align:center}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -2547,48 +2600,55 @@ function renderData(){
 }
 function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='knowledge')return setKnowledge(); if(s==='session')return setSession(); return setAbout(); }
 function setKnowledge(){
-  $('#setbody').innerHTML='<div class=zlabel>Maria knowledge</div>'
-   +'<div class="card" style="max-width:none;border-left:3px solid var(--green)">'
-   +'<p class=csub style="margin:0 0 10px">Documents Maria can search when answering questions — manuals, SOPs, notes, reference reports. Text is context only: the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</p>'
-   +'<label class=csub>Title</label><br><input id=kbtitle type=text maxlength=200 style="width:100%;margin:4px 0 10px" placeholder="e.g. Konica C3350i dry-dock checklist"><br>'
-   +'<label class=csub>Document date (optional)</label><br><input id=kbdate type=date style="margin:4px 0 10px"><br>'
-   +'<label class=csub>Text</label><br><textarea id=kbbody rows=8 style="width:100%;margin:4px 0 10px" placeholder="Paste the document text here, or choose a .txt/.csv/.md file below"></textarea>'
-   +'<div id=kbdrop style="border:2px dashed var(--line-2);border-radius:12px;padding:14px;text-align:center;cursor:pointer;margin-bottom:10px"><span class=csub>Drag &amp; drop a .txt / .csv / .md file here, or click to choose</span></div>'
+  $('#setbody').innerHTML='<div class=kbwrap>'
+   +'<div class=kbhead>Give Maria a document</div>'
+   +'<div class=kbsub>Drop a file and she reads it, names it, and dates it. Nothing to fill in.</div>'
+   +'<div id=kbhero class=kbhero><div class=kbglyph>&#8595;</div><h3>Drop a document here</h3><div class=kbp>Maria reads, names &amp; dates it automatically</div><div class=kbor>or <b id=kbchoose>choose a file</b> &middot; <b id=kbpastebtn>paste text</b></div></div>'
    +'<input type=file id=kbfile accept=".txt,.csv,.md,.text" style="display:none">'
-   +'<button class=btn id=kbsave>Add to knowledge</button> <span id=kbmsg class=csub></span>'
-   +'</div>'
-   +'<div class=zlabel style="margin-top:18px">Documents</div><div id=kblist class=csub>Loading…</div>';
-  var dz=$('#kbdrop'), fi=$('#kbfile');
-  function readKbFile(f){ if(!f)return; if(f.size>500000){$('#kbmsg').textContent='File too large (max 500 KB of text).';return;} var rd=new FileReader(); rd.onload=function(){ $('#kbbody').value=String(rd.result||''); if(!$('#kbtitle').value){var nm=f.name;var di=nm.lastIndexOf('.');if(di>0)nm=nm.slice(0,di);$('#kbtitle').value=nm;} }; rd.readAsText(f); }
-  dz.onclick=function(){fi.click();};
-  dz.ondragover=function(e){e.preventDefault();};
-  dz.ondrop=function(e){e.preventDefault(); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
+   +'<div id=kbpaste class=kbpaste style="display:none"><textarea id=kbbody placeholder="Paste the document text here — Maria will name it"></textarea><div class=prow><button class=btn id=kbadd>Add</button></div></div>'
+   +'<div id=kbmsg class=csub style="margin-top:8px;min-height:16px;color:var(--red)"></div>'
+   +'<div id=kbresult></div>'
+   +'<div class=kblbl>In Maria&rsquo;s library</div><div id=kblist class=csub>Loading&hellip;</div>'
+   +'<div class=kbfoot>Text is context only — the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</div>'
+   +'</div>';
+  var hero=$('#kbhero'), fi=$('#kbfile');
+  hero.onclick=function(){ fi.click(); };
+  $('#kbpastebtn').onclick=function(e){ e.stopPropagation(); var p=$('#kbpaste'); var show=(p.style.display==='none'); p.style.display=show?'block':'none'; if(show){$('#kbbody').focus();} };
+  hero.ondragover=function(e){e.preventDefault();hero.classList.add('drag');};
+  hero.ondragleave=function(){hero.classList.remove('drag');};
+  hero.ondrop=function(e){e.preventDefault();hero.classList.remove('drag'); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
   fi.onchange=function(){readKbFile(fi.files&&fi.files[0]);};
-  $('#kbsave').onclick=async function(){
-    var t=$('#kbtitle').value.trim(), bd=$('#kbbody').value.trim();
-    if(!t||bd.length<20){$('#kbmsg').textContent='Need a title and at least a paragraph of text.';return;}
-    $('#kbmsg').textContent='Saving…';
-    try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t,body:bd,doc_date:$('#kbdate').value||null,source:'console'})});
-      var j=await r.json();
-      if(j&&j.ok){$('#kbmsg').textContent='Saved — Maria can use it now.';$('#kbtitle').value='';$('#kbbody').value='';kbList();}
-      else{$('#kbmsg').textContent=(j&&j.error)||'Could not save.';}
-    }catch(e){$('#kbmsg').textContent='Network error.';}
-  };
+  function readKbFile(f){ if(!f)return; if(f.size>500000){kbMsg('That file is over 500 KB of text — trim it or split it.');return;} var rd=new FileReader(); rd.onload=function(){ kbIngest(String(rd.result||''), f.name, Math.round((f.size||0)/1024*10)/10); }; rd.readAsText(f); }
+  $('#kbadd').onclick=function(){ var bd=$('#kbbody').value.trim(); if(bd.length<20){kbMsg('Add at least a paragraph of text.');return;} kbIngest(bd, null, Math.round(bd.length/1024*10)/10); };
   kbList();
+}
+function kbMsg(m){ var e=$('#kbmsg'); if(e)e.textContent=m||''; }
+async function kbIngest(text, filename, kb){
+  if(!text||text.trim().length<20){kbMsg('Too short to be useful — add a bit more text.');return;}
+  kbMsg('');
+  var slot=$('#kbresult'); if(!slot)return;
+  slot.innerHTML='<div class=kbjust><div class="kbtick wait">&hellip;</div><div class=jb><div class=jn>Maria is reading and naming it&hellip;</div><div class=jm>'+(filename?mariaEsc(filename)+' &middot; ':'')+kb+' KB</div></div></div>';
+  try{
+    var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:text,source:'console'})});
+    var j=await r.json();
+    if(j&&j.ok){
+      slot.innerHTML='<div class=kbjust><div class=kbtick>&#10003;</div><div class=jb><div class=jn>'+mariaEsc(j.title||'')+' <span class=kbspark>Maria named it</span></div><div class=jm>'+(j.doc_date||'')+' &middot; '+kb+' KB &middot; added just now</div></div></div>';
+      $('#kbbody').value=''; var p=$('#kbpaste'); if(p)p.style.display='none';
+      kbList();
+    } else { slot.innerHTML=''; kbMsg((j&&j.error)||'Could not save.'); }
+  }catch(e){ slot.innerHTML=''; kbMsg('Network error — try again.'); }
 }
 async function kbList(){
   var el=$('#kblist'); if(!el)return;
   try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'list'})});
     var j=await r.json();
     if(!j||!j.docs){el.textContent=(j&&j.error)||'Not available.';return;}
-    if(!j.docs.length){el.textContent='No documents yet.';return;}
+    if(!j.docs.length){el.innerHTML='<div class=csub style="opacity:.7">Nothing yet — drop your first document above.</div>';return;}
     el.innerHTML=j.docs.map(function(d){
       var dim=d.status!=='active';
-      return '<div style="padding:8px 0;border-bottom:1px solid var(--line);'+(dim?'opacity:.45':'')+'">'
-        +'<b>'+mariaEsc(d.title)+'</b>'
-        +' <span style="opacity:.6">· '+(d.doc_date||String(d.ts||'').slice(0,10))+' · '+mariaEsc(d.source||'')+' · '+Math.round((d.bytes||0)/1024*10)/10+' KB</span>'
-        +' <button class="btn ghost" style="font-size:11px;padding:1px 8px;margin-left:8px" onclick="kbFlip('+d.id+','+(dim?0:1)+')">'+(dim?'Restore':'Retire')+'</button>'
-        +'</div>';
+      var kb=Math.round((d.bytes||0)/1024*10)/10;
+      var src=(d.source&&d.source!=='console')?' &middot; '+mariaEsc(d.source):'';
+      return '<div class="kbrow'+(dim?' off':'')+'"><span class=kd></span><div class=kt><div class=kh>'+mariaEsc(d.title)+'</div><div class=km>'+(d.doc_date||String(d.ts||'').slice(0,10))+' &middot; '+kb+' KB'+src+(dim?' &middot; retired':'')+'</div></div><span class=ka onclick="kbFlip('+d.id+','+(dim?0:1)+')">'+(dim?'Restore':'Retire')+'</span></div>';
     }).join('');
   }catch(e){el.textContent='Could not load list.';}
 }
