@@ -2600,48 +2600,55 @@ function renderData(){
 }
 function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='knowledge')return setKnowledge(); if(s==='session')return setSession(); return setAbout(); }
 function setKnowledge(){
-  $('#setbody').innerHTML='<div class=zlabel>Maria knowledge</div>'
-   +'<div class="card" style="max-width:none;border-left:3px solid var(--green)">'
-   +'<p class=csub style="margin:0 0 10px">Documents Maria can search when answering questions — manuals, SOPs, notes, reference reports. Text is context only: the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</p>'
-   +'<label class=csub>Title</label><br><input id=kbtitle type=text maxlength=200 style="width:100%;margin:4px 0 10px" placeholder="e.g. Konica C3350i dry-dock checklist"><br>'
-   +'<label class=csub>Document date (optional)</label><br><input id=kbdate type=date style="margin:4px 0 10px"><br>'
-   +'<label class=csub>Text</label><br><textarea id=kbbody rows=8 style="width:100%;margin:4px 0 10px" placeholder="Paste the document text here, or choose a .txt/.csv/.md file below"></textarea>'
-   +'<div id=kbdrop style="border:2px dashed var(--line-2);border-radius:12px;padding:14px;text-align:center;cursor:pointer;margin-bottom:10px"><span class=csub>Drag &amp; drop a .txt / .csv / .md file here, or click to choose</span></div>'
+  $('#setbody').innerHTML='<div class=kbwrap>'
+   +'<div class=kbhead>Give Maria a document</div>'
+   +'<div class=kbsub>Drop a file and she reads it, names it, and dates it. Nothing to fill in.</div>'
+   +'<div id=kbhero class=kbhero><div class=kbglyph>&#8595;</div><h3>Drop a document here</h3><div class=kbp>Maria reads, names &amp; dates it automatically</div><div class=kbor>or <b id=kbchoose>choose a file</b> &middot; <b id=kbpastebtn>paste text</b></div></div>'
    +'<input type=file id=kbfile accept=".txt,.csv,.md,.text" style="display:none">'
-   +'<button class=btn id=kbsave>Add to knowledge</button> <span id=kbmsg class=csub></span>'
-   +'</div>'
-   +'<div class=zlabel style="margin-top:18px">Documents</div><div id=kblist class=csub>Loading…</div>';
-  var dz=$('#kbdrop'), fi=$('#kbfile');
-  function readKbFile(f){ if(!f)return; if(f.size>500000){$('#kbmsg').textContent='File too large (max 500 KB of text).';return;} var rd=new FileReader(); rd.onload=function(){ $('#kbbody').value=String(rd.result||''); if(!$('#kbtitle').value){var nm=f.name;var di=nm.lastIndexOf('.');if(di>0)nm=nm.slice(0,di);$('#kbtitle').value=nm;} }; rd.readAsText(f); }
-  dz.onclick=function(){fi.click();};
-  dz.ondragover=function(e){e.preventDefault();};
-  dz.ondrop=function(e){e.preventDefault(); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
+   +'<div id=kbpaste class=kbpaste style="display:none"><textarea id=kbbody placeholder="Paste the document text here — Maria will name it"></textarea><div class=prow><button class=btn id=kbadd>Add</button></div></div>'
+   +'<div id=kbmsg class=csub style="margin-top:8px;min-height:16px;color:var(--red)"></div>'
+   +'<div id=kbresult></div>'
+   +'<div class=kblbl>In Maria&rsquo;s library</div><div id=kblist class=csub>Loading&hellip;</div>'
+   +'<div class=kbfoot>Text is context only — the database always wins on numbers. You can also drop files in Drive &rsaquo; 5. IT &rsaquo; Ask Maria (picked up nightly).</div>'
+   +'</div>';
+  var hero=$('#kbhero'), fi=$('#kbfile');
+  hero.onclick=function(){ fi.click(); };
+  $('#kbpastebtn').onclick=function(e){ e.stopPropagation(); var p=$('#kbpaste'); var show=(p.style.display==='none'); p.style.display=show?'block':'none'; if(show){$('#kbbody').focus();} };
+  hero.ondragover=function(e){e.preventDefault();hero.classList.add('drag');};
+  hero.ondragleave=function(){hero.classList.remove('drag');};
+  hero.ondrop=function(e){e.preventDefault();hero.classList.remove('drag'); readKbFile(e.dataTransfer.files&&e.dataTransfer.files[0]);};
   fi.onchange=function(){readKbFile(fi.files&&fi.files[0]);};
-  $('#kbsave').onclick=async function(){
-    var t=$('#kbtitle').value.trim(), bd=$('#kbbody').value.trim();
-    if(!t||bd.length<20){$('#kbmsg').textContent='Need a title and at least a paragraph of text.';return;}
-    $('#kbmsg').textContent='Saving…';
-    try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:t,body:bd,doc_date:$('#kbdate').value||null,source:'console'})});
-      var j=await r.json();
-      if(j&&j.ok){$('#kbmsg').textContent='Saved — Maria can use it now.';$('#kbtitle').value='';$('#kbbody').value='';kbList();}
-      else{$('#kbmsg').textContent=(j&&j.error)||'Could not save.';}
-    }catch(e){$('#kbmsg').textContent='Network error.';}
-  };
+  function readKbFile(f){ if(!f)return; if(f.size>500000){kbMsg('That file is over 500 KB of text — trim it or split it.');return;} var rd=new FileReader(); rd.onload=function(){ kbIngest(String(rd.result||''), f.name, Math.round((f.size||0)/1024*10)/10); }; rd.readAsText(f); }
+  $('#kbadd').onclick=function(){ var bd=$('#kbbody').value.trim(); if(bd.length<20){kbMsg('Add at least a paragraph of text.');return;} kbIngest(bd, null, Math.round(bd.length/1024*10)/10); };
   kbList();
+}
+function kbMsg(m){ var e=$('#kbmsg'); if(e)e.textContent=m||''; }
+async function kbIngest(text, filename, kb){
+  if(!text||text.trim().length<20){kbMsg('Too short to be useful — add a bit more text.');return;}
+  kbMsg('');
+  var slot=$('#kbresult'); if(!slot)return;
+  slot.innerHTML='<div class=kbjust><div class="kbtick wait">&hellip;</div><div class=jb><div class=jn>Maria is reading and naming it&hellip;</div><div class=jm>'+(filename?mariaEsc(filename)+' &middot; ':'')+kb+' KB</div></div></div>';
+  try{
+    var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body:text,source:'console'})});
+    var j=await r.json();
+    if(j&&j.ok){
+      slot.innerHTML='<div class=kbjust><div class=kbtick>&#10003;</div><div class=jb><div class=jn>'+mariaEsc(j.title||'')+' <span class=kbspark>Maria named it</span></div><div class=jm>'+(j.doc_date||'')+' &middot; '+kb+' KB &middot; added just now</div></div></div>';
+      $('#kbbody').value=''; var p=$('#kbpaste'); if(p)p.style.display='none';
+      kbList();
+    } else { slot.innerHTML=''; kbMsg((j&&j.error)||'Could not save.'); }
+  }catch(e){ slot.innerHTML=''; kbMsg('Network error — try again.'); }
 }
 async function kbList(){
   var el=$('#kblist'); if(!el)return;
   try{ var r=await fetch('/api/maria/knowledge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'list'})});
     var j=await r.json();
     if(!j||!j.docs){el.textContent=(j&&j.error)||'Not available.';return;}
-    if(!j.docs.length){el.textContent='No documents yet.';return;}
+    if(!j.docs.length){el.innerHTML='<div class=csub style="opacity:.7">Nothing yet — drop your first document above.</div>';return;}
     el.innerHTML=j.docs.map(function(d){
       var dim=d.status!=='active';
-      return '<div style="padding:8px 0;border-bottom:1px solid var(--line);'+(dim?'opacity:.45':'')+'">'
-        +'<b>'+mariaEsc(d.title)+'</b>'
-        +' <span style="opacity:.6">· '+(d.doc_date||String(d.ts||'').slice(0,10))+' · '+mariaEsc(d.source||'')+' · '+Math.round((d.bytes||0)/1024*10)/10+' KB</span>'
-        +' <button class="btn ghost" style="font-size:11px;padding:1px 8px;margin-left:8px" onclick="kbFlip('+d.id+','+(dim?0:1)+')">'+(dim?'Restore':'Retire')+'</button>'
-        +'</div>';
+      var kb=Math.round((d.bytes||0)/1024*10)/10;
+      var src=(d.source&&d.source!=='console')?' &middot; '+mariaEsc(d.source):'';
+      return '<div class="kbrow'+(dim?' off':'')+'"><span class=kd></span><div class=kt><div class=kh>'+mariaEsc(d.title)+'</div><div class=km>'+(d.doc_date||String(d.ts||'').slice(0,10))+' &middot; '+kb+' KB'+src+(dim?' &middot; retired':'')+'</div></div><span class=ka onclick="kbFlip('+d.id+','+(dim?0:1)+')">'+(dim?'Restore':'Retire')+'</span></div>';
     }).join('');
   }catch(e){el.textContent='Could not load list.';}
 }
