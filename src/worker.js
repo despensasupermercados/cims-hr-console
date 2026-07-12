@@ -24,7 +24,7 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
-import { runMaria, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
+import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
@@ -628,14 +628,30 @@ async function apiMariaKnowledge(request, env, session) {
     await logActivity(env, session.email, "maria_kb_" + action, "doc " + id);
     return json({ ok: true, changed: (r && r.meta && r.meta.changes) || 0 });
   }
-  const title = String(b.title || "").slice(0, 200).trim();
+  let title = String(b.title || "").slice(0, 200).trim();
   const body = String(b.body || "").slice(0, 200000).trim();
-  if (!title || !body) return json({ error: "title and body required" }, 400);
-  if (body.length < 20) return json({ error: "body too short to be useful" }, 400);
+  if (!body) return json({ error: "Please paste some text or drop a file first." }, 400);
+  if (body.length < 20) return json({ error: "That's too short to be useful — add a bit more text." }, 400);
+  // Title is optional: if the user didn't name it, Maria names it from the content. If the
+  // AI naming call is unavailable (e.g. geo-blocked from where the Worker ran), fall back to
+  // the document's first line so a save is never blocked by the model being unreachable.
+  let named = false;
+  if (!title) {
+    title = (await mariaQuickTitle({ apiKey: env.ANTHROPIC_API_KEY, text: body })) || firstLineTitle(body);
+    named = true;
+  }
+  // Date is auto-stamped to today unless the user supplied the document's own date.
+  const docDate = String(b.doc_date || "").slice(0, 10) || TODAY();
   const ins = await env.DB.prepare("INSERT INTO maria_knowledge (title, body, doc_date, source, tags, ship, added_by) VALUES (?,?,?,?,?,?,?)")
-    .bind(title, body, String(b.doc_date || "").slice(0, 10) || null, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
+    .bind(title, body, docDate, String(b.source || "console").slice(0, 40), String(b.tags || "").slice(0, 200) || null, String(b.ship || "").slice(0, 60) || null, session.email || "").run();
   await logActivity(env, session.email, "maria_kb_add", title.slice(0, 100));
-  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null });
+  return json({ ok: true, id: (ins && ins.meta && ins.meta.last_row_id) || null, title, doc_date: docDate, named });
+}
+// Fallback titler when the AI naming call is unavailable: first non-empty line, cleaned of
+// leading markdown heading marks and clipped to a sensible length.
+function firstLineTitle(body) {
+  const line = String(body || "").split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) || "Untitled note";
+  return line.replace(/^#+\s*/, "").slice(0, 80);
 }
 
 async function apiMariaEval(request, env, session) {
