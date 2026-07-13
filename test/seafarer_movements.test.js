@@ -53,6 +53,34 @@ test('buildSeafarerMovementEmail: renders rows, badge, footer, window', () => {
   assert.doesNotMatch(html, /08:00 Miami time/);
 });
 
+test('buildSeafarerMovementEmail: relief column + coverage banner', () => {
+  const signOffs = [
+    { name: 'Reyes, Ana', vessel: 'Allure', port: 'Barcelona', date: '2026-07-04', relief: { state: 'none', reliever: null, signon: null } },
+    { name: 'Tan, Mia',   vessel: 'Oasis',  port: 'Cape Liberty', date: '2026-06-30', relief: { state: 'confirmed', reliever: 'Cruz, Juan', signon: '2026-06-30' } },
+  ];
+  const html = buildSeafarerMovementEmail({ runDate: RUN, signOns: [], signOffs });
+  assert.match(html, />Relief</);            // new column header
+  assert.match(html, /No relief/);            // uncovered pill
+  assert.match(html, /Confirmed/);            // covered pill
+  assert.match(html, /Cruz, Juan/);           // reliever name shown
+  assert.match(html, /Coverage alert/);       // banner fires when a seat is uncovered
+});
+
+test('buildSeafarerMovementEmail: no banner when all covered', () => {
+  const signOffs = [
+    { name: 'Tan, Mia', vessel: 'Oasis', port: 'Cape Liberty', date: '2026-06-30', relief: { state: 'confirmed', reliever: 'Cruz, Juan', signon: '2026-06-30' } },
+  ];
+  const html = buildSeafarerMovementEmail({ runDate: RUN, signOns: [], signOffs });
+  assert.doesNotMatch(html, /Coverage alert/);
+});
+
+test('buildSeafarerMovementEmail: unannotated sign-offs still render (back-compat)', () => {
+  const signOffs = [{ name: 'Reyes, Ana', vessel: 'Allure', port: 'Barcelona', date: '2026-07-04' }];
+  const html = buildSeafarerMovementEmail({ runDate: RUN, signOns: [], signOffs });
+  assert.match(html, /Reyes, Ana/);
+  assert.doesNotMatch(html, /Coverage alert/); // nothing annotated -> no false alarm
+});
+
 test('buildSeafarerMovementEmail: empty states', () => {
   const html = buildSeafarerMovementEmail({ runDate: RUN, signOns: [], signOffs: [] });
   assert.match(html, /No sign-ons scheduled/);
