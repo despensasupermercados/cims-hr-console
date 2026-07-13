@@ -111,7 +111,7 @@ function badge() {
 function header(rows, kind) {
   const cols = kind === 'on'
     ? ['Seafarer','Vessel','Port','Sign-on','Contract']
-    : ['Seafarer','Vessel','Port','Sign-off'];
+    : ['Seafarer','Vessel','Port','Sign-off','Relief'];
   const ths = cols.map((c) =>
     `<th style="padding:9px 14px;font-family:${FONT};font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:#FFFFFF;text-align:left;font-weight:bold;">${c}</th>`
   ).join('');
@@ -130,20 +130,55 @@ function onRow(p, idx) {
     + `</tr>`;
 }
 
+// Relief-coverage pill for a departing seat. `relief` = { state, reliever, signon }.
+// Missing/unknown -> neutral dash (keeps back-compat with callers that don't annotate).
+function reliefPill(r) {
+  if (!r || r.state === 'unknown') return `<span style="color:${C.muted};">—</span>`;
+  const map = {
+    confirmed: { bg: '#DCFCE7', tx: '#166534', label: 'Confirmed' },
+    planned:   { bg: '#FEF3C7', tx: '#92400E', label: 'Unconfirmed' },
+    none:      { bg: '#FEE2E2', tx: '#991B1B', label: 'No relief' },
+  };
+  const m = map[r.state] || map.none;
+  const pill = `<span style="display:inline-block;background:${m.bg};color:${m.tx};font-size:10px;font-weight:bold;letter-spacing:.4px;padding:2px 7px;border-radius:10px;text-transform:uppercase;white-space:nowrap;">${m.label}</span>`;
+  if (r.state === 'none') return pill;
+  const sub = `${esc(r.reliever || '')}${r.signon ? ' · ' + fmtShort(r.signon) : ''}`;
+  return pill + `<div style="font-size:11px;color:${C.muted};padding-top:3px;">${sub}</div>`;
+}
+
 function offRow(p, idx) {
   const bg = idx % 2 ? C.rowAlt : C.card;
   return `<tr bgcolor="${bg}" style="background:${bg};">`
-    + cell(esc(p.name), { bold: true, width: '30%' })
-    + cell(esc(p.vessel), { width: '28%' })
-    + cell(esc(p.port), { width: '22%' })
-    + cell(fmt(p.date), { width: '20%' })
+    + cell(esc(p.name), { bold: true, width: '24%' })
+    + cell(esc(p.vessel), { width: '20%' })
+    + cell(esc(p.port), { width: '18%' })
+    + cell(fmt(p.date), { width: '18%' })
+    + cell(reliefPill(p.relief), { width: '20%' })
     + `</tr>`;
 }
 
 function emptyRow(kind) {
-  const span = kind === 'on' ? 5 : 4;
+  const span = kind === 'on' ? 5 : 5;
   const word = kind === 'on' ? 'No sign-ons' : 'No sign-offs';
   return `<tr><td colspan="${span}" style="padding:22px 14px;text-align:center;font-family:${FONT};font-size:13px;color:${C.muted};border-bottom:1px solid ${C.rule};">${word} scheduled in this window.</td></tr>`;
+}
+
+// Risk banner shown above the tables when any departing seat lacks a confirmed
+// relief. Renders nothing when every seat is covered (or nothing is annotated).
+function coverageBanner(uncovered, unconfirmed) {
+  const total = uncovered + unconfirmed;
+  if (total <= 0) return '';
+  const parts = [];
+  if (uncovered) parts.push(`${uncovered} with <strong>no relief in the system</strong>`);
+  if (unconfirmed) parts.push(`${unconfirmed} with an <strong>unconfirmed</strong> reliever`);
+  return `
+  <tr><td style="padding:18px 0 0 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid #FCA5A5;border-radius:6px;background:#FEF2F2;">
+      <tr><td style="padding:12px 14px;font-family:${FONT};font-size:13px;line-height:1.5;color:#991B1B;">
+        <strong>Coverage alert:</strong> ${parts.join(' · ')}. Relief status reflects records in the console only — an empty seat here may mean the reliever was never entered, not that none exists. Confirm with crewing.
+      </td></tr>
+    </table>
+  </td></tr>`;
 }
 
 function section(title, accent, count, kind, rowsHtml) {
@@ -180,8 +215,12 @@ function buildSeafarerMovementEmail({ runDate = new Date(), signOns = [], signOf
   const onRows  = ons.length  ? ons.map(onRow).join('')   : emptyRow('on');
   const offRows = offs.length ? offs.map(offRow).join('') : emptyRow('off');
 
+  const uncovered   = offs.filter(p => p.relief && p.relief.state === 'none').length;
+  const unconfirmed = offs.filter(p => p.relief && p.relief.state === 'planned').length;
+
   const windowLabel = `${fmtShort(startS)} – ${fmtShort(endS)} ${endS.slice(0,4)}`;
-  const preheader = `${ons.length} arriving · ${offs.length} departing · ${windowLabel}`;
+  const coverageNote = uncovered ? ` · ${uncovered} uncovered` : '';
+  const preheader = `${ons.length} arriving · ${offs.length} departing${coverageNote} · ${windowLabel}`;
 
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -218,6 +257,7 @@ function buildSeafarerMovementEmail({ runDate = new Date(), signOns = [], signOf
    <!-- sections -->
    <tr><td bgcolor="${C.card}" style="background:${C.card};padding:0 24px 8px 24px;">
      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+       ${coverageBanner(uncovered, unconfirmed)}
        ${section('Arriving (sign-on)', C.accentOn, ons.length, 'on', onRows)}
        ${section('Departing (sign-off)', C.accentOff, offs.length, 'off', offRows)}
      </table>
