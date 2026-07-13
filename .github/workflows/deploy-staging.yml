@@ -1,0 +1,30 @@
+name: deploy-staging
+# Manual staging deploy. Run from the Actions tab ("Run workflow"), pick a branch.
+# Runs the test gate, applies staging D1 migrations, deploys the Worker to the
+# STAGING env (separate Worker + separate D1). NEVER touches production.
+# One-time repo secrets required (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_API_TOKEN   - token with "Workers Scripts: Edit" + "D1: Edit"
+#   CLOUDFLARE_ACCOUNT_ID  - the Cloudflare account id
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Deploys to STAGING only (never prod).'
+        required: true
+        default: 'staging'
+permissions:
+  contents: read
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - name: Test + migrate staging + deploy (staging env)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run deploy:staging
