@@ -18,13 +18,14 @@ import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, legsFrom
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
-import { contractLedgerRow, psRank } from "./ledger.js";
+import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
+import { annotateReliefCoverage } from "./relief_coverage.js";
 import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
@@ -376,7 +377,9 @@ async function movementsData(env, runDate, days = 7) {
   const { sections } = await rotationSections(env);
   const crew = [];
   for (const s of (sections || [])) for (const c of (s.crew || [])) crew.push(c);
-  return shapeMovements(crew, runDate, days);
+  const md = shapeMovements(crew, runDate, days);
+    await annotateReliefCoverage(env, md.signOffs);
+    return md;
 }
 function nyDateStr(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -1049,7 +1052,13 @@ async function apiCrew(env, url) {
       rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
       client: clientOf(c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
       med_exp: c.med_exp, sirb_exp: c.sirb_exp, pp_exp: c.pp_exp, usv_exp: c.usv_exp, sch_exp: c.sch_exp,
-      baseline_count: c.baseline_count, contract_count: fullContracts(ls.map(legShape)),
+      // contract_count = CUMULATIVE completed contracts (seeded baseline + full legs since); drives the
+      // HR grade below. tier/base_salary_usd are display/HR only, never a payout input. baseline NULL =
+      // 'baseline pending' -> tier still computes from legs alone (0 -> Junior) until Rita confirms.
+      baseline_count: c.baseline_count,
+      contract_count: tierContracts(c.baseline_count, fullContracts(ls.map(legShape))),
+      tier: psRank(tierContracts(c.baseline_count, fullContracts(ls.map(legShape))), true),
+      base_salary_usd: psSalary(tierContracts(c.baseline_count, fullContracts(ls.map(legShape)))),
       active_on: act ? act.sign_on : null, active_off: act ? (act.act_off || act.proj_off) : null,
       hasNote: !!noteMap[c.agency_id] || !!(c.notes && String(c.notes).trim())
     };
@@ -1446,7 +1455,8 @@ async function apiBonusCrew(env, url) {
   }
   const legRows = (await env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all()).results;
   const legN = fullContracts(legRows.map(legShape));
-  return json({ crew: cr, count, contracts: legN, rank: psRank(legN, true), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  const effN = tierContracts(baseline, legN); // cumulative completed -> grade/pay (never resets)
+  return json({ crew: cr, count, contracts: effN, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -1467,10 +1477,13 @@ async function apiContracts(env) {
     // Baseline + count + rank + next rung via the shared ledger helper (override-wins through the
     // SAME resolveBaseline as the commit/PDF path — no inline copy that could silently drift).
     const L = contractLedgerRow(b.baseline_count, ov.baseline_count, lo);
+    // Grade/pay ride the CUMULATIVE count (seeded baseline + full legs), not the consecutive `count`,
+    // so a bonus reset never demotes anyone. Display only — payout still uses L.count + the ladder.
+    const eff = tierContracts(L.baseline, legCounts[b.agency_id] || 0);
     return {
       agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
-      vessel: vessel || null, client: clientOf(vessel), contracts: legCounts[b.agency_id] || 0,
-      count: L.count, baseline_set: L.baseline_set, rank: psRank(legCounts[b.agency_id] || 0), nextRung: L.nextRung,
+      vessel: vessel || null, client: clientOf(vessel), contracts: eff,
+      count: L.count, baseline_set: L.baseline_set, rank: psRank(eff), base_salary_usd: psSalary(eff), nextRung: L.nextRung,
       lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
       lastGate: lo ? lo.gate : null, lastPay: lo ? lo.pay_usd : null, totalPay: totPay[b.id] || 0
     };
@@ -1490,7 +1503,8 @@ async function gatherStatement(env, id) {
   const count = await crewCount(env, crew.id, baseline);
   const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
   const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
-  const bonus = { rank: psRank(fc, true), contracts: fc, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  const effFc = tierContracts(baseline, fc); // cumulative completed -> grade/pay on the statement
+  const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
@@ -3900,9 +3914,10 @@ function paintContracts(){
   var body=rows.map(function(r){
     var last=r.lastDate?(r.lastDate+' · '+(r.lastScore!=null?r.lastScore+'%':'—')+(r.lastGate?(' · '+r.lastGate):'')+' · $'+Number(r.lastPay||0).toLocaleString()):'<span class=muted style="padding:0">none yet</span>';
     var nb=r.baseline_set?('$'+Number(r.nextRung||0).toLocaleString()):'<span class=vchip>baseline pending</span>';
-    return '<tr><td><b>'+r.name+'</b><div class=csub>'+r.agency_id+'</div></td><td>'+(r.vessel||'—')+'<div class=csub>'+(r.client||'')+'</div></td><td style="text-align:center">'+r.contracts+'</td><td style="text-align:center"><span class="pill rank">'+r.rank+'</span> '+r.count+'</td><td>'+nb+'</td><td>'+last+'</td><td style="text-align:right">$'+Number(r.totalPay||0).toLocaleString()+'</td><td style="white-space:nowrap"><button class="btn ghost" onclick="window.open(\\'/api/crew/statement.pdf?id='+encodeURIComponent(r.agency_id)+'\\',\\'_blank\\')">PDF</button> <button class="btn ghost" onclick="openFill(\\''+r.agency_id+'\\')" title="Ray / Rolando / Dexter fill in their inputs">Inputs →</button> <button class="btn green" onclick="ledgerScore(\\''+r.agency_id+'\\')">Score</button></td></tr>';
-  }).join('')||'<tr><td colspan=8 class=muted>No matches.</td></tr>';
-  $('#cttable').innerHTML='<table class=tbl><thead><tr><th>Crew</th><th>Ship · client</th><th>Contracts</th><th>Consec.</th><th>Next bonus</th><th>Last outcome</th><th style="text-align:right">Paid</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
+    var sal=(r.base_salary_usd!=null?'<b>$'+Number(r.base_salary_usd).toLocaleString()+'</b>':'<span class=muted style="padding:0">—</span>');
+    return '<tr><td><b>'+r.name+'</b><div class=csub>'+r.agency_id+'</div></td><td>'+(r.vessel||'—')+'<div class=csub>'+(r.client||'')+'</div></td><td style="text-align:center">'+r.contracts+'</td><td style="text-align:center"><span class="pill rank">'+r.rank+'</span> '+r.count+'</td><td style="text-align:center">'+sal+'</td><td>'+nb+'</td><td>'+last+'</td><td style="text-align:right">$'+Number(r.totalPay||0).toLocaleString()+'</td><td style="white-space:nowrap"><button class="btn ghost" onclick="window.open(\\'/api/crew/statement.pdf?id='+encodeURIComponent(r.agency_id)+'\\',\\'_blank\\')">PDF</button> <button class="btn ghost" onclick="openFill(\\''+r.agency_id+'\\')" title="Ray / Rolando / Dexter fill in their inputs">Inputs →</button> <button class="btn green" onclick="ledgerScore(\\''+r.agency_id+'\\')">Score</button></td></tr>';
+  }).join('')||'<tr><td colspan=9 class=muted>No matches.</td></tr>';
+  $('#cttable').innerHTML='<table class=tbl><thead><tr><th>Crew</th><th>Ship · client</th><th>Contracts</th><th>Consec.</th><th>Salary</th><th>Next bonus</th><th>Last outcome</th><th style="text-align:right">Paid</th><th></th></tr></thead><tbody>'+body+'</tbody></table>';
 }
 function ledgerScore(id){openScore(id);}
 /* ---- Feedback windows board ---- */

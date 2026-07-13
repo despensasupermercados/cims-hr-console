@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ledgerCount, contractLedgerRow, psRank } from "../src/ledger.js";
+import { ledgerCount, contractLedgerRow, psRank, psSalary, tierContracts } from "../src/ledger.js";
 import { ladderValue } from "../src/bonus.js";
 
 test("ledgerCount: committed outcome's count_after is authoritative", () => {
@@ -34,17 +34,39 @@ test("contractLedgerRow: baseline_set + count + nextRung (rank is no longer here
   assert.equal(r0.rank, undefined); // rank moved out of the ledger row into psRank(contracts)
 });
 
-test("psRank: 3 tiers by contracts served — 1st=Jr, 2nd-4th=PS, 5th+=Sr", () => {
+test("psRank: DG3 pay ladder by CUMULATIVE completed contracts — 0=Jr, 1-6=PS, 7+=Sr", () => {
   assert.equal(psRank(0), "Jr PS");
-  assert.equal(psRank(1), "Jr PS");
-  assert.equal(psRank(2), "PS");
-  assert.equal(psRank(4), "PS");
-  assert.equal(psRank(5), "Sr PS");
+  assert.equal(psRank(1), "PS");           // 1 completed -> Printer Specialist (was Jr under old rule)
+  assert.equal(psRank(5), "PS");
+  assert.equal(psRank(6), "PS");           // 6 completed still PS (matches Robles/Malkevich on the sheet)
+  assert.equal(psRank(7), "Sr PS");        // Senior lands at the 7th completed (matches Espenilla)
   assert.equal(psRank(12), "Sr PS");
   assert.equal(psRank(null), "Jr PS");
-  assert.equal(psRank(1, true), "Junior Printer Specialist");
+  assert.equal(psRank(0, true), "Junior Printer Specialist");
   assert.equal(psRank(3, true), "Printer Specialist");
-  assert.equal(psRank(6, true), "Senior Printer Specialist");
+  assert.equal(psRank(7, true), "Senior Printer Specialist");
+});
+
+test("psSalary: pay bands track the tier exactly — $1,600 / $1,800 / $1,900", () => {
+  assert.equal(psSalary(0), 1600);
+  assert.equal(psSalary(1), 1800);
+  assert.equal(psSalary(6), 1800);
+  assert.equal(psSalary(7), 1900);
+  assert.equal(psSalary(20), 1900);
+  assert.equal(psSalary(null), 1600);
+  // grade and pay must never disagree
+  for (const n of [0, 1, 5, 6, 7, 9]) {
+    const jr = psRank(n) === "Jr PS", sr = psRank(n) === "Sr PS";
+    assert.equal(psSalary(n), jr ? 1600 : sr ? 1900 : 1800);
+  }
+});
+
+test("tierContracts: cumulative = seeded baseline + full legs since (monotonic, null-safe)", () => {
+  assert.equal(tierContracts(6, 1), 7);        // veteran completes one more -> promotes to Senior
+  assert.equal(tierContracts(null, 0), 0);     // baseline pending, no legs -> Junior
+  assert.equal(tierContracts(3, null), 3);     // seeded only, no legs yet
+  assert.equal(tierContracts(0, 0), 0);        // confirmed first-contract junior
+  assert.equal(psRank(tierContracts(6, 1), true), "Senior Printer Specialist");
 });
 
 // Behavior-equivalence guard: the new helper must match the exact inline logic that previously
