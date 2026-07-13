@@ -27,11 +27,38 @@ export function contractLedgerRow(baseBaseline, overrideBaseline, lastOutcome) {
   };
 }
 
-// Printer-specialist rank TIER by contracts served (seniority, independent of the consecutive-contract count):
-//   1st contract -> Junior PS, 2nd-4th -> Printer Specialist, 5th and above -> Senior PS.
+// Printer-specialist rank TIER by CUMULATIVE completed contracts (seniority). This is the HR/pay
+// grade and is deliberately monotonic — it must never drop on a bonus reset, so it is driven by the
+// cumulative completed-contract count (seeded baseline + full contracts since), NOT by the
+// consecutive bonus `count`. It is display/HR only and is NEVER a payout input (see src/bonus.js).
+//
+// DG3 pay ladder (Miguel, 2026-07; matches the validated Contract Counter sheet exactly):
+//   0 completed  -> Junior Printer Specialist  ($1,600/mo)   [on their 1st contract]
+//   1-6 completed-> Printer Specialist          ($1,800/mo)   [2nd through 7th sign-on]
+//   7+ completed -> Senior Printer Specialist   ($1,900/mo)
+// Note: promotion to Senior lands once the 7th contract is COMPLETED (count reaches 7). A crew member
+// who has completed 6 and is currently sailing their 7th still reads PS until that 7th closes — this
+// reproduces the source sheet (Robles/Malkevich, 6 done = PS; Espenilla, 7 done = Sr). If the business
+// rule is "Senior the moment they SIGN ON to the 7th", flip the >=7 threshold to >=6 (one line).
 export function psRank(contracts, long) {
   const n = contracts || 0;
-  if (n >= 5) return long ? "Senior Printer Specialist" : "Sr PS";
-  if (n >= 2) return long ? "Printer Specialist" : "PS";
+  if (n >= 7) return long ? "Senior Printer Specialist" : "Sr PS";
+  if (n >= 1) return long ? "Printer Specialist" : "PS";
   return long ? "Junior Printer Specialist" : "Jr PS";
+}
+
+// Monthly base salary (USD) for the tier the cumulative completed-contract count implies. Same
+// thresholds as psRank so the grade and the pay never disagree. Display/HR only — not a payout input.
+export function psSalary(contracts) {
+  const n = contracts || 0;
+  if (n >= 7) return 1900;
+  if (n >= 1) return 1800;
+  return 1600;
+}
+
+// The number that drives the tier/pay grade: cumulative completed contracts = seeded historical
+// baseline + full contracts completed since (from the schedule legs). Monotonic; never resets.
+// (The consecutive bonus count lives separately in ledgerCount and DOES reset on gates.)
+export function tierContracts(baseline, fullSinceBaseline) {
+  return (baseline || 0) + (fullSinceBaseline || 0);
 }
