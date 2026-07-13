@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { apiCrewImportStage, apiCrewImportApply } from "../src/crew_import_routes.js";
+import { apiCrewImportStage, apiCrewImportApply, handleCrewImport } from "../src/crew_import_routes.js";
 
+// --- fake D1 -------------------------------------------------------------
 function fakeDB({ existing = [], overrides = [], dup = false } = {}) {
   const batched = [];
-  function route(sql) {
+  function route(sql, args) {
     if (/FROM import_run WHERE file_hash/i.test(sql)) return { __first: dup ? { x: 1 } : null };
     if (/FROM crew_override/i.test(sql)) return { __all: { results: overrides } };
     if (/FROM crew\b/i.test(sql)) return { __all: { results: existing } };
@@ -13,8 +14,8 @@ function fakeDB({ existing = [], overrides = [], dup = false } = {}) {
   const mk = (sql, args = []) => ({
     sql, args,
     bind(...a) { return mk(sql, a); },
-    async first() { return route(sql).__first ?? null; },
-    async all() { return route(sql).__all ?? { results: [] }; },
+    async first() { return route(sql, args).__first ?? null; },
+    async all() { return route(sql, args).__all ?? { results: [] }; },
   });
   return {
     _batched: batched,
@@ -70,4 +71,15 @@ test("apply is idempotent by file hash", async () => {
   assert.equal(res.status, 409);
   const body = await res.json();
   assert.equal(body.error, "already_processed");
+});
+
+test("handleCrewImport routes stage + unknown path returns null", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const staged = await handleCrewImport(
+    { ...req({ rows: ROWS, file_hash: "hr" }), method: "POST" },
+    { pathname: "/api/crew/import/stage" }, env);
+  assert.ok(staged, "stage route returns a Response");
+  assert.equal((await staged.json()).ok, true);
+  const miss = await handleCrewImport({ method: "GET" }, { pathname: "/api/other" }, env);
+  assert.equal(miss, null, "unknown path returns null so worker.js falls through");
 });

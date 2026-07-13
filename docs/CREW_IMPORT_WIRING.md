@@ -1,60 +1,59 @@
 # Crew Import “Review & Apply” — wiring & staging runbook
 
-The feature code is merged as **inert, additive modules**. This doc is the ONLY remaining
-step: register three routes, surface the loader in the console, and validate on **staging**
-before prod. Nothing here runs against production data until step 4 passes.
+The feature code is on the branch as **inert, additive modules**. This doc is the ONLY remaining
+step: register the router, surface the loader in the console, and validate on **staging** before
+prod. Nothing here runs against production data until step 4 passes.
 
-## Modules (already on the branch)
-- `src/crew_review.js` — pure tier classifier (tested)
-- `src/crew_apply.js` — pure apply planner; `vessel_observed` can never be written (tested)
-- `src/crew_import_routes.js` — `crewImportPage` / `apiCrewImportStage` / `apiCrewImportApply`
+## Modules (already on the branch, 24 tests green)
+- `src/crew_review.js` — pure tier classifier
+- `src/crew_apply.js` — pure apply planner; `vessel_observed` can never be written
+- `src/crew_import_routes.js` — exports `handleCrewImport(request, url, env)` (+ handlers)
 - `src/crew_import_ui.js` — `CREW_IMPORT_HTML` (drag-drop review screen)
-- Tests: `test/crew_review.test.js`, `test/crew_apply.test.js`, `test/crew_import_routes.test.js` (23 cases)
 
-## The three routes (all session-gated, like `/api/relief/deploy`)
-| Method | Path | Handler | Writes? |
-|--------|------|---------|---------|
-| GET  | `/api/crew/import`        | `crewImportPage()`      | no |
-| POST | `/api/crew/import/stage`  | `apiCrewImportStage`    | **no** (diff only) |
-| POST | `/api/crew/import/apply`  | `apiCrewImportApply`    | yes — crew UPDATE/INSERT + import_run + sync_conflict, one D1 batch, idempotent by file_hash |
+## Routes (via handleCrewImport, all session-gated like handleRelief)
+| Method | Path | Writes? |
+|--------|------|---------|
+| GET  | `/api/crew/import`        | no |
+| POST | `/api/crew/import/stage`  | **no** (diff only) |
+| POST | `/api/crew/import/apply`  | yes — crew UPDATE/INSERT + import_run + sync_conflict, one D1 batch, idempotent by file_hash |
 
-## 1. Register (surgical edit — mirror the relief dispatch)
-Routes are dispatched the same way `/api/relief/deploy` is (see `src/relief_api.js`). Add the
-three checks in that same router, **inside the §11 error-boundary wrapper**, gated by the same
-session check the relief routes use. Import at the top of the dispatch module:
+## 1. Wire it — a 2-line mirror of handleRelief (do NOT push worker.js whole-file)
+`handleCrewImport` has the SAME shape as `relief_api.handleRelief` (returns a Response or null).
+Edit `src/worker.js` in the GitHub web editor / github.dev (surgical, per §11 — never a whole-file
+push). (a) Next to the existing relief import add:
 ```js
-import { crewImportPage, apiCrewImportStage, apiCrewImportApply } from "./crew_import_routes.js";
+import { handleCrewImport } from "./crew_import_routes.js";
 ```
-Then, next to the other `/api/...` checks:
+(b) Find where `handleRelief(` is called in the fetch dispatch (inside the §11 error-boundary
+wrapper) — it looks like `const r = await handleRelief(request, url, env); if (r) return r;` —
+and add the identical line right after it:
 ```js
-if (p === "/api/crew/import"       && request.method === "GET")  return crewImportPage();
-if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env);
-if (p === "/api/crew/import/apply" && request.method === "POST") return apiCrewImportApply(request, env);
+const ci = await handleCrewImport(request, url, env); if (ci) return ci;
 ```
-Do **not** re-inline any logic into `worker.js`; keep it delegated (§3). Restrict `/apply` to
-`MONEY_USERS` (Miguel + Rita) — it mutates crew.
+That's the whole wiring. Restrict `/api/crew/import/apply` to `MONEY_USERS` (Miguel + Rita) at
+the same gate the other crew-mutating routes use.
 
 ## 2. Surface in the console
-Add a **Data → Upload data → “Crew registry (TDG AdvancedQuery)”** entry that embeds
-`/api/crew/import` in an iframe, exactly like the “Vessel deployment” loader.
+Add **Data → Upload data → “Crew registry (TDG AdvancedQuery)”** embedding `/api/crew/import`
+in an iframe, exactly like the “Vessel deployment” loader.
 
 ## 3. Test gate
-`npm test` must stay green (adds 23 cases). Do not weaken a test to pass (§2).
+`npm test` must stay green (adds 24 cases). Do not weaken a test to pass.
 
 ## 4. STAGING first (CLAUDE.md §4) — mandatory before prod
-1. `npm run deploy:staging` (test → migrate staging → deploy to staging Worker).
-2. On the **staging** console, drag in a recent AdvancedQuery export.
+1. `npm run deploy:staging`.
+2. On the staging console, drag in a recent AdvancedQuery export.
 3. Verify: ship changes appear under “ship” and are **flagged, never written**; certs default
-   accept; a hand-set `crew_override` field shows as “your manual entry” and stays on Apply;
+   accept; a hand-set `crew_override` field shows “your manual entry” and stays on Apply;
    re-dropping the same file says “already processed.”
-4. Confirm rows in `import_run` and `sync_conflict` on staging D1; confirm no `crew.vessel_observed`
-   changed for a flagged keyman.
+4. Confirm rows land in `import_run` + `sync_conflict` on staging D1, and that no
+   `crew.vessel_observed` changed for a flagged keyman. Confirm a NEW-crew insert satisfies the
+   NOT-NULL/CHECK constraints (this is the one thing only staging can prove).
 
 ## 5. Promote + verify live (§9)
-Merge to `main` → Workers Builds deploys. Then hit the live `/api/crew/import` and run one real
-file end-to-end; confirm the same invariants on prod D1. A green commit is not a deploy.
+Merge to `main` → Workers Builds deploys. Hit live `/api/crew/import`, run one real file
+end-to-end, confirm the same invariants on prod D1. A green commit is not a deploy.
 
 ## Rollback
-Routes are additive and delegated — remove the three registration lines to fully disable; the
-modules become dead code again. No schema migration is required for this feature (it uses the
-existing `import_run` / `sync_conflict` tables).
+Remove the two `worker.js` lines to fully disable; the modules become dead code again. No schema
+migration is needed (uses the existing `import_run` / `sync_conflict` tables).

@@ -109,3 +109,14 @@ export async function apiCrewImportApply(request, env) {
     open_conflicts: plan.importRun.conflicts, droppedShipWrites: plan.droppedShipWrites,
   });
 }
+
+// Router — mirrors relief_api.handleRelief(request, url, env): returns a Response or null.
+// worker.js delegates to this exactly like it does handleRelief (same session gate applies).
+// NOTE: /apply mutates crew — restrict to MONEY_USERS (Miguel + Rita) at the worker gate.
+export async function handleCrewImport(request, url, env) {
+  const p = url.pathname;
+  if (p === "/api/crew/import" && request.method === "GET") return crewImportPage();
+  if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env);
+  if (p === "/api/crew/import/apply" && request.method === "POST") return apiCrewImportApply(request, env);
+  return null;
+}
