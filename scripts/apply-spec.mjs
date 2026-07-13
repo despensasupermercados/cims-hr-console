@@ -31,7 +31,7 @@ let applied = 0, skipped = 0;
     console.error(specPath + " block " + i + ": OLD occurs " + count + " times in " + spec.target + " (need exactly 1)");
     process.exit(2);
   }
-  src = src.replace(o, n);
+  src = src.replace(o, () => n);   // function replacement: keep NEW literal ($&, $', $1… are NOT special)
   applied++;
 });
 
