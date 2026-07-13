@@ -24,6 +24,7 @@ import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
+import { annotateReliefCoverage } from "./relief_coverage.js";
 import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
@@ -374,7 +375,9 @@ async function movementsData(env, runDate, days = 7) {
   const { sections } = await rotationSections(env);
   const crew = [];
   for (const s of (sections || [])) for (const c of (s.crew || [])) crew.push(c);
-  return shapeMovements(crew, runDate, days);
+  const md = shapeMovements(crew, runDate, days);
+    await annotateReliefCoverage(env, md.signOffs);
+    return md;
 }
 function nyDateStr(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
