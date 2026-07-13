@@ -1,0 +1,9 @@
+{
+  "target": "src/worker.js",
+  "blocks": [
+    {
+      "o": "b2ZmQ29uZmlybWVkOiAhIWVuci5vZmZDb25maXJtZWQsIG9uQ29uZmlybWVkOiAhIWVuci5vbkNvbmZpcm1lZCwgZW1iYXJrOiBlbnIuZW1iYXJrIHx8IHNFbnIuZW1iYXJrIHx8IHNoaXBIb21lW2tdIHx8IG51bGws",
+      "n": "b2ZmQ29uZmlybWVkOiAhIWVuci5vZmZDb25maXJtZWQsIG9uQ29uZmlybWVkOiAhIWVuci5vbkNvbmZpcm1lZCwgZWNjcjogISEoYmFzZS5lY2NyIHx8IGVuci5lY2NyKSwgYWlyOiAhIShiYXNlLmFpciB8fCBlbnIuYWlyKSwgaG90ZWw6ICEhKGJhc2UuaG90ZWwgfHwgZW5yLmhvdGVsKSwgZW1iYXJrOiBlbnIuZW1iYXJrIHx8IHNFbnIuZW1iYXJrIHx8IHNoaXBIb21lW2tdIHx8IG51bGws"
+    }
+  ]
+}
