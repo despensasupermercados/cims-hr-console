@@ -1,9 +1,0 @@
-{
-  "target": "src/worker.js",
-  "blocks": [
-    {
-      "o": "b2ZmQ29uZmlybWVkOiAhIWVuci5vZmZDb25maXJtZWQsIG9uQ29uZmlybWVkOiAhIWVuci5vbkNvbmZpcm1lZCwgZW1iYXJrOiBlbnIuZW1iYXJrIHx8IHNFbnIuZW1iYXJrIHx8IHNoaXBIb21lW2tdIHx8IG51bGws",
-      "n": "b2ZmQ29uZmlybWVkOiAhIWVuci5vZmZDb25maXJtZWQsIG9uQ29uZmlybWVkOiAhIWVuci5vbkNvbmZpcm1lZCwgZWNjcjogKGVtYXBbYy5hZ2VuY3lfaWQrInwiKyhlbnIuc2VxfHwxKV0/ISFlbWFwW2MuYWdlbmN5X2lkKyJ8IisoZW5yLnNlcXx8MSldLmVjY3I6YmFzZS5lY2NyKSwgYWlyOiAoZW1hcFtjLmFnZW5jeV9pZCsifCIrKGVuci5zZXF8fDEpXT8hIWVtYXBbYy5hZ2VuY3lfaWQrInwiKyhlbnIuc2VxfHwxKV0uYWlyOmJhc2UuYWlyKSwgaG90ZWw6IChlbWFwW2MuYWdlbmN5X2lkKyJ8IisoZW5yLnNlcXx8MSldPyEhZW1hcFtjLmFnZW5jeV9pZCsifCIrKGVuci5zZXF8fDEpXS5ob3RlbDpiYXNlLmhvdGVsKSwgZW1iYXJrOiBlbnIuZW1iYXJrIHx8IHNFbnIuZW1iYXJrIHx8IHNoaXBIb21lW2tdIHx8IG51bGws"
-    }
-  ]
-}
