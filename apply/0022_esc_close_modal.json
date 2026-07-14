@@ -1,0 +1,13 @@
+{
+  "target": "src/worker.js",
+  "blocks": [
+    {
+      "o": "ICB2YXIgdz1kb2N1bWVudC5jcmVhdGVFbGVtZW50KCdkaXYnKTt3LmlkPSdyb3Rtb2RhbCc7dy5jbGFzc05hbWU9J21vZHdyYXAnO3cuaW5uZXJIVE1MPWg7CiAgdy5vbmNsaWNrPWZ1bmN0aW9uKGV2KXtpZihldi50YXJnZXQ9PT13KWNsb3NlUm90TW9kYWwoKTt9Ow==",
+      "n": "ICB2YXIgdz1kb2N1bWVudC5jcmVhdGVFbGVtZW50KCdkaXYnKTt3LmlkPSdyb3Rtb2RhbCc7dy5jbGFzc05hbWU9J21vZHdyYXAnO3cuaW5uZXJIVE1MPWg7CiAgdy5vbmNsaWNrPWZ1bmN0aW9uKGV2KXtpZihldi50YXJnZXQ9PT13KWNsb3NlUm90TW9kYWwoKTt9OwogIHdpbmRvdy5yb3RFc2NIYW5kbGVyPWZ1bmN0aW9uKGV2KXtpZihldi5rZXk9PT0nRXNjYXBlJyljbG9zZVJvdE1vZGFsKCk7fTtkb2N1bWVudC5hZGRFdmVudExpc3RlbmVyKCdrZXlkb3duJyx3aW5kb3cucm90RXNjSGFuZGxlcik7"
+    },
+    {
+      "o": "ZnVuY3Rpb24gY2xvc2VSb3RNb2RhbCgpe3ZhciBtPWRvY3VtZW50LmdldEVsZW1lbnRCeUlkKCdyb3Rtb2RhbCcpO2lmKG0pbS5yZW1vdmUoKTt9",
+      "n": "ZnVuY3Rpb24gY2xvc2VSb3RNb2RhbCgpe3ZhciBtPWRvY3VtZW50LmdldEVsZW1lbnRCeUlkKCdyb3Rtb2RhbCcpO2lmKG0pbS5yZW1vdmUoKTtpZih3aW5kb3cucm90RXNjSGFuZGxlcil7ZG9jdW1lbnQucmVtb3ZlRXZlbnRMaXN0ZW5lcigna2V5ZG93bicsd2luZG93LnJvdEVzY0hhbmRsZXIpO3dpbmRvdy5yb3RFc2NIYW5kbGVyPW51bGw7fX0="
+    }
+  ]
+}
