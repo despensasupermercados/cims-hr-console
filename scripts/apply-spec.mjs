@@ -27,7 +27,14 @@ let applied = 0, skipped = 0;
   const n = Buffer.from(blk.n, "base64").toString("utf-8");
   if (src.includes(n) && !src.includes(o)) { skipped++; return; } // already applied
   const count = src.split(o).length - 1;
-  if (count !== 1) {
+  if (count === 0) {
+    // OLD not present (and NEW not present either, per the check above): a stale/consumed/poison
+    // spec whose target region was later changed. Skip it with a warning — a dead spec must NOT
+    // abort the whole run (that silently blocked later specs from ever applying). Prune it later.
+    console.warn(specPath + " block " + i + ": OLD not found — stale/consumed spec, skipping");
+    skipped++; return;
+  }
+  if (count > 1) {
     console.error(specPath + " block " + i + ": OLD occurs " + count + " times in " + spec.target + " (need exactly 1)");
     process.exit(2);
   }
