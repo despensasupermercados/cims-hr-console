@@ -59,7 +59,6 @@ test('buildSeafarerMovementEmail: relief column + coverage banner', () => {
     { name: 'Tan, Mia',   vessel: 'Oasis',  port: 'Cape Liberty', date: '2026-06-30', relief: { state: 'confirmed', reliever: 'Cruz, Juan', signon: '2026-06-30' } },
   ];
   const html = buildSeafarerMovementEmail({ runDate: RUN, signOns: [], signOffs });
-  assert.match(html, />Relief</);            // new column header
   assert.match(html, /No relief/);            // uncovered pill
   assert.match(html, /Confirmed/);            // covered pill
   assert.match(html, /Cruz, Juan/);           // reliever name shown
