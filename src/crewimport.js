@@ -57,11 +57,15 @@ export function mapRow(row) {
     province: pick(row, ["province"]) || null,
     phone: pick(row, ["mobile", "phone", "cell", "contact no"]) || null,
     email: pick(row, ["email", "e-mail"]) || null,
-    med_exp: normalizeDate(pick(row, ["medical"])),
-    sirb_exp: normalizeDate(pick(row, ["seaman", "sirb", "seamans book", "seafarer"])),
-    pp_exp: normalizeDate(pick(row, ["passport"])),
-    sch_exp: normalizeDate(pick(row, ["schengen"])),
-    usv_exp: normalizeDate(pick(row, ["us visa", "usvisa", "c1d", "c1/d", "usa visa", "american visa"])),
+    // Match the EXPIRATION column specifically. The real AdvancedQuery layout has
+    // "<DOC> NO", "<DOC> ISSUE/DATE OF ISSUE", "<DOC> EXPIRATION", "<DOC> PLACE" — and a
+    // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.
+    // Specific "… expiration" patterns come first; loose ones stay as fallbacks for other formats.
+    med_exp: normalizeDate(pick(row, ["medical expiration", "medical exp", "med expiration", "med exp"])),
+    sirb_exp: normalizeDate(pick(row, ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"])),
+    pp_exp: normalizeDate(pick(row, ["passport expiration", "passport exp"])),
+    sch_exp: normalizeDate(pick(row, ["schengen visa expiration", "schengen expiration", "schengen exp"])),
+    usv_exp: normalizeDate(pick(row, ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"])),
   };
 }
 
