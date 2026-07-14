@@ -113,15 +113,69 @@ confidence threshold (fall back to manual pick), and log unrecognized drops.
 Fits Miguel's operating philosophy: prevention over reactive (catches drift + wrong file),
 single source of truth (pure modules unchanged), clear ownership (Rita still confirms).
 
-## E. Open items (this workstream)
-- [ ] Confirm skin choice = Option A (Calm) — Miguel said "version 1"; proceeding on that read.
-- [ ] Build the integrated Data page: A's calm shell + B's monospace dates + persistent safety badge.
+## E. Final layout + commit UX (settled after 3 iteration rounds with Miguel)
+
+- **DECISION (R4): the "cart" layout is the final skin.** The review list sits center; a **sticky
+  right-hand "Ready to apply" cart** (checkout metaphor) holds the itemized tally, running totals,
+  the Apply button, Discard, and the "nothing saved until you apply" lock. It rides down the page
+  as Rita scrolls, so Apply is always one glance away. This replaced an earlier bottom commit-bar,
+  which wasted the right-hand whitespace and cramped the summary horizontally.
+- **Cart must be LIVE, not decorative:** flipping a row (Accept↔Hold, Add↔Skip, Keep↔Accept)
+  updates the matching cart line, the two totals, and the Apply count in real time. The cart count
+  must always equal what `/apply` will actually write. This is the whole point of the metaphor.
+- **Held vs. save semantics in the cart:** GREEN lines = will be written (certs, new crew, tidy-ups);
+  AMBER "held" lines = protected, NOT written (ship flag, live manual override). Held items appear in
+  the cart precisely so the protection is visible, not buried.
+- **Count integrity:** the Apply count must reconcile with the itemized breakdown (sample math:
+  2 certs + 1 new + 2 tidy-ups = 5 save; 1 ship + 1 manual = 2 held). A commit button whose number
+  disagrees with the list quietly erodes trust — never ship a mismatch.
+- Reference artifact: `data_redesign_cims.html` (session workspace) — the branded, cart-layout,
+  auto-detect final mockup. Supersedes `data_redesign_A_calm.html`, `_B_operator.html`,
+  `_A_final.html`, `_A_cart.html` (earlier iteration steps, kept for history only).
+
+## F. Brand system — CIMS / DG3 (from `cimsbrandmanualv1.html`, uploaded 2026-07-14)
+
+The Data page must carry the CIMS identity, not a generic palette. Source of truth = the brand
+manual. Tokens the build MUST use:
+
+| Token | Hex | Role |
+|-------|-----|------|
+| DG3 Navy | `#1B3A5C` | **Primary** — sidebar, headings, primary/segmented-active, cart header |
+| Deep Navy | `#142D48` | deep headers / hovers |
+| DG3 Green | `#5FB946` | **Accent CHROME ONLY** — top rule, logo underline, borders, icon strokes, active nav marker |
+| Green-ink | `#3C7A2A` | **derived accessible shade** for green *text* + the Apply button fill (see note) |
+| Slate | `#6B7280` | body text |
+| Light slate | `#9CA3AF` | muted/meta |
+| Cloud | `#F3F4F6` | page background |
+| Border | `#E5E7EB` | hairlines / card borders |
+
+- **Fonts:** headings + wordmark = **Outfit** (600/700); body = **DM Sans** (400/500). Loaded from
+  Google Fonts (same as the manual).
+- **Logo:** the print-mark SVG (stacked green document outlines) + `CIMS` wordmark (Outfit 700,
+  letter-spacing 4px) + a 2px green underline + `Cruise Industry Managed Services` sub-label.
+  Sidebar footer carries `A division of DG3` with green `DG3`.
+- **Top accent rule:** 4px `linear-gradient(90deg, navy 62%, green 62%)` across the very top.
+
+**DECISION (R5 — accessibility guardrail): DG3 Green `#5FB946` is an accent, not a text/fill color.**
+White text on `#5FB946` (contrast ≈2.2:1) and green text on white both FAIL WCAG AA. The brand
+manual itself only uses green for thin rules and tiny caps labels. So: keep `#5FB946` for chrome,
+and use **Green-ink `#3C7A2A`** (same hue, darkened) wherever green must be *read* — "N save"
+counts, the "renewed" tag, and the **Apply button fill** (white-on-`#3C7A2A` ≈5:1, passes AA).
+Navy remains the authoritative primary. Functional status colors (amber for caution/held, red for
+"your manual entry") are muted toward the brand and used only for semantics, not brand chrome.
+
+## G. Build checklist (unblocked once Miguel approves the branded mockup)
+- [x] Skin choice = Option A (Calm) → evolved into the branded **cart layout** (R4).
+- [x] Auto-detect design settled (D) — recognizer registry, one entry, evidence shown, fail-safe.
+- [x] Brand tokens + accessibility guardrail settled (F, R5).
+- [ ] Build the integrated Data page from `data_redesign_cims.html` as the visual spec.
 - [ ] Wire the shell to `/api/crew/import/stage` + `/apply` (endpoints already prod-tested).
+- [ ] Make the cart LIVE (row toggles → cart lines + totals + Apply count).
+- [ ] Implement the recognizer registry + "detected" UI + unrecognized-drop log.
 - [ ] **Retire/neutralize the old unsafe crew importer** in worker.js (one door only).
-- [ ] Implement the recognizer registry (one entry: AdvancedQuery) + "detected" UI + unrecognized log.
 - [ ] Staging-first validation, then prod (DEPLOY_AND_VALIDATE.md runbook).
 
-## F. Carry-over reminders (still open from prior session)
+## H. Carry-over reminders (still open from prior session)
 - [ ] Make the `cims-hr-console` repo **PRIVATE** (governance; 45-day reminder set ~Aug 27).
 - [ ] Optionally restrict `/apply` to MONEY_USERS (Miguel + Rita) at the worker gate.
 - [ ] Longer term: separate CIMS from the Despensa GitHub org / Cloudflare account.
