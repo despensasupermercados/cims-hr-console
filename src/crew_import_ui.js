@@ -14,6 +14,7 @@
 export const CREW_IMPORT_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CIMS Console — Upload data</title>
+<script>if(location.search.indexOf('embed')>=0)document.documentElement.className='embed';</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
@@ -28,6 +29,12 @@ export const CREW_IMPORT_HTML = `<!DOCTYPE html>
 body{margin:0;background:var(--cloud);color:var(--ink);font-family:'DM Sans',ui-sans-serif,-apple-system,BlinkMacSystemFont,sans-serif;font-size:14.5px;line-height:1.5}
 .accent{height:4px;background:linear-gradient(90deg,var(--navy) 62%,var(--green) 62%)}
 .app{display:grid;grid-template-columns:244px 1fr;min-height:calc(100vh - 4px)}
+/* embed mode: when iframed into the console Data tab (?embed=1), drop our own chrome */
+html.embed body{background:var(--white)}
+html.embed .accent,html.embed .side{display:none}
+html.embed .app{grid-template-columns:1fr;min-height:0}
+html.embed .content{padding:14px 18px 40px;max-width:100%}
+html.embed .crumb{display:none}
 h1,h2,.wordmark,.applyb,.cart .ch .h{font-family:'Outfit',sans-serif}
 .side{background:var(--navy);color:rgba(255,255,255,.72);padding:26px 16px 22px;display:flex;flex-direction:column}
 .brand{margin-bottom:30px;padding:0 6px}

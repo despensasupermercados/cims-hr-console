@@ -1,0 +1,15 @@
+{
+  "target": "src/worker.js",
+  "blocks": [
+    {
+      "o": "ZnVuY3Rpb24gZHN0eXBlQ2hhbmdlZCgpe2lmKGRzLnZhbHVlPT09J3Zlc3NlbCcpe2R6LnN0eWxlLmRpc3BsYXk9J25vbmUnO2lmKHZmJiYhdmYuZmlyc3RDaGlsZCl2Zi5pbm5lckhUTUw9JzxpZnJhbWUgc3JjPSIvYXBpL3JlbGllZi9kZXBsb3kiIHRpdGxlPSJWZXNzZWwgZGVwbG95bWVudCBsb2FkZXIiIHN0eWxlPSJ3aWR0aDoxMDAlO2hlaWdodDo1NDBweDtib3JkZXI6MDtib3JkZXItcmFkaXVzOjEycHg7YmFja2dyb3VuZDojZmZmIj48L2lmcmFtZT4nO2lmKHZmKXZmLnN0eWxlLmRpc3BsYXk9Jyc7fWVsc2V7aWYodmYpe3ZmLnN0eWxlLmRpc3BsYXk9J25vbmUnO3ZmLmlubmVySFRNTD0nJzt9ZHouc3R5bGUuZGlzcGxheT0nJzt9fQ==",
+      "n": "ZnVuY3Rpb24gZHN0eXBlQ2hhbmdlZCgpe3ZhciBfc3JjPWRzLnZhbHVlPT09J3Zlc3NlbCc/Jy9hcGkvcmVsaWVmL2RlcGxveSc6KGRzLnZhbHVlPT09J2NyZXcnPycvYXBpL2NyZXcvaW1wb3J0P2VtYmVkPTEnOicnKTtpZihfc3JjKXtkei5zdHlsZS5kaXNwbGF5PSdub25lJztpZih2Zil7dmYuaW5uZXJIVE1MPSc8aWZyYW1lIHNyYz0iJytfc3JjKyciIHRpdGxlPSJsb2FkZXIiIHN0eWxlPSJ3aWR0aDoxMDAlO2hlaWdodDo2ODBweDtib3JkZXI6MDtib3JkZXItcmFkaXVzOjEycHg7YmFja2dyb3VuZDojZmZmIj48L2lmcmFtZT4nO3ZmLnN0eWxlLmRpc3BsYXk9Jyc7fX1lbHNle2lmKHZmKXt2Zi5zdHlsZS5kaXNwbGF5PSdub25lJzt2Zi5pbm5lckhUTUw9Jyc7fWR6LnN0eWxlLmRpc3BsYXk9Jyc7fX0=",
+      "why": "Data-tab crew type embeds the reviewed importer; old parse/apply path unreachable"
+    },
+    {
+      "o": "aWYgKHAgPT09ICIvYXBpL2NyZXcvaW1wb3J0IiAmJiByZXF1ZXN0Lm1ldGhvZCA9PT0gIlBPU1QiKSByZXR1cm4gYXBpQ3Jld0ltcG9ydChyZXF1ZXN0LCBlbnYsIHNlc3Npb24pOw==",
+      "n": "aWYgKHAgPT09ICIvYXBpL2NyZXcvaW1wb3J0IiAmJiByZXF1ZXN0Lm1ldGhvZCA9PT0gIlBPU1QiKSByZXR1cm4ganNvbih7IGVycm9yOiAicmV0aXJlZF91c2VfcmV2aWV3ZWRfaW1wb3J0ZXIiLCBkZXRhaWw6ICJUaGUgZGlyZWN0IGNyZXcgaW1wb3J0IHdhcyByZXRpcmVkLiBVc2UgdGhlIHJldmlld2VkIGltcG9ydGVyOiBHRVQgL2FwaS9jcmV3L2ltcG9ydCwgUE9TVCAvYXBpL2NyZXcvaW1wb3J0L3N0YWdlLCBQT1NUIC9hcGkvY3Jldy9pbXBvcnQvYXBwbHkuIiB9KTs=",
+      "why": "Neutralize legacy direct-write POST /api/crew/import (wrote ship allocation — D1 violation)"
+    }
+  ]
+}
