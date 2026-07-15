@@ -2680,7 +2680,7 @@ function setUploads(){
   $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
    +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
    +'<label class=csub>Data type</label><br>'
-   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="keyman">Keyman contracts — CIMS Keyman workbook (.xlsx)</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — Celebrity / RCCL + Azamara</option></select>'
+   +'<select id=dstype style="margin:6px 0 14px"><option value="">— Select data type —</option><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="keyman">Keyman contracts — CIMS Keyman workbook (.xlsx)</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — Celebrity / RCCL + Azamara</option></select>'
    +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
      +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop the file here</div>'
      +'<div class=csub style="margin-top:4px">or click to choose · .xls or .xlsx only</div></div>'
@@ -2692,7 +2692,7 @@ function setUploads(){
   dz.onclick=function(){fi.click();};
   dz.ondragover=function(e){e.preventDefault();dz.style.borderColor='var(--green)';dz.style.background='#F2F8EF';};
   dz.ondragleave=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';};
-  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};var ds=$('#dstype'),vf=$('#vesselframe');function dstypeChanged(){var _src=ds.value==='vessel'?'/api/relief/deploy':(ds.value==='crew'?'/api/crew/import?embed=1':'');if(_src){dz.style.display='none';if(vf){vf.innerHTML='<iframe src="'+_src+'" title="loader" style="width:100%;height:680px;border:0;border-radius:12px;background:#fff"></iframe>';vf.style.display='';}}else{if(vf){vf.style.display='none';vf.innerHTML='';}dz.style.display='';}}if(ds)ds.onchange=dstypeChanged;dstypeChanged();
+  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};var ds=$('#dstype'),vf=$('#vesselframe');function dstypeChanged(){if(ds.value==='crew'){window.location.href='/api/crew/import';return;}if(ds.value==='vessel'){dz.style.display='none';if(vf){vf.innerHTML='<iframe src="/api/relief/deploy" title="loader" style="width:100%;height:680px;border:0;border-radius:12px;background:#fff"></iframe>';vf.style.display='';}}else{if(vf){vf.style.display='none';vf.innerHTML='';}dz.style.display=ds.value?'':'none';}}if(ds)ds.onchange=dstypeChanged;dstypeChanged();
 }
 async function setSession(){
   var me={}; try{me=await (await fetch('/api/me')).json();}catch(e){}
