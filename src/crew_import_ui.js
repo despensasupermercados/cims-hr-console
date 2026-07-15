@@ -41,6 +41,12 @@ html.embed .accent,html.embed .side{display:none}
 html.embed .app{grid-template-columns:1fr;min-height:0}
 html.embed .content{padding:14px 18px 40px;max-width:100%}
 html.embed .crumb{display:none}
+/* embed mode: when iframed into the console Data tab (?embed=1), drop our own chrome */
+html.embed body{background:var(--white)}
+html.embed .accent,html.embed .side{display:none}
+html.embed .app{grid-template-columns:1fr;min-height:0}
+html.embed .content{padding:14px 18px 40px;max-width:100%}
+html.embed .crumb{display:none}
 h1,h2,.wordmark,.applyb,.cart .ch .h{font-family:'Outfit',sans-serif}
 .side{background:var(--navy);color:rgba(255,255,255,.72);padding:26px 16px 22px;display:flex;flex-direction:column}
 .brand{margin-bottom:30px;padding:0 6px}
