@@ -198,7 +198,7 @@ export default {
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/autosend") return apiAutoSend(request, env, session);
         if (p === "/api/sbmtoggle") return apiSbmToggle(request, env, session);
-        if (p === "/api/crew/import" && request.method === "POST") return apiCrewImport(request, env, session);
+        if (p === "/api/crew/import" && request.method === "POST") return json({ error: "retired_use_reviewed_importer", detail: "The direct crew import was retired. Use the reviewed importer: GET /api/crew/import, POST /api/crew/import/stage, POST /api/crew/import/apply." });
         if (p === "/api/keyman/import" && request.method === "POST") return apiKeymanImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/billing/month") return apiBillingMonth(env);
@@ -2688,7 +2688,7 @@ function setUploads(){
   dz.onclick=function(){fi.click();};
   dz.ondragover=function(e){e.preventDefault();dz.style.borderColor='var(--green)';dz.style.background='#F2F8EF';};
   dz.ondragleave=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';};
-  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};var ds=$('#dstype'),vf=$('#vesselframe');function dstypeChanged(){if(ds.value==='vessel'){dz.style.display='none';if(vf&&!vf.firstChild)vf.innerHTML='<iframe src="/api/relief/deploy" title="Vessel deployment loader" style="width:100%;height:540px;border:0;border-radius:12px;background:#fff"></iframe>';if(vf)vf.style.display='';}else{if(vf){vf.style.display='none';vf.innerHTML='';}dz.style.display='';}}if(ds)ds.onchange=dstypeChanged;dstypeChanged();
+  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};var ds=$('#dstype'),vf=$('#vesselframe');function dstypeChanged(){var _src=ds.value==='vessel'?'/api/relief/deploy':(ds.value==='crew'?'/api/crew/import?embed=1':'');if(_src){dz.style.display='none';if(vf){vf.innerHTML='<iframe src="'+_src+'" title="loader" style="width:100%;height:680px;border:0;border-radius:12px;background:#fff"></iframe>';vf.style.display='';}}else{if(vf){vf.style.display='none';vf.innerHTML='';}dz.style.display='';}}if(ds)ds.onchange=dstypeChanged;dstypeChanged();
 }
 async function setSession(){
   var me={}; try{me=await (await fetch('/api/me')).json();}catch(e){}
