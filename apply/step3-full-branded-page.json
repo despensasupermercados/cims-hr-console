@@ -1,0 +1,15 @@
+{
+  "target": "src/worker.js",
+  "blocks": [
+    {
+      "o": "PHNlbGVjdCBpZD1kc3R5cGUgc3R5bGU9Im1hcmdpbjo2cHggMCAxNHB4Ij48b3B0aW9uIHZhbHVlPSJjcmV3Ij5DcmV3IHJlZ2lzdHJ5IOKAlCBBZHZhbmNlZFF1ZXJ5ICgueGxzIC8gLnhsc3gpPC9vcHRpb24+",
+      "n": "PHNlbGVjdCBpZD1kc3R5cGUgc3R5bGU9Im1hcmdpbjo2cHggMCAxNHB4Ij48b3B0aW9uIHZhbHVlPSIiPuKAlCBTZWxlY3QgZGF0YSB0eXBlIOKAlDwvb3B0aW9uPjxvcHRpb24gdmFsdWU9ImNyZXciPkNyZXcgcmVnaXN0cnkg4oCUIEFkdmFuY2VkUXVlcnkgKC54bHMgLyAueGxzeCk8L29wdGlvbj4=",
+      "why": "neutral default data-type so Data doesn't auto-redirect"
+    },
+    {
+      "o": "ZnVuY3Rpb24gZHN0eXBlQ2hhbmdlZCgpe3ZhciBfc3JjPWRzLnZhbHVlPT09J3Zlc3NlbCc/Jy9hcGkvcmVsaWVmL2RlcGxveSc6KGRzLnZhbHVlPT09J2NyZXcnPycvYXBpL2NyZXcvaW1wb3J0P2VtYmVkPTEnOicnKTtpZihfc3JjKXtkei5zdHlsZS5kaXNwbGF5PSdub25lJztpZih2Zil7dmYuaW5uZXJIVE1MPSc8aWZyYW1lIHNyYz0iJytfc3JjKyciIHRpdGxlPSJsb2FkZXIiIHN0eWxlPSJ3aWR0aDoxMDAlO2hlaWdodDo2ODBweDtib3JkZXI6MDtib3JkZXItcmFkaXVzOjEycHg7YmFja2dyb3VuZDojZmZmIj48L2lmcmFtZT4nO3ZmLnN0eWxlLmRpc3BsYXk9Jyc7fX1lbHNle2lmKHZmKXt2Zi5zdHlsZS5kaXNwbGF5PSdub25lJzt2Zi5pbm5lckhUTUw9Jyc7fWR6LnN0eWxlLmRpc3BsYXk9Jyc7fX0=",
+      "n": "ZnVuY3Rpb24gZHN0eXBlQ2hhbmdlZCgpe2lmKGRzLnZhbHVlPT09J2NyZXcnKXt3aW5kb3cubG9jYXRpb24uaHJlZj0nL2FwaS9jcmV3L2ltcG9ydCc7cmV0dXJuO31pZihkcy52YWx1ZT09PSd2ZXNzZWwnKXtkei5zdHlsZS5kaXNwbGF5PSdub25lJztpZih2Zil7dmYuaW5uZXJIVE1MPSc8aWZyYW1lIHNyYz0iL2FwaS9yZWxpZWYvZGVwbG95IiB0aXRsZT0ibG9hZGVyIiBzdHlsZT0id2lkdGg6MTAwJTtoZWlnaHQ6NjgwcHg7Ym9yZGVyOjA7Ym9yZGVyLXJhZGl1czoxMnB4O2JhY2tncm91bmQ6I2ZmZiI+PC9pZnJhbWU+Jzt2Zi5zdHlsZS5kaXNwbGF5PScnO319ZWxzZXtpZih2Zil7dmYuc3R5bGUuZGlzcGxheT0nbm9uZSc7dmYuaW5uZXJIVE1MPScnO31kei5zdHlsZS5kaXNwbGF5PWRzLnZhbHVlPycnOidub25lJzt9fQ==",
+      "why": "crew opens the full branded page /api/crew/import (not embed); dropzone only for a chosen non-crew type"
+    }
+  ]
+}
