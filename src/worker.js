@@ -26,6 +26,7 @@ import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
 import { annotateReliefCoverage } from "./relief_coverage.js";
+import { maybeSendDocRadar, docRadarPreviewResponse, docRadarSendResponse } from "./doc_radar.js";
 import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
 import { installAck } from "./signoff_ack.js";
@@ -226,6 +227,8 @@ export default {
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
         if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
         if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
+if (p === "/api/health/preview") return docRadarPreviewResponse(env, url);
+if (p === "/api/health/send" && request.method === "POST") return docRadarSendResponse(request, env, session);
         if (p === "/api/rotation/upcoming") return apiRotationUpcoming(env, url);
         if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
         if (p === "/api/maria/feedback" && request.method === "POST") return apiMariaFeedback(request, env, session);
@@ -268,6 +271,7 @@ export default {
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
+if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event));
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
