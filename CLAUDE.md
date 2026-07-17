@@ -100,3 +100,14 @@ dated card on the crew. Hard rules:
   `embark` and `disembark` (a dropped field = the port silently never shows).
 - **Keyman import refreshes matched crew only** and re-pins `KEYMAN_VERSION` so the bundled self-seed
   (`ensureKeyman`) can't overwrite it. Crew bridge is by name (km ≠ SC id).
+
+## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
+The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
+`test/perf_invariants.test.js` (static guards, same approach as sqlsafety):
+- **Hot read routes fire their queries as ONE concurrent wave** (`await Promise.all([...])`) —
+  apiDashboard, apiCrew, rotationSections. Never add a sequential `await env.DB...` chain to a hot
+  path; add the new query to the existing wave instead.
+- **`ensure*` schema guards are memoized once per isolate** (`memoEnsure`, WeakMap-keyed by
+  `env.DB`). Never call raw DDL per request. New `ensureX` helpers must be wrapped the same way.
+- **Every `/api` response carries `Server-Timing`** — it is the measurement instrument; without it
+  a perf regression is invisible. Keep the stamp in the fetch handler.
