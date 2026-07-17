@@ -2,35 +2,34 @@
 
 _Companion to `docs/DATA_PAGE_REDESIGN_DECISIONS.md`. Short, updated as the build ships._
 
-## Step 1 — Branded crew-import UI ✅ MERGED TO PROD (2026-07-14)
-- PR **#50** (`feat/crew-import-brand-ui`) merged to `main` → prod via Workers Builds.
-- Swapped `src/crew_import_ui.js` for the CIMS-branded, cart-layout, auto-detect page settled
-  with Miguel (decisions R1–R5). UI-only. Wired to the tested `/stage` + `/apply` endpoints.
-- Served at `GET /api/crew/import` (session-gated).
+## ✅ COMPLETE — all steps merged to prod (2026-07-16)
 
-## Step 2 — Retire the OLD unsafe importer ✅ MERGED TO PROD (2026-07-15)
-- PR **#52** (`feat/crew-import-step2`) merged to `main` (commit `145da01`); `tests` workflow green.
-  Two apply-specs (CI rebuilt the large files via the apply-bot):
-  - `apply/step2-retire-old-importer.json` → `src/worker.js`:
-    1. `dstypeChanged()`: the Data tab's **Crew registry** data-type now embeds the reviewed
-       importer (`/api/crew/import?embed=1`), mirroring how **Vessel** embeds the relief loader.
-       The old drag-drop → parse → preview → apply chain is unreachable from the UI.
-    2. `POST /api/crew/import` (legacy route): **neutralized** — previously called `apiCrewImport`,
-       which upserted `crew` INCLUDING `vessel_observed` (wrote ship allocation directly — the D1
-       violation). Now returns `retired_use_reviewed_importer` and writes nothing.
-  - `apply/step2-embed-mode.json` → `src/crew_import_ui.js`: embed mode — when loaded with
-    `?embed=1` the page drops its own sidebar/accent so it sits cleanly inside the Data tab.
-- **Result — ONE DOOR:** Data → Upload data → Crew registry shows OUR branded reviewed importer
-  inline. Only safe write paths remain (`/stage` + `/apply`); ship never written; logged; idempotent.
-- Prod visual confirmation: pending Miguel's eyeball (browser can't auth; staging login not set up,
-  so validation is on the prod console where Miguel is already signed in).
+| Step | PR | What shipped |
+|------|----|--------------|
+| 1 | #50 | Branded standalone importer page at `/api/crew/import` (cart layout, auto-detect, live cart) |
+| 2 | #52 | **One door:** Data tab routed to the safe importer; legacy direct-write `POST /api/crew/import` neutralized (`retired_use_reviewed_importer`) — it used to write `vessel_observed` (D1 violation) |
+| 3–4 | #54, #55 | Course corrections: removed embed/redirect approaches; moved the safe review + **live cart engine** (`cimsStage/cimsRender/cimsCart/cimsApply`) INLINE into the Data tab, talking only to `/stage` + `/apply` |
+| 5 | #56 | **Data tab shell rebuilt** to the approved mockup: navy `#1B3A5C` sidebar, CIMS print-mark logo + green underline, "Cruise Industry Managed Services", nav, "A division of DG3" |
+| 6 | #57 | **Upload data view rebuilt** to the mockup: "Upload data" h1 + lede, big branded dropzone, **NO data-type dropdown** — header-signature auto-detect (R3): crew → green "Recognized ✓ N/12 columns" band → staged review + cart; keyman/travel auto-detected; unknown → fail-safe amber band with explicit choose buttons; vessel via quiet link |
 
-### Follow-up cleanup (low priority)
-- `apiCrewImport` function definition still exists at `worker.js:~749` but is now **dead code**
-  (no route calls it). Safe to delete in a later cleanup once confirmed unused.
+### The flow now (weekly TDG import)
+Data → Upload data → drop the AdvancedQuery file → green Recognized band → tiered review
+(ship flags / needs-you / certificates / new / departed) + navy "Ready to apply" cart with live
+totals → Apply (or Discard). Ship allocation never written; idempotent by file hash; logged to
+`import_run`; conflicts to `sync_conflict`.
+
+### Notes / lessons (for future agents)
+- The Data tab lives inside `worker.js` `APP_HTML` (template literal). Client code inserted there
+  must contain NO backticks, NO dollar-brace, NO backslashes. Full-rebuild simulation +
+  `node --check` locally BEFORE pushing the apply-spec is the reliable guard.
+- "Redesign the page" meant the page IN PLACE — not a separate page, not an embed, not a redirect.
+  Three iterations were burned learning this; don't repeat it.
+- `import_run.file_hash` dedup: a file that was ever APPLIED will stage as `already_processed`.
+  Use a fresh export to demo.
+- Old client fns `previewImport`/`applyImport` and server fn `apiCrewImport` are now dead code —
+  optional cleanup.
 
 ## Carry-over
 - [ ] Make `cims-hr-console` repo PRIVATE (governance; ~Aug 27 reminder).
 - [ ] Optionally restrict `/apply` to MONEY_USERS at the worker gate.
-- [ ] (Optional) Stand up real staging auth (seed users + login email/secret) to make staging a
-      usable interactive test env. Miguel + Rita already seeded into staging `users`.
+- [ ] Staging auth (users seeded; login email/secret config still missing) if a real test env is wanted.
