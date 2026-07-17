@@ -2309,6 +2309,36 @@ details.ddwrap>summary{padding:6px 0}
 .kbrow .ka{font-size:12px;color:var(--mut);cursor:pointer;flex:none;opacity:.7}
 .kbrow .ka:hover{opacity:1;color:var(--navy)}
 .kbfoot{margin-top:22px;color:var(--mut);font-size:11.5px;text-align:center}
+/* ---- Reports tab (v1: Management Reviews module, sample data; live API lands in v2) ---- */
+.rpthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 6px}
+.rpthead h2{font-size:19px;color:var(--navy);margin-right:auto}
+.pchip{font-size:12px;font-weight:700;padding:6px 13px;border-radius:20px;border:1px solid var(--line-2);background:#fff;color:var(--mut);cursor:pointer}
+.pchip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.mockband{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;color:#9A6614;background:#FBF2E0;border:1px solid #EAD9AE;border-radius:20px;padding:4px 12px;margin-bottom:12px}
+.kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:11px}
+.ktile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 11px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
+.ktile .kl{font-size:10.5px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.ktile .kv{font-family:'Outfit';font-size:26px;font-weight:800;color:var(--navy);line-height:1.15;margin-top:6px}
+.ktile .kv small{font-size:13px;color:var(--mut);font-weight:600}
+.kdelta{font-size:11.5px;font-weight:700;margin-left:7px;vertical-align:2px}
+.kdelta.up{color:var(--green-d)}.kdelta.dn{color:var(--red)}.kdelta.flat{color:var(--mut)}
+.ktile svg{display:block;margin-top:8px}
+.rblk{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
+.rgrid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px}
+.rblk h3{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);margin-bottom:12px;font-family:'Outfit'}
+.frow{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
+.frow .fl{width:88px;color:var(--mut);flex:none}
+.frow .fbar{flex:1;height:18px;background:#F1F4F8;border-radius:5px;overflow:hidden}
+.frow .fbar i{display:block;height:100%;border-radius:5px}
+.frow .fn{width:44px;text-align:right;font-weight:700;font-family:'Outfit';flex:none}
+.hwrap2{display:flex;align-items:flex-end;gap:10px;height:120px;padding:4px 2px 0}
+.hcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;justify-content:flex-end;height:100%}
+.hcol i{width:100%;max-width:52px;background:var(--royal);border-radius:5px 5px 0 0;display:block}
+.hcol.rlow i{background:var(--red)}
+.hcol b{font-family:'Outfit';font-size:12.5px}
+.hcol span{font-size:10.5px;color:var(--mut)}
+.ratebar{height:8px;background:#F1F4F8;border-radius:4px;overflow:hidden;min-width:70px;display:inline-block;vertical-align:middle}
+.ratebar i{display:block;height:100%;background:var(--green);border-radius:4px}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -2434,6 +2464,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
+    <button id=nav-reports onclick="show('reports')">Reports</button>
     <button id=nav-data onclick="show('data')">Data</button>
     <button id=nav-ask onclick="show('ask')">Ask Maria</button>
     <a class=out href="/api/auth/logout">Sign out</a>
@@ -2488,6 +2519,7 @@ async function show(tab){
   if(tab==='billing')return renderBilling();
   if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
+  if(tab==='reports')return renderReports();
   if(tab==='data'||tab==='settings')return renderData();
   if(tab==='ask')return renderAsk();
 }
@@ -2929,6 +2961,90 @@ function parseVesselFile(f){
 var NOCHG='margin-top:8px;padding:10px 12px;border-radius:8px;background:#F2F8EF;border-left:3px solid var(--green);color:var(--navy);font-weight:600';
 var BADBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FDF3F1;border-left:3px solid var(--red);color:var(--navy)';
 var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last name',status:'status',rank_observed:'rank',vessel_observed:'vessel',dob:'date of birth',province:'province',phone:'phone',email:'email',med_exp:'medical expiry',sirb_exp:'seaman-book expiry',pp_exp:'passport expiry',sch_exp:'Schengen expiry',usv_exp:'US-visa expiry'};
+// ===== Inline branded crew importer for the console Data tab (served form) =====
+// Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
+// Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
+// cart inline into #imp, using the console's existing brand (navy/green, Outfit/DM Sans).
+// No backticks and no dollar-brace interpolation and no quote nesting, so source == served JS.
+var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null;
+async function sha256buf(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
+function impEsc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":"&gt;";});}
+async function cimsStage(){
+  $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
+  var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
+  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"This exact file was already imported &mdash; nothing to do.":"Stage failed: "+impEsc(res.error))+'</div>';return;}
+  STAGE=res;DEC={};cimsRender();
+}
+function impSeg(key,def,a,b,la,lb){var cur=DEC[key]||def;return '<span class=impseg><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
+function impTag(txt,kind){return ' <span class="cchip '+kind+'">'+txt+'</span>';}
+function impDiff(lab,o,n,tag){return '<div style="margin-top:5px;font-size:13px"><span class=csub>'+impEsc(lab)+'</span> <span style="color:var(--mut);text-decoration:line-through">'+impEsc(o)+'</span> &rarr; <b style="color:var(--navy)">'+impEsc(n)+'</b>'+(tag||"")+'</div>';}
+function impCard(inner){return '<div class="card" style="margin:0 0 8px;border-left:3px solid var(--line-2);padding:11px 13px">'+inner+'</div>';}
+function cimsRender(){
+  var g=STAGE.review.groups,c=STAGE.review.counts,L="";
+  L+='<style>.impseg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-top:8px}.impb{border:0;background:#fff;padding:5px 12px;font:600 12.5px DM Sans;color:var(--mut);cursor:pointer}.impb+.impb{border-left:1px solid var(--line-2)}.impb.on{background:var(--navy);color:#fff}.impwho{font-weight:700;color:var(--navy);font-size:13.5px}.impid{color:var(--mut);font-weight:500;font-size:12px;margin-left:6px}</style>';
+  L+='<div style="display:grid;grid-template-columns:1fr 272px;gap:16px;align-items:start;margin-top:8px">';
+  L+='<div>';
+  L+='<div style="margin-bottom:6px"><b style="color:var(--navy)">'+STAGE.rows_seen+' crew read</b> <span class=csub>&middot; nothing saved yet</span></div>';
+  L+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
+    +'<span class="cchip amber">&#9875; '+c.ship_flag+' ship</span>'
+    +'<span class="cchip red">&#9679; '+(c.critical+c.override_conflict)+' need you</span>'
+    +'<span class="cchip ok">&#9677; '+c.cert+' certificates</span>'
+    +'<span class="cchip amber">&#65291; '+c.new+' new</span>'
+    +'<span class="cchip">&#128682; '+c.departed+' departed</span></div>';
+  if(g.ship_flag.length){L+='<div class=zlabel>Ship allocation &mdash; file disagrees with your board</div>';
+    g.ship_flag.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});}
+  if(g.override_conflict.length||g.critical.length){L+='<div class=zlabel>Needs your decision</div>';
+    g.override_conflict.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,impTag("your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file","Keep mine"));});
+    g.critical.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});}
+  if(g.cert.length){L+='<div class=zlabel>Certificate updates from TDG</div>';
+    g.cert.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,it.earlier?impTag("moved earlier","amber"):impTag("renewed","ok"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold"));});}
+  if(g.new.length){L+='<div class=zlabel>New crew</div>';
+    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=impwho>'+impEsc((f.first_name||"")+" "+(f.last_name||""))+'<span class=impid>'+impEsc(it.agency_id)+'</span></div><div style="margin-top:4px;font-size:13px"><b style="color:var(--navy)">'+impEsc(f.vessel_observed||"&mdash;")+'</b> <span class=csub>'+impEsc(f.rank_observed||f.status||"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});}
+  if(g.departed.length){L+='<div class=zlabel>Absent from this file</div>';
+    g.departed.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss"));});}
+  if(g.minor.length){L+='<div class=hint style="margin-top:8px">'+g.minor.length+' minor tidy-ups auto-applied (spelling, spacing)</div>';}
+  L+='</div>';
+  L+='<div id=impcart></div>';
+  L+='</div>';
+  $("#imp").innerHTML=L;
+  $("#imp").onclick=function(e){var b=e.target.closest?e.target.closest(".impb"):null;if(!b)return;DEC[b.getAttribute("data-k")]=b.getAttribute("data-v");var sib=b.parentNode.querySelectorAll(".impb");for(var i=0;i<sib.length;i++)sib[i].classList.toggle("on",sib[i].getAttribute("data-v")===b.getAttribute("data-v"));cimsCart();};
+  cimsCart();
+}
+function cimsCart(){
+  var g=STAGE.review.groups;function d(k,def){return DEC[k]||def;}
+  var certAcc=0;g.cert.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")certAcc++;});
+  var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")ovAcc++;else ovKeep++;});
+  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")crAcc++;else crKeep++;});
+  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
+  var minor=g.minor.length;
+  var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"flag")==="flag")shipFlag++;});
+  var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
+  var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
+  var rows="";
+  function li(name,sub,q,cls){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)"><div style="flex:1;font-size:13px;color:var(--navy);font-weight:600">'+name+'<div class=csub style="font-weight:400">'+sub+'</div></div><div style="font:700 12.5px DM Sans;color:'+cls+'">'+q+'</div></div>';}
+  if(g.cert.length)rows+=li("Certificates","medical, visas, SIRB",certAcc+" save","var(--green-d)");
+  if((g.override_conflict.length+g.critical.length)&&fieldSave)rows+=li("Field updates","status, contact",fieldSave+" save","var(--green-d)");
+  if(g.new.length)rows+=li("New crew","added to roster",newAdd+" save","var(--green-d)");
+  if(g.minor.length)rows+=li("Minor tidy-ups","spelling, spacing",minor+" save","var(--green-d)");
+  if(g.ship_flag.length)rows+=li("Ship flag","kept on your board",shipFlag+" held","var(--amber)");
+  if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=li("Your edits","kept as yours",(ovKeep+crKeep)+" held","var(--amber)");
+  if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
+  var H='<div class="card" style="margin:0;padding:0;overflow:hidden;position:sticky;top:12px">';
+  H+='<div style="background:var(--navy);color:#fff;padding:13px 15px"><div style="font-family:Outfit;font-weight:700">Ready to apply</div><div style="color:rgba(255,255,255,.65);font-size:12px;margin-top:2px">'+STAGE.rows_seen+' crew read'+(flags?" &middot; "+flags+" flagged":"")+'</div></div>';
+  H+='<div style="padding:4px 15px">'+rows+'</div>';
+  H+='<div style="padding:11px 15px;background:#F7F9FC;border-top:1px solid var(--line);border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy)"><span>Will save to roster</span><b style="color:var(--green-d)">'+willSave+'</b></div><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy);margin-top:2px"><span>Kept as yours</span><b style="color:var(--amber)">'+kept+'</b></div></div>';
+  H+='<div style="padding:13px 15px"><button class="btn green" style="width:100%" onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply '+willSave+' updates</button><button class="btn ghost" style="width:100%;margin-top:6px" onclick="setUploads()">Discard</button><div class=csub style="text-align:center;margin-top:8px">Nothing saved until you press Apply</div></div>';
+  H+='</div>';
+  $("#impcart").innerHTML=H;
+}
+async function cimsApply(){
+  var btn=$("#impcart")?$("#impcart").querySelector(".btn.green"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
+  var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
+  var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
+  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
+  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged. Nothing else was touched.</div>';
+  STAGE=null;DEC={};IMPROWS=null;
+}
 // ===== Inline branded crew importer for the console Data tab (served form) =====
 // Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
 // Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
@@ -3732,6 +3848,132 @@ function lineSVG(pts){
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
 function legendH(segs){return '<div class=legend>'+segs.filter(function(s){return (s.value||0)>0;}).map(function(s){return '<span><i style="background:'+s.color+'"></i>'+s.label+' '+s.value+'</span>';}).join('')+'</div>';}
+// ============================== REPORTS TAB (v1) ==============================
+// Module 1: Management Reviews (SBM). SAMPLE DATA ONLY — the pipeline is not live
+// (sbm_enabled=false, zero rows). RPT_MOCK mirrors the exact payload shape a future
+// GET /api/reports/sbm?period=… must return, so v2 swaps one line (the fetch) and
+// deletes the mock — no markup changes. All aggregation stays server-side in v2.
+var RPT_P='YTD';
+var RPT_MOCK={
+ kpi:{
+  responseRate:{v:'68',u:'%',d:'+6',spark:[52,55,61,58,63,66,68]},
+  avgRating:{v:'4.2',u:'/5',d:'+0.1',spark:[3.9,4.0,4.1,4.0,4.2,4.1,4.2]},
+  openInvites:{v:'7',u:'',d:'-2',spark:[12,10,11,9,8,9,7]},
+  below3:{v:'2',u:'',d:'+1',dBad:true,spark:[0,1,0,0,1,1,2]},
+  medianDays:{v:'2.4',u:'d',d:'-0.3',spark:[3.4,3.1,3.0,2.8,2.7,2.5,2.4]},
+  coverage:{v:'81',u:'%',d:'+4',spark:[64,68,71,74,76,79,81]}
+ },
+ funnel:[
+  {l:'Invited',n:124,c:'#1E6FD0',pct:100},
+  {l:'Reminded',n:41,c:'#7FA8D9',pct:33},
+  {l:'Submitted',n:84,c:'#5FB946',pct:68},
+  {l:'Expired',n:32,c:'#C7CFDA',pct:26},
+  {l:'Suppressed',n:8,c:'#C7CFDA',pct:6}
+ ],
+ dist:[{r:1,n:1},{r:2,n:1},{r:3,n:15},{r:4,n:40},{r:5,n:27}],
+ brands:[
+  {b:'Royal Caribbean',n:61,avg:'4.2'},
+  {b:'Celebrity',n:17,avg:'4.0'},
+  {b:'Azamara',n:6,avg:'4.5'}
+ ],
+ trend:[{x:'Feb',y:4.0},{x:'Mar',y:4.1},{x:'Apr',y:4.0},{x:'May',y:4.2},{x:'Jun',y:4.1},{x:'Jul',y:4.2}],
+ board:[
+  {name:'M. K. R. Murillo',ship:'Navigator',n:3,avg:'4.7'},
+  {name:'J. P. Santos',ship:'Wonder',n:4,avg:'4.5'},
+  {name:'A. Reyes',ship:'Apex',n:2,avg:'4.5'},
+  {name:'R. D. Cruz',ship:'Icon',n:3,avg:'4.3'},
+  {name:'L. Fernandez',ship:'Quest',n:2,avg:'4.0'},
+  {name:'C. Bautista',ship:'Allure',n:3,avg:'3.7'}
+ ],
+ watch:[
+  {name:'E. Villanueva',ship:'Symphony',rating:2,date:'2026-06-28',note:'freeze gate — sEval 0/15, review before commit'},
+  {name:'D. Ocampo',ship:'Eclipse',rating:2,date:'2026-05-14',note:'freeze gate — resolved by Rita 2026-05-20'}
+ ],
+ ships:[
+  {ship:'Navigator',brand:'Royal',sent:6,ans:6,rate:100},
+  {ship:'Wonder',brand:'Royal',sent:7,ans:6,rate:86},
+  {ship:'Icon',brand:'Royal',sent:5,ans:4,rate:80},
+  {ship:'Apex',brand:'Celebrity',sent:4,ans:3,rate:75},
+  {ship:'Quest',brand:'Azamara',sent:3,ans:2,rate:67},
+  {ship:'Allure',brand:'Royal',sent:6,ans:3,rate:50},
+  {ship:'Symphony',brand:'Royal',sent:5,ans:2,rate:40},
+  {ship:'Eclipse',brand:'Celebrity',sent:4,ans:0,rate:0}
+ ],
+ latest:[
+  {date:'2026-07-08',crew:'M. K. R. Murillo',ship:'Navigator',brand:'Royal',rating:4},
+  {date:'2026-07-05',crew:'J. P. Santos',ship:'Wonder',brand:'Royal',rating:5},
+  {date:'2026-07-01',crew:'A. Reyes',ship:'Apex',brand:'Celebrity',rating:4},
+  {date:'2026-06-28',crew:'E. Villanueva',ship:'Symphony',brand:'Royal',rating:2},
+  {date:'2026-06-24',crew:'R. D. Cruz',ship:'Icon',brand:'Royal',rating:4},
+  {date:'2026-06-20',crew:'L. Fernandez',ship:'Quest',brand:'Azamara',rating:5}
+ ]
+};
+function rspark(arr,color){
+  var w=120,h=30,mn=Math.min.apply(null,arr),mx=Math.max.apply(null,arr),sp=(mx-mn)||1;
+  var pts=arr.map(function(v,i){return (i*(w/(arr.length-1))).toFixed(1)+','+(h-3-((v-mn)/sp)*(h-8)).toFixed(1);}).join(' ');
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" preserveAspectRatio="none"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round"></polyline></svg>';
+}
+function rpset(p){RPT_P=p;renderReports();}
+function rtrend(pts,ymin,ymax){
+  var w=320,h=130,pad=26,n=pts.length,dx=(w-pad*2)/Math.max(1,n-1),sp=(ymax-ymin)||1;
+  var co=pts.map(function(p,i){return [pad+i*dx,h-pad-((p.y-ymin)/sp)*(h-pad*2)];});
+  var path=co.map(function(c,i){return (i?'L':'M')+c[0].toFixed(1)+' '+c[1].toFixed(1);}).join(' ');
+  var area=path+' L'+co[n-1][0].toFixed(1)+' '+(h-pad)+' L'+co[0][0].toFixed(1)+' '+(h-pad)+' Z';
+  var dots=co.map(function(c,i){return '<circle cx="'+c[0].toFixed(1)+'" cy="'+c[1].toFixed(1)+'" r="2.6" fill="#1E6FD0"></circle><text x="'+c[0].toFixed(1)+'" y="'+(c[1]-8).toFixed(1)+'" text-anchor="middle" font-size="9" font-weight="700" fill="#1B3A5C">'+pts[i].y.toFixed(1)+'</text>';}).join('');
+  var labs=pts.map(function(p,i){return '<text x="'+co[i][0].toFixed(1)+'" y="'+(h-7)+'" text-anchor="middle" font-size="8" fill="#6B7C93">'+p.x+'</text>';}).join('');
+  var gate=h-pad-((3-ymin)/sp)*(h-pad*2);
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><line x1="'+pad+'" y1="'+gate.toFixed(1)+'" x2="'+(w-pad)+'" y2="'+gate.toFixed(1)+'" stroke="#BC3B2C" stroke-width="1" stroke-dasharray="4 4" opacity=".55"></line><text x="'+(w-pad)+'" y="'+(gate-4).toFixed(1)+'" text-anchor="end" font-size="8" fill="#BC3B2C">freeze gate (3.0)</text><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
+}
+function renderReports(){
+  var d=RPT_MOCK;
+  var h='<div class=rpthead><h2>Reports · Management Reviews</h2>'
+   +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
+   +'</div>'
+   +'<div class=mockband>◈ SAMPLE DATA — the review pipeline is not live yet (invites off, 0 responses). Numbers are illustrative; the layout is the contract.</div>';
+  // ---- KPI strip
+  var KL=[['responseRate','Response rate','#3E8E2A'],['avgRating','Avg rating','#1E6FD0'],['openInvites','Open invites','#1E6FD0'],['below3','Below-3 ratings','#BC3B2C'],['medianDays','Median reply time','#1E6FD0'],['coverage','Contract coverage','#3E8E2A']];
+  h+='<div class=kgrid>'+KL.map(function(k){
+    var t=d.kpi[k[0]];var neg=t.d.charAt(0)==='-';
+    var good=t.dBad?neg:!neg;var cls=t.d==='0'?'flat':(good?'up':'dn');
+    var arrow=neg?'▼':'▲';
+    return '<div class=ktile><div class=kl>'+k[1]+'</div><div class=kv>'+t.v+'<small>'+t.u+'</small><span class="kdelta '+cls+'">'+arrow+' '+t.d.replace('-','').replace('+','')+'</span></div>'+rspark(t.spark,k[2])+'</div>';
+  }).join('')+'</div>';
+  // ---- Funnel + distribution
+  h+='<div class=rgrid2>';
+  h+='<div class=rblk><h3>Invite funnel · '+RPT_P+'</h3>'+d.funnel.map(function(f){
+    return '<div class=frow><span class=fl>'+f.l+'</span><span class=fbar><i style="width:'+f.pct+'%;background:'+f.c+'"></i></span><span class=fn>'+f.n+'</span></div>';
+  }).join('')+'<div class=csub style="margin-top:8px">Leakage = expired + suppressed. Reminders go only to unanswered invites at T−4.</div></div>';
+  var dmax=Math.max.apply(null,d.dist.map(function(x){return x.n;}));
+  h+='<div class=rblk><h3>Rating distribution</h3><div class=hwrap2>'+d.dist.map(function(x){
+    return '<div class="hcol'+(x.r<3?' rlow':'')+'"><b>'+x.n+'</b><i style="height:'+Math.max(4,Math.round(x.n/dmax*82))+'%"></i><span>'+x.r+'</span></div>';
+  }).join('')+'</div><div class=csub style="margin-top:10px">'+d.brands.map(function(b){return b.b+' <b>'+b.avg+'</b> ('+b.n+')';}).join(' · ')+'</div></div>';
+  h+='</div>';
+  // ---- Trend + specialist board
+  h+='<div class=rgrid2>';
+  h+='<div class=rblk><h3>Average rating trend</h3>'+rtrend(d.trend,2.8,5)+'</div>';
+  h+='<div class=rblk><h3>Specialist board · min 2 reviews</h3><table class=tbl><thead><tr><th>Specialist</th><th>Ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
+   +d.board.map(function(b){var col=parseFloat(b.avg)>=4.5?'var(--green-d)':(parseFloat(b.avg)<4?'var(--amber)':'var(--navy)');
+     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg+'</td></tr>';}).join('')
+   +'</tbody></table></div>';
+  h+='</div>';
+  // ---- Watchlist
+  h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist · ratings below 3</h3>'
+   +d.watch.map(function(x){return '<div class=frow><span style="font-weight:700;min-width:130px">'+x.name+'</span><span class=csub>'+x.ship+' · '+x.date+' · rated <b style="color:var(--red)">'+x.rating+'/5</b> · '+x.note+'</span></div>';}).join('')
+   +'</div>';
+  // ---- GSM engagement + latest
+  h+='<div class=rgrid2>';
+  h+='<div class=rblk><h3>GSM engagement by ship</h3><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Sent</th><th>Answered</th><th>Rate</th></tr></thead><tbody>'
+   +d.ships.map(function(s){var bc=s.rate>=75?'var(--green)':(s.rate>=40?'#B0741A':'var(--red)');
+     return '<tr><td>'+s.ship+'</td><td>'+s.brand+'</td><td>'+s.sent+'</td><td>'+s.ans+'</td><td><span class=ratebar style="width:70px"><i style="width:'+s.rate+'%;background:'+bc+'"></i></span> <b>'+s.rate+'%</b></td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">Client-relationship signal: a ship that never answers is a conversation for the account call, not a crew problem.</div></div>';
+  h+='<div class=rblk><h3>Latest responses</h3><table class=tbl><thead><tr><th>Date</th><th>Specialist</th><th>Ship</th><th>Rating</th></tr></thead><tbody>'
+   +d.latest.map(function(r){var col=r.rating<3?'var(--red)':'var(--navy)';
+     return '<tr><td>'+r.date+'</td><td>'+r.crew+'</td><td>'+r.ship+' · '+r.brand+'</td><td style="font-weight:800;color:'+col+'">'+r.rating+'/5</td></tr>';}).join('')
+   +'</tbody></table></div>';
+  h+='</div>';
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Reports v1 · module: Management Reviews. Next modules on this tab: Bonus &amp; Money, Manpower, Travel Spend, Logistics. Period chips re-render now and bind to the live API in v2.</div>';
+  $('#view').innerHTML=h;
+}
 var DASH=null,DASH_SH=false;
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
