@@ -2379,6 +2379,7 @@ details.ddwrap>summary{padding:6px 0}
 .pchip{font-size:12px;font-weight:700;padding:6px 13px;border-radius:20px;border:1px solid var(--line-2);background:#fff;color:var(--mut);cursor:pointer}
 .pchip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .mockband{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;color:#9A6614;background:#FBF2E0;border:1px solid #EAD9AE;border-radius:20px;padding:4px 12px;margin-bottom:12px}
+.liveband{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;color:#3E8E2A;background:#EAF6E4;border:1px solid #CDE8C1;border-radius:20px;padding:4px 12px;margin-bottom:12px}
 .kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:11px}
 .ktile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 11px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
 .ktile .kl{font-size:10.5px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
@@ -3726,61 +3727,41 @@ function lineSVG(pts){
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
 function legendH(segs){return '<div class=legend>'+segs.filter(function(s){return (s.value||0)>0;}).map(function(s){return '<span><i style="background:'+s.color+'"></i>'+s.label+' '+s.value+'</span>';}).join('')+'</div>';}
-var RPT_P='YTD';
-var RPT_MOCK={
- kpi:{
-  responseRate:{v:'68',u:'%',d:'+6',spark:[52,55,61,58,63,66,68]},
-  avgRating:{v:'4.2',u:'/5',d:'+0.1',spark:[3.9,4.0,4.1,4.0,4.2,4.1,4.2]},
-  openInvites:{v:'7',u:'',d:'-2',spark:[12,10,11,9,8,9,7]},
-  below3:{v:'2',u:'',d:'+1',dBad:true,spark:[0,1,0,0,1,1,2]},
-  medianDays:{v:'2.4',u:'d',d:'-0.3',spark:[3.4,3.1,3.0,2.8,2.7,2.5,2.4]},
-  coverage:{v:'81',u:'%',d:'+4',spark:[64,68,71,74,76,79,81]}
- },
- funnel:[
-  {l:'Invited',n:124,c:'#1E6FD0',pct:100},
-  {l:'Reminded',n:41,c:'#7FA8D9',pct:33},
-  {l:'Submitted',n:84,c:'#5FB946',pct:68},
-  {l:'Expired',n:32,c:'#C7CFDA',pct:26},
-  {l:'Suppressed',n:8,c:'#C7CFDA',pct:6}
- ],
- dist:[{r:1,n:1},{r:2,n:1},{r:3,n:15},{r:4,n:40},{r:5,n:27}],
- brands:[
-  {b:'Royal Caribbean',n:61,avg:'4.2'},
-  {b:'Celebrity',n:17,avg:'4.0'},
-  {b:'Azamara',n:6,avg:'4.5'}
- ],
- trend:[{x:'Feb',y:4.0},{x:'Mar',y:4.1},{x:'Apr',y:4.0},{x:'May',y:4.2},{x:'Jun',y:4.1},{x:'Jul',y:4.2}],
- board:[
-  {name:'M. K. R. Murillo',ship:'Navigator',n:3,avg:'4.7'},
-  {name:'J. P. Santos',ship:'Wonder',n:4,avg:'4.5'},
-  {name:'A. Reyes',ship:'Apex',n:2,avg:'4.5'},
-  {name:'R. D. Cruz',ship:'Icon',n:3,avg:'4.3'},
-  {name:'L. Fernandez',ship:'Quest',n:2,avg:'4.0'},
-  {name:'C. Bautista',ship:'Allure',n:3,avg:'3.7'}
- ],
- watch:[
-  {name:'E. Villanueva',ship:'Symphony',rating:2,date:'2026-06-28',note:'freeze gate — sEval 0/15, review before commit'},
-  {name:'D. Ocampo',ship:'Eclipse',rating:2,date:'2026-05-14',note:'freeze gate — resolved by Rita 2026-05-20'}
- ],
- ships:[
-  {ship:'Navigator',brand:'Royal',sent:6,ans:6,rate:100},
-  {ship:'Wonder',brand:'Royal',sent:7,ans:6,rate:86},
-  {ship:'Icon',brand:'Royal',sent:5,ans:4,rate:80},
-  {ship:'Apex',brand:'Celebrity',sent:4,ans:3,rate:75},
-  {ship:'Quest',brand:'Azamara',sent:3,ans:2,rate:67},
-  {ship:'Allure',brand:'Royal',sent:6,ans:3,rate:50},
-  {ship:'Symphony',brand:'Royal',sent:5,ans:2,rate:40},
-  {ship:'Eclipse',brand:'Celebrity',sent:4,ans:0,rate:0}
- ],
- latest:[
-  {date:'2026-07-08',crew:'M. K. R. Murillo',ship:'Navigator',brand:'Royal',rating:4},
-  {date:'2026-07-05',crew:'J. P. Santos',ship:'Wonder',brand:'Royal',rating:5},
-  {date:'2026-07-01',crew:'A. Reyes',ship:'Apex',brand:'Celebrity',rating:4},
-  {date:'2026-06-28',crew:'E. Villanueva',ship:'Symphony',brand:'Royal',rating:2},
-  {date:'2026-06-24',crew:'R. D. Cruz',ship:'Icon',brand:'Royal',rating:4},
-  {date:'2026-06-20',crew:'L. Fernandez',ship:'Quest',brand:'Azamara',rating:5}
- ]
-};
+var RPT_P='All';
+// REAL DATA: 37 GSM reviews imported from the legacy MS Forms survey
+// "Crew Feedback Survey - Royal Caribbean Printer Specialist" (Jun 2025 - Jul 2026).
+// One explicit test response excluded. Names normalized ("Last, First" -> "First Last",
+// trailing crew-id suffixes stripped); spelling variants intentionally NOT merged.
+// Invite/funnel/response-rate metrics have no source until the CIMS-native pipeline
+// (sbm_enabled) goes live - the report shows only what this data can prove.
+var RPT_ROWS=[{d:'2025-06-02',s:'Navigator',n:'Maria Katrina Rica Murillo',r:4},{d:'2025-06-05',s:'Radiance',n:'John Sarmiento',r:4},{d:'2025-06-18',s:'Liberty',n:'Mario Lazo',r:4},{d:'2025-06-30',s:'Liberty',n:'Mario Lazo',r:5},{d:'2025-08-14',s:'Spectrum',n:'Ohji Miranda',r:4},{d:'2025-09-02',s:'Grandeur',n:'Norman Osorio',r:4},{d:'2025-09-16',s:'Anthem',n:'Anthony Rey Batadlan',r:4},{d:'2025-09-17',s:'Allure',n:'Raymond',r:3},{d:'2025-10-18',s:'Harmony',n:'King Manzano',r:4},{d:'2025-10-21',s:'Enchantment',n:'Jim Olid',r:4},{d:'2025-10-24',s:'Rhapsody',n:'Jonathan Alonzo',r:4},{d:'2025-10-31',s:'Enchantment',n:'Jim Olid',r:4},{d:'2025-11-14',s:'Odyssey',n:'Ryan Marto',r:4},{d:'2025-11-30',s:'Mariner',n:'Edward Guazon',r:4},{d:'2025-12-01',s:'Spectrum',n:'Mark Joseph Dela Rosa',r:4},{d:'2025-12-02',s:'Icon',n:'Rommel Mandrinico',r:4},{d:'2025-12-04',s:'Radiance',n:'Azariah Asim',r:4},{d:'2025-12-04',s:'Serenade',n:'Estandian Sharene',r:5},{d:'2026-01-16',s:'Quantum',n:'Jeremy Padilla',r:3},{d:'2026-01-31',s:'Liberty',n:'Christjhelen Racho',r:5},{d:'2026-02-05',s:'Grandeur',n:'Jerome Valdesco',r:3},{d:'2026-02-06',s:'Navigator',n:'Andrew Lorono',r:4},{d:'2026-02-15',s:'Utopia',n:'Baris',r:4},{d:'2026-02-28',s:'Oasis',n:'Jim Olid',r:3},{d:'2026-03-01',s:'Radiance',n:'Raymond Villacortes',r:3},{d:'2026-03-04',s:'Star',n:'Sherry Gibas',r:5},{d:'2026-03-05',s:'Symphony',n:'King Manzano',r:5},{d:'2026-03-15',s:'Anthem',n:'John Sarmiento',r:4},{d:'2026-04-08',s:'Voyager',n:'Cherry Gayda',r:4},{d:'2026-04-18',s:'Allure',n:'Mario Lazo',r:4},{d:'2026-04-18',s:'Harmony',n:'Jomar Mangulabnan',r:4},{d:'2026-06-01',s:'Mariner',n:'Jeadrig Tuazon',r:4},{d:'2026-06-01',s:'Explorer',n:'Haziel Caag',r:4},{d:'2026-06-04',s:'Icon',n:'Zandro Espenilla',r:4},{d:'2026-06-05',s:'Enchantment',n:'Ryan Lumanglas',r:5},{d:'2026-06-06',s:'Utopia',n:'Rommel Madrinico',r:4},{d:'2026-07-15',s:'Independence',n:'Janet Magana',r:5}];
+function rptCut(p,ref){
+  var d=new Date(ref.getTime());
+  if(p==='7D'){d.setDate(d.getDate()-7);return d;}
+  if(p==='30D'){d.setDate(d.getDate()-30);return d;}
+  if(p==='QTD'){d.setMonth(Math.floor(d.getMonth()/3)*3,1);d.setHours(0,0,0,0);return d;}
+  if(p==='YTD'){d.setMonth(0,1);d.setHours(0,0,0,0);return d;}
+  return null;
+}
+function rptFilter(p){
+  var now=new Date(),cut=rptCut(p,now);
+  if(!cut)return RPT_ROWS.slice();
+  return RPT_ROWS.filter(function(x){return new Date(x.d)>=cut;});
+}
+function rptPrev(p){
+  var now=new Date(),cut=rptCut(p,now);
+  if(!cut)return [];
+  var span=now.getTime()-cut.getTime(),from=new Date(cut.getTime()-span);
+  return RPT_ROWS.filter(function(x){var t=new Date(x.d);return t>=from&&t<cut;});
+}
+function rptAvg(rows){var s=0;rows.forEach(function(x){s+=x.r;});return rows.length?s/rows.length:0;}
+function rptMonths(rows){
+  var m={},keys=[];
+  rows.forEach(function(x){var k=x.d.slice(0,7);if(!m[k]){m[k]=[];keys.push(k);}m[k].push(x.r);});
+  keys.sort();
+  return keys.map(function(k){var v=m[k],s=v.reduce(function(a,b){return a+b;},0);var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(k.slice(5,7),10)-1];
+    return {k:k,x:mo+' '+k.slice(2,4),n:v.length,avg:s/v.length,five:v.filter(function(r){return r===5;}).length,low:v.filter(function(r){return r<3;}).length};});
+}
 function rspark(arr,color){
   var w=120,h=30,mn=Math.min.apply(null,arr),mx=Math.max.apply(null,arr),sp=(mx-mn)||1;
   var pts=arr.map(function(v,i){return (i*(w/(arr.length-1))).toFixed(1)+','+(h-3-((v-mn)/sp)*(h-8)).toFixed(1);}).join(' ');
@@ -3836,53 +3817,89 @@ function rtrend(pts,ymin,ymax){
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><line x1="'+pad+'" y1="'+gate.toFixed(1)+'" x2="'+(w-pad)+'" y2="'+gate.toFixed(1)+'" stroke="#BC3B2C" stroke-width="1" stroke-dasharray="4 4" opacity=".55"></line><text x="'+(w-pad)+'" y="'+(gate-4).toFixed(1)+'" text-anchor="end" font-size="8" fill="#BC3B2C">freeze gate (3.0)</text><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
 function rptSbm(){
-  var d=RPT_MOCK;
+  var rows=rptFilter(RPT_P),prev=rptPrev(RPT_P),mo=rptMonths(rows);
+  var n=rows.length,avg=rptAvg(rows),five=rows.filter(function(x){return x.r===5;}).length,
+      low=rows.filter(function(x){return x.r<3;}).length,
+      ships={},specs={};
+  rows.forEach(function(x){ships[x.s]=ships[x.s]||[];ships[x.s].push(x);specs[x.n]=specs[x.n]||[];specs[x.n].push(x);});
+  var shipN=Object.keys(ships).length,specN=Object.keys(specs).length;
+  function delta(cur,pv,dec,bad){
+    if(!prev.length)return '<span class="kdelta flat">&mdash;</span>';
+    var df=cur-pv;if(Math.abs(df)<(dec?0.05:0.5))return '<span class="kdelta flat">&#9644; 0</span>';
+    var up=df>0,good=bad?!up:up;
+    return '<span class="kdelta '+(good?'up':'dn')+'">'+(up?'&#9650;':'&#9660;')+' '+(dec?Math.abs(df).toFixed(1):Math.round(Math.abs(df)))+'</span>';
+  }
+  var pAvg=rptAvg(prev),pFive=prev.filter(function(x){return x.r===5;}).length,pLow=prev.filter(function(x){return x.r<3;}).length;
+  var pShips={};prev.forEach(function(x){pShips[x.s]=1;});
+  var pSpecs={};prev.forEach(function(x){pSpecs[x.n]=1;});
   var h='<div class=rpthead><h2>Shipboard Feedback</h2>'
    +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
    +'</div>'
-   +'<div class=mockband>◈ SAMPLE DATA — the review pipeline is not live yet (invites off, 0 responses). Numbers are illustrative; the layout is the contract.</div>';
-  // ---- KPI strip
-  var KL=[['responseRate','Response rate','#3E8E2A'],['avgRating','Avg rating','#1E6FD0'],['openInvites','Open invites','#1E6FD0'],['below3','Below-3 ratings','#BC3B2C'],['medianDays','Median reply time','#1E6FD0'],['coverage','Contract coverage','#3E8E2A']];
-  h+='<div class=kgrid>'+KL.map(function(k){
-    var t=d.kpi[k[0]];var neg=t.d.charAt(0)==='-';
-    var good=t.dBad?neg:!neg;var cls=t.d==='0'?'flat':(good?'up':'dn');
-    var arrow=neg?'▼':'▲';
-    return '<div class=ktile><div class=kl>'+k[1]+'</div><div class=kv>'+t.v+'<small>'+t.u+'</small><span class="kdelta '+cls+'">'+arrow+' '+t.d.replace('-','').replace('+','')+'</span></div>'+rspark(t.spark,k[2])+'</div>';
-  }).join('')+'</div>';
-  // ---- Funnel + distribution
+   +'<div class=liveband>&#9679; LIVE DATA &mdash; '+RPT_ROWS.length+' GSM reviews imported from the legacy MS Forms survey (Jun 2025 &ndash; Jul 2026, Royal Caribbean). 1 test response excluded. Invite &amp; response-rate metrics arrive when the CIMS-native pipeline goes live.</div>';
+  if(!n){
+    h+='<div class=rblk><div class=csub style="padding:14px 4px">No reviews in this period. Widen the range &mdash; the imported history starts June 2025.</div></div>';
+    $('#rptbody').innerHTML=h;return;
+  }
+  // ---- KPI strip (only metrics this data can prove)
+  var sparkN=mo.map(function(x){return x.n;}),sparkA=mo.map(function(x){return x.avg;}),sparkF=mo.map(function(x){return x.five;});
+  if(sparkN.length<2){sparkN=[0].concat(sparkN);sparkA=[sparkA[0]||0].concat(sparkA);sparkF=[0].concat(sparkF);}
+  h+='<div class=kgrid>'
+   +'<div class=ktile><div class=kl>Reviews</div><div class=kv>'+n+delta(n,prev.length)+'</div>'+rspark(sparkN,'#1E6FD0')+'</div>'
+   +'<div class=ktile><div class=kl>Avg rating</div><div class=kv>'+avg.toFixed(2)+'<small>/5</small>'+delta(avg,pAvg,true)+'</div>'+rspark(sparkA,'#1E6FD0')+'</div>'
+   +'<div class=ktile><div class=kl>5-star reviews</div><div class=kv>'+five+delta(five,pFive)+'</div>'+rspark(sparkF,'#3E8E2A')+'</div>'
+   +'<div class=ktile><div class=kl>Below-3 ratings</div><div class=kv>'+low+delta(low,pLow,false,true)+'</div>'+rspark(mo.map(function(x){return x.low;}).length>1?mo.map(function(x){return x.low;}):[0,low],'#BC3B2C')+'</div>'
+   +'<div class=ktile><div class=kl>Ships covered</div><div class=kv>'+shipN+delta(shipN,Object.keys(pShips).length)+'</div><div class=csub style="margin-top:8px">of 26 Royal Caribbean</div></div>'
+   +'<div class=ktile><div class=kl>Specialists reviewed</div><div class=kv>'+specN+delta(specN,Object.keys(pSpecs).length)+'</div><div class=csub style="margin-top:8px">distinct names on file</div></div>'
+   +'</div>';
+  // ---- Monthly volume + distribution
   h+='<div class=rgrid2>';
-  h+='<div class=rblk><h3>Invite funnel · '+RPT_P+'</h3>'+d.funnel.map(function(f){
-    return '<div class=frow><span class=fl>'+f.l+'</span><span class=fbar><i style="width:'+f.pct+'%;background:'+f.c+'"></i></span><span class=fn>'+f.n+'</span></div>';
-  }).join('')+'<div class=csub style="margin-top:8px">Leakage = expired + suppressed. Reminders go only to unanswered invites at T−4.</div></div>';
-  var dmax=Math.max.apply(null,d.dist.map(function(x){return x.n;}));
-  h+='<div class=rblk><h3>Rating distribution</h3><div class=hwrap2>'+d.dist.map(function(x){
+  var vmax=1;mo.forEach(function(x){if(x.n>vmax)vmax=x.n;});
+  h+='<div class=rblk><h3>Reviews per month</h3>'+mo.map(function(x){
+    return '<div class=frow><span class=fl>'+x.x+'</span><span class=fbar><i style="width:'+Math.round(x.n/vmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+x.n+'</span></div>';
+  }).join('')+'<div class=csub style="margin-top:8px">Volume follows sign-off dates &mdash; the invite funnel appears here once the CIMS pipeline is live.</div></div>';
+  var dist=[1,2,3,4,5].map(function(rr){return {r:rr,n:rows.filter(function(x){return x.r===rr;}).length};});
+  var dmax=1;dist.forEach(function(x){if(x.n>dmax)dmax=x.n;});
+  h+='<div class=rblk><h3>Rating distribution</h3><div class=hwrap2>'+dist.map(function(x){
     return '<div class="hcol'+(x.r<3?' rlow':'')+'"><b>'+x.n+'</b><i style="height:'+Math.max(4,Math.round(x.n/dmax*82))+'%"></i><span>'+x.r+'</span></div>';
-  }).join('')+'</div><div class=csub style="margin-top:10px">'+d.brands.map(function(b){return b.b+' <b>'+b.avg+'</b> ('+b.n+')';}).join(' · ')+'</div></div>';
+  }).join('')+'</div><div class=csub style="margin-top:10px">Royal Caribbean <b>'+avg.toFixed(2)+'</b> ('+n+') &middot; Celebrity &amp; Azamara start with the CIMS-native pipeline</div></div>';
   h+='</div>';
   // ---- Trend + specialist board
   h+='<div class=rgrid2>';
-  h+='<div class=rblk><h3>Average rating trend</h3>'+rtrend(d.trend,2.8,5)+'</div>';
-  h+='<div class=rblk><h3>Specialist board · min 2 reviews</h3><table class=tbl><thead><tr><th>Specialist</th><th>Ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
-   +d.board.map(function(b){var col=parseFloat(b.avg)>=4.5?'var(--green-d)':(parseFloat(b.avg)<4?'var(--amber)':'var(--navy)');
-     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg+'</td></tr>';}).join('')
-   +'</tbody></table></div>';
-  h+='</div>';
+  if(mo.length>=2)h+='<div class=rblk><h3>Average rating trend</h3>'+rtrend(mo.map(function(x){return {x:x.x,y:Math.round(x.avg*10)/10};}),2.8,5)+'</div>';
+  else h+='<div class=rblk><h3>Average rating trend</h3><div class=csub style="padding:12px 2px">Needs at least two months of data in the selected period.</div></div>';
+  var board=Object.keys(specs).map(function(k){var v=specs[k];return {name:k,n:v.length,avg:rptAvg(v),ship:v[v.length-1].s};})
+    .filter(function(b){return b.n>=2;}).sort(function(a,b){return b.avg-a.avg||b.n-a.n;});
+  h+='<div class=rblk><h3>Specialist board &middot; min 2 reviews</h3>';
+  if(board.length)h+='<table class=tbl><thead><tr><th>Specialist</th><th>Latest ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
+   +board.map(function(b){var col=b.avg>=4.5?'var(--green-d)':(b.avg<4?'var(--amber)':'var(--navy)');
+     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg.toFixed(1)+'</td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">Everyone else has one review so far &mdash; the board fills in as second contracts complete.</div>';
+  else h+='<div class=csub style="padding:12px 2px">No specialist has two reviews in this period yet.</div>';
+  h+='</div></div>';
   // ---- Watchlist
-  h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist · ratings below 3</h3>'
-   +d.watch.map(function(x){return '<div class=frow><span style="font-weight:700;min-width:130px">'+x.name+'</span><span class=csub>'+x.ship+' · '+x.date+' · rated <b style="color:var(--red)">'+x.rating+'/5</b> · '+x.note+'</span></div>';}).join('')
-   +'</div>';
-  // ---- GSM engagement + latest
+  var watch=rows.filter(function(x){return x.r<3;}).sort(function(a,b){return a.d<b.d?1:-1;});
+  if(watch.length){
+    h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist &middot; ratings below 3</h3>'
+     +watch.map(function(x){return '<div class=frow><span style="font-weight:700;min-width:130px">'+x.n+'</span><span class=csub>'+x.s+' &middot; '+x.d+' &middot; rated <b style="color:var(--red)">'+x.r+'/5</b> &middot; freeze gate &mdash; sEval 0/15 until reviewed</span></div>';}).join('')
+     +'</div>';
+  }else{
+    h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--green)"><h3 style="color:var(--green-d)">Watchlist &middot; ratings below 3</h3><div class=csub style="padding:4px 2px">Clear &mdash; no review in this period has triggered the freeze gate. Lowest rating on file is 3/5.</div></div>';
+  }
+  // ---- Ships + latest
   h+='<div class=rgrid2>';
-  h+='<div class=rblk><h3>GSM engagement by ship</h3><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Sent</th><th>Answered</th><th>Rate</th></tr></thead><tbody>'
-   +d.ships.map(function(s){var bc=s.rate>=75?'var(--green)':(s.rate>=40?'#B0741A':'var(--red)');
-     return '<tr><td>'+s.ship+'</td><td>'+s.brand+'</td><td>'+s.sent+'</td><td>'+s.ans+'</td><td><span class=ratebar style="width:70px"><i style="width:'+s.rate+'%;background:'+bc+'"></i></span> <b>'+s.rate+'%</b></td></tr>';}).join('')
-   +'</tbody></table><div class=csub style="margin-top:8px">Client-relationship signal: a ship that never answers is a conversation for the account call, not a crew problem.</div></div>';
-  h+='<div class=rblk><h3>Latest responses</h3><table class=tbl><thead><tr><th>Date</th><th>Specialist</th><th>Ship</th><th>Rating</th></tr></thead><tbody>'
-   +d.latest.map(function(r){var col=r.rating<3?'var(--red)':'var(--navy)';
-     return '<tr><td>'+r.date+'</td><td>'+r.crew+'</td><td>'+r.ship+' · '+r.brand+'</td><td style="font-weight:800;color:'+col+'">'+r.rating+'/5</td></tr>';}).join('')
+  var shipList=Object.keys(ships).map(function(k){var v=ships[k];return {ship:k,n:v.length,avg:rptAvg(v),last:v[v.length-1].d};})
+    .sort(function(a,b){return b.n-a.n||(a.ship<b.ship?-1:1);});
+  h+='<div class=rblk><h3>Reviews by ship</h3><table class=tbl><thead><tr><th>Ship</th><th>Reviews</th><th>Avg</th><th>Last review</th></tr></thead><tbody>'
+   +shipList.map(function(s){var col=s.avg>=4.5?'var(--green-d)':(s.avg<4?'var(--amber)':'var(--navy)');
+     return '<tr><td>'+s.ship+'</td><td>'+s.n+'</td><td style="font-weight:800;color:'+col+'">'+s.avg.toFixed(1)+'</td><td>'+s.last+'</td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">Ships with no row have never returned a survey &mdash; that gap becomes visible (and chaseable) once invites are tracked.</div></div>';
+  var latest=rows.slice().sort(function(a,b){return a.d<b.d?1:-1;}).slice(0,8);
+  h+='<div class=rblk><h3>Latest reviews</h3><table class=tbl><thead><tr><th>Date</th><th>Specialist</th><th>Ship</th><th>Rating</th></tr></thead><tbody>'
+   +latest.map(function(r){var col=r.r<3?'var(--red)':'var(--navy)';
+     return '<tr><td>'+r.d+'</td><td>'+r.n+'</td><td>'+r.s+'</td><td style="font-weight:800;color:'+col+'">'+r.r+'/5</td></tr>';}).join('')
    +'</tbody></table></div>';
   h+='</div>';
-  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback · GSM review analytics. Period chips re-render now and bind to the live API in v2.</div>';
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback &middot; live import of the legacy survey. Next: switch the source to the CIMS-native pipeline (adds invites, response rate, reminders, and per-brand coverage).</div>';
   $('#rptbody').innerHTML=h;
 }
 var DASH=null,DASH_SH=false;
