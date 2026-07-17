@@ -57,3 +57,52 @@ test("multi-word first name (Adrian Dexter Domingo)", () => {
   assert.equal(r.agency_id, "SC-3");
   assert.equal(r.confidence, "high");
 });
+
+// ---- v2: the "Resposo case" and forwarded-thread hygiene ----
+const roster2 = buildRoster([
+  { agency_id: "SC-0038129", first_name: "Michael Angelo", last_name: "Resposo", status: "On board" },
+  { agency_id: "SC-0038392", first_name: "Joemar", last_name: "De Leon", status: "On board" },
+  { agency_id: "SC-0038378", first_name: "Ohji", last_name: "Miranda", status: "Earmarked" },
+]);
+
+const FWD = [
+  "Team, employee: Michael Resposo has inventory discrepancies that must be corrected before sign-off.",
+  "",
+  "From: Michael Resposo <mr@ship.com>",
+  "To: Joemar De Leon <joemar.deleon@dg3.com>",
+  "Cc: Ray Guerra <rg@dg3.com>; Ohji Miranda <Ohji.Miranda@dg3.com>",
+  "Subject: RE: OPB Inventory Review",
+  "",
+  "Noted on the findings below. Will correct the OPB figures.",
+  "Michael Resposo",
+  "Printer Specialist, Celebrity Reflection",
+].join("\n");
+
+test("v2: forwarded thread files to the subject named in the fresh note (Resposo case)", () => {
+  const r = matchCrew(FWD, roster2);
+  assert.equal(r.agency_id, "SC-0038129");
+  assert.equal(r.confidence, "high");
+});
+
+test("v2: quoted To/Cc header names do not become candidates", () => {
+  const r = matchCrew(FWD, roster2);
+  assert.deepEqual(r.candidates, ["SC-0038129"]);
+});
+
+test("v2: compound first name matches on a single token (Michael Resposo)", () => {
+  const r = matchCrew("Michael Resposo missed the PM cycle on Reflection.", roster2);
+  assert.equal(r.agency_id, "SC-0038129");
+  assert.equal(r.confidence, "high");
+});
+
+test("v2: ambiguity still never auto-files, and includes surname hits in candidates", () => {
+  const two = buildRoster([
+    { agency_id: "SC-A", first_name: "Joemar", last_name: "De Leon" },
+    { agency_id: "SC-B", first_name: "Ohji", last_name: "Miranda" },
+    { agency_id: "SC-C", first_name: "Michael Angelo", last_name: "Resposo" },
+  ]);
+  const r = matchCrew("Joemar De Leon and Ohji Miranda discussed the case of Resposo.", two);
+  assert.equal(r.agency_id, null);
+  assert.equal(r.confidence, "low");
+  assert.ok(r.candidates.includes("SC-C"), "surname-only hit must appear on the review card");
+});
