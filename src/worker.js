@@ -3661,7 +3661,45 @@ function rspark(arr,color){
   var pts=arr.map(function(v,i){return (i*(w/(arr.length-1))).toFixed(1)+','+(h-3-((v-mn)/sp)*(h-8)).toFixed(1);}).join(' ');
   return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" preserveAspectRatio="none"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round"></polyline></svg>';
 }
-function rpset(p){RPT_P=p;renderReports();}
+function rpset(p){RPT_P=p;rptSbm();}
+// Reports shell: navy left sub-menu (same pattern as the Data tab), content on the
+// right. Each report is a menu entry; future modules (Bonus & Money, Manpower,
+// Travel Spend) slot in as new entries + one render function each.
+function renderReports(){
+  $('#view').innerHTML='<style>'
+   +'.dswrap{display:grid;grid-template-columns:238px 1fr;gap:0;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(20,45,72,.06)}'
+   +'.dsside{background:var(--navy);padding:22px 14px;display:flex;flex-direction:column;min-height:540px}'
+   +'.dsbrandrow{display:flex;align-items:center;gap:9px;padding:0 6px}'
+   +'.dswm{font-family:Outfit;font-size:24px;font-weight:800;color:#fff;letter-spacing:4px}'
+   +'.dsline{height:2px;background:var(--green);width:112px;border-radius:1px;margin:8px 6px 7px}'
+   +'.dssub{font-size:8px;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:2px;text-transform:uppercase;line-height:1.6;padding:0 6px 18px}'
+   +'.dsnav{display:block;width:100%;text-align:left;border:0;background:transparent;color:rgba(255,255,255,.72);font:600 14px DM Sans;padding:9px 11px;border-radius:8px;cursor:pointer;margin:1px 0}'
+   +'.dsside .dsnav:hover{background:rgba(255,255,255,.07);color:#fff}'
+   +'.dsside .dsnav.on{background:rgba(255,255,255,.13);color:#fff}'
+   +'.dsnav.soon{color:rgba(255,255,255,.32);cursor:default}'
+   +'.dsnav.soon:hover{background:transparent;color:rgba(255,255,255,.32)}'
+   +'.dsnav.soon small{font-size:9px;letter-spacing:.08em;text-transform:uppercase;opacity:.8;margin-left:6px}'
+   +'.dsdg3{margin-top:auto;padding:12px 8px 0;border-top:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);font-size:8px;letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;gap:8px}'
+   +'.dsdg3 b{color:var(--green);font-family:Outfit;font-size:13px;letter-spacing:2px}'
+   +'.dsmain{padding:22px 24px;min-width:0}'
+   +'</style>'
+   +'<div class=dswrap>'
+   +'<aside class=dsside>'
+     +'<div class=dsbrandrow><svg width=27 height=27 viewBox="0 0 34 34" fill="none"><rect x=4 y=2 width=20 height=26 rx=2 stroke="#5FB946" stroke-width=1.8 fill="none"/><rect x=10 y=8 width=20 height=26 rx=2 stroke="#5FB946" stroke-width=1.2 fill="none" opacity=0.3/><line x1=8 y1=10 x2=20 y2=10 stroke="#5FB946" stroke-width=1.2 opacity=0.6/><line x1=8 y1=14 x2=18 y2=14 stroke="#5FB946" stroke-width=1.2 opacity=0.4/><line x1=8 y1=18 x2=16 y2=18 stroke="#5FB946" stroke-width=1.2 opacity=0.25/></svg><span class=dswm>CIMS</span></div>'
+     +'<div class=dsline></div>'
+     +'<div class=dssub>Reports<br>Operational Intelligence</div>'
+     +'<button class="dsnav rptmenu on" data-rpt="sbm">Shipboard Feedback</button>'
+     +'<button class="dsnav soon" tabindex=-1>Bonus &amp; Money<small>soon</small></button>'
+     +'<button class="dsnav soon" tabindex=-1>Manpower<small>soon</small></button>'
+     +'<button class="dsnav soon" tabindex=-1>Travel Spend<small>soon</small></button>'
+     +'<div class=dsdg3>A division of <b>DG3</b></div>'
+   +'</aside>'
+   +'<div class=dsmain><div id=rptbody></div></div>'
+   +'</div>';
+  document.querySelectorAll('.rptmenu').forEach(function(b){b.onclick=function(){document.querySelectorAll('.rptmenu').forEach(function(x){x.classList.remove('on');});b.classList.add('on');rptShow(b.getAttribute('data-rpt'));};});
+  rptShow('sbm');
+}
+function rptShow(r){ if(r==='sbm')return rptSbm(); }
 function rtrend(pts,ymin,ymax){
   var w=320,h=130,pad=26,n=pts.length,dx=(w-pad*2)/Math.max(1,n-1),sp=(ymax-ymin)||1;
   var co=pts.map(function(p,i){return [pad+i*dx,h-pad-((p.y-ymin)/sp)*(h-pad*2)];});
@@ -3672,9 +3710,9 @@ function rtrend(pts,ymin,ymax){
   var gate=h-pad-((3-ymin)/sp)*(h-pad*2);
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><line x1="'+pad+'" y1="'+gate.toFixed(1)+'" x2="'+(w-pad)+'" y2="'+gate.toFixed(1)+'" stroke="#BC3B2C" stroke-width="1" stroke-dasharray="4 4" opacity=".55"></line><text x="'+(w-pad)+'" y="'+(gate-4).toFixed(1)+'" text-anchor="end" font-size="8" fill="#BC3B2C">freeze gate (3.0)</text><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
-function renderReports(){
+function rptSbm(){
   var d=RPT_MOCK;
-  var h='<div class=rpthead><h2>Reports · Management Reviews</h2>'
+  var h='<div class=rpthead><h2>Shipboard Feedback</h2>'
    +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
    +'</div>'
    +'<div class=mockband>◈ SAMPLE DATA — the review pipeline is not live yet (invites off, 0 responses). Numbers are illustrative; the layout is the contract.</div>';
@@ -3719,8 +3757,8 @@ function renderReports(){
      return '<tr><td>'+r.date+'</td><td>'+r.crew+'</td><td>'+r.ship+' · '+r.brand+'</td><td style="font-weight:800;color:'+col+'">'+r.rating+'/5</td></tr>';}).join('')
    +'</tbody></table></div>';
   h+='</div>';
-  h+='<div class=csub style="margin-top:14px;opacity:.75">Reports v1 · module: Management Reviews. Next modules on this tab: Bonus &amp; Money, Manpower, Travel Spend, Logistics. Period chips re-render now and bind to the live API in v2.</div>';
-  $('#view').innerHTML=h;
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback · GSM review analytics. Period chips re-render now and bind to the live API in v2.</div>';
+  $('#rptbody').innerHTML=h;
 }
 var DASH=null,DASH_SH=false;
 async function renderDashboard(){
