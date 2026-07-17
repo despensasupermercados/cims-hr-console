@@ -2697,22 +2697,40 @@ async function kbFlip(id,retire){
   kbList();
 }
 function setUploads(){
-  $('#setbody').innerHTML='<div class=zlabel>Data uploads</div>'
-   +'<div class="card" style="max-width:none;border-left:3px solid var(--navy)">'
-   +'<label class=csub>Data type</label><br>'
-   +'<select id=dstype style="margin:6px 0 14px"><option value="crew">Crew registry — AdvancedQuery (.xls / .xlsx)</option><option value="keyman">Keyman contracts — CIMS Keyman workbook (.xlsx)</option><option value="travel">Travel expenses — monthly workbook (.xls / .xlsx)</option><option value="vessel">Vessel deployment — Celebrity / RCCL + Azamara</option></select>'
-   +'<div id=dropzone style="border:2px dashed var(--line-2);border-radius:12px;padding:30px 18px;text-align:center;cursor:pointer">'
-     +'<div style="font-family:\\'Outfit\\';font-weight:700;color:var(--navy)">Drag &amp; drop a file, or click to choose</div>'
-     +'<div class=csub style="margin-top:4px">Excel from TDG · read in your browser</div></div>'
-   +'<div id=vesselframe style="display:none;margin-top:12px"></div>'+'<input type=file id=crewfile accept=".xls,.xlsx" style="display:none" onchange="handleDrop(this.files)">'
-   +'<div id=imp class=csub style="margin-top:12px"></div>'
-   +'<p class=muted style="text-align:left;margin-top:10px">Only the data types listed above are accepted — nothing else is read. You\\'ll see a preview before anything is saved, and bonus baselines are never affected.</p>'
-   +'</div>';
-  var dz=$('#dropzone'), fi=$('#crewfile');
+  $('#setbody').innerHTML='<style>'
+   +'#dz2{border:2px dashed var(--line-2);border-radius:12px;background:#fff;padding:36px 18px;text-align:center;color:var(--mut);cursor:pointer;transition:border-color .15s,background .15s}'
+   +'#dz2.over,#dz2:hover{border-color:var(--green);background:#F2F8EF}'
+   +'#dz2 b{display:block;font-family:Outfit;font-weight:700;font-size:15px;color:var(--navy);margin-bottom:3px}'
+   +'.upband{display:flex;align-items:center;gap:12px;margin-top:12px;border-radius:12px;padding:12px 15px}'
+   +'.upband.ok{background:#EAF5E4;border:1px solid #CDE8C1}'
+   +'.upband.warn{background:#FBF2E0;border:1px solid #EAD9AE}'
+   +'.upband .tk{width:26px;height:26px;border-radius:50%;color:#fff;display:grid;place-items:center;font-size:14px;flex:none}'
+   +'.upband.ok .tk{background:var(--green-d)}.upband.warn .tk{background:var(--amber)}'
+   +'.upband .t{font-family:Outfit;font-weight:700}'
+   +'.upband.ok .t{color:var(--green-d)}.upband.warn .t{color:var(--amber)}'
+   +'.upband .m{font-size:12px;opacity:.92}'
+   +'.upband.ok .m{color:var(--green-d)}.upband.warn .m{color:var(--amber)}'
+   +'.upband .fn{font-size:11.5px;color:var(--mut)}'
+   +'.upband .act{margin-left:auto;white-space:nowrap;display:flex;gap:6px;align-items:center}'
+   +'</style>'
+   +'<div class=csub style="font-size:12px;margin-bottom:2px">Data &middot; Uploads</div>'
+   +'<h2 style="font-family:Outfit;font-size:22px;font-weight:600;color:var(--navy);margin:0 0 4px">Upload data</h2>'
+   +'<div class=csub style="margin:0 0 16px;font-size:13px">Drop a file &mdash; we recognize it, then show you exactly what changes before anything is saved.</div>'
+   +'<div id=dz2><b>Drag &amp; drop a file, or click to choose</b>Excel from TDG &middot; read in your browser</div>'
+   +'<input type=file id=crewfile accept=".xls,.xlsx" style="display:none" onchange="handleDrop(this.files)">'
+   +'<div id=band></div>'
+   +'<div id=vesselframe style="display:none;margin-top:12px"></div>'
+   +'<div id=imp style="margin-top:12px"></div>'
+   +'<p class=csub style="margin-top:14px">Accepted: Crew registry (AdvancedQuery) &middot; Keyman contracts &middot; Travel expenses &middot; <a href="#" onclick="upVessel();return false" style="color:var(--navy)">Vessel deployment</a>. Nothing is saved without review, and bonus baselines are never affected.</p>';
+  var dz=$('#dz2'), fi=$('#crewfile');
   dz.onclick=function(){fi.click();};
-  dz.ondragover=function(e){e.preventDefault();dz.style.borderColor='var(--green)';dz.style.background='#F2F8EF';};
-  dz.ondragleave=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';};
-  dz.ondrop=function(e){e.preventDefault();dz.style.borderColor='var(--line-2)';dz.style.background='';handleDrop(e.dataTransfer.files);};var ds=$('#dstype'),vf=$('#vesselframe');function dstypeChanged(){if(ds.value==='vessel'){dz.style.display='none';if(vf){vf.innerHTML='<iframe src="/api/relief/deploy" title="loader" style="width:100%;height:680px;border:0;border-radius:12px;background:#fff"></iframe>';vf.style.display='';}}else{if(vf){vf.style.display='none';vf.innerHTML='';}dz.style.display=ds.value?'':'none';}}if(ds)ds.onchange=dstypeChanged;dstypeChanged();
+  dz.ondragover=function(e){e.preventDefault();dz.classList.add('over');};
+  dz.ondragleave=function(e){e.preventDefault();dz.classList.remove('over');};
+  dz.ondrop=function(e){e.preventDefault();dz.classList.remove('over');handleDrop(e.dataTransfer.files);};
+}
+function upVessel(){
+  var vf=$('#vesselframe');$('#band').innerHTML='';$('#imp').innerHTML='';
+  if(vf){vf.innerHTML='<iframe src="/api/relief/deploy" title="Vessel deployment loader" style="width:100%;height:680px;border:0;border-radius:12px;background:#fff"></iframe>';vf.style.display='';}
 }
 async function setSession(){
   var me={}; try{me=await (await fetch('/api/me')).json();}catch(e){}
@@ -2760,15 +2778,51 @@ function parseCrewFile(f){
     rd.readAsArrayBuffer(f);
   });
 }
+var PENDF=null;
+function upNorm(s){return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');}
+function upBand(label,score,total,f){
+  $('#band').innerHTML='<div class="upband ok"><span class=tk>&#10003;</span><div><div class=t>Recognized: '+label+'</div><div class=m>'+(total?(score+' / '+total+' signature columns matched &middot; auto-selected'):'auto-selected')+'</div><div class=fn>'+f.name+'</div></div><span class=act><a href="#" onclick="setUploads();return false" style="color:var(--green-d);font-size:12.5px">Not this? Start over</a></span></div>';
+}
+function upForce(k){
+  var f=PENDF;if(!f)return;
+  if(k===1){upBand('Crew registry &mdash; AdvancedQuery',0,0,f);parseCrewFile(f);}
+  else if(k===2){upBand('Keyman contracts',0,0,f);parseKeymanFile(f);}
+  else{upBand('Travel expenses',0,0,f);parseTravelFile(f);}
+}
 function handleDrop(files){
   var f=files&&files[0]; if(!f)return;
-  var t=$('#dstype')?$('#dstype').value:'crew';
-  if(t!=='crew'&&t!=='vessel'&&t!=='travel'&&t!=='keyman'){$('#imp').textContent='That data type is not enabled yet.';return;}
-  if(!/\\.(xls|xlsx)$/i.test(f.name)){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
-  if(t==='vessel')return;
-  if(t==='travel')return parseTravelFile(f);
-  if(t==='keyman')return parseKeymanFile(f);
-  parseCrewFile(f);
+  var nm=String(f.name).toLowerCase();
+  if(!(nm.slice(-4)==='.xls'||nm.slice(-5)==='.xlsx')){$('#imp').textContent='Please upload a .xls or .xlsx file.';return;}
+  PENDF=f;$('#imp').innerHTML='';
+  $('#band').innerHTML='<div class=csub style="margin-top:10px">Reading '+f.name+' &hellip;</div>';
+  var vf=$('#vesselframe');if(vf){vf.style.display='none';vf.innerHTML='';}
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      var heads=[];
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+        for(var i=0;i<Math.min(aoa.length,15);i++){
+          var row=(aoa[i]||[]).map(function(c){return upNorm(c);}).filter(function(x){return x;});
+          if(row.length>heads.length)heads=row;
+          if(row.join('|').indexOf('crewid')>=0){heads=row;break;}
+        }
+      }catch(err){$('#band').innerHTML='';$('#imp').textContent='Could not read that file: '+err.message;return;}
+      var joined=heads.join('|');
+      var SIGC=['crewid','firstname','lastname','status','rank','vessel','medicalexpiration','sirb','passport','usvisa','mobile','province'];
+      var score=0;SIGC.forEach(function(x){if(joined.indexOf(x)>=0)score++;});
+      if(joined.indexOf('crewid')>=0&&score>=8){upBand('Crew registry &mdash; AdvancedQuery',score,SIGC.length,f);parseCrewFile(f);return;}
+      if(joined.indexOf('ttlmonths')>=0||(joined.indexOf('signon')>=0&&joined.indexOf('projectedsignoff')>=0)){upBand('Keyman contracts',0,0,f);parseKeymanFile(f);return;}
+      if(joined.indexOf('hotel')>=0&&joined.indexOf('air')>=0){upBand('Travel expenses',0,0,f);parseTravelFile(f);return;}
+      $('#band').innerHTML='<div class="upband warn"><span class=tk>?</span><div><div class=t>Not sure what this file is</div><div class=m>Choose the type and we will treat it that way.</div><div class=fn>'+f.name+'</div></div><span class=act>'
+       +'<button class="btn" onclick="upForce(1)">Crew registry</button>'
+       +'<button class="btn ghost" onclick="upForce(2)">Keyman</button>'
+       +'<button class="btn ghost" onclick="upForce(3)">Travel</button></span></div>';
+    };
+    rd.readAsArrayBuffer(f);
+  });
 }
 var KEYMANUP=null;
 function parseKeymanFile(f){
@@ -2875,6 +2929,90 @@ function parseVesselFile(f){
 var NOCHG='margin-top:8px;padding:10px 12px;border-radius:8px;background:#F2F8EF;border-left:3px solid var(--green);color:var(--navy);font-weight:600';
 var BADBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FDF3F1;border-left:3px solid var(--red);color:var(--navy)';
 var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last name',status:'status',rank_observed:'rank',vessel_observed:'vessel',dob:'date of birth',province:'province',phone:'phone',email:'email',med_exp:'medical expiry',sirb_exp:'seaman-book expiry',pp_exp:'passport expiry',sch_exp:'Schengen expiry',usv_exp:'US-visa expiry'};
+// ===== Inline branded crew importer for the console Data tab (served form) =====
+// Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
+// Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
+// cart inline into #imp, using the console's existing brand (navy/green, Outfit/DM Sans).
+// No backticks and no dollar-brace interpolation and no quote nesting, so source == served JS.
+var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null;
+async function sha256buf(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
+function impEsc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":"&gt;";});}
+async function cimsStage(){
+  $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
+  var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
+  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"This exact file was already imported &mdash; nothing to do.":"Stage failed: "+impEsc(res.error))+'</div>';return;}
+  STAGE=res;DEC={};cimsRender();
+}
+function impSeg(key,def,a,b,la,lb){var cur=DEC[key]||def;return '<span class=impseg><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
+function impTag(txt,kind){return ' <span class="cchip '+kind+'">'+txt+'</span>';}
+function impDiff(lab,o,n,tag){return '<div style="margin-top:5px;font-size:13px"><span class=csub>'+impEsc(lab)+'</span> <span style="color:var(--mut);text-decoration:line-through">'+impEsc(o)+'</span> &rarr; <b style="color:var(--navy)">'+impEsc(n)+'</b>'+(tag||"")+'</div>';}
+function impCard(inner){return '<div class="card" style="margin:0 0 8px;border-left:3px solid var(--line-2);padding:11px 13px">'+inner+'</div>';}
+function cimsRender(){
+  var g=STAGE.review.groups,c=STAGE.review.counts,L="";
+  L+='<style>.impseg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-top:8px}.impb{border:0;background:#fff;padding:5px 12px;font:600 12.5px DM Sans;color:var(--mut);cursor:pointer}.impb+.impb{border-left:1px solid var(--line-2)}.impb.on{background:var(--navy);color:#fff}.impwho{font-weight:700;color:var(--navy);font-size:13.5px}.impid{color:var(--mut);font-weight:500;font-size:12px;margin-left:6px}</style>';
+  L+='<div style="display:grid;grid-template-columns:1fr 272px;gap:16px;align-items:start;margin-top:8px">';
+  L+='<div>';
+  L+='<div style="margin-bottom:6px"><b style="color:var(--navy)">'+STAGE.rows_seen+' crew read</b> <span class=csub>&middot; nothing saved yet</span></div>';
+  L+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
+    +'<span class="cchip amber">&#9875; '+c.ship_flag+' ship</span>'
+    +'<span class="cchip red">&#9679; '+(c.critical+c.override_conflict)+' need you</span>'
+    +'<span class="cchip ok">&#9677; '+c.cert+' certificates</span>'
+    +'<span class="cchip amber">&#65291; '+c.new+' new</span>'
+    +'<span class="cchip">&#128682; '+c.departed+' departed</span></div>';
+  if(g.ship_flag.length){L+='<div class=zlabel>Ship allocation &mdash; file disagrees with your board</div>';
+    g.ship_flag.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});}
+  if(g.override_conflict.length||g.critical.length){L+='<div class=zlabel>Needs your decision</div>';
+    g.override_conflict.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,impTag("your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file","Keep mine"));});
+    g.critical.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});}
+  if(g.cert.length){L+='<div class=zlabel>Certificate updates from TDG</div>';
+    g.cert.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,it.earlier?impTag("moved earlier","amber"):impTag("renewed","ok"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold"));});}
+  if(g.new.length){L+='<div class=zlabel>New crew</div>';
+    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=impwho>'+impEsc((f.first_name||"")+" "+(f.last_name||""))+'<span class=impid>'+impEsc(it.agency_id)+'</span></div><div style="margin-top:4px;font-size:13px"><b style="color:var(--navy)">'+impEsc(f.vessel_observed||"&mdash;")+'</b> <span class=csub>'+impEsc(f.rank_observed||f.status||"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});}
+  if(g.departed.length){L+='<div class=zlabel>Absent from this file</div>';
+    g.departed.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss"));});}
+  if(g.minor.length){L+='<div class=hint style="margin-top:8px">'+g.minor.length+' minor tidy-ups auto-applied (spelling, spacing)</div>';}
+  L+='</div>';
+  L+='<div id=impcart></div>';
+  L+='</div>';
+  $("#imp").innerHTML=L;
+  $("#imp").onclick=function(e){var b=e.target.closest?e.target.closest(".impb"):null;if(!b)return;DEC[b.getAttribute("data-k")]=b.getAttribute("data-v");var sib=b.parentNode.querySelectorAll(".impb");for(var i=0;i<sib.length;i++)sib[i].classList.toggle("on",sib[i].getAttribute("data-v")===b.getAttribute("data-v"));cimsCart();};
+  cimsCart();
+}
+function cimsCart(){
+  var g=STAGE.review.groups;function d(k,def){return DEC[k]||def;}
+  var certAcc=0;g.cert.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")certAcc++;});
+  var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")ovAcc++;else ovKeep++;});
+  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")crAcc++;else crKeep++;});
+  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
+  var minor=g.minor.length;
+  var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"flag")==="flag")shipFlag++;});
+  var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
+  var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
+  var rows="";
+  function li(name,sub,q,cls){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)"><div style="flex:1;font-size:13px;color:var(--navy);font-weight:600">'+name+'<div class=csub style="font-weight:400">'+sub+'</div></div><div style="font:700 12.5px DM Sans;color:'+cls+'">'+q+'</div></div>';}
+  if(g.cert.length)rows+=li("Certificates","medical, visas, SIRB",certAcc+" save","var(--green-d)");
+  if((g.override_conflict.length+g.critical.length)&&fieldSave)rows+=li("Field updates","status, contact",fieldSave+" save","var(--green-d)");
+  if(g.new.length)rows+=li("New crew","added to roster",newAdd+" save","var(--green-d)");
+  if(g.minor.length)rows+=li("Minor tidy-ups","spelling, spacing",minor+" save","var(--green-d)");
+  if(g.ship_flag.length)rows+=li("Ship flag","kept on your board",shipFlag+" held","var(--amber)");
+  if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=li("Your edits","kept as yours",(ovKeep+crKeep)+" held","var(--amber)");
+  if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
+  var H='<div class="card" style="margin:0;padding:0;overflow:hidden;position:sticky;top:12px">';
+  H+='<div style="background:var(--navy);color:#fff;padding:13px 15px"><div style="font-family:Outfit;font-weight:700">Ready to apply</div><div style="color:rgba(255,255,255,.65);font-size:12px;margin-top:2px">'+STAGE.rows_seen+' crew read'+(flags?" &middot; "+flags+" flagged":"")+'</div></div>';
+  H+='<div style="padding:4px 15px">'+rows+'</div>';
+  H+='<div style="padding:11px 15px;background:#F7F9FC;border-top:1px solid var(--line);border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy)"><span>Will save to roster</span><b style="color:var(--green-d)">'+willSave+'</b></div><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy);margin-top:2px"><span>Kept as yours</span><b style="color:var(--amber)">'+kept+'</b></div></div>';
+  H+='<div style="padding:13px 15px"><button class="btn green" style="width:100%" onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply '+willSave+' updates</button><button class="btn ghost" style="width:100%;margin-top:6px" onclick="setUploads()">Discard</button><div class=csub style="text-align:center;margin-top:8px">Nothing saved until you press Apply</div></div>';
+  H+='</div>';
+  $("#impcart").innerHTML=H;
+}
+async function cimsApply(){
+  var btn=$("#impcart")?$("#impcart").querySelector(".btn.green"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
+  var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
+  var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
+  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
+  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged. Nothing else was touched.</div>';
+  STAGE=null;DEC={};IMPROWS=null;
+}
 // ===== Inline branded crew importer for the console Data tab (served form) =====
 // Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
 // Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
