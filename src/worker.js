@@ -3835,7 +3835,71 @@ function rptSbm(){
   var h='<div class=rpthead><h2>Shipboard Feedback</h2>'
    +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
    +'</div>'
-function rptSbm(){ $('#rptbody').innerHTML='<div class=csub>swapping to live data - one CI run behind</div>'; } // z-swap-stage-marker-7391
+   +'<div class=liveband>&#9679; LIVE DATA &mdash; '+RPT_ROWS.length+' GSM reviews imported from the legacy MS Forms survey (Jun 2025 &ndash; Jul 2026, Royal Caribbean). 1 test response excluded. Invite &amp; response-rate metrics arrive when the CIMS-native pipeline goes live.</div>';
+  if(!n){
+    h+='<div class=rblk><div class=csub style="padding:14px 4px">No reviews in this period. Widen the range &mdash; the imported history starts June 2025.</div></div>';
+    $('#rptbody').innerHTML=h;return;
+  }
+  // ---- KPI strip (only metrics this data can prove)
+  var sparkN=mo.map(function(x){return x.n;}),sparkA=mo.map(function(x){return x.avg;}),sparkF=mo.map(function(x){return x.five;});
+  if(sparkN.length<2){sparkN=[0].concat(sparkN);sparkA=[sparkA[0]||0].concat(sparkA);sparkF=[0].concat(sparkF);}
+  h+='<div class=kgrid>'
+   +'<div class=ktile><div class=kl>Reviews</div><div class=kv>'+n+delta(n,prev.length)+'</div>'+rspark(sparkN,'#1E6FD0')+'</div>'
+   +'<div class=ktile><div class=kl>Avg rating</div><div class=kv>'+avg.toFixed(2)+'<small>/5</small>'+delta(avg,pAvg,true)+'</div>'+rspark(sparkA,'#1E6FD0')+'</div>'
+   +'<div class=ktile><div class=kl>5-star reviews</div><div class=kv>'+five+delta(five,pFive)+'</div>'+rspark(sparkF,'#3E8E2A')+'</div>'
+   +'<div class=ktile><div class=kl>Below-3 ratings</div><div class=kv>'+low+delta(low,pLow,false,true)+'</div>'+rspark(mo.map(function(x){return x.low;}).length>1?mo.map(function(x){return x.low;}):[0,low],'#BC3B2C')+'</div>'
+   +'<div class=ktile><div class=kl>Ships covered</div><div class=kv>'+shipN+delta(shipN,Object.keys(pShips).length)+'</div><div class=csub style="margin-top:8px">of 26 Royal Caribbean</div></div>'
+   +'<div class=ktile><div class=kl>Specialists reviewed</div><div class=kv>'+specN+delta(specN,Object.keys(pSpecs).length)+'</div><div class=csub style="margin-top:8px">distinct names on file</div></div>'
+   +'</div>';
+  // ---- Monthly volume + distribution
+  h+='<div class=rgrid2>';
+  var vmax=1;mo.forEach(function(x){if(x.n>vmax)vmax=x.n;});
+  h+='<div class=rblk><h3>Reviews per month</h3>'+mo.map(function(x){
+    return '<div class=frow><span class=fl>'+x.x+'</span><span class=fbar><i style="width:'+Math.round(x.n/vmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+x.n+'</span></div>';
+  }).join('')+'<div class=csub style="margin-top:8px">Volume follows sign-off dates &mdash; the invite funnel appears here once the CIMS pipeline is live.</div></div>';
+  var dist=[1,2,3,4,5].map(function(rr){return {r:rr,n:rows.filter(function(x){return x.r===rr;}).length};});
+  var dmax=1;dist.forEach(function(x){if(x.n>dmax)dmax=x.n;});
+  h+='<div class=rblk><h3>Rating distribution</h3><div class=hwrap2>'+dist.map(function(x){
+    return '<div class="hcol'+(x.r<3?' rlow':'')+'"><b>'+x.n+'</b><i style="height:'+Math.max(4,Math.round(x.n/dmax*82))+'%"></i><span>'+x.r+'</span></div>';
+  }).join('')+'</div><div class=csub style="margin-top:10px">Royal Caribbean <b>'+avg.toFixed(2)+'</b> ('+n+') &middot; Celebrity &amp; Azamara start with the CIMS-native pipeline</div></div>';
+  h+='</div>';
+  // ---- Trend + specialist board
+  h+='<div class=rgrid2>';
+  if(mo.length>=2)h+='<div class=rblk><h3>Average rating trend</h3>'+rtrend(mo.map(function(x){return {x:x.x,y:Math.round(x.avg*10)/10};}),2.8,5)+'</div>';
+  else h+='<div class=rblk><h3>Average rating trend</h3><div class=csub style="padding:12px 2px">Needs at least two months of data in the selected period.</div></div>';
+  var board=Object.keys(specs).map(function(k){var v=specs[k];return {name:k,n:v.length,avg:rptAvg(v),ship:v[v.length-1].s};})
+    .filter(function(b){return b.n>=2;}).sort(function(a,b){return b.avg-a.avg||b.n-a.n;});
+  h+='<div class=rblk><h3>Specialist board &middot; min 2 reviews</h3>';
+  if(board.length)h+='<table class=tbl><thead><tr><th>Specialist</th><th>Latest ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
+   +board.map(function(b){var col=b.avg>=4.5?'var(--green-d)':(b.avg<4?'var(--amber)':'var(--navy)');
+     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg.toFixed(1)+'</td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">Everyone else has one review so far &mdash; the board fills in as second contracts complete.</div>';
+  else h+='<div class=csub style="padding:12px 2px">No specialist has two reviews in this period yet.</div>';
+  h+='</div></div>';
+  // ---- Watchlist
+  var watch=rows.filter(function(x){return x.r<3;}).sort(function(a,b){return a.d<b.d?1:-1;});
+  if(watch.length){
+    h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist &middot; ratings below 3</h3>'
+     +watch.map(function(x){return '<div class=frow><span style="font-weight:700;min-width:130px">'+x.n+'</span><span class=csub>'+x.s+' &middot; '+x.d+' &middot; rated <b style="color:var(--red)">'+x.r+'/5</b> &middot; freeze gate &mdash; sEval 0/15 until reviewed</span></div>';}).join('')
+     +'</div>';
+  }else{
+    h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--green)"><h3 style="color:var(--green-d)">Watchlist &middot; ratings below 3</h3><div class=csub style="padding:4px 2px">Clear &mdash; no review in this period has triggered the freeze gate. Lowest rating on file is 3/5.</div></div>';
+  }
+  // ---- Ships + latest
+  h+='<div class=rgrid2>';
+  var shipList=Object.keys(ships).map(function(k){var v=ships[k];return {ship:k,n:v.length,avg:rptAvg(v),last:v[v.length-1].d};})
+    .sort(function(a,b){return b.n-a.n||(a.ship<b.ship?-1:1);});
+  h+='<div class=rblk><h3>Reviews by ship</h3><table class=tbl><thead><tr><th>Ship</th><th>Reviews</th><th>Avg</th><th>Last review</th></tr></thead><tbody>'
+   +shipList.map(function(s){var col=s.avg>=4.5?'var(--green-d)':(s.avg<4?'var(--amber)':'var(--navy)');
+     return '<tr><td>'+s.ship+'</td><td>'+s.n+'</td><td style="font-weight:800;color:'+col+'">'+s.avg.toFixed(1)+'</td><td>'+s.last+'</td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">Ships with no row have never returned a survey &mdash; that gap becomes visible (and chaseable) once invites are tracked.</div></div>';
+  var latest=rows.slice().sort(function(a,b){return a.d<b.d?1:-1;}).slice(0,8);
+  h+='<div class=rblk><h3>Latest reviews</h3><table class=tbl><thead><tr><th>Date</th><th>Specialist</th><th>Ship</th><th>Rating</th></tr></thead><tbody>'
+   +latest.map(function(r){var col=r.r<3?'var(--red)':'var(--navy)';
+     return '<tr><td>'+r.d+'</td><td>'+r.n+'</td><td>'+r.s+'</td><td style="font-weight:800;color:'+col+'">'+r.r+'/5</td></tr>';}).join('')
+   +'</tbody></table></div>';
+  h+='</div>';
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback &middot; live import of the legacy survey. Next: switch the source to the CIMS-native pipeline (adds invites, response rate, reminders, and per-brand coverage).</div>;
   $('#rptbody').innerHTML=h;
 }
 var DASH=null,DASH_SH=false;
