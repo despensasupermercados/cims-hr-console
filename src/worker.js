@@ -3727,61 +3727,41 @@ function lineSVG(pts){
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
 function legendH(segs){return '<div class=legend>'+segs.filter(function(s){return (s.value||0)>0;}).map(function(s){return '<span><i style="background:'+s.color+'"></i>'+s.label+' '+s.value+'</span>';}).join('')+'</div>';}
-var RPT_P='YTD';
-var RPT_MOCK={
- kpi:{
-  responseRate:{v:'68',u:'%',d:'+6',spark:[52,55,61,58,63,66,68]},
-  avgRating:{v:'4.2',u:'/5',d:'+0.1',spark:[3.9,4.0,4.1,4.0,4.2,4.1,4.2]},
-  openInvites:{v:'7',u:'',d:'-2',spark:[12,10,11,9,8,9,7]},
-  below3:{v:'2',u:'',d:'+1',dBad:true,spark:[0,1,0,0,1,1,2]},
-  medianDays:{v:'2.4',u:'d',d:'-0.3',spark:[3.4,3.1,3.0,2.8,2.7,2.5,2.4]},
-  coverage:{v:'81',u:'%',d:'+4',spark:[64,68,71,74,76,79,81]}
- },
- funnel:[
-  {l:'Invited',n:124,c:'#1E6FD0',pct:100},
-  {l:'Reminded',n:41,c:'#7FA8D9',pct:33},
-  {l:'Submitted',n:84,c:'#5FB946',pct:68},
-  {l:'Expired',n:32,c:'#C7CFDA',pct:26},
-  {l:'Suppressed',n:8,c:'#C7CFDA',pct:6}
- ],
- dist:[{r:1,n:1},{r:2,n:1},{r:3,n:15},{r:4,n:40},{r:5,n:27}],
- brands:[
-  {b:'Royal Caribbean',n:61,avg:'4.2'},
-  {b:'Celebrity',n:17,avg:'4.0'},
-  {b:'Azamara',n:6,avg:'4.5'}
- ],
- trend:[{x:'Feb',y:4.0},{x:'Mar',y:4.1},{x:'Apr',y:4.0},{x:'May',y:4.2},{x:'Jun',y:4.1},{x:'Jul',y:4.2}],
- board:[
-  {name:'M. K. R. Murillo',ship:'Navigator',n:3,avg:'4.7'},
-  {name:'J. P. Santos',ship:'Wonder',n:4,avg:'4.5'},
-  {name:'A. Reyes',ship:'Apex',n:2,avg:'4.5'},
-  {name:'R. D. Cruz',ship:'Icon',n:3,avg:'4.3'},
-  {name:'L. Fernandez',ship:'Quest',n:2,avg:'4.0'},
-  {name:'C. Bautista',ship:'Allure',n:3,avg:'3.7'}
- ],
- watch:[
-  {name:'E. Villanueva',ship:'Symphony',rating:2,date:'2026-06-28',note:'freeze gate — sEval 0/15, review before commit'},
-  {name:'D. Ocampo',ship:'Eclipse',rating:2,date:'2026-05-14',note:'freeze gate — resolved by Rita 2026-05-20'}
- ],
- ships:[
-  {ship:'Navigator',brand:'Royal',sent:6,ans:6,rate:100},
-  {ship:'Wonder',brand:'Royal',sent:7,ans:6,rate:86},
-  {ship:'Icon',brand:'Royal',sent:5,ans:4,rate:80},
-  {ship:'Apex',brand:'Celebrity',sent:4,ans:3,rate:75},
-  {ship:'Quest',brand:'Azamara',sent:3,ans:2,rate:67},
-  {ship:'Allure',brand:'Royal',sent:6,ans:3,rate:50},
-  {ship:'Symphony',brand:'Royal',sent:5,ans:2,rate:40},
-  {ship:'Eclipse',brand:'Celebrity',sent:4,ans:0,rate:0}
- ],
- latest:[
-  {date:'2026-07-08',crew:'M. K. R. Murillo',ship:'Navigator',brand:'Royal',rating:4},
-  {date:'2026-07-05',crew:'J. P. Santos',ship:'Wonder',brand:'Royal',rating:5},
-  {date:'2026-07-01',crew:'A. Reyes',ship:'Apex',brand:'Celebrity',rating:4},
-  {date:'2026-06-28',crew:'E. Villanueva',ship:'Symphony',brand:'Royal',rating:2},
-  {date:'2026-06-24',crew:'R. D. Cruz',ship:'Icon',brand:'Royal',rating:4},
-  {date:'2026-06-20',crew:'L. Fernandez',ship:'Quest',brand:'Azamara',rating:5}
- ]
-};
+var RPT_P='All';
+// REAL DATA: 37 GSM reviews imported from the legacy MS Forms survey
+// "Crew Feedback Survey - Royal Caribbean Printer Specialist" (Jun 2025 - Jul 2026).
+// One explicit test response excluded. Names normalized ("Last, First" -> "First Last",
+// trailing crew-id suffixes stripped); spelling variants intentionally NOT merged.
+// Invite/funnel/response-rate metrics have no source until the CIMS-native pipeline
+// (sbm_enabled) goes live - the report shows only what this data can prove.
+var RPT_ROWS=[{d:'2025-06-02',s:'Navigator',n:'Maria Katrina Rica Murillo',r:4},{d:'2025-06-05',s:'Radiance',n:'John Sarmiento',r:4},{d:'2025-06-18',s:'Liberty',n:'Mario Lazo',r:4},{d:'2025-06-30',s:'Liberty',n:'Mario Lazo',r:5},{d:'2025-08-14',s:'Spectrum',n:'Ohji Miranda',r:4},{d:'2025-09-02',s:'Grandeur',n:'Norman Osorio',r:4},{d:'2025-09-16',s:'Anthem',n:'Anthony Rey Batadlan',r:4},{d:'2025-09-17',s:'Allure',n:'Raymond',r:3},{d:'2025-10-18',s:'Harmony',n:'King Manzano',r:4},{d:'2025-10-21',s:'Enchantment',n:'Jim Olid',r:4},{d:'2025-10-24',s:'Rhapsody',n:'Jonathan Alonzo',r:4},{d:'2025-10-31',s:'Enchantment',n:'Jim Olid',r:4},{d:'2025-11-14',s:'Odyssey',n:'Ryan Marto',r:4},{d:'2025-11-30',s:'Mariner',n:'Edward Guazon',r:4},{d:'2025-12-01',s:'Spectrum',n:'Mark Joseph Dela Rosa',r:4},{d:'2025-12-02',s:'Icon',n:'Rommel Mandrinico',r:4},{d:'2025-12-04',s:'Radiance',n:'Azariah Asim',r:4},{d:'2025-12-04',s:'Serenade',n:'Estandian Sharene',r:5},{d:'2026-01-16',s:'Quantum',n:'Jeremy Padilla',r:3},{d:'2026-01-31',s:'Liberty',n:'Christjhelen Racho',r:5},{d:'2026-02-05',s:'Grandeur',n:'Jerome Valdesco',r:3},{d:'2026-02-06',s:'Navigator',n:'Andrew Lorono',r:4},{d:'2026-02-15',s:'Utopia',n:'Baris',r:4},{d:'2026-02-28',s:'Oasis',n:'Jim Olid',r:3},{d:'2026-03-01',s:'Radiance',n:'Raymond Villacortes',r:3},{d:'2026-03-04',s:'Star',n:'Sherry Gibas',r:5},{d:'2026-03-05',s:'Symphony',n:'King Manzano',r:5},{d:'2026-03-15',s:'Anthem',n:'John Sarmiento',r:4},{d:'2026-04-08',s:'Voyager',n:'Cherry Gayda',r:4},{d:'2026-04-18',s:'Allure',n:'Mario Lazo',r:4},{d:'2026-04-18',s:'Harmony',n:'Jomar Mangulabnan',r:4},{d:'2026-06-01',s:'Mariner',n:'Jeadrig Tuazon',r:4},{d:'2026-06-01',s:'Explorer',n:'Haziel Caag',r:4},{d:'2026-06-04',s:'Icon',n:'Zandro Espenilla',r:4},{d:'2026-06-05',s:'Enchantment',n:'Ryan Lumanglas',r:5},{d:'2026-06-06',s:'Utopia',n:'Rommel Madrinico',r:4},{d:'2026-07-15',s:'Independence',n:'Janet Magana',r:5}];
+function rptCut(p,ref){
+  var d=new Date(ref.getTime());
+  if(p==='7D'){d.setDate(d.getDate()-7);return d;}
+  if(p==='30D'){d.setDate(d.getDate()-30);return d;}
+  if(p==='QTD'){d.setMonth(Math.floor(d.getMonth()/3)*3,1);d.setHours(0,0,0,0);return d;}
+  if(p==='YTD'){d.setMonth(0,1);d.setHours(0,0,0,0);return d;}
+  return null;
+}
+function rptFilter(p){
+  var now=new Date(),cut=rptCut(p,now);
+  if(!cut)return RPT_ROWS.slice();
+  return RPT_ROWS.filter(function(x){return new Date(x.d)>=cut;});
+}
+function rptPrev(p){
+  var now=new Date(),cut=rptCut(p,now);
+  if(!cut)return [];
+  var span=now.getTime()-cut.getTime(),from=new Date(cut.getTime()-span);
+  return RPT_ROWS.filter(function(x){var t=new Date(x.d);return t>=from&&t<cut;});
+}
+function rptAvg(rows){var s=0;rows.forEach(function(x){s+=x.r;});return rows.length?s/rows.length:0;}
+function rptMonths(rows){
+  var m={},keys=[];
+  rows.forEach(function(x){var k=x.d.slice(0,7);if(!m[k]){m[k]=[];keys.push(k);}m[k].push(x.r);});
+  keys.sort();
+  return keys.map(function(k){var v=m[k],s=v.reduce(function(a,b){return a+b;},0);var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(k.slice(5,7),10)-1];
+    return {k:k,x:mo+' '+k.slice(2,4),n:v.length,avg:s/v.length,five:v.filter(function(r){return r===5;}).length,low:v.filter(function(r){return r<3;}).length};});
+}
 function rspark(arr,color){
   var w=120,h=30,mn=Math.min.apply(null,arr),mx=Math.max.apply(null,arr),sp=(mx-mn)||1;
   var pts=arr.map(function(v,i){return (i*(w/(arr.length-1))).toFixed(1)+','+(h-3-((v-mn)/sp)*(h-8)).toFixed(1);}).join(' ');
