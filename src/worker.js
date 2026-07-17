@@ -3835,49 +3835,7 @@ function rptSbm(){
   var h='<div class=rpthead><h2>Shipboard Feedback</h2>'
    +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
    +'</div>'
-   +'<div class=mockband>◈ SAMPLE DATA — the review pipeline is not live yet (invites off, 0 responses). Numbers are illustrative; the layout is the contract.</div>';
-  // ---- KPI strip
-  var KL=[['responseRate','Response rate','#3E8E2A'],['avgRating','Avg rating','#1E6FD0'],['openInvites','Open invites','#1E6FD0'],['below3','Below-3 ratings','#BC3B2C'],['medianDays','Median reply time','#1E6FD0'],['coverage','Contract coverage','#3E8E2A']];
-  h+='<div class=kgrid>'+KL.map(function(k){
-    var t=d.kpi[k[0]];var neg=t.d.charAt(0)==='-';
-    var good=t.dBad?neg:!neg;var cls=t.d==='0'?'flat':(good?'up':'dn');
-    var arrow=neg?'▼':'▲';
-    return '<div class=ktile><div class=kl>'+k[1]+'</div><div class=kv>'+t.v+'<small>'+t.u+'</small><span class="kdelta '+cls+'">'+arrow+' '+t.d.replace('-','').replace('+','')+'</span></div>'+rspark(t.spark,k[2])+'</div>';
-  }).join('')+'</div>';
-  // ---- Funnel + distribution
-  h+='<div class=rgrid2>';
-  h+='<div class=rblk><h3>Invite funnel · '+RPT_P+'</h3>'+d.funnel.map(function(f){
-    return '<div class=frow><span class=fl>'+f.l+'</span><span class=fbar><i style="width:'+f.pct+'%;background:'+f.c+'"></i></span><span class=fn>'+f.n+'</span></div>';
-  }).join('')+'<div class=csub style="margin-top:8px">Leakage = expired + suppressed. Reminders go only to unanswered invites at T−4.</div></div>';
-  var dmax=Math.max.apply(null,d.dist.map(function(x){return x.n;}));
-  h+='<div class=rblk><h3>Rating distribution</h3><div class=hwrap2>'+d.dist.map(function(x){
-    return '<div class="hcol'+(x.r<3?' rlow':'')+'"><b>'+x.n+'</b><i style="height:'+Math.max(4,Math.round(x.n/dmax*82))+'%"></i><span>'+x.r+'</span></div>';
-  }).join('')+'</div><div class=csub style="margin-top:10px">'+d.brands.map(function(b){return b.b+' <b>'+b.avg+'</b> ('+b.n+')';}).join(' · ')+'</div></div>';
-  h+='</div>';
-  // ---- Trend + specialist board
-  h+='<div class=rgrid2>';
-  h+='<div class=rblk><h3>Average rating trend</h3>'+rtrend(d.trend,2.8,5)+'</div>';
-  h+='<div class=rblk><h3>Specialist board · min 2 reviews</h3><table class=tbl><thead><tr><th>Specialist</th><th>Ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
-   +d.board.map(function(b){var col=parseFloat(b.avg)>=4.5?'var(--green-d)':(parseFloat(b.avg)<4?'var(--amber)':'var(--navy)');
-     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg+'</td></tr>';}).join('')
-   +'</tbody></table></div>';
-  h+='</div>';
-  // ---- Watchlist
-  h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist · ratings below 3</h3>'
-   +d.watch.map(function(x){return '<div class=frow><span style="font-weight:700;min-width:130px">'+x.name+'</span><span class=csub>'+x.ship+' · '+x.date+' · rated <b style="color:var(--red)">'+x.rating+'/5</b> · '+x.note+'</span></div>';}).join('')
-   +'</div>';
-  // ---- GSM engagement + latest
-  h+='<div class=rgrid2>';
-  h+='<div class=rblk><h3>GSM engagement by ship</h3><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Sent</th><th>Answered</th><th>Rate</th></tr></thead><tbody>'
-   +d.ships.map(function(s){var bc=s.rate>=75?'var(--green)':(s.rate>=40?'#B0741A':'var(--red)');
-     return '<tr><td>'+s.ship+'</td><td>'+s.brand+'</td><td>'+s.sent+'</td><td>'+s.ans+'</td><td><span class=ratebar style="width:70px"><i style="width:'+s.rate+'%;background:'+bc+'"></i></span> <b>'+s.rate+'%</b></td></tr>';}).join('')
-   +'</tbody></table><div class=csub style="margin-top:8px">Client-relationship signal: a ship that never answers is a conversation for the account call, not a crew problem.</div></div>';
-  h+='<div class=rblk><h3>Latest responses</h3><table class=tbl><thead><tr><th>Date</th><th>Specialist</th><th>Ship</th><th>Rating</th></tr></thead><tbody>'
-   +d.latest.map(function(r){var col=r.rating<3?'var(--red)':'var(--navy)';
-     return '<tr><td>'+r.date+'</td><td>'+r.crew+'</td><td>'+r.ship+' · '+r.brand+'</td><td style="font-weight:800;color:'+col+'">'+r.rating+'/5</td></tr>';}).join('')
-   +'</tbody></table></div>';
-  h+='</div>';
-  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback · GSM review analytics. Period chips re-render now and bind to the live API in v2.</div>';
+function rptSbm(){ $('#rptbody').innerHTML='<div class=csub>swapping to live data - one CI run behind</div>'; } // z-swap-stage-marker-7391
   $('#rptbody').innerHTML=h;
 }
 var DASH=null,DASH_SH=false;
