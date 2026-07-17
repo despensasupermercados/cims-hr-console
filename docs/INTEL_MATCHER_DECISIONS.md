@@ -1,4 +1,4 @@
-# Field Intel — Matcher v2 & Review-Card Search (session memory, 2026-07-17, PR #62)
+# Field Intel — Matcher v2 & Review-Card Search (session memory, 2026-07-17, PRs #62 + #64)
 
 _Why the matcher works the way it does. Companion to the pipeline: email → `email_inbox` →
 `matchCrew` (src/crewmatch.js) → `aiSummarize` (src/intelai.js) → `crew_intel` (filed/pending)._
@@ -21,9 +21,16 @@ short-circuited before the last-name pass that would have found Resposo uniquely
   "Michael Angelo").
 - **M5 — No short-circuit.** Ambiguity → LOW, and candidates include phrase hits, first+last hits
   AND surname hits (deduped, capped 6) so the right person is always a button on the review card.
-- **M6 — Human escape hatch.** Every review card has a crew search ("Someone else? Search crew by
-  name or SC-ID", roster comes back with `/api/intel/review`) filing via the same
-  `/api/intel/resolve`. Suggestions are stored snapshots; the search covers stale/empty ones.
+- **M6 — Human escape hatch.** Every review card has a crew search filing via the same
+  `/api/intel/resolve` (roster ships with `/api/intel/review`). **Layout (PR #64, Miguel's call):
+  ONE action row** — candidate buttons → compact "🔍 Search crew…" input (top-4 inline results) →
+  Discard right-aligned. Suggestions are stored snapshots; the search covers stale/empty ones.
+
+## Where filed intel DISPLAYS (Miguel tripped on this)
+Crew profile page does NOT show field intel. It lives in the **"Notes & field intel" modal**,
+opened from the **🗒 notes icon** in the crew card tools row (Crew tab). Candidate improvement
+(not built): surface a Field intel section on the profile page next to Manager Feedback, reusing
+`/api/intel/crew` + `intelCard`.
 
 ## Notes
 - Tests: test/crewmatch.test.js — 8 legacy behaviors + 4 v2 cases incl. the exact forwarded thread.
