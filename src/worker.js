@@ -2781,7 +2781,16 @@ function parseCrewFile(f){
 var PENDF=null;
 function upNorm(s){return String(s==null?'':s).toLowerCase().replace(/[^a-z0-9]/g,'');}
 function upBand(label,score,total,f){
-  $('#band').innerHTML='<div class="upband ok"><span class=tk>&#10003;</span><div><div class=t>Recognized: '+label+'</div><div class=m>'+(total?(score+' / '+total+' signature columns matched &middot; auto-selected'):'auto-selected')+'</div><div class=fn>'+f.name+'</div></div><span class=act><a href="#" onclick="setUploads();return false" style="color:var(--green-d);font-size:12.5px">Not this? Start over</a></span></div>';
+  $('#band').innerHTML='<div class="upband ok"><span class=tk>&#10003;</span><div><div class=t>Recognized: '+label+'</div><div class=m style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">'+(total?(score+' / '+total+' signature columns matched &middot; auto-selected'):'auto-selected')+'</div><div class=fn style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">'+f.name+'</div></div><span class=act><a href="#" onclick="upChoose();return false" style="color:var(--green-d);font-size:12.5px">Not this? Change type</a></span></div>';
+}
+function upChoose(){
+  var f=PENDF;if(!f)return setUploads();
+  $('#imp').innerHTML='';
+  $('#band').innerHTML='<div class="upband warn"><span class=tk>?</span><div><div class=t>Choose the file type</div><div class=m>We will treat '+f.name+' as the type you pick.</div></div><span class=act>'
+   +'<button class="btn" onclick="upForce(1)">Crew registry</button>'
+   +'<button class="btn ghost" onclick="upForce(2)">Keyman</button>'
+   +'<button class="btn ghost" onclick="upForce(3)">Travel</button>'
+   +'<a href="#" onclick="setUploads();return false" style="color:var(--mut);font-size:12.5px;margin-left:4px">Start over</a></span></div>';
 }
 function upForce(k){
   var f=PENDF;if(!f)return;
@@ -2934,43 +2943,96 @@ var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last 
 // Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
 // cart inline into #imp, using the console's existing brand (navy/green, Outfit/DM Sans).
 // No backticks and no dollar-brace interpolation and no quote nesting, so source == served JS.
-var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null;
+var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null,NMAP={};
 async function sha256buf(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
 function impEsc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":"&gt;";});}
+function impWho(id){var n=NMAP[id];return n&&n!==id?impEsc(n)+' <span class=iid>'+impEsc(id)+'</span>':impEsc(id);}
 async function cimsStage(){
+  NMAP={};
+  (IMPROWS||[]).forEach(function(row){var id="",fn="",ln="";for(var k in row){var nk=k.toLowerCase();if(nk.indexOf("crew id")>=0||nk.indexOf("crewid")>=0)id=String(row[k]).trim();else if(nk.indexOf("first")>=0)fn=String(row[k]).trim();else if(nk.indexOf("last")>=0||nk.indexOf("surname")>=0)ln=String(row[k]).trim();}if(id)NMAP[id]=(fn+" "+ln).trim()||id;});
   $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
   var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"This exact file was already imported &mdash; nothing to do.":"Stage failed: "+impEsc(res.error))+'</div>';return;}
   STAGE=res;DEC={};cimsRender();
 }
-function impSeg(key,def,a,b,la,lb){var cur=DEC[key]||def;return '<span class=impseg><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
-function impTag(txt,kind){return ' <span class="cchip '+kind+'">'+txt+'</span>';}
-function impDiff(lab,o,n,tag){return '<div style="margin-top:5px;font-size:13px"><span class=csub>'+impEsc(lab)+'</span> <span style="color:var(--mut);text-decoration:line-through">'+impEsc(o)+'</span> &rarr; <b style="color:var(--navy)">'+impEsc(n)+'</b>'+(tag||"")+'</div>';}
-function impCard(inner){return '<div class="card" style="margin:0 0 8px;border-left:3px solid var(--line-2);padding:11px 13px">'+inner+'</div>';}
+function impSeg(key,def,a,b,la,lb,soft){var cur=DEC[key]||def;return '<span class="iseg'+(soft?" soft":"")+'"><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
+function impTag(txt,kind){return ' <span class="itag t-'+kind+'">'+txt+'</span>';}
+function impDiff(lab,o,n,tag){return '<div class=irow><span class=ik>'+impEsc(lab)+'</span><span class=idf><span class=iold>'+impEsc(o)+'</span> <span class=iarw>&#8594;</span> <span class=inew>'+impEsc(n)+'</span>'+(tag||"")+'</span></div>';}
+function impCard(inner){return '<div class=icard>'+inner+'</div>';}
+function impFld(f){return (typeof IMP_FLAB!=="undefined"&&IMP_FLAB[f])?IMP_FLAB[f]:f;}
 function cimsRender(){
   var g=STAGE.review.groups,c=STAGE.review.counts,L="";
-  L+='<style>.impseg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-top:8px}.impb{border:0;background:#fff;padding:5px 12px;font:600 12.5px DM Sans;color:var(--mut);cursor:pointer}.impb+.impb{border-left:1px solid var(--line-2)}.impb.on{background:var(--navy);color:#fff}.impwho{font-weight:700;color:var(--navy);font-size:13.5px}.impid{color:var(--mut);font-weight:500;font-size:12px;margin-left:6px}</style>';
-  L+='<div style="display:grid;grid-template-columns:1fr 272px;gap:16px;align-items:start;margin-top:8px">';
+  L+='<style>'
+   +'.chips2{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 4px}'
+   +'.chip2{display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line-2);border-radius:999px;padding:6px 13px;font-weight:600;font-size:13px;box-shadow:0 1px 2px rgba(20,45,72,.05)}'
+   +'.chip2 .n{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}'
+   +'.chip2.amber{color:var(--amber)}.chip2.red{color:var(--red)}.chip2.green{color:var(--green-d)}.chip2.navy{color:var(--navy)}.chip2.gray{color:var(--mut)}'
+   +'.isec{margin-top:20px}'
+   +'.isec h3{font-family:Outfit;font-size:15px;font-weight:600;color:var(--navy);margin:0 0 2px;display:flex;align-items:center;gap:8px}'
+   +'.isec .d{color:var(--mut);font-size:12.5px;margin-bottom:10px}'
+   +'.icard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-bottom:9px;box-shadow:0 1px 2px rgba(20,45,72,.05)}'
+   +'.iwho{font-weight:600;color:var(--navy);display:flex;align-items:baseline;gap:9px;font-size:14px}'
+   +'.iid{color:var(--mut);font-weight:500;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}'
+   +'.irow{margin-top:8px;display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;font-size:13.5px}'
+   +'.ik{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.4px}'
+   +'.idf{display:flex;align-items:center;gap:9px;flex-wrap:wrap}'
+   +'.iold{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--mut);text-decoration:line-through;font-size:12.5px}'
+   +'.iarw{color:var(--mut)}'
+   +'.inew{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700;font-size:12.5px;color:var(--navy)}'
+   +'.itag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px}'
+   +'.itag.t-amber{background:#FBF2E0;color:var(--amber)}.itag.t-red{background:#FBE9E7;color:var(--red)}.itag.t-green{background:#EAF5E4;color:var(--green-d)}'
+   +'.iseg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-top:10px}'
+   +'.impb{border:0;background:#fff;padding:6px 14px;font:700 12.5px DM Sans;color:var(--mut);cursor:pointer}'
+   +'.impb+.impb{border-left:1px solid var(--line-2)}'
+   +'.impb.on{background:var(--navy);color:#fff}'
+   +'.iseg.soft .impb.on{background:var(--bg);color:var(--navy)}'
+   +'details.iminor{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 15px;margin-top:20px;box-shadow:0 1px 2px rgba(20,45,72,.05)}'
+   +'details.iminor summary{cursor:pointer;font-weight:600;color:var(--mut);padding:9px 0;font-size:13.5px}'
+   +'details.iminor summary .c{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--mut);background:var(--bg);border-radius:20px;padding:1px 8px;margin-right:4px}'
+   +'.cart2{position:sticky;top:12px;background:#fff;border:1px solid var(--line-2);border-radius:16px;box-shadow:0 6px 22px rgba(20,45,72,.09);overflow:hidden}'
+   +'.cart2 .ch{padding:16px 18px 13px;background:var(--navy);color:#fff}'
+   +'.cart2 .ch .h{font-family:Outfit;font-weight:600;font-size:15px}'
+   +'.cart2 .ch .sub{color:rgba(255,255,255,.6);font-size:12px;margin-top:2px}'
+   +'.cart2 .items{padding:8px 18px}'
+   +'.cli{display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--line)}'
+   +'.cli:last-child{border-bottom:0}'
+   +'.cic{width:23px;height:23px;border-radius:6px;display:grid;place-items:center;font-size:12px;flex:none}'
+   +'.ci-green{background:#EAF5E4;color:var(--green-d)}.ci-navy{background:#E7EDF4;color:var(--navy)}.ci-gray{background:var(--bg);color:var(--mut)}.ci-amber{background:#FBF2E0;color:var(--amber)}.ci-red{background:#FBE9E7;color:var(--red)}'
+   +'.cli .nm{font-size:13.5px;flex:1;color:var(--navy);font-weight:600}'
+   +'.cli .nm small{display:block;color:var(--mut);font-size:11px;font-weight:400}'
+   +'.cli .q{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700;font-size:12.5px}'
+   +'.cli .q.save{color:var(--green-d)}.cli .q.held{color:var(--amber)}'
+   +'.cart2 .totals{padding:13px 18px;background:#F7F9FC;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}'
+   +'.ctl{display:flex;align-items:center;justify-content:space-between;font-size:13.5px;padding:2px 0;color:var(--navy)}'
+   +'.ctl .v{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:700}'
+   +'.ctl .v.save{color:var(--green-d)}.ctl .v.keep{color:var(--amber)}'
+   +'.cart2 .foot{padding:15px 18px}'
+   +'.applyb2{width:100%;border:0;border-radius:11px;background:var(--green-d);color:#fff;padding:13px;font-family:Outfit;font-weight:700;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 2px 9px rgba(62,142,42,.32)}'
+   +'.applyb2[disabled]{opacity:.6;cursor:default}'
+   +'.applyb2 .k{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:rgba(255,255,255,.22);border-radius:6px;padding:1px 7px;font-size:13px}'
+   +'.discard2{width:100%;border:0;background:transparent;color:var(--mut);padding:10px;margin-top:4px;font-weight:600;font-size:13px;cursor:pointer;font-family:DM Sans}'
+   +'.lock2{display:flex;align-items:center;gap:7px;justify-content:center;color:var(--green-d);background:#EAF5E4;border:1px solid #CDE8C1;border-radius:9px;padding:8px;margin-top:10px;font-size:11px;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}'
+   +'</style>';
+  L+='<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start;margin-top:10px">';
   L+='<div>';
-  L+='<div style="margin-bottom:6px"><b style="color:var(--navy)">'+STAGE.rows_seen+' crew read</b> <span class=csub>&middot; nothing saved yet</span></div>';
-  L+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
-    +'<span class="cchip amber">&#9875; '+c.ship_flag+' ship</span>'
-    +'<span class="cchip red">&#9679; '+(c.critical+c.override_conflict)+' need you</span>'
-    +'<span class="cchip ok">&#9677; '+c.cert+' certificates</span>'
-    +'<span class="cchip amber">&#65291; '+c.new+' new</span>'
-    +'<span class="cchip">&#128682; '+c.departed+' departed</span></div>';
-  if(g.ship_flag.length){L+='<div class=zlabel>Ship allocation &mdash; file disagrees with your board</div>';
-    g.ship_flag.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});}
-  if(g.override_conflict.length||g.critical.length){L+='<div class=zlabel>Needs your decision</div>';
-    g.override_conflict.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,impTag("your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file","Keep mine"));});
-    g.critical.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});}
-  if(g.cert.length){L+='<div class=zlabel>Certificate updates from TDG</div>';
-    g.cert.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,it.earlier?impTag("moved earlier","amber"):impTag("renewed","ok"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold"));});}
-  if(g.new.length){L+='<div class=zlabel>New crew</div>';
-    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=impwho>'+impEsc((f.first_name||"")+" "+(f.last_name||""))+'<span class=impid>'+impEsc(it.agency_id)+'</span></div><div style="margin-top:4px;font-size:13px"><b style="color:var(--navy)">'+impEsc(f.vessel_observed||"&mdash;")+'</b> <span class=csub>'+impEsc(f.rank_observed||f.status||"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});}
-  if(g.departed.length){L+='<div class=zlabel>Absent from this file</div>';
-    g.departed.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss"));});}
-  if(g.minor.length){L+='<div class=hint style="margin-top:8px">'+g.minor.length+' minor tidy-ups auto-applied (spelling, spacing)</div>';}
+  L+='<div class=chips2>'
+    +'<span class="chip2 amber">&#9875; <span class=n>'+c.ship_flag+'</span> ship</span>'
+    +'<span class="chip2 red">&#9679; <span class=n>'+(c.critical+c.override_conflict)+'</span> needs you</span>'
+    +'<span class="chip2 green">&#9677; <span class=n>'+c.cert+'</span> certificates</span>'
+    +'<span class="chip2 navy">&#65291; <span class=n>'+c.new+'</span> new</span>'
+    +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
+  if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
+    g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});L+='</div>';}
+  if(g.override_conflict.length||g.critical.length){L+='<div class=isec><h3>&#9679; Needs your decision</h3><div class=d>A field you set by hand, and status changes. Defaults to keeping yours.</div>';
+    g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file","Keep mine"));});
+    g.critical.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});L+='</div>';}
+  if(g.cert.length){L+='<div class=isec><h3>&#9677; Certificate updates from TDG</h3><div class=d>Accepted by default &mdash; TDG maintains these. An expiry moving earlier is flagged.</div>';
+    g.cert.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,it.earlier?impTag("&#9888; moved earlier","amber"):impTag("renewed","green"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold",true));});L+='</div>';}
+  if(g.new.length){L+='<div class=isec><h3>&#65291; New crew</h3>';
+    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+impEsc(f.vessel_observed||"&mdash;")+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
+  if(g.departed.length){L+='<div class=isec><h3>&#128682; Absent from this file</h3><div class=d>Never auto-removed. Decide the status yourself.</div>';
+    g.departed.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss",true));});L+='</div>';}
+  if(g.minor.length){L+='<details class=iminor><summary><span class=c>'+g.minor.length+'</span> minor tidy-ups auto-applied (spelling, spacing)</summary>'+g.minor.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}
   L+='</div>';
   L+='<div id=impcart></div>';
   L+='</div>';
@@ -2989,112 +3051,32 @@ function cimsCart(){
   var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
   var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
   var rows="";
-  function li(name,sub,q,cls){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)"><div style="flex:1;font-size:13px;color:var(--navy);font-weight:600">'+name+'<div class=csub style="font-weight:400">'+sub+'</div></div><div style="font:700 12.5px DM Sans;color:'+cls+'">'+q+'</div></div>';}
-  if(g.cert.length)rows+=li("Certificates","medical, visas, SIRB",certAcc+" save","var(--green-d)");
-  if((g.override_conflict.length+g.critical.length)&&fieldSave)rows+=li("Field updates","status, contact",fieldSave+" save","var(--green-d)");
-  if(g.new.length)rows+=li("New crew","added to roster",newAdd+" save","var(--green-d)");
-  if(g.minor.length)rows+=li("Minor tidy-ups","spelling, spacing",minor+" save","var(--green-d)");
-  if(g.ship_flag.length)rows+=li("Ship flag","kept on your board",shipFlag+" held","var(--amber)");
-  if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=li("Your edits","kept as yours",(ovKeep+crKeep)+" held","var(--amber)");
+  function cli(icls,ic,name,sub,q,qcls){return '<div class=cli><span class="cic '+icls+'">'+ic+'</span><span class=nm>'+name+(sub?'<small>'+sub+'</small>':'')+'</span><span class="q '+qcls+'">'+q+'</span></div>';}
+  var newSub="added to roster";
+  if(g.new.length===1){var nf=g.new[0].fields||{};var nn=((nf.first_name||"")+" "+(nf.last_name||"")).trim();if(nn)newSub=impEsc(nn);}
+  if(g.cert.length)rows+=cli("ci-green","&#9677;","Certificates","medical, visas, SIRB",certAcc+" save","save");
+  if((g.override_conflict.length+g.critical.length)&&fieldSave)rows+=cli("ci-green","&#9998;","Field updates","status, contact",fieldSave+" save","save");
+  if(g.new.length)rows+=cli("ci-navy","&#65291;","New crew",newSub,newAdd+" save","save");
+  if(g.minor.length)rows+=cli("ci-gray","&#9881;","Minor tidy-ups","spelling, spacing",minor+" save","save");
+  if(g.ship_flag.length)rows+=cli("ci-amber","&#9875;","Ship flag","kept on your board",shipFlag+" held","held");
+  if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=cli("ci-red","&#9995;","Manual edit","kept as yours",(ovKeep+crKeep)+" held","held");
   if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
-  var H='<div class="card" style="margin:0;padding:0;overflow:hidden;position:sticky;top:12px">';
-  H+='<div style="background:var(--navy);color:#fff;padding:13px 15px"><div style="font-family:Outfit;font-weight:700">Ready to apply</div><div style="color:rgba(255,255,255,.65);font-size:12px;margin-top:2px">'+STAGE.rows_seen+' crew read'+(flags?" &middot; "+flags+" flagged":"")+'</div></div>';
-  H+='<div style="padding:4px 15px">'+rows+'</div>';
-  H+='<div style="padding:11px 15px;background:#F7F9FC;border-top:1px solid var(--line);border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy)"><span>Will save to roster</span><b style="color:var(--green-d)">'+willSave+'</b></div><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy);margin-top:2px"><span>Kept as yours</span><b style="color:var(--amber)">'+kept+'</b></div></div>';
-  H+='<div style="padding:13px 15px"><button class="btn green" style="width:100%" onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply '+willSave+' updates</button><button class="btn ghost" style="width:100%;margin-top:6px" onclick="setUploads()">Discard</button><div class=csub style="text-align:center;margin-top:8px">Nothing saved until you press Apply</div></div>';
+  var H='<div class=cart2>';
+  H+='<div class=ch><div class=h>Ready to apply</div><div class=sub>'+STAGE.rows_seen+' crew read &middot; from AdvancedQuery</div></div>';
+  H+='<div class=items>'+rows+'</div>';
+  H+='<div class=totals><div class=ctl><span>Will save to roster</span><span class="v save">'+willSave+'</span></div><div class=ctl><span>Kept as yours</span><span class="v keep">'+kept+'</span></div></div>';
+  H+='<div class=foot><button class=applyb2 onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply <span class=k>'+willSave+'</span> updates <span>&#8594;</span></button>'
+   +'<button class=discard2 onclick="setUploads()">Discard all</button>'
+   +'<div class=lock2>&#128274; NOTHING SAVED UNTIL YOU APPLY</div></div>';
   H+='</div>';
   $("#impcart").innerHTML=H;
 }
 async function cimsApply(){
-  var btn=$("#impcart")?$("#impcart").querySelector(".btn.green"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
+  var btn=$("#impcart")?$("#impcart").querySelector(".applyb2"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
   var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
-  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged. Nothing else was touched.</div>';
-  STAGE=null;DEC={};IMPROWS=null;
-}
-// ===== Inline branded crew importer for the console Data tab (served form) =====
-// Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
-// Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
-// cart inline into #imp, using the console's existing brand (navy/green, Outfit/DM Sans).
-// No backticks and no dollar-brace interpolation and no quote nesting, so source == served JS.
-var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null;
-async function sha256buf(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
-function impEsc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":"&gt;";});}
-async function cimsStage(){
-  $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
-  var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
-  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"This exact file was already imported &mdash; nothing to do.":"Stage failed: "+impEsc(res.error))+'</div>';return;}
-  STAGE=res;DEC={};cimsRender();
-}
-function impSeg(key,def,a,b,la,lb){var cur=DEC[key]||def;return '<span class=impseg><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
-function impTag(txt,kind){return ' <span class="cchip '+kind+'">'+txt+'</span>';}
-function impDiff(lab,o,n,tag){return '<div style="margin-top:5px;font-size:13px"><span class=csub>'+impEsc(lab)+'</span> <span style="color:var(--mut);text-decoration:line-through">'+impEsc(o)+'</span> &rarr; <b style="color:var(--navy)">'+impEsc(n)+'</b>'+(tag||"")+'</div>';}
-function impCard(inner){return '<div class="card" style="margin:0 0 8px;border-left:3px solid var(--line-2);padding:11px 13px">'+inner+'</div>';}
-function cimsRender(){
-  var g=STAGE.review.groups,c=STAGE.review.counts,L="";
-  L+='<style>.impseg{display:inline-flex;border:1px solid var(--line-2);border-radius:8px;overflow:hidden;margin-top:8px}.impb{border:0;background:#fff;padding:5px 12px;font:600 12.5px DM Sans;color:var(--mut);cursor:pointer}.impb+.impb{border-left:1px solid var(--line-2)}.impb.on{background:var(--navy);color:#fff}.impwho{font-weight:700;color:var(--navy);font-size:13.5px}.impid{color:var(--mut);font-weight:500;font-size:12px;margin-left:6px}</style>';
-  L+='<div style="display:grid;grid-template-columns:1fr 272px;gap:16px;align-items:start;margin-top:8px">';
-  L+='<div>';
-  L+='<div style="margin-bottom:6px"><b style="color:var(--navy)">'+STAGE.rows_seen+' crew read</b> <span class=csub>&middot; nothing saved yet</span></div>';
-  L+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">'
-    +'<span class="cchip amber">&#9875; '+c.ship_flag+' ship</span>'
-    +'<span class="cchip red">&#9679; '+(c.critical+c.override_conflict)+' need you</span>'
-    +'<span class="cchip ok">&#9677; '+c.cert+' certificates</span>'
-    +'<span class="cchip amber">&#65291; '+c.new+' new</span>'
-    +'<span class="cchip">&#128682; '+c.departed+' departed</span></div>';
-  if(g.ship_flag.length){L+='<div class=zlabel>Ship allocation &mdash; file disagrees with your board</div>';
-    g.ship_flag.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});}
-  if(g.override_conflict.length||g.critical.length){L+='<div class=zlabel>Needs your decision</div>';
-    g.override_conflict.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,impTag("your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file","Keep mine"));});
-    g.critical.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});}
-  if(g.cert.length){L+='<div class=zlabel>Certificate updates from TDG</div>';
-    g.cert.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impDiff(it.field,it.old,it.new,it.earlier?impTag("moved earlier","amber"):impTag("renewed","ok"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold"));});}
-  if(g.new.length){L+='<div class=zlabel>New crew</div>';
-    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=impwho>'+impEsc((f.first_name||"")+" "+(f.last_name||""))+'<span class=impid>'+impEsc(it.agency_id)+'</span></div><div style="margin-top:4px;font-size:13px"><b style="color:var(--navy)">'+impEsc(f.vessel_observed||"&mdash;")+'</b> <span class=csub>'+impEsc(f.rank_observed||f.status||"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});}
-  if(g.departed.length){L+='<div class=zlabel>Absent from this file</div>';
-    g.departed.forEach(function(it){L+=impCard('<div class=impwho>'+impEsc(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss"));});}
-  if(g.minor.length){L+='<div class=hint style="margin-top:8px">'+g.minor.length+' minor tidy-ups auto-applied (spelling, spacing)</div>';}
-  L+='</div>';
-  L+='<div id=impcart></div>';
-  L+='</div>';
-  $("#imp").innerHTML=L;
-  $("#imp").onclick=function(e){var b=e.target.closest?e.target.closest(".impb"):null;if(!b)return;DEC[b.getAttribute("data-k")]=b.getAttribute("data-v");var sib=b.parentNode.querySelectorAll(".impb");for(var i=0;i<sib.length;i++)sib[i].classList.toggle("on",sib[i].getAttribute("data-v")===b.getAttribute("data-v"));cimsCart();};
-  cimsCart();
-}
-function cimsCart(){
-  var g=STAGE.review.groups;function d(k,def){return DEC[k]||def;}
-  var certAcc=0;g.cert.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")certAcc++;});
-  var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")ovAcc++;else ovKeep++;});
-  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")crAcc++;else crKeep++;});
-  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
-  var minor=g.minor.length;
-  var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"flag")==="flag")shipFlag++;});
-  var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
-  var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
-  var rows="";
-  function li(name,sub,q,cls){return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)"><div style="flex:1;font-size:13px;color:var(--navy);font-weight:600">'+name+'<div class=csub style="font-weight:400">'+sub+'</div></div><div style="font:700 12.5px DM Sans;color:'+cls+'">'+q+'</div></div>';}
-  if(g.cert.length)rows+=li("Certificates","medical, visas, SIRB",certAcc+" save","var(--green-d)");
-  if((g.override_conflict.length+g.critical.length)&&fieldSave)rows+=li("Field updates","status, contact",fieldSave+" save","var(--green-d)");
-  if(g.new.length)rows+=li("New crew","added to roster",newAdd+" save","var(--green-d)");
-  if(g.minor.length)rows+=li("Minor tidy-ups","spelling, spacing",minor+" save","var(--green-d)");
-  if(g.ship_flag.length)rows+=li("Ship flag","kept on your board",shipFlag+" held","var(--amber)");
-  if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=li("Your edits","kept as yours",(ovKeep+crKeep)+" held","var(--amber)");
-  if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
-  var H='<div class="card" style="margin:0;padding:0;overflow:hidden;position:sticky;top:12px">';
-  H+='<div style="background:var(--navy);color:#fff;padding:13px 15px"><div style="font-family:Outfit;font-weight:700">Ready to apply</div><div style="color:rgba(255,255,255,.65);font-size:12px;margin-top:2px">'+STAGE.rows_seen+' crew read'+(flags?" &middot; "+flags+" flagged":"")+'</div></div>';
-  H+='<div style="padding:4px 15px">'+rows+'</div>';
-  H+='<div style="padding:11px 15px;background:#F7F9FC;border-top:1px solid var(--line);border-bottom:1px solid var(--line)"><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy)"><span>Will save to roster</span><b style="color:var(--green-d)">'+willSave+'</b></div><div style="display:flex;justify-content:space-between;font-size:13px;color:var(--navy);margin-top:2px"><span>Kept as yours</span><b style="color:var(--amber)">'+kept+'</b></div></div>';
-  H+='<div style="padding:13px 15px"><button class="btn green" style="width:100%" onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply '+willSave+' updates</button><button class="btn ghost" style="width:100%;margin-top:6px" onclick="setUploads()">Discard</button><div class=csub style="text-align:center;margin-top:8px">Nothing saved until you press Apply</div></div>';
-  H+='</div>';
-  $("#impcart").innerHTML=H;
-}
-async function cimsApply(){
-  var btn=$("#impcart")?$("#impcart").querySelector(".btn.green"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
-  var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
-  var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
-  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
-  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged. Nothing else was touched.</div>';
+  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged to import history. Nothing else was touched.</div>';
   STAGE=null;DEC={};IMPROWS=null;
 }
 // ===== Inline branded crew importer for the console Data tab (served form) =====
