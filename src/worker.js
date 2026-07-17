@@ -1914,7 +1914,8 @@ async function apiIntelReview(env) {
   const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew WHERE redacted=0").all()).results;
   const nm = {}; for (const c of crew) nm[c.agency_id] = [c.first_name, c.last_name].filter(Boolean).join(" ");
   const pending = rows.map(r => { let cand = []; try { cand = JSON.parse(r.candidates || "[]"); } catch (e) {} return { id: r.id, reporter: r.reporter, summary: r.summary, confidence: r.confidence, ts: r.ts, candidates: cand.map(a => ({ agency_id: a, name: nm[a] || a })) }; });
-  return json({ count: pending.length, pending });
+  const roster = crew.map(c => ({ agency_id: c.agency_id, name: nm[c.agency_id] })).filter(c => c.name);
+  return json({ count: pending.length, pending, roster });
 }
 // Human assigns a pending note to a crew (or discards it).
 async function apiIntelResolve(request, env, session) {
@@ -3806,12 +3807,20 @@ function closeIntelReview(){var w=document.getElementById('intelmodal');if(w)w.r
 async function loadIntelReview(){
   var box=document.getElementById('intelrev');if(!box)return;
   var r;try{r=await (await fetch('/api/intel/review')).json();}catch(e){box.innerHTML='<div class=muted style="padding:14px">Could not load.</div>';return;}
-  var ps=r.pending||[];
+  var ps=r.pending||[];window.INTELROSTER=r.roster||[];
   if(!ps.length){box.innerHTML='<div class=muted style="padding:14px">Nothing to review — all clear.</div>';return;}
   box.innerHTML=ps.map(function(p){
-    var cands=(p.candidates||[]).map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px;margin:2px" onclick="intelAssign(\\''+p.id+'\\',\\''+c.agency_id+'\\')">→ '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('');
-    return '<div class=noteitem><div class=notemeta>'+(p.reporter?(String(p.reporter).replace(/</g,'&lt;')+' · '):'')+'<span class=cchip>'+p.confidence+' match</span></div><div class=notetext>'+String(p.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div><div style="margin-top:6px">'+(cands||'<span class=hint>No candidate names found. </span>')+' <button class="btn ghost" style="padding:6px 10px;font-size:12px;margin:2px" onclick="intelDiscard(\\''+p.id+'\\')">Discard</button></div></div>';
+    var cands=(p.candidates||[]).map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px;margin:2px" data-pid="'+p.id+'" data-aid="'+c.agency_id+'">&#8594; '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('');
+    return '<div class=noteitem><div class=notemeta>'+(p.reporter?(String(p.reporter).replace(/</g,'&lt;')+' &middot; '):'')+'<span class=cchip>'+p.confidence+' match</span></div><div class=notetext>'+String(p.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div><div style="margin-top:6px">'+(cands||'<span class=hint>No candidate names found. </span>')+' <button class="btn ghost intelrm" style="padding:6px 10px;font-size:12px;margin:2px" data-pid="'+p.id+'">Discard</button></div><div style="margin-top:8px"><input class=intelsq data-pid="'+p.id+'" placeholder="Someone else? Search crew by name or SC-ID" style="width:300px;max-width:100%;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;font-size:12.5px"><div class=intelsr style="margin-top:4px"></div></div></div>';
   }).join('');
+  box.onclick=function(e){var b=e.target.closest?e.target.closest('button[data-aid]'):null;if(b)return intelAssign(b.getAttribute('data-pid'),b.getAttribute('data-aid'));var d=e.target.closest?e.target.closest('.intelrm'):null;if(d)return intelDiscard(d.getAttribute('data-pid'));};
+  box.querySelectorAll('.intelsq').forEach(function(inp){inp.oninput=function(){
+    var q=inp.value.toLowerCase().trim();var out=inp.parentNode.querySelector('.intelsr');
+    if(!q||q.length<2){out.innerHTML='';return;}
+    var toks=q.split(/\\s+/);
+    var hits=(window.INTELROSTER||[]).filter(function(c){var hay=(String(c.name)+' '+String(c.agency_id)).toLowerCase();return toks.every(function(t){return hay.indexOf(t)>=0;});}).slice(0,6);
+    out.innerHTML=hits.map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px;margin:2px" data-pid="'+inp.getAttribute('data-pid')+'" data-aid="'+c.agency_id+'">&#8594; '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('')||'<span class=hint>No crew found.</span>';
+  };});
 }
 async function intelAssign(id,aid){
   try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,agency_id:aid})});}catch(e){}
