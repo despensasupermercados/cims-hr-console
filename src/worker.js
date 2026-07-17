@@ -144,11 +144,14 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname;
+    const t0 = Date.now(); // PERF: request start, for the Server-Timing header on /api responses
     try {
       // Await the whole dispatch so an async handler's rejection is caught here and returned as a
       // clean JSON 500 — routes do `return apiX(...)` without await, and an unawaited rejection would
       // otherwise escape this try and surface as Cloudflare's raw error page (this bit /api/daysworked).
-      return await (async () => {
+      // (Captured into `res` instead of returned directly so we can stamp Server-Timing below —
+      // the await stays INSIDE this try, so the §11 error-boundary invariant is unchanged.)
+      const res = await (async () => {
       // ---- public brand icons (no auth) ----
       if (p === "/favicon.ico")          return assetResponse(ICO_B64, "image/x-icon");
       if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png")
@@ -246,6 +249,17 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
 
       return htmlResponse(APP_HTML);
       })();
+      // PERF instrumentation: stamp total server time on every API response so per-request cost
+      // is visible in browser devtools (Network -> Timing -> Server Timing). Read-only; on any
+      // copy failure we return the original response untouched.
+      if (p.startsWith("/api/") && res instanceof Response) {
+        try {
+          const out = new Response(res.body, res);
+          out.headers.set("Server-Timing", "app;dur=" + (Date.now() - t0));
+          return out;
+        } catch { return res; }
+      }
+      return res;
     } catch (err) {
       // Log server-side (Cloudflare tail/logs) but never leak internals to the client.
       console.error("worker_error", (err && err.stack) || err);
@@ -727,7 +741,27 @@ async function logData(env, source, rows, status) {
 // D1 (seed-only-when-empty would otherwise ignore the new data). Reseed is keyman_contract3 only;
 // per-contract manual edits live in the separate contract_edit table and are preserved.
 const KEYMAN_VERSION = "2026-06-13-cc-v3";
-async function ensureKeyman(env) {
+// PERF: once-per-isolate memo for the ensure* schema guards. Before this, every hot request re-ran
+// CREATE TABLE / ALTER TABLE / seed-version checks — each one a full Worker->D1 round trip on the
+// write path. The DDL is idempotent, so running it once per (isolate, DB binding) is sufficient:
+// new deploys create fresh isolates and re-check automatically. Keyed by env.DB (WeakMap) so tests
+// with independent fake DBs keep their own state; a rejected ensure clears its slot and retries on
+// the next request instead of caching the failure.
+const _ensureMemo = new WeakMap();
+function memoEnsure(fn) {
+  return (env) => {
+    let m = _ensureMemo.get(env.DB);
+    if (!m) { m = new Map(); _ensureMemo.set(env.DB, m); }
+    let pr = m.get(fn);
+    if (!pr) {
+      pr = Promise.resolve().then(() => fn(env)).catch((e) => { m.delete(fn); throw e; });
+      m.set(fn, pr);
+    }
+    return pr;
+  };
+}
+const ensureKeyman = memoEnsure(ensureKeymanImpl);
+async function ensureKeymanImpl(env) {
   // PRIMARY KEY (sc,seq) + INSERT OR REPLACE = race-proof idempotent seeding. Earlier DELETE+INSERT
   // reseeds raced under concurrent requests and STACKED rows (3x duplication); this can't.
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq))").run();
@@ -886,7 +920,8 @@ async function insertTravel(env, recs, year) {
     }));
   }
 }
-async function ensureTravel(env) {
+const ensureTravel = memoEnsure(ensureTravelImpl);
+async function ensureTravelImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run();
   // Steady state = one combined count. If 'kind' is missing (legacy table) the query throws -> migrate once.
   let st = null;
@@ -931,15 +966,38 @@ async function apiTravelImport(request, env, session) {
 
 async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
-  const q = async (sql, ...b) => (await env.DB.prepare(sql).bind(...b).first());
-  await ensureKeyman(env);
-  const hist = await q("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(off_date)-julianday(on_date))) AS INTEGER) days FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL AND off_date IS NOT NULL AND off_date>on_date");
-  const total = (await q("SELECT COUNT(*) n FROM crew")).n;
+  // PERF (2026-07): this route used to issue ~15 D1 queries ONE AFTER ANOTHER — each a full
+  // Worker->D1 round trip, so wall time was RTT x 15 even though every query runs in <1ms.
+  // Now: the five compliance counts + total + vessels collapse into ONE pass over crew, and all
+  // remaining queries are independent, so they run in a single concurrent wave (Promise.all).
+  // The travel queries keyed off "latest year" inline via (SELECT MAX(year)...) instead of
+  // waiting for a separate MAX(year) result. Outputs are byte-identical to the sequential version.
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureTravel(env)]);
+  const md = today.slice(5);
+  const curY = +today.slice(0, 4), curM = +today.slice(5, 7);
+  const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
+  const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy] = await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(off_date)-julianday(on_date))) AS INTEGER) days FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL AND off_date IS NOT NULL AND off_date>on_date").first(),
+    env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew").bind(in90).first(),
+    env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all(),
+    // Bonus committed to date (money path — read only). Resilient like the old try/catch.
+    env.DB.prepare("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome").first().catch(() => null),
+    // Birthdays today (match MM-DD of dob).
+    env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND status='On board' ORDER BY last_name").bind(md).all(),
+    env.DB.prepare("SELECT MAX(year) y FROM travel_expense").first(),
+    env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=" + TY + " GROUP BY kind").all(),
+    env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=" + TY + " GROUP BY month ORDER BY month").all(),
+    env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside'").first(),
+    // YTD crew spend: elapsed months = current month if latest year is the current year, else 12.
+    env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside' AND month <= CASE WHEN " + TY + "=? THEN ? ELSE 12 END").bind(curY, curM).first(),
+  ]);
+  const total = cc.total || 0, vessels = cc.vessels || 0;
+  const medExp = cc.med || 0, sirbExp = cc.sirb || 0, ppExp = cc.pp || 0, usvExp = cc.usv || 0, schExp = cc.sch || 0;
   // Count by EFFECTIVE status (auto-derived from the schedule; retired/manual win) so the dashboard
   // matches the crew cards and rotation board rather than the raw stored value.
-  await ensureCrewExtras(env);
-  const cs = (await env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all()).results;
-  const csOv = {}; for (const o of (await env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all()).results) csOv[o.agency_id] = o;
+  const cs = csRes.results;
+  const csOv = {}; for (const o of ovRes.results) csOv[o.agency_id] = o;
   const csSched = scheduleBySc();
   const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0 };
   for (const c of cs) {
@@ -948,42 +1006,26 @@ async function apiDashboard(env) {
     // Donut counts the same ACTIVE set as the tiles (exclude Retired/Inactive), by client/brand.
     if (s !== "Retired" && s !== "Inactive") byClient[clientOf((ov && ov.vessel_observed) || c.vessel_observed)] += 1;
   }
-  const medExp = (await q("SELECT COUNT(*) n FROM crew WHERE med_exp IS NOT NULL AND med_exp < ?", in90)).n;
-  const sirbExp = (await q("SELECT COUNT(*) n FROM crew WHERE sirb_exp IS NOT NULL AND sirb_exp < ?", in90)).n;
-  const ppExp = (await q("SELECT COUNT(*) n FROM crew WHERE pp_exp IS NOT NULL AND pp_exp < ?", in90)).n;
-  const usvExp = (await q("SELECT COUNT(*) n FROM crew WHERE usv_exp IS NOT NULL AND usv_exp < ?", in90)).n;
-  const schExp = (await q("SELECT COUNT(*) n FROM crew WHERE sch_exp IS NOT NULL AND sch_exp < ?", in90)).n;
-  const vessels = (await q("SELECT COUNT(DISTINCT vessel_observed) n FROM crew")).n;
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
-  // Bonus committed to date (money path — read only).
-  let bonus = { committed: 0, pay: 0 };
-  try { const bo = await q("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome"); bonus = { committed: bo.n || 0, pay: bo.p || 0 }; } catch {}
-  // Birthdays today (match MM-DD of dob).
-  const md = today.slice(5);
-  const bd = (await env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND status='On board' ORDER BY last_name").bind(md).all()).results;
-  const birthdays = bd.map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: b.vessel_observed || "" }));
+  const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
+  const birthdays = bdRes.results.map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: b.vessel_observed || "" }));
   // Travel budget (latest year on file), split crew vs shoreside management.
-  await ensureTravel(env);
-  const ty = (await q("SELECT MAX(year) y FROM travel_expense")).y;
+  const ty = tyRow.y;
   const travel = { year: ty || null, all: 0, shoreside: 0, crew: 0, months: [], air: 0 };
   if (ty) {
-    const tr = (await env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=? GROUP BY kind").bind(ty).all()).results;
-    for (const r of tr) { travel.all += r.t || 0; if (r.kind === "shoreside") travel.shoreside += r.t || 0; }
+    for (const r of trKind.results) { travel.all += r.t || 0; if (r.kind === "shoreside") travel.shoreside += r.t || 0; }
     travel.crew = Math.round((travel.all - travel.shoreside) * 100) / 100;
     travel.all = Math.round(travel.all * 100) / 100;
     travel.shoreside = Math.round(travel.shoreside * 100) / 100;
-    const ms = (await env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=? GROUP BY month ORDER BY month").bind(ty).all()).results;
+    const ms = trMs.results;
     travel.months = ms.map(r => ({ m: r.month, t: Math.round((r.t || 0) * 100) / 100 }));
     travel.air = Math.round(ms.reduce((s, r) => s + (r.a || 0), 0) * 100) / 100;
-    const cat = await env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=? AND kind!='shoreside'").bind(ty).first();
     const rnd = (x) => Math.round((x || 0) * 100) / 100;
-    travel.cats = { air: rnd(cat.air), hotel: rnd(cat.hotel), medical: rnd(cat.medical), visa: rnd(cat.visa), food: rnd(cat.food), transport: rnd(cat.transport), other: rnd(cat.other) };
-    const curY = +TODAY().slice(0, 4), curM = +TODAY().slice(5, 7);
+    travel.cats = { air: rnd(trCat.air), hotel: rnd(trCat.hotel), medical: rnd(trCat.medical), visa: rnd(trCat.visa), food: rnd(trCat.food), transport: rnd(trCat.transport), other: rnd(trCat.other) };
     travel.elapsedMo = (ty === curY) ? curM : 12;          // YTD = elapsed calendar months
     travel.budgetMo = 15000;                               // crew travel budget (source: travel sheet SUMMARY!C55)
     travel.ytdBudget = travel.budgetMo * travel.elapsedMo;
-    const cy = await env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=? AND kind!='shoreside' AND month<=?").bind(ty, travel.elapsedMo).first();
-    travel.crewYTD = rnd(cy.t);
+    travel.crewYTD = rnd(trCy.t);
     travel.pctUsedYTD = travel.ytdBudget ? Math.round(travel.crewYTD / travel.ytdBudget * 100) : 0;
   }
   return json({
@@ -1014,7 +1056,8 @@ function clientOf(vessel) {
 }
 // Manual edits live in crew_override and ALWAYS win over the imported base row.
 // applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
-async function ensureCrewExtras(env) {
+const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
+async function ensureCrewExtrasImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_override (agency_id TEXT PRIMARY KEY, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_override TEXT, vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT, baseline_count INTEGER, notes TEXT, updated_at TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)").run();
   try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
@@ -1036,14 +1079,22 @@ function crewStatus(base, ov, schedLegs, today) {
 // Returns the FULL enriched crew list (overrides merged, contract count, active span, client,
 // docs). Filtering/sorting is done client-side (≈100 crew) so the UI stays snappy and consistent.
 async function apiCrew(env, url) {
-  await ensureKeyman(env); await ensureCrewExtras(env);
+  // PERF (2026-07): ensures + the four reads are independent — run them concurrently instead of
+  // paying 6 sequential Worker->D1 round trips. Same statements, same outputs.
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
   const today = TODAY();
-  const base = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=0").all()).results;
-  const ovs = (await env.DB.prepare("SELECT * FROM crew_override").all()).results;
+  const [baseRes, ovsRes, legsRes, nlRes] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT * FROM crew_override").all(),
+    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+    env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
+  ]);
+  const base = baseRes.results;
+  const ovs = ovsRes.results;
   const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
+  const legs = legsRes.results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
-  const nl = (await env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all()).results;
+  const nl = nlRes.results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
   const sched = scheduleBySc();
   const crew = base.map(b => {
@@ -1167,27 +1218,37 @@ async function apiRotation(env) { return json(await rotationSections(env)); }
 // dates (registry status + vessel, enriched by contract_edit, Keyman legs, then schedule tabs).
 // Shared so the monthly billing export computes days from the SAME dates the board displays.
 async function rotationSections(env) {
-  await ensureKeyman(env); await ensureReady(env);
+  // PERF (2026-07): ensures first (concurrently), then ALL independent reads in one concurrent
+  // wave instead of 7 sequential Worker->D1 round trips. Same statements, same downstream logic.
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env)]);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const AZ = ["journey", "onward", "quest", "pursuit"]; const HIST = await boardLegs(env);
+  const AZ = ["journey", "onward", "quest", "pursuit"];
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes] = await Promise.all([
+    boardLegs(env),
+    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all(),
+    env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
+    env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all(),
+    env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
+    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+  ]);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
-  const crewRows = (await env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all()).results;
-  const ovRows = (await env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all()).results;
+  const crewRows = crewRowsRes.results;
+  const ovRows = ovRowsRes.results;
   const ovVessel = {}, ovMap = {}; for (const o of ovRows) { ovMap[o.agency_id] = o; if (o.vessel_observed != null && o.vessel_observed !== "") ovVessel[o.agency_id] = o.vessel_observed; }
   for (const c of crewRows) if (ovVessel[c.agency_id]) c.vessel_observed = ovVessel[c.agency_id]; // manual edits win
   const schedMap = scheduleBySc(HIST);
   for (const c of crewRows) c.status = crewStatus(c, ovMap[c.agency_id], schedMap[c.agency_id], today); // auto status (On board / On Vacation), retired/manual win
   const cmap = {};
   for (const c of crewRows) cmap[c.agency_id] = { agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.agency_id, status: c.status || "Unknown", rank: c.rank_override || c.rank_observed || null };
-  const rd = (await env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all()).results;
+  const rd = rdRes.results;
   const rmap = {}; for (const r of rd) rmap[r.agency_id] = r;
-  await ensureContractEdit(env);
-  const eds = (await env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all()).results;const _vpd=(await env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all()).results;const _pdBy=groupPortDays(_vpd);
+  const eds = edsRes.results;const _vpd=vpdRes.results;const _pdBy=groupPortDays(_vpd);
   const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
-  const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
+  const legs = legsRes.results;
   const byCrew = {};
   for (const r of legs) (byCrew[r.sc] = byCrew[r.sc] || []).push(r);
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
@@ -1362,11 +1423,13 @@ async function apiNote(request, env, session) {
   await logActivity(env, session && session.email, "crew_note", b.agency_id);
   return json({ ok: true });
 }
-async function ensureReady(env) {
+const ensureReady = memoEnsure(ensureReadyImpl);
+async function ensureReadyImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_ready (agency_id TEXT PRIMARY KEY, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, note TEXT, updated_at TEXT)").run();
   try { await env.DB.prepare("ALTER TABLE crew_ready ADD COLUMN note TEXT").run(); } catch {}
 }
-async function ensureContractEdit(env) {
+const ensureContractEdit = memoEnsure(ensureContractEditImpl);
+async function ensureContractEditImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, PRIMARY KEY (sc, seq))").run();
 }
 // Per-contract edit (manual-wins): embark/disembark city, sign-on/off, ship, + confirmed flags.
