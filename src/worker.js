@@ -2379,6 +2379,7 @@ details.ddwrap>summary{padding:6px 0}
 .pchip{font-size:12px;font-weight:700;padding:6px 13px;border-radius:20px;border:1px solid var(--line-2);background:#fff;color:var(--mut);cursor:pointer}
 .pchip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .mockband{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;color:#9A6614;background:#FBF2E0;border:1px solid #EAD9AE;border-radius:20px;padding:4px 12px;margin-bottom:12px}
+.liveband{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;color:#3E8E2A;background:#EAF6E4;border:1px solid #CDE8C1;border-radius:20px;padding:4px 12px;margin-bottom:12px}
 .kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:11px}
 .ktile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 11px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
 .ktile .kl{font-size:10.5px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
@@ -3836,7 +3837,21 @@ function rtrend(pts,ymin,ymax){
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><line x1="'+pad+'" y1="'+gate.toFixed(1)+'" x2="'+(w-pad)+'" y2="'+gate.toFixed(1)+'" stroke="#BC3B2C" stroke-width="1" stroke-dasharray="4 4" opacity=".55"></line><text x="'+(w-pad)+'" y="'+(gate-4).toFixed(1)+'" text-anchor="end" font-size="8" fill="#BC3B2C">freeze gate (3.0)</text><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
 function rptSbm(){
-  var d=RPT_MOCK;
+  var rows=rptFilter(RPT_P),prev=rptPrev(RPT_P),mo=rptMonths(rows);
+  var n=rows.length,avg=rptAvg(rows),five=rows.filter(function(x){return x.r===5;}).length,
+      low=rows.filter(function(x){return x.r<3;}).length,
+      ships={},specs={};
+  rows.forEach(function(x){ships[x.s]=ships[x.s]||[];ships[x.s].push(x);specs[x.n]=specs[x.n]||[];specs[x.n].push(x);});
+  var shipN=Object.keys(ships).length,specN=Object.keys(specs).length;
+  function delta(cur,pv,dec,bad){
+    if(!prev.length)return '<span class="kdelta flat">&mdash;</span>';
+    var df=cur-pv;if(Math.abs(df)<(dec?0.05:0.5))return '<span class="kdelta flat">&#9644; 0</span>';
+    var up=df>0,good=bad?!up:up;
+    return '<span class="kdelta '+(good?'up':'dn')+'">'+(up?'&#9650;':'&#9660;')+' '+(dec?Math.abs(df).toFixed(1):Math.round(Math.abs(df)))+'</span>';
+  }
+  var pAvg=rptAvg(prev),pFive=prev.filter(function(x){return x.r===5;}).length,pLow=prev.filter(function(x){return x.r<3;}).length;
+  var pShips={};prev.forEach(function(x){pShips[x.s]=1;});
+  var pSpecs={};prev.forEach(function(x){pSpecs[x.n]=1;});
   var h='<div class=rpthead><h2>Shipboard Feedback</h2>'
    +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
    +'</div>'
