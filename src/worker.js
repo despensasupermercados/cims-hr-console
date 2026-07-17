@@ -2373,6 +2373,36 @@ details.ddwrap>summary{padding:6px 0}
 .kbrow .ka{font-size:12px;color:var(--mut);cursor:pointer;flex:none;opacity:.7}
 .kbrow .ka:hover{opacity:1;color:var(--navy)}
 .kbfoot{margin-top:22px;color:var(--mut);font-size:11.5px;text-align:center}
+/* ---- Reports tab (v1: Management Reviews module, sample data; live API lands in v2) ---- */
+.rpthead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:2px 0 6px}
+.rpthead h2{font-size:19px;color:var(--navy);margin-right:auto}
+.pchip{font-size:12px;font-weight:700;padding:6px 13px;border-radius:20px;border:1px solid var(--line-2);background:#fff;color:var(--mut);cursor:pointer}
+.pchip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.mockband{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.05em;color:#9A6614;background:#FBF2E0;border:1px solid #EAD9AE;border-radius:20px;padding:4px 12px;margin-bottom:12px}
+.kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:11px}
+.ktile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 11px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
+.ktile .kl{font-size:10.5px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.ktile .kv{font-family:'Outfit';font-size:26px;font-weight:800;color:var(--navy);line-height:1.15;margin-top:6px}
+.ktile .kv small{font-size:13px;color:var(--mut);font-weight:600}
+.kdelta{font-size:11.5px;font-weight:700;margin-left:7px;vertical-align:2px}
+.kdelta.up{color:var(--green-d)}.kdelta.dn{color:var(--red)}.kdelta.flat{color:var(--mut)}
+.ktile svg{display:block;margin-top:8px}
+.rblk{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
+.rgrid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px}
+.rblk h3{font-size:12px;text-transform:uppercase;letter-spacing:.09em;color:var(--mut);margin-bottom:12px;font-family:'Outfit'}
+.frow{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:13px}
+.frow .fl{width:88px;color:var(--mut);flex:none}
+.frow .fbar{flex:1;height:18px;background:#F1F4F8;border-radius:5px;overflow:hidden}
+.frow .fbar i{display:block;height:100%;border-radius:5px}
+.frow .fn{width:44px;text-align:right;font-weight:700;font-family:'Outfit';flex:none}
+.hwrap2{display:flex;align-items:flex-end;gap:10px;height:120px;padding:4px 2px 0}
+.hcol{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;justify-content:flex-end;height:100%}
+.hcol i{width:100%;max-width:52px;background:var(--royal);border-radius:5px 5px 0 0;display:block}
+.hcol.rlow i{background:var(--red)}
+.hcol b{font-family:'Outfit';font-size:12.5px}
+.hcol span{font-size:10.5px;color:var(--mut)}
+.ratebar{height:8px;background:#F1F4F8;border-radius:4px;overflow:hidden;min-width:70px;display:inline-block;vertical-align:middle}
+.ratebar i{display:block;height:100%;background:var(--green);border-radius:4px}
 `;
 
 const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
@@ -2498,6 +2528,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-billing onclick="show('billing')">Billing</button>
     <button id=nav-travel onclick="show('travel')">Travel</button>
     <button id=nav-fleet onclick="show('fleet')">Fleet</button>
+    <button id=nav-reports onclick="show('reports')">Reports</button>
     <button id=nav-data onclick="show('data')">Data</button>
     <button id=nav-ask onclick="show('ask')">Ask Maria</button>
     <a class=out href="/api/auth/logout">Sign out</a>
@@ -2552,6 +2583,7 @@ async function show(tab){
   if(tab==='billing')return renderBilling();
   if(tab==='travel')return renderTravel();
   if(tab==='fleet')return renderFleet();
+  if(tab==='reports')return renderReports();
   if(tab==='data'||tab==='settings')return renderData();
   if(tab==='ask')return renderAsk();
 }
@@ -3694,6 +3726,165 @@ function lineSVG(pts){
   return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
 }
 function legendH(segs){return '<div class=legend>'+segs.filter(function(s){return (s.value||0)>0;}).map(function(s){return '<span><i style="background:'+s.color+'"></i>'+s.label+' '+s.value+'</span>';}).join('')+'</div>';}
+var RPT_P='YTD';
+var RPT_MOCK={
+ kpi:{
+  responseRate:{v:'68',u:'%',d:'+6',spark:[52,55,61,58,63,66,68]},
+  avgRating:{v:'4.2',u:'/5',d:'+0.1',spark:[3.9,4.0,4.1,4.0,4.2,4.1,4.2]},
+  openInvites:{v:'7',u:'',d:'-2',spark:[12,10,11,9,8,9,7]},
+  below3:{v:'2',u:'',d:'+1',dBad:true,spark:[0,1,0,0,1,1,2]},
+  medianDays:{v:'2.4',u:'d',d:'-0.3',spark:[3.4,3.1,3.0,2.8,2.7,2.5,2.4]},
+  coverage:{v:'81',u:'%',d:'+4',spark:[64,68,71,74,76,79,81]}
+ },
+ funnel:[
+  {l:'Invited',n:124,c:'#1E6FD0',pct:100},
+  {l:'Reminded',n:41,c:'#7FA8D9',pct:33},
+  {l:'Submitted',n:84,c:'#5FB946',pct:68},
+  {l:'Expired',n:32,c:'#C7CFDA',pct:26},
+  {l:'Suppressed',n:8,c:'#C7CFDA',pct:6}
+ ],
+ dist:[{r:1,n:1},{r:2,n:1},{r:3,n:15},{r:4,n:40},{r:5,n:27}],
+ brands:[
+  {b:'Royal Caribbean',n:61,avg:'4.2'},
+  {b:'Celebrity',n:17,avg:'4.0'},
+  {b:'Azamara',n:6,avg:'4.5'}
+ ],
+ trend:[{x:'Feb',y:4.0},{x:'Mar',y:4.1},{x:'Apr',y:4.0},{x:'May',y:4.2},{x:'Jun',y:4.1},{x:'Jul',y:4.2}],
+ board:[
+  {name:'M. K. R. Murillo',ship:'Navigator',n:3,avg:'4.7'},
+  {name:'J. P. Santos',ship:'Wonder',n:4,avg:'4.5'},
+  {name:'A. Reyes',ship:'Apex',n:2,avg:'4.5'},
+  {name:'R. D. Cruz',ship:'Icon',n:3,avg:'4.3'},
+  {name:'L. Fernandez',ship:'Quest',n:2,avg:'4.0'},
+  {name:'C. Bautista',ship:'Allure',n:3,avg:'3.7'}
+ ],
+ watch:[
+  {name:'E. Villanueva',ship:'Symphony',rating:2,date:'2026-06-28',note:'freeze gate — sEval 0/15, review before commit'},
+  {name:'D. Ocampo',ship:'Eclipse',rating:2,date:'2026-05-14',note:'freeze gate — resolved by Rita 2026-05-20'}
+ ],
+ ships:[
+  {ship:'Navigator',brand:'Royal',sent:6,ans:6,rate:100},
+  {ship:'Wonder',brand:'Royal',sent:7,ans:6,rate:86},
+  {ship:'Icon',brand:'Royal',sent:5,ans:4,rate:80},
+  {ship:'Apex',brand:'Celebrity',sent:4,ans:3,rate:75},
+  {ship:'Quest',brand:'Azamara',sent:3,ans:2,rate:67},
+  {ship:'Allure',brand:'Royal',sent:6,ans:3,rate:50},
+  {ship:'Symphony',brand:'Royal',sent:5,ans:2,rate:40},
+  {ship:'Eclipse',brand:'Celebrity',sent:4,ans:0,rate:0}
+ ],
+ latest:[
+  {date:'2026-07-08',crew:'M. K. R. Murillo',ship:'Navigator',brand:'Royal',rating:4},
+  {date:'2026-07-05',crew:'J. P. Santos',ship:'Wonder',brand:'Royal',rating:5},
+  {date:'2026-07-01',crew:'A. Reyes',ship:'Apex',brand:'Celebrity',rating:4},
+  {date:'2026-06-28',crew:'E. Villanueva',ship:'Symphony',brand:'Royal',rating:2},
+  {date:'2026-06-24',crew:'R. D. Cruz',ship:'Icon',brand:'Royal',rating:4},
+  {date:'2026-06-20',crew:'L. Fernandez',ship:'Quest',brand:'Azamara',rating:5}
+ ]
+};
+function rspark(arr,color){
+  var w=120,h=30,mn=Math.min.apply(null,arr),mx=Math.max.apply(null,arr),sp=(mx-mn)||1;
+  var pts=arr.map(function(v,i){return (i*(w/(arr.length-1))).toFixed(1)+','+(h-3-((v-mn)/sp)*(h-8)).toFixed(1);}).join(' ');
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" preserveAspectRatio="none"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linecap="round"></polyline></svg>';
+}
+function rpset(p){RPT_P=p;rptSbm();}
+// Reports shell: navy left sub-menu (same pattern as the Data tab), content on the
+// right. Each report is a menu entry; future modules (Bonus & Money, Manpower,
+// Travel Spend) slot in as new entries + one render function each.
+function renderReports(){
+  $('#view').innerHTML='<style>'
+   +'.dswrap{display:grid;grid-template-columns:238px 1fr;gap:0;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(20,45,72,.06)}'
+   +'.dsside{background:var(--navy);padding:22px 14px;display:flex;flex-direction:column;min-height:540px}'
+   +'.dsbrandrow{display:flex;align-items:center;gap:9px;padding:0 6px}'
+   +'.dswm{font-family:Outfit;font-size:24px;font-weight:800;color:#fff;letter-spacing:4px}'
+   +'.dsline{height:2px;background:var(--green);width:112px;border-radius:1px;margin:8px 6px 7px}'
+   +'.dssub{font-size:8px;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:2px;text-transform:uppercase;line-height:1.6;padding:0 6px 18px}'
+   +'.dsnav{display:block;width:100%;text-align:left;border:0;background:transparent;color:rgba(255,255,255,.72);font:600 14px DM Sans;padding:9px 11px;border-radius:8px;cursor:pointer;margin:1px 0}'
+   +'.dsside .dsnav:hover{background:rgba(255,255,255,.07);color:#fff}'
+   +'.dsside .dsnav.on{background:rgba(255,255,255,.13);color:#fff}'
+   +'.dsnav.soon{color:rgba(255,255,255,.32);cursor:default}'
+   +'.dsnav.soon:hover{background:transparent;color:rgba(255,255,255,.32)}'
+   +'.dsnav.soon small{font-size:9px;letter-spacing:.08em;text-transform:uppercase;opacity:.8;margin-left:6px}'
+   +'.dsdg3{margin-top:auto;padding:12px 8px 0;border-top:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);font-size:8px;letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;gap:8px}'
+   +'.dsdg3 b{color:var(--green);font-family:Outfit;font-size:13px;letter-spacing:2px}'
+   +'.dsmain{padding:22px 24px;min-width:0}'
+   +'</style>'
+   +'<div class=dswrap>'
+   +'<aside class=dsside>'
+     +'<div class=dsbrandrow><svg width=27 height=27 viewBox="0 0 34 34" fill="none"><rect x=4 y=2 width=20 height=26 rx=2 stroke="#5FB946" stroke-width=1.8 fill="none"/><rect x=10 y=8 width=20 height=26 rx=2 stroke="#5FB946" stroke-width=1.2 fill="none" opacity=0.3/><line x1=8 y1=10 x2=20 y2=10 stroke="#5FB946" stroke-width=1.2 opacity=0.6/><line x1=8 y1=14 x2=18 y2=14 stroke="#5FB946" stroke-width=1.2 opacity=0.4/><line x1=8 y1=18 x2=16 y2=18 stroke="#5FB946" stroke-width=1.2 opacity=0.25/></svg><span class=dswm>CIMS</span></div>'
+     +'<div class=dsline></div>'
+     +'<div class=dssub>Reports<br>Operational Intelligence</div>'
+     +'<button class="dsnav rptmenu on" data-rpt="sbm">Shipboard Feedback</button>'
+     +'<button class="dsnav soon" tabindex=-1>Bonus &amp; Money<small>soon</small></button>'
+     +'<button class="dsnav soon" tabindex=-1>Manpower<small>soon</small></button>'
+     +'<button class="dsnav soon" tabindex=-1>Travel Spend<small>soon</small></button>'
+     +'<div class=dsdg3>A division of <b>DG3</b></div>'
+   +'</aside>'
+   +'<div class=dsmain><div id=rptbody></div></div>'
+   +'</div>';
+  document.querySelectorAll('.rptmenu').forEach(function(b){b.onclick=function(){document.querySelectorAll('.rptmenu').forEach(function(x){x.classList.remove('on');});b.classList.add('on');rptShow(b.getAttribute('data-rpt'));};});
+  rptShow('sbm');
+}
+function rptShow(r){ if(r==='sbm')return rptSbm(); }
+function rtrend(pts,ymin,ymax){
+  var w=320,h=130,pad=26,n=pts.length,dx=(w-pad*2)/Math.max(1,n-1),sp=(ymax-ymin)||1;
+  var co=pts.map(function(p,i){return [pad+i*dx,h-pad-((p.y-ymin)/sp)*(h-pad*2)];});
+  var path=co.map(function(c,i){return (i?'L':'M')+c[0].toFixed(1)+' '+c[1].toFixed(1);}).join(' ');
+  var area=path+' L'+co[n-1][0].toFixed(1)+' '+(h-pad)+' L'+co[0][0].toFixed(1)+' '+(h-pad)+' Z';
+  var dots=co.map(function(c,i){return '<circle cx="'+c[0].toFixed(1)+'" cy="'+c[1].toFixed(1)+'" r="2.6" fill="#1E6FD0"></circle><text x="'+c[0].toFixed(1)+'" y="'+(c[1]-8).toFixed(1)+'" text-anchor="middle" font-size="9" font-weight="700" fill="#1B3A5C">'+pts[i].y.toFixed(1)+'</text>';}).join('');
+  var labs=pts.map(function(p,i){return '<text x="'+co[i][0].toFixed(1)+'" y="'+(h-7)+'" text-anchor="middle" font-size="8" fill="#6B7C93">'+p.x+'</text>';}).join('');
+  var gate=h-pad-((3-ymin)/sp)*(h-pad*2);
+  return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'"><line x1="'+pad+'" y1="'+gate.toFixed(1)+'" x2="'+(w-pad)+'" y2="'+gate.toFixed(1)+'" stroke="#BC3B2C" stroke-width="1" stroke-dasharray="4 4" opacity=".55"></line><text x="'+(w-pad)+'" y="'+(gate-4).toFixed(1)+'" text-anchor="end" font-size="8" fill="#BC3B2C">freeze gate (3.0)</text><path d="'+area+'" fill="rgba(30,111,208,.12)"></path><path d="'+path+'" fill="none" stroke="#1E6FD0" stroke-width="2"></path>'+dots+labs+'</svg>';
+}
+function rptSbm(){
+  var d=RPT_MOCK;
+  var h='<div class=rpthead><h2>Shipboard Feedback</h2>'
+   +['7D','30D','QTD','YTD','All'].map(function(p){return '<button class="pchip'+(p===RPT_P?' on':'')+'" onclick="rpset(\\''+p+'\\')">'+p+'</button>';}).join('')
+   +'</div>'
+   +'<div class=mockband>◈ SAMPLE DATA — the review pipeline is not live yet (invites off, 0 responses). Numbers are illustrative; the layout is the contract.</div>';
+  // ---- KPI strip
+  var KL=[['responseRate','Response rate','#3E8E2A'],['avgRating','Avg rating','#1E6FD0'],['openInvites','Open invites','#1E6FD0'],['below3','Below-3 ratings','#BC3B2C'],['medianDays','Median reply time','#1E6FD0'],['coverage','Contract coverage','#3E8E2A']];
+  h+='<div class=kgrid>'+KL.map(function(k){
+    var t=d.kpi[k[0]];var neg=t.d.charAt(0)==='-';
+    var good=t.dBad?neg:!neg;var cls=t.d==='0'?'flat':(good?'up':'dn');
+    var arrow=neg?'▼':'▲';
+    return '<div class=ktile><div class=kl>'+k[1]+'</div><div class=kv>'+t.v+'<small>'+t.u+'</small><span class="kdelta '+cls+'">'+arrow+' '+t.d.replace('-','').replace('+','')+'</span></div>'+rspark(t.spark,k[2])+'</div>';
+  }).join('')+'</div>';
+  // ---- Funnel + distribution
+  h+='<div class=rgrid2>';
+  h+='<div class=rblk><h3>Invite funnel · '+RPT_P+'</h3>'+d.funnel.map(function(f){
+    return '<div class=frow><span class=fl>'+f.l+'</span><span class=fbar><i style="width:'+f.pct+'%;background:'+f.c+'"></i></span><span class=fn>'+f.n+'</span></div>';
+  }).join('')+'<div class=csub style="margin-top:8px">Leakage = expired + suppressed. Reminders go only to unanswered invites at T−4.</div></div>';
+  var dmax=Math.max.apply(null,d.dist.map(function(x){return x.n;}));
+  h+='<div class=rblk><h3>Rating distribution</h3><div class=hwrap2>'+d.dist.map(function(x){
+    return '<div class="hcol'+(x.r<3?' rlow':'')+'"><b>'+x.n+'</b><i style="height:'+Math.max(4,Math.round(x.n/dmax*82))+'%"></i><span>'+x.r+'</span></div>';
+  }).join('')+'</div><div class=csub style="margin-top:10px">'+d.brands.map(function(b){return b.b+' <b>'+b.avg+'</b> ('+b.n+')';}).join(' · ')+'</div></div>';
+  h+='</div>';
+  // ---- Trend + specialist board
+  h+='<div class=rgrid2>';
+  h+='<div class=rblk><h3>Average rating trend</h3>'+rtrend(d.trend,2.8,5)+'</div>';
+  h+='<div class=rblk><h3>Specialist board · min 2 reviews</h3><table class=tbl><thead><tr><th>Specialist</th><th>Ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
+   +d.board.map(function(b){var col=parseFloat(b.avg)>=4.5?'var(--green-d)':(parseFloat(b.avg)<4?'var(--amber)':'var(--navy)');
+     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg+'</td></tr>';}).join('')
+   +'</tbody></table></div>';
+  h+='</div>';
+  // ---- Watchlist
+  h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist · ratings below 3</h3>'
+   +d.watch.map(function(x){return '<div class=frow><span style="font-weight:700;min-width:130px">'+x.name+'</span><span class=csub>'+x.ship+' · '+x.date+' · rated <b style="color:var(--red)">'+x.rating+'/5</b> · '+x.note+'</span></div>';}).join('')
+   +'</div>';
+  // ---- GSM engagement + latest
+  h+='<div class=rgrid2>';
+  h+='<div class=rblk><h3>GSM engagement by ship</h3><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Sent</th><th>Answered</th><th>Rate</th></tr></thead><tbody>'
+   +d.ships.map(function(s){var bc=s.rate>=75?'var(--green)':(s.rate>=40?'#B0741A':'var(--red)');
+     return '<tr><td>'+s.ship+'</td><td>'+s.brand+'</td><td>'+s.sent+'</td><td>'+s.ans+'</td><td><span class=ratebar style="width:70px"><i style="width:'+s.rate+'%;background:'+bc+'"></i></span> <b>'+s.rate+'%</b></td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">Client-relationship signal: a ship that never answers is a conversation for the account call, not a crew problem.</div></div>';
+  h+='<div class=rblk><h3>Latest responses</h3><table class=tbl><thead><tr><th>Date</th><th>Specialist</th><th>Ship</th><th>Rating</th></tr></thead><tbody>'
+   +d.latest.map(function(r){var col=r.rating<3?'var(--red)':'var(--navy)';
+     return '<tr><td>'+r.date+'</td><td>'+r.crew+'</td><td>'+r.ship+' · '+r.brand+'</td><td style="font-weight:800;color:'+col+'">'+r.rating+'/5</td></tr>';}).join('')
+   +'</tbody></table></div>';
+  h+='</div>';
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback · GSM review analytics. Period chips re-render now and bind to the live API in v2.</div>';
+  $('#rptbody').innerHTML=h;
+}
 var DASH=null,DASH_SH=false;
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
