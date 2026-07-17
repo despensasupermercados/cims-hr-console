@@ -4001,16 +4001,16 @@ async function loadIntelReview(){
   var ps=r.pending||[];window.INTELROSTER=r.roster||[];
   if(!ps.length){box.innerHTML='<div class=muted style="padding:14px">Nothing to review — all clear.</div>';return;}
   box.innerHTML=ps.map(function(p){
-    var cands=(p.candidates||[]).map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px;margin:2px" data-pid="'+p.id+'" data-aid="'+c.agency_id+'">&#8594; '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('');
-    return '<div class=noteitem><div class=notemeta>'+(p.reporter?(String(p.reporter).replace(/</g,'&lt;')+' &middot; '):'')+'<span class=cchip>'+p.confidence+' match</span></div><div class=notetext>'+String(p.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div><div style="margin-top:6px">'+(cands||'<span class=hint>No candidate names found. </span>')+' <button class="btn ghost intelrm" style="padding:6px 10px;font-size:12px;margin:2px" data-pid="'+p.id+'">Discard</button></div><div style="margin-top:8px"><input class=intelsq data-pid="'+p.id+'" placeholder="Someone else? Search crew by name or SC-ID" style="width:300px;max-width:100%;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;font-size:12.5px"><div class=intelsr style="margin-top:4px"></div></div></div>';
+    var cands=(p.candidates||[]).map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px" data-pid="'+p.id+'" data-aid="'+c.agency_id+'">&#8594; '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('');
+    return '<div class=noteitem><div class=notemeta>'+(p.reporter?(String(p.reporter).replace(/</g,'&lt;')+' &middot; '):'')+'<span class=cchip>'+p.confidence+' match</span></div><div class=notetext>'+String(p.summary||'').replace(/</g,'&lt;').replace(/\\n/g,'<br>')+'</div><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center">'+cands+'<input class=intelsq data-pid="'+p.id+'" placeholder="&#128269; Search crew&hellip;" style="width:180px;padding:6px 10px;border:1px solid var(--line-2);border-radius:8px;font-size:12px;height:30px;box-sizing:border-box"><span class=intelsr style="display:inline-flex;flex-wrap:wrap;gap:5px;align-items:center"></span><span style="flex:1"></span><button class="btn ghost intelrm" style="padding:6px 10px;font-size:12px" data-pid="'+p.id+'">Discard</button></div></div>';
   }).join('');
   box.onclick=function(e){var b=e.target.closest?e.target.closest('button[data-aid]'):null;if(b)return intelAssign(b.getAttribute('data-pid'),b.getAttribute('data-aid'));var d=e.target.closest?e.target.closest('.intelrm'):null;if(d)return intelDiscard(d.getAttribute('data-pid'));};
   box.querySelectorAll('.intelsq').forEach(function(inp){inp.oninput=function(){
     var q=inp.value.toLowerCase().trim();var out=inp.parentNode.querySelector('.intelsr');
     if(!q||q.length<2){out.innerHTML='';return;}
     var toks=q.split(/\\s+/);
-    var hits=(window.INTELROSTER||[]).filter(function(c){var hay=(String(c.name)+' '+String(c.agency_id)).toLowerCase();return toks.every(function(t){return hay.indexOf(t)>=0;});}).slice(0,6);
-    out.innerHTML=hits.map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px;margin:2px" data-pid="'+inp.getAttribute('data-pid')+'" data-aid="'+c.agency_id+'">&#8594; '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('')||'<span class=hint>No crew found.</span>';
+    var hits=(window.INTELROSTER||[]).filter(function(c){var hay=(String(c.name)+' '+String(c.agency_id)).toLowerCase();return toks.every(function(t){return hay.indexOf(t)>=0;});}).slice(0,4);
+    out.innerHTML=hits.map(function(c){return '<button class="btn green" style="padding:6px 10px;font-size:12px" data-pid="'+inp.getAttribute('data-pid')+'" data-aid="'+c.agency_id+'">&#8594; '+String(c.name).replace(/</g,'&lt;')+'</button>';}).join('')||'<span class=hint>No crew found.</span>';
   };});
 }
 async function intelAssign(id,aid){
