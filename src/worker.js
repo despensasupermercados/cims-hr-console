@@ -581,6 +581,19 @@ async function mariaExecTool(env, name, input) {
   return { error: "unknown tool: " + name };
 }
 // POST /api/ask {question, history?} -> { answer, sources } (session-gated, read-only)
+// Turn an internal error code from runMaria into a sentence a non-developer can act on.
+// "model_http_403" is exactly the kind of jargon the team should never see — the AI-provider
+// failure is not the user's fault and not a data problem, so say so plainly. The raw code is
+// still returned as `code` and stored in maria_log.note for diagnosis.
+function mariaFriendlyError(code) {
+  if (!code) return null;
+  if (code === "model_http_401") return "Maria couldn't sign in to the AI service — the API key needs attention. Miguel has been notified.";
+  if (code === "model_http_403") return "Maria reached the AI service but it isn't currently permitted to use the model (a permissions setting on the AI account, not your data). Miguel has been notified.";
+  if (code === "model_http_429") return "The AI service is busy right now (rate limit). Give it a moment and ask again.";
+  if (code === "model_http_400" || code === "model_http_402") return "There's a billing issue on the AI account. Miguel has been notified.";
+  if (code.indexOf("model_http_") === 0) return "Maria couldn't reach the AI model right now. Miguel has been notified.";
+  return code;
+}
 async function apiAsk(request, env, session) {
   if (!env.ANTHROPIC_API_KEY) return json({ error: "Ask Maria is not configured yet (no AI key set)." }, 503);
   const b = await request.json().catch(() => ({}));
@@ -598,12 +611,15 @@ async function apiAsk(request, env, session) {
   try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run();
     const sqlRun = (res.toolCalls || []).filter(c => c.name === "run_sql").map(c => String((c.input && c.input.sql) || "")).join("\n---\n");
-    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms) VALUES (?,?,?,?,?,?,?,?,?,?)")
-      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms).run();
+    // On an AI-provider failure, keep the raw response body (the provider's exact reason) so a
+    // future failure is self-diagnosing from D1 instead of a bare status code (Session-7 gap).
+    const noteVal = res.error ? String(res.detail || "").slice(0, 500) : null;
+    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms, noteVal).run();
     logId = (ins && ins.meta && ins.meta.last_row_id) || null;
   } catch (e) { console.error("maria_log", (e && e.message) || e); }
   await logActivity(env, session.email, "maria_ask", question.slice(0, 120));
-  return json({ answer: res.answer, sources: res.sources, error: res.error, detail: res.detail, log_id: logId });
+  return json({ answer: res.answer, sources: res.sources, error: mariaFriendlyError(res.error), code: res.error || null, detail: res.detail, log_id: logId });
 }
 
 // POST /api/maria/feedback {id, verdict:1|0, note?} — the correction loop's write path.
