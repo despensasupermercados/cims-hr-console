@@ -1,5 +1,0 @@
-{
- "target": "src/worker.js",
- "blocks": [],
- "note": "NEUTRALIZED 2026-07-17: block 5 was a poison spec - its NEW contained its own OLD anchor ('async function previewImport(){'), so it re-applied and duplicated 84 lines on EVERY apply-spec run (main accumulated 3 copies, this branch 5). Emptied in the same commit that ships the z-cleanup peeler. File deleted in the stale-spec prune commits that follow."
-}
