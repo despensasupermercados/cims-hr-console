@@ -3899,7 +3899,7 @@ function rptSbm(){
      return '<tr><td>'+r.d+'</td><td>'+r.n+'</td><td>'+r.s+'</td><td style="font-weight:800;color:'+col+'">'+r.r+'/5</td></tr>';}).join('')
    +'</tbody></table></div>';
   h+='</div>';
-  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback &middot; live import of the legacy survey. Next: switch the source to the CIMS-native pipeline (adds invites, response rate, reminders, and per-brand coverage).</div>;
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback &middot; live import of the legacy survey. Next: switch the source to the CIMS-native pipeline (adds invites, response rate, reminders, and per-brand coverage).</div>';
   $('#rptbody').innerHTML=h;
 }
 var DASH=null,DASH_SH=false;
