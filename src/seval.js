@@ -6,12 +6,21 @@
 // at commit time, and bonus_outcome (the immutable ledger) is never rewritten.
 //
 //   auto   -> set from the shipboard review rating(s) for the contract (average)
+//             OR from a PRINTSHOP AUDIT's settled supervisor_eval (set_by 'audit:<id>')
 //   manual -> a money user (Miguel/Rita) overrode it, with a reason
 //   none   -> no review, nothing entered (Rita types it in, exactly as today)
 //
 // Precedence (§6.2): auto PREFILLS, never commits; MANUAL ALWAYS WINS; auto never
 // overwrites manual; multiple reviews average (rounded half-up); a review after a
 // commit is filed + flagged but has NO bonus effect (ledger is append-only).
+//
+// AUDIT INTEGRATION (this PR, spec I5 — the audit's supervisor_eval is THE pay field):
+//   A printshop audit's SETTLED eval (3/4/5, or a 1/2 after Miguel confirms) is applied
+//   here as an `auto` source via sevalApplyAudit(). Among AUTO sources the audit is
+//   AUTHORITATIVE: an audit-set value (set_by 'audit:*') is not overwritten by a later
+//   shipboard-review average. Manual (money user) still ALWAYS wins over both.
+//   >>> POLICY DECISION FOR MIGUEL/RITA: audit-authoritative-among-autos. If you prefer
+//   >>> averaging the audit with the shipboard review instead, say so and this changes. <<<
 
 export function sevalValidValue(v) {
   const n = parseInt(v, 10);
@@ -53,6 +62,7 @@ export function installSeval(deps) {
     if (!crew_id) return false;
     return !!(await env.DB.prepare("SELECT 1 FROM bonus_outcome WHERE crew_id=? AND span_end=? LIMIT 1").bind(crew_id, off).first());
   }
+  const isAuditSourced = (row) => !!(row && row.source === "auto" && String(row.set_by || "").startsWith("audit:"));
 
   // Score Card prefill + badge + evidence.
   async function sevalGet(env, sc, off) {
@@ -70,7 +80,9 @@ export function installSeval(deps) {
     };
   }
 
-  // Auto-apply from a submitted review. Manual always wins; auto never overwrites it.
+  // Auto-apply from a submitted shipboard review. Manual always wins; auto never
+  // overwrites it. AUDIT PRECEDENCE: a value set by a printshop audit (set_by 'audit:*')
+  // is also not overwritten by a later review average (spec I5).
   async function sevalAutoApply(env, sc, off, crew_id) {
     await ensureSeval(env);
     const row = await stateRow(env, sc, off);
@@ -81,11 +93,35 @@ export function installSeval(deps) {
       await audit(env, sc, off, "system", row, row.value, "manual", null, "review received after manual entry — not applied" + (postCommit ? "; post-commit" : ""));
       return { applied: false, source: "manual", value: row.value, reviewAvg: avg };
     }
+    if (isAuditSourced(row)) {                                  // audit authoritative among autos (I5)
+      await audit(env, sc, off, "system", row, row.value, "auto", null, "review received after printshop audit — not applied (audit authoritative)");
+      return { applied: false, source: "auto", value: row.value, reviewAvg: avg, auditHeld: true };
+    }
     if (avg == null) return { applied: false, source: (row && row.source) || "none", value: row ? row.value : null, reviewAvg: null };
     await env.DB.prepare("INSERT INTO seval_state (agency_id,crew_id,contract_signoff,value,source,set_by,set_at,reason) VALUES (?,?,?,?,'auto','system',?,NULL) ON CONFLICT(agency_id,contract_signoff) DO UPDATE SET value=excluded.value, source='auto', set_by='system', set_at=excluded.set_at, crew_id=COALESCE(excluded.crew_id, seval_state.crew_id)")
       .bind(sc, crew_id || null, off, avg, nowIso()).run();
     await audit(env, sc, off, "system", row, avg, "auto", null, postCommit ? "post-commit — no bonus effect (ledger immutable)" : null);
     return { applied: true, source: "auto", value: avg, reviewAvg: avg, postCommit };
+  }
+
+  // Apply a PRINTSHOP AUDIT's settled supervisor_eval as an `auto` source (spec I5).
+  // Additive: does not change bonus.js or the review path. Manual ALWAYS wins.
+  // `sc` = crew agency_id, `off` = contract sign-off date (must equal the bonus span_end).
+  // Caller applies this ONLY for a settled eval (3/4/5, or a 1/2 AFTER Miguel confirms — I8).
+  async function sevalApplyAudit(env, sc, off, value, crew_id, auditId) {
+    await ensureSeval(env);
+    const v = sevalValidValue(value);
+    if (v == null) return { applied: false, error: "value_1_5" };
+    const row = await stateRow(env, sc, off);
+    const postCommit = await isCommitted(env, crew_id, off);
+    if (row && row.source === "manual") {                       // manual wins (§6.2.3)
+      await audit(env, sc, off, "audit", row, row.value, "manual", null, "printshop audit " + (auditId || "") + " after manual entry — not applied" + (postCommit ? "; post-commit" : ""));
+      return { applied: false, source: "manual", value: row.value };
+    }
+    await env.DB.prepare("INSERT INTO seval_state (agency_id,crew_id,contract_signoff,value,source,set_by,set_at,reason) VALUES (?,?,?,?,'auto',?,?,?) ON CONFLICT(agency_id,contract_signoff) DO UPDATE SET value=excluded.value, source='auto', set_by=excluded.set_by, set_at=excluded.set_at, reason=excluded.reason, crew_id=COALESCE(excluded.crew_id, seval_state.crew_id)")
+      .bind(sc, crew_id || null, off, v, "audit:" + (auditId || ""), nowIso(), "printshop audit").run();
+    await audit(env, sc, off, "audit", row, v, "auto", null, postCommit ? "post-commit — no bonus effect (ledger immutable)" : "source: printshop audit " + (auditId || ""));
+    return { applied: true, source: "auto", value: v, postCommit };
   }
 
   // Money-user manual override. Caller MUST enforce isMoneyUser; reason required (§6.2.2).
@@ -115,5 +151,5 @@ export function installSeval(deps) {
     return json(r, r.ok ? 200 : 400);
   }
 
-  return { ensureSeval, sevalGet, sevalAutoApply, sevalOverride, apiSevalGet, apiSevalOverride };
+  return { ensureSeval, sevalGet, sevalAutoApply, sevalApplyAudit, sevalOverride, apiSevalGet, apiSevalOverride };
 }
