@@ -3176,27 +3176,10 @@ async function cimsApply(){
   $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged to import history. Nothing else was touched.</div>';
   STAGE=null;DEC={};IMPROWS=null;
 }
-async function previewImport(){
-  if(!IMPROWS||!IMPROWS.length){$('#imp').innerHTML='<div style="'+BADBOX+'">Couldn\\'t read any crew rows from this file. Make sure it\\'s the AdvancedQuery export (.xls/.xlsx).</div>';return;}
-  $('#imp').textContent='Analyzing '+IMPROWS.length+' rows…';
-  var r=await (await fetch('/api/crew/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:IMPROWS,dryRun:true})})).json();
-  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse the file: '+r.error+'</div>';return;}
-  // name lookup from the file rows, to show WHO changed (not just IDs)
-  var nm={};IMPROWS.forEach(function(row){var id='',fn='',ln='';for(var k in row){var nk=k.toLowerCase();if(nk.indexOf('crew id')>=0||nk.indexOf('crewid')>=0)id=String(row[k]).trim();else if(nk.indexOf('first')>=0)fn=String(row[k]).trim();else if(nk.indexOf('last')>=0||nk.indexOf('surname')>=0)ln=String(row[k]).trim();}if(id)nm[id]=(fn+' '+ln).trim()||id;});
-  if((r.add+r.change)===0){$('#imp').innerHTML='<div style="'+NOCHG+'">✓ No changes — this file is identical to the crew data already on file ('+r.total+' rows checked). Nothing to import.</div>';return;}
-  var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.total+' rows checked</b> · <span class="cchip ok">'+r.add+' new</span> <span class="cchip amber">'+r.change+' changed</span> '+r.unchanged+' unchanged'
-    +(r.needsStatus?(' · <span class="cchip red">'+r.needsStatus+' new w/o status (skipped)</span>'):'')+(r.invalid?(' · '+r.invalid+' unreadable'):'')+'</div>';
-  if(r.add&&r.sampleAdd&&r.sampleAdd.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">New crew ('+r.add+')</b><br>'+r.sampleAdd.map(function(id){return (nm[id]||id)+' <span class=csub>('+id+')</span>';}).join('<br>')+(r.add>r.sampleAdd.length?('<br>+'+(r.add-r.sampleAdd.length)+' more'):'')+'</div>';
-  if(r.change&&r.sampleChange&&r.sampleChange.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Changed ('+r.change+')</b><br>'+r.sampleChange.map(function(c){return (nm[c.agency_id]||c.agency_id)+' — '+c.changed.map(function(f){return IMP_FLAB[f]||f;}).join(', ');}).join('<br>')+(r.change>r.sampleChange.length?('<br>+'+(r.change-r.sampleChange.length)+' more'):'')+'</div>';
-  h+='<button class="btn" style="margin-top:10px" onclick="applyImport()">Apply '+(r.add+r.change)+' changes</button>';
-  $('#imp').innerHTML=h;
-}
-async function applyImport(){
-  $('#imp').textContent='Applying…';
-  var r=await (await fetch('/api/crew/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:IMPROWS})})).json();
-  if(r.ok){$('#imp').innerHTML='<span class="cchip ok">Done</span> applied '+r.applied+' ('+r.added+' new, '+r.changed+' changed'+(r.skippedNoStatus?(', '+r.skippedNoStatus+' skipped'):'')+'). <a href="#" onclick="renderData();return false">Reload</a>';IMPROWS=null;}
-  else $('#imp').textContent='Import failed.';
-}
+// [removed 2026-07-22] previewImport()/applyImport() deleted — dead code that POSTed to the
+// RETIRED /api/crew/import (direct-write). The live upload path is parseCrewFile -> cimsStage
+// -> /api/crew/import/stage + /apply (reviewed importer). Kept the retired-route guard as a
+// safety net so any stale client still gets a clean error instead of a silent write.
 async function dataOverview(){
   $('#setbody').innerHTML='<div class=muted>Loading…</div>';
   const d=await (await fetch('/api/datastatus')).json();
