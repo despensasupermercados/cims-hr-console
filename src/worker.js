@@ -186,6 +186,7 @@ export default {
         if (p === "/api/crew/get")  return apiCrewOne(env, url);
         if (p === "/api/crew/save" && request.method === "POST") return apiCrewSave(request, env, session);
         if (p === "/api/crew/add"  && request.method === "POST") return apiCrewAdd(request, env, session);
+        if (p === "/api/crew/hide" && request.method === "POST") return apiCrewHide(request, env, session);
         if (p === "/api/crew/notes") return apiCrewNotes(request, env, session, url);
         if (p === "/api/crew/statement.pdf") return apiStatementPdf(env, url);
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
@@ -1083,8 +1084,12 @@ async function apiCrew(env, url) {
   // paying 6 sequential Worker->D1 round trips. Same statements, same outputs.
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
   const today = TODAY();
+  // ?hidden=1 returns the HIDDEN cards (redacted=1) for the "Hidden cards" restore list; default is
+  // the live roster (redacted=0). Fixed 0/1 literal — no user string reaches the SQL.
+  const onlyHidden = !!(url && url.searchParams.get("hidden") === "1");
+  const redFlag = onlyHidden ? "1" : "0";
   const [baseRes, ovsRes, legsRes, nlRes] = await Promise.all([
-    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
     env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
     env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
@@ -1166,6 +1171,27 @@ async function apiCrewAdd(request, env, session) {
     .bind(id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now).run();
   await logActivity(env, session && session.email, "crew_add", id);
   return json({ ok: true, agency_id: id });
+}
+// Hide / restore a crew card (reversible). Flips the existing crew.redacted flag that EVERY roster
+// query already filters on (WHERE redacted=0), so a hidden card disappears from all views but keeps
+// its row + history intact. Money-users only (Miguel + Rita) — a data-integrity action. Refuses to
+// hide a crew that already has committed bonus history: that card must stay visible for the audit
+// trail. Reversible from the "Hidden cards" list (POST hidden:0).
+async function apiCrewHide(request, env, session) {
+  if (!isMoneyUser(session && session.email)) return json({ error: "money_users_only" }, 403);
+  const b = await request.json().catch(() => ({}));
+  const id = String(b.agency_id || "").trim();
+  if (!id) return json({ error: "no_id" }, 400);
+  const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(id).first();
+  if (!cr) return json({ error: "not_found" }, 404);
+  const hide = b.hidden ? 1 : 0;
+  if (hide) {
+    const bh = await env.DB.prepare("SELECT 1 x FROM bonus_outcome WHERE crew_id=? LIMIT 1").bind(cr.id).first().catch(() => null);
+    if (bh) return json({ error: "has_bonus_history" }, 409); // never hide a crew with real payout history
+  }
+  await env.DB.prepare("UPDATE crew SET redacted=?, updated_at=? WHERE agency_id=?").bind(hide, new Date().toISOString(), id).run();
+  await logActivity(env, session && session.email, hide ? "crew_hide" : "crew_restore", id);
+  return json({ ok: true, hidden: hide });
 }
 // Timestamped notes log, kept with the crew across every contract. GET ?id= lists; POST adds.
 async function apiCrewNotes(request, env, session, url) {
@@ -3981,6 +4007,7 @@ async function renderCrew(){
    +'<button class="btn ghost" onclick="clearCrewFilters()">Clear</button>'
    +'<button class="btn ghost" id=intelReviewBtn onclick="openIntelReview()">Review intel</button>'
    +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
+   +'<button class="btn ghost" onclick="hiddenCardsModal()">Hidden cards</button>'
    +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
    +'</div><div class=tiles id=crewtiles></div>'
    +'<div id=crewcount class=csub style="margin:8px 0 12px"></div><div id=crewgrid class=grid></div>';
@@ -4283,7 +4310,7 @@ async function editCrewModal(id){
    +fg('Schengen (Europe only)','<input id=eSch type=date value="'+iv(c.sch_exp)+'">')
    +'</div>'
    +'<span class=ck style="margin-top:8px;font-weight:600;cursor:pointer;display:flex" onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"> Retired (manual — keeps this crew off the auto On board / On Vacation tagging)</span>'
-   +'<div style="margin-top:12px;text-align:right"><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></div></div>';
+   +'<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><button class="btn ghost" style="color:var(--red)" onclick="hideCrew(\\''+id+'\\')" title="Remove this card from all rosters (reversible)">Hide card</button><span><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></span></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
 }
 async function saveEditCrew(id){
@@ -4294,6 +4321,30 @@ async function saveEditCrew(id){
   var body={agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:document.getElementById('eShip').value,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===''?null:Number(cnt),retired:er&&er.checked?1:0};
   try{await fetch('/api/crew/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});closeCrewModal();renderCrew();}
   catch(e){document.getElementById('eMsg').textContent='Could not save.';}
+}
+// Hide (void) a crew card — reversible. Removes it from every roster via the server's redacted flag.
+async function hideCrew(id){
+  if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Crew, Dashboard, Rotation, Billing). You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
+  var em=document.getElementById('eMsg');if(em)em.textContent='Hiding…';
+  try{
+    var r=await (await fetch('/api/crew/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,hidden:1})})).json();
+    if(r.ok){closeCrewModal();renderCrew();return;}
+    if(em)em.textContent=r.error==='money_users_only'?'Only Miguel or Rita can hide cards.':(r.error==='has_bonus_history'?'This crew has committed bonus history — it cannot be hidden.':'Could not hide the card.');
+  }catch(e){if(em)em.textContent='Could not hide the card.';}
+}
+// Hidden cards list + one-click restore.
+async function hiddenCardsModal(){
+  var list=[];try{var r=await (await fetch('/api/crew?hidden=1')).json();list=r.crew||[];}catch(e){}
+  var h='<div class=modcard><div class=modhd><div><div class=cname>Hidden cards</div><div class=csub>'+list.length+' hidden &middot; restore to bring back onto the rosters</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>';
+  if(!list.length)h+='<div class=csub style="padding:16px 2px">No hidden cards. Use &ldquo;Hide card&rdquo; on a crew&rsquo;s Edit screen to remove a duplicate or mistaken entry from the rosters.</div>';
+  else h+='<div style="margin-top:10px">'+list.map(function(c){var nm=[c.first_name,c.last_name].filter(Boolean).join(' ')||c.agency_id;return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)"><span>'+nm+' <span class=csub>'+c.agency_id+(c.vessel_observed?(' &middot; '+c.vessel_observed):'')+'</span></span><button class="btn ghost" onclick="restoreCrew(\\''+c.agency_id+'\\')">Restore</button></div>';}).join('')+'</div>';
+  h+='</div>';
+  var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
+}
+async function restoreCrew(id){
+  try{var r=await (await fetch('/api/crew/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,hidden:0})})).json();
+    if(r.ok){closeCrewModal();renderCrew();}
+  }catch(e){}
 }
 async function notesModal(id){
   var c=crewById(id);var name=c?[c.first_name,c.last_name].filter(Boolean).join(' '):id;
