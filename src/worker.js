@@ -2574,6 +2574,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
 const $=s=>document.querySelector(s);
 let CREW=[];
 let ROT=null,ROTF='';
+var ROT_HIDEMODE=false, ROT_HIDDEN=null; // Keyman "Hide mode" (lower-left toggle): void/restore crew cards from the board
 let CURRENT_CREW=null,CURD=null;
 // Click any .tbl header to sort that table (numeric / ISO-date / text aware).
 document.addEventListener('click',function(e){
@@ -3573,6 +3574,13 @@ async function renderRotation(){
     +'.shipdrop{transition:background .15s ease,box-shadow .15s ease}'
     +'.shipdrop.dragover{background:rgba(95,185,70,.08);box-shadow:inset 0 0 0 2px var(--green);border-radius:10px}'
     +'.shipbody{transition:max-height .2s ease}'
+    +'#hideModeTog{position:fixed;left:18px;bottom:18px;z-index:9000;display:inline-flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line-2);border-radius:999px;padding:9px 15px;box-shadow:0 6px 18px rgba(20,45,72,.16);cursor:pointer;font:600 13px DM Sans;color:var(--navy);user-select:none}'
+    +'#hideModeTog .hmtrack{width:34px;height:19px;border-radius:999px;background:var(--line-2);position:relative;transition:background .15s;flex:none}'
+    +'#hideModeTog .hmknob{position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:left .15s}'
+    +'#hideModeTog.on{border-color:var(--red);color:var(--red)}#hideModeTog.on .hmtrack{background:var(--red)}#hideModeTog.on .hmknob{left:17px}'
+    +'.rhidebtn{position:absolute;left:9px;bottom:9px;z-index:4;border:1px solid var(--red);background:#fff;color:var(--red);font:700 11px DM Sans;padding:3px 10px;border-radius:7px;cursor:pointer;box-shadow:0 1px 3px rgba(20,45,72,.1)}'
+    +'.rhidebtn:hover{background:var(--red);color:#fff}'
+    +'.hidemode .rcard[data-crew]{padding-bottom:36px}'
     +'</style>'
     +'<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
     +'<div class=bar style="margin-bottom:8px;flex-wrap:wrap"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:170px">'
@@ -3580,9 +3588,11 @@ async function renderRotation(){
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
-    +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
+    +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>'
+    +'<div id=hideModeTog onclick="toggleHideMode()" title="Hide mode — void or restore crew cards straight from the board"><span class=hmtrack><span class=hmknob></span></span>Hide mode</div>';
   drawRotation(); loadAutoToggle();
   loadSbmToggle();
+  updateHideTog(); if(ROT_HIDEMODE)loadHidden(); // restore hide-mode visuals if it was left on
 }
 function rmonthChips(){
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -3638,6 +3648,64 @@ function drawRotation(){
       assignCrew(DRAGID,ship);
     };
   });
+  applyHideMode(); renderHiddenStrip(); // Keyman hide mode: inject per-card Hide buttons + the hidden strip
+}
+// ---- Keyman "Hide mode" (lower-left toggle) — void/restore crew cards straight from the board ----
+function toggleHideMode(){
+  ROT_HIDEMODE=!ROT_HIDEMODE; updateHideTog();
+  if(ROT_HIDEMODE)loadHidden(); else { ROT_HIDDEN=null; drawRotation(); }
+}
+function updateHideTog(){ var t=document.getElementById('hideModeTog'); if(t)t.classList.toggle('on',ROT_HIDEMODE); }
+async function loadHidden(){
+  try{var r=await (await fetch('/api/crew?hidden=1')).json();ROT_HIDDEN=r.crew||[];}catch(e){ROT_HIDDEN=[];}
+  drawRotation();
+}
+// Re-pull board + hidden list after a hide/restore, keeping filters and hide mode intact (no #view rebuild).
+async function refreshBoardKeepMode(){
+  try{ROT=await (await fetch('/api/rotation')).json();}catch(e){}
+  if(ROT_HIDEMODE){try{var r=await (await fetch('/api/crew?hidden=1')).json();ROT_HIDDEN=r.crew||[];}catch(_){}}
+  drawRotation();
+}
+// Inject a small Hide button (lower-left of each real crew card) only while hide mode is on.
+function applyHideMode(){
+  var body=document.getElementById('rotbody'); if(!body)return;
+  body.classList.toggle('hidemode',ROT_HIDEMODE);
+  body.querySelectorAll('.rhidebtn').forEach(function(b){b.remove();});
+  if(!ROT_HIDEMODE)return;
+  body.querySelectorAll('.rcard[data-crew]').forEach(function(card){
+    var id=card.getAttribute('data-crew');
+    var b=document.createElement('button');
+    b.type='button'; b.className='rhidebtn'; b.textContent='Hide'; b.title='Hide (void) this crew card — reversible';
+    b.onmousedown=function(e){e.stopPropagation();}; // don't start a drag
+    b.onclick=function(e){e.stopPropagation();e.preventDefault();boardHide(id);}; // don't open the card
+    card.appendChild(b);
+  });
+}
+// The greyed "hidden cards" strip at the top of the board, with one-click Restore.
+function renderHiddenStrip(){
+  var body=document.getElementById('rotbody'); if(!body)return;
+  var old=document.getElementById('hiddenStrip'); if(old)old.remove();
+  if(!ROT_HIDEMODE)return;
+  var list=ROT_HIDDEN||[];
+  var d=document.createElement('div'); d.id='hiddenStrip';
+  d.style.cssText='margin:0 0 12px;padding:11px 13px;border:1px dashed var(--line-2);border-radius:10px;background:var(--bg)';
+  if(!list.length){ d.innerHTML='<span class=csub><b style="color:var(--navy)">Hide mode on.</b> Click <b>Hide</b> on any card to remove it from the rosters (reversible). No hidden cards yet.</span>'; }
+  else { d.innerHTML='<div class=csub style="margin-bottom:7px"><b style="color:var(--navy)">Hidden cards ('+list.length+')</b> &mdash; off all rosters; Restore to bring back</div>'
+    +list.map(function(c){var nm=[c.first_name,c.last_name].filter(Boolean).join(' ')||c.agency_id;return '<span style="display:inline-flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:4px 6px 4px 12px;margin:0 7px 7px 0;font-size:12.5px"><span style="opacity:.7">'+nm+' <span class=csub>'+c.agency_id+'</span></span><button type=button onclick="boardRestore(\\''+c.agency_id+'\\')" style="border:1px solid var(--green);background:#fff;color:var(--green-d);font:700 11px DM Sans;padding:2px 9px;border-radius:7px;cursor:pointer">Restore</button></span>';}).join(''); }
+  body.insertBefore(d, body.firstChild);
+}
+async function boardHide(id){
+  if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Keyman, Crew, Dashboard, Billing). You can Restore it any time from the strip at the top. Nothing is deleted.'))return;
+  try{
+    var r=await (await fetch('/api/crew/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,hidden:1})})).json();
+    if(r.ok){refreshBoardKeepMode();return;}
+    alert(r.error==='money_users_only'?'Only Miguel or Rita can hide cards.':(r.error==='has_bonus_history'?'This crew has committed bonus history — it cannot be hidden.':'Could not hide the card.'));
+  }catch(e){alert('Could not hide the card.');}
+}
+async function boardRestore(id){
+  try{var r=await (await fetch('/api/crew/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,hidden:0})})).json();
+    if(r.ok)refreshBoardKeepMode();
+  }catch(e){}
 }
 async function exportDaysExcel(){
   try{
