@@ -3510,23 +3510,48 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
   var shipOpts=Object.keys(ships).sort().map(function(s){return '<option'+(s===e.ship?' selected':'')+'>'+s+'</option>';}).join('');
   // The wrapper handles the tap (tgFlip) and the checkbox is pointer-events:none, so a tap can only
   // produce ONE flip — fixes the iPad double-toggle where the box landed back where it started.
-  var ck=function(i,lab,on){return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-size:13px;cursor:pointer" onclick="tgFlip(\\''+i+'\\')"><input type=checkbox id="'+i+'"'+(on?' checked':'')+' style="pointer-events:none"> '+lab+'</span>';};
+  // UI pass 2026-07-23 (visual only, same ids + handlers): confirm toggles become bordered chips that
+  // tint green when on; consistent field labels + heights; comment gets real room; history scrolls;
+  // footer separated with the danger action de-emphasized as a quiet red text button.
+  var ck=function(i,lab,on){return '<span class=ckchip onclick="tgFlip(\\''+i+'\\')"><input type=checkbox id="'+i+'"'+(on?' checked':'')+' style="pointer-events:none"><span>'+lab+'</span></span>';};
   var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||'—';return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on||'—')+'</td><td>'+off+'</td></tr>';}).join('');
-  var fld=function(lab,inp){return '<div><label class=csub>'+lab+'</label>'+inp+'</div>';};
-  var h='<div class=modcard><div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+' · contract #'+seq+'</div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
-   +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">'
-   +fld('Embark city · from itinerary','<select id=eEmb onchange="pickPort(this)" style="width:100%">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
-   +fld('Disembark city · from itinerary','<select id=eDis onchange="pickPort(this)" style="width:100%">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
-   +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'" style="width:100%">')
-   +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'" style="width:100%">')
-   +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip style="width:100%">'+shipOpts+'</select>')+'</div>'
+  var fld=function(lab,inp){return '<div><label>'+lab+'</label>'+inp+'</div>';};
+  var h='<div class=modcard><style>'
+   +'#rotmodal .modcard{max-width:720px;padding:24px 26px 22px}'
+   +'#rotmodal .ecgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-top:16px}'
+   +'#rotmodal .ecgrid label{display:block;font:600 11.5px "DM Sans";letter-spacing:.03em;color:var(--mut);margin:0 0 6px}'
+   +'#rotmodal .ecgrid select,#rotmodal .ecgrid input{width:100%;height:42px;padding:0 12px;font-size:13.5px;color:var(--navy);box-sizing:border-box}'
+   +'#rotmodal .ckrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 2px}'
+   +'#rotmodal .ckchip{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:999px;padding:7px 14px 7px 8px;cursor:pointer;font:700 11.5px "DM Sans";letter-spacing:.05em;color:var(--mut);background:#fff;transition:border-color .15s,background .15s,color .15s;user-select:none}'
+   +'#rotmodal .ckchip:hover{border-color:var(--navy);color:var(--navy)}'
+   +'#rotmodal .ckchip:has(input:checked){border-color:var(--green);background:#F2FAEE;color:var(--green-d)}'
+   +'#rotmodal .ckchip input[type=checkbox]{width:32px;height:19px}'
+   +'#rotmodal .ckchip input[type=checkbox]::after{width:15px;height:15px}'
+   +'#rotmodal .ckchip input[type=checkbox]:checked::after{transform:translateX(13px)}'
+   +'#rotmodal textarea{width:100%;min-height:74px;padding:10px 12px;font:400 13.5px "DM Sans";color:var(--navy);box-sizing:border-box;resize:vertical;line-height:1.5}'
+   +'#rotmodal .echist{max-height:190px;overflow:auto;border-radius:10px}'
+   +'#rotmodal .ecwf{display:flex;gap:8px;flex-wrap:wrap}'
+   +'#rotmodal .ecwf .btn{font-size:12.5px;height:36px}'
+   +'#rotmodal .ecfoot{margin-top:22px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:10px}'
+   +'#rotmodal .echide{border:0;background:transparent;color:var(--red);font:700 13px "DM Sans";padding:9px 12px;margin-left:-12px;border-radius:9px;cursor:pointer;transition:background .15s}'
+   +'#rotmodal .echide:hover{background:#FBE9E7}'
+   +'#rotmodal .ecpill{display:inline-block;background:var(--bg);border-radius:999px;padding:2px 10px;font:600 11px "DM Sans";color:var(--mut);margin-left:7px;vertical-align:1px}'
+   +'#rotmodal .zcount{letter-spacing:0;text-transform:none;font:600 11px "DM Sans";color:var(--mut)}'
+   +'</style>'
+   +'<div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+'<span class=ecpill>contract #'+seq+'</span></div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
+   +'<div class=ecgrid>'
+   +fld('Embark city · from itinerary','<select id=eEmb onchange="pickPort(this)">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
+   +fld('Disembark city · from itinerary','<select id=eDis onchange="pickPort(this)">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
+   +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'">')
+   +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'">')
+   +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip>'+shipOpts+'</select>')+'</div>'
    +'</div>'
-   +'<div class=zlabel style="margin-top:12px">Confirmed — shows as green tags on the card</div>'
-   +'<div style="margin:6px 0 8px">'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
-   +'<div class=zlabel>Comment</div><textarea id=cmt rows=2 style="width:100%" placeholder="Note for this crew…">'+note+'</textarea>'
-   +(legs?'<div class=zlabel style="margin-top:12px">Contract history</div><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table>':'')
-      +'<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)"><div class=csub style="margin-bottom:6px">SIGN-OFF WORKFLOW</div><button class="btn ghost" style="font-size:12px" onclick="sendSignoffInstructions(\\''+id+'\\','+seq+')">Send instructions</button> <button class="btn ghost" style="font-size:12px" onclick="sendSignoffLink(\\''+id+'\\','+seq+')">Send sign-off link</button> <button class="btn ghost" style="font-size:12px" onclick="sendReviewInvite(\\''+id+'\\','+seq+')">Send review invite</button></div>'
-   +'<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><button class="btn ghost" style="color:var(--red)" onclick="hideCrewFromBoard(\\''+id+'\\')" title="Remove this crew card from all rosters (reversible)">Hide crew card</button><span><span id=cmtmsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeRotModal()">Cancel</button> <button class="btn green" onclick="saveContract(\\''+id+'\\','+seq+')">Save</button></span></div></div>';
+   +'<div class=zlabel>Confirmed <span class=zcount>shows as green tags on the card</span></div>'
+   +'<div class=ckrow>'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
+   +'<div class=zlabel>Comment</div><textarea id=cmt placeholder="Note for this crew…">'+note+'</textarea>'
+   +(legs?'<div class=zlabel>Contract history <span class=zcount>'+(d.legs||[]).length+' contract'+((d.legs||[]).length===1?'':'s')+'</span></div><div class=echist><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table></div>':'')
+   +'<div class=zlabel>Sign-off workflow</div><div class=ecwf><button class="btn ghost" onclick="sendSignoffInstructions(\\''+id+'\\','+seq+')">Send instructions</button><button class="btn ghost" onclick="sendSignoffLink(\\''+id+'\\','+seq+')">Send sign-off link</button><button class="btn ghost" onclick="sendReviewInvite(\\''+id+'\\','+seq+')">Send review invite</button></div>'
+   +'<div class=ecfoot><button class=echide onclick="hideCrewFromBoard(\\''+id+'\\')" title="Remove this crew card from all rosters (reversible)">Hide crew card</button><span style="display:flex;align-items:center;gap:8px"><span id=cmtmsg class=csub></span><button class="btn ghost" onclick="closeRotModal()">Cancel</button><button class="btn green" onclick="saveContract(\\''+id+'\\','+seq+')">Save</button></span></div></div>';
   var w=document.createElement('div');w.id='rotmodal';w.className='modwrap';w.innerHTML=h;
   w.onclick=function(ev){if(ev.target===w)closeRotModal();};
   window.rotEscHandler=function(ev){if(ev.key==='Escape')closeRotModal();};document.addEventListener('keydown',window.rotEscHandler);
