@@ -3522,7 +3522,7 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'#rotmodal .ecgrid label{display:block;font:600 11.5px "DM Sans";letter-spacing:.03em;color:var(--mut);margin:0 0 6px}'
    +'#rotmodal .ecgrid select,#rotmodal .ecgrid input{width:100%;height:42px;padding:0 12px;font-size:13.5px;color:var(--navy);box-sizing:border-box}'
    +'#rotmodal .ckrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 2px}'
-   +'#rotmodal .ckchip{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:999px;padding:7px 14px 7px 8px;cursor:pointer;font:700 11.5px "DM Sans";letter-spacing:.05em;color:var(--mut);background:#fff;transition:border-color .15s,background .15s,color .15s;user-select:none}'
+   +'#rotmodal .ckchip{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:999px;padding:7px 14px 7px 8px;cursor:pointer;font:700 11.5px "DM Sans";letter-spacing:.05em;color:var(--mut);background:#fff;transition:border-color .15s,background .15s,color .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}'
    +'#rotmodal .ckchip:hover{border-color:var(--navy);color:var(--navy)}'
    +'#rotmodal .ckchip:has(input:checked){border-color:var(--green);background:#F2FAEE;color:var(--green-d)}'
    +'#rotmodal .ckchip input[type=checkbox]{width:32px;height:19px}'
