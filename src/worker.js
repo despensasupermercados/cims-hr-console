@@ -248,6 +248,13 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
       }
       if (p === "/relief") { const rr = await handleRelief(request, url, env); if (rr) return rr; }
 
+      // Recruitment monthly report — external form. The full URL (including its access
+      // key) lives ONLY in the RECRUITMENT_FORM_URL Worker secret, never in this repo.
+      if (p === "/go/recruitment") {
+        if (env.RECRUITMENT_FORM_URL) return Response.redirect(env.RECRUITMENT_FORM_URL, 302);
+        return new Response("Recruitment link not configured (set the RECRUITMENT_FORM_URL secret).", { status: 503 });
+      }
+
       return htmlResponse(APP_HTML);
       })();
       // PERF instrumentation: stamp total server time on every API response so per-request cost
@@ -3853,6 +3860,7 @@ function renderReports(){
      +'<div class=dsline></div>'
      +'<div class=dssub>Reports<br>Operational Intelligence</div>'
      +'<button class="dsnav rptmenu on" data-rpt="sbm">Shipboard Feedback</button>'
+     +'<a class=dsnav href="/go/recruitment" target=_blank rel=noopener style="text-decoration:none">Recruitment &#8599;</a>'
      +'<button class="dsnav soon" tabindex=-1>Bonus &amp; Money<small>soon</small></button>'
      +'<button class="dsnav soon" tabindex=-1>Manpower<small>soon</small></button>'
      +'<button class="dsnav soon" tabindex=-1>Travel Spend<small>soon</small></button>'
