@@ -3608,7 +3608,11 @@ function legInFilter(x){
 function drawRotation(){
   var b=ROT,c=b.counts;
   if(document.getElementById('rotchips'))rmonthChips();
-  var sfilt=function(arr){return (arr||[]).filter(function(x){return (!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
+  // Retired crew auto-clean (Miguel 2026-07-23): retired cards leave the ACTIVE roster/pool display —
+  // retire once on the Crew tab, the board reflects it. DISPLAY-ONLY: ROT (rotationSections) is
+  // untouched, so the monthly billing export still counts every day a crew actually worked. Their
+  // past contracts are re-added to the ship's history list below so nothing disappears from view.
+  var sfilt=function(arr){return (arr||[]).filter(function(x){return x.status!=='Retired'&&(!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
   var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')+rfTile(c.vessels,'Vessels — show all','','')+'</div>';
   var shore=(b.shoreside||[]);
@@ -3622,7 +3626,14 @@ function drawRotation(){
   var secs=(b.sections||[]).slice();
   if(ROT_BRAND)secs=secs.filter(function(s){return s.brand===ROT_BRAND;});
   if(ROT_FIND){var q=ROT_FIND.toLowerCase();secs=secs.filter(function(s){return s.ship.toLowerCase().indexOf(q)>=0;});}
-  secs=secs.map(function(s){return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),history:s.history};});
+  secs=secs.map(function(s){
+    // Move retired crew's leg into the ship's history (same shape the server uses for past crew),
+    // so retiring hides the card but keeps the service record visible under the ship.
+    var hist=(s.history||[]).slice();
+    (s.crew||[]).forEach(function(x){if(x.status==='Retired'&&x.signOn&&x.signOff&&x.signOn!==x.signOff)hist.push({name:x.name,sc:x.agency_id,ours:true,on:x.signOn,off:x.signOff});});
+    hist.sort(function(a,b){return (a.off||'')<(b.off||'')?1:-1;});
+    return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),history:hist};
+  });
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0;});
   h+='<div class=zlabel style="margin-top:14px">Ships ('+secs.length+')</div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
