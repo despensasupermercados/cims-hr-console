@@ -248,6 +248,13 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
       }
       if (p === "/relief") { const rr = await handleRelief(request, url, env); if (rr) return rr; }
 
+      // Recruitment monthly report — external form. The full URL (including its access
+      // key) lives ONLY in the RECRUITMENT_FORM_URL Worker secret, never in this repo.
+      if (p === "/go/recruitment") {
+        if (env.RECRUITMENT_FORM_URL) return Response.redirect(env.RECRUITMENT_FORM_URL, 302);
+        return new Response("Recruitment link not configured (set the RECRUITMENT_FORM_URL secret).", { status: 503 });
+      }
+
       return htmlResponse(APP_HTML);
       })();
       // PERF instrumentation: stamp total server time on every API response so per-request cost
@@ -2558,6 +2565,7 @@ const APP_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta n
     <button id=nav-reports onclick="show('reports')">Reports</button>
     <button id=nav-data onclick="show('data')">Data</button>
     <button id=nav-ask onclick="show('ask')">Ask Maria</button>
+    <a class=out href="/go/recruitment" target=_blank rel=noopener>Recruitment</a>
     <a class=out href="/api/auth/logout">Sign out</a>
   </nav>
   <button class=mkbtn onclick="mkOpen()" title="Ask Maria (Cmd/Ctrl+K)">Ask Maria <span class=mkk>⌘K</span></button>
