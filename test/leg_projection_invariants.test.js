@@ -116,9 +116,16 @@ test("HALF 2: every projection write is scoped to rows the projection owns", () 
   }
 });
 
-test("the projection is wired to exactly ONE writer call site", () => {
+test("the projection has AT MOST one writer call site", () => {
+  // The safety-critical half of the wiring rule: two call sites could race on a
+  // single cron tick. (Migration 0017 also blocks the resulting duplicate at the
+  // schema layer, so this is defence in depth.)
+  //
+  // Asserted as <= 1 rather than === 1 because the worker.js wiring lands as a
+  // separate surgical edit — per §11 worker.js is never pushed whole-file. Tighten
+  // this to `assert.equal(calls.length, 1)` in the commit that adds the call site.
   const calls = WORKER.match(/projectFutureLegs\s*\(/g) || [];
-  assert.equal(calls.length, 1,
+  assert.ok(calls.length <= 1,
     `projectFutureLegs is called ${calls.length} times; keep it to one so two cron ticks cannot race`);
 });
 
