@@ -24,7 +24,8 @@ import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
-import { buildSeafarerMovementEmail, shapeMovements } from "./seafarer_movements.js";
+import { buildSeafarerMovementEmail, shapeMovements, monthsLabel } from "./seafarer_movements.js";
+import { projectFutureLegs, fetchArrivals } from "./leg_projection.js";
 import { annotateReliefCoverage } from "./relief_coverage.js";
 import { maybeSendDocRadar, docRadarPreviewResponse, docRadarSendResponse } from "./doc_radar.js";
 import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
@@ -297,6 +298,7 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event));
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(projectFutureLegs(env, { today: nyDateStr() }).catch(function (e) { console.error("leg_projection", (e && e.stack) || e); }));
   }
 };
 
@@ -400,12 +402,52 @@ async function sendMagicLink(env, email, link) {
 
 /* -------------------- Seafarer Movements weekly email -------------------- */
 async function movementsData(env, runDate, days = 7) {
-  const { sections } = await rotationSections(env);
+  const { sections, pool } = await rotationSections(env);
   const crew = [];
   for (const s of (sections || [])) for (const c of (s.crew || [])) crew.push(c);
   const md = shapeMovements(crew, runDate, days);
-    await annotateReliefCoverage(env, md.signOffs);
-    return md;
+
+   // ---- ARRIVING (fixed 2026-07-27) ----------------------------------------
+   // rotationSections reads ship_leg WHERE is_current=1 — by definition only
+   // legs already under way — so it can NEVER yield a future sign-on and this
+   // section rendered 0 every single week since launch. Forward legs are
+   // projected from assignment (the table the relief board actually writes)
+   // into ship_leg as is_current=0 rows by src/leg_projection.js. This is the
+   // ONLY reader of that forward set; every other query keeps its is_current=1
+   // filter, so the board, dashboard and billing export are untouched.
+   const startS = String(runDate).slice(0, 10);
+   const _e = new Date(startS + "T00:00:00Z"); _e.setUTCDate(_e.getUTCDate() + days);
+   const endS = _e.toISOString().slice(0, 10);
+   try {
+     const contractsBy = {};
+     for (const c of crew) contractsBy[c.agency_id] = c.contracts;
+     for (const c of (pool || [])) contractsBy[c.agency_id] = c.contracts;
+     const seen = new Set(md.signOns.map(p => p.name + "|" + p.date));
+     for (const a of await fetchArrivals(env, startS, endS)) {
+       const nm = a.name || a.agency_id;
+       const key = nm + "|" + a.signOn;
+       if (seen.has(key)) continue; // don't double-count once a leg is promoted
+       seen.add(key);
+       md.signOns.push({
+         name: nm,
+         vessel: a.ship,
+         port: a.embark || "TBA",
+         date: a.signOn,
+         contract: monthsLabel(a.signOn, a.signOff),
+         // Badge a new hire ONLY on a positively-known zero. Absent from the
+         // roster map means unknown, not new — a wrong badge is worse than none.
+         newHire: contractsBy[a.agency_id] === 0,
+       });
+     }
+     md.signOns.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+   } catch (e) {
+     // Arrivals are additive. A failure here must never cost us the departures
+     // email, which is the part Crew Ops already depends on.
+     console.error("movements_arrivals", (e && e.stack) || e);
+   }
+
+   await annotateReliefCoverage(env, md.signOffs);
+   return md;
 }
 function nyDateStr(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);

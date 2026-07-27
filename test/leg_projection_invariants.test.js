@@ -125,7 +125,7 @@ test("the projection has AT MOST one writer call site", () => {
   // separate surgical edit — per §11 worker.js is never pushed whole-file. Tighten
   // this to `assert.equal(calls.length, 1)` in the commit that adds the call site.
   const calls = WORKER.match(/projectFutureLegs\s*\(/g) || [];
-  assert.ok(calls.length <= 1,
+  assert.equal(calls.length, 1,
     `projectFutureLegs is called ${calls.length} times; keep it to one so two cron ticks cannot race`);
 });
 
