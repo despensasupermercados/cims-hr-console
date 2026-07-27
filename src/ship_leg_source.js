@@ -28,6 +28,16 @@ export async function boardSource(env) {
 // Returns SHIP_HISTORY-shaped rows from ship_leg:
 //   { ship, name, sc, ours, on, off, brand, is_current[, embark][, disembark] }
 // off === null  => TBA sign-off (readers already treat null off as still-onboard).
+//
+// EXCLUDES projected forward legs (2026-07-27). Unlike every other ship_leg
+// reader this one has no `is_current = 1` filter, so the is_current=0 rows written
+// by src/leg_projection.js WOULD flow into HIST -> scheduleBySc / schEnr / histByShip
+// in rotationSections. A forward leg always has the latest off_date, so it would win
+// the schEnr date-enrichment race and silently rewrite a crew member's displayed
+// sign-on/sign-off — and, for crew with no keyman leg, their billed days via
+// apiBillingMonth. Excluding them here is a NO-OP today (all 48 real rows are
+// is_current=1) and keeps this reader admitting genuine history if it is ever
+// backfilled.
 export async function legsFromShipLeg(env) {
   const { results } = await env.DB.prepare(
     `SELECT l.brand, l.ship_short, l.sc, l.on_date, l.off_date,
@@ -36,6 +46,7 @@ export async function legsFromShipLeg(env) {
        FROM ship_leg l
        LEFT JOIN crew c ON c.id = l.crew_id
       WHERE l.ours = 1
+        AND NOT (l.source LIKE 'assignment:%' AND l.is_current = 0)
       ORDER BY l.brand, l.ship_short, l.on_date`
   ).all();
   return (results || []).map((r) => {
