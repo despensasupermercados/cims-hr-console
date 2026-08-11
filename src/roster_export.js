@@ -7,6 +7,16 @@
 // drifts, and a drifted roster chases the wrong people for time cards and misses
 // the right ones. It draws from here instead — the parts pattern.
 //
+// THIS ROUTE IS PUBLICLY REACHABLE. READ THIS BEFORE CHANGING IT.
+// It must be dispatched BEFORE the console's `/api/` session gate, because the
+// caller is a Worker with no session cookie. That means it also answers on the
+// public hostname. The shared X-Roster-Key header is therefore the ONLY thing
+// standing between the internet and 101 crew names and email addresses.
+// Consequences:
+//   - the key is a 256-bit random value, compared in constant time below
+//   - if it ever leaks, rotate it on BOTH workers in the same change
+//   - never widen EXPORT_FIELDS without re-reading this paragraph
+//
 // AUTHORITATIVE SOURCES (per the glossary in maria.js)
 //   crew            identity, docs, status, ship_crew_id
 //   crew_override   Rita's manual edits; ALWAYS win, but only when not retired
@@ -48,6 +58,27 @@ export const ROSTER_SQL = `
 `;
 
 /**
+ * Timing-safe secret comparison.
+ *
+ * `a !== b` on strings short-circuits at the first differing byte, so response
+ * time leaks how much of the key a guess got right. Digesting both to a fixed
+ * 32 bytes first also stops length from leaking, and the XOR accumulation below
+ * always walks all 32 bytes.
+ */
+async function secretEquals(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const enc = new TextEncoder();
+  const [da, db] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ]);
+  const x = new Uint8Array(da), y = new Uint8Array(db);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+/**
  * Coverage counters travel with the payload on purpose.
  *
  * The timecard app matches crew to their Kronos card by ship_crew_id. A crew
@@ -71,13 +102,13 @@ export function coverage(rows) {
 /**
  * GET /api/roster/export
  *
- * Guarded by a shared-key header, NOT by a session: the caller is a Worker, not
- * a person. Must be dispatched BEFORE the session gate. See docs/ROSTER_EXPORT.md.
+ * Dispatch this BEFORE the `/api/` session gate in worker.js. The caller is a
+ * Worker, not a person: it has no session cookie and would be rejected with
+ * JSON 401 before ever reaching this function. Its credential is the header.
  */
 export async function apiRosterExport(request, env) {
   const key = request.headers.get('X-Roster-Key');
-  // Constant-time-ish: reject a missing secret outright rather than comparing to undefined.
-  if (!env.ROSTER_KEY || key !== env.ROSTER_KEY) {
+  if (!env.ROSTER_KEY || !(await secretEquals(key, env.ROSTER_KEY))) {
     return new Response(JSON.stringify({ error: 'forbidden' }), {
       status: 403, headers: { 'content-type': 'application/json' },
     });
