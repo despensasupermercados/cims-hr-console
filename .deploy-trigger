@@ -1,1 +1,10 @@
+deploy trigger 2026-08-11 — Apply the ROSTER_KEY secret. No code change.
+
+A secret added through the dashboard (Settings → Variables and Secrets) shows
+as "Value encrypted" immediately but is NOT visible to the running code until
+the next deploy. Proven on cims-timecard the same day: two consecutive cron
+runs logged "ROSTER_KEY secret missing" while the dashboard showed the secret
+present; a no-op redeploy made it visible on the very next run. If a secret you
+can see is not visible to the code, deploy before assuming the value is wrong.
+
 deploy trigger 2026-07-08V — Fix (Miguel: disembark dropdown showed only 1 option). Root cause: portOptions de-duplicated by port NAME, and Adventure homeports at the same port for many consecutive turnarounds (Fort Lauderdale Nov→Apr, Orlando otherwise), so all 6 windowed turnarounds shared a name and collapsed to one. Verified via D1: Adventure has ~120 turnarounds, plenty after the sign-off date — so it was the dedup, not coverage. Fix: removed name-dedup; portOptions now lists each turnaround as "PORT · date" (the matched verified date preselected) and carries data-d=berth_date; new pickPort(sel) sets the sign-on (eEmb→eOn) or sign-off (eDis→eOff) date field when a turnaround is chosen, so it's a real turnaround-day picker. Window = matched date + next 5 (falls back to last 6 if the date is past all turnarounds). 3 surgical single-line edits; deployed file BYTE-IDENTICAL to locally node --check'd target.
