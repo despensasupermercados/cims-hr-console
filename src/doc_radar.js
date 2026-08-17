@@ -16,6 +16,8 @@
  */
 
 import { isMoneyUser } from "./policy.js";
+import { applyOverride } from "./override.js";
+import { scheduleBySc, crewStatus, isOffFleet } from "./crew_status.js";
 
 // --- recipients (edit here; lives in code so it survives every deploy) -------
 const TO = ["Rita Berenyi <Rita.Berenyi@dg3.com>"];
@@ -28,6 +30,15 @@ const CC = [
 const WINDOW_DAYS = 90;   // expiring horizon
 const MAX_ROWS = 60;      // safety cap on email size
 
+// A document cannot plausibly have lapsed more than five years ago and still sit on an ACTIVE
+// crew record, nor be valid half a century out. Dates outside this band are data-entry or import
+// damage, not compliance lapses, and must not be reported as though a seafarer is sailing on an
+// expired passport. 2026-08-17: 'Ida Purnama' carried pp 1934-09-22 / C1D 1930-02-28 from a
+// duplicate import row and took the "Most urgent" headline off a genuinely expiring medical.
+// SUSPECT still counts as a flag and still prints — it is relabelled, never hidden.
+const SUSPECT_PAST_YEARS = 5;
+const SUSPECT_FUTURE_YEARS = 50;
+
 // --- brand palette -----------------------------------------------------------
 const C = { navy:'#1B3A5C', green:'#5FB946', ink:'#1F2A37', slate:'#6B7280', light:'#9CA3AF', border:'#E5E7EB', page:'#EAEDF1', card:'#FFFFFF' };
 const S = {
@@ -35,6 +46,7 @@ const S = {
   expiring:{ bg:'#FBF0DA', tx:'#8A6620', ac:'#E0A64B' },
   expired: { bg:'#FDE7E7', tx:'#9B1C1C', ac:'#DC2626' },
   missing: { bg:'#ECEFF3', tx:'#4B5563', ac:'#94A3B8' },
+  suspect: { bg:'#EDE9FE', tx:'#5B21B6', ac:'#8B5CF6' },
   na:      { bg:'#F5F6F7', tx:'#B7B6B2', ac:'#E5E7EB' },
 };
 const F  = "'DM Sans','Segoe UI',Helvetica,Arial,sans-serif";
@@ -69,6 +81,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','
 export function docStatus(exp, todayStr) {
   if (!isoOk(exp)) return 'missing';
   const d = daysUntil(exp, todayStr);
+  if (d < -365 * SUSPECT_PAST_YEARS || d > 365 * SUSPECT_FUTURE_YEARS) return 'suspect';
   if (d < 0) return 'expired';
   if (d <= WINDOW_DAYS) return 'expiring';
   return 'valid';
@@ -76,7 +89,7 @@ export function docStatus(exp, todayStr) {
 
 export function assessCrew(row, todayStr) {
   const cells = {};
-  let expired = 0, expiring = 0, missing = 0;
+  let expired = 0, expiring = 0, missing = 0, suspect = 0;
   for (const [, key] of DOCS) {
     let st = docStatus(row[key], todayStr);
     if (st === 'missing' && !CRITICAL.has(key)) st = 'na'; // blank Schengen = not held, not a gap
@@ -84,11 +97,16 @@ export function assessCrew(row, todayStr) {
     if (st === 'expired') expired++;
     else if (st === 'expiring') expiring++;
     else if (st === 'missing') missing++;
+    else if (st === 'suspect') suspect++;
   }
+  // 'deployable' = about to join a ship, so a document gap blocks the crew change. Derived status
+  // only (see fetchDocRadar) — never the raw crew.status column.
   const deployable = row.status === 'Earmarked' || row.status === 'On Vacation';
-  const flagged = (expired + expiring + missing) > 0;
-  // worst-first score: expired critical dominates, then missing, then expiring; deployable adds urgency.
-  const score = expired * 100 + missing * 50 + expiring * 10 + (deployable && (expired + missing > 0) ? 25 : 0);
+  const flagged = (expired + expiring + missing + suspect) > 0;
+  // worst-first score: expired critical dominates, then missing, then expiring; deployable adds
+  // urgency. SUSPECT scores lowest — it is a registry defect to correct, not a seafarer at risk.
+  const score = expired * 100 + missing * 50 + expiring * 10 + suspect * 5
+    + (deployable && (expired + missing > 0) ? 25 : 0);
   // earliest bad date for tiebreak
   let earliest = null;
   for (const [, key] of DOCS) {
@@ -97,39 +115,62 @@ export function assessCrew(row, todayStr) {
       if (!earliest || v < earliest) earliest = v;
     }
   }
-  return { cells, expired, expiring, missing, deployable, flagged, score, earliest };
+  return { cells, expired, expiring, missing, suspect, deployable, flagged, score, earliest };
 }
 
 // --- data --------------------------------------------------------------------
+// Reads the registry the SAME way the Crew tab does — that tab is the authority, and this email
+// must never contradict it. Concretely (mirrors apiCrew in worker.js):
+//   1. no status filter in SQL; take every live crew row,
+//   2. merge crew_override, which ALWAYS wins (manual document corrections live there),
+//   3. derive status via crewStatus (retired flag > manual status > schedule), then
+//   4. drop the off-fleet crew, because an expired document on someone who has left is not an
+//      action item.
+// The previous version did none of this: it filtered on the raw crew.status column and never
+// opened crew_override. On 2026-08-17 that put 5 crew Rita had tagged Retired onto the report and
+// disagreed with the console on 12 of 21 statuses. Do not reintroduce a raw-status read here
+// (CLAUDE.md §11).
 export async function fetchDocRadar(env, todayStr) {
-  const { results } = await env.DB.prepare(
-    "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp " +
-    "FROM crew WHERE redacted=0 AND status != 'Inactive'"
-  ).all();
+  // PERF (CLAUDE.md §12): the three reads are independent — one concurrent wave, not a chain.
+  const [baseRes, ovRes] = await Promise.all([
+    env.DB.prepare(
+      "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp " +
+      "FROM crew WHERE redacted=0"
+    ).all(),
+    env.DB.prepare("SELECT * FROM crew_override").all().catch(() => ({ results: [] })),
+  ]);
+  const ovm = {};
+  for (const o of (ovRes.results || [])) ovm[o.agency_id] = o;
+  const sched = scheduleBySc();
+
   const flagged = [];
-  const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, deployable: 0 };
-  for (const r of (results || [])) {
+  const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, suspect: 0, deployable: 0, offFleetSkipped: 0 };
+  for (const b of (baseRes.results || [])) {
+    const ov = ovm[b.agency_id];
+    const status = crewStatus(b, ov, sched[b.agency_id], todayStr);
+    if (isOffFleet(status)) { counts.offFleetSkipped++; continue; }
+    const r = applyOverride(b, ov);   // manual document edits win over the imported row
+    r.status = status;                // derived, never the raw column
     const a = assessCrew(r, todayStr);
     if (!a.flagged) continue;
-    counts.crew++; counts.expired += a.expired; counts.expiring += a.expiring; counts.missing += a.missing;
+    counts.crew++; counts.expired += a.expired; counts.expiring += a.expiring;
+    counts.missing += a.missing; counts.suspect += a.suspect;
     if (a.deployable) counts.deployable++;
     flagged.push({
       agency_id: r.agency_id,
       name: [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || r.agency_id,
-      status: r.status, docs: { pp_exp:r.pp_exp, sirb_exp:r.sirb_exp, med_exp:r.med_exp, usv_exp:r.usv_exp, sch_exp:r.sch_exp }, ...a,
+      status, docs: { pp_exp:r.pp_exp, sirb_exp:r.sirb_exp, med_exp:r.med_exp, usv_exp:r.usv_exp, sch_exp:r.sch_exp }, ...a,
     });
   }
-  flagged.sort((a, b) => b.score - a.score || (a.earliest || '9999') < (b.earliest || '9999') ? -1 : 1);
-  // most-urgent callout
+  flagged.sort((a, b) => (b.score - a.score) || String(a.earliest || '9999').localeCompare(String(b.earliest || '9999')));
+  // Most-urgent callout: the worst crew that has a REAL lapse. A suspect date is a registry defect
+  // and must not headline the email over a seafarer whose medical actually runs out.
   let urgent = null;
-  if (flagged.length) {
-    const t = flagged[0];
+  for (const t of flagged) {
     let label = null, date = null;
-    for (const [lab, key] of DOCS) {
-      if (t.cells[key] === 'expired') { label = lab; date = t.docs[key]; break; }
-    }
-    if (!label) for (const [lab, key] of DOCS) { if (t.cells[key] === 'missing') { label = lab; break; } }
-    urgent = { name: t.name, status: t.status, deployable: t.deployable, label, date };
+    for (const [lab, key] of DOCS) if (t.cells[key] === 'expired') { label = lab; date = t.docs[key]; break; }
+    if (!label) for (const [lab, key] of DOCS) if (t.cells[key] === 'missing') { label = lab; break; }
+    if (label) { urgent = { name: t.name, status: t.status, deployable: t.deployable, label, date }; break; }
   }
   return { rows: flagged.slice(0, MAX_ROWS), truncated: Math.max(0, flagged.length - MAX_ROWS), counts, urgent };
 }
@@ -157,14 +198,21 @@ function legend() {
     + `<span style="color:${S.expiring.tx};font-weight:700;">&#9679;</span> Expiring &nbsp; `
     + `<span style="color:${S.expired.tx};font-weight:700;">&#9679;</span> Expired &nbsp; `
     + `<span style="color:${S.missing.tx};font-weight:700;">&#9679;</span> Missing &nbsp; `
+    + `<span style="color:${S.suspect.tx};font-weight:700;">&#9679;</span> Suspect date &nbsp; `
     + `<span style="color:${S.na.tx};font-weight:700;">&#9679;</span> Not held</span></td></tr>`;
 }
 const foot = `<tr><td style="padding:22px 30px 26px;"><div style="border-top:1px solid ${C.border};padding-top:14px;font-family:${F};font-size:11px;color:${C.light};line-height:1.6;">Automated weekly report · Monday 03:00 Miami time · Source: CIMS crew registry. Statuses derived from document expiry dates on file — accuracy depends on the registry being current.</div></td></tr></table></td></tr></table></body></html>`;
 
 function cellHtml(state, exp) {
   const o = S[state] || S.na;
-  const txt = state === 'missing' ? 'MISSING' : state === 'na' ? '&mdash;' : shortDate(exp);
-  return `<td style="padding:7px 3px;text-align:center;border-bottom:1px solid ${C.border};"><div style="background:${o.bg};border-radius:6px;padding:5px 2px;font-family:${F};font-size:10px;font-weight:600;color:${o.tx};">${txt}</div></td>`;
+  // A suspect date prints its FULL year. The 2-digit year everywhere else is what let
+  // "22 Sep 1934" read as a plausible "22 Sep 34" in the matrix for as long as it did.
+  const txt = state === 'missing' ? 'MISSING'
+    : state === 'na' ? '&mdash;'
+    : state === 'suspect' ? longDate(exp)
+    : shortDate(exp);
+  const size = state === 'suspect' ? '9px' : '10px';
+  return `<td style="padding:7px 3px;text-align:center;border-bottom:1px solid ${C.border};"><div style="background:${o.bg};border-radius:6px;padding:5px 2px;font-family:${F};font-size:${size};font-weight:600;color:${o.tx};">${txt}</div></td>`;
 }
 
 export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 0 }) {
@@ -176,6 +224,7 @@ export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 
     if (counts.expired) bits.push(`${counts.expired} expired`);
     if (counts.expiring) bits.push(`${counts.expiring} expiring`);
     if (counts.missing) bits.push(`${counts.missing} missing`);
+    if (counts.suspect) bits.push(`${counts.suspect} suspect`);
     let urgentLine = '';
     if (urgent && urgent.label) {
       const where = urgent.date ? `${urgent.label} lapsed ${longDate(urgent.date)}` : `${urgent.label} not on file`;
@@ -202,7 +251,12 @@ export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 
     table = `<tr><td style="padding:12px 30px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid ${C.border};border-radius:8px;overflow:hidden;">${hdr}${body}${more}</table></td></tr>`;
   }
 
-  return head(runDate) + banner + legend() + table + foot;
+  // A suspect date is a registry defect, so it gets an explicit instruction rather than sitting in
+  // the matrix looking like a compliance failure someone has to chase a seafarer about.
+  const note = counts && counts.suspect
+    ? `<tr><td style="padding:10px 30px 0;"><table role="presentation" width="100%" style="background:${S.suspect.bg};border:1px solid #DDD6FE;border-radius:10px;"><tr><td width="4" style="background:${S.suspect.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:11px 15px;font-family:${F};font-size:12px;color:${S.suspect.tx};line-height:1.5;"><strong>${counts.suspect} suspect date${counts.suspect > 1 ? 's' : ''}.</strong> Outside the plausible range for an active crew record &mdash; treat as a data error, not a lapse. Correct it on the Crew tab; the correction carries into this report automatically.</td></tr></table></td></tr>`
+    : '';
+  return head(runDate) + banner + legend() + table + note + foot;
 }
 
 // --- delivery (self-contained; mirrors worker.sendViaMailer) -----------------
