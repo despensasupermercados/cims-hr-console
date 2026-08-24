@@ -9,9 +9,12 @@
 //   D3  A change to a field with a LIVE crew_override defaults KEEP — never silently overwrites
 //       a manual correction (reinforces the override-wins rule in override.js / CLAUDE.md §11).
 //   D4  Crew present in the roster but absent from the file are FLAGGED, never auto-removed.
-//   D5  Selective friction: only ship / status / override / earlier-expiry demand attention;
+//   D5  Selective friction: only ship / override / earlier-expiry / identity demand attention;
 //       minor hygiene (province, etc.) auto-applies. An approval that fires on every trivial
 //       row trains the reviewer to rubber-stamp — worse than no gate.
+//   D6  (2026-08-24) STATUS IS TDG'S, and defaults ACCEPT. See below.
+//   D7  (2026-08-24) Identity is agency_id first, cruise-line id second; an id collision is
+//       a flag, never an auto-rekey.
 
 import { OVR_FIELDS } from "./override.js";
 
@@ -53,7 +56,20 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
     return { tier: TIER.OVERRIDE, write: true, defaultKeep: true };
   }
   if (field === "status") {
-    return { tier: TIER.CRITICAL, write: true, defaultKeep: true };
+    // D6 — TDG owns crew status. It is the register of who is aboard, on leave, earmarked
+    // or inactive; the console has no independent way to know. It therefore defaults to
+    // ACCEPT, like the certificates in D2.
+    //
+    // Why this changed: status previously defaulted to KEEP. Because the reviewer has to
+    // flip every row by hand to make a keep-by-default field move, the roster simply stopped
+    // tracking reality — 32 crew sat on a stale status for six weeks while every weekly
+    // import dutifully logged the correct value to sync_conflict and threw it away. The
+    // Fleet Document Radar of 2026-08-24 went out with 22 flagged crew, most of them wrong,
+    // and proposed retiring five men who were aboard. Status is high-consequence, which is
+    // an argument for making it VISIBLE and REVERSIBLE, not for making it hard to apply.
+    // It stays in the CRITICAL tier so it is still shown prominently and can still be kept
+    // per row — but the default now moves the registry toward the source of truth.
+    return { tier: TIER.CRITICAL, write: true, defaultAccept: true };
   }
   if (CERT_FIELDS.has(field)) {
     // D2 — trusted; accept by default, flag an expiry that moved earlier.
@@ -67,7 +83,7 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
 }
 
 // buildReview: turn a diffCrew() result into review groups the UI renders and the apply route consumes.
-//   diff              : output of crewimport.diffCrew()  ({ add, change, needsStatus, ... })
+//   diff              : output of crewimport.diffCrew()  ({ add, change, needsStatus, rekeyed, ... })
 //   existingByAgency  : agency_id -> existing base crew row
 //   incomingByAgency  : agency_id -> mapped incoming row (crewimport.mapRow output)
 //   overrideByAgency  : agency_id -> crew_override row (may be undefined)
@@ -75,12 +91,20 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
 export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, overrideByAgency = {}) {
   const groups = {
     ship_flag: [], override_conflict: [], critical: [], cert: [], minor: [],
-    new: [], departed: [], needs_status: [],
+    new: [], departed: [], needs_status: [], rekeyed: [],
   };
+
+  // Rows the file keyed on a cruise-line id that we matched to an existing crew member.
+  // Without this they would have been INSERTed as duplicates.
+  const rekeyedIncoming = new Set();
+  for (const rk of diff.rekeyed || []) {
+    groups.rekeyed.push(rk);
+    rekeyedIncoming.add(String(rk.incoming_id));
+  }
 
   for (const ch of diff.change || []) {
     const ex = existingByAgency[ch.agency_id] || {};
-    const inc = incomingByAgency[ch.agency_id] || {};
+    const inc = incomingByAgency[ch.incoming_id ?? ch.agency_id] || {};
     const liveOvr = liveOverrideFields(overrideByAgency[ch.agency_id]);
     for (const field of ch.changed) {
       const c = classifyField(field, ex[field] ?? null, inc[field] ?? null, liveOvr);
@@ -90,18 +114,24 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
   }
 
   for (const id of diff.add || []) {
+    if (rekeyedIncoming.has(String(id))) continue; // matched an existing member — not new
     groups.new.push({ agency_id: id, fields: incomingByAgency[id] || {} });
   }
   for (const id of diff.needsStatus || []) {
     groups.needs_status.push({ agency_id: id, fields: incomingByAgency[id] || {} });
   }
   // D4 — departed: in the roster, absent from this file. Flag only.
+  const seen = new Set(Object.keys(incomingByAgency));
+  for (const ch of diff.change || []) seen.add(String(ch.agency_id));
   for (const id of Object.keys(existingByAgency)) {
-    if (!incomingByAgency[id]) groups.departed.push({ agency_id: id, last: existingByAgency[id] });
+    if (!seen.has(String(id))) groups.departed.push({ agency_id: id, last: existingByAgency[id] });
   }
 
   const counts = Object.fromEntries(Object.entries(groups).map(([k, v]) => [k, v.length]));
-  const attention = counts.ship_flag + counts.override_conflict + counts.critical +
+  // What genuinely needs a human: ship placement, a live override, an identity collision,
+  // and an expiry that moved backwards. Status is no longer here — it is applied by default
+  // and reported, which is what D6 is for.
+  const attention = counts.ship_flag + counts.override_conflict + counts.rekeyed +
     groups.cert.filter(c => c.earlier).length;
   return { groups, counts, attention };
 }
