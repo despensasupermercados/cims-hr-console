@@ -3,6 +3,7 @@
 // existing roster. NEVER touches baseline_count (money — gated for Rita).
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]/g, "");
+const pad2 = (n) => String(n).padStart(2, "0");
 
 // Find the value in a raw row whose header matches any of the given normalized substrings.
 function pick(row, patterns) {
@@ -15,6 +16,14 @@ function pick(row, patterns) {
   return "";
 }
 
+// A cruise-line crew id arrives from spreadsheets as "349195" or "349195.0".
+// Same normalisation keymanimport.js uses for the money bridge.
+export function normKm(v) {
+  if (v == null) return null;
+  const s = String(v).trim().replace(/\.0+$/, "");
+  return /^\d{4,}$/.test(s) ? s : null;
+}
+
 export function normalizeDate(v) {
   if (v == null || v === "") return null;
   if (typeof v === "number" && isFinite(v)) {
@@ -25,10 +34,38 @@ export function normalizeDate(v) {
   }
   const s = String(v).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
   let m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); // M/D/YYYY (US)
-  if (m) { const [_, a, b, y] = m; return `${y}-${String(a).padStart(2, "0")}-${String(b).padStart(2, "0")}`; }
+  if (m) { const [, a, b, y] = m; return `${y}-${pad2(a)}-${pad2(b)}`; }
+
+  // M/D/YY — TWO-DIGIT YEAR. Native Date() maps "9/22/34" to 1934, which silently turns a
+  // 2034 passport into a document that "lapsed" 90 years ago. That is exactly how the
+  // 2026-08-24 Fleet Document Radar came to lead with "Ida Purnama, PP lapsed 22 Sep 1934".
+  // Pivot on 70 (POSIX convention): 00–69 -> 2000s, 70–99 -> 1900s.
+  m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/);
+  if (m) {
+    const [, a, b, y] = m;
+    const yy = Number(y);
+    const full = yy < 70 ? 2000 + yy : 1900 + yy;
+    return `${full}-${pad2(a)}-${pad2(b)}`;
+  }
+
   const d = new Date(s);
   return isNaN(d) ? null : d.toISOString().slice(0, 10);
+}
+
+// A document expiry is only credible inside a sane band. Anything outside it is a parse
+// artifact, not a compliance emergency — and a parse artifact must never be allowed to
+// outrank a real lapsed medical on the radar. Out-of-band => null => shows as MISSING,
+// which is honest (we do not have a usable date) and still gets flagged.
+export const DOC_DATE_MIN = "1950-01-01";
+export const DOC_DATE_MAX = "2100-01-01";
+export function isSaneDocDate(iso) {
+  return typeof iso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(iso) && iso >= DOC_DATE_MIN && iso < DOC_DATE_MAX;
+}
+function docDate(v) {
+  const d = normalizeDate(v);
+  return isSaneDocDate(d) ? d : null;
 }
 
 export function normalizeStatus(v) {
@@ -47,6 +84,8 @@ export function mapRow(row) {
   if (!agency_id) return null;
   return {
     agency_id,
+    // The cruise-line crew id, when the export carries it in its own column.
+    ship_crew_id: normKm(pick(row, ["ship crew id", "shipcrewid", "km id", "kmid", "keyman id"])),
     first_name: pick(row, ["first name", "firstname", "given"]) || null,
     middle_name: pick(row, ["middle"]) || null,
     last_name: pick(row, ["last name", "lastname", "surname"]) || null,
@@ -61,11 +100,11 @@ export function mapRow(row) {
     // "<DOC> NO", "<DOC> ISSUE/DATE OF ISSUE", "<DOC> EXPIRATION", "<DOC> PLACE" — and a
     // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.
     // Specific "… expiration" patterns come first; loose ones stay as fallbacks for other formats.
-    med_exp: normalizeDate(pick(row, ["medical expiration", "medical exp", "med expiration", "med exp"])),
-    sirb_exp: normalizeDate(pick(row, ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"])),
-    pp_exp: normalizeDate(pick(row, ["passport expiration", "passport exp"])),
-    sch_exp: normalizeDate(pick(row, ["schengen visa expiration", "schengen expiration", "schengen exp"])),
-    usv_exp: normalizeDate(pick(row, ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"])),
+    med_exp: docDate(pick(row, ["medical expiration", "medical exp", "med expiration", "med exp"])),
+    sirb_exp: docDate(pick(row, ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"])),
+    pp_exp: docDate(pick(row, ["passport expiration", "passport exp"])),
+    sch_exp: docDate(pick(row, ["schengen visa expiration", "schengen expiration", "schengen exp"])),
+    usv_exp: docDate(pick(row, ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"])),
   };
 }
 
@@ -79,24 +118,73 @@ const TRACK = ["first_name", "middle_name", "last_name", "status", "rank_observe
   "vessel_observed", "dob", "province", "phone", "email",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp"];
 
-// Diff incoming mapped rows vs existing roster (map agency_id -> existing crew row).
+// --- identity ---------------------------------------------------------------
+// A crew member has TWO ids: our agency id (SC-…) and the cruise line's numeric crew id.
+// Matching on agency_id alone means a row that arrives keyed on the cruise-line id looks
+// brand new and gets INSERTed — which is how "Ida Purnama / 349195" became a second copy
+// of "Ida Bagus Made Purnama / SC-0040010" on 2026-08-14. Prefer the agency id, fall back
+// to the cruise-line id. Same prefer-id-then-fall-back shape as keymanimport.buildBridge.
+export function buildIdentityIndex(existingRows) {
+  const byAgency = {}, byShipCrewId = {};
+  for (const r of existingRows || []) {
+    if (r == null) continue;
+    if (r.agency_id != null) byAgency[String(r.agency_id)] = r;
+    const km = normKm(r.ship_crew_id);
+    if (km && !byShipCrewId[km]) byShipCrewId[km] = r;
+  }
+  return { byAgency, byShipCrewId };
+}
+
+// Accepts either an index (from buildIdentityIndex) or the legacy agency_id -> row map.
+function asIndex(x) {
+  if (x && x.byAgency && x.byShipCrewId) return x;
+  return buildIdentityIndex(Object.values(x || {}));
+}
+
+// Resolve an incoming mapped row to an existing crew row. `via` records how we matched so
+// the review layer can show it — an id-based match is evidence, not a guess.
+export function resolveExisting(m, index) {
+  const idx = asIndex(index);
+  const direct = idx.byAgency[String(m.agency_id)];
+  if (direct) return { row: direct, via: "agency_id" };
+  // The export sometimes puts the cruise-line id in the crew-id column; try both.
+  const km = normKm(m.ship_crew_id) || normKm(m.agency_id);
+  if (km) {
+    const r = idx.byShipCrewId[km];
+    if (r) return { row: r, via: "ship_crew_id" };
+  }
+  return { row: null, via: null };
+}
+
+// Diff incoming mapped rows vs the existing roster.
 // New rows with an unknown/invalid status are flagged (status is NOT NULL + CHECK in D1).
-export function diffCrew(incoming, existingByAgency) {
-  const add = [], change = [], needsStatus = [];
+// `rekeyed` = matched by cruise-line id under a DIFFERENT agency id: never an auto-write of
+// agency_id (it is the roster's stable key), always a flag for a human.
+export function diffCrew(incoming, existing) {
+  const idx = asIndex(existing);
+  const add = [], change = [], needsStatus = [], rekeyed = [];
   let unchanged = 0;
   for (const m of incoming || []) {
-    const ex = existingByAgency[m.agency_id];
+    const { row: ex, via } = resolveExisting(m, idx);
     if (!ex) {
       if (!m.status) { needsStatus.push(m.agency_id); continue; }
       add.push(m.agency_id);
       continue;
     }
+    if (via === "ship_crew_id" && String(ex.agency_id) !== String(m.agency_id)) {
+      rekeyed.push({ agency_id: ex.agency_id, incoming_id: m.agency_id, ship_crew_id: normKm(m.ship_crew_id) || normKm(m.agency_id) });
+    }
     const changed = TRACK.filter(f => {
       const nv = m[f]; if (nv == null) return false;            // blank in source = don't clobber
       return String(nv) !== String(ex[f] == null ? "" : ex[f]);
     });
-    if (changed.length) change.push({ agency_id: m.agency_id, changed });
-    else unchanged++;
+    // Key every change on the EXISTING agency id — never the id the file happened to use.
+    // `incoming_id` is carried so the review layer can still find the incoming row.
+    if (changed.length) {
+      const entry = { agency_id: ex.agency_id, changed };
+      if (String(ex.agency_id) !== String(m.agency_id)) entry.incoming_id = m.agency_id;
+      change.push(entry);
+    } else unchanged++;
   }
-  return { add, change, unchanged, needsStatus, total: (incoming || []).length };
+  return { add, change, unchanged, needsStatus, rekeyed, total: (incoming || []).length };
 }
