@@ -3,8 +3,8 @@
  * -----------------------------------------------------
  * Every active crew with a document EXPIRED, EXPIRING (<=90 days), or MISSING,
  * worst-first, on the CIMS/DG3 brand. Catches the lapses that ground a crew
- * change (medical, US C1/D visa, seaman's book, passport, Schengen) before they
- * bite — and surfaces missing records so the registry gets completed.
+ * change (medical, US C1/D visa, seaman's book, passport) before they bite —
+ * and surfaces missing records so the registry gets completed.
  *
  * Cadence: Monday 03:00 America/New_York (Miami), weekly, deduped. Sent via the
  * existing hourly cron (maybeSendDocRadar) — no new infrastructure.
@@ -13,6 +13,21 @@
  * Read-only over the crew registry. Content-only; delivery is the cims-mailer
  * service binding (owns Resend key, retries, mail_log). Fail-safe: any error is
  * logged and swallowed so it can never break the shared cron.
+ *
+ * 2026-08-24 — two changes after the radar went out with 22 flagged crew, most
+ * of them wrong (see docs/CREW_IMPORT_STATUS_AUTHORITY.md):
+ *
+ *   1. RECONCILIATION STATE IN THE FOOTER. The footer used to say "accuracy
+ *      depends on the registry being current" — true, unmeasured, and therefore
+ *      decorative. It now prints when TDG was last imported and how many status
+ *      changes are still outstanding. A reader can see whether to trust the page.
+ *
+ *   2. SCHENGEN IS ADVISORY, NOT CRITICAL. A blank Schengen was already treated
+ *      as "not held, not a gap" — but an EXPIRED one scored the same 100 points
+ *      as an expired medical, so 11 of 19 flags were men whose only problem was
+ *      a lapsed optional visa. They are still shown; they no longer crowd out a
+ *      crew member who cannot legally join a ship. An alert that fires on
+ *      everything is an alert nobody reads (D5, docs/CREW_IMPORT_DECISIONS.md).
  */
 
 import { isMoneyUser } from "./policy.js";
@@ -36,6 +51,7 @@ const S = {
   expired: { bg:'#FDE7E7', tx:'#9B1C1C', ac:'#DC2626' },
   missing: { bg:'#ECEFF3', tx:'#4B5563', ac:'#94A3B8' },
   na:      { bg:'#F5F6F7', tx:'#B7B6B2', ac:'#E5E7EB' },
+  info:    { bg:'#EEF2F7', tx:'#41546B', ac:'#8FA3BC' },
 };
 const F  = "'DM Sans','Segoe UI',Helvetica,Arial,sans-serif";
 const FH = "'Outfit','Segoe UI',Helvetica,Arial,sans-serif";
@@ -48,7 +64,9 @@ const DOCS = [
   ['C1/D', 'usv_exp',  'US C1/D'],
   ['SCH',  'sch_exp',  'Schengen'],
 ];
-const CRITICAL = new Set(['pp_exp', 'sirb_exp', 'med_exp', 'usv_exp']); // Schengen is optional
+// Documents without which a crew member cannot join a ship. Schengen is an
+// optional convenience visa: its absence is not a gap, so neither is its lapse.
+const CRITICAL = new Set(['pp_exp', 'sirb_exp', 'med_exp', 'usv_exp']);
 
 // --- date helpers ------------------------------------------------------------
 const DAY = 86400000;
@@ -76,28 +94,41 @@ export function docStatus(exp, todayStr) {
 
 export function assessCrew(row, todayStr) {
   const cells = {};
-  let expired = 0, expiring = 0, missing = 0;
+  let expired = 0, expiring = 0, missing = 0;      // CRITICAL documents only
+  let advExpired = 0, advExpiring = 0;             // advisory (Schengen)
   for (const [, key] of DOCS) {
     let st = docStatus(row[key], todayStr);
-    if (st === 'missing' && !CRITICAL.has(key)) st = 'na'; // blank Schengen = not held, not a gap
+    const critical = CRITICAL.has(key);
+    if (st === 'missing' && !critical) st = 'na';  // blank Schengen = not held, not a gap
     cells[key] = st;
-    if (st === 'expired') expired++;
-    else if (st === 'expiring') expiring++;
-    else if (st === 'missing') missing++;
+    if (critical) {
+      if (st === 'expired') expired++;
+      else if (st === 'expiring') expiring++;
+      else if (st === 'missing') missing++;
+    } else {
+      if (st === 'expired') advExpired++;
+      else if (st === 'expiring') advExpiring++;
+    }
   }
   const deployable = row.status === 'Earmarked' || row.status === 'On Vacation';
   const flagged = (expired + expiring + missing) > 0;
-  // worst-first score: expired critical dominates, then missing, then expiring; deployable adds urgency.
-  const score = expired * 100 + missing * 50 + expiring * 10 + (deployable && (expired + missing > 0) ? 25 : 0);
-  // earliest bad date for tiebreak
+  const advisoryOnly = !flagged && (advExpired + advExpiring) > 0;
+  // Worst-first: an expired critical doc dominates, then missing, then expiring;
+  // deployable adds urgency (they are the next to join a ship). Advisory items are
+  // worth a single point — enough to break a tie, never enough to lead the email.
+  const score = expired * 100 + missing * 50 + expiring * 10
+    + (deployable && (expired + missing > 0) ? 25 : 0)
+    + advExpired + advExpiring;
+  // earliest bad CRITICAL date for tiebreak
   let earliest = null;
   for (const [, key] of DOCS) {
+    if (!CRITICAL.has(key)) continue;
     if ((cells[key] === 'expired' || cells[key] === 'expiring') && isoOk(row[key])) {
       const v = row[key].slice(0,10);
       if (!earliest || v < earliest) earliest = v;
     }
   }
-  return { cells, expired, expiring, missing, deployable, flagged, score, earliest };
+  return { cells, expired, expiring, missing, advExpired, advExpiring, deployable, flagged, advisoryOnly, score, earliest };
 }
 
 // --- data --------------------------------------------------------------------
@@ -106,32 +137,60 @@ export async function fetchDocRadar(env, todayStr) {
     "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp " +
     "FROM crew WHERE redacted=0 AND status != 'Inactive'"
   ).all();
-  const flagged = [];
-  const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, deployable: 0 };
+  const flagged = [], advisory = [];
+  const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, deployable: 0, advisory: 0 };
   for (const r of (results || [])) {
     const a = assessCrew(r, todayStr);
-    if (!a.flagged) continue;
-    counts.crew++; counts.expired += a.expired; counts.expiring += a.expiring; counts.missing += a.missing;
-    if (a.deployable) counts.deployable++;
-    flagged.push({
+    if (!a.flagged && !a.advisoryOnly) continue;
+    const rec = {
       agency_id: r.agency_id,
       name: [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || r.agency_id,
       status: r.status, docs: { pp_exp:r.pp_exp, sirb_exp:r.sirb_exp, med_exp:r.med_exp, usv_exp:r.usv_exp, sch_exp:r.sch_exp }, ...a,
-    });
+    };
+    if (a.advisoryOnly) { counts.advisory++; advisory.push(rec); continue; }
+    counts.crew++; counts.expired += a.expired; counts.expiring += a.expiring; counts.missing += a.missing;
+    if (a.deployable) counts.deployable++;
+    flagged.push(rec);
   }
-  flagged.sort((a, b) => b.score - a.score || (a.earliest || '9999') < (b.earliest || '9999') ? -1 : 1);
-  // most-urgent callout
+  flagged.sort((a, b) => b.score - a.score || ((a.earliest || '9999') < (b.earliest || '9999') ? -1 : 1));
+  advisory.sort((a, b) => b.score - a.score);
+  // most-urgent callout — drawn from CRITICAL findings only.
   let urgent = null;
   if (flagged.length) {
     const t = flagged[0];
     let label = null, date = null;
     for (const [lab, key] of DOCS) {
+      if (!CRITICAL.has(key)) continue;
       if (t.cells[key] === 'expired') { label = lab; date = t.docs[key]; break; }
     }
-    if (!label) for (const [lab, key] of DOCS) { if (t.cells[key] === 'missing') { label = lab; break; } }
+    if (!label) for (const [lab, key] of DOCS) { if (CRITICAL.has(key) && t.cells[key] === 'missing') { label = lab; break; } }
     urgent = { name: t.name, status: t.status, deployable: t.deployable, label, date };
   }
-  return { rows: flagged.slice(0, MAX_ROWS), truncated: Math.max(0, flagged.length - MAX_ROWS), counts, urgent };
+  return { rows: flagged.slice(0, MAX_ROWS), advisory, truncated: Math.max(0, flagged.length - MAX_ROWS), counts, urgent };
+}
+
+/**
+ * Reconciliation state — how current is the registry this email is derived from?
+ * Defensive: any failure returns nulls and the footer simply omits the line. This
+ * must never be able to stop a compliance email going out.
+ */
+export async function fetchReconciliation(env) {
+  const out = { lastImportAt: null, lastImportBy: null, pendingStatus: 0, pendingIdentity: 0, pendingShip: 0 };
+  try {
+    const run = await env.DB.prepare(
+      "SELECT run_at, run_by FROM import_run ORDER BY run_at DESC LIMIT 1").first();
+    if (run) { out.lastImportAt = run.run_at || null; out.lastImportBy = run.run_by || null; }
+    const { results } = await env.DB.prepare(
+      "SELECT field, COUNT(*) AS n FROM sync_conflict WHERE resolved=0 GROUP BY field").all();
+    for (const r of (results || [])) {
+      if (r.field === 'status') out.pendingStatus = r.n || 0;
+      else if (r.field === 'identity') out.pendingIdentity = r.n || 0;
+      else if (r.field === 'vessel_observed') out.pendingShip = r.n || 0;
+    }
+  } catch (e) {
+    console.error('docradar_reconciliation', (e && e.stack) || e);
+  }
+  return out;
 }
 
 // --- email (pure) ------------------------------------------------------------
@@ -149,7 +208,7 @@ function head(runDate) {
 <div style="font-family:${F};font-size:8px;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.4);padding-top:6px;">A division of <span style="color:${C.green};font-weight:700;">DG3</span></div></td>
 </tr></table></td></tr>
 <tr><td style="padding:24px 30px 2px;"><div style="font-family:${FH};font-size:23px;font-weight:700;color:${C.navy};line-height:1.25;">Fleet document radar</div>
-<div style="font-family:${F};font-size:13px;color:${C.slate};padding-top:5px;">Active crew with a document expired, expiring &le;90 days, or missing · ${fmtRun(runDate)}</div></td></tr>`;
+<div style="font-family:${F};font-size:13px;color:${C.slate};padding-top:5px;">Active crew with a passport, seaman's book, medical or C1/D expired, expiring &le;90 days, or missing · ${fmtRun(runDate)}</div></td></tr>`;
 }
 function legend() {
   return `<tr><td style="padding:14px 30px 2px;"><span style="font-family:${F};font-size:11px;color:${C.slate};">`
@@ -159,7 +218,36 @@ function legend() {
     + `<span style="color:${S.missing.tx};font-weight:700;">&#9679;</span> Missing &nbsp; `
     + `<span style="color:${S.na.tx};font-weight:700;">&#9679;</span> Not held</span></td></tr>`;
 }
-const foot = `<tr><td style="padding:22px 30px 26px;"><div style="border-top:1px solid ${C.border};padding-top:14px;font-family:${F};font-size:11px;color:${C.light};line-height:1.6;">Automated weekly report · Monday 03:00 Miami time · Source: CIMS crew registry. Statuses derived from document expiry dates on file — accuracy depends on the registry being current.</div></td></tr></table></td></tr></table></body></html>`;
+
+// Reconciliation line — the measurable version of "accuracy depends on the
+// registry being current". Says when TDG was last imported and what is outstanding.
+export function reconLine(recon) {
+  if (!recon) return '';
+  const bits = [];
+  if (recon.lastImportAt) {
+    const when = longDate(String(recon.lastImportAt).slice(0, 10)) || String(recon.lastImportAt).slice(0, 10);
+    bits.push(`TDG roster last imported <strong>${esc(when)}</strong>${recon.lastImportBy ? ` by ${esc(recon.lastImportBy)}` : ''}`);
+  } else {
+    bits.push('<strong>No TDG import on record</strong>');
+  }
+  const pend = [];
+  if (recon.pendingStatus) pend.push(`${recon.pendingStatus} status`);
+  if (recon.pendingIdentity) pend.push(`${recon.pendingIdentity} identity`);
+  if (recon.pendingShip) pend.push(`${recon.pendingShip} ship`);
+  const total = (recon.pendingStatus || 0) + (recon.pendingIdentity || 0) + (recon.pendingShip || 0);
+  bits.push(pend.length
+    ? `<strong>${pend.join(' + ')}</strong> ${total === 1 ? 'change' : 'changes'} still unreconciled`
+    : 'all imported changes reconciled');
+  return bits.join(' · ');
+}
+
+function foot(recon) {
+  const rl = reconLine(recon);
+  const reconHtml = rl
+    ? `<div style="font-family:${F};font-size:11px;color:${C.slate};line-height:1.6;padding-bottom:8px;">${rl}</div>`
+    : '';
+  return `<tr><td style="padding:22px 30px 26px;"><div style="border-top:1px solid ${C.border};padding-top:14px;">${reconHtml}<div style="font-family:${F};font-size:11px;color:${C.light};line-height:1.6;">Automated weekly report · Monday 03:00 Miami time · Source: CIMS crew registry, which is fed by the TDG AdvancedQuery export. Document states are derived from the expiry dates on file.</div></div></td></tr></table></td></tr></table></body></html>`;
+}
 
 function cellHtml(state, exp) {
   const o = S[state] || S.na;
@@ -167,10 +255,10 @@ function cellHtml(state, exp) {
   return `<td style="padding:7px 3px;text-align:center;border-bottom:1px solid ${C.border};"><div style="background:${o.bg};border-radius:6px;padding:5px 2px;font-family:${F};font-size:10px;font-weight:600;color:${o.tx};">${txt}</div></td>`;
 }
 
-export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 0 }) {
+export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 0, advisory = [], recon = null }) {
   let banner;
   if (!rows.length) {
-    banner = `<tr><td style="padding:16px 30px 0;"><table role="presentation" width="100%" style="background:${S.valid.bg};border:1px solid #CDE9C0;border-radius:10px;"><tr><td width="4" style="background:${S.valid.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:11px 15px;font-family:${F};font-size:12.5px;color:${S.valid.tx};"><strong>All clear:</strong> no active crew has a document expired, expiring within 90 days, or missing.</td></tr></table></td></tr>`;
+    banner = `<tr><td style="padding:16px 30px 0;"><table role="presentation" width="100%" style="background:${S.valid.bg};border:1px solid #CDE9C0;border-radius:10px;"><tr><td width="4" style="background:${S.valid.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:11px 15px;font-family:${F};font-size:12.5px;color:${S.valid.tx};"><strong>All clear:</strong> no active crew has a passport, seaman's book, medical or C1/D expired, expiring within 90 days, or missing.</td></tr></table></td></tr>`;
   } else {
     const bits = [];
     if (counts.expired) bits.push(`${counts.expired} expired`);
@@ -202,7 +290,15 @@ export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 
     table = `<tr><td style="padding:12px 30px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid ${C.border};border-radius:8px;overflow:hidden;">${hdr}${body}${more}</table></td></tr>`;
   }
 
-  return head(runDate) + banner + legend() + table + foot;
+  // Advisory: Schengen only. Named, so nothing is lost — but below the fold and
+  // outside the headline count, because it does not stop anyone joining a ship.
+  let adv = '';
+  if (advisory && advisory.length) {
+    const names = advisory.map(a => esc(a.name)).join(', ');
+    adv = `<tr><td style="padding:14px 30px 0;"><table role="presentation" width="100%" style="background:${S.info.bg};border:1px solid #D6DEE8;border-radius:10px;"><tr><td width="4" style="background:${S.info.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:10px 15px;font-family:${F};font-size:11.5px;color:${S.info.tx};line-height:1.55;"><strong>Advisory · ${advisory.length} crew hold only a lapsed or lapsing Schengen visa.</strong> No effect on joining a ship; listed so it is not lost: ${names}.</td></tr></table></td></tr>`;
+  }
+
+  return head(runDate) + banner + legend() + table + adv + foot(recon);
 }
 
 // --- delivery (self-contained; mirrors worker.sendViaMailer) -----------------
@@ -224,8 +320,9 @@ async function sendViaMailer(env, envelope) {
 export async function renderDocRadar(env, runDate) {
   const today = nyDateStr();
   const rd = runDate || today;
-  const { rows, counts, urgent, truncated } = await fetchDocRadar(env, today);
-  return { html: buildDocRadarEmail({ runDate: rd, rows, counts, urgent, truncated }), count: counts.crew };
+  const { rows, counts, urgent, truncated, advisory } = await fetchDocRadar(env, today);
+  const recon = await fetchReconciliation(env);
+  return { html: buildDocRadarEmail({ runDate: rd, rows, counts, urgent, truncated, advisory, recon }), count: counts.crew };
 }
 
 // toOverride: optional single address (or array) for a self-test — sends To that only, no CC.
