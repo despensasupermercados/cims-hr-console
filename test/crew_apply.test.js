@@ -52,10 +52,42 @@ test("D3 override explicitly accepted -> base write + audit", () => {
   assert.ok(plan.crewUpdates.some(u => u.agency_id === "SC-1" && u.field === "phone" && u.value === "+63911"));
 });
 
-test("status defaults keep (no write) but audited", () => {
+// --- D6: the behaviour change this PR exists for ---------------------------
+test("D6 status defaults ACCEPT and is written to crew", () => {
   const plan = buildApplyPlan(sampleReview(), {});
+  const w = plan.crewUpdates.find(u => u.agency_id === "SC-2" && u.field === "status");
+  assert.ok(w, "status must be applied by default — the old keep-by-default froze the roster");
+  assert.equal(w.value, "Inactive");
+  assert.equal(plan.statusApplied, 1);
+  assert.equal(plan.statusKept, 0);
+});
+
+test("D6 an APPLIED status closes the conflict (registry agrees with TDG)", () => {
+  const plan = buildApplyPlan(sampleReview(), {});
+  const c = plan.conflicts.find(x => x.agency_id === "SC-2" && x.field === "status");
+  assert.ok(c);
+  assert.equal(c.resolved, 1);
+  assert.equal(c.new_value, "Inactive");
+});
+
+test("D6 a KEPT status stays OPEN — resolved=1 now means 'agrees with source of truth'", () => {
+  // The old code wrote resolved=1 on a KEPT status too. That is how 198 rows could read
+  // 'resolved' while 32 crew carried a stale status for six weeks.
+  const plan = buildApplyPlan(sampleReview(), { "SC-2:status": "keep" });
   assert.equal(plan.crewUpdates.some(u => u.field === "status"), false);
-  assert.ok(plan.conflicts.some(c => c.agency_id === "SC-2" && c.field === "status" && c.resolved === 1));
+  assert.equal(plan.statusKept, 1);
+  const c = plan.conflicts.find(x => x.agency_id === "SC-2" && x.field === "status");
+  assert.equal(c.resolved, 0, "a deliberate divergence from TDG is outstanding work, not 'resolved'");
+  assert.match(c.new_value, /source of truth says Inactive/);
+});
+
+test("D7 a rekeyed row raises an OPEN identity flag and never rewrites agency_id", () => {
+  const review = { groups: { rekeyed: [{ agency_id: "SC-0040010", incoming_id: "349195", ship_crew_id: "349195" }] } };
+  const plan = buildApplyPlan(review, {});
+  assert.equal(plan.crewUpdates.some(u => u.field === "agency_id"), false);
+  const c = plan.conflicts.find(x => x.field === "identity");
+  assert.ok(c && c.resolved === 0);
+  assert.match(c.new_value, /349195/);
 });
 
 test("D4 departed -> open presence conflict, never a delete", () => {
@@ -83,6 +115,6 @@ test("new crew can be skipped", () => {
 test("importRun summary counts touched rows and open conflicts", () => {
   const plan = buildApplyPlan(sampleReview(), {}, { file_hash: "abc", run_by: "Rita" });
   assert.equal(plan.importRun.file_hash, "abc");
-  assert.equal(plan.importRun.rows_upserted, 3);
-  assert.equal(plan.importRun.conflicts, 2);
+  assert.equal(plan.importRun.rows_upserted, 4); // SC-2 now touched: status applies by default
+  assert.equal(plan.importRun.conflicts, 2);     // ship + departed (status now resolved)
 });
