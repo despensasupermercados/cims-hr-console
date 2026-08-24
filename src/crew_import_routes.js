@@ -8,6 +8,7 @@
 // Safety at this layer (defense in depth, on top of crew_apply's own guarantees):
 //   - column names for UPDATE are whitelisted (CREW_WRITABLE) — vessel_observed is NOT in it,
 //     so a ship value can never be written even if a bad plan slipped through.
+//   - agency_id is NOT writable: identity is never rewritten by an import (D7).
 //   - idempotent by import_run.file_hash (re-dropping the same file is a no-op).
 
 import { mapRows, diffCrew } from "./crewimport.js";
@@ -15,7 +16,8 @@ import { buildReview } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
 
-// Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
+// Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1);
+// agency_id and ship_crew_id deliberately absent (D7 — identity is not an import decision).
 export const CREW_WRITABLE = new Set([
   "first_name", "middle_name", "last_name", "status", "rank_observed",
   "dob", "province", "phone", "email",
@@ -23,7 +25,7 @@ export const CREW_WRITABLE = new Set([
 ]);
 
 // Columns written when INSERTing a brand-new crew member (agency_code has a DB default).
-const INSERT_COLS = ["id", "agency_id", "first_name", "middle_name", "last_name", "status",
+const INSERT_COLS = ["id", "agency_id", "ship_crew_id", "first_name", "middle_name", "last_name", "status",
   "rank_observed", "vessel_observed", "dob", "province", "phone", "email",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp", "created_at", "updated_at"];
 
@@ -37,6 +39,7 @@ export function crewImportPage() {
 }
 
 async function loadContext(env) {
+  // SELECT * so ship_crew_id reaches the identity index (D7).
   const ex = await env.DB.prepare("SELECT * FROM crew").all();
   const existingByAgency = Object.fromEntries((ex.results || []).map(r => [r.agency_id, r]));
   const ov = await env.DB.prepare("SELECT * FROM crew_override WHERE COALESCE(retired,0)=0").all();
@@ -84,7 +87,7 @@ export async function apiCrewImportApply(request, env) {
       plan.importRun.rows_upserted, plan.importRun.conflicts, run_by, run_at));
 
   for (const u of plan.crewUpdates) {
-    if (!CREW_WRITABLE.has(u.field)) continue; // hard whitelist — no vessel_observed, no injection
+    if (!CREW_WRITABLE.has(u.field)) continue; // hard whitelist — no vessel_observed, no identity, no injection
     stmts.push(env.DB.prepare(`UPDATE crew SET ${u.field}=?, updated_at=? WHERE agency_id=?`)
       .bind(u.value ?? null, run_at, u.agency_id));
   }
@@ -106,6 +109,7 @@ export async function apiCrewImportApply(request, env) {
   return J({
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
+    status_applied: plan.statusApplied, status_kept: plan.statusKept,
     open_conflicts: plan.importRun.conflicts, droppedShipWrites: plan.droppedShipWrites,
   });
 }
