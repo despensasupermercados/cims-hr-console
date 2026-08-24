@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { mapRows, diffCrew } from "../src/crewimport.js";
 import { buildReview, classifyField, liveOverrideFields, TIER } from "../src/crew_review.js";
 
-// --- shared fixture -------------------------------------------------------
 const existing = {
   "SC-1": { agency_id: "SC-1", first_name: "Jomar", last_name: "Dela Cruz",
     status: "On board", vessel_observed: "Celebrity Edge", med_exp: "2026-03-19",
@@ -24,9 +23,7 @@ const rawRows = [
     "VESSEL NAME": "Wonder of the Seas" },
 ];
 
-const overrides = {
-  "SC-1": { agency_id: "SC-1", phone: "+63999999999", retired: 0 },
-};
+const overrides = { "SC-1": { agency_id: "SC-1", phone: "+63999999999", retired: 0 } };
 
 function review() {
   const { mapped } = mapRows(rawRows);
@@ -77,9 +74,36 @@ test("retired override does not protect a field", () => {
   assert.equal(live.has("phone"), false);
 });
 
+test("D6 status is CRITICAL tier but defaults ACCEPT", () => {
+  const c = classifyField("status", "Earmarked", "On board", new Set());
+  assert.equal(c.tier, TIER.CRITICAL, "still shown prominently");
+  assert.equal(c.write, true);
+  assert.equal(c.defaultAccept, true, "TDG owns status — the default must move toward it");
+  assert.ok(!c.defaultKeep);
+});
+
+test("D6 a LIVE override still beats the TDG status", () => {
+  const live = liveOverrideFields({ status: "On Vacation", retired: 0 });
+  const c = classifyField("status", "On board", "Inactive", live);
+  assert.equal(c.tier, TIER.OVERRIDE, "override-wins (D3) outranks TDG authority (D6)");
+  assert.equal(c.defaultKeep, true);
+});
+
 test("D4 crew absent from file is flagged departed", () => {
   const r = review();
   assert.ok(r.groups.departed.some(x => x.agency_id === "SC-3"));
+});
+
+test("D7 a crew matched by cruise-line id is NOT new and NOT departed", () => {
+  const ex = { "SC-0040010": { agency_id: "SC-0040010", ship_crew_id: "349195",
+    first_name: "Ida Bagus Made", last_name: "Purnama", status: "Earmarked" } };
+  const { mapped } = mapRows([{ "CREW ID": "349195", "FIRST NAME": "Ida", "LAST NAME": "Purnama", "STATUS": "On board" }]);
+  const inc = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
+  const r = buildReview(diffCrew(mapped, ex), ex, inc, {});
+  assert.equal(r.groups.new.length, 0, "no duplicate insert");
+  assert.equal(r.groups.departed.length, 0, "the real record must not look departed either");
+  assert.equal(r.groups.rekeyed.length, 1);
+  assert.ok(r.groups.critical.some(x => x.agency_id === "SC-0040010" && x.field === "status"));
 });
 
 test("new crew surfaces in the new group", () => {
@@ -87,7 +111,7 @@ test("new crew surfaces in the new group", () => {
   assert.ok(r.groups.new.some(x => x.agency_id === "SC-9"));
 });
 
-test("attention counts ship + override + earlier-expiry", () => {
+test("attention counts ship + override + rekeyed + earlier-expiry (status auto-applies)", () => {
   const r = review();
   assert.equal(r.attention, 3);
 });

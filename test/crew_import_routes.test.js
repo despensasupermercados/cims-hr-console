@@ -2,10 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { apiCrewImportStage, apiCrewImportApply, handleCrewImport } from "../src/crew_import_routes.js";
 
-// --- fake D1 -------------------------------------------------------------
 function fakeDB({ existing = [], overrides = [], dup = false } = {}) {
   const batched = [];
-  function route(sql, args) {
+  function route(sql) {
     if (/FROM import_run WHERE file_hash/i.test(sql)) return { __first: dup ? { x: 1 } : null };
     if (/FROM crew_override/i.test(sql)) return { __all: { results: overrides } };
     if (/FROM crew\b/i.test(sql)) return { __all: { results: existing } };
@@ -14,8 +13,8 @@ function fakeDB({ existing = [], overrides = [], dup = false } = {}) {
   const mk = (sql, args = []) => ({
     sql, args,
     bind(...a) { return mk(sql, a); },
-    async first() { return route(sql, args).__first ?? null; },
-    async all() { return route(sql, args).__all ?? { results: [] }; },
+    async first() { return route(sql).__first ?? null; },
+    async all() { return route(sql).__all ?? { results: [] }; },
   });
   return {
     _batched: batched,
@@ -63,6 +62,33 @@ test("apply NEVER emits a vessel_observed UPDATE and logs the ship as a conflict
   assert.ok(sqls.some(s => /INSERT INTO import_run/i.test(s)), "import_run logged");
   assert.ok(sqls.some(s => /INSERT INTO sync_conflict/i.test(s)), "ship flagged as conflict");
   assert.ok(sqls.some(s => /UPDATE crew SET med_exp/i.test(s)), "cert applied");
+});
+
+test("D6 end-to-end: a TDG status change reaches an UPDATE crew SET status", async () => {
+  const env = { DB: fakeDB({ existing: [{ agency_id: "SC-5", first_name: "A", last_name: "B", status: "Earmarked" }] }) };
+  const rows = [{ "CREW ID": "SC-5", "FIRST NAME": "A", "LAST NAME": "B", "CREW STATUS": "On board" }];
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "s1" }), env)).json();
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "s1", run_by: "Rita" }), env);
+  const body = await res.json();
+  const sqls = env.DB._batched.map(s => s.sql);
+  assert.ok(sqls.some(s => /UPDATE crew SET status/i.test(s)), "status must actually be written");
+  assert.equal(body.status_applied, 1);
+  assert.equal(body.status_kept, 0);
+});
+
+test("D7 end-to-end: a cruise-line-keyed row updates the existing crew, no INSERT", async () => {
+  const env = { DB: fakeDB({ existing: [{ agency_id: "SC-0040010", ship_crew_id: "349195",
+    first_name: "Ida Bagus Made", last_name: "Purnama", status: "Earmarked" }] }) };
+  const rows = [{ "CREW ID": "349195", "FIRST NAME": "Ida", "LAST NAME": "Purnama", "CREW STATUS": "On board" }];
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "s2" }), env)).json();
+  assert.equal(stage.review.counts.new, 0, "no duplicate proposed");
+  assert.equal(stage.review.counts.rekeyed, 1);
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "s2", run_by: "Rita" }), env);
+  const sqls = env.DB._batched.map(s => s.sql);
+  assert.equal(sqls.some(s => /INSERT INTO crew\b/i.test(s)), false, "must not insert a second Purnama");
+  assert.ok(sqls.some(s => /UPDATE crew SET status/i.test(s)));
+  assert.equal(sqls.some(s => /UPDATE crew SET agency_id/i.test(s)), false, "identity never rewritten");
+  assert.equal((await res.json()).ok, true);
 });
 
 test("apply is idempotent by file hash", async () => {
