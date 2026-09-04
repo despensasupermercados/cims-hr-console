@@ -65,6 +65,38 @@ test("apply NEVER emits a vessel_observed UPDATE and logs the ship as a conflict
   assert.ok(sqls.some(s => /UPDATE crew SET med_exp/i.test(s)), "cert applied");
 });
 
+// D3 + override.js: a manual crew_override field ALWAYS wins on read, so an accepted override
+// conflict must NULL that one field on crew_override or the accept never reaches the card.
+const OVR_EXISTING = [{ agency_id: "SC-1", first_name: "Jomar", last_name: "Dela Cruz", status: "On board", vessel_observed: "Celebrity Edge" }];
+const OVR_ROWS = [{ "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "Inactive", "VESSEL NAME": "Celebrity Edge" }];
+const OVR = [{ agency_id: "SC-1", status: "Earmarked", notes: "hand-set", retired: 0 }];
+
+test("accepted override conflict clears ONLY that crew_override field (status) and writes the base", async () => {
+  const env = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
+  const stage = await (await apiCrewImportStage(req({ rows: OVR_ROWS, file_hash: "h3" }), env)).json();
+  assert.equal(stage.review.counts.override_conflict, 1, "status change under a live override lands in the override tier");
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: { "SC-1:status": "accept" }, file_hash: "h3", run_by: "Rita" }), env);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.override_cleared, 1);
+  const st = env.DB._batched;
+  const clr = st.find(s => /UPDATE crew_override SET status=NULL/i.test(s.sql));
+  assert.ok(clr, "override.status cleared");
+  assert.equal(clr.args[1], "SC-1");
+  assert.ok(st.some(s => /UPDATE crew SET status=\?/i.test(s.sql) && s.args[0] === "Inactive"), "base status written");
+  assert.equal(st.filter(s => /UPDATE crew_override/i.test(s.sql)).length, 1, "nothing else on the override row is touched");
+});
+
+test("kept override conflict (the default) leaves crew_override untouched", async () => {
+  const env = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
+  const stage = await (await apiCrewImportStage(req({ rows: OVR_ROWS, file_hash: "h4" }), env)).json();
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h4", run_by: "Rita" }), env);
+  const body = await res.json();
+  assert.equal(body.override_cleared, 0);
+  assert.equal(env.DB._batched.some(s => /UPDATE crew_override/i.test(s.sql)), false);
+  assert.equal(env.DB._batched.some(s => /UPDATE crew SET status/i.test(s.sql)), false);
+});
+
 test("apply is idempotent by file hash", async () => {
   const env = { DB: fakeDB({ existing: EXISTING, dup: true }) };
   const res = await apiCrewImportApply(req({ review: { groups: {} }, decisions: {}, file_hash: "seen" }), env);

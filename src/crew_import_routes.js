@@ -14,6 +14,7 @@ import { mapRows, diffCrew } from "./crewimport.js";
 import { buildReview } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
+import { OVR_FIELDS } from "./override.js";
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -21,6 +22,10 @@ export const CREW_WRITABLE = new Set([
   "dob", "province", "phone", "email",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp",
 ]);
+
+// crew_override columns an ACCEPTED override conflict may set to NULL — only fields that exist on
+// both sides (never vessel_observed: it is not writable, so it is never accepted either).
+export const OVR_CLEARABLE = new Set(OVR_FIELDS.filter(f => CREW_WRITABLE.has(f)));
 
 // Columns written when INSERTing a brand-new crew member (agency_code has a DB default).
 const INSERT_COLS = ["id", "agency_id", "first_name", "middle_name", "last_name", "status",
@@ -88,6 +93,14 @@ export async function apiCrewImportApply(request, env) {
     stmts.push(env.DB.prepare(`UPDATE crew SET ${u.field}=?, updated_at=? WHERE agency_id=?`)
       .bind(u.value ?? null, run_at, u.agency_id));
   }
+  // D3 accepted: the manual value is superseded by the ratified TDG value. Clear ONLY that field
+  // (the rest of the override row — retired flag, notes, other fields — stays), else the override
+  // keeps winning at read time and the accept is a no-op on the card.
+  for (const o of plan.overrideClears || []) {
+    if (!OVR_CLEARABLE.has(o.field)) continue;
+    stmts.push(env.DB.prepare(`UPDATE crew_override SET ${o.field}=NULL, updated_at=? WHERE agency_id=?`)
+      .bind(run_at, o.agency_id));
+  }
   for (const n of plan.newCrew) {
     const vals = INSERT_COLS.map(c =>
       c === "id" ? crypto.randomUUID()
@@ -106,6 +119,7 @@ export async function apiCrewImportApply(request, env) {
   return J({
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
+    override_cleared: (plan.overrideClears || []).filter(o => OVR_CLEARABLE.has(o.field)).length,
     open_conflicts: plan.importRun.conflicts, droppedShipWrites: plan.droppedShipWrites,
   });
 }

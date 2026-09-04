@@ -8,7 +8,11 @@
 //       become sync_conflict flags only. (Allowed on a NEW-crew insert: no allocation exists yet.)
 //   D2  cert fields default 'accept'.
 //   D3  override_conflict + status default 'keep'; kept OR accepted, both write an audit
-//       sync_conflict row (resolved=1) so we can prove Rita saw it.
+//       sync_conflict row (resolved=1) so we can prove Rita saw it. An ACCEPTED override
+//       conflict also CLEARS that one field on crew_override (overrideClears): the override
+//       merge (override.js) makes any non-empty crew_override field win at read time, so
+//       without the clear the accepted TDG value lands on crew and stays invisible — which is
+//       exactly what happened to SC-0038392 (status Inactive accepted, card still Earmarked).
 //   D4  departed default 'flag' (open sync_conflict, resolved=0); never a delete.
 //   D5  minor auto-applies regardless of decision.
 
@@ -20,6 +24,7 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   const crewUpdates = [];   // { agency_id, field, value }
   const newCrew = [];       // full mapped field object
   const conflicts = [];     // { agency_id, field, old_value, new_value, resolved }
+  const overrideClears = []; // { agency_id, field } — crew_override field to NULL (accepted D3 only)
 
   // cert (incl. name/email/rank) — default accept
   for (const it of g.cert || []) {
@@ -34,8 +39,10 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   }
   // override conflict — default keep (protect manual edit); always audit
   for (const it of g.override_conflict || []) {
-    if (dec(key(it.agency_id, it.field), "keep") === "accept")
+    if (dec(key(it.agency_id, it.field), "keep") === "accept") {
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
+      if (it.field !== "vessel_observed") overrideClears.push({ agency_id: it.agency_id, field: it.field });
+    }
     conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: it.old, new_value: it.new, resolved: 1 });
   }
   // ship flag — NEVER a crew write; open to-do unless dismissed
@@ -73,5 +80,5 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     run_at: meta.run_at ?? null,
   };
 
-  return { crewUpdates: safeUpdates, newCrew, conflicts, importRun, droppedShipWrites };
+  return { crewUpdates: safeUpdates, newCrew, conflicts, overrideClears, importRun, droppedShipWrites };
 }
