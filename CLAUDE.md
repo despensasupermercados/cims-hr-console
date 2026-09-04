@@ -92,6 +92,10 @@ dated card on the crew. Hard rules:
   consistently in apiCrew, apiRotation, AND apiDashboard. Don't reintroduce a raw-`crew.status` count in
   one view only (the donut/tiles must use the same derived set). Manual `crew_override.status` and the
   `retired` flag win over derivation. Status does NOT come from the historical Contract Counter.
+  The ONE schedule is `boardLegs(env)` = current `ship_leg` rows + crew aboard per the relief board
+  (in-force `assignment` rows, `ship_leg_source.boardLegsFromDb`, 2026-09-04). Never call
+  `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
+  crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
 - **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
   type=checkbox style="pointer-events:none">`. Native label-wrapped checkboxes double-fire per tap
   (one flip cancels the other). Don't add a bare clickable checkbox.
