@@ -1602,18 +1602,29 @@ async function effectiveBaseline(env, agency_id, baseBaseline) {
 }
 async function apiBonusCrew(env, url) {
   const id = url.searchParams.get("id");
-  const cr = await env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(id).first();
+  // Crew row + the LIVE board schedule in one wave (ensureKeyman alongside; memoized). Until
+  // 2026-09-04 the Score Card's default sign-on/off came from the frozen SHIP_HISTORY code constant
+  // (a July snapshot) — a crew who moved since then was scored against stale dates. §11: one schedule.
+  const [cr, HIST] = await Promise.all([
+    env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(id).first(),
+    boardLegs(env),
+    ensureKeyman(env),
+  ]);
   if (!cr) return json({ error: "not found" }, 404);
-  await ensureKeyman(env);
-  const baseline = await effectiveBaseline(env, cr.agency_id, cr.baseline_count);
+  // The reads keyed by the crew row fire as a second wave (was 5 sequential round trips). The bonus
+  // math is untouched: same helpers (effectiveBaseline, crewCount), same statements, same output.
+  const [baseline, outs, legRowsRes] = await Promise.all([
+    effectiveBaseline(env, cr.agency_id, cr.baseline_count),
+    env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all(),
+    env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all(),
+  ]);
   const count = await crewCount(env, cr.id, baseline);
-  const outs = await env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all();
-  // Default sign-on/off for the Score Card (manually editable there). Prefer the SCHEDULE deployment
-  // (the Keyman schedule grids — the contract just ended, or the current one), since the Contract
-  // Counter only holds completed-contract dates. Fall back to the latest Contract Counter leg.
+  // Default sign-on/off for the Score Card (manually editable there). Prefer the live SCHEDULE
+  // (current leg or crew aboard per the relief board — the contract just ended, or the current one),
+  // since the Contract Counter only holds completed-contract dates. Fall back to the latest Counter leg.
   const td = TODAY();
   let current = null, bestPast = null, bestFut = null;
-  for (const h of SHIP_HISTORY) {
+  for (const h of HIST) {
     if (!h.ours || h.sc !== cr.agency_id || !h.off) continue;
     if (h.on && h.on <= td && h.off >= td) { if (!current || h.off > current.off) current = h; } // contract spanning today
     else if (h.off < td) { if (!bestPast || h.off > bestPast.off) bestPast = h; }                  // last completed
@@ -1625,7 +1636,7 @@ async function apiBonusCrew(env, url) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
   }
-  const legRows = (await env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all()).results;
+  const legRows = legRowsRes.results;
   const legN = fullContracts(legRows.map(legShape));
   const effN = tierContracts(baseline, legN); // cumulative completed -> grade/pay (never resets)
   return json({ crew: cr, count, contracts: effN, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
@@ -1902,11 +1913,13 @@ async function apiScoreQueue(env, url) {
   const fb = {}; for (const r of reqs) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = r.status; }
   for (const r of resp) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = "answered"; }
   const keys = buildShipKeys(VESSEL_REF);
-  // SOURCE = the SCHEDULE deployment grids (ship_history), which carry forward-looking sign-off
-  // dates + ship. The Contract Counter is completed-contracts only (no future dates), so it can
-  // never populate "signing off next 14 days" — the schedule is the right Keyman tab for timing.
+  // SOURCE = the LIVE board schedule (boardLegs: current ship_leg rows + crew aboard per the relief
+  // board), which carries forward-looking sign-off dates + ship. The Contract Counter is completed-
+  // contracts only (no future dates), so it can never populate "signing off next 14 days". Until
+  // 2026-09-04 this loop read the frozen SHIP_HISTORY constant — a July snapshot (§11: one schedule).
+  const HIST = await boardLegs(env);
   const recBy = {}, upBy = {};
-  for (const h of SHIP_HISTORY) {
+  for (const h of HIST) {
     if (!h.ours || !h.sc || !h.off || !byId[h.sc]) continue;
     const w = classifyWindow(h.off, today, days);
     if (!w) continue;
