@@ -25,8 +25,22 @@ export function normalizeDate(v) {
   }
   const s = String(v).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  let m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); // M/D/YYYY (US)
-  if (m) { const [_, a, b, y] = m; return `${y}-${String(a).padStart(2, "0")}-${String(b).padStart(2, "0")}`; }
+  // Numeric a/b/YYYY. AdvancedQuery emits M/D/YYYY (US) for the PHL roster; the rows Rita hand-pastes
+  // for non-PHL crew (E1-format, e.g. Joseph, Purnama — 2026-08-25) arrive as D/M/YYYY. Before
+  // 2026-09-04 this branch assumed US and turned "23/09/2034" into "2034-23-09" — an impossible date
+  // stored verbatim, which the console then read as a MISSING passport/medical. Rule now: a first
+  // field > 12 can only be a day, so it is D/M; both fields <= 12 stay US (the roster's own format —
+  // the ambiguity is real and is NOT guessed away); anything that does not form a real date is null.
+  let m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (m) {
+    let [_, a, b, y] = m;
+    a = +a; b = +b;
+    let mo = a, da = b;                 // M/D/YYYY (US)
+    if (a > 12 && b <= 12) { mo = b; da = a; } // D/M/YYYY
+    const iso = `${y}-${String(mo).padStart(2, "0")}-${String(da).padStart(2, "0")}`;
+    const d = new Date(iso + "T00:00:00Z");
+    return !isNaN(d) && d.toISOString().slice(0, 10) === iso ? iso : null; // rejects 2034-13-40 etc.
+  }
   const d = new Date(s);
   return isNaN(d) ? null : d.toISOString().slice(0, 10);
 }

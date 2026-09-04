@@ -10,6 +10,20 @@ test("normalizeDate handles ISO, US, Excel serial, junk", () => {
   assert.equal(normalizeDate("n/a"), null);
 });
 
+// 2026-09-04 (Rita, 25 Aug): the non-PHL rows she pastes into the AdvancedQuery file carry
+// D/M/YYYY. The parser assumed US and stored "2034-23-09" — an impossible date — which the
+// console then reported as a MISSING document. A first field > 12 can only be a day.
+test("normalizeDate: D/M/YYYY when the first field cannot be a month; never stores an impossible date", () => {
+  assert.equal(normalizeDate("23/09/2034"), "2034-09-23");   // Joseph's passport expiry, as pasted
+  assert.equal(normalizeDate("23-09-2034"), "2034-09-23");
+  assert.equal(normalizeDate("9/23/2034"), "2034-09-23");    // the same date in the roster's US form
+  assert.equal(normalizeDate("1/31/2027"), "2027-01-31");    // US stays US
+  assert.equal(normalizeDate("3/4/2026"), "2026-03-04");     // both <= 12: ambiguous, stays US by rule
+  assert.equal(normalizeDate("13/13/2030"), null);           // no reading makes this a date
+  assert.equal(normalizeDate("2/30/2027"), null);            // rolls over in JS; must not be stored
+  assert.equal(normalizeDate("23 Sep 2034"), "2034-09-23");  // text form still parses
+});
+
 test("normalizeStatus maps tolerant variants to the D1 enum", () => {
   assert.equal(normalizeStatus("On Board"), "On board");
   assert.equal(normalizeStatus("ONVACATION"), "On Vacation");
