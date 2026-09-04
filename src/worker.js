@@ -789,9 +789,17 @@ async function logData(env, source, rows, status) {
     await env.DB.prepare("INSERT INTO data_log (id,source,rows,status,at) VALUES (?,?,?,?,?)").bind("dl_" + crypto.randomUUID(), source, rows, status, new Date().toISOString()).run();
   } catch {}
 }
-// Bump when KEYMAN_CONTRACTS is regenerated from a new workbook so the deploy actually RELOADS
-// D1 (seed-only-when-empty would otherwise ignore the new data). Reseed is keyman_contract3 only;
-// per-contract manual edits live in the separate contract_edit table and are preserved.
+// The bundled KEYMAN_CONTRACTS seeds an EMPTY keyman_contract3 only (fresh DB / staging). Once the
+// table is populated, the Keyman import (apiKeymanImport) is the ONLY refresh path — it refreshes
+// matched crew and re-pins this version (CLAUDE.md §11). A bare version bump must never overwrite
+// live rows.
+//
+// Why (P3.13 audit H6 — verified read-only on prod 2026-09-04): prod holds 47 hand-cleaned rows,
+// all seq=1, sign_on 2025-10..2026-06. The bundled constant is 209 rows, seq 1..9, 2022-era. The
+// previous rule ("reseed on version mismatch" + prune rows not in the constant) would have replaced
+// the 47 clean rows with 2022 legs on the next bump: sbm's manual invite would resolve a 2022
+// sign-off, and statements, crew cards and the days-worked export would read history that no longer
+// exists. Money-adjacent and silent — so a populated table now refuses the bundled reseed.
 const KEYMAN_VERSION = "2026-06-13-cc-v3";
 // PERF: once-per-isolate memo for the ensure* schema guards. Before this, every hot request re-ran
 // CREATE TABLE / ALTER TABLE / seed-version checks — each one a full Worker->D1 round trip on the
@@ -821,16 +829,18 @@ async function ensureKeymanImpl(env) {
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()).n;
   const ver = await env.DB.prepare("SELECT v FROM data_meta WHERE k='keyman_version'").first();
   const stale = !ver || ver.v !== KEYMAN_VERSION;
-  if ((n === 0 || stale) && KEYMAN_CONTRACTS.length) {
+  if (n === 0 && KEYMAN_CONTRACTS.length) {
+    // Empty table: seed from the bundled constant and pin the version.
     const stmt = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
     await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.ship, r.st, r.seq, r.on, r.proj, r.act)));
-    // Prune any (sc,seq) no longer in the dataset (e.g. a crew's contract count shrank on refresh).
-    const keep = new Set(KEYMAN_CONTRACTS.map(r => r.sc + "|" + r.seq));
-    const have = (await env.DB.prepare("SELECT sc, seq FROM keyman_contract3").all()).results;
-    const extra = have.filter(r => !keep.has(r.sc + "|" + r.seq));
-    if (extra.length) await env.DB.batch(extra.map(r => env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=? AND seq=?").bind(r.sc, r.seq)));
     await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
-    await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", KEYMAN_CONTRACTS.length, n > 0 ? "refreshed" : "seeded");
+    await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", KEYMAN_CONTRACTS.length, "seeded");
+  } else if (stale) {
+    // Populated table + version drift: REFUSE the bundled reseed (see KEYMAN_VERSION). Re-pin so this
+    // check stops firing on every new isolate, and leave the refusal in data_log so it is visible.
+    // Refresh the data through the Keyman import, never the constant.
+    await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
+    await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", n, "reseed_refused_table_populated");
   }
 }
 // Crew refresh from an uploaded AdvancedQuery export. Browser parses the file (SheetJS) and
