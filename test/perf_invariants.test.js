@@ -22,7 +22,11 @@ function body(name) {
 }
 
 test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), not sequentially", () => {
-  for (const fn of ["async function apiDashboard(", "async function apiCrew(", "async function rotationSections("]) {
+  for (const fn of [
+    "async function apiDashboard(", "async function apiCrew(", "async function rotationSections(",
+    // 2026-09: the per-crew card/rotation reads and the feedback board/queue were still sequential.
+    "async function apiCrewOne(", "async function apiRotationCrew(", "async function apiFeedbackBoard(", "async function apiScoreQueue(",
+  ]) {
     const b = body(fn);
     assert.match(b, /await Promise\.all\(\[/, fn + " lost its concurrent query wave — each sequential `await env.DB` re-adds a full Worker->D1 round trip on the hot path");
   }
@@ -30,7 +34,11 @@ test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), n
 
 test("ensure* schema guards stay memoized (once per isolate), not per-request DDL", () => {
   assert.match(SRC, /function memoEnsure\(/, "memoEnsure helper removed");
-  for (const g of ["ensureKeyman", "ensureTravel", "ensureCrewExtras", "ensureReady", "ensureContractEdit"]) {
+  for (const g of [
+    "ensureKeyman", "ensureTravel", "ensureCrewExtras", "ensureReady", "ensureContractEdit",
+    // 2026-09: these four were still raw — DDL on every feedback/intel/Maria/login request.
+    "ensureUsers", "ensureMariaKB", "ensureFb", "ensureIntel",
+  ]) {
     assert.match(SRC, new RegExp("const " + g + " = memoEnsure\\("), g + " is no longer memoized — its CREATE/ALTER DDL would run on every request again");
   }
 });

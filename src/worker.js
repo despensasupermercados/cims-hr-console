@@ -335,7 +335,9 @@ const ALLOWLIST_SEED = [
   ["Ohji.Miranda@dg3.com",     "Ohji Miranda"],
 ];
 // Idempotent: seeds the allowlist (INSERT OR IGNORE on UNIQUE email). Safe to run every login.
-async function ensureUsers(env) {
+// Memoized once per isolate (§12) — 7 INSERT OR IGNORE round trips on every login otherwise.
+const ensureUsers = memoEnsure(ensureUsersImpl);
+async function ensureUsersImpl(env) {
   for (const [email, name] of ALLOWLIST_SEED) {
     const id = "u_" + email.toLowerCase().replace(/[^a-z0-9]/g, "");
     await env.DB.prepare("INSERT OR IGNORE INTO users (id, email, name, role) VALUES (?,?,?,'full')")
@@ -676,7 +678,9 @@ async function apiMariaFeedback(request, env, session) {
 // A pass-rate drop after a prompt/glossary/model change is a regression — treat as red.
 // maria_knowledge: curated document knowledge + FTS5 index. Schema is the contract shared
 // with the nightly Drive sweep — change BOTH together. Documents are context, never money.
-async function ensureMariaKB(env) {
+// Memoized once per isolate (§12) — 5 DDL round trips on every Maria request otherwise.
+const ensureMariaKB = memoEnsure(ensureMariaKBImpl);
+async function ensureMariaKBImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), title TEXT NOT NULL, body TEXT NOT NULL, doc_date TEXT, source TEXT DEFAULT 'console', tags TEXT, ship TEXT, added_by TEXT, status TEXT DEFAULT 'active')").run();
   await env.DB.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS maria_knowledge_fts USING fts5(title, body, content='maria_knowledge', content_rowid='id')").run();
   await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ai AFTER INSERT ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END").run();
@@ -1180,13 +1184,19 @@ async function apiCrew(env, url) {
 
 async function apiCrewOne(env, url) {
   const id = url.searchParams.get("id");
-  const row = await env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first();
+  // PERF (2026-09): opening a crew card was 4 sequential Worker->D1 round trips. Every read is keyed
+  // by the same agency_id, so they fire as ONE wave after the (memoized) ensures. Same statements,
+  // same output, same 404.
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
+  const [row, ov, ctRes, dw] = await Promise.all([
+    env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first(),
+    env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
+    env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
+    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
+  ]);
   if (!row) return json({ error: "not found" }, 404);
-  await ensureKeyman(env); await ensureCrewExtras(env);
-  const ov = await env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first();
   const crew = applyOverride(row, ov);
-  const ct = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
-  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
+  const ct = ctRes.results;
   return json({ crew, contracts: ct, daysWorked: (dw && dw.days) || 0, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, TODAY()) });
 }
 // Manual edit (manual-wins): upsert only the provided fields into crew_override.
@@ -1483,12 +1493,17 @@ function histEntries(hs, excludeSc) {
 }
 // Full detail for one crew (modal): all contract legs + readiness + note.
 async function apiRotationCrew(env, url) {
-  await ensureKeyman(env); await ensureReady(env);
+  // PERF (2026-09): the rotation card was 3 sequential round trips after 2 sequential ensures.
+  // Ensures together, then all three reads as one wave. Same statements, same output, same 404.
+  await Promise.all([ensureKeyman(env), ensureReady(env)]);
   const id = url.searchParams.get("id");
-  const c = await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, pp_exp, usv_exp FROM crew WHERE agency_id=?").bind(id).first();
+  const [c, legsRes, r] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, pp_exp, usv_exp FROM crew WHERE agency_id=?").bind(id).first(),
+    env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
+    env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first(),
+  ]);
   if (!c) return json({ error: "not_found" }, 404);
-  const legs = (await env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
-  const r = await env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first();
+  const legs = legsRes.results;
   return json({ crew: c, legs, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
 }
 async function apiNote(request, env, session) {
@@ -1759,7 +1774,9 @@ async function sha256hex(s) {
   return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 // Self-creating tables (avoids any manual console SQL).
-async function ensureFb(env) {
+// Memoized once per isolate (§12) — was 2 DDL round trips on each of 7 feedback routes per request.
+const ensureFb = memoEnsure(ensureFbImpl);
+async function ensureFbImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_request2 (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', due_date TEXT, requested_by TEXT, requested_at TEXT NOT NULL, UNIQUE (crew_id, role))").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL)").run();
 }
@@ -1854,9 +1871,14 @@ async function apiFeedbackScore(request, env, session) {
     .bind("fp_" + crypto.randomUUID(), rid, cr.id, role, JSON.stringify(b.answers || {}), now).run();
   await env.DB.prepare("UPDATE feedback_request2 SET status=? WHERE id=?").bind(naDexter ? "na" : "answered", rid).run();
   await logActivity(env, session && session.email, "feedback_score", cr.agency_id + " " + role);
-  const resp = (await env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=?").bind(cr.id).all()).results;
+  // The writes above must stay in order; the two read-backs below are independent -> one wave.
+  const [respRes, reqsRes] = await Promise.all([
+    env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=?").bind(cr.id).all(),
+    env.DB.prepare("SELECT role, status FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all(),
+  ]);
+  const resp = respRes.results;
   const answers = {}; for (const r of resp) answers[r.role] = JSON.parse(r.answers_json);
-  const reqs = (await env.DB.prepare("SELECT role, status FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all()).results;
+  const reqs = reqsRes.results;
   const st = { ray: "none", rolando: "none", dexter: "none" }; for (const r of reqs) st[r.role] = r.status;
   return json({ ok: true, prefill: mapFeedbackToScore(answers), status: st });
 }
@@ -1867,10 +1889,16 @@ async function apiScoreQueue(env, url) {
   await ensureFb(env);
   const today = TODAY();
   const days = Math.max(1, Math.min(120, parseInt(url.searchParams.get("days")) || 14));
-  const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
+  // PERF (2026-09): three independent reads -> one wave.
+  const [crewRes, reqsRes, respRes] = await Promise.all([
+    env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all(),
+    env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all(),
+  ]);
+  const crewRows = crewRes.results;
   const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
-  const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
-  const resp = (await env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all()).results;
+  const reqs = reqsRes.results;
+  const resp = respRes.results;
   const fb = {}; for (const r of reqs) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = r.status; }
   for (const r of resp) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = "answered"; }
   const keys = buildShipKeys(VESSEL_REF);
@@ -1891,7 +1919,10 @@ async function apiScoreQueue(env, url) {
   return json({ today, days, recent, upcoming });
 }
 /* ----------------------- crew intel (email -> AI -> notes) — SEPARATE from the scored bonus ----------------------- */
-async function ensureIntel(env) {
+// Memoized once per isolate (§12) — was 2 DDL + 2 ALTER (throw+catch) round trips on each of 9
+// intel routes per request.
+const ensureIntel = memoEnsure(ensureIntelImpl);
+async function ensureIntelImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_intel (id TEXT PRIMARY KEY, agency_id TEXT, reporter TEXT, summary TEXT, source TEXT DEFAULT 'email', source_email_id TEXT, confidence TEXT, status TEXT DEFAULT 'filed', candidates TEXT, ts TEXT, created_by TEXT)").run();
   try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN contract_no INTEGER").run(); } catch (e) {}
@@ -2107,13 +2138,20 @@ async function processIntelInbox(env, limit) {
 // "On board" = currently serving -> feedback due at sign-off (pre-stage). Keyman dates, when present,
 // are used only for display/sort, never to include/exclude. Inactive/Earmarked are not shown.
 async function apiFeedbackBoard(env) {
-  await ensureKeyman(env); await ensureFb(env);
+  // PERF (2026-09): 4 sequential reads after 2 sequential ensures -> one wave each.
+  await Promise.all([ensureKeyman(env), ensureFb(env)]);
   const today = TODAY();
-  const legs = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
+  const [legsRes, crewRes, reqsRes, respRes] = await Promise.all([
+    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+    env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all(),
+    env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all(),
+  ]);
+  const legs = legsRes.results;
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
-  const crewRows = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all()).results;
-  const reqs = (await env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all()).results;
-  const resp = (await env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all()).results;
+  const crewRows = crewRes.results;
+  const reqs = reqsRes.results;
+  const resp = respRes.results;
   const reqByCrew = {}, respByCrew = {};
   for (const r of reqs) (reqByCrew[r.crew_id] = reqByCrew[r.crew_id] || {})[r.role] = r.status;
   for (const r of resp) (respByCrew[r.crew_id] = respByCrew[r.crew_id] || {})[r.role] = true;
