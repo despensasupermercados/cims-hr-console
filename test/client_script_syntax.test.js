@@ -1,50 +1,33 @@
-// DEPLOY GATE: every inline <script> the worker serves must PARSE as JavaScript.
+// DEPLOY GATE (CI half): every inline <script> the worker serves must PARSE as JavaScript.
 //
-// Why this exists (incident 2026-07-03): the page templates are JS template
-// literals, so an escape like '\n' written inside them is consumed at template
-// evaluation and reaches the browser as a raw newline inside a string literal
-// -- a SyntaxError that kills the ENTIRE inline script and white-screens the
-// console. Wrangler deployed it anyway: the newline is legal in the template
-// literal itself, so nothing validated the JS the BROWSER actually receives.
-// This test does. vm.Script parses without executing.
+// Why this exists (incident 2026-07-03): the page templates are JS template literals, so an
+// escape like '\n' written inside them is consumed at template evaluation and reaches the
+// browser as a raw newline inside a string literal -- a SyntaxError that kills the ENTIRE
+// inline script and white-screens the console. Wrangler deployed it anyway.
 //
-// IMPORTANT -- this test validates the code AS SHIPPED, not as committed:
-// it applies the same repair scripts/apply_hotfix.mjs performs at build time
-// (a no-op once the fix is committed to src/worker.js directly), because the
-// deployable artifact is source + build hook. After the source cleanup, the
-// transform below does nothing and this file can be simplified to a plain
-// `import { APP_HTML, LOGIN_HTML, FB_HTML } from "../src/worker.js"`.
+// This test calls the SAME function wrangler's [build] hook runs before every deploy
+// (scripts/verify_client_scripts.mjs), so the CI gate and the deploy gate are one code path
+// and cannot drift apart (CLAUDE.md §3 in spirit: the tested check == the deployed check). The
+// build-time source PATCH that used to be mirrored here is gone: the source was fixed in July
+// and the mirror had been a no-op since.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import vm from "node:vm";
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { verifyClientScripts } from "../scripts/verify_client_scripts.mjs";
 
-const SRC = new URL("../src/worker.js", import.meta.url);
-const TMP = new URL(`../src/__gate_${process.pid}__.mjs`, import.meta.url);
+const pages = await verifyClientScripts(); // throws (fails the whole file) on any unparseable script
 
-let s = readFileSync(SRC, "utf-8");
-// Mirror of the build-time hotfix (no-op when the source is already fixed):
-s = s.replace(
-  "(r.seeded>0?('\\n'+r.seeded+' in-window items",
-  "(r.seeded>0?(' \u2014 '+r.seeded+' in-window items"
-);
-
-writeFileSync(TMP, s + "\nexport { APP_HTML, LOGIN_HTML, FB_HTML };\n", "utf-8");
-let pages;
-try {
-  const m = await import(TMP.href);
-  pages = { APP_HTML: m.APP_HTML, LOGIN_HTML: m.LOGIN_HTML, FB_HTML: m.FB_HTML };
-} finally {
-  unlinkSync(TMP);
-}
-
-for (const [name, html] of Object.entries(pages)) {
+for (const name of ["APP_HTML", "LOGIN_HTML", "FB_HTML"]) {
   test(`${name}: every inline <script> parses as valid JavaScript`, () => {
-    assert.ok(html && html.length > 0, `${name} is non-empty`);
-    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-    assert.ok(scripts.length >= 1, `${name} contains at least one inline script`);
-    for (const src of scripts) {
-      new vm.Script(src, { filename: `${name}.inline.js` }); // throws SyntaxError if unparseable
-    }
+    assert.ok(Array.isArray(pages[name]), `${name} was verified`);
+    assert.ok(pages[name].length >= 1, `${name} contains at least one inline script`);
   });
 }
+
+test("the retired build-time patch pattern is not back in the source", () => {
+  // The exact string that white-screened the console. The gate above would catch the resulting
+  // SyntaxError anyway; this names the root cause so a regression reads clearly.
+  const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  assert.equal(src.includes("(r.seeded>0?('\\n'+r.seeded+' in-window items"), false,
+    "autoToggleClick alert string carries a raw '\\n' inside the template literal again");
+});
