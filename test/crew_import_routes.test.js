@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { apiCrewImportStage, apiCrewImportApply, handleCrewImport } from "../src/crew_import_routes.js";
 
 // --- fake D1 -------------------------------------------------------------
-function fakeDB({ existing = [], overrides = [], dup = false } = {}) {
+function fakeDB({ existing = [], overrides = [], dup = false, openFlags = [] } = {}) {
   const batched = [];
   function route(sql, args) {
     if (/FROM import_run WHERE file_hash/i.test(sql)) return { __first: dup ? { x: 1 } : null };
+    if (/FROM sync_conflict WHERE field='vessel_observed' AND resolved=0/i.test(sql)) return { __all: { results: openFlags } };
     if (/FROM crew_override/i.test(sql)) return { __all: { results: overrides } };
     if (/FROM crew\b/i.test(sql)) return { __all: { results: existing } };
     return { __first: null, __all: { results: [] } };
@@ -159,6 +160,52 @@ test("apply is MONEY_USERS only; stage is any session", async () => {
   assert.equal(ok.status, 200);
   const staged = await handleCrewImport({ ...req({ rows: OVR_ROWS, file_hash: "h8" }), method: "POST" }, { pathname: "/api/crew/import/stage" }, env, { email: "someone@dg3.com" });
   assert.equal((await staged.json()).ok, true);
+});
+
+// Ship flags (Miguel, 2026-09-05): the same flag was re-raised every weekly upload (411 open rows
+// for 58 crew+ship pairs on prod) and nothing ever closed one.
+test("apply: a ship flag the live board already satisfies is not inserted, and the open copy closes (resolved=2)", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
+  const deps = { boardLegs: async () => [{ ours: true, sc: "SC-1", ship: "Apex", on: "2026-08-01", off: "2027-02-01" }] };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h11" }), env)).json();
+  assert.equal(stage.review.counts.ship_flag, 1, "the review still shows the flag (registry says Edge, file says Apex)");
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h11", run_by: "Rita" }), env, deps)).json();
+  assert.equal(body.open_conflicts, 0, "nothing left open: the board has the crew on Apex already");
+  assert.equal(body.ship_flags.closed_board_matches, 1);
+  const st = env.DB._batched;
+  const upd = st.find(s => /UPDATE sync_conflict SET resolved=\? WHERE id=\? AND resolved=0/.test(s.sql));
+  assert.ok(upd && upd.args[0] === 2 && upd.args[1] === "f1");
+  assert.equal(st.some(s => /INSERT INTO sync_conflict/i.test(s.sql) && s.args[3] === "vessel_observed"), false, "no new ship flag row");
+  const run = st.find(s => /INSERT INTO import_run/i.test(s.sql));
+  assert.equal(run.args[5], 0, "import_run.conflicts counts what is actually left open");
+});
+
+test("apply: without the live board (no deps) a repeated flag is still deduped, a new one still inserted", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h12" }), env)).json();
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h12", run_by: "Rita" }), env)).json();
+  assert.equal(body.open_conflicts, 0, "same crew, same ship already open -> no duplicate");
+  assert.equal(env.DB._batched.some(s => /UPDATE sync_conflict/i.test(s.sql)), false);
+  const env2 = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Quest" }] }) };
+  const stage2 = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h13" }), env2)).json();
+  const body2 = await (await apiCrewImportApply(req({ review: stage2.review, decisions: {}, file_hash: "h13", run_by: "Rita" }), env2)).json();
+  assert.equal(body2.open_conflicts, 1, "a different ship: inserted");
+  assert.equal(body2.ship_flags.closed_superseded, 1, "and the older Quest flag is superseded");
+});
+
+test("apply: a failing live-board read never blocks the import — the board rule is simply off and reported", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
+  const deps = { boardLegs: async () => { throw new Error("D1 hiccup"); } };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h14" }), env)).json();
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h14", run_by: "Rita" }), env, deps);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.board_unavailable, true);
+  assert.ok(env.DB._batched.some(s => /UPDATE crew SET med_exp/i.test(s.sql)), "the cert update still applied");
+  assert.equal(body.open_conflicts, 0, "the duplicate flag is still deduped without the board");
+  assert.match(body.summary, /board unavailable this run/);
+  assert.match(body.summary, /^Applied 1 change · added 0 crew · 0 flags for the board/);
 });
 
 test("apply is idempotent by file hash", async () => {

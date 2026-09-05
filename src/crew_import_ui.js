@@ -327,7 +327,7 @@ async function apply(){
  var res;try{res=await fetch("/api/crew/import/apply",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();});}catch(e){res={ok:false,error:"network"};}
  if(!res.ok){$("cart").innerHTML='<div class="ch"><div class="h">Apply failed</div></div><div class="foot"><div class="msg">'+(res.error==="already_processed"?"Already processed.":esc(res.error))+'</div></div>';return;}
  $("work").style.display="none";
- $("msg").innerHTML='<div class="msg">&#10003; Applied '+res.applied+' changes · added '+res.added+' crew · '+res.open_conflicts+' flags for the board · logged to import history. '+(res.override_cleared?res.override_cleared+' manual entr'+(res.override_cleared===1?'y':'ies')+' replaced by the file'+(res.override_skipped?' ('+res.override_skipped+' changed since review, left alone)':'')+'.':'Nothing else was touched.')+'</div>';
+ $("msg").innerHTML='<div class="msg">&#10003; '+esc(res.summary||('Applied '+res.applied+' changes.'))+'</div>';
 }
 function reset(){STAGE=null;DEC={};PENDING=null;$("band").innerHTML="";$("work").style.display="none";$("msg").innerHTML="";$("f").value="";}
 function discard(){reset();$("msg").innerHTML='<div class="msg">Discarded. Nothing was saved.</div>';}

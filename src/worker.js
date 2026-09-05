@@ -17,6 +17,7 @@ import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
+const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
@@ -196,7 +197,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env, session); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs }); if (ci) return ci; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -1410,7 +1411,7 @@ async function rotationSections(env) {
   // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
   // three data sources below so their sections key-align instead of fragmenting (Celebrity-prefixed
   // and Azamara schedule rows used to miss the registry/keyman sections and vanish).
-  const vesselKeys = buildShipKeys(VESSEL_REF);
+  const vesselKeys = SHIP_KEYS;
   const shipOf = (vessel) => canonShipWith(vessel, vesselKeys);
   // Shoreside DG3 team (not seafarers): tagged + kept OFF the ship rotation.
   const SHORE_IDS = new Set(["SC-0038392", "SC-0038378"]);
@@ -1986,7 +1987,7 @@ async function loadFeedbackState(env) {
     return { role, answered, status: answered ? "answered" : ((reqByCrew[crewId] && reqByCrew[crewId][role]) || "none") };
   });
   const statusOf = (c) => crewStatus(c, ovm[c.agency_id], sched[c.agency_id], today);
-  const keys = buildShipKeys(VESSEL_REF);
+  const keys = SHIP_KEYS;
   const shipOf = (v) => (v ? (canonShipWith(v, keys) || v) : null); // one short name whether the leg came from ship_leg or an assignment
   // The leg that places the crew today: the one spanning today, else the latest STARTED leg (the
   // same set deriveStatus judged "On Vacation" from) — never a future TBA leg over the one that just ended.
@@ -3385,7 +3386,7 @@ async function cimsApply(){
   var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
-  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged to import history. '+(res.override_cleared?res.override_cleared+' manual entr'+(res.override_cleared===1?'y':'ies')+' replaced by the file'+(res.override_skipped?' ('+res.override_skipped+' changed since review, left alone)':'')+'.':'Nothing else was touched.')+'</div>';
+  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; '+impEsc(res.summary||('Applied '+res.applied+' changes.'))+'</div>';
   STAGE=null;DEC={};IMPROWS=null;
 }
 // [removed 2026-07-22] previewImport()/applyImport() deleted — dead code that POSTed to the

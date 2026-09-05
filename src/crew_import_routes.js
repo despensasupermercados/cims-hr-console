@@ -16,6 +16,10 @@ import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
 import { OVR_FIELDS } from "./override.js";
 import { isMoneyUser } from "./policy.js";
+import { reconcileShipFlags, boardShipsFromLegs, strictShipMatcher, AUTO_CLOSED } from "./crew_flags.js";
+import { VESSEL_REF } from "./vessel_ref.js";
+
+const SHIP_OF = strictShipMatcher(VESSEL_REF); // built once per isolate, not per request
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -71,7 +75,9 @@ export async function apiCrewImportStage(request, env) {
 
 // POST /api/crew/import/apply — body { review, decisions, file_hash, filename, rows_seen, run_by }.
 // Executes the plan as one D1 batch (transaction). Idempotent by file_hash.
-export async function apiCrewImportApply(request, env) {
+// deps.boardLegs(env) = the ONE live schedule (worker.js boardLegs, CLAUDE.md §11) — used to close
+// ship flags the board already satisfies. Without it (tests, tools) no flag auto-closes on that rule.
+export async function apiCrewImportApply(request, env, deps) {
   const body = await request.json();
   const file_hash = body.file_hash || null;
   if (file_hash) {
@@ -84,12 +90,28 @@ export async function apiCrewImportApply(request, env) {
     file_hash, filename: body.filename || null, rows_seen: body.rows_seen ?? null, run_by, run_at,
   });
 
+  // Ship flags: dedupe against what is already open, close what the board already satisfies or a
+  // newer file supersedes (crew_flags.js). One read of the open flags + the live board, together.
+  // The import itself never depends on the board: if the live read fails, the apply still runs and
+  // only the "board already matches" rule is off for this run (reported as board_unavailable).
+  const today = run_at.slice(0, 10);
+  const [openRes, legs] = await Promise.all([
+    env.DB.prepare("SELECT id, agency_id, new_value FROM sync_conflict WHERE field='vessel_observed' AND resolved=0").all(),
+    deps && deps.boardLegs ? deps.boardLegs(env).catch(() => null) : Promise.resolve(null),
+  ]);
+  const board_unavailable = !!(deps && deps.boardLegs) && legs == null;
+  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF });
+  const openInserted = flags.insert.filter(c => c.resolved === 0).length;
+
   const importRunId = crypto.randomUUID();
   const stmts = [];
   stmts.push(env.DB.prepare(
     "INSERT INTO import_run (id,file_hash,filename,rows_seen,rows_upserted,conflicts,run_by,run_at) VALUES (?,?,?,?,?,?,?,?)")
     .bind(importRunId, file_hash, plan.importRun.filename, plan.importRun.rows_seen,
-      plan.importRun.rows_upserted, plan.importRun.conflicts, run_by, run_at));
+      plan.importRun.rows_upserted, openInserted, run_by, run_at));
+  for (const c of flags.close) {
+    stmts.push(env.DB.prepare("UPDATE sync_conflict SET resolved=? WHERE id=? AND resolved=0").bind(AUTO_CLOSED, c.id));
+  }
 
   for (const u of plan.crewUpdates) {
     if (!CREW_WRITABLE.has(u.field)) continue; // hard whitelist — no vessel_observed, no injection
@@ -116,7 +138,7 @@ export async function apiCrewImportApply(request, env) {
     stmts.push(env.DB.prepare(
       `INSERT INTO crew (${INSERT_COLS.join(",")}) VALUES (${INSERT_COLS.map(() => "?").join(",")})`).bind(...vals));
   }
-  for (const c of plan.conflicts) {
+  for (const c of flags.insert) {
     stmts.push(env.DB.prepare(
       "INSERT INTO sync_conflict (id,import_run_id,agency_id,field,old_value,new_value,resolved,created_at) VALUES (?,?,?,?,?,?,?,?)")
       .bind(crypto.randomUUID(), importRunId, c.agency_id, c.field, str(c.old_value), str(c.new_value), c.resolved, run_at));
@@ -126,25 +148,43 @@ export async function apiCrewImportApply(request, env) {
   // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
   let override_cleared = 0;
   for (const i of clearIdx) { const m = results && results[i] && results[i].meta; if (!m || m.changes == null || m.changes > 0) override_cleared++; }
-  return J({
+  const res = {
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
     override_cleared, override_skipped: clears.length - override_cleared,
-    open_conflicts: plan.importRun.conflicts, droppedShipWrites: plan.droppedShipWrites,
-  });
+    open_conflicts: openInserted, ship_flags: flags.counts, board_unavailable, droppedShipWrites: plan.droppedShipWrites,
+  };
+  res.summary = applySummary(res); // ONE sentence for both import screens (they used to each compose their own)
+  return J(res);
+}
+
+// The post-apply sentence, worded once from the counters. Both import screens render it verbatim.
+export function applySummary(r) {
+  const n = (k, one, many) => k === 1 ? "1 " + one : k + " " + many;
+  const parts = ["Applied " + n(r.applied, "change", "changes"), "added " + n(r.added, "crew", "crew"), n(r.open_conflicts, "flag", "flags") + " for the board"];
+  const f = r.ship_flags || {};
+  const closed = [];
+  if (f.closed_board_matches) closed.push(n(f.closed_board_matches, "already matched the board", "already matched the board"));
+  if (f.closed_superseded) closed.push(n(f.closed_superseded, "superseded by this file", "superseded by this file"));
+  if (f.closed_dismissed) closed.push(n(f.closed_dismissed, "dismissed", "dismissed"));
+  if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
+  if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
+  if (r.override_cleared) parts.push(n(r.override_cleared, "manual entry", "manual entries") + " replaced by the file" + (r.override_skipped ? " (" + n(r.override_skipped, "changed", "changed") + " since review, left alone)" : ""));
+  parts.push("logged to import history");
+  return parts.join(" · ") + ".";
 }
 
 // Router — mirrors relief_api.handleRelief(request, url, env): returns a Response or null.
 // worker.js delegates to this exactly like it does handleRelief (same session gate applies).
 // /apply mutates crew AND (on an accepted D3) crew_override — MONEY_USERS only (Miguel + Rita).
 // Any signed-in user may view the page and stage (stage writes nothing).
-export async function handleCrewImport(request, url, env, session) {
+export async function handleCrewImport(request, url, env, session, deps) {
   const p = url.pathname;
   if (p === "/api/crew/import" && request.method === "GET") return crewImportPage();
   if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env);
   if (p === "/api/crew/import/apply" && request.method === "POST") {
     if (!isMoneyUser(session && session.email)) return J({ ok: false, error: "money_users_only" }, 403);
-    return apiCrewImportApply(request, env);
+    return apiCrewImportApply(request, env, deps);
   }
   return null;
 }
