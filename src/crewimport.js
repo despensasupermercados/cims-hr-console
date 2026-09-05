@@ -57,8 +57,11 @@ export function normalizeDate(v, opts) {
     if (dmy || (a > 12 && b <= 12)) { mo = b; da = a; } // D/M/YYYY
     return realDate(y, mo, da);
   }
-  // Text forms ("23 Sep 2034"). Local components, not toISOString(): the suite must not depend on
-  // the machine's time zone (Rita is UTC+8; Workers run UTC).
+  // Text forms ("23 Sep 2034") only: a day, a month word and a 4-digit year must all be present.
+  // new Date() alone turns "12" into 2001-12-01 and "Sep 2027" into 2027-09-01 — real-looking
+  // dates from typos, which the accept-by-default cert tier would then store. Local components,
+  // not toISOString(): the suite must not depend on the machine's time zone (Rita is UTC+8).
+  if (!/\b\d{4}\b/.test(s) || !/[A-Za-z]{3}/.test(s) || !/(^|\D)\d{1,2}(\D|$)/.test(s)) return null;
   const d = new Date(s);
   return isNaN(d) ? null : realDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
@@ -73,8 +76,9 @@ export function normalizeStatus(v) {
   return null; // unknown -> caller decides (skip / keep existing)
 }
 
-// Map one raw row to crew fields. Returns null if no agency_id found.
-export function mapRow(row) {
+// Map one raw row to crew fields plus the date cells no reading could make a real date.
+// Returns null if no agency_id found. mapRow() below is the row-only view.
+export function mapRowFull(row) {
   const agency_id = pick(row, ["crew id", "crewid", "agency id", "agencyid", "crew no", "crewno"]);
   if (!agency_id) return null;
   const raw = {
@@ -87,8 +91,12 @@ export function mapRow(row) {
   };
   // Date order is a property of the ROW (one source pasted it), not of each cell.
   const dmy = Object.values(raw).some(looksDMY);
-  const date = (k) => normalizeDate(raw[k], { dmy });
-  return {
+  const dates = {}; for (const k of Object.keys(raw)) dates[k] = normalizeDate(raw[k], { dmy });
+  const date = (k) => dates[k];
+  // A non-empty cell that no reading makes a real date. null downstream means "blank, keep the
+  // stored value" — so without this list a typo like 2/30/2027 would silently keep a stale expiry.
+  const unparsed = Object.keys(raw).filter(k => raw[k] !== "" && dates[k] == null).map(k => ({ field: k, raw: raw[k] }));
+  const out = {
     agency_id,
     first_name: pick(row, ["first name", "firstname", "given"]) || null,
     middle_name: pick(row, ["middle"]) || null,
@@ -106,12 +114,19 @@ export function mapRow(row) {
     // Specific "… expiration" patterns come first; loose ones stay as fallbacks for other formats.
     med_exp: date("med_exp"), sirb_exp: date("sirb_exp"), pp_exp: date("pp_exp"), sch_exp: date("sch_exp"), usv_exp: date("usv_exp"),
   };
+  return { row: out, unparsed };
 }
+export function mapRow(row) { const r = mapRowFull(row); return r ? r.row : null; }
 
 export function mapRows(rows) {
-  const mapped = [], invalid = [];
-  for (const r of rows || []) { const m = mapRow(r); if (m) mapped.push(m); else invalid.push(r); }
-  return { mapped, invalidCount: invalid.length };
+  const mapped = [], invalid = [], unparsed = [];
+  for (const r of rows || []) {
+    const m = mapRowFull(r);
+    if (!m) { invalid.push(r); continue; }
+    mapped.push(m.row);
+    for (const u of m.unparsed) unparsed.push({ agency_id: m.row.agency_id, ...u });
+  }
+  return { mapped, invalidCount: invalid.length, unparsed };
 }
 
 const TRACK = ["first_name", "middle_name", "last_name", "status", "rank_observed",

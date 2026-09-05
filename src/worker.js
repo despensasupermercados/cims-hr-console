@@ -20,7 +20,7 @@ import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./sh
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
-import { parseContractCounter, buildKeymanRows } from "./keymanimport.js";
+import { parseContractCounterFull, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -896,7 +896,7 @@ async function apiCrewImport(request, env, session) {
 async function apiKeymanImport(request, env, session) {
   await ensureKeyman(env);
   const b = await request.json().catch(() => ({}));
-  const parsed = parseContractCounter(b.rows || []);
+  const { crew: parsed, unparsed: unparsedDates } = parseContractCounterFull(b.rows || []);
   if (!parsed.length) return json({ error: "no_rows" }, 400);
   const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all()).results;
   const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
@@ -904,7 +904,7 @@ async function apiKeymanImport(request, env, session) {
   if (b.dryRun) {
     return json({
       dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
-      contracts: rows.length, currentRows,
+      contracts: rows.length, currentRows, unparsedDates,
       sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
     });
   }
@@ -3163,6 +3163,7 @@ async function previewKeyman(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  if(r.unparsedDates&&r.unparsedDates.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsedDates.length+' date cell'+(r.unparsedDates.length===1?'':'s')+' unreadable</b> (a leg with an unreadable sign-on is skipped; fix the sheet and re-drop)<br>'+r.unparsedDates.slice(0,15).map(function(u){return impEsc(u.last+', '+u.first+' &middot; contract '+u.seq+' '+u.field+': '+u.raw);}).join('<br>')+(r.unparsedDates.length>15?'<br>+'+(r.unparsedDates.length-15)+' more':'')+'</div>';
   h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">Refresh contract history for '+r.matched+' crew</button>';
   $('#imp').innerHTML=h;
 }
@@ -3250,7 +3251,7 @@ var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last 
 // No backticks and no dollar-brace interpolation and no quote nesting, so source == served JS.
 var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null,NMAP={};
 async function sha256buf(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
-function impEsc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":"&gt;";});}
+function impEsc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":c==='"'?"&quot;":"&#39;";});}
 function impWho(id){var n=NMAP[id];return n&&n!==id?impEsc(n)+' <span class=iid>'+impEsc(id)+'</span>':impEsc(id);}
 async function cimsStage(){
   NMAP={};
@@ -3367,7 +3368,9 @@ function cimsCart(){
   if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=cli("ci-red","&#9995;","Manual edit","kept as yours",(ovKeep+crKeep)+" held","held");
   if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
   var H='<div class=cart2>';
-  H+='<div class=ch><div class=h>Ready to apply</div><div class=sub>'+STAGE.rows_seen+' crew read &middot; from AdvancedQuery</div></div>';
+  var unp=(STAGE.unparsed||[]);
+  H+='<div class=ch><div class=h>Ready to apply</div><div class=sub>'+STAGE.rows_seen+' crew read &middot; from AdvancedQuery'+(unp.length?' &middot; '+unp.length+' date cell'+(unp.length===1?'':'s')+' unreadable, kept as is':'')+'</div>'
+    +(unp.length?'<div class=sub style="color:#9A6614;white-space:normal">'+unp.map(function(u){return impEsc(u.agency_id+' '+u.field+': '+u.raw);}).join(' &middot; ')+'</div>':'')+'</div>';
   H+='<div class=items>'+rows+'</div>';
   H+='<div class=totals><div class=ctl><span>Will save to roster</span><span class="v save">'+willSave+'</span></div><div class=ctl><span>Kept as yours</span><span class="v keep">'+kept+'</span></div></div>';
   H+='<div class=foot><button class=applyb2 onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply <span class=k>'+willSave+'</span> updates <span>&#8594;</span></button>'

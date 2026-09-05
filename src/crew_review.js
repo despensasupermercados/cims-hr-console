@@ -15,6 +15,16 @@
 
 import { OVR_FIELDS } from "./override.js";
 
+// Import field -> the crew_override column that overrides it, where the names differ. The file's
+// "rank" lands on crew.rank_observed; Rita's manual rank lives in crew_override.rank_override.
+// Without this map a rank change under a live manual rank was accepted silently (CERT tier) and
+// never showed, because the override kept winning (2026-09-05 review of #89).
+// (crew.rank_override — the base table's own lateral-hire column — would mask a rank the same way;
+// 0 crew carry it in prod as of 2026-09-05, so it is not modelled here. Revisit if that changes.)
+export const OVR_COL = { rank_observed: "rank_override" };
+const ovrCol = (f) => OVR_COL[f] || f;
+const importField = (col) => Object.keys(OVR_COL).find(k => OVR_COL[k] === col) || col;
+
 export const TIER = {
   SHIP: "ship_flag",
   OVERRIDE: "override_conflict",
@@ -48,7 +58,7 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
     // D1 — never written by the import; surface as a board reconciliation flag.
     return { tier: TIER.SHIP, write: false, defaultKeep: true };
   }
-  if (liveOvr && liveOvr.has(field)) {
+  if (liveOvr && liveOvr.has(ovrCol(field))) {
     // D3 — a live manual override sits here; keep it unless Rita explicitly accepts.
     return { tier: TIER.OVERRIDE, write: true, defaultKeep: true };
   }
@@ -91,9 +101,10 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
         // What Rita sees on the card, and what an accept replaces, is the MANUAL value — not the
         // base row the file is diffed against. Carry it so the card, the audit row and the clear
         // all name the value actually being superseded (2026-09-05 review).
-        item.override_value = ov[field];
+        item.override_field = ovrCol(field);
+        item.override_value = ov[item.override_field];
         item.base = item.old;
-        item.old = ov[field];
+        item.old = item.override_value;
       }
       seen.add(ch.agency_id + ":" + field);
       (c.auto ? groups.minor : groups[c.tier]).push(item);
@@ -107,13 +118,14 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
     const ex = existingByAgency[id];
     if (!ex) continue;
     const ov = overrideByAgency[id];
-    for (const field of liveOverrideFields(ov)) {
+    for (const col of liveOverrideFields(ov)) {
+      const field = importField(col); // the file's name for this field
       if (field === "vessel_observed" || seen.has(id + ":" + field)) continue;
       const nv = inc[field];
       if (nv == null || nv === "") continue;
-      if (String(nv) === String(ov[field])) continue;
-      const c = classifyField(field, ex[field] ?? null, nv, new Set([field]));
-      groups[TIER.OVERRIDE].push({ agency_id: id, field, old: ov[field], base: ex[field] ?? null, new: nv, override_value: ov[field], ...c });
+      if (String(nv) === String(ov[col])) continue;
+      const c = classifyField(field, ex[field] ?? null, nv, new Set([col]));
+      groups[TIER.OVERRIDE].push({ agency_id: id, field, override_field: col, old: ov[col], base: ex[field] ?? null, new: nv, override_value: ov[col], ...c });
       seen.add(id + ":" + field);
     }
   }

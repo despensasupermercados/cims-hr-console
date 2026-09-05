@@ -24,7 +24,7 @@ test("deploy gate: every inline <script> the worker serves parses as JavaScript"
   pages = await verifyClientScripts(); // throws SyntaxError naming the page on the first bad script
 });
 
-for (const name of ["APP_HTML", "LOGIN_HTML", "FB_HTML"]) {
+for (const name of ["APP_HTML", "LOGIN_HTML", "FB_HTML", "CREW_IMPORT_HTML"]) {
   test(`${name}: every inline <script> parses as valid JavaScript`, () => {
     assert.ok(pages, "the deploy gate test above must run first and pass");
     assert.ok(Array.isArray(pages[name]), `${name} was verified`);
@@ -44,4 +44,11 @@ test("the retired build-time patch pattern is not back in the source", () => {
   const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
   assert.equal(src.includes("(r.seeded>0?('\\n'+r.seeded+' in-window items"), false,
     "autoToggleClick alert string carries a raw '\\n' inside the template literal again");
+});
+
+test("both import-page escapers neutralise quotes (spreadsheet text lands inside HTML attributes and text)", () => {
+  const ui = readFileSync(new URL("../src/crew_import_ui.js", import.meta.url), "utf-8");
+  const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  assert.match(ui, /function esc\(s\)\{[^\n]*&quot;/, "crew_import_ui esc() must escape a double quote");
+  assert.match(src, /function impEsc\(s\)\{[^\n]*&quot;/, "worker impEsc() must escape a double quote");
 });

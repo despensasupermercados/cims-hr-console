@@ -6,25 +6,26 @@
 // PERSISTENT cruise-line id (crew.ship_crew_id) when we have it — exact and immune to name drift —
 // and fall back to NAME matching only for crew whose ship_crew_id isn't filled yet.
 // Informational only — NEVER a payout input.
+import { normalizeDate, looksDMY } from "./crewimport.js";
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z]/g, "");
 // Normalise a cruise-line crew id for comparison: string, trimmed, drop a trailing ".0" spreadsheet float artifact.
 const normKm = (v) => String(v == null ? "" : v).trim().replace(/\.0$/, "");
 
-export function normDate(v) {
-  if (v == null || v === "") return null;
-  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/); // M/D/YYYY
-  if (m) return `${m[3]}-${String(m[1]).padStart(2, "0")}-${String(m[2]).padStart(2, "0")}`;
-  const d = new Date(s);
-  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+export function normDate(v, opts) {
+  // One validated parser for the whole console (crewimport.normalizeDate): ISO with or without a
+  // time, M/D/YYYY, D/M/YYYY when the row proves it (opts.dmy), text forms; an impossible date is
+  // null, never stored (julianday() of "2034-23-09" is NULL and silently skips the leg).
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString().slice(0, 10);
+  return normalizeDate(v, opts);
 }
 
-// aoa = the whole sheet as array-of-arrays. Returns one entry per crew with their contract blocks.
-export function parseContractCounter(aoa) {
-  const out = [];
+// aoa = the whole sheet as array-of-arrays. Returns { crew: one entry per crew with their contract
+// blocks, unparsed: date cells no reading could make a real date }. A leg whose sign-on is
+// unreadable is SKIPPED (it used to be stored as an impossible date that julianday() ignored) —
+// the skip is reported, never silent: rank and the Contracts number are computed from these legs.
+export function parseContractCounterFull(aoa) {
+  const out = [], unparsed = [];
   for (const row of (aoa || [])) {
     if (!row) continue;
     const km = row[3];
@@ -32,10 +33,15 @@ export function parseContractCounter(aoa) {
     const last = String(row[4] == null ? "" : row[4]).trim();
     const first = String(row[5] == null ? "" : row[5]).trim();
     if (!last || norm(last) === "lastname") continue; // header / blank row
+    // Day-first is a property of the ROW: one cell with a first field > 12 decides every cell in it.
+    const dmy = row.some(looksDMY);
     const contracts = [];
+    const bad = (seq, field, raw) => unparsed.push({ km: String(km).replace(/\.0$/, ""), last, first, seq, field, raw: String(raw) });
     for (let c = 6, seq = 1; c < row.length; c += 3, seq++) {
-      const on = normDate(row[c]);
-      if (on) contracts.push({ seq, on, proj: normDate(row[c + 1]) });
+      const on = normDate(row[c], { dmy }), proj = normDate(row[c + 1], { dmy });
+      if (!on && row[c] != null && row[c] !== "") bad(seq, "sign_on", row[c]);
+      if (!proj && row[c + 1] != null && row[c + 1] !== "") bad(seq, "proj_off", row[c + 1]);
+      if (on) contracts.push({ seq, on, proj });
     }
     if (!contracts.length) continue;
     out.push({
@@ -46,8 +52,9 @@ export function parseContractCounter(aoa) {
       contracts,
     });
   }
-  return out;
+  return { crew: out, unparsed };
 }
+export function parseContractCounter(aoa) { return parseContractCounterFull(aoa).crew; }
 
 // roster: [{agency_id, last_name, first_name, ship_crew_id}] -> id + name lookup helpers.
 //   byKm  : persistent cruise-line id -> SC agency id (authoritative)
