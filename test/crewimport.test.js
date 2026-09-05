@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeDate, normalizeStatus, mapRow, mapRows, diffCrew } from "../src/crewimport.js";
+import { normalizeDate, normalizeStatus, mapRow, mapRows, diffCrew, looksDMY } from "../src/crewimport.js";
 
 test("normalizeDate handles ISO, US, Excel serial, junk", () => {
   assert.equal(normalizeDate("2027-01-31"), "2027-01-31");
@@ -22,6 +22,21 @@ test("normalizeDate: D/M/YYYY when the first field cannot be a month; never stor
   assert.equal(normalizeDate("13/13/2030"), null);           // no reading makes this a date
   assert.equal(normalizeDate("2/30/2027"), null);            // rolls over in JS; must not be stored
   assert.equal(normalizeDate("23 Sep 2034"), "2034-09-23");  // text form still parses
+  assert.equal(normalizeDate("23/09/2034 0:00"), "2034-09-23"); // xlsx->csv time suffix
+  assert.equal(normalizeDate("2034-23-09"), null);           // an already-stored bad value must not round-trip
+  assert.equal(normalizeDate("2027-02-30"), null);
+  assert.equal(normalizeDate("5/3/2027", { dmy: true }), "2027-03-05"); // row known day-first
+});
+
+// Date order is decided per ROW: one cell with a day > 12 proves the whole pasted row is day-first,
+// so its ambiguous siblings are read the same way instead of silently becoming a wrong US date.
+test("mapRow: a day-first cell makes the whole row day-first; a US-only row stays US", () => {
+  const dmyRow = mapRow({ "CREW ID": "358775", "Passport Exp": "23/09/2034", "Medical Expiration Date": "05/03/2027" });
+  assert.equal(dmyRow.pp_exp, "2034-09-23");
+  assert.equal(dmyRow.med_exp, "2027-03-05");   // 5 March, not 3 May
+  const usRow = mapRow({ "CREW ID": "SC-1", "Passport Exp": "9/23/2034", "Medical Expiration Date": "5/3/2027" });
+  assert.equal(usRow.pp_exp, "2034-09-23");
+  assert.equal(usRow.med_exp, "2027-05-03");    // roster format
 });
 
 test("normalizeStatus maps tolerant variants to the D1 enum", () => {
