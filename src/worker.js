@@ -807,7 +807,7 @@ async function logData(env, source, rows, status) {
 // the 47 clean rows with 2022 legs on the next bump: sbm's manual invite would resolve a 2022
 // sign-off, and statements, crew cards and the days-worked export would read history that no longer
 // exists. Money-adjacent and silent — so a populated table now refuses the bundled reseed.
-const KEYMAN_VERSION = "2026-06-13-cc-v3";
+const KEYMAN_VERSION = "2026-09-05-cc-v4"; // = the snapshot date in src/keyman_data.js (scripts/keyman_snapshot.mjs)
 // PERF: once-per-isolate memo for the ensure* schema guards. Before this, every hot request re-ran
 // CREATE TABLE / ALTER TABLE / seed-version checks — each one a full Worker->D1 round trip on the
 // write path. The DDL is idempotent, so running it once per (isolate, DB binding) is sufficient:
