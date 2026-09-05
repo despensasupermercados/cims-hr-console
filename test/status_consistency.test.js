@@ -31,8 +31,15 @@ test("apiCrew, apiDashboard, apiCompliance and rotationSections all take the sch
   for (const fn of ["async function apiCrew(", "async function apiDashboard(", "async function apiCompliance(", "async function rotationSections("]) {
     const b = body(fn);
     assert.match(b, /boardLegs\(env\)/, fn + " no longer reads the live board schedule");
-    assert.match(b, /scheduleBySc\(HIST\)|scheduleBySc\(HIST\)|boardLegs\(env\),/, fn + " must feed the board legs into scheduleBySc");
+    assert.match(b, /scheduleBySc\(HIST\)/, fn + " must feed the board legs into scheduleBySc");
   }
+});
+
+test("rotationSections treats a TBA (null) sign-off as still aboard, like apiCrew and deriveStatus", () => {
+  const b = body("async function rotationSections(");
+  assert.match(b, /const off = h\.off \|\| "9999"/, "a null off must not drop the leg from the self-heal placement");
+  assert.doesNotMatch(b, /\|\| !h\.off\) continue/, "the old `!h.off -> continue` skip is back");
+  assert.match(b, /h\.is_current\) histScs\.add/, "only CURRENT live legs may block the SHIP_HISTORY backfill");
 });
 
 test("boardLegs reads ship_leg AND the relief board's in-force assignments, in one wave", () => {

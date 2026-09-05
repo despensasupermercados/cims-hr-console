@@ -40,14 +40,30 @@ test("ship_leg rows are returned first and untouched", () => {
   assert.deepEqual(out.slice(0, 2), rows);
 });
 
-test("a crew with a current ship_leg row is never duplicated — by sc", () => {
-  const out = mergeBoardLegs([leg({ sc: "SC-9", crew_id: "cX" })], [asg({ sc: "SC-9", crew_id: "c9" })]);
+const TODAY = "2026-08-25"; // inside leg()'s span (2026-02-01 .. 2026-09-01)
+
+test("a crew with a current ship_leg row spanning today is never duplicated — by sc", () => {
+  const out = mergeBoardLegs([leg({ sc: "SC-9", crew_id: "cX" })], [asg({ sc: "SC-9", crew_id: "c9" })], TODAY);
   assert.equal(out.length, 1);
   assert.equal(out[0].source, undefined);
 });
 
-test("a crew with a current ship_leg row is never duplicated — by crew_id", () => {
-  const out = mergeBoardLegs([leg({ sc: "SC-OLD", crew_id: "c9" })], [asg({ sc: "SC-9", crew_id: "c9" })]);
+test("a crew with a current ship_leg row spanning today is never duplicated — by crew_id", () => {
+  const out = mergeBoardLegs([leg({ sc: "SC-OLD", crew_id: "c9" })], [asg({ sc: "SC-9", crew_id: "c9" })], TODAY);
+  assert.equal(out.length, 1);
+});
+
+// Nothing ever flips is_current back to 0. A snapshot crew whose leg ENDED must not be "taken"
+// forever, or their next relief-board contract never reaches status, the board, or billing.
+test("a current ship_leg row whose off_date has passed does NOT block the crew's next assignment", () => {
+  const out = mergeBoardLegs([leg({ sc: "SC-9", crew_id: "c9", off: "2026-08-10" })], [asg({ ship: "Jewel", sign_on: "2026-09-01" })], "2026-09-05");
+  assert.equal(out.length, 2);
+  assert.equal(out[1].ship, "Jewel");
+  assert.equal(out[1].source, "assignment");
+});
+
+test("a current ship_leg row with a TBA (null) sign-off still blocks — the crew is still aboard", () => {
+  const out = mergeBoardLegs([leg({ sc: "SC-9", crew_id: "c9", off: null })], [asg()], "2026-09-05");
   assert.equal(out.length, 1);
 });
 

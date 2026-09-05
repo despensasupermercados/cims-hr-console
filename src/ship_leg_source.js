@@ -113,16 +113,19 @@ export async function fetchCurrentAssignments(env, today) {
 }
 
 // PURE. Merge the current ship_leg rows (SHIP_HISTORY shape, from legsFromShipLeg) with the
-// in-force assignment rows (raw, from fetchCurrentAssignments). A crew with a current
-// ship_leg row is never duplicated. An assignment on a ship the board has never seen is
-// still included — a vessel is never invented, but a crew is never dropped either: brand
-// is simply null and downstream readers derive brand from VESSEL_REF.
-export function mergeBoardLegs(shipLegRows, assignmentRows) {
+// in-force assignment rows (raw, from fetchCurrentAssignments). A crew whose current ship_leg
+// row still spans `today` (off null = TBA, or off >= today) is never duplicated. A current
+// ship_leg row whose off_date has PASSED does not block: nothing ever flips is_current back to
+// 0 (2026-09-05 review), so without this every snapshot crew would be "taken" forever and their
+// next relief-board contract would never reach status, the board, or billing. An assignment on
+// a ship the board has never seen is still included — a vessel is never invented, but a crew is
+// never dropped either: brand is simply null and downstream readers derive brand from VESSEL_REF.
+export function mergeBoardLegs(shipLegRows, assignmentRows, today) {
   const legs = shipLegRows || [];
   const taken = new Set();
   const brandByShip = {};
   for (const r of legs) {
-    if (r.is_current) {
+    if (r.is_current && (!today || !r.off || r.off >= today)) {
       if (r.sc) taken.add("sc:" + r.sc);
       if (r.crew_id) taken.add("id:" + r.crew_id);
     }
@@ -163,5 +166,5 @@ export function mergeBoardLegs(shipLegRows, assignmentRows) {
 // Both reads fire together (one Worker->D1 round trip, CLAUDE.md §12).
 export async function boardLegsFromDb(env, today) {
   const [legs, asg] = await Promise.all([legsFromShipLeg(env), fetchCurrentAssignments(env, today)]);
-  return mergeBoardLegs(legs, asg);
+  return mergeBoardLegs(legs, asg, today);
 }

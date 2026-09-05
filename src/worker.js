@@ -1171,10 +1171,15 @@ async function apiCrew(env, url) {
   const nl = nlRes.results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
   const sched = scheduleBySc(HIST);
+  // Crew aboard per the relief board only (no ship_leg row yet): their contract span comes from the
+  // board leg. Dates only — the Contracts count still comes from ship_leg via fullContracts().
+  const histAct = {};
+  for (const h of HIST) { if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue; const cur = histAct[h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) histAct[h.sc] = { on: h.on, off: h.off || null }; }
   const crew = base.map(b => {
     const c = applyOverride(b, ovm[b.agency_id]);
     const ls = (byCrew[b.agency_id] || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
-    let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1] || null;
+    let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1]
+      || (histAct[b.agency_id] ? { sign_on: histAct[b.agency_id].on, proj_off: histAct[b.agency_id].off, act_off: null } : null);
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
       status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
@@ -1384,7 +1389,7 @@ async function rotationSections(env) {
   const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
   // Schedule-tab dates per (ship, crew) — fallback enrichment when Keyman has no leg (latest run wins).
   const schEnr = {};
-  for (const h of HIST) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
+  for (const h of HIST) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
   // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
   // NOW (incl. 2-up crew-change overlaps). Dates enriched from Keyman, then the schedule tabs.
   // SELF-HEAL placement: where the SCHEDULE actually puts each crew (current leg spanning today, else
@@ -1394,13 +1399,14 @@ async function rotationSections(env) {
   // Live board legs first (ship_leg + crew aboard per the relief board). The frozen SHIP_HISTORY
   // constant only backfills crew the live source knows nothing about — a stale July leg must never
   // out-vote a current assignment for the same crew.
-  const histScs = new Set(); for (const h of HIST) if (h && h.ours && h.sc) histScs.add(h.sc);
+  const histScs = new Set(); for (const h of HIST) if (h && h.ours && h.sc && h.is_current) histScs.add(h.sc);
   const schedRows = HIST.concat(SHIP_HISTORY.filter((h) => !(h.ours && h.sc && histScs.has(h.sc))));
   for (const h of schedRows) {
-    if (!h.ours || !h.sc || !h.on || !h.off) continue;
-    const isCur = h.on <= today && today <= h.off, isPast = h.off < today, e = schedEff[h.sc];
-    if (isCur) { if (!e || !e.cur || h.off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: true }; }
-    else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: false }; else if (!e.cur && h.off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: false }; }
+    if (!h.ours || !h.sc || !h.on) continue;
+    const off = h.off || "9999"; // TBA sign-off = still aboard (same rule as apiCrew / deriveStatus)
+    const isCur = h.on <= today && today <= off, isPast = off < today, e = schedEff[h.sc];
+    if (isCur) { if (!e || !e.cur || off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: true }; }
+    else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; else if (!e.cur && off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; }
   }
   const promByShip = {}, shoreside = [], pool = [];
   for (const c of crewRows) {
