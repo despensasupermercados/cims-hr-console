@@ -338,11 +338,10 @@ const ALLOWLIST_SEED = [
 // Memoized once per isolate (§12) — 7 INSERT OR IGNORE round trips on every login otherwise.
 const ensureUsers = memoEnsure(ensureUsersImpl);
 async function ensureUsersImpl(env) {
-  for (const [email, name] of ALLOWLIST_SEED) {
-    const id = "u_" + email.toLowerCase().replace(/[^a-z0-9]/g, "");
-    await env.DB.prepare("INSERT OR IGNORE INTO users (id, email, name, role) VALUES (?,?,?,'full')")
-      .bind(id, email, name).run();
-  }
+  // One batch (one Worker->D1 round trip per isolate), not one round trip per seeded user.
+  const stmt = env.DB.prepare("INSERT OR IGNORE INTO users (id, email, name, role) VALUES (?,?,?,'full')");
+  await env.DB.batch(ALLOWLIST_SEED.map(([email, name]) =>
+    stmt.bind("u_" + email.toLowerCase().replace(/[^a-z0-9]/g, ""), email, name)));
 }
 function sessionCookie(token) {
   return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
@@ -584,9 +583,9 @@ async function mariaExecTool(env, name, input) {
     return await J(await apiRotationCrew(env, new URL(base + "/api/rotation/crew?id=" + encodeURIComponent(id))));
   }
   if (name === "scoring_board") {
-    const board = await J(await apiFeedbackBoard(env));
-    const queue = await J(await apiScoreQueue(env, new URL(base + "/api/score/queue")));
-    return { feedback_board: board, score_queue: queue };
+    const st = await loadFeedbackState(env); // one wave for both views, not two
+    const [board, queue] = await Promise.all([apiFeedbackBoard(env, st), apiScoreQueue(env, new URL(base + "/api/score/queue"), st)]);
+    return { feedback_board: await J(board), score_queue: await J(queue) };
   }
   if (name === "billing_range") {
     const u = new URL(base + "/api/daysworked");
@@ -681,11 +680,15 @@ async function apiMariaFeedback(request, env, session) {
 // Memoized once per isolate (§12) — 5 DDL round trips on every Maria request otherwise.
 const ensureMariaKB = memoEnsure(ensureMariaKBImpl);
 async function ensureMariaKBImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), title TEXT NOT NULL, body TEXT NOT NULL, doc_date TEXT, source TEXT DEFAULT 'console', tags TEXT, ship TEXT, added_by TEXT, status TEXT DEFAULT 'active')").run();
-  await env.DB.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS maria_knowledge_fts USING fts5(title, body, content='maria_knowledge', content_rowid='id')").run();
-  await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ai AFTER INSERT ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END").run();
-  await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ad AFTER DELETE ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(maria_knowledge_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); END").run();
-  await env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_au AFTER UPDATE ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(maria_knowledge_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END").run();
+  // Five IF NOT EXISTS statements in ONE batch (one round trip per isolate). Order matters: the
+  // FTS table and its triggers reference maria_knowledge; a batch runs in order.
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), title TEXT NOT NULL, body TEXT NOT NULL, doc_date TEXT, source TEXT DEFAULT 'console', tags TEXT, ship TEXT, added_by TEXT, status TEXT DEFAULT 'active')"),
+    env.DB.prepare("CREATE VIRTUAL TABLE IF NOT EXISTS maria_knowledge_fts USING fts5(title, body, content='maria_knowledge', content_rowid='id')"),
+    env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ai AFTER INSERT ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END"),
+    env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_ad AFTER DELETE ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(maria_knowledge_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); END"),
+    env.DB.prepare("CREATE TRIGGER IF NOT EXISTS maria_kb_au AFTER UPDATE ON maria_knowledge BEGIN INSERT INTO maria_knowledge_fts(maria_knowledge_fts, rowid, title, body) VALUES ('delete', old.id, old.title, old.body); INSERT INTO maria_knowledge_fts(rowid, title, body) VALUES (new.id, new.title, new.body); END"),
+  ]);
 }
 
 // POST /api/maria/knowledge — add / list / retire knowledge documents. Money users only:
@@ -1845,8 +1848,10 @@ async function sha256hex(s) {
 // Memoized once per isolate (§12) — was 2 DDL round trips on each of 7 feedback routes per request.
 const ensureFb = memoEnsure(ensureFbImpl);
 async function ensureFbImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_request2 (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', due_date TEXT, requested_by TEXT, requested_at TEXT NOT NULL, UNIQUE (crew_id, role))").run();
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL)").run();
+  await env.DB.batch([ // one round trip per isolate
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_request2 (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', due_date TEXT, requested_by TEXT, requested_at TEXT NOT NULL, UNIQUE (crew_id, role))"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL)"),
+  ]);
 }
 // Rita fires a scoped request for a crew+role -> returns a single-use signed link.
 async function apiFeedbackRequest(request, env, session, url) {
@@ -1950,27 +1955,57 @@ async function apiFeedbackScore(request, env, session) {
   const st = { ray: "none", rolando: "none", dexter: "none" }; for (const r of reqs) st[r.role] = r.status;
   return json({ ok: true, prefill: mapFeedbackToScore(answers), status: st });
 }
-// Scoring queue: crew whose contract just ended (signed off in the last 14 days) or is about to
-// end (next 14 days) — the contracts that need contributor scoring. Effective sign-off = the
-// latest Keyman leg's actual-off, else projected-off. Each carries the per-role feedback status.
-async function apiScoreQueue(env, url) {
-  await ensureFb(env);
+// Scoring queue (crew whose contract just ended or is about to, per the LIVE board schedule) and
+// the Feedback Windows board share this state. Everything both read, in ONE wave, loaded ONCE. Status comes
+// from the same rule as the crew list and dashboard (§11: retired -> manual -> schedule -> registry):
+// until 2026-09-05 both routes gated on the raw imported crew.status, so a crew the board showed
+// "On board" could sit on the feedback board as feedback-due. Maria's scoring_board tool used to
+// call both routes back to back and read all three tables twice; it now loads this once.
+async function loadFeedbackState(env) {
+  await Promise.all([ensureFb(env), ensureCrewExtras(env)]); // crew_override (status/retired) is read below
   const today = TODAY();
-  const days = Math.max(1, Math.min(120, parseInt(url.searchParams.get("days")) || 14));
-  // PERF (2026-09): three independent reads -> one wave.
-  const [crewRes, reqsRes, respRes, HIST] = await Promise.all([
+  const [crewRes, ovRes, reqsRes, respRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, status, retired FROM crew_override").all(),
     env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all(),
     env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all(),
-    boardLegs(env), // the LIVE board schedule, in the same wave (§12) — see the note below
+    boardLegs(env), // the LIVE board schedule, in the same wave (§12)
   ]);
   const crewRows = crewRes.results;
-  const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
-  const reqs = reqsRes.results;
-  const resp = respRes.results;
-  const fb = {}; for (const r of reqs) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = r.status; }
-  for (const r of resp) { (fb[r.crew_id] = fb[r.crew_id] || {})[r.role] = "answered"; }
+  const ovm = {}; for (const o of ovRes.results) ovm[o.agency_id] = o;
+  const sched = scheduleBySc(HIST);
+  const legsBySc = {}; for (const h of HIST) if (h && h.ours && h.sc) (legsBySc[h.sc] = legsBySc[h.sc] || []).push(h);
+  const reqByCrew = {}, respByCrew = {};
+  for (const r of reqsRes.results) (reqByCrew[r.crew_id] = reqByCrew[r.crew_id] || {})[r.role] = r.status;
+  for (const r of respRes.results) (respByCrew[r.crew_id] = respByCrew[r.crew_id] || {})[r.role] = true;
+  // Per-role feedback state, ONE rule for both views: an answer wins over the request status.
+  const FB_ROLES = ["ray", "rolando", "dexter"];
+  const fbRoles = (crewId) => FB_ROLES.map(role => {
+    const answered = !!(respByCrew[crewId] && respByCrew[crewId][role]);
+    return { role, answered, status: answered ? "answered" : ((reqByCrew[crewId] && reqByCrew[crewId][role]) || "none") };
+  });
+  const statusOf = (c) => crewStatus(c, ovm[c.agency_id], sched[c.agency_id], today);
   const keys = buildShipKeys(VESSEL_REF);
+  const shipOf = (v) => (v ? (canonShipWith(v, keys) || v) : null); // one short name whether the leg came from ship_leg or an assignment
+  // The leg that places the crew today: the one spanning today, else the latest STARTED leg (the
+  // same set deriveStatus judged "On Vacation" from) — never a future TBA leg over the one that just ended.
+  const legNow = (sc) => {
+    const ls = legsBySc[sc] || []; let cur = null, last = null;
+    for (const h of ls) {
+      if (!h.on || h.on > today) continue;
+      const off = h.off || "9999";
+      if (off >= today) { if (!cur || off > (cur.off || "9999")) cur = h; }
+      else if (!last || off > last.off) last = h;
+    }
+    return cur || last;
+  };
+  return { today, crewRows, ovm, HIST, sched, reqByCrew, respByCrew, fbRoles, statusOf, legNow, shipOf };
+}
+async function apiScoreQueue(env, url, state) {
+  const st = state || await loadFeedbackState(env);
+  const { today, crewRows, HIST, fbRoles, statusOf, shipOf } = st;
+  const days = Math.max(1, Math.min(120, parseInt(url.searchParams.get("days")) || 14));
+  const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
   // SOURCE = the LIVE board schedule (boardLegs: current ship_leg rows + crew aboard per the relief
   // board), which carries forward-looking sign-off dates + ship. The Contract Counter is completed-
   // contracts only (no future dates), so it can never populate "signing off next 14 days". Until
@@ -1984,7 +2019,7 @@ async function apiScoreQueue(env, url) {
     if (w === "recent") { const cur = recBy[h.sc]; if (!cur || h.off > cur.off) recBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
     else { const cur = upBy[h.sc]; if (!cur || h.off < cur.off) upBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
   }
-  const mk = (sc, dep) => { const c = byId[sc]; const f = (c && fb[c.id]) || {}; return { agency_id: sc, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || sc, vessel: c.vessel_observed || null, ship: canonShipWith(dep.ship, keys) || dep.ship, signOn: dep.on, signOff: dep.off, status: c.status, feedback: { ray: f.ray || "none", rolando: f.rolando || "none", dexter: f.dexter || "none" } }; };
+  const mk = (sc, dep) => { const c = byId[sc]; const f = {}; for (const r of fbRoles(c.id)) f[r.role] = r.status; return { agency_id: sc, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || sc, vessel: c.vessel_observed || null, ship: shipOf(dep.ship), signOn: dep.on, signOff: dep.off, status: statusOf(c), feedback: f }; };
   const recent = Object.keys(recBy).map(sc => mk(sc, recBy[sc])).sort((a, b) => (a.signOff < b.signOff ? 1 : -1));    // most recently off first
   const upcoming = Object.keys(upBy).map(sc => mk(sc, upBy[sc])).sort((a, b) => (a.signOff < b.signOff ? -1 : 1));    // soonest off first
   return json({ today, days, recent, upcoming });
@@ -1994,8 +2029,10 @@ async function apiScoreQueue(env, url) {
 // intel routes per request.
 const ensureIntel = memoEnsure(ensureIntelImpl);
 async function ensureIntelImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)").run();
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_intel (id TEXT PRIMARY KEY, agency_id TEXT, reporter TEXT, summary TEXT, source TEXT DEFAULT 'email', source_email_id TEXT, confidence TEXT, status TEXT DEFAULT 'filed', candidates TEXT, ts TEXT, created_by TEXT)").run();
+  await env.DB.batch([ // the two CREATEs in one round trip; the ALTERs must stay separate (a failing statement aborts a batch)
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_intel (id TEXT PRIMARY KEY, agency_id TEXT, reporter TEXT, summary TEXT, source TEXT DEFAULT 'email', source_email_id TEXT, confidence TEXT, status TEXT DEFAULT 'filed', candidates TEXT, ts TEXT, created_by TEXT)"),
+  ]);
   try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN contract_no INTEGER").run(); } catch (e) {}
   try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN edited_at TEXT").run(); } catch (e) {}
 }
@@ -2203,39 +2240,24 @@ async function processIntelInbox(env, limit) {
     return n;
   } catch (e) { console.error("intel_inbox_error", (e && e.stack) || e); return 0; }
 }
-// Feedback Windows board — REGISTRY-DRIVEN (re-based 2026-06-13).
-// Keyman projected-off dates are an unreliable trigger (often stale), which left the board empty.
-// We now key off live crew status: "On Vacation" = a contract just completed -> feedback due NOW;
-// "On board" = currently serving -> feedback due at sign-off (pre-stage). Keyman dates, when present,
-// are used only for display/sort, never to include/exclude. Inactive/Earmarked are not shown.
-async function apiFeedbackBoard(env) {
-  // PERF (2026-09): 4 sequential reads after 2 sequential ensures -> one wave each.
-  await Promise.all([ensureKeyman(env), ensureFb(env)]);
-  const today = TODAY();
-  const [legsRes, crewRes, reqsRes, respRes] = await Promise.all([
-    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
-    env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all(),
-    env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all(),
-  ]);
-  const legs = legsRes.results;
-  const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
-  const crewRows = crewRes.results;
-  const reqs = reqsRes.results;
-  const resp = respRes.results;
-  const reqByCrew = {}, respByCrew = {};
-  for (const r of reqs) (reqByCrew[r.crew_id] = reqByCrew[r.crew_id] || {})[r.role] = r.status;
-  for (const r of resp) (respByCrew[r.crew_id] = respByCrew[r.crew_id] || {})[r.role] = true;
+// Feedback Windows board — SCHEDULE-DRIVEN status (2026-09-05; registry-driven since 2026-06-13).
+// Status is crewStatus() over the live board schedule, the same rule as the crew list and dashboard:
+// "On Vacation" = a contract just completed -> feedback due NOW; "On board" = currently serving ->
+// due at sign-off (pre-stage). The leg's dates are display/sort only, never include/exclude.
+// Inactive/Earmarked/Retired are not shown.
+async function apiFeedbackBoard(env, state) {
+  // Same state, same status rule and same schedule as the scoring queue (loadFeedbackState).
+  const { today, crewRows, fbRoles, statusOf, legNow, shipOf } = state || await loadFeedbackState(env);
   const DUE = { "On Vacation": 0, "On board": 1 }; // On Vacation first (feedback due now)
   const rows = [];
   for (const c of crewRows) {
-    if (!(c.status in DUE)) continue;
-    const ls = (byCrew[c.agency_id] || []).slice().sort((a, b) => (a.seq || 0) - (b.seq || 0));
-    const leg = ls.length ? (ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1]) : null;
-    const off = leg ? (leg.act_off || leg.proj_off || null) : null;
+    const status = statusOf(c);
+    if (!(status in DUE)) continue;
+    const leg = legNow(c.agency_id);
+    const off = leg ? (leg.off || null) : null;
     const days = off ? Math.round((new Date(off) - new Date(today)) / 86400000) : null;
-    const roles = ["ray", "rolando", "dexter"].map(role => ({ role, answered: !!(respByCrew[c.id] && respByCrew[c.id][role]), status: (reqByCrew[c.id] && reqByCrew[c.id][role]) || "none" }));
-    rows.push({ agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: (leg && leg.ship) || c.vessel_observed, signOff: off, days, status: c.status, due: DUE[c.status], roles, answeredCount: roles.filter(r => r.answered).length });
+    const roles = fbRoles(c.id);
+    rows.push({ agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: (leg && shipOf(leg.ship)) || c.vessel_observed, signOff: off, days, status, due: DUE[status], roles, answeredCount: roles.filter(r => r.answered).length });
   }
   // Feedback-due (On Vacation) first; then by soonest/most-recent off date; unknown dates last.
   rows.sort((a, b) => a.due - b.due || ((a.days == null) - (b.days == null)) || ((a.days || 0) - (b.days || 0)));

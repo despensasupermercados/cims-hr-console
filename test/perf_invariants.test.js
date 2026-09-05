@@ -25,14 +25,16 @@ function body(name) {
 // Lowering a number is fine; raising one is a perf regression and needs a reason in the PR.
 const SEQ_READ_ALLOW = {
   "async function apiDashboard(": 0, "async function apiCrew(": 0, "async function rotationSections(": 0,
-  "async function apiCrewOne(": 0, "async function apiRotationCrew(": 0, "async function apiFeedbackBoard(": 0, "async function apiScoreQueue(": 0,
+  "async function apiCrewOne(": 0, "async function apiRotationCrew(": 0, "async function loadFeedbackState(": 0,
 };
 
 test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), not sequentially", () => {
   for (const fn of [
     "async function apiDashboard(", "async function apiCrew(", "async function rotationSections(",
     // 2026-09: the per-crew card/rotation reads and the feedback board/queue were still sequential.
-    "async function apiCrewOne(", "async function apiRotationCrew(", "async function apiFeedbackBoard(", "async function apiScoreQueue(",
+    "async function apiCrewOne(", "async function apiRotationCrew(",
+    // 2026-09-05: the feedback board + scoring queue read ONE shared state (loadFeedbackState).
+    "async function loadFeedbackState(",
   ]) {
     const b = body(fn);
     assert.match(b, /await Promise\.all\(\[/, fn + " lost its concurrent query wave — each sequential `await env.DB` re-adds a full Worker->D1 round trip on the hot path");
@@ -42,6 +44,28 @@ test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), n
     const seq = (b.match(/^\s*(?:const|let|var)?\s*[\w\[\], {}]*=?\s*await env\.DB\.prepare\(/mg) || []).length;
     assert.ok(seq <= SEQ_READ_ALLOW[fn], fn + " has " + seq + " sequential `await env.DB.prepare` statements (allowed " + SEQ_READ_ALLOW[fn] + ")");
   }
+});
+
+test("feedback board + scoring queue issue no D1 reads of their own — they consume loadFeedbackState", () => {
+  for (const fn of ["async function apiFeedbackBoard(", "async function apiScoreQueue("]) {
+    const b = body(fn);
+    assert.doesNotMatch(b, /env\.DB\.prepare\(/, fn + " reads D1 directly again — two views, two waves, and a second status rule");
+    assert.match(b, /loadFeedbackState\(env\)/, fn + " must fall back to loadFeedbackState");
+  }
+  const tool = SRC.slice(SRC.indexOf('name === "scoring_board"'), SRC.indexOf('name === "billing_range"'));
+  assert.match(tool, /loadFeedbackState\(env\)/, "Maria's scoring_board must load the state once");
+  assert.match(tool, /Promise\.all\(\[apiFeedbackBoard/, "Maria's scoring_board must render both views concurrently");
+});
+
+test("cold-start ensure guards seed/DDL in ONE batch, not one round trip per statement", () => {
+  for (const fn of ["async function ensureUsersImpl(", "async function ensureMariaKBImpl(", "async function ensureFbImpl("]) {
+    const b = body(fn);
+    assert.match(b, /env\.DB\.batch\(/, fn + " lost its batch");
+    assert.doesNotMatch(b, /\.run\(\)/, fn + " has a sequential .run() again");
+  }
+  const intel = body("async function ensureIntelImpl(");
+  assert.match(intel, /env\.DB\.batch\(/, "ensureIntelImpl CREATEs must be batched");
+  assert.equal((intel.match(/\.run\(\)/g) || []).length, 2, "only the two ALTERs may run alone (a failing ALTER would abort a batch)");
 });
 
 test("ensure* schema guards stay memoized (once per isolate), not per-request DDL", () => {
