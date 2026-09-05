@@ -196,7 +196,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env, session); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs }); if (ci) return ci; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -3384,7 +3384,7 @@ async function cimsApply(){
   var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
-  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged to import history. '+(res.override_cleared?res.override_cleared+' manual entr'+(res.override_cleared===1?'y':'ies')+' replaced by the file'+(res.override_skipped?' ('+res.override_skipped+' changed since review, left alone)':'')+'.':'Nothing else was touched.')+'</div>';
+  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board'+(function(f){var n=f?((f.closed_board_matches||0)+(f.closed_superseded||0)+(f.closed_dismissed||0)):0;return n?' &middot; '+n+' earlier flag'+(n===1?'':'s')+' closed (board already matches, or superseded)':'';})(res.ship_flags)+' &middot; logged to import history. '+(res.override_cleared?res.override_cleared+' manual entr'+(res.override_cleared===1?'y':'ies')+' replaced by the file'+(res.override_skipped?' ('+res.override_skipped+' changed since review, left alone)':'')+'.':'Nothing else was touched.')+'</div>';
   STAGE=null;DEC={};IMPROWS=null;
 }
 // [removed 2026-07-22] previewImport()/applyImport() deleted — dead code that POSTed to the

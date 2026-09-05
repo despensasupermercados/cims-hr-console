@@ -55,6 +55,12 @@ test("feedback board + scoring queue derive status with crewStatus() over the li
   assert.doesNotMatch(sq, /status: c\.status/, "scoring queue reports raw crew.status again");
 });
 
+test("the crew importer receives the ONE live schedule (boardLegs) from the worker — never its own copy", () => {
+  assert.match(SRC, /handleCrewImport\(request, url, env, session, \{ boardLegs \}\)/, "worker must hand boardLegs to the importer");
+  const routes = readFileSync(new URL("../src/crew_import_routes.js", import.meta.url), "utf-8");
+  assert.doesNotMatch(routes, /FROM ship_leg|FROM assignment|SHIP_HISTORY/, "the importer must not read the schedule tables itself");
+});
+
 test("boardLegs reads ship_leg AND the relief board's in-force assignments, in one wave", () => {
   const b = body("async function boardLegs(");
   assert.match(b, /Promise\.all\(\[/, "boardSource + boardLegsFromDb must fire together (one round trip)");

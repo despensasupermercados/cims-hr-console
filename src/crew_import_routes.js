@@ -16,6 +16,9 @@ import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
 import { OVR_FIELDS } from "./override.js";
 import { isMoneyUser } from "./policy.js";
+import { reconcileShipFlags, boardShipsFromLegs, AUTO_CLOSED } from "./crew_flags.js";
+import { buildShipKeys, canonShipWith } from "./shipname.js";
+import { VESSEL_REF } from "./vessel_ref.js";
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -71,7 +74,9 @@ export async function apiCrewImportStage(request, env) {
 
 // POST /api/crew/import/apply — body { review, decisions, file_hash, filename, rows_seen, run_by }.
 // Executes the plan as one D1 batch (transaction). Idempotent by file_hash.
-export async function apiCrewImportApply(request, env) {
+// deps.boardLegs(env) = the ONE live schedule (worker.js boardLegs, CLAUDE.md §11) — used to close
+// ship flags the board already satisfies. Without it (tests, tools) no flag auto-closes on that rule.
+export async function apiCrewImportApply(request, env, deps) {
   const body = await request.json();
   const file_hash = body.file_hash || null;
   if (file_hash) {
@@ -84,12 +89,27 @@ export async function apiCrewImportApply(request, env) {
     file_hash, filename: body.filename || null, rows_seen: body.rows_seen ?? null, run_by, run_at,
   });
 
+  // Ship flags: dedupe against what is already open, close what the board already satisfies or a
+  // newer file supersedes (crew_flags.js). One read of the open flags + the live board, together.
+  const today = run_at.slice(0, 10);
+  const [openRes, legs] = await Promise.all([
+    env.DB.prepare("SELECT id, agency_id, new_value FROM sync_conflict WHERE field='vessel_observed' AND resolved=0").all(),
+    deps && deps.boardLegs ? deps.boardLegs(env) : Promise.resolve([]),
+  ]);
+  const keys = buildShipKeys(VESSEL_REF);
+  const shipOf = (v) => canonShipWith(v, keys);
+  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs, today, shipOf), shipOf });
+  const openInserted = flags.insert.filter(c => c.resolved === 0).length;
+
   const importRunId = crypto.randomUUID();
   const stmts = [];
   stmts.push(env.DB.prepare(
     "INSERT INTO import_run (id,file_hash,filename,rows_seen,rows_upserted,conflicts,run_by,run_at) VALUES (?,?,?,?,?,?,?,?)")
     .bind(importRunId, file_hash, plan.importRun.filename, plan.importRun.rows_seen,
-      plan.importRun.rows_upserted, plan.importRun.conflicts, run_by, run_at));
+      plan.importRun.rows_upserted, openInserted, run_by, run_at));
+  for (const c of flags.close) {
+    stmts.push(env.DB.prepare("UPDATE sync_conflict SET resolved=? WHERE id=? AND resolved=0").bind(AUTO_CLOSED, c.id));
+  }
 
   for (const u of plan.crewUpdates) {
     if (!CREW_WRITABLE.has(u.field)) continue; // hard whitelist — no vessel_observed, no injection
@@ -116,7 +136,7 @@ export async function apiCrewImportApply(request, env) {
     stmts.push(env.DB.prepare(
       `INSERT INTO crew (${INSERT_COLS.join(",")}) VALUES (${INSERT_COLS.map(() => "?").join(",")})`).bind(...vals));
   }
-  for (const c of plan.conflicts) {
+  for (const c of flags.insert) {
     stmts.push(env.DB.prepare(
       "INSERT INTO sync_conflict (id,import_run_id,agency_id,field,old_value,new_value,resolved,created_at) VALUES (?,?,?,?,?,?,?,?)")
       .bind(crypto.randomUUID(), importRunId, c.agency_id, c.field, str(c.old_value), str(c.new_value), c.resolved, run_at));
@@ -130,7 +150,7 @@ export async function apiCrewImportApply(request, env) {
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
     override_cleared, override_skipped: clears.length - override_cleared,
-    open_conflicts: plan.importRun.conflicts, droppedShipWrites: plan.droppedShipWrites,
+    open_conflicts: openInserted, ship_flags: flags.counts, droppedShipWrites: plan.droppedShipWrites,
   });
 }
 
@@ -138,13 +158,13 @@ export async function apiCrewImportApply(request, env) {
 // worker.js delegates to this exactly like it does handleRelief (same session gate applies).
 // /apply mutates crew AND (on an accepted D3) crew_override — MONEY_USERS only (Miguel + Rita).
 // Any signed-in user may view the page and stage (stage writes nothing).
-export async function handleCrewImport(request, url, env, session) {
+export async function handleCrewImport(request, url, env, session, deps) {
   const p = url.pathname;
   if (p === "/api/crew/import" && request.method === "GET") return crewImportPage();
   if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env);
   if (p === "/api/crew/import/apply" && request.method === "POST") {
     if (!isMoneyUser(session && session.email)) return J({ ok: false, error: "money_users_only" }, 403);
-    return apiCrewImportApply(request, env);
+    return apiCrewImportApply(request, env, deps);
   }
   return null;
 }
