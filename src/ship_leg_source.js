@@ -112,6 +112,32 @@ export async function fetchCurrentAssignments(env, today) {
   return results || [];
 }
 
+// Assignments that ENDED via the relief board (actual_sign_off set) within the trailing window.
+// fetchCurrentAssignments drops a row the moment Rita records the sign-off, and leg_projection
+// never writes it to ship_leg — so without this arm a contract that just ended leaves no trace in
+// the schedule: the scoring queue's "signed off in the last N days" and the Score Card's default
+// span (the contract just completed) could never see it (2026-09-05 review of #87).
+export const ENDED_WINDOW_DAYS = 60;
+export async function fetchRecentSignoffs(env, today, days = ENDED_WINDOW_DAYS) {
+  const from = new Date(today + "T00:00:00Z"); from.setUTCDate(from.getUTCDate() - days);
+  const since = from.toISOString().slice(0, 10);
+  const { results } = await env.DB.prepare(
+    `SELECT a.id, a.sign_on, a.actual_sign_off, a.on_port_seed, a.off_port_seed,
+            COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
+            c.id AS crew_id, c.agency_id AS sc,
+            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
+       FROM assignment a
+       JOIN contract k ON k.id = a.contract_id
+       JOIN crew     c ON c.id = k.crew_id
+       LEFT JOIN vessel v ON v.id = a.vessel_id
+      WHERE a.actual_sign_off IS NOT NULL
+        AND a.actual_sign_off >= ?1
+        AND a.actual_sign_off <= ?2
+      ORDER BY ship, a.actual_sign_off`
+  ).bind(since, today).all();
+  return results || [];
+}
+
 // PURE. Merge the current ship_leg rows (SHIP_HISTORY shape, from legsFromShipLeg) with the
 // in-force assignment rows (raw, from fetchCurrentAssignments). A crew whose current ship_leg
 // row still spans `today` (off null = TBA, or off >= today) is never duplicated. A current
@@ -120,7 +146,7 @@ export async function fetchCurrentAssignments(env, today) {
 // next relief-board contract would never reach status, the board, or billing. An assignment on
 // a ship the board has never seen is still included — a vessel is never invented, but a crew is
 // never dropped either: brand is simply null and downstream readers derive brand from VESSEL_REF.
-export function mergeBoardLegs(shipLegRows, assignmentRows, today) {
+export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
   const legs = shipLegRows || [];
   const taken = new Set();
   const brandByShip = {};
@@ -159,12 +185,29 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today) {
     if (a.off_port_seed) o.disembark = a.off_port_seed;
     out.push(o);
   }
+  // Ended assignments -> NON-current history legs (off = the actual sign-off). Skipped when a
+  // ship_leg row already records that same crew + sign-on (the snapshot has it).
+  const onKey = new Set(legs.map((r) => (r.sc || "") + "|" + (r.on || "")));
+  for (const a of endedRows || []) {
+    if (!a || !a.sc || !a.actual_sign_off || !a.sign_on) continue;
+    const ship = a.ship == null ? "" : String(a.ship).trim();
+    if (!ship || onKey.has(a.sc + "|" + a.sign_on)) continue;
+    const o = {
+      ship, name: a.crew_name || null, sc: a.sc, ours: true,
+      on: a.sign_on, off: a.actual_sign_off,
+      brand: (a.brand && (BRAND_SHORT[a.brand] || a.brand)) || brandByShip[ship] || null,
+      is_current: false, crew_id: a.crew_id || null, source: "assignment:ended",
+    };
+    if (a.on_port_seed) o.embark = a.on_port_seed;
+    if (a.off_port_seed) o.disembark = a.off_port_seed;
+    out.push(o);
+  }
   return out;
 }
 
 // Board legs from the database: current ship_leg rows + crew aboard per the relief board.
 // Both reads fire together (one Worker->D1 round trip, CLAUDE.md §12).
 export async function boardLegsFromDb(env, today) {
-  const [legs, asg] = await Promise.all([legsFromShipLeg(env), fetchCurrentAssignments(env, today)]);
-  return mergeBoardLegs(legs, asg, today);
+  const [legs, asg, ended] = await Promise.all([legsFromShipLeg(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today)]);
+  return mergeBoardLegs(legs, asg, today, ended);
 }

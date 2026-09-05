@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBoardLegs, fetchCurrentAssignments, boardLegsFromDb } from "../src/ship_leg_source.js";
+import { mergeBoardLegs, fetchCurrentAssignments, fetchRecentSignoffs, boardLegsFromDb } from "../src/ship_leg_source.js";
 
 // The board's current set = ship_leg is_current=1 rows PLUS crew aboard per the relief board
 // (in-force `assignment` rows). Verified on prod 2026-09-04: 13 crew were aboard per Rita's
@@ -112,7 +112,7 @@ test("an assignment with no vessel or no crew id is skipped, never invented", ()
 
 /* ---- SQL wiring ---- */
 
-function stubEnv({ legs = [], assignments = [] } = {}) {
+function stubEnv({ legs = [], assignments = [], ended = [] } = {}) {
   const calls = [];
   const env = {
     DB: {
@@ -122,6 +122,7 @@ function stubEnv({ legs = [], assignments = [] } = {}) {
           bind(...args) { rec.args = args; return this; },
           async all() {
             rec.t = calls.length; calls.push(rec);
+            if (/actual_sign_off IS NOT NULL/i.test(rec.sql)) return { results: ended };
             if (/FROM assignment/i.test(rec.sql)) return { results: assignments };
             if (/FROM ship_leg/i.test(rec.sql)) return { results: legs };
             return { results: [] };
@@ -148,13 +149,35 @@ test("fetchCurrentAssignments: only ?1 placeholders, exactly one bound arg, in-f
   assert.doesNotMatch(c.sql, /FROM ship_leg/i, "exclusion by current ship_leg is done in JS (mergeBoardLegs), not SQL");
 });
 
-test("boardLegsFromDb fires both reads concurrently and merges", async () => {
+test("fetchRecentSignoffs: trailing window [today-60, today], both bound, actual_sign_off filter", async () => {
+  const { env, calls } = stubEnv();
+  await fetchRecentSignoffs(env, "2026-09-05");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].args, ["2026-07-07", "2026-09-05"]);
+  assert.match(calls[0].sql, /a\.actual_sign_off IS NOT NULL/);
+});
+
+// A contract that ENDED on the relief board must still be in the schedule as history: the scoring
+// queue's "signed off in the last N days" and the Score Card's default span depend on it.
+test("an ended assignment becomes a NON-current leg with off = actual sign-off; a snapshot row for the same sign-on wins", () => {
+  const ended = { id: "e1", sign_on: "2026-03-01", actual_sign_off: "2026-09-01", ship: "Symphony", brand: "Royal Caribbean", crew_id: "c7", sc: "SC-7", crew_name: "Q R" };
+  const out = mergeBoardLegs([], [], "2026-09-05", [ended]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].is_current, false);
+  assert.equal(out[0].off, "2026-09-01");
+  assert.equal(out[0].source, "assignment:ended");
+  const dup = mergeBoardLegs([leg({ sc: "SC-7", crew_id: "c7", on: "2026-03-01", off: "2026-09-01" })], [], "2026-09-05", [ended]);
+  assert.equal(dup.length, 1, "snapshot already records that sign-on");
+  assert.equal(mergeBoardLegs([], [], "2026-09-05", [{ ...ended, actual_sign_off: null }]).length, 0, "no actual sign-off = not ended");
+});
+
+test("boardLegsFromDb fires all three reads concurrently and merges", async () => {
   const { env, calls } = stubEnv({
     legs: [{ brand: "Royal Caribbean", ship_short: "Harmony", sc: "SC-1", crew_id: "c1", on_date: "2026-02-01", off_date: "2026-09-01", ours: 1, is_current: 1, crew_name: "A B" }],
     assignments: [asg()],
   });
   const out = await boardLegsFromDb(env, "2026-09-04");
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(out.length, 2);
   assert.equal(out[0].sc, "SC-1");
   assert.equal(out[0].brand, "Royal");

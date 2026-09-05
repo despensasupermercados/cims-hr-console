@@ -49,6 +49,17 @@ test("boardLegs reads ship_leg AND the relief board's in-force assignments, in o
   assert.match(b, /throw db\.e/, "a live-source read failure must fail loud, never serve the frozen constant");
 });
 
+test("no route iterates the frozen constant directly: Score Card dates and the scoring queue read the live board", () => {
+  assert.doesNotMatch(SRC, /for \(const h of SHIP_HISTORY\)/, "a route still loops over the July SHIP_HISTORY snapshot");
+  for (const fn of ["async function apiBonusCrew(", "async function apiScoreQueue("]) {
+    const b = body(fn);
+    assert.match(b, /boardLegs\(env\)/, fn + " must take the schedule from boardLegs(env)");
+    assert.match(b, /for \(const h of HIST\)/, fn + " must consume the live legs (HIST)");
+    assert.doesNotMatch(b, /SHIP_HISTORY/, fn + " must not touch the frozen constant at all");
+    assert.match(b, /Promise\.all\(\[[^\]]*boardLegs\(env\)/, fn + " must fetch boardLegs inside its read wave, not as an extra round trip (§12)");
+  }
+});
+
 test("self-heal placement prefers live board legs; the constant only backfills unknown crew", () => {
   const b = body("async function rotationSections(");
   assert.match(b, /const schedRows = HIST\.concat\(SHIP_HISTORY\.filter\(/);

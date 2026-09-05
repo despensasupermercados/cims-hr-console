@@ -96,6 +96,8 @@ dated card on the crew. Hard rules:
   (in-force `assignment` rows, `ship_leg_source.boardLegsFromDb`, 2026-09-04). Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
   crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
+  The same schedule feeds the Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue
+  (`apiScoreQueue`); no route loops over the `SHIP_HISTORY` constant directly — it is history backfill only.
 - **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
   type=checkbox style="pointer-events:none">`. Native label-wrapped checkboxes double-fire per tap
   (one flip cancels the other). Don't add a bare clickable checkbox.
