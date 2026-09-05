@@ -11,18 +11,19 @@
 // the same function under `npm test`. The build-time PATCH that used to live here
 // (scripts/apply_hotfix.mjs) is gone — the source has been fixed since July and the patch had
 // been a no-op; the verification stays. vm.Script parses without executing.
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const PAGES = ["APP_HTML", "LOGIN_HTML", "FB_HTML"];
 
-// Evaluate the real module (a temp copy with the page constants exported, so sibling imports
-// resolve) and return { page -> [inline script source, ...] }. Throws SyntaxError on the first
-// unparseable script, naming the page.
-export async function verifyClientScripts(workerUrl = new URL("../src/worker.js", import.meta.url)) {
+// Evaluate the real src/worker.js (a temp copy next to it with the page constants exported, so
+// sibling imports resolve) and return { page -> [inline script source, ...] }. Throws SyntaxError
+// on the first unparseable script, naming the page.
+const WORKER = new URL("../src/worker.js", import.meta.url);
+export async function verifyClientScripts() {
   const tmp = new URL(`../src/__verify_${process.pid}__.mjs`, import.meta.url);
-  writeFileSync(tmp, readFileSync(workerUrl, "utf-8") + `\nexport { ${PAGES.join(", ")} };\n`, "utf-8");
+  writeFileSync(tmp, readFileSync(WORKER, "utf-8") + `\nexport { ${PAGES.join(", ")} };\n`, "utf-8");
   let m;
   try {
     m = await import(tmp.href);
@@ -33,7 +34,8 @@ export async function verifyClientScripts(workerUrl = new URL("../src/worker.js"
   for (const name of PAGES) {
     const html = m[name];
     if (!html || !html.length) throw new Error(`${name} is empty`);
-    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((x) => x[1]);
+    // Every inline script, whatever its attributes (type=module, defer, ...); external src= tags have no body.
+    const scripts = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((x) => x[1]);
     if (!scripts.length) throw new Error(`no inline scripts in ${name}`);
     for (const src of scripts) new vm.Script(src, { filename: `${name}.inline.js` }); // throws SyntaxError
     out[name] = scripts;
@@ -41,8 +43,15 @@ export async function verifyClientScripts(workerUrl = new URL("../src/worker.js"
   return out;
 }
 
-// CLI entry (wrangler [build] / npm predeploy): exit non-zero on any failure so the deploy stops.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// CLI entry (wrangler [build]): exit non-zero on any failure so the deploy stops. import.meta.url is
+// realpath-resolved by the ESM loader, so argv[1] must be too — otherwise a checkout under a
+// symlinked directory (macOS /tmp, container mounts) makes this guard false and the gate exits 0
+// having verified NOTHING (the silent no-op CLAUDE.md §9 warns about).
+const isCli = (() => {
+  try { return !!process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href; }
+  catch { return false; }
+})();
+if (isCli) {
   try {
     const res = await verifyClientScripts();
     for (const [name, scripts] of Object.entries(res)) {

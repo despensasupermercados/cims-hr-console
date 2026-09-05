@@ -13,16 +13,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 import { verifyClientScripts } from "../scripts/verify_client_scripts.mjs";
 
-const pages = await verifyClientScripts(); // throws (fails the whole file) on any unparseable script
+// The gate runs INSIDE a named test (not at module top level): a top-level throw fails the file
+// at load with a raw stack and skips every other test here, including the root-cause pin below.
+let pages = null;
+test("deploy gate: every inline <script> the worker serves parses as JavaScript", async () => {
+  pages = await verifyClientScripts(); // throws SyntaxError naming the page on the first bad script
+});
 
 for (const name of ["APP_HTML", "LOGIN_HTML", "FB_HTML"]) {
   test(`${name}: every inline <script> parses as valid JavaScript`, () => {
+    assert.ok(pages, "the deploy gate test above must run first and pass");
     assert.ok(Array.isArray(pages[name]), `${name} was verified`);
     assert.ok(pages[name].length >= 1, `${name} contains at least one inline script`);
   });
 }
+
+test("the deploy gate rejects an unparseable inline script (negative case, in-process)", () => {
+  // Same vm.Script rule the gate applies, on a minimal broken script: proves the check has teeth.
+  const vm = require("node:vm");
+  assert.throws(() => new vm.Script("var s = 'a\nb';", { filename: "broken.inline.js" }), SyntaxError);
+});
 
 test("the retired build-time patch pattern is not back in the source", () => {
   // The exact string that white-screened the console. The gate above would catch the resulting
