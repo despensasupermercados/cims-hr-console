@@ -122,6 +122,30 @@ test("a clear that matched no row (manual value changed since review) is reporte
   assert.equal(body.override_skipped, 1);
 });
 
+test("accepted rank conflict: UPDATE crew SET rank_observed + UPDATE crew_override SET rank_override=NULL bound to the manual rank", async () => {
+  const existing = [{ agency_id: "SC-7", first_name: "Ana", last_name: "Cruz", status: "On board", rank_observed: "Cook", vessel_observed: "Edge" }];
+  const rows = [{ "CREW ID": "SC-7", "FIRST NAME": "Ana", "LAST NAME": "Cruz", "CREW STATUS": "On board", "RANK": "Sous Chef", "VESSEL NAME": "Edge" }];
+  const env = { DB: fakeDB({ existing, overrides: [{ agency_id: "SC-7", rank_override: "Chef de Partie", retired: 0 }] }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h9" }), env)).json();
+  assert.equal(stage.review.counts.override_conflict, 1);
+  assert.deepEqual(stage.unparsed, [], "stage reports unreadable date cells (none here)");
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: { "SC-7:rank_observed": "accept" }, file_hash: "h9", run_by: "Rita" }), env)).json();
+  assert.equal(body.override_cleared, 1);
+  const st = env.DB._batched;
+  assert.ok(st.some(s => /UPDATE crew SET rank_observed=\?/i.test(s.sql) && s.args[0] === "Sous Chef"));
+  const clr = st.find(s => /UPDATE crew_override SET rank_override=NULL/i.test(s.sql));
+  assert.ok(clr, "the override COLUMN is cleared, not a non-existent crew_override.rank_observed");
+  assert.deepEqual(clr.args.slice(1), ["SC-7", "Chef de Partie"]);
+});
+
+test("stage lists unreadable date cells so a typo is visible instead of silently keeping the old value", async () => {
+  const rows = [{ "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Edge", "MEDICAL EXPIRATION DATE": "2/30/2027" }];
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h10" }), env)).json();
+  assert.deepEqual(stage.unparsed, [{ agency_id: "SC-1", field: "med_exp", raw: "2/30/2027" }]);
+  assert.equal(stage.review.counts.cert, 0, "the bad cell is not a change (old value kept)");
+});
+
 test("apply is MONEY_USERS only; stage is any session", async () => {
   const env = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
   const url = { pathname: "/api/crew/import/apply" };

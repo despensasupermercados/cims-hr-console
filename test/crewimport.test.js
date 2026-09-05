@@ -68,6 +68,20 @@ test("mapRows separates valid from invalid", () => {
   const r = mapRows([{ "Crew ID": "SC-1", "Status": "On board" }, { "x": 1 }]);
   assert.equal(r.mapped.length, 1);
   assert.equal(r.invalidCount, 1);
+  assert.deepEqual(r.unparsed, []);
+});
+
+// null downstream means "blank in source, keep the stored value" — so a typo in a date cell used to
+// vanish without a trace. mapRows now names every non-empty cell no reading could make a date.
+test("mapRows reports unreadable date cells (kept as-is) instead of dropping them silently", () => {
+  const r = mapRows([
+    { "Crew ID": "SC-1", "Status": "On board", "Passport Exp": "2/30/2027", "Medical Expiration Date": "2027-01-31" },
+    { "Crew ID": "SC-2", "Status": "On board", "Passport Exp": "" },
+  ]);
+  assert.deepEqual(r.unparsed, [{ agency_id: "SC-1", field: "pp_exp", raw: "2/30/2027" }]);
+  assert.equal(r.mapped[0].pp_exp, null, "the bad cell still imports as null (keep existing)");
+  assert.equal(r.mapped[0].med_exp, "2027-01-31");
+  assert.equal(Object.keys(r.mapped[0]).includes("_unparsed"), false, "not a crew column: never reaches an INSERT");
 });
 
 test("diffCrew classifies add / change / unchanged and blanks don't clobber", () => {
@@ -88,4 +102,15 @@ test("diffCrew classifies add / change / unchanged and blanks don't clobber", ()
   assert.equal(d.change[0].agency_id, "SC-2");
   assert.deepEqual(d.change[0].changed, ["status"]);
   assert.deepEqual(d.needsStatus, ["SC-4"]);
+});
+
+// The text fallback needs a day, a month word and a year — new Date() alone invents real-looking
+// dates from typos ("12" -> 2001-12-01, "Sep 2027" -> 2027-09-01) that the accept-by-default
+// cert tier would then store.
+test("normalizeDate text fallback rejects fragments and bare numbers", () => {
+  assert.equal(normalizeDate("12"), null);
+  assert.equal(normalizeDate("Sep 2027"), null);
+  assert.equal(normalizeDate("0"), null);
+  assert.equal(normalizeDate("23 Sep 2034"), "2034-09-23");
+  assert.equal(normalizeDate("September 23, 2034"), "2034-09-23");
 });

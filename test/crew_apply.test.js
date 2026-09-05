@@ -56,6 +56,20 @@ test("D3 override explicitly accepted -> base write + audit + that override fiel
   assert.equal(audit.old_value, "+63900", "audit records the manual value being replaced");
 });
 
+test("an override conflict on rank clears rank_override (the override column), writes rank_observed (the crew column)", () => {
+  const review = { groups: { override_conflict: [{ agency_id: "SC-7", field: "rank_observed", override_field: "rank_override", old: "Chef de Partie", base: "Cook", new: "Sous Chef", override_value: "Chef de Partie" }] } };
+  const plan = buildApplyPlan(review, { "SC-7:rank_observed": "accept" });
+  assert.deepEqual(plan.crewUpdates, [{ agency_id: "SC-7", field: "rank_observed", value: "Sous Chef" }]);
+  assert.deepEqual(plan.overrideClears, [{ agency_id: "SC-7", field: "rank_override", expect: "Chef de Partie" }]);
+  assert.equal(plan.conflicts[0].old_value, "Chef de Partie");
+});
+
+test("the override column comes from OVR_COL, never from the client item (a forged override_field is ignored)", () => {
+  const review = { groups: { override_conflict: [{ agency_id: "SC-7", field: "rank_observed", override_field: "status", old: "X", new: "Sous Chef", override_value: "X" }] } };
+  const plan = buildApplyPlan(review, { "SC-7:rank_observed": "accept" });
+  assert.equal(plan.overrideClears[0].field, "rank_override", "a forged override_field must not NULL an unrelated manual field");
+});
+
 test("D3 override kept -> the override field is NOT cleared", () => {
   const plan = buildApplyPlan(sampleReview(), {});
   assert.deepEqual(plan.overrideClears, []);

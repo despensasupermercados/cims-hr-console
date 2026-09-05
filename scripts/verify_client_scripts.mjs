@@ -16,6 +16,8 @@ import { pathToFileURL } from "node:url";
 import vm from "node:vm";
 
 const PAGES = ["APP_HTML", "LOGIN_HTML", "FB_HTML"];
+// Pages that live in their own module with a plain named export (no temp copy needed).
+const EXTRA = [["CREW_IMPORT_HTML", new URL("../src/crew_import_ui.js", import.meta.url)]];
 
 // Evaluate the real src/worker.js (a temp copy next to it with the page constants exported, so
 // sibling imports resolve) and return { page -> [inline script source, ...] }. Throws SyntaxError
@@ -31,8 +33,11 @@ export async function verifyClientScripts() {
     unlinkSync(tmp);
   }
   const out = {};
-  for (const name of PAGES) {
-    const html = m[name];
+  const pages = {}; // a module namespace is frozen, so collect into a plain object
+  for (const name of PAGES) pages[name] = m[name];
+  for (const [name, url] of EXTRA) pages[name] = (await import(url.href))[name];
+  for (const name of Object.keys(pages)) {
+    const html = pages[name];
     if (!html || !html.length) throw new Error(`${name} is empty`);
     // Every inline script, whatever its attributes (type=module, defer, ...); external src= tags have no body.
     const scripts = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((x) => x[1]);

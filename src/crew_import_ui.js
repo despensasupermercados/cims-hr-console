@@ -203,7 +203,7 @@ details.minor summary .c{font-family:var(--mono);font-size:11px;color:var(--slat
 var $=function(i){return document.getElementById(i);};
 var STAGE=null,DEC={},META={},PENDING=null;
 var SIG=["crew id","first name","last name","status","rank","vessel","medical expiration","sirb","passport","us visa","mobile","province"];
-function esc(s){return String(s==null?"":s).replace(/[&<>]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;"}[c];});}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function norm(s){return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9]/g,"");}
 async function sha256(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
 function parse(wb){
@@ -308,8 +308,11 @@ function renderCart(){
  if(g.override_conflict.length+g.critical.length && x.ovKeep)items+=cline("i-red","&#9995;","Your edits","kept as yours",x.ovKeep+" held","held");
  if(!items)items='<div class="li"><span class="nm" style="color:var(--slate);font-weight:400">Nothing to apply — all rows match.</span></div>';
  var flags=x.shipFlag+x.depFlag;
- var sub=STAGE.rows_seen+' crew read'+(flags?' · '+flags+' flagged for board':'');
- var h='<div class="ch"><div class="h">Ready to apply</div><div class="sub">'+sub+'</div></div>'+
+ var unp=(STAGE.unparsed||[]);
+ var sub=STAGE.rows_seen+' crew read'+(flags?' · '+flags+' flagged for board':'')+(unp.length?' · '+unp.length+' date cell'+(unp.length===1?'':'s')+' unreadable, kept as is':'');
+ // The unreadable cells themselves, visible (no hover on a tablet): fix them in the file, re-drop.
+ var unpList=unp.length?'<div class="sub" style="color:var(--amber);white-space:normal">'+unp.map(function(u){return esc(u.agency_id+' '+u.field+': '+u.raw);}).join(' · ')+'</div>':'';
+ var h='<div class="ch"><div class="h">Ready to apply</div><div class="sub">'+sub+'</div>'+unpList+'</div>'+
   '<div class="items">'+items+'</div>'+
   '<div class="totals"><div class="tl"><span>Will save to roster</span><span class="v save">'+x.willSave+'</span></div>'+
   '<div class="tl"><span>Kept as yours</span><span class="v keep">'+x.kept+'</span></div></div>'+

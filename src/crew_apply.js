@@ -21,6 +21,8 @@
 //   D4  departed default 'flag' (open sync_conflict, resolved=0); never a delete.
 //   D5  minor auto-applies regardless of decision.
 
+import { OVR_COL } from "./crew_review.js";
+
 const key = (agency_id, field) => `${agency_id}:${field}`;
 
 export function buildApplyPlan(review, decisions = {}, meta = {}) {
@@ -47,7 +49,9 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     const manual = it.override_value !== undefined ? it.override_value : it.old;
     if (dec(key(it.agency_id, it.field), "keep") === "accept") {
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
-      overrideClears.push({ agency_id: it.agency_id, field: it.field, expect: manual ?? null });
+      // The override COLUMN (rank_observed -> rank_override) is derived HERE from OVR_COL, never read
+      // from the client item: a forged override_field could otherwise NULL an unrelated manual field.
+      overrideClears.push({ agency_id: it.agency_id, field: OVR_COL[it.field] || it.field, expect: manual ?? null });
     }
     conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: manual ?? null, new_value: it.new, resolved: 1 });
   }

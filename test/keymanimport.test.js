@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normDate, parseContractCounter, buildBridge, bridgeName, buildKeymanRows } from "../src/keymanimport.js";
+import { normDate, parseContractCounter, parseContractCounterFull, buildBridge, bridgeName, buildKeymanRows } from "../src/keymanimport.js";
 
 // ---------------- EXISTING GOLDEN TESTS (unchanged) ----------------
 test("normDate handles ISO, datetime strings, M/D/YYYY, Date objects, and junk", () => {
@@ -10,6 +10,24 @@ test("normDate handles ISO, datetime strings, M/D/YYYY, Date objects, and junk",
   assert.equal(normDate(new Date("2024-05-01T00:00:00Z")), "2024-05-01");
   assert.equal(normDate(""), null);
   assert.equal(normDate("not a date"), null);
+  // 2026-09-05: one validated parser shared with the crew import — no impossible date can reach
+  // keyman_contract3.sign_on (julianday() of "2034-23-09" is NULL and silently skips the leg).
+  assert.equal(normDate("23/09/2034"), "2034-09-23");
+  assert.equal(normDate("13/13/2030"), null);
+  assert.equal(normDate("2/30/2027"), null);
+});
+
+// Day-first is decided once per ROW (like the crew import): a sign-on "05/03/2027" next to a
+// sign-off "23/09/2027" is 5 March -> 23 Sep, not 3 May -> 23 Sep (two months short of a contract).
+test("parseContractCounterFull: row-level day-first, and unreadable date cells are reported not dropped silently", () => {
+  const aoa = [
+    ["RCCL", "Harmony", "Active", "123456", "Reyes", "Ana", "05/03/2027", "23/09/2027", 6, "2/30/2028", "9/1/2028", 6],
+  ];
+  const r = parseContractCounterFull(aoa);
+  assert.equal(r.crew.length, 1);
+  assert.deepEqual(r.crew[0].contracts, [{ seq: 1, on: "2027-03-05", proj: "2027-09-23" }], "leg 2's sign-on is unreadable so it is skipped");
+  assert.deepEqual(r.unparsed, [{ km: "123456", last: "Reyes", first: "Ana", seq: 2, field: "sign_on", raw: "2/30/2028" }]);
+  assert.deepEqual(parseContractCounter(aoa), r.crew, "parseContractCounter stays the row-only view");
 });
 
 const AOA = [

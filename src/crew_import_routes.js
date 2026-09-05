@@ -11,7 +11,7 @@
 //   - idempotent by import_run.file_hash (re-dropping the same file is a no-op).
 
 import { mapRows, diffCrew } from "./crewimport.js";
-import { buildReview } from "./crew_review.js";
+import { buildReview, OVR_COL } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
 import { OVR_FIELDS } from "./override.js";
@@ -26,7 +26,7 @@ export const CREW_WRITABLE = new Set([
 
 // crew_override columns an ACCEPTED override conflict may set to NULL — only fields that exist on
 // both sides (never vessel_observed: it is not writable, so it is never accepted either).
-export const OVR_CLEARABLE = new Set(OVR_FIELDS.filter(f => CREW_WRITABLE.has(f)));
+export const OVR_CLEARABLE = new Set(OVR_FIELDS.filter(f => CREW_WRITABLE.has(f) || Object.values(OVR_COL).includes(f)));
 
 // Columns written when INSERTing a brand-new crew member (agency_code has a DB default).
 const INSERT_COLS = ["id", "agency_id", "first_name", "middle_name", "last_name", "status",
@@ -59,12 +59,14 @@ export async function apiCrewImportStage(request, env) {
     const dup = await env.DB.prepare("SELECT 1 AS x FROM import_run WHERE file_hash=?").bind(file_hash).first();
     if (dup) return J({ ok: false, error: "already_processed" });
   }
-  const { mapped, invalidCount } = mapRows(rows);
+  const { mapped, invalidCount, unparsed } = mapRows(rows);
   const incomingByAgency = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
   const { existingByAgency, overrideByAgency } = await loadContext(env);
   const diff = diffCrew(mapped, existingByAgency);
   const review = buildReview(diff, existingByAgency, incomingByAgency, overrideByAgency);
-  return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, review });
+  // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
+  // before 2026-09-05 they vanished silently because null means "blank in source").
+  return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
 }
 
 // POST /api/crew/import/apply — body { review, decisions, file_hash, filename, rows_seen, run_by }.

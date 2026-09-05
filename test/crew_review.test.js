@@ -62,6 +62,28 @@ test("D2 medical expiry moving EARLIER is flagged", () => {
   assert.ok(m && m.earlier, "SC-2 earlier medical is flagged");
 });
 
+// The file's "rank" is crew.rank_observed; Rita's manual rank is crew_override.rank_override. They
+// are the same field with two names — a rank change under a live manual rank must be a D3 conflict
+// (it used to slip through the CERT tier and be accepted silently, invisible behind the override).
+test("rank_observed under a live rank_override is an override_conflict, naming the override column", () => {
+  const ex = { "SC-7": { agency_id: "SC-7", first_name: "Ana", last_name: "Cruz", status: "On board", rank_observed: "Cook" } };
+  const rows = [{ "CREW ID": "SC-7", "FIRST NAME": "Ana", "LAST NAME": "Cruz", "CREW STATUS": "On board", "RANK": "Sous Chef" }];
+  const { mapped } = mapRows(rows);
+  const inc = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
+  const ov = { "SC-7": { agency_id: "SC-7", rank_override: "Chef de Partie", retired: 0 } };
+  const r = buildReview(diffCrew(mapped, ex), ex, inc, ov);
+  const it = r.groups.override_conflict.find(x => x.agency_id === "SC-7" && x.field === "rank_observed");
+  assert.ok(it, "rank change under a manual rank must land in the override tier");
+  assert.equal(it.override_field, "rank_override");
+  assert.equal(it.old, "Chef de Partie", "the card shows the manual rank as the value being replaced");
+  assert.equal(it.new, "Sous Chef");
+  assert.equal(r.groups.cert.some(x => x.field === "rank_observed"), false, "and NOT silently in the accept-by-default tier");
+  // base already equals the file, override still differs -> still raised (second pass)
+  const ex2 = { "SC-7": { ...ex["SC-7"], rank_observed: "Sous Chef" } };
+  const r2 = buildReview(diffCrew(mapped, ex2), ex2, inc, ov);
+  assert.ok(r2.groups.override_conflict.some(x => x.field === "rank_observed" && x.override_field === "rank_override"));
+});
+
 test("D3 change to a field with a live override is an override_conflict, default keep", () => {
   const live = liveOverrideFields(overrides["SC-1"]);
   assert.ok(live.has("phone"));
