@@ -11,19 +11,43 @@
 //
 // resolved values on sync_conflict: 0 open · 1 seen/decided by a person · 2 closed automatically.
 
+import { normShip, AZ_DISP, AZAMARA_SHORT } from "./shipname.js";
+
 export const AUTO_CLOSED = 2;
+
+// STRICT ship matcher for auto-closing: a real hull name must appear as a whole word of the raw
+// string ("Harmony of the Seas" -> Harmony, "MV AZAMARA QUEST" -> Quest, "Celebrity Apex" -> Apex).
+// The board's general canonicaliser (canonShipWith) matches by SUBSTRING and never returns null —
+// "MV STARLIGHT" would read as "Star" — which is fine for grouping a board section but not for
+// closing a flag nobody can reopen. Unknown or ambiguous -> null -> no auto-close on that crew.
+export function strictShipMatcher(vesselRef) {
+  const disp = {};
+  for (const v of vesselRef || []) { const k = normShip(v.name); if (k) disp[k] = v.name; }
+  for (const k of AZAMARA_SHORT) disp[k] = AZ_DISP[k];
+  return (raw) => {
+    const words = String(raw == null ? "" : raw).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const hits = new Set();
+    for (const w of words) if (disp[w]) hits.add(disp[w]);
+    // multi-word hull names ("of the seas" is a suffix, never part of the key): join adjacent words too
+    for (let i = 0; i + 1 < words.length; i++) { const k = words[i] + words[i + 1]; if (disp[k]) hits.add(disp[k]); }
+    return hits.size === 1 ? [...hits][0] : null;
+  };
+}
 
 // open:      existing open ship flags [{ id, agency_id, new_value }]
 // incoming:  ALL conflicts the apply plan wants to write (any field, any resolved)
 // boardShip: (agency_id) -> canonical short ship the live board places the crew on today, or null
 // shipOf:    (raw vessel string) -> canonical short ship, or null when unknown
 export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf }) {
-  const canon = (v) => (v == null || v === "" ? null : (shipOf(v) || String(v).trim()));
+  // Equality key for "same ship": the strict hull name when known, else the normalised raw text
+  // (so two identical unknown strings still dedupe; an unknown never equals a board ship).
+  const canon = (v) => (v == null || v === "" ? null : (shipOf(v) || ("raw:" + normShip(v))));
   const close = [], insert = [];
   const closed = new Set();
   const openBySc = {};
   for (const o of open) (openBySc[o.agency_id] = openBySc[o.agency_id] || []).push(o);
   const closeRow = (o, why) => { if (closed.has(o.id)) return; closed.add(o.id); close.push({ id: o.id, why }); };
+  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, skipped_board_matches: 0, skipped_duplicate: 0 };
 
   // 1) Open flags the board already satisfies: the crew is on the ship the file named.
   for (const o of open) {
@@ -41,17 +65,15 @@ export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf
       insert.push(c);
       continue;
     }
-    if (want && boardShip(c.agency_id) === want) continue;                 // board agrees: nothing to flag
-    if (mine.some((o) => !closed.has(o.id) && canon(o.new_value) === want)) continue; // already open: no duplicate
-    for (const o of mine) closeRow(o, "superseded");                       // a different ship was flagged before
+    // The newest file is the current word on what TDG thinks: every open flag naming a DIFFERENT
+    // ship for this crew is superseded — whether or not the new flag itself gets inserted.
+    for (const o of mine) if (canon(o.new_value) !== want) closeRow(o, "superseded");
+    if (want && boardShip(c.agency_id) === want) { counts.skipped_board_matches++; continue; } // board agrees: nothing to flag
+    if (mine.some((o) => !closed.has(o.id) && canon(o.new_value) === want)) { counts.skipped_duplicate++; continue; } // already open
     insert.push(c);
   }
-  const why = (w) => close.filter((x) => x.why === w).length;
-  return {
-    close, insert,
-    counts: { closed_board_matches: why("board_matches"), closed_superseded: why("superseded"), closed_dismissed: why("dismissed"),
-      skipped_board_matches: incoming.filter((c) => c.field === "vessel_observed" && c.resolved === 0).length - insert.filter((c) => c.field === "vessel_observed" && c.resolved === 0).length },
-  };
+  for (const x of close) counts["closed_" + x.why]++;
+  return { close, insert, counts };
 }
 
 // The ship each crew is on TODAY per the live board legs (SHIP_HISTORY shape), canonicalised.

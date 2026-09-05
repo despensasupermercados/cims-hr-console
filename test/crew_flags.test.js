@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reconcileShipFlags, boardShipsFromLegs, AUTO_CLOSED } from "../src/crew_flags.js";
+import { reconcileShipFlags, boardShipsFromLegs, strictShipMatcher, AUTO_CLOSED } from "../src/crew_flags.js";
+import { VESSEL_REF } from "../src/vessel_ref.js";
 
 // prod 2026-09-05: 411 open ship flags for 58 distinct crew+ship pairs, none ever closed.
 const shipOf = (v) => ({ "celebrity apex": "Apex", "apex": "Apex", "harmony of the seas": "Harmony", "harmony": "Harmony", "mv azamara quest": "Quest", "quest": "Quest" }[String(v || "").toLowerCase()] || null);
@@ -13,12 +14,43 @@ test("an open flag the board already satisfies closes; the same flag arriving ag
   assert.deepEqual(r.insert, []);
   assert.equal(r.counts.closed_board_matches, 1);
   assert.equal(r.counts.skipped_board_matches, 1);
+  assert.equal(r.counts.skipped_duplicate, 0);
 });
 
 test("a duplicate of an open flag (same crew, same ship, board disagrees) is NOT inserted again", () => {
   const r = reconcileShipFlags({ open: [{ id: "f1", agency_id: "SC-1", new_value: "MV AZAMARA QUEST" }], incoming: [flag("SC-1", "Quest")], boardShip: board({ "SC-1": "Harmony" }), shipOf });
   assert.deepEqual(r.close, []);
   assert.deepEqual(r.insert, []);
+  assert.equal(r.counts.skipped_duplicate, 1, "counted as a duplicate, NOT as a board match");
+  assert.equal(r.counts.skipped_board_matches, 0);
+});
+
+test("an older flag naming a DIFFERENT ship is superseded even when the new flag itself is skipped", () => {
+  // board already agrees with the new file -> new flag skipped, but the stale Quest flag must still close
+  const a = reconcileShipFlags({ open: [{ id: "q", agency_id: "SC-1", new_value: "Quest" }], incoming: [flag("SC-1", "Apex")], boardShip: board({ "SC-1": "Apex" }), shipOf });
+  assert.deepEqual(a.close, [{ id: "q", why: "superseded" }]);
+  assert.deepEqual(a.insert, []);
+  // a same-ship copy is already open -> new flag deduped, the older different-ship one still closes
+  const b = reconcileShipFlags({ open: [{ id: "q", agency_id: "SC-1", new_value: "Quest" }, { id: "a", agency_id: "SC-1", new_value: "Apex" }], incoming: [flag("SC-1", "Celebrity Apex")], boardShip: board({ "SC-1": "Harmony" }), shipOf });
+  assert.deepEqual(b.close, [{ id: "q", why: "superseded" }]);
+  assert.deepEqual(b.insert, []);
+  assert.equal(b.counts.skipped_duplicate, 1);
+});
+
+test("strictShipMatcher: whole-word hull names only — no substring closes a flag nobody can reopen", () => {
+  const m = strictShipMatcher(VESSEL_REF);
+  assert.equal(m("Harmony of the Seas"), "Harmony");
+  assert.equal(m("MV AZAMARA QUEST"), "Quest");
+  assert.equal(m("Celebrity Apex"), "Apex");
+  assert.equal(m("MV STARLIGHT"), null, "contains 'Star' but is not the Star");
+  assert.equal(m("# of flights:"), null);
+  assert.equal(m(""), null);
+  assert.equal(m("Apex Harmony"), null, "two hulls named -> ambiguous -> no auto-close");
+  // unknown strings still dedupe against each other, but never equal a board ship
+  const r = reconcileShipFlags({ open: [{ id: "f1", agency_id: "SC-1", new_value: "MV STARLIGHT" }], incoming: [flag("SC-1", "mv starlight")], boardShip: board({ "SC-1": "Star" }), shipOf: m });
+  assert.deepEqual(r.close, []);
+  assert.deepEqual(r.insert, [], "identical unknown text is a duplicate");
+  assert.equal(r.counts.skipped_duplicate, 1);
 });
 
 test("a newer file naming a DIFFERENT ship supersedes the older open flag for that crew", () => {

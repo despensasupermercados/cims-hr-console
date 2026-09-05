@@ -193,6 +193,21 @@ test("apply: without the live board (no deps) a repeated flag is still deduped, 
   assert.equal(body2.ship_flags.closed_superseded, 1, "and the older Quest flag is superseded");
 });
 
+test("apply: a failing live-board read never blocks the import — the board rule is simply off and reported", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
+  const deps = { boardLegs: async () => { throw new Error("D1 hiccup"); } };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h14" }), env)).json();
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h14", run_by: "Rita" }), env, deps);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.board_unavailable, true);
+  assert.ok(env.DB._batched.some(s => /UPDATE crew SET med_exp/i.test(s.sql)), "the cert update still applied");
+  assert.equal(body.open_conflicts, 0, "the duplicate flag is still deduped without the board");
+  assert.match(body.summary, /board unavailable this run/);
+  assert.match(body.summary, /^Applied 1 change · added 0 crew · 0 flags for the board/);
+});
+
 test("apply is idempotent by file hash", async () => {
   const env = { DB: fakeDB({ existing: EXISTING, dup: true }) };
   const res = await apiCrewImportApply(req({ review: { groups: {} }, decisions: {}, file_hash: "seen" }), env);
