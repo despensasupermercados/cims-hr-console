@@ -31,8 +31,8 @@ function fakeEnv(state) {
     prepare(sql) {
       const S = String(sql).replace(/\s+/g, " ").trim();
       const s = { sql: S, args: [] };
-      s.bind = (...a) => { s.args = a; return s; };
-      s.run = async () => { writes.push(s); return { meta: { changes: 1 } }; };
+      s.bind = (...a) => ({ ...s, args: a }); // fresh statement per bind, like real D1
+      s.run = async function () { writes.push(this); return { meta: { changes: (/INSERT INTO data_meta/.test(S) && state.pinChanges != null) ? state.pinChanges : 1 } }; };
       s.first = async () => {
         if (S.startsWith("SELECT COUNT(*) n FROM keyman_contract3")) return { n: state.n };
         if (S.startsWith("SELECT v FROM data_meta WHERE k='keyman_version'")) return state.version ? { v: state.version } : null;
@@ -87,8 +87,26 @@ test("empty table: seeds every bundled row and pins the version", async () => {
     assert.match(st.sql, /^INSERT OR REPLACE INTO keyman_contract3/);
     assert.equal(st.args.length, 8, "8 columns, 8 binds");
   }
+  assert.equal(batches[0][0].args[0], KEYMAN_CONTRACTS[0].sc, "each batch entry captures its OWN row");
+  assert.equal(batches[0][batches[0].length - 1].args[0], KEYMAN_CONTRACTS[KEYMAN_CONTRACTS.length - 1].sc);
   assert.deepEqual(pin(writes).args, [KEYMAN_VERSION]);
   assert.equal(log(writes).args[3], "seeded");
+});
+
+test("stale version, but another isolate already re-pinned (pin changed 0 rows): no duplicate refusal row", async () => {
+  const { env, writes } = fakeEnv({ n: 47, version: "some-older-version", pinChanges: 0 });
+  await ensureKeymanImpl(env);
+  assert.ok(pin(writes), "the conditional pin is still attempted");
+  assert.match(pin(writes).sql, /WHERE data_meta\.v IS NOT excluded\.v/, "pin only when the stored version differs");
+  assert.equal(log(writes), undefined, "no refusal row when this isolate's pin did not land");
+});
+
+test("empty table + empty bundled constant: nothing is seeded and NO refusal is logged", async () => {
+  // The refusal branch is for a POPULATED table only; an empty one must not log 'table populated'.
+  const src = readFileSync(SRC, "utf-8");
+  const i = src.indexOf("async function ensureKeymanImpl(");
+  const body = src.slice(i, src.indexOf("\nasync function ", i + 10));
+  assert.match(body, /else if \(n > 0 && stale\)/, "refusal branch must require a populated table");
 });
 
 test("static: the reseed is gated on an EMPTY table, and the prune is gone", () => {

@@ -835,12 +835,15 @@ async function ensureKeymanImpl(env) {
     await env.DB.batch(KEYMAN_CONTRACTS.map(r => stmt.bind(r.sc, r.km, r.ship, r.st, r.seq, r.on, r.proj, r.act)));
     await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
     await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", KEYMAN_CONTRACTS.length, "seeded");
-  } else if (stale) {
+  } else if (n > 0 && stale) {
     // Populated table + version drift: REFUSE the bundled reseed (see KEYMAN_VERSION). Re-pin so this
     // check stops firing on every new isolate, and leave the refusal in data_log so it is visible.
     // Refresh the data through the Keyman import, never the constant.
-    await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
-    await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", n, "reseed_refused_table_populated");
+    // The pin is conditional (only when the stored version differs) and the refusal is logged only
+    // when THIS isolate's pin landed: under a deploy several cold isolates race here and would
+    // otherwise each add an identical refusal row, pushing real import history off the Data panel.
+    const pin = await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v WHERE data_meta.v IS NOT excluded.v").bind(KEYMAN_VERSION).run();
+    if (!pin || !pin.meta || pin.meta.changes > 0) await logData(env, "keyman_contract (Contract Counter " + KEYMAN_VERSION + ")", n, "reseed_refused_table_populated");
   }
 }
 // Crew refresh from an uploaded AdvancedQuery export. Browser parses the file (SheetJS) and
@@ -904,7 +907,9 @@ async function apiKeymanImport(request, env, session) {
   for (let i = 0; i < rows.length; i += 80) {
     await env.DB.batch(rows.slice(i, i + 80).map(r => ins.bind(r.sc, r.km, r.ship, r.st, r.seq, r.sign_on, r.proj_off, r.act_off)));
   }
-  // Pin the version so the bundled-snapshot self-seed (ensureKeyman) doesn't overwrite this import.
+  // Re-pin the version. Since the reseed guard (ensureKeymanImpl) a populated table is never
+  // overwritten by the bundled constant regardless of this pin; it only keeps the guard from logging
+  // a spurious "reseed refused" row after this import.
   await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
   await logData(env, "keyman_contract (Contract Counter import, by " + ((session && session.email) || "?") + ")", rows.length, "refreshed " + matched.length + " crew");
   return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length });
