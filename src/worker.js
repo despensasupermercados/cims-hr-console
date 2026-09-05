@@ -14,7 +14,7 @@ import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, legsFromShipLeg } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
 import { applyOverride, OVR_FIELDS } from "./override.js";
@@ -1028,7 +1028,7 @@ async function apiDashboard(env) {
   const md = today.slice(5);
   const curY = +today.slice(0, 4), curM = +today.slice(5, 7);
   const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
-  const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy] = await Promise.all([
+  const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy, HIST] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(off_date)-julianday(on_date))) AS INTEGER) days FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL AND off_date IS NOT NULL AND off_date>on_date").first(),
     env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew").bind(in90).first(),
     env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all(),
@@ -1043,6 +1043,7 @@ async function apiDashboard(env) {
     env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside'").first(),
     // YTD crew spend: elapsed months = current month if latest year is the current year, else 12.
     env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside' AND month <= CASE WHEN " + TY + "=? THEN ? ELSE 12 END").bind(curY, curM).first(),
+    boardLegs(env), // the live schedule — same source as the crew list and rotation board (§11)
   ]);
   const total = cc.total || 0, vessels = cc.vessels || 0;
   const medExp = cc.med || 0, sirbExp = cc.sirb || 0, ppExp = cc.pp || 0, usvExp = cc.usv || 0, schExp = cc.sch || 0;
@@ -1050,7 +1051,7 @@ async function apiDashboard(env) {
   // matches the crew cards and rotation board rather than the raw stored value.
   const cs = csRes.results;
   const csOv = {}; for (const o of ovRes.results) csOv[o.agency_id] = o;
-  const csSched = scheduleBySc();
+  const csSched = scheduleBySc(HIST);
   const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0 };
   for (const c of cs) {
     const ov = csOv[c.agency_id], s = crewStatus(c, ov, csSched[c.agency_id], today);
@@ -1114,10 +1115,26 @@ async function ensureCrewExtrasImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)").run();
   try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
 }
-// Schedule assignments per crew (from SHIP_HISTORY), for the auto status derivation.
-async function boardLegs(env) { return (await boardSource(env)) === "ship_leg" ? await legsFromShipLeg(env) : SHIP_HISTORY; } function scheduleBySc(legs) {
+// Board legs = the live schedule: current ship_leg rows + crew aboard per the relief board
+// (ship_leg_source.boardLegsFromDb). The source flip is a DATA change (app_config.board_source);
+// both reads fire together so the flip costs no extra round trip. This is the ONE schedule that
+// apiCrew, apiDashboard AND rotationSections derive status from (CLAUDE.md §11) — before 2026-09-04
+// only the rotation board read it; the crew list and dashboard silently fell back to the frozen
+// SHIP_HISTORY code constant via a bare scheduleBySc().
+async function boardLegs(env) {
+  const [src, db] = await Promise.all([
+    boardSource(env),
+    boardLegsFromDb(env, TODAY()).then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })),
+  ]);
+  if (src !== "ship_leg") return SHIP_HISTORY;
+  if (!db.ok) throw db.e; // fail loud: never quietly serve the frozen constant for a live source
+  return db.v;
+}
+// Schedule legs per crew, for the auto status derivation. No legs = no schedule (status falls
+// back to the registry value) — never the frozen constant.
+function scheduleBySc(legs) {
   const m = {};
-  for (const h of (legs || SHIP_HISTORY)) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
+  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
   return m;
 }
 // Effective status: manual 'Retired' tag wins; else a manual status edit wins; else auto-derive from
@@ -1139,11 +1156,12 @@ async function apiCrew(env, url) {
   // the live roster (redacted=0). Fixed 0/1 literal — no user string reaches the SQL.
   const onlyHidden = !!(url && url.searchParams.get("hidden") === "1");
   const redFlag = onlyHidden ? "1" : "0";
-  const [baseRes, ovsRes, legsRes, nlRes] = await Promise.all([
+  const [baseRes, ovsRes, legsRes, nlRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
     env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
     env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
+    boardLegs(env), // the live schedule — same source as the rotation board and dashboard (§11)
   ]);
   const base = baseRes.results;
   const ovs = ovsRes.results;
@@ -1152,11 +1170,16 @@ async function apiCrew(env, url) {
   const byCrew = {}; for (const l of legs) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const nl = nlRes.results;
   const noteMap = {}; for (const r of nl) noteMap[r.agency_id] = r.n;
-  const sched = scheduleBySc();
+  const sched = scheduleBySc(HIST);
+  // Crew aboard per the relief board only (no ship_leg row yet): their contract span comes from the
+  // board leg. Dates only — the Contracts count still comes from ship_leg via fullContracts().
+  const histAct = {};
+  for (const h of HIST) { if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue; const cur = histAct[h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) histAct[h.sc] = { on: h.on, off: h.off || null }; }
   const crew = base.map(b => {
     const c = applyOverride(b, ovm[b.agency_id]);
     const ls = (byCrew[b.agency_id] || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
-    let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1] || null;
+    let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1]
+      || (histAct[b.agency_id] ? { sign_on: histAct[b.agency_id].on, proj_off: histAct[b.agency_id].off, act_off: null } : null);
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
       status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
@@ -1269,11 +1292,16 @@ async function apiCompliance(env, url) {
   const today = new Date().toISOString().slice(0, 10);
   const warn = parseInt(url.searchParams.get("days")) || 60;
   await ensureCrewExtras(env);
-  const rows = (await env.DB.prepare(
-    "SELECT agency_id, first_name, last_name, status, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0"
-  ).all()).results;
-  const ovm = {}; for (const o of (await env.DB.prepare("SELECT * FROM crew_override").all()).results) ovm[o.agency_id] = o;
-  const sched = scheduleBySc();
+  // One concurrent wave (§12) — and the live board schedule (§11): this used to be three sequential
+  // round trips ending in a bare scheduleBySc(), i.e. status from the frozen SHIP_HISTORY constant.
+  const [rowsRes, ovRes, HIST] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, last_name, status, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT * FROM crew_override").all(),
+    boardLegs(env),
+  ]);
+  const rows = rowsRes.results;
+  const ovm = {}; for (const o of ovRes.results) ovm[o.agency_id] = o;
+  const sched = scheduleBySc(HIST);
   // ACTIVE crew only (on board + on vacation ≤6mo). Retired/Inactive are off the fleet, so their expired
   // docs are not action items. Uses the SAME derived status + override merge as the Crew tab so all
   // compliance views agree (manual document edits in crew_override win over the imported row).
@@ -1361,18 +1389,24 @@ async function rotationSections(env) {
   const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
   // Schedule-tab dates per (ship, crew) — fallback enrichment when Keyman has no leg (latest run wins).
   const schEnr = {};
-  for (const h of HIST) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "") > (cur.off || "")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
+  for (const h of HIST) { if (!h.ours || !h.sc) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
   // PROMINENT roster per ship = live REGISTRY (status + vessel) — the source of truth for who's onboard
   // NOW (incl. 2-up crew-change overlaps). Dates enriched from Keyman, then the schedule tabs.
   // SELF-HEAL placement: where the SCHEDULE actually puts each crew (current leg spanning today, else
   // their last completed leg). Used to override a STALE registry vessel that points to a ship the crew
   // has no contract on (which otherwise renders an empty/wrong card). Future-only legs are ignored.
   const schedEff = {};
-  for (const h of SHIP_HISTORY) {
-    if (!h.ours || !h.sc || !h.on || !h.off) continue;
-    const isCur = h.on <= today && today <= h.off, isPast = h.off < today, e = schedEff[h.sc];
-    if (isCur) { if (!e || !e.cur || h.off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: true }; }
-    else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: false }; else if (!e.cur && h.off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off: h.off, cur: false }; }
+  // Live board legs first (ship_leg + crew aboard per the relief board). The frozen SHIP_HISTORY
+  // constant only backfills crew the live source knows nothing about — a stale July leg must never
+  // out-vote a current assignment for the same crew.
+  const histScs = new Set(); for (const h of HIST) if (h && h.ours && h.sc && h.is_current) histScs.add(h.sc);
+  const schedRows = HIST.concat(SHIP_HISTORY.filter((h) => !(h.ours && h.sc && histScs.has(h.sc))));
+  for (const h of schedRows) {
+    if (!h.ours || !h.sc || !h.on) continue;
+    const off = h.off || "9999"; // TBA sign-off = still aboard (same rule as apiCrew / deriveStatus)
+    const isCur = h.on <= today && today <= off, isPast = off < today, e = schedEff[h.sc];
+    if (isCur) { if (!e || !e.cur || off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: true }; }
+    else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; else if (!e.cur && off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; }
   }
   const promByShip = {}, shoreside = [], pool = [];
   for (const c of crewRows) {
