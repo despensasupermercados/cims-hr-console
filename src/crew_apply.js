@@ -8,7 +8,16 @@
 //       become sync_conflict flags only. (Allowed on a NEW-crew insert: no allocation exists yet.)
 //   D2  cert fields default 'accept'.
 //   D3  override_conflict + status default 'keep'; kept OR accepted, both write an audit
-//       sync_conflict row (resolved=1) so we can prove Rita saw it.
+//       sync_conflict row (resolved=1) so we can prove Rita saw it. An ACCEPTED override
+//       conflict also CLEARS that one field on crew_override (overrideClears): the override
+//       merge (override.js) makes any non-empty crew_override field win at read time, so
+//       without the clear the accepted TDG value lands on crew and stays invisible — which is
+//       exactly what happened to SC-0038392 (TDG said Inactive; the manual Earmarked kept winning).
+//       The audit row records the MANUAL value being replaced (old_value), and the clear carries
+//       it as `expect` so the route only NULLs the value Rita actually reviewed. For `status`,
+//       clearing the override re-enables schedule derivation (crewStatus); crew.status is the
+//       fallback when the board has no dated leg, so the card may show the derived status rather
+//       than the file's literal value. That is by design (§11: status comes from the schedule).
 //   D4  departed default 'flag' (open sync_conflict, resolved=0); never a delete.
 //   D5  minor auto-applies regardless of decision.
 
@@ -20,6 +29,7 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   const crewUpdates = [];   // { agency_id, field, value }
   const newCrew = [];       // full mapped field object
   const conflicts = [];     // { agency_id, field, old_value, new_value, resolved }
+  const overrideClears = []; // { agency_id, field, expect } — crew_override field to NULL (accepted D3 only)
 
   // cert (incl. name/email/rank) — default accept
   for (const it of g.cert || []) {
@@ -34,9 +44,12 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   }
   // override conflict — default keep (protect manual edit); always audit
   for (const it of g.override_conflict || []) {
-    if (dec(key(it.agency_id, it.field), "keep") === "accept")
+    const manual = it.override_value !== undefined ? it.override_value : it.old;
+    if (dec(key(it.agency_id, it.field), "keep") === "accept") {
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
-    conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: it.old, new_value: it.new, resolved: 1 });
+      overrideClears.push({ agency_id: it.agency_id, field: it.field, expect: manual ?? null });
+    }
+    conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: manual ?? null, new_value: it.new, resolved: 1 });
   }
   // ship flag — NEVER a crew write; open to-do unless dismissed
   for (const it of g.ship_flag || []) {
@@ -73,5 +86,5 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     run_at: meta.run_at ?? null,
   };
 
-  return { crewUpdates: safeUpdates, newCrew, conflicts, importRun, droppedShipWrites };
+  return { crewUpdates: safeUpdates, newCrew, conflicts, overrideClears, importRun, droppedShipWrites };
 }

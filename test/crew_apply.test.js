@@ -47,9 +47,30 @@ test("D3 override defaults KEEP: no base write, but an audit conflict is logged"
   assert.ok(audit && audit.resolved === 1);
 });
 
-test("D3 override explicitly accepted -> base write + audit", () => {
+test("D3 override explicitly accepted -> base write + audit + that override field cleared", () => {
   const plan = buildApplyPlan(sampleReview(), { "SC-1:phone": "accept" });
   assert.ok(plan.crewUpdates.some(u => u.agency_id === "SC-1" && u.field === "phone" && u.value === "+63911"));
+  // Without the clear, override.js keeps the manual value winning and the accept is invisible.
+  assert.deepEqual(plan.overrideClears, [{ agency_id: "SC-1", field: "phone", expect: "+63900" }]);
+  const audit = plan.conflicts.find(c => c.agency_id === "SC-1" && c.field === "phone");
+  assert.equal(audit.old_value, "+63900", "audit records the manual value being replaced");
+});
+
+test("D3 override kept -> the override field is NOT cleared", () => {
+  const plan = buildApplyPlan(sampleReview(), {});
+  assert.deepEqual(plan.overrideClears, []);
+});
+
+// 2026-09-04: SC-0038392 — TDG said Inactive three weeks running; crew_override.status held
+// 'Earmarked'; accepting wrote crew.status but the card never changed. Pin the whole path.
+test("status under a live override: accept clears crew_override.status so the card can change", () => {
+  const review = { groups: { override_conflict: [{ agency_id: "SC-0038392", field: "status", old: "Earmarked", base: "On board", new: "Inactive", override_value: "Earmarked" }] } };
+  const plan = buildApplyPlan(review, { "SC-0038392:status": "accept" });
+  assert.ok(plan.crewUpdates.some(u => u.agency_id === "SC-0038392" && u.field === "status" && u.value === "Inactive"));
+  assert.deepEqual(plan.overrideClears, [{ agency_id: "SC-0038392", field: "status", expect: "Earmarked" }]);
+  const audit = plan.conflicts.find(c => c.agency_id === "SC-0038392");
+  assert.equal(audit.old_value, "Earmarked", "the manual value, not the base row, is what the audit names");
+  assert.ok(plan.conflicts.some(c => c.agency_id === "SC-0038392" && c.field === "status" && c.resolved === 1), "audited");
 });
 
 test("status defaults keep (no write) but audited", () => {

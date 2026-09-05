@@ -26,7 +26,10 @@ TDG's file lags Rita's real moves and is often wrong on ship placement — so it
 ## D. Locked decisions
 - **D1** Import NEVER writes ship allocation → mismatch becomes a flag resolved on the board. No "adopt agency" path.
 - **D2** Certificates default Accept; an expiry moving **earlier** is flagged (still one click).
-- **D3** A change to a field with a **live** crew_override defaults Keep; if accepted, logged.
+- **D3** A change to a field with a **live** crew_override defaults Keep; if accepted, logged (audit row
+  records the manual value replaced) AND that one crew_override field is cleared — otherwise the manual
+  value keeps winning on read and the accept never reaches the card (found 2026-09-05, SC-0038392).
+  The clear is bound to the reviewed value; a manual edit made after staging is left alone.
 - **D4** Nothing auto-deletes; crew absent from file → flagged for review.
 - **D5** Selective friction: only ship / status / override / earlier-expiry demand attention; minor hygiene auto-applies. (An approval that fires on every trivial row trains rubber-stamping.)
 

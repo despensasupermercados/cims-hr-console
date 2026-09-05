@@ -273,7 +273,7 @@ function render(){
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
   g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","dismiss"],["Keep board","Dismiss"])+'</div>';});h+='</div>';}
  if(g.override_conflict.length||g.critical.length){h+='<div class="sec"><h2>&#9679; Needs your decision</h2><div class="d">Fields you set by hand, and status changes. Defaults to keeping yours.</div>';
-  g.override_conflict.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,badge("&#9995; your manual entry","t-red"))+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept file","Keep mine"])+'</div>';});
+  g.override_conflict.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,badge("&#9995; your manual entry","t-red"))+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept file (replaces my entry)","Keep mine"])+'</div>';});
   g.critical.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,"")+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept","Keep"])+'</div>';});h+='</div>';}
  if(g.cert.length){h+='<div class="sec"><h2>&#9677; Certificate updates from TDG</h2><div class="d">Accepted by default — TDG maintains these. An expiry moving earlier is flagged.</div>';
   g.cert.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,it.earlier?badge("&#9888; moved earlier","t-amber"):badge("renewed","t-green"))+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
@@ -324,7 +324,7 @@ async function apply(){
  var res;try{res=await fetch("/api/crew/import/apply",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();});}catch(e){res={ok:false,error:"network"};}
  if(!res.ok){$("cart").innerHTML='<div class="ch"><div class="h">Apply failed</div></div><div class="foot"><div class="msg">'+(res.error==="already_processed"?"Already processed.":esc(res.error))+'</div></div>';return;}
  $("work").style.display="none";
- $("msg").innerHTML='<div class="msg">&#10003; Applied '+res.applied+' changes · added '+res.added+' crew · '+res.open_conflicts+' flags for the board · logged to import history. Nothing else was touched.</div>';
+ $("msg").innerHTML='<div class="msg">&#10003; Applied '+res.applied+' changes · added '+res.added+' crew · '+res.open_conflicts+' flags for the board · logged to import history. '+(res.override_cleared?res.override_cleared+' manual entr'+(res.override_cleared===1?'y':'ies')+' replaced by the file'+(res.override_skipped?' ('+res.override_skipped+' changed since review, left alone)':'')+'.':'Nothing else was touched.')+'</div>';
 }
 function reset(){STAGE=null;DEC={};PENDING=null;$("band").innerHTML="";$("work").style.display="none";$("msg").innerHTML="";$("f").value="";}
 function discard(){reset();$("msg").innerHTML='<div class="msg">Discarded. Nothing was saved.</div>';}

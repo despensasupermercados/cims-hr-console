@@ -1,5 +1,7 @@
 // Manual-override merge — pure, testable. crew_override holds per-field manual edits that ALWAYS
-// win over the imported base crew row (imports never touch crew_override). This is the single
+// win over the imported base crew row. The import never writes crew_override EXCEPT the one case
+// Rita ratifies: an accepted override conflict (D3) clears that single field so the ratified TDG
+// value can show (crew_import_routes.js; audited in sync_conflict). This is the single
 // merge used by every crew read. baseline_count is money: 0 is a valid override (Jr PS) and must
 // win; an empty string is treated as "not set" and never clobbers the base.
 

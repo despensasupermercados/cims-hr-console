@@ -78,14 +78,43 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
     new: [], departed: [], needs_status: [],
   };
 
+  const seen = new Set(); // agency:field already raised
   for (const ch of diff.change || []) {
     const ex = existingByAgency[ch.agency_id] || {};
     const inc = incomingByAgency[ch.agency_id] || {};
-    const liveOvr = liveOverrideFields(overrideByAgency[ch.agency_id]);
+    const ov = overrideByAgency[ch.agency_id];
+    const liveOvr = liveOverrideFields(ov);
     for (const field of ch.changed) {
       const c = classifyField(field, ex[field] ?? null, inc[field] ?? null, liveOvr);
       const item = { agency_id: ch.agency_id, field, old: ex[field] ?? null, new: inc[field] ?? null, ...c };
+      if (c.tier === TIER.OVERRIDE) {
+        // What Rita sees on the card, and what an accept replaces, is the MANUAL value — not the
+        // base row the file is diffed against. Carry it so the card, the audit row and the clear
+        // all name the value actually being superseded (2026-09-05 review).
+        item.override_value = ov[field];
+        item.base = item.old;
+        item.old = ov[field];
+      }
+      seen.add(ch.agency_id + ":" + field);
       (c.auto ? groups.minor : groups[c.tier]).push(item);
+    }
+  }
+  // diffCrew compares the file with the BASE row. When the base already equals the file but a
+  // live manual override says otherwise (e.g. an earlier accept wrote the base while the override
+  // kept winning), no change is detected and the disagreement would never surface. Raise it here
+  // so Rita decides. Ship allocation is excluded: it is never written by the import (D1).
+  for (const [id, inc] of Object.entries(incomingByAgency)) {
+    const ex = existingByAgency[id];
+    if (!ex) continue;
+    const ov = overrideByAgency[id];
+    for (const field of liveOverrideFields(ov)) {
+      if (field === "vessel_observed" || seen.has(id + ":" + field)) continue;
+      const nv = inc[field];
+      if (nv == null || nv === "") continue;
+      if (String(nv) === String(ov[field])) continue;
+      const c = classifyField(field, ex[field] ?? null, nv, new Set([field]));
+      groups[TIER.OVERRIDE].push({ agency_id: id, field, old: ov[field], base: ex[field] ?? null, new: nv, override_value: ov[field], ...c });
+      seen.add(id + ":" + field);
     }
   }
 

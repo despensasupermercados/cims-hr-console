@@ -196,7 +196,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session); if (ci) return ci; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -3285,7 +3285,7 @@ function cimsRender(){
   if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
     g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});L+='</div>';}
   if(g.override_conflict.length||g.critical.length){L+='<div class=isec><h3>&#9679; Needs your decision</h3><div class=d>A field you set by hand, and status changes. Defaults to keeping yours.</div>';
-    g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file","Keep mine"));});
+    g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file (replaces my entry)","Keep mine"));});
     g.critical.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});L+='</div>';}
   if(g.cert.length){L+='<div class=isec><h3>&#9677; Certificate updates from TDG</h3><div class=d>Accepted by default &mdash; TDG maintains these. An expiry moving earlier is flagged.</div>';
     g.cert.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,it.earlier?impTag("&#9888; moved earlier","amber"):impTag("renewed","green"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold",true));});L+='</div>';}
@@ -3337,7 +3337,7 @@ async function cimsApply(){
   var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
-  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged to import history. Nothing else was touched.</div>';
+  $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; Applied '+res.applied+' changes &middot; added '+res.added+' crew &middot; '+res.open_conflicts+' flags for the board &middot; logged to import history. '+(res.override_cleared?res.override_cleared+' manual entr'+(res.override_cleared===1?'y':'ies')+' replaced by the file'+(res.override_skipped?' ('+res.override_skipped+' changed since review, left alone)':'')+'.':'Nothing else was touched.')+'</div>';
   STAGE=null;DEC={};IMPROWS=null;
 }
 // [removed 2026-07-22] previewImport()/applyImport() deleted — dead code that POSTed to the
