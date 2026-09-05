@@ -1,7 +1,8 @@
 // P3.13 audit H6 — the reseed landmine (verified read-only on prod 2026-09-04).
 //
 // keyman_contract3 on prod: 47 hand-cleaned rows, all seq=1, sign_on 2025-10..2026-06.
-// The bundled KEYMAN_CONTRACTS: 209 rows, seq 1..9, 2022-era. The old ensureKeyman rule
+// The bundled KEYMAN_CONTRACTS was a 209-row 2022-era transcription (since 2026-09-05 it is a
+// dated snapshot of prod that can still lag — the rule below is unchanged). The old ensureKeyman rule
 // ("reseed on version mismatch" + prune rows not in the constant) would have replaced the
 // 47 clean rows with 2022 legs on the next KEYMAN_VERSION bump — silently breaking sbm's
 // manual invite (a 2022 sign-off), the crew card, the statement PDF and the days-worked
