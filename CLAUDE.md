@@ -92,6 +92,10 @@ dated card on the crew. Hard rules:
   consistently in apiCrew, apiRotation, AND apiDashboard. Don't reintroduce a raw-`crew.status` count in
   one view only (the donut/tiles must use the same derived set). Manual `crew_override.status` and the
   `retired` flag win over derivation. Status does NOT come from the historical Contract Counter.
+  The ONE schedule is `boardLegs(env)` = current `ship_leg` rows + crew aboard per the relief board
+  (in-force `assignment` rows, `ship_leg_source.boardLegsFromDb`, 2026-09-04). Never call
+  `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
+  crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
 - **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
   type=checkbox style="pointer-events:none">`. Native label-wrapped checkboxes double-fire per tap
   (one flip cancels the other). Don't add a bare clickable checkbox.
@@ -99,7 +103,10 @@ dated card on the crew. Hard rules:
   imports COALESCE onto the base row and would clobber a manual edit. The card pipeline must carry BOTH
   `embark` and `disembark` (a dropped field = the port silently never shows).
 - **Keyman import refreshes matched crew only** and re-pins `KEYMAN_VERSION` so the bundled self-seed
-  (`ensureKeyman`) can't overwrite it. Crew bridge is by name (km ≠ SC id).
+  (`ensureKeyman`) can't overwrite it. Crew bridge is by name (km ≠ SC id). The self-seed only ever
+  seeds an EMPTY `keyman_contract3` (2026-09-04, P3.13 H6): a version bump on a populated table is
+  refused and logged, never applied — the bundled constant (209 rows, 2022-era) no longer matches prod
+  (47 clean rows, all seq=1). Pinned by `test/keyman_seed_guard.test.js`.
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by

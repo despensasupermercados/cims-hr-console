@@ -21,16 +21,36 @@ function body(name) {
   return rest.slice(0, j === -1 ? undefined : j);
 }
 
+// Sequential `await env.DB.prepare` statements each function may keep (post-write read-backs etc.).
+// Lowering a number is fine; raising one is a perf regression and needs a reason in the PR.
+const SEQ_READ_ALLOW = {
+  "async function apiDashboard(": 0, "async function apiCrew(": 0, "async function rotationSections(": 0,
+  "async function apiCrewOne(": 0, "async function apiRotationCrew(": 0, "async function apiFeedbackBoard(": 0, "async function apiScoreQueue(": 0,
+};
+
 test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), not sequentially", () => {
-  for (const fn of ["async function apiDashboard(", "async function apiCrew(", "async function rotationSections("]) {
+  for (const fn of [
+    "async function apiDashboard(", "async function apiCrew(", "async function rotationSections(",
+    // 2026-09: the per-crew card/rotation reads and the feedback board/queue were still sequential.
+    "async function apiCrewOne(", "async function apiRotationCrew(", "async function apiFeedbackBoard(", "async function apiScoreQueue(",
+  ]) {
     const b = body(fn);
     assert.match(b, /await Promise\.all\(\[/, fn + " lost its concurrent query wave — each sequential `await env.DB` re-adds a full Worker->D1 round trip on the hot path");
+    // The wave must be the READ wave, not just the ensure wave: an `await Promise.all([ensureX(env), ...])`
+    // alone satisfied the line above while the reads went back to sequential (2026-09-05 review).
+    assert.match(b, /Promise\.all\(\[[^\]]*env\.DB\.prepare\(/, fn + " has a Promise.all but its D1 reads are not inside it");
+    const seq = (b.match(/^\s*(?:const|let|var)?\s*[\w\[\], {}]*=?\s*await env\.DB\.prepare\(/mg) || []).length;
+    assert.ok(seq <= SEQ_READ_ALLOW[fn], fn + " has " + seq + " sequential `await env.DB.prepare` statements (allowed " + SEQ_READ_ALLOW[fn] + ")");
   }
 });
 
 test("ensure* schema guards stay memoized (once per isolate), not per-request DDL", () => {
   assert.match(SRC, /function memoEnsure\(/, "memoEnsure helper removed");
-  for (const g of ["ensureKeyman", "ensureTravel", "ensureCrewExtras", "ensureReady", "ensureContractEdit"]) {
+  for (const g of [
+    "ensureKeyman", "ensureTravel", "ensureCrewExtras", "ensureReady", "ensureContractEdit",
+    // 2026-09: these four were still raw — DDL on every feedback/intel/Maria/login request.
+    "ensureUsers", "ensureMariaKB", "ensureFb", "ensureIntel",
+  ]) {
     assert.match(SRC, new RegExp("const " + g + " = memoEnsure\\("), g + " is no longer memoized — its CREATE/ALTER DDL would run on every request again");
   }
 });
