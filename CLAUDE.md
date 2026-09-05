@@ -103,7 +103,10 @@ dated card on the crew. Hard rules:
   imports COALESCE onto the base row and would clobber a manual edit. The card pipeline must carry BOTH
   `embark` and `disembark` (a dropped field = the port silently never shows).
 - **Keyman import refreshes matched crew only** and re-pins `KEYMAN_VERSION` so the bundled self-seed
-  (`ensureKeyman`) can't overwrite it. Crew bridge is by name (km ≠ SC id).
+  (`ensureKeyman`) can't overwrite it. Crew bridge is by name (km ≠ SC id). The self-seed only ever
+  seeds an EMPTY `keyman_contract3` (2026-09-04, P3.13 H6): a version bump on a populated table is
+  refused and logged, never applied — the bundled constant (209 rows, 2022-era) no longer matches prod
+  (47 clean rows, all seq=1). Pinned by `test/keyman_seed_guard.test.js`.
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
