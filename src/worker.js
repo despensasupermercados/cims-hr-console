@@ -1661,13 +1661,21 @@ async function apiBonusCrew(env, url) {
   const td = TODAY();
   let current = null, bestPast = null, bestFut = null;
   for (const h of HIST) {
-    if (!h.ours || h.sc !== cr.agency_id || !h.off) continue;
-    if (h.on && h.on <= td && h.off >= td) { if (!current || h.off > current.off) current = h; } // contract spanning today
-    else if (h.off < td) { if (!bestPast || h.off > bestPast.off) bestPast = h; }                  // last completed
-    else { if (!bestFut || h.off < bestFut.off) bestFut = h; }                                       // next one
+    if (!h.ours || h.sc !== cr.agency_id || !h.on) continue;
+    const off = h.off || "9999"; // TBA sign-off = still aboard (same rule as the board and deriveStatus)
+    if (h.on <= td && off >= td) { if (!current || off > (current.off || "9999")) current = h; } // contract spanning today
+    else if (off < td) { if (!bestPast || off > bestPast.off) bestPast = h; }                    // last completed
+    else { if (!bestFut || off < (bestFut.off || "9999")) bestFut = h; }                          // next one
   }
   const sched = current || bestPast || bestFut;  // the contract being scored: current first, else most-recent
-  let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null;
+  let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null; // TBA off stays blank for manual entry
+  // Already committed for this contract? Prefill the COMMITTED span, not the board's (planned vs
+  // actual drift, snapshot vs grid). The commit path's double-commit guard is an exact (start,end)
+  // match; a shifted default would slip past it and pay twice. Display only — the money path is untouched.
+  if (lastLeg && lastLeg.on) {
+    const hit = (outs.results || []).find(o => o.span_start && o.span_end && lastLeg.on <= o.span_end && (lastLeg.off || "9999") >= o.span_start);
+    if (hit) lastLeg = { on: hit.span_start, off: hit.span_end, ship: lastLeg.ship, committed: hit.id };
+  }
   if (!lastLeg) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
@@ -1950,10 +1958,11 @@ async function apiScoreQueue(env, url) {
   const today = TODAY();
   const days = Math.max(1, Math.min(120, parseInt(url.searchParams.get("days")) || 14));
   // PERF (2026-09): three independent reads -> one wave.
-  const [crewRes, reqsRes, respRes] = await Promise.all([
+  const [crewRes, reqsRes, respRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all(),
     env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all(),
+    boardLegs(env), // the LIVE board schedule, in the same wave (§12) — see the note below
   ]);
   const crewRows = crewRes.results;
   const byId = {}; for (const c of crewRows) byId[c.agency_id] = c;
@@ -1966,7 +1975,7 @@ async function apiScoreQueue(env, url) {
   // board), which carries forward-looking sign-off dates + ship. The Contract Counter is completed-
   // contracts only (no future dates), so it can never populate "signing off next 14 days". Until
   // 2026-09-04 this loop read the frozen SHIP_HISTORY constant — a July snapshot (§11: one schedule).
-  const HIST = await boardLegs(env);
+  // "Signed off recently" includes contracts ENDED via the relief board (boardLegs' trailing arm).
   const recBy = {}, upBy = {};
   for (const h of HIST) {
     if (!h.ours || !h.sc || !h.off || !byId[h.sc]) continue;
