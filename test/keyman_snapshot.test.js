@@ -17,17 +17,20 @@ test("keyman_data.js is a dated production snapshot and KEYMAN_VERSION carries t
   assert.equal(v[1], m[1], "a regenerated snapshot must bump KEYMAN_VERSION to its date");
 });
 
-test("every bundled row is well-formed and seq numbering is contiguous per crew", () => {
+test("every bundled row is well-formed and (sc, seq) is unique — the table's primary key", () => {
   assert.ok(KEYMAN_CONTRACTS.length > 0);
-  const bySc = {};
+  const seen = new Set();
   for (const r of KEYMAN_CONTRACTS) {
     assert.match(r.sc, /^SC-\d{7}$/, "sc " + r.sc);
-    assert.ok(r.ship && typeof r.ship === "string");
+    assert.ok(Number.isInteger(r.seq) && r.seq >= 1, "seq " + r.seq);
+    if (r.ship != null) assert.ok(typeof r.ship === "string" && r.ship.length, "ship " + r.ship);
     assert.match(r.on, /^\d{4}-\d{2}-\d{2}$/, "sign-on " + r.on);
     for (const k of ["proj", "act"]) if (r[k] != null) assert.match(r[k], /^\d{4}-\d{2}-\d{2}$/, k + " " + r[k]);
-    (bySc[r.sc] = bySc[r.sc] || []).push(r.seq);
+    const k = r.sc + "|" + r.seq;
+    assert.ok(!seen.has(k), "duplicate (sc, seq) " + k);
+    seen.add(k);
   }
-  for (const [sc, seqs] of Object.entries(bySc)) assert.deepEqual(seqs, seqs.map((_, i) => i + 1), "seq gap for " + sc);
+  // seq gaps are LEGAL: a leg whose sign-on was unreadable is skipped (and reported) by the importer.
 });
 
 test("the generator is deterministic and accepts both a bare array and the wrangler --json envelope", () => {
@@ -37,5 +40,6 @@ test("the generator is deterministic and accepts both a bare array and the wrang
   const b = renderConstant(rowsFromExport(JSON.stringify([{ results: rows, success: true }])), "2026-09-05");
   assert.equal(a, b);
   assert.match(a, /^\{sc:"SC-0000001",km:"12",ship:"Apex",st:"Onboard",seq:1,on:"2026-01-01",proj:"2026-07-01",act:"2026-06-30"\},$/m, "sorted by sc, seq; all 8 fields");
-  assert.throws(() => rowsFromExport(JSON.stringify([{ sc: "SC-1", seq: 1 }])), /missing ship/);
+  assert.throws(() => rowsFromExport(JSON.stringify([{ sc: "SC-1", seq: 1 }])), /missing sign_on/);
+  assert.equal(rowsFromExport(JSON.stringify([{ sc: "SC-1", seq: 2, sign_on: "2026-01-01", ship: "" }]))[0].ship, null, "a blank ship is legal (nullable in prod)");
 });

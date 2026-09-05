@@ -15,15 +15,14 @@
 // The input may be the wrangler --json envelope ([{results:[...]}]) or a bare array of rows.
 import { readFileSync, writeFileSync } from "node:fs";
 
-const COLS = ["sc", "km", "ship", "st", "seq", "sign_on", "proj_off", "act_off"];
-
 export function rowsFromExport(text) {
   const j = JSON.parse(text);
   const rows = Array.isArray(j) && j.length && j[0] && Array.isArray(j[0].results) ? j[0].results : j;
   if (!Array.isArray(rows)) throw new Error("expected a JSON array of rows or a wrangler --json envelope");
   return rows.map((r) => {
-    for (const c of ["sc", "ship", "seq", "sign_on"]) if (r[c] == null || r[c] === "") throw new Error("row missing " + c + ": " + JSON.stringify(r));
-    return { sc: String(r.sc), km: r.km == null ? null : String(r.km), ship: String(r.ship), st: r.st == null ? null : String(r.st),
+    // Only the PK and the column every reader filters on are required; ship/km/st are nullable in prod.
+    for (const c of ["sc", "seq", "sign_on"]) if (r[c] == null || r[c] === "") throw new Error("row missing " + c + ": " + JSON.stringify(r));
+    return { sc: String(r.sc), km: r.km == null ? null : String(r.km), ship: r.ship == null || r.ship === "" ? null : String(r.ship), st: r.st == null ? null : String(r.st),
       seq: Number(r.seq), on: String(r.sign_on), proj: r.proj_off == null ? null : String(r.proj_off), act: r.act_off == null ? null : String(r.act_off) };
   }).sort((a, b) => (a.sc < b.sc ? -1 : a.sc > b.sc ? 1 : a.seq - b.seq));
 }

@@ -801,12 +801,13 @@ async function logData(env, source, rows, status) {
 // matched crew and re-pins this version (CLAUDE.md §11). A bare version bump must never overwrite
 // live rows.
 //
-// Why (P3.13 audit H6 — verified read-only on prod 2026-09-04): prod holds 47 hand-cleaned rows,
-// all seq=1, sign_on 2025-10..2026-06. The bundled constant is 209 rows, seq 1..9, 2022-era. The
-// previous rule ("reseed on version mismatch" + prune rows not in the constant) would have replaced
-// the 47 clean rows with 2022 legs on the next bump: sbm's manual invite would resolve a 2022
-// sign-off, and statements, crew cards and the days-worked export would read history that no longer
-// exists. Money-adjacent and silent — so a populated table now refuses the bundled reseed.
+// Why (P3.13 audit H6 — verified read-only on prod 2026-09-04): the bundled constant was a 2022-era
+// spreadsheet transcription (209 rows) while prod held 47 clean rows; the previous rule ("reseed on
+// version mismatch" + prune rows not in the constant) would have replaced live history on the next
+// bump — sbm's manual invite resolving a 2022 sign-off, statements and the days-worked export reading
+// legs that no longer exist. Money-adjacent and silent. Since 2026-09-05 the constant is a DATED
+// SNAPSHOT of prod (scripts/keyman_snapshot.mjs) — still a copy that can lag, so the rule stands:
+// a populated table refuses the bundled reseed.
 const KEYMAN_VERSION = "2026-09-05-cc-v4"; // = the snapshot date in src/keyman_data.js (scripts/keyman_snapshot.mjs)
 // PERF: once-per-isolate memo for the ensure* schema guards. Before this, every hot request re-ran
 // CREATE TABLE / ALTER TABLE / seed-version checks — each one a full Worker->D1 round trip on the
