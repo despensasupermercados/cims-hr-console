@@ -82,7 +82,11 @@ test("accepted override conflict clears ONLY that crew_override field (status) a
   const st = env.DB._batched;
   const clr = st.find(s => /UPDATE crew_override SET status=NULL/i.test(s.sql));
   assert.ok(clr, "override.status cleared");
-  assert.equal(clr.args[1], "SC-1");
+  assert.match(clr.sql, /WHERE agency_id=\? AND status IS \?/, "clear is bound to the reviewed manual value");
+  assert.deepEqual(clr.args.slice(1), ["SC-1", "Earmarked"]);
+  const audit = st.find(s => /INSERT INTO sync_conflict/i.test(s.sql) && s.args[3] === "status");
+  assert.equal(audit.args[4], "Earmarked", "audit old_value is the manual value being replaced");
+  assert.equal(stage.review.groups.override_conflict[0].old, "Earmarked", "the card shows the manual value as 'old'");
   assert.ok(st.some(s => /UPDATE crew SET status=\?/i.test(s.sql) && s.args[0] === "Inactive"), "base status written");
   assert.equal(st.filter(s => /UPDATE crew_override/i.test(s.sql)).length, 1, "nothing else on the override row is touched");
 });
@@ -95,6 +99,42 @@ test("kept override conflict (the default) leaves crew_override untouched", asyn
   assert.equal(body.override_cleared, 0);
   assert.equal(env.DB._batched.some(s => /UPDATE crew_override/i.test(s.sql)), false);
   assert.equal(env.DB._batched.some(s => /UPDATE crew SET status/i.test(s.sql)), false);
+});
+
+// The base row may already equal the file (an earlier accept wrote it) while the override still
+// disagrees: diffCrew sees no change, yet the card still shows the manual value. Must be raised.
+test("override disagrees with the file while the base already matches: still an override conflict", async () => {
+  const existing = [{ agency_id: "SC-1", first_name: "Jomar", last_name: "Dela Cruz", status: "Inactive", vessel_observed: "Celebrity Edge" }];
+  const env = { DB: fakeDB({ existing, overrides: OVR }) };
+  const stage = await (await apiCrewImportStage(req({ rows: OVR_ROWS, file_hash: "h5" }), env)).json();
+  const it = stage.review.groups.override_conflict.find(x => x.agency_id === "SC-1" && x.field === "status");
+  assert.ok(it, "raised even though crew.status already equals the file");
+  assert.equal(it.old, "Earmarked");
+  assert.equal(it.new, "Inactive");
+});
+
+test("a clear that matched no row (manual value changed since review) is reported as skipped, not cleared", async () => {
+  const env = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
+  env.DB.batch = async (stmts) => { env.DB._batched.push(...stmts); return stmts.map(s => ({ success: true, meta: { changes: /crew_override/.test(s.sql) ? 0 : 1 } })); };
+  const stage = await (await apiCrewImportStage(req({ rows: OVR_ROWS, file_hash: "h6" }), env)).json();
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: { "SC-1:status": "accept" }, file_hash: "h6", run_by: "Rita" }), env)).json();
+  assert.equal(body.override_cleared, 0);
+  assert.equal(body.override_skipped, 1);
+});
+
+test("apply is MONEY_USERS only; stage is any session", async () => {
+  const env = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
+  const url = { pathname: "/api/crew/import/apply" };
+  const body = { review: { groups: {} }, decisions: {}, file_hash: "h7" };
+  const denied = await handleCrewImport({ ...req(body), method: "POST" }, url, env, { email: "someone@dg3.com" });
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error, "money_users_only");
+  const none = await handleCrewImport({ ...req(body), method: "POST" }, url, env, null);
+  assert.equal(none.status, 403);
+  const ok = await handleCrewImport({ ...req(body), method: "POST" }, url, env, { email: "Rita.Berenyi@dg3.com" });
+  assert.equal(ok.status, 200);
+  const staged = await handleCrewImport({ ...req({ rows: OVR_ROWS, file_hash: "h8" }), method: "POST" }, { pathname: "/api/crew/import/stage" }, env, { email: "someone@dg3.com" });
+  assert.equal((await staged.json()).ok, true);
 });
 
 test("apply is idempotent by file hash", async () => {

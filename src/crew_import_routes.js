@@ -15,6 +15,7 @@ import { buildReview } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
 import { OVR_FIELDS } from "./override.js";
+import { isMoneyUser } from "./policy.js";
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -95,11 +96,15 @@ export async function apiCrewImportApply(request, env) {
   }
   // D3 accepted: the manual value is superseded by the ratified TDG value. Clear ONLY that field
   // (the rest of the override row — retired flag, notes, other fields — stays), else the override
-  // keeps winning at read time and the accept is a no-op on the card.
-  for (const o of plan.overrideClears || []) {
-    if (!OVR_CLEARABLE.has(o.field)) continue;
-    stmts.push(env.DB.prepare(`UPDATE crew_override SET ${o.field}=NULL, updated_at=? WHERE agency_id=?`)
-      .bind(run_at, o.agency_id));
+  // keeps winning at read time and the accept is a no-op on the card. The clear is bound to the
+  // value Rita reviewed (`IS ?`): if someone changed the card between stage and apply, that newer
+  // manual value is left alone and reported as skipped, never wiped unseen.
+  const clears = (plan.overrideClears || []).filter(o => OVR_CLEARABLE.has(o.field));
+  const clearIdx = [];
+  for (const o of clears) {
+    clearIdx.push(stmts.length);
+    stmts.push(env.DB.prepare(`UPDATE crew_override SET ${o.field}=NULL, updated_at=? WHERE agency_id=? AND ${o.field} IS ?`)
+      .bind(run_at, o.agency_id, o.expect ?? null));
   }
   for (const n of plan.newCrew) {
     const vals = INSERT_COLS.map(c =>
@@ -115,22 +120,29 @@ export async function apiCrewImportApply(request, env) {
       .bind(crypto.randomUUID(), importRunId, c.agency_id, c.field, str(c.old_value), str(c.new_value), c.resolved, run_at));
   }
 
-  await env.DB.batch(stmts);
+  const results = await env.DB.batch(stmts);
+  // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
+  let override_cleared = 0;
+  for (const i of clearIdx) { const m = results && results[i] && results[i].meta; if (!m || m.changes == null || m.changes > 0) override_cleared++; }
   return J({
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
-    override_cleared: (plan.overrideClears || []).filter(o => OVR_CLEARABLE.has(o.field)).length,
+    override_cleared, override_skipped: clears.length - override_cleared,
     open_conflicts: plan.importRun.conflicts, droppedShipWrites: plan.droppedShipWrites,
   });
 }
 
 // Router — mirrors relief_api.handleRelief(request, url, env): returns a Response or null.
 // worker.js delegates to this exactly like it does handleRelief (same session gate applies).
-// NOTE: /apply mutates crew — restrict to MONEY_USERS (Miguel + Rita) at the worker gate.
-export async function handleCrewImport(request, url, env) {
+// /apply mutates crew AND (on an accepted D3) crew_override — MONEY_USERS only (Miguel + Rita).
+// Any signed-in user may view the page and stage (stage writes nothing).
+export async function handleCrewImport(request, url, env, session) {
   const p = url.pathname;
   if (p === "/api/crew/import" && request.method === "GET") return crewImportPage();
   if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env);
-  if (p === "/api/crew/import/apply" && request.method === "POST") return apiCrewImportApply(request, env);
+  if (p === "/api/crew/import/apply" && request.method === "POST") {
+    if (!isMoneyUser(session && session.email)) return J({ ok: false, error: "money_users_only" }, 403);
+    return apiCrewImportApply(request, env);
+  }
   return null;
 }
