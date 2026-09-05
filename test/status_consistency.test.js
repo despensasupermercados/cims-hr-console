@@ -42,6 +42,19 @@ test("rotationSections treats a TBA (null) sign-off as still aboard, like apiCre
   assert.match(b, /h\.is_current\) histScs\.add/, "only CURRENT live legs may block the SHIP_HISTORY backfill");
 });
 
+// 2026-09-05: the feedback board + scoring queue gated on the RAW imported crew.status — a crew the
+// board showed "On board" could sit on the feedback board as feedback-due. One rule, everywhere.
+test("feedback board + scoring queue derive status with crewStatus() over the live schedule, never raw crew.status", () => {
+  const st = body("async function loadFeedbackState(");
+  assert.match(st, /crewStatus\(c, ovm\[c\.agency_id\], sched\[c\.agency_id\], today\)/, "status must come from crewStatus over scheduleBySc(HIST)");
+  assert.match(st, /FROM crew_override/, "the manual status/retired override must be part of the rule");
+  const fb = body("async function apiFeedbackBoard(");
+  assert.doesNotMatch(fb, /DUE\[c\.status\]|c\.status in DUE/, "feedback board gates on raw crew.status again");
+  assert.doesNotMatch(fb, /FROM ship_leg/, "feedback board reads ship_leg directly again instead of the board schedule");
+  const sq = body("async function apiScoreQueue(");
+  assert.doesNotMatch(sq, /status: c\.status/, "scoring queue reports raw crew.status again");
+});
+
 test("boardLegs reads ship_leg AND the relief board's in-force assignments, in one wave", () => {
   const b = body("async function boardLegs(");
   assert.match(b, /Promise\.all\(\[/, "boardSource + boardLegsFromDb must fire together (one round trip)");
@@ -51,12 +64,13 @@ test("boardLegs reads ship_leg AND the relief board's in-force assignments, in o
 
 test("no route iterates the frozen constant directly: Score Card dates and the scoring queue read the live board", () => {
   assert.doesNotMatch(SRC, /for \(const h of SHIP_HISTORY\)/, "a route still loops over the July SHIP_HISTORY snapshot");
-  for (const fn of ["async function apiBonusCrew(", "async function apiScoreQueue("]) {
-    const b = body(fn);
-    assert.match(b, /boardLegs\(env\)/, fn + " must take the schedule from boardLegs(env)");
+  // apiScoreQueue takes its legs from loadFeedbackState (one wave shared with the feedback board).
+  for (const [fn, src] of [["async function apiBonusCrew(", "async function apiBonusCrew("], ["async function apiScoreQueue(", "async function loadFeedbackState("]]) {
+    const b = body(fn), w = body(src);
+    assert.match(w, /boardLegs\(env\)/, src + " must take the schedule from boardLegs(env)");
     assert.match(b, /for \(const h of HIST\)/, fn + " must consume the live legs (HIST)");
     assert.doesNotMatch(b, /SHIP_HISTORY/, fn + " must not touch the frozen constant at all");
-    assert.match(b, /Promise\.all\(\[[^\]]*boardLegs\(env\)/, fn + " must fetch boardLegs inside its read wave, not as an extra round trip (§12)");
+    assert.match(w, /Promise\.all\(\[[^\]]*boardLegs\(env\)/, src + " must fetch boardLegs inside its read wave, not as an extra round trip (§12)");
   }
 });
 
