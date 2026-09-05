@@ -4,14 +4,14 @@ name = "cims-hr-console"
 main = "src/worker.js"
 compatibility_date = "2025-05-01"
 
-# HOTFIX HOOK (2026-07-03): wrangler runs this before every bundle/deploy, no
-# matter how wrangler is invoked (Workers Builds, local, CI). Repairs the
-# autoToggleClick alert-string SyntaxError in src/worker.js and hard-verifies
-# every inline <script> parses. Idempotent no-op once the source is fixed --
-# then delete this [build] block, scripts/apply_hotfix.mjs, and the
-# "predeploy" entry in package.json.
+# DEPLOY GATE (2026-07-03 white-screen incident; patch retired 2026-09-04): wrangler runs
+# this before every bundle/deploy, no matter how wrangler is invoked (Workers Builds,
+# local, CI). It hard-verifies that every inline <script> the worker serves PARSES as
+# JavaScript and fails the build otherwise. The source-repair half of the old hook is
+# gone (the source has been fixed since July); test/client_script_syntax.test.js runs the
+# same function under `npm test`, so CI and the deploy hook cannot drift apart.
 [build]
-command = "node scripts/apply_hotfix.mjs"
+command = "node scripts/verify_client_scripts.mjs"
 
 # Weekly Seafarer Movements email recipient. The hourly cron (below) sends ONCE on
 # Monday 07:00 America/New_York to this address. Kept here (not the dashboard) so it

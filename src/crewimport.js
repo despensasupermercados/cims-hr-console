@@ -15,7 +15,25 @@ function pick(row, patterns) {
   return "";
 }
 
-export function normalizeDate(v) {
+// A real calendar date or null. Every branch below ends here, so an impossible date
+// (2034-23-09, 2027-02-30) can never be stored — the console read those as a MISSING document.
+function realDate(y, mo, da) {
+  const iso = `${y}-${String(mo).padStart(2, "0")}-${String(da).padStart(2, "0")}`;
+  const d = new Date(iso + "T00:00:00Z");
+  return !isNaN(d) && d.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
+// Numeric a/b/YYYY (optionally followed by a time, as xlsx->csv exports add " 0:00").
+const AB_YEAR = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s.*)?$/;
+// Does this raw cell PROVE day-first order? Only a first field > 12 can.
+export function looksDMY(v) {
+  const m = String(v == null ? "" : v).trim().match(AB_YEAR);
+  return !!m && +m[1] > 12 && +m[2] <= 12;
+}
+
+// opts.dmy: the ROW is known to be day-first (see mapRow) — read every a/b/YYYY cell as D/M.
+export function normalizeDate(v, opts) {
+  const dmy = !!(opts && opts.dmy);
   if (v == null || v === "") return null;
   if (typeof v === "number" && isFinite(v)) {
     // Excel serial date (epoch 1899-12-30)
@@ -24,11 +42,25 @@ export function normalizeDate(v) {
     return isNaN(d) ? null : d.toISOString().slice(0, 10);
   }
   const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  let m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/); // M/D/YYYY (US)
-  if (m) { const [_, a, b, y] = m; return `${y}-${String(a).padStart(2, "0")}-${String(b).padStart(2, "0")}`; }
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T].*)?$/);
+  if (m) return realDate(+m[1], +m[2], +m[3]); // ISO, validated too (a stored 2034-23-09 must not round-trip)
+  // Numeric a/b/YYYY. AdvancedQuery emits M/D/YYYY (US) for the PHL roster; the rows Rita hand-pastes
+  // for non-PHL crew (E1-format, e.g. Joseph, Purnama — 2026-08-25) arrive as D/M/YYYY. Before
+  // 2026-09-04 this branch assumed US and turned "23/09/2034" into "2034-23-09". Rule: the row's
+  // order is decided once in mapRow (any cell with a first field > 12 proves day-first for the whole
+  // row, so a sibling "05/03/2027" in the same row is read as 5 March, not 3 May); a lone ambiguous
+  // cell with both fields <= 12 stays US, the roster's own format.
+  m = s.match(AB_YEAR);
+  if (m) {
+    const a = +m[1], b = +m[2], y = +m[3];
+    let mo = a, da = b;                              // M/D/YYYY (US)
+    if (dmy || (a > 12 && b <= 12)) { mo = b; da = a; } // D/M/YYYY
+    return realDate(y, mo, da);
+  }
+  // Text forms ("23 Sep 2034"). Local components, not toISOString(): the suite must not depend on
+  // the machine's time zone (Rita is UTC+8; Workers run UTC).
   const d = new Date(s);
-  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  return isNaN(d) ? null : realDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
 
 export function normalizeStatus(v) {
@@ -45,6 +77,17 @@ export function normalizeStatus(v) {
 export function mapRow(row) {
   const agency_id = pick(row, ["crew id", "crewid", "agency id", "agencyid", "crew no", "crewno"]);
   if (!agency_id) return null;
+  const raw = {
+    dob: pick(row, ["date of birth", "birth", "dob"]),
+    med_exp: pick(row, ["medical expiration", "medical exp", "med expiration", "med exp"]),
+    sirb_exp: pick(row, ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"]),
+    pp_exp: pick(row, ["passport expiration", "passport exp"]),
+    sch_exp: pick(row, ["schengen visa expiration", "schengen expiration", "schengen exp"]),
+    usv_exp: pick(row, ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"]),
+  };
+  // Date order is a property of the ROW (one source pasted it), not of each cell.
+  const dmy = Object.values(raw).some(looksDMY);
+  const date = (k) => normalizeDate(raw[k], { dmy });
   return {
     agency_id,
     first_name: pick(row, ["first name", "firstname", "given"]) || null,
@@ -53,7 +96,7 @@ export function mapRow(row) {
     status: normalizeStatus(pick(row, ["status"])),
     rank_observed: pick(row, ["rank", "position", "rating"]) || null,
     vessel_observed: pick(row, ["vessel", "ship"]) || null,
-    dob: normalizeDate(pick(row, ["date of birth", "birth", "dob"])),
+    dob: date("dob"),
     province: pick(row, ["province"]) || null,
     phone: pick(row, ["mobile", "phone", "cell", "contact no"]) || null,
     email: pick(row, ["email", "e-mail"]) || null,
@@ -61,11 +104,7 @@ export function mapRow(row) {
     // "<DOC> NO", "<DOC> ISSUE/DATE OF ISSUE", "<DOC> EXPIRATION", "<DOC> PLACE" — and a
     // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.
     // Specific "… expiration" patterns come first; loose ones stay as fallbacks for other formats.
-    med_exp: normalizeDate(pick(row, ["medical expiration", "medical exp", "med expiration", "med exp"])),
-    sirb_exp: normalizeDate(pick(row, ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"])),
-    pp_exp: normalizeDate(pick(row, ["passport expiration", "passport exp"])),
-    sch_exp: normalizeDate(pick(row, ["schengen visa expiration", "schengen expiration", "schengen exp"])),
-    usv_exp: normalizeDate(pick(row, ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"])),
+    med_exp: date("med_exp"), sirb_exp: date("sirb_exp"), pp_exp: date("pp_exp"), sch_exp: date("sch_exp"), usv_exp: date("usv_exp"),
   };
 }
 

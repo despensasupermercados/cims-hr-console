@@ -13,20 +13,19 @@ Read this together with `docs/CIMS_SESSION_TRANSFER.md` and
   `test.yml`), plus `apply-spec.yml` and `self-maintenance.yml`.
 - `package.json` scripts:
   - `test` = `node --test` (runs the whole `test/` suite).
-  - `predeploy` = `node scripts/apply_hotfix.mjs`.
   - `migrate` = `wrangler d1 migrations apply cims-hr-console --remote`.
   - `deploy` = `npm test && npm run migrate && wrangler deploy`.
   - `deploy:staging` = `npm test && npm run migrate:staging && wrangler deploy --env staging`.
 - So a real deploy: **runs the tests, applies D1 migrations to prod, then deploys
   the worker.** Bumping `.deploy-trigger` on `main` is what kicks the CI that runs
   this. Red tests block it.
-- **`wrangler.toml` has a `[build]` hotfix hook**: `command = "node scripts/apply_hotfix.mjs"`.
-  It runs before EVERY bundle/deploy and (a) repairs a known `autoToggleClick`
-  alert-string SyntaxError in worker.js and (b) hard-verifies every inline
-  `<script>` parses. It's idempotent (no-op once source is clean). Don't be
-  surprised by it. It is the belt-and-suspenders for the "worker.js must parse"
-  rule. (There's a note to eventually delete it + `scripts/apply_hotfix.mjs` +
-  the `predeploy` entry once the source is permanently clean.)
+- **`wrangler.toml` has a `[build]` verify hook**: `command = "node scripts/verify_client_scripts.mjs"`.
+  It runs before EVERY bundle/deploy and hard-verifies every inline `<script>` the
+  worker serves parses as JavaScript (vm.Script, no execution). It is VERIFY-ONLY:
+  the old build-time source patch (`scripts/apply_hotfix.mjs`, retired 2026-09) is
+  gone, so a re-introduced raw-newline string is NOT auto-fixed — the build fails
+  and names the page. `test/client_script_syntax.test.js` calls the same function
+  under `npm test`, so the CI gate and the deploy gate are one code path.
 
 ## B. Tests — USE THEM to pre-validate (stronger than node --check)
 
