@@ -63,7 +63,9 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
     return { tier: TIER.OVERRIDE, write: true, defaultKeep: true };
   }
   if (field === "status") {
-    return { tier: TIER.CRITICAL, write: true, defaultKeep: true };
+    // D6 (2026-09-07) — the TDG file DRIVES status: default ACCEPT so an upload actually
+    // updates crew.status. A live crew_override on status is exempt (caught above, KEEP).
+    return { tier: TIER.CRITICAL, write: true, defaultAccept: true };
   }
   if (CERT_FIELDS.has(field)) {
     // D2 — trusted; accept by default, flag an expiry that moved earlier.

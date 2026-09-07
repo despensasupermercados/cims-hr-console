@@ -20,6 +20,7 @@ Purpose: preserve the reasoning so no future agent or person re-litigates settle
 |--------|--------|-----------------|-----------------|
 | Certificates | medical, BDOS/SIRB, passport, visas | **TDG** (agency keeps current) | Default **Accept** |
 | Ship allocation | current ship / vessel_observed | **Rita** (she dictates placement) | **Never written** — flag only |
+| Status | on board / vacation / earmarked / inactive | **TDG** file, unless pinned by a manual override | Default **Accept** (D6) — override-guarded, audited |
 
 TDG's file lags Rita's real moves and is often wrong on ship placement — so its ship column is a lagging record of her decisions, not truth. "Current ship" also lives in two places: `crew.vessel_observed` (file) vs `ship_leg`/`assignment` (the board Rita runs); a disagreement between them is the high-value signal.
 
@@ -31,7 +32,16 @@ TDG's file lags Rita's real moves and is often wrong on ship placement — so it
   value keeps winning on read and the accept never reaches the card (found 2026-09-05, SC-0038392).
   The clear is bound to the reviewed value; a manual edit made after staging is left alone.
 - **D4** Nothing auto-deletes; crew absent from file → flagged for review.
-- **D5** Selective friction: only ship / status / override / earlier-expiry demand attention; minor hygiene auto-applies. (An approval that fires on every trivial row trains rubber-stamping.)
+- **D5** Selective friction: only ship / override / earlier-expiry demand attention; minor hygiene auto-applies. (An approval that fires on every trivial row trains rubber-stamping.) _Status was originally in this list; superseded by D6, which auto-applies it._
+- **D6** (2026-09-07, supersedes the original status-defaults-Keep call) Status defaults **Accept** — the
+  TDG file drives `crew.status` on every upload, so an upload no longer silently no-ops on status (Rita's
+  uploads had been logging status changes as resolved conflicts but never writing them). A crew member with
+  a **live** crew_override on status stays exempt (D3 path: override_conflict, default Keep, clears on
+  accept). Every status change is still audited (sync_conflict, resolved=1) and can be individually **Held**
+  in the review. **Scope (CLAUDE.md §11):** `crew.status` feeds the weekly Fleet Document Radar email and
+  the no-dated-leg fallback; the crew list, dashboard, compliance view, feedback board and scoring queue
+  still DERIVE status from the live schedule, so D6 does not change what they show for a crew member who has
+  a board leg — it fixes the email/fallback and the stored value, not the schedule-derived views.
 
 ## E. UX principles ("Review & Apply")
 - Upload is a **proposal Rita ratifies** (Word tracked-changes model). Nothing saves until Apply.

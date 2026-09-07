@@ -266,15 +266,16 @@ function render(){
  $("work").style.display="grid";
  h+='<div class="chips">'+
   '<span class="chip amber">&#9875; <span class="n">'+c.ship_flag+'</span> ship</span>'+
-  '<span class="chip red">&#9679; <span class="n">'+(c.critical+c.override_conflict)+'</span> needs you</span>'+
+  '<span class="chip red">&#9679; <span class="n">'+c.override_conflict+'</span> needs you</span>'+
   '<span class="chip green">&#9677; <span class="n">'+c.cert+'</span> certificates</span>'+
   '<span class="chip navy">&#65291; <span class="n">'+c.new+'</span> new</span>'+
   '<span class="chip">&#128682; <span class="n">'+c.departed+'</span> departed</span></div>';
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
   g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","dismiss"],["Keep board","Dismiss"])+'</div>';});h+='</div>';}
- if(g.override_conflict.length||g.critical.length){h+='<div class="sec"><h2>&#9679; Needs your decision</h2><div class="d">Fields you set by hand, and status changes. Defaults to keeping yours.</div>';
-  g.override_conflict.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,badge("&#9995; your manual entry","t-red"))+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept file (replaces my entry)","Keep mine"])+'</div>';});
-  g.critical.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,"")+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept","Keep"])+'</div>';});h+='</div>';}
+ if(g.critical.length){h+='<div class="sec"><h2>&#9679; Status changes from TDG</h2><div class="d">Applied by default — the file drives status. Hold any you want left as-is. Crew you pinned by hand are protected and shown below.</div>';
+  g.critical.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,"")+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
+ if(g.override_conflict.length){h+='<div class="sec"><h2>&#9995; Fields you set by hand</h2><div class="d">Your manual entries. Kept unless you accept the file.</div>';
+  g.override_conflict.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,badge("&#9995; your manual entry","t-red"))+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept file (replaces my entry)","Keep mine"])+'</div>';});h+='</div>';}
  if(g.cert.length){h+='<div class="sec"><h2>&#9677; Certificate updates from TDG</h2><div class="d">Accepted by default — TDG maintains these. An expiry moving earlier is flagged.</div>';
   g.cert.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,it.earlier?badge("&#9888; moved earlier","t-amber"):badge("renewed","t-green"))+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
  if(g.new.length){h+='<div class="sec"><h2>&#65291; New crew</h2>';g.new.forEach(function(it){var f=it.fields||{};h+='<div class="card"><div class="who">'+esc((f.first_name||"")+" "+(f.last_name||""))+' <span class="id">'+esc(it.agency_id)+'</span></div><div class="row"><span class="k">Joining</span><span class="diff"><span class="new">'+esc(f.vessel_observed||"—")+'</span> · '+esc(f.rank_observed||f.status||"")+'</span></div>'+seg("new:"+it.agency_id,"add",["add","skip"],["Add","Skip"])+'</div>';});h+='</div>';}
@@ -288,7 +289,7 @@ function computeCart(){
  function d(k,def){return DEC[k]||def;}
  var certAcc=0,certKeep=0;g.cert.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")certAcc++;else certKeep++;});
  var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")ovAcc++;else ovKeep++;});
- var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")crAcc++;else crKeep++;});
+ var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")crAcc++;else crKeep++;});
  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
  var minor=g.minor.length;
  var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"flag")==="flag")shipFlag++;});
