@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBoardLegs, fetchCurrentAssignments, fetchRecentSignoffs, boardLegsFromDb } from "../src/ship_leg_source.js";
+import { mergeBoardLegs, fetchCurrentAssignments, fetchRecentSignoffs, boardLegsFromDb, legWithRecordedSignoff, applyRecordedSignoffs } from "../src/ship_leg_source.js";
 
 // The board's current set = ship_leg is_current=1 rows PLUS crew aboard per the relief board
 // (in-force `assignment` rows). Verified on prod 2026-09-04: 13 crew were aboard per Rita's
@@ -171,17 +171,53 @@ test("an ended assignment becomes a NON-current leg with off = actual sign-off; 
   assert.equal(mergeBoardLegs([], [], "2026-09-05", [{ ...ended, actual_sign_off: null }]).length, 0, "no actual sign-off = not ended");
 });
 
-test("boardLegsFromDb fires all three reads concurrently and merges", async () => {
+test("boardLegsFromDb fires all four reads concurrently and merges", async () => {
   const { env, calls } = stubEnv({
     legs: [{ brand: "Royal Caribbean", ship_short: "Harmony", sc: "SC-1", crew_id: "c1", on_date: "2026-02-01", off_date: "2026-09-01", ours: 1, is_current: 1, crew_name: "A B" }],
     assignments: [asg()],
   });
   const out = await boardLegsFromDb(env, "2026-09-04");
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
   assert.equal(out.length, 2);
   assert.equal(out[0].sc, "SC-1");
   assert.equal(out[0].brand, "Royal");
   assert.equal(out[0].crew_id, "c1", "legsFromShipLeg must expose crew_id so the merge can exclude by id");
   assert.equal(out[1].sc, "SC-9");
   assert.equal(out[1].is_current, true);
+});
+
+/* ---- recorded sign-off closes the stuck snapshot leg (card-drop + over-billing fix, 7 Sep) ---- */
+
+test("legWithRecordedSignoff: no recorded date -> leg unchanged", () => {
+  assert.deepEqual(legWithRecordedSignoff("2026-08-01", true, null, "2026-09-07"), { off: "2026-08-01", is_current: true });
+  assert.deepEqual(legWithRecordedSignoff(null, false, undefined, "2026-09-07"), { off: null, is_current: false });
+});
+
+test("legWithRecordedSignoff: a recorded PAST sign-off closes the leg and sets the real off", () => {
+  assert.deepEqual(legWithRecordedSignoff("2026-08-23", true, "2026-08-09", "2026-09-07"), { off: "2026-08-09", is_current: false });
+});
+
+test("legWithRecordedSignoff: a recorded FUTURE sign-off keeps the leg current, off = recorded", () => {
+  assert.deepEqual(legWithRecordedSignoff("2026-08-01", true, "2026-09-12", "2026-09-07"), { off: "2026-09-12", is_current: true });
+});
+
+test("legWithRecordedSignoff: recorded == today still counts as aboard (last day)", () => {
+  assert.deepEqual(legWithRecordedSignoff("2026-08-01", true, "2026-09-07", "2026-09-07"), { off: "2026-09-07", is_current: true });
+});
+
+test("applyRecordedSignoffs: a recorded past sign-off closes the matching leg; others untouched", () => {
+  const legs = [
+    { ship: "Independence", sc: "SC-1", on: "2025-12-21", off: "2026-07-16", is_current: true },
+    { ship: "Quest", sc: "SC-2", on: "2026-01-06", off: "2026-07-29", is_current: true },
+  ];
+  const out = applyRecordedSignoffs(legs, { "SC-1|2025-12-21": "2026-07-16" }, "2026-09-07");
+  assert.equal(out[0].is_current, false, "matched leg closes");
+  assert.equal(out[0].off, "2026-07-16");
+  assert.equal(out[1].is_current, true, "unmatched leg untouched");
+});
+
+test("applyRecordedSignoffs: no map / no match -> legs returned unchanged", () => {
+  const legs = [{ sc: "SC-1", on: "2025-12-21", off: "2026-07-16", is_current: true }];
+  assert.deepEqual(applyRecordedSignoffs(legs, null, "2026-09-07"), legs);
+  assert.deepEqual(applyRecordedSignoffs(legs, {}, "2026-09-07"), legs);
 });
