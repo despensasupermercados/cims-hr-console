@@ -102,9 +102,19 @@ export function assessCrew(row, todayStr) {
 
 // --- data --------------------------------------------------------------------
 export async function fetchDocRadar(env, todayStr) {
+  // Apply crew_override (manual corrections that survive AdvancedQuery re-import).
+  // Effective status and doc expiries come from the override when present (retired=0), else crew.
   const { results } = await env.DB.prepare(
-    "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp " +
-    "FROM crew WHERE redacted=0 AND status != 'Inactive'"
+    "SELECT c.agency_id, c.first_name, c.last_name, " +
+    "COALESCE(o.status, c.status) AS status, " +
+    "COALESCE(o.pp_exp, c.pp_exp) AS pp_exp, " +
+    "COALESCE(o.sirb_exp, c.sirb_exp) AS sirb_exp, " +
+    "COALESCE(o.med_exp, c.med_exp) AS med_exp, " +
+    "COALESCE(o.usv_exp, c.usv_exp) AS usv_exp, " +
+    "COALESCE(o.sch_exp, c.sch_exp) AS sch_exp " +
+    "FROM crew c " +
+    "LEFT JOIN crew_override o ON o.agency_id = c.agency_id AND COALESCE(o.retired,0)=0 " +
+    "WHERE c.redacted=0 AND COALESCE(o.status, c.status) != 'Inactive'"
   ).all();
   const flagged = [];
   const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, deployable: 0 };
