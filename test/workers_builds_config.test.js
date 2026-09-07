@@ -24,7 +24,7 @@ test("the default plan disables non-production builds and leaves the production 
   const { updates, skips } = planTriggerUpdates([prod, nonprod]);
   assert.equal(updates.length, 1);
   assert.equal(updates[0].id, "n1");
-  assert.deepEqual(updates[0].patch, { branch_excludes: ["*"] }, "smallest possible body: nothing else on the trigger is touched");
+  assert.deepEqual(updates[0].patch, { branch_includes: ["*"], branch_excludes: ["*"] }, "branch filter sent as a pair; nothing else on the trigger is touched");
   assert.equal(updates[0].verify({ branch_excludes: ["*"] }), true);
   assert.equal(updates[0].verify({ branch_excludes: ["main"] }), false, "an ignored PATCH must not read as success");
   assert.match(skips.find((s) => s.id === "p1").reason, /left untouched/);
