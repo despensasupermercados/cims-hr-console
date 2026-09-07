@@ -12,6 +12,8 @@ test("classifyTrigger names the four states and refuses to guess at anything els
   assert.equal(classifyTrigger(nonprod, "main"), "non-production");
   assert.equal(classifyTrigger({ branch_includes: [] }, "main"), "disabled", "fires on no branch, whatever it once was");
   assert.equal(classifyTrigger({ branch_includes: [], branch_excludes: ["main"] }, "main"), "disabled");
+  // How we turn it off: every branch excluded. Must read back as disabled, not as non-production.
+  assert.equal(classifyTrigger({ branch_includes: ["*"], branch_excludes: ["*"] }, "main"), "disabled");
   assert.equal(classifyTrigger({ branch_includes: ["main", "release"] }, "main"), "unknown");
   assert.equal(classifyTrigger({ branch_includes: ["claude/read-this"] }, "main"), "unknown",
     "a worker whose production branch is not main must not be silently retargeted");
@@ -22,9 +24,9 @@ test("the default plan disables non-production builds and leaves the production 
   const { updates, skips } = planTriggerUpdates([prod, nonprod]);
   assert.equal(updates.length, 1);
   assert.equal(updates[0].id, "n1");
-  assert.deepEqual(updates[0].patch, { branch_includes: [] }, "smallest possible body: nothing else on the trigger is touched");
-  assert.equal(updates[0].verify({ branch_includes: [] }), true);
-  assert.equal(updates[0].verify({ branch_includes: ["*"] }), false, "an ignored PATCH must not read as success");
+  assert.deepEqual(updates[0].patch, { branch_excludes: ["*"] }, "smallest possible body: nothing else on the trigger is touched");
+  assert.equal(updates[0].verify({ branch_excludes: ["*"] }), true);
+  assert.equal(updates[0].verify({ branch_excludes: ["main"] }), false, "an ignored PATCH must not read as success");
   assert.match(skips.find((s) => s.id === "p1").reason, /left untouched/);
 });
 
@@ -37,6 +39,12 @@ test("REFUSES to disable the only trigger a worker has", () => {
   assert.equal(s.blocked, true);
   assert.match(s.reason, /REFUSED/);
   assert.match(s.reason, /would stop production deploys/);
+});
+
+test("a re-run is a no-op after the real disable (branch_excludes ['*'])", () => {
+  const done = planTriggerUpdates([prod, { ...nonprod, branch_excludes: ["*"] }]);
+  assert.equal(done.updates.length, 0);
+  assert.match(done.skips.find((s) => s.id === "n1").reason, /already disabled/);
 });
 
 test("a re-run is a no-op: an already-disabled trigger produces no update", () => {

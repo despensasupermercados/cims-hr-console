@@ -26,10 +26,11 @@ const API = "https://api.cloudflare.com/client/v4";
 // branch) and non-production (fires on everything else, `branch_includes: ["*"]`).
 // Anything that matches neither shape is left ALONE and reported — never guessed at.
 export function classifyTrigger(t, productionBranch = "main") {
-  const inc = t.branch_includes || [];
+  const inc = t.branch_includes || [], exc = t.branch_excludes || [];
   // Fires on no branch at all: disabled, whatever it once was. Checked FIRST so a re-run
   // reads "already disabled" instead of "unrecognised", which would look like a fault.
-  if (inc.length === 0) return "disabled";
+  // Two ways to be off: every branch excluded (how we turn it off), or nothing included.
+  if (exc.includes("*") || inc.length === 0) return "disabled";
   if (inc.includes("*")) return "non-production";
   if (inc.every((b) => b === productionBranch)) return "production";
   return "unknown";
@@ -62,8 +63,14 @@ export function planTriggerUpdates(triggers, opts = {}) {
           reason: `REFUSED: this is the only build trigger, so production deploys from it. Disabling it would stop production deploys. Give the worker a production trigger on "${productionBranch}" first.` });
         continue;
       }
-      updates.push({ id, name, role, patch: { branch_includes: [] }, verify: (x) => (x.branch_includes || []).length === 0,
-        reason: `disable non-production builds (was ${JSON.stringify(t.branch_includes)})` });
+      // HOW "off" IS EXPRESSED (settled 2026-09-07 by dumping a live trigger, after the API
+      // rejected branch_includes: [] with "12002 Invalid request body"): exclude every branch.
+      // The trigger keeps its build/deploy commands and its build token, so re-enabling is one
+      // PATCH back to branch_excludes: ["main"]. The dashboard checkbox appears to DELETE the
+      // trigger instead (the row carries a deleted_on field) — this is the reversible equivalent.
+      updates.push({ id, name, role, patch: { branch_excludes: ["*"] },
+        verify: (x) => (x.branch_excludes || []).includes("*"),
+        reason: `disable non-production builds (branch_excludes ${JSON.stringify(t.branch_excludes || [])} -> ["*"], every branch excluded)` });
       continue;
     }
     // production
