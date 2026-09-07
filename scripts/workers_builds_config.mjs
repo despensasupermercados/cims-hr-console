@@ -68,7 +68,9 @@ export function planTriggerUpdates(triggers, opts = {}) {
       // The trigger keeps its build/deploy commands and its build token, so re-enabling is one
       // PATCH back to branch_excludes: ["main"]. The dashboard checkbox appears to DELETE the
       // trigger instead (the row carries a deleted_on field) — this is the reversible equivalent.
-      updates.push({ id, name, role, patch: { branch_excludes: ["*"] },
+      // Sent as a PAIR: "12002 Invalid request body" came back for branch_includes alone and for
+      // branch_excludes alone, so the branch filter is likely validated as one unit.
+      updates.push({ id, name, role, patch: { branch_includes: ["*"], branch_excludes: ["*"] },
         verify: (x) => (x.branch_excludes || []).includes("*"),
         reason: `disable non-production builds (branch_excludes ${JSON.stringify(t.branch_excludes || [])} -> ["*"], every branch excluded)` });
       continue;
@@ -94,8 +96,12 @@ async function cf(path, { token, method = "GET", body } = {}) {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || j.success === false) {
+    // "12002 Invalid request body" on its own is not actionable. Cloudflare usually says which
+    // field it disliked in errors[].error_chain / messages, so surface the whole envelope
+    // (errors + messages only — never the result, and the token is not echoed back).
     const errs = (j.errors || []).map((e) => `${e.code} ${e.message}`).join("; ") || `HTTP ${r.status}`;
-    throw new Error(`${method} ${path.replace(/\/accounts\/[^/]+/, "/accounts/***")} -> ${errs}`);
+    const detail = JSON.stringify({ errors: j.errors, messages: j.messages });
+    throw new Error(`${method} ${path.replace(/\/accounts\/[^/]+/, "/accounts/***")} -> ${errs}\n       full: ${detail}\n       sent: ${body ? JSON.stringify(body) : "(no body)"}`);
   }
   return j.result;
 }
