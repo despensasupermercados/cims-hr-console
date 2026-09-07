@@ -55,12 +55,18 @@ jobs:
             echo "::error title=Missing credentials::Add CLOUDFLARE_BUILDS_TOKEN (user-scoped: Workers Builds Configuration Edit + Workers Scripts Read) and CLOUDFLARE_ACCOUNT_ID to this repo's Actions secrets. Nothing has been changed."
             exit 1
           fi
+      # Inputs go through env, never interpolated into the shell line. `${{ }}` inside a
+      # run: block is textual substitution, so a worker name containing a quote would break
+      # out and execute arbitrary commands with CLOUDFLARE_BUILDS_TOKEN in scope.
       - name: Configure branch control
         env:
           CLOUDFLARE_BUILDS_TOKEN: ${{ secrets.CLOUDFLARE_BUILDS_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          IN_WORKERS: ${{ inputs.workers }}
+          IN_WATCH_PATHS: ${{ inputs.watch_paths }}
+          IN_APPLY: ${{ inputs.apply }}
         run: |
-          node scripts/workers_builds_config.mjs \
-            --workers='${{ inputs.workers }}' \
-            --watch-paths='${{ inputs.watch_paths }}' \
-            ${{ inputs.apply == 'true' && '--apply' || '' }}
+          set -euo pipefail
+          args=( "--workers=$IN_WORKERS" "--watch-paths=$IN_WATCH_PATHS" )
+          if [ "$IN_APPLY" = "true" ]; then args+=( "--apply" ); fi
+          node scripts/workers_builds_config.mjs "${args[@]}"

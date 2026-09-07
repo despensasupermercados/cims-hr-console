@@ -25,14 +25,13 @@ const API = "https://api.cloudflare.com/client/v4";
 // Classify one trigger. A worker has at most two: production (fires on the production
 // branch) and non-production (fires on everything else, `branch_includes: ["*"]`).
 // Anything that matches neither shape is left ALONE and reported — never guessed at.
-export function classifyTrigger(t, productionBranch) {
-  const inc = t.branch_includes || [], exc = t.branch_excludes || [];
+export function classifyTrigger(t, productionBranch = "main") {
+  const inc = t.branch_includes || [];
+  // Fires on no branch at all: disabled, whatever it once was. Checked FIRST so a re-run
+  // reads "already disabled" instead of "unrecognised", which would look like a fault.
+  if (inc.length === 0) return "disabled";
   if (inc.includes("*")) return "non-production";
-  // Already disabled by a previous run: includes emptied, the production branch still
-  // excluded. Without this a second run reports it as unrecognised, which reads like a
-  // fault rather than "nothing left to do".
-  if (inc.length === 0 && exc.length) return "non-production";
-  if (inc.length && inc.every((b) => b === productionBranch)) return "production";
+  if (inc.every((b) => b === productionBranch)) return "production";
   return "unknown";
 }
 
@@ -43,16 +42,27 @@ export function planTriggerUpdates(triggers, opts = {}) {
   const productionBranch = opts.productionBranch || "main";
   const watchPaths = opts.watchPaths || null; // null = leave path filters untouched
   const updates = [], skips = [];
-  for (const t of triggers || []) {
-    const role = classifyTrigger(t, productionBranch);
+  const all = triggers || [];
+  const roles = all.map((t) => classifyTrigger(t, productionBranch));
+  // SAFETY: only disable a non-production trigger when a separate production trigger
+  // exists to keep deploying. A worker whose ONLY trigger is branch_includes:["*"] builds
+  // production FROM that trigger; emptying it would stop production deploys altogether.
+  const hasProduction = roles.includes("production");
+  for (let i = 0; i < all.length; i++) {
+    const t = all[i], role = roles[i];
     const id = t.trigger_uuid, name = t.trigger_name || "(unnamed)";
+    if (role === "disabled") { skips.push({ id, name, role, reason: "already disabled (fires on no branch)" }); continue; }
     if (role === "unknown") {
-      skips.push({ id, name, role, reason: `branch_includes ${JSON.stringify(t.branch_includes || [])} matches neither the production nor the non-production shape` });
+      skips.push({ id, name, role, reason: `branch_includes ${JSON.stringify(t.branch_includes || [])} is neither "${productionBranch}" nor "*" — left alone` });
       continue;
     }
     if (role === "non-production") {
-      if ((t.branch_includes || []).length === 0) { skips.push({ id, name, role, reason: "already disabled" }); continue; }
-      updates.push({ id, name, role, patch: { branch_includes: [] },
+      if (!hasProduction) {
+        skips.push({ id, name, role, blocked: true,
+          reason: `REFUSED: this is the only build trigger, so production deploys from it. Disabling it would stop production deploys. Give the worker a production trigger on "${productionBranch}" first.` });
+        continue;
+      }
+      updates.push({ id, name, role, patch: { branch_includes: [] }, verify: (x) => (x.branch_includes || []).length === 0,
         reason: `disable non-production builds (was ${JSON.stringify(t.branch_includes)})` });
       continue;
     }
@@ -61,6 +71,7 @@ export function planTriggerUpdates(triggers, opts = {}) {
     const cur = t.path_includes || [];
     if (JSON.stringify(cur) === JSON.stringify(watchPaths)) { skips.push({ id, name, role, reason: "watch paths already correct" }); continue; }
     updates.push({ id, name, role, patch: { path_includes: watchPaths },
+      verify: (x) => JSON.stringify(x.path_includes || []) === JSON.stringify(watchPaths),
       reason: `limit production builds to ${watchPaths.join(", ")} (was ${cur.length ? JSON.stringify(cur) : "everything"})` });
   }
   return { updates, skips };
@@ -82,25 +93,32 @@ async function cf(path, { token, method = "GET", body } = {}) {
   return j.result;
 }
 
-export async function run({ token, accountId, workers, watchPaths, apply, log = console.log }) {
+export async function run({ token, accountId, workers, watchPaths, productionBranch, apply, log = console.log }) {
   const scripts = await cf(`/accounts/${accountId}/workers/scripts`, { token });
   const tagByName = Object.fromEntries((scripts || []).map((s) => [s.id, s.tag]));
-  let changed = 0, planned = 0, missing = 0;
+  let changed = 0, planned = 0, missing = 0, blocked = 0, unverified = 0;
   for (const name of workers) {
     const tag = tagByName[name];
-    if (!tag) { log(`\n## ${name}\n   NOT FOUND on this account — skipped`); missing++; continue; }
-    const triggers = await cf(`/accounts/${accountId}/builds/workers/${tag}/triggers`, { token });
-    const { updates, skips } = planTriggerUpdates(triggers, { watchPaths });
     log(`\n## ${name}`);
-    for (const s of skips) log(`   - ${s.role.padEnd(15)} ${s.name}: ${s.reason}`);
+    if (!tag) { log("   NOT FOUND on this account — nothing was changed for it"); missing++; continue; }
+    const triggers = await cf(`/accounts/${accountId}/builds/workers/${tag}/triggers`, { token });
+    const { updates, skips } = planTriggerUpdates(triggers, { watchPaths, productionBranch });
+    for (const s of skips) { if (s.blocked) blocked++; log(`   - ${s.role.padEnd(15)} ${s.name}: ${s.reason}`); }
     for (const u of updates) {
       planned++;
       log(`   ${apply ? "*" : "~"} ${u.role.padEnd(15)} ${u.name}: ${u.reason}`);
-      if (apply) { await cf(`/accounts/${accountId}/builds/triggers/${u.id}`, { token, method: "PATCH", body: u.patch }); changed++; }
+      if (!apply) continue;
+      await cf(`/accounts/${accountId}/builds/triggers/${u.id}`, { token, method: "PATCH", body: u.patch });
+      // A 200 is not the change (CLAUDE.md §9). Empty branch_includes as the "off" switch
+      // is inferred from the trigger schema, not documented, so re-read and prove it stuck.
+      const after = (await cf(`/accounts/${accountId}/builds/workers/${tag}/triggers`, { token }) || [])
+        .find((x) => x.trigger_uuid === u.id);
+      if (after && u.verify(after)) { changed++; log("     verified"); }
+      else { unverified++; log(`     NOT VERIFIED — re-read still shows branch_includes=${JSON.stringify((after || {}).branch_includes)} path_includes=${JSON.stringify((after || {}).path_includes)}`); }
     }
     if (!updates.length && !skips.length) log("   (no build triggers — this worker is not connected to git)");
   }
-  return { planned, changed, missing };
+  return { planned, changed, missing, blocked, unverified };
 }
 
 // ---------- CLI -----------------------------------------------------------------
@@ -120,8 +138,16 @@ if (isCli) {
   if (!workers.length) { console.error("Pass --workers=name1,name2"); process.exit(2); }
   const wp = arg("watch-paths", "");
   const apply = process.argv.includes("--apply");
-  console.log(apply ? "APPLYING changes." : "DRY RUN — nothing will be changed. Re-run with --apply.");
-  const res = await run({ token, accountId, workers, watchPaths: wp ? wp.split(",").map((s) => s.trim()).filter(Boolean) : null, apply });
-  console.log(`\n${apply ? "Changed" : "Would change"} ${apply ? res.changed : res.planned} trigger(s). ${res.missing} worker(s) not found.`);
-  if (!apply && res.planned) console.log("Re-run this workflow with apply = true to make it so.");
+  console.log(apply ? "APPLYING changes." : "DRY RUN — nothing will be changed. Re-run with apply = true.");
+  const res = await run({ token, accountId, workers, productionBranch: arg("production-branch", "main"),
+    watchPaths: wp ? wp.split(",").map((s) => s.trim()).filter(Boolean) : null, apply });
+  console.log(`\n${apply ? "Changed and verified" : "Would change"} ${apply ? res.changed : res.planned} trigger(s).`);
+  // Exit non-zero on anything left unresolved: a green run must mean the estate is covered,
+  // not that a mistyped worker name was quietly skipped.
+  const problems = [];
+  if (res.missing) problems.push(`${res.missing} worker(s) not found on this account`);
+  if (res.blocked) problems.push(`${res.blocked} trigger(s) refused for safety`);
+  if (res.unverified) problems.push(`${res.unverified} PATCH(es) did not verify`);
+  if (problems.length) { console.error(`\nUNRESOLVED: ${problems.join("; ")}. See the lines above.`); process.exit(1); }
+  if (!apply && res.planned) console.log("Re-run with apply = true to make it so.");
 }
