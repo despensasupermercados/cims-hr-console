@@ -1,0 +1,66 @@
+name: workers-builds-branch-control
+# Turn OFF non-production branch builds across the estate's git-connected Workers.
+#
+# Why: a non-production build runs `wrangler versions upload`, creating a version of the
+# PRODUCTION worker with PRODUCTION bindings and posting its preview URL on the PR. So any
+# unreviewed branch is reachable against the production D1. This is the dashboard's
+# "Builds for non-production branches" checkbox, done through the Builds API so it is
+# reviewable, repeatable, and does not rely on anyone remembering the click.
+#
+# ONE-TIME SETUP — a new, narrowly-scoped secret on this repo
+# (Settings -> Secrets and variables -> Actions):
+#   CLOUDFLARE_BUILDS_TOKEN
+# Create it at https://dash.cloudflare.com/profile/api-tokens as a USER token with:
+#   - Workers Builds Configuration : Edit
+#   - Workers Scripts              : Read
+# It MUST be user-scoped; the Builds API rejects account-scoped tokens with "Invalid token".
+# Deliberately NOT reusing CLOUDFLARE_API_TOKEN: that one is the account-scoped deploy
+# token, and it should never gain build-configuration rights.
+#
+# Run it from the Actions tab. It defaults to a DRY RUN that changes nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: 'Comma-separated worker names. cims-housing is omitted: its production branch is a claude/* branch and it has no main, so it needs its default branch sorted first.'
+        required: true
+        default: 'cims-hr-console,cims-recruitment,cims-travel-console,dg3-internal-tracker,ncl-tracker'
+      apply:
+        description: 'false = dry run (default, changes nothing). true = make the change.'
+        required: true
+        default: 'false'
+      watch_paths:
+        description: 'OPTIONAL and off by default. Comma-separated paths that should trigger a PRODUCTION build, e.g. src/**,wrangler.toml,package*.json,migrations/**. Leave blank to leave production triggers untouched.'
+        required: false
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: workers-builds-config
+  cancel-in-progress: false
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check the builds token is present
+        env:
+          HAVE: ${{ secrets.CLOUDFLARE_BUILDS_TOKEN != '' }}
+          HAVE_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          if [ "$HAVE" != "true" ] || [ "$HAVE_ACCOUNT" != "true" ]; then
+            echo "::error title=Missing credentials::Add CLOUDFLARE_BUILDS_TOKEN (user-scoped: Workers Builds Configuration Edit + Workers Scripts Read) and CLOUDFLARE_ACCOUNT_ID to this repo's Actions secrets. Nothing has been changed."
+            exit 1
+          fi
+      - name: Configure branch control
+        env:
+          CLOUDFLARE_BUILDS_TOKEN: ${{ secrets.CLOUDFLARE_BUILDS_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node scripts/workers_builds_config.mjs \
+            --workers='${{ inputs.workers }}' \
+            --watch-paths='${{ inputs.watch_paths }}' \
+            ${{ inputs.apply == 'true' && '--apply' || '' }}
