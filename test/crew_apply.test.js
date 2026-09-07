@@ -87,8 +87,17 @@ test("status under a live override: accept clears crew_override.status so the ca
   assert.ok(plan.conflicts.some(c => c.agency_id === "SC-0038392" && c.field === "status" && c.resolved === 1), "audited");
 });
 
-test("status defaults keep (no write) but audited", () => {
+// D6 (2026-09-07): status now DEFAULTS ACCEPT — the TDG file drives crew.status so an upload
+// stops silently no-op'ing. A live override still keeps status (override_conflict path above);
+// any single change can be explicitly Held.
+test("status defaults ACCEPT (file drives status) and is audited", () => {
   const plan = buildApplyPlan(sampleReview(), {});
+  assert.ok(plan.crewUpdates.some(u => u.agency_id === "SC-2" && u.field === "status" && u.value === "Inactive"), "status auto-applies by default");
+  assert.ok(plan.conflicts.some(c => c.agency_id === "SC-2" && c.field === "status" && c.resolved === 1), "still audited");
+});
+
+test("status can be explicitly HELD (keep) — no write, still audited", () => {
+  const plan = buildApplyPlan(sampleReview(), { "SC-2:status": "keep" });
   assert.equal(plan.crewUpdates.some(u => u.field === "status"), false);
   assert.ok(plan.conflicts.some(c => c.agency_id === "SC-2" && c.field === "status" && c.resolved === 1));
 });
@@ -118,6 +127,6 @@ test("new crew can be skipped", () => {
 test("importRun summary counts touched rows and open conflicts", () => {
   const plan = buildApplyPlan(sampleReview(), {}, { file_hash: "abc", run_by: "Rita" });
   assert.equal(plan.importRun.file_hash, "abc");
-  assert.equal(plan.importRun.rows_upserted, 3);
+  assert.equal(plan.importRun.rows_upserted, 4); // SC-2 status now auto-applies (D6)
   assert.equal(plan.importRun.conflicts, 2);
 });
