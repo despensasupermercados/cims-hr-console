@@ -38,9 +38,11 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     if (dec(key(it.agency_id, it.field), "accept") === "accept")
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
   }
-  // status — default keep; always audit
+  // status — default ACCEPT (D6, 2026-09-07): the TDG file drives status, so an upload updates
+  // crew.status instead of silently no-op'ing. A live override keeps status (handled as
+  // override_conflict above). Every change is still audited (resolved=1) and can be Held.
   for (const it of g.critical || []) {
-    if (dec(key(it.agency_id, it.field), "keep") === "accept")
+    if (dec(key(it.agency_id, it.field), "accept") === "accept")
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
     conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: it.old, new_value: it.new, resolved: 1 });
   }
