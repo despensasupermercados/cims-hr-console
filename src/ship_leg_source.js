@@ -205,9 +205,48 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
   return out;
 }
 
-// Board legs from the database: current ship_leg rows + crew aboard per the relief board.
-// Both reads fire together (one Worker->D1 round trip, CLAUDE.md §12).
+// A recorded actual sign-off, keyed "sc|sign_on" to match a leg's sc + on-date. Rita records a
+// sign-off in the Keyman board (contract_edit.sign_off) / keyman act_off, but nothing ever closes
+// the matching July ship_leg snapshot row — is_current is never flipped back to 0 — so the crew
+// keeps holding their card and stays billed as current (rotationSections/apiBillingMonth bill a
+// current crew through today). We read these and fold them in at the READ layer, the same
+// precedence already used for in-force and ended assignments (3-5 Sep).
+export async function fetchRecordedSignoffs(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT k.sc, k.sign_on, COALESCE(k.act_off, e.sign_off) AS recorded_off
+       FROM keyman_contract3 k
+       LEFT JOIN contract_edit e ON e.sc = k.sc AND e.seq = k.seq
+      WHERE COALESCE(k.act_off, e.sign_off) IS NOT NULL`
+  ).all();
+  const m = {};
+  for (const r of results || []) if (r.recorded_off) m[(r.sc || "") + "|" + (r.sign_on || "")] = r.recorded_off;
+  return m;
+}
+
+// PURE. The rule for one leg: a recorded sign-off sets the real off-date; if it has passed, the crew
+// has left, so the leg is no longer current (drops the card, stops billing as current). A future
+// recorded date keeps the leg current (aboard until then). No recorded date -> unchanged.
+export function legWithRecordedSignoff(offDate, isCurrent, recordedOff, today) {
+  if (!recordedOff) return { off: offDate || null, is_current: !!isCurrent };
+  return { off: recordedOff, is_current: (today && recordedOff < today) ? false : !!isCurrent };
+}
+
+// PURE. Fold recorded sign-offs into the shaped snapshot legs (match on sc + on-date = sign_on).
+export function applyRecordedSignoffs(legs, recMap, today) {
+  if (!recMap) return legs || [];
+  return (legs || []).map((r) => {
+    const rec = recMap[(r.sc || "") + "|" + (r.on || "")];
+    if (!rec) return r;
+    const eff = legWithRecordedSignoff(r.off, r.is_current, rec, today);
+    return { ...r, off: eff.off, is_current: eff.is_current };
+  });
+}
+
+// Board legs from the database: current ship_leg rows + crew aboard per the relief board, with any
+// recorded sign-off folded into the snapshot legs. All reads fire together (one wave, CLAUDE.md §12).
 export async function boardLegsFromDb(env, today) {
-  const [legs, asg, ended] = await Promise.all([legsFromShipLeg(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today)]);
-  return mergeBoardLegs(legs, asg, today, ended);
+  const [legs, asg, ended, recMap] = await Promise.all([
+    legsFromShipLeg(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
+  ]);
+  return mergeBoardLegs(applyRecordedSignoffs(legs, recMap, today), asg, today, ended);
 }
