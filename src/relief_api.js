@@ -163,6 +163,39 @@ export async function saveReliefAssignment(env, payload) {
   return { ok: true, id: asId, mode: "insert" };
 }
 
+// Remove a reliever card: delete the assignment, its PROJECTED forward leg (is_current=0 only
+// — never the billing-visible set, per leg_projection invariants), its comments, and the 1:1
+// contract shell the relief insert created — but only when nothing else references it. Refuses
+// if a committed bonus outcome is tied to the contract. Printer legs (id "leg:...") are not
+// removable here.
+export async function removeReliefAssignment(env, id) {
+  id = String(id || "").trim();
+  if (!id) return { ok: false, error: "id_required" };
+  if (!id.startsWith("as_")) return { ok: false, error: "not_removable" };
+  const a = await env.DB.prepare("SELECT id, contract_id FROM assignment WHERE id=?").bind(id).first();
+  if (!a) return { ok: false, error: "not_found" };
+  const cid = a.contract_id;
+
+  const bonus = await env.DB.prepare("SELECT 1 x FROM bonus_outcome WHERE contract_id=? LIMIT 1").bind(cid).first().catch(() => null);
+  if (bonus) return { ok: false, error: "has_bonus_history" };
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM assignment WHERE id=?").bind(id),
+    env.DB.prepare("DELETE FROM ship_leg WHERE source=? AND source LIKE 'assignment:%' AND is_current=0").bind("assignment:" + id),
+    env.DB.prepare("DELETE FROM relief_comment WHERE assignment_id=?").bind(id),
+  ]);
+
+  // Clean up the contract shell only when nothing else depends on it.
+  const dep = await env.DB.prepare(
+    "SELECT (SELECT COUNT(*) FROM assignment WHERE contract_id=?1) " +
+    "     + (SELECT COUNT(*) FROM feedback_request WHERE contract_id=?1) " +
+    "     + (SELECT COUNT(*) FROM feedback_response WHERE contract_id=?1) AS n"
+  ).bind(cid).first().catch(() => ({ n: 1 }));
+  const contract_removed = !!(dep && Number(dep.n) === 0);
+  if (contract_removed) await env.DB.prepare("DELETE FROM contract WHERE id=?").bind(cid).run();
+  return { ok: true, id, mode: "remove", contract_removed };
+}
+
 // Printer leg flags — PARTIAL upsert keyed by vessel_key (stores crew_name so a rotation resets).
 // Only the fields present in the body are written, so a confirmations-save and an Azamara off-override
 // save don't clobber each other. Pass override_off_date:"" or null to clear the override (→ projection).
@@ -295,6 +328,12 @@ export async function handleRelief(request, url, env) {
     let payload;
     try { payload = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const res = await saveReliefAssignment(env, payload);
+    return jsonResp(res, res.ok ? 200 : 400);
+  }
+  if (p === "/api/relief/remove" && request.method === "POST") {
+    let payload;
+    try { payload = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
+    const res = await removeReliefAssignment(env, payload && payload.id);
     return jsonResp(res, res.ok ? 200 : 400);
   }
   if (p === "/api/relief/comments" && request.method === "GET") {
