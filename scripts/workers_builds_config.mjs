@@ -93,7 +93,19 @@ async function cf(path, { token, method = "GET", body } = {}) {
   return j.result;
 }
 
-export async function run({ token, accountId, workers, watchPaths, productionBranch, apply, log = console.log }) {
+// What a trigger really looks like, with anything sensitive removed. environment_variables
+// are build-time values that may hold credentials, so only their KEYS are shown, and the
+// build token id is masked (CLAUDE.md §7).
+export function redactTrigger(t) {
+  const o = { ...t };
+  if (o.environment_variables && typeof o.environment_variables === "object") {
+    o.environment_variables = Object.keys(o.environment_variables).sort().map((k) => k + "=<redacted>");
+  }
+  if (o.build_token_uuid) o.build_token_uuid = "<redacted>";
+  return o;
+}
+
+export async function run({ token, accountId, workers, watchPaths, productionBranch, apply, dump, log = console.log }) {
   const scripts = await cf(`/accounts/${accountId}/workers/scripts`, { token });
   const tagByName = Object.fromEntries((scripts || []).map((s) => [s.id, s.tag]));
   let changed = 0, planned = 0, missing = 0, blocked = 0, unverified = 0;
@@ -102,19 +114,25 @@ export async function run({ token, accountId, workers, watchPaths, productionBra
     log(`\n## ${name}`);
     if (!tag) { log("   NOT FOUND on this account — nothing was changed for it"); missing++; continue; }
     const triggers = await cf(`/accounts/${accountId}/builds/workers/${tag}/triggers`, { token });
+    if (dump) for (const t of triggers || []) log("   " + JSON.stringify(redactTrigger(t)));
     const { updates, skips } = planTriggerUpdates(triggers, { watchPaths, productionBranch });
     for (const s of skips) { if (s.blocked) blocked++; log(`   - ${s.role.padEnd(15)} ${s.name}: ${s.reason}`); }
     for (const u of updates) {
       planned++;
       log(`   ${apply ? "*" : "~"} ${u.role.padEnd(15)} ${u.name}: ${u.reason}`);
       if (!apply) continue;
-      await cf(`/accounts/${accountId}/builds/triggers/${u.id}`, { token, method: "PATCH", body: u.patch });
-      // A 200 is not the change (CLAUDE.md §9). Empty branch_includes as the "off" switch
-      // is inferred from the trigger schema, not documented, so re-read and prove it stuck.
+      try {
+        await cf(`/accounts/${accountId}/builds/triggers/${u.id}`, { token, method: "PATCH", body: u.patch });
+      } catch (e) {
+        // One worker's rejection must not abandon the other four half-done. Report and carry on;
+        // the non-zero exit at the end still makes the run fail.
+        unverified++; log(`     PATCH REJECTED — ${e.message}`); continue;
+      }
+      // A 200 is not the change (CLAUDE.md §9): re-read and prove it stuck.
       const after = (await cf(`/accounts/${accountId}/builds/workers/${tag}/triggers`, { token }) || [])
         .find((x) => x.trigger_uuid === u.id);
       if (after && u.verify(after)) { changed++; log("     verified"); }
-      else { unverified++; log(`     NOT VERIFIED — re-read still shows branch_includes=${JSON.stringify((after || {}).branch_includes)} path_includes=${JSON.stringify((after || {}).path_includes)}`); }
+      else { unverified++; log(`     NOT VERIFIED — re-read shows ${JSON.stringify(redactTrigger(after || {}))}`); }
     }
     if (!updates.length && !skips.length) log("   (no build triggers — this worker is not connected to git)");
   }
@@ -138,9 +156,10 @@ if (isCli) {
   if (!workers.length) { console.error("Pass --workers=name1,name2"); process.exit(2); }
   const wp = arg("watch-paths", "");
   const apply = process.argv.includes("--apply");
+  const dump = process.argv.includes("--dump");
   console.log(apply ? "APPLYING changes." : "DRY RUN — nothing will be changed. Re-run with apply = true.");
   const res = await run({ token, accountId, workers, productionBranch: arg("production-branch", "main"),
-    watchPaths: wp ? wp.split(",").map((s) => s.trim()).filter(Boolean) : null, apply });
+    watchPaths: wp ? wp.split(",").map((s) => s.trim()).filter(Boolean) : null, apply, dump });
   console.log(`\n${apply ? "Changed and verified" : "Would change"} ${apply ? res.changed : res.planned} trigger(s).`);
   // Exit non-zero on anything left unresolved: a green run must mean the estate is covered,
   // not that a mistyped worker name was quietly skipped.

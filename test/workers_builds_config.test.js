@@ -67,3 +67,22 @@ test("an unrecognised trigger is reported, never patched", () => {
   assert.equal(updates.length, 0);
   assert.match(skips[0].reason, /left alone/);
 });
+
+// The 2026-09-07 apply run was rejected with "12002 Invalid request body" for
+// branch_includes: []. Before guessing again, the run can print what a trigger actually
+// looks like — with nothing sensitive in it.
+test("redactTrigger keeps the shape but never leaks build-time values or the build token", async () => {
+  const { redactTrigger } = await import("../scripts/workers_builds_config.mjs");
+  const out = redactTrigger({
+    trigger_uuid: "u1", trigger_name: "np", branch_includes: ["*"], branch_excludes: ["main"],
+    build_token_uuid: "super-secret-token-id",
+    environment_variables: { API_KEY: "live-value-here", NODE_VERSION: "22" },
+  });
+  assert.equal(out.trigger_uuid, "u1");
+  assert.deepEqual(out.branch_includes, ["*"]);
+  assert.equal(out.build_token_uuid, "<redacted>");
+  assert.deepEqual(out.environment_variables, ["API_KEY=<redacted>", "NODE_VERSION=<redacted>"]);
+  const s = JSON.stringify(out);
+  assert.equal(s.includes("live-value-here"), false);
+  assert.equal(s.includes("super-secret-token-id"), false);
+});
