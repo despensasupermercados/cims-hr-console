@@ -81,6 +81,7 @@ select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(
         <div id="mdates"></div>
         <div class="lbl">Confirmed<span style="color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400"> — shows as green tags on the card</span></div><div id="mtogs"></div><div class="lbl" id="mworklbl">Sign-off workflow</div><div id="mwork"></div><div class="lbl">Comment</div><div id="mcmts"></div><div style="display:flex;gap:8px;margin-top:6px"><input type="text" id="mcmt" placeholder="Add a note…" autocomplete="off"><button class="btn" style="white-space:nowrap;margin:0" onclick="RB.addComment()"><i class="ti ti-plus"></i> Post</button></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;padding-top:12px;border-top:.5px solid var(--border)">
+          <button class="btn" id="mremove" style="display:none;margin-right:auto;border-color:var(--text-danger);color:var(--text-danger)" onclick="RB.remove()"><i class="ti ti-trash"></i> Remove</button>
           <button class="btn" onclick="RB.close()">Cancel</button>
           <button class="btn" id="msave" style="border-color:var(--text-success);color:var(--text-success)" onclick="RB.save()"><i class="ti ti-check"></i> Save</button>
         </div>
@@ -220,6 +221,7 @@ const RB=(()=>{
   $("mtitle").textContent=ro?(node.crew_name||"Keyman"):((node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract"));
   $("msub").textContent=ro?"Rotation from the Keyman board · confirmations editable here":((node?(node.id||""):shipName(key)+" · unassigned")+(role==="reliever"?" · reliever":" · printer"));
   $("msave").style.display="inline-block";
+  var _rm=$("mremove");if(_rm)_rm.style.display=(node&&!ro&&role==="reliever")?"inline-block":"none";
   const banner=$("mbanner");
   if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div><button class="match" onclick="RB.matchHandover()"><i class="ti ti-wand"></i> Match handover</button>';}else banner.style.display="none";
   if(node){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+(node.crew_name||"—")+'</b>';cur.crew_id=null;}
@@ -265,9 +267,14 @@ const RB=(()=>{
   if(res&&res.ok){_CHG=true;close();await load();}else{alert("Save rejected: "+(res&&(res.error||(res.rejected||[]).join(","))||"error"));}
  }
  async function post(payload){try{const r=await fetch("/api/relief/save",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});return await r.json();}catch(e){return{ok:false,error:"network"};}}
+ async function remove(){
+  if(!cur||!cur.id||cur.readonly||cur.role!=="reliever")return;
+  if(!confirm("Remove "+(cur.crewName||"this reliever")+" from "+shipName(cur.key)+"? This clears the assignment card."))return;
+  try{const r=await fetch("/api/relief/remove",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:cur.id})});const j=await r.json();if(j&&j.ok){_CHG=true;close();await load();}else{alert("Remove failed: "+((j&&j.error)||"error"));}}catch(e){alert("network");}
+ }
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
  document.getElementById("modal").addEventListener("click",close);
  load();
- return {open,close,save,azTouch,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff,derive,matchHandover,mark,addComment};
+ return {open,close,save,azTouch,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff,derive,matchHandover,mark,addComment,remove};
 })();
 </script></body></html>`;
