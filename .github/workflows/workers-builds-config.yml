@@ -18,6 +18,26 @@ name: workers-builds-branch-control
 # token, and it should never gain build-configuration rights.
 #
 # Run it from the Actions tab. It defaults to a DRY RUN that changes nothing.
+#
+# STATUS 2026-09-07 — READS WORK, THE WRITE DOES NOT (yet).
+# Listing workers, reading triggers and planning are all proven against the live account.
+# Every PATCH, however, is refused with a bare "12002 Invalid request body" and no field
+# detail whatsoever ({"errors":[{"code":12002,"message":"Invalid request body"}],"messages":[]}).
+# Four bodies were tried, each on its own run, and all four were refused identically:
+#   34170439777  {"branch_includes":[]}
+#   34170696500  {"branch_excludes":["*"]}
+#   34170782761  {"branch_includes":["*"],"branch_excludes":["*"]}
+#   34170915344  the complete writable config, every other field copied verbatim
+# No worker was changed by any of them. Do NOT spend a fifth guess here without new
+# information. The two candidate causes, in order of cheapness to check:
+#   1. CLOUDFLARE_BUILDS_TOKEN has Workers Builds Configuration: READ, not Edit. Reads would
+#      still all succeed, which matches exactly what we see.
+#   2. The endpoint does not accept branch-filter changes at all, whatever the body.
+# The dashboard checkbox (Settings > Build > Branch control) does this in five clicks per
+# worker and is the right answer unless (1) turns out to be the cause.
+#
+# The dry run and --dump remain genuinely useful on their own: they audit branch control
+# across the whole estate in one pass, which the dashboard cannot do.
 on:
   workflow_dispatch:
     inputs:
