@@ -20,6 +20,34 @@ import { pathToFileURL } from "node:url";
 
 const API = "https://api.cloudflare.com/client/v4";
 
+// What a trigger really looks like, with anything sensitive removed. environment_variables are
+// build-time values that may hold credentials, so only their KEYS are shown, and the build token
+// id is masked (CLAUDE.md §7). Applied to dumped triggers AND to any body echoed in an error.
+export function redactTrigger(t) {
+  const o = { ...t };
+  if (o.environment_variables && typeof o.environment_variables === "object" && !Array.isArray(o.environment_variables)) {
+    o.environment_variables = Object.keys(o.environment_variables).sort().map((k) => k + "=<redacted>");
+  }
+  if (o.build_token_uuid) o.build_token_uuid = "<redacted>";
+  return o;
+}
+
+// The fields a trigger PATCH may carry. Read-only metadata (trigger_uuid, external_script_id,
+// build_token_name, created_on, modified_on, deleted_on, repo_connection) is deliberately absent.
+export const TRIGGER_WRITABLE = ["trigger_name", "build_token_uuid", "build_command", "deploy_command",
+  "root_directory", "branch_includes", "branch_excludes", "path_includes", "path_excludes",
+  "build_caching_enabled", "environment_variables"];
+
+// Every writable field, copied verbatim from the live trigger, with `changes` applied on top.
+// Three partial bodies were refused with a bare "12002 Invalid request body" and no field
+// detail (runs 34170439777, 34170696500, 34170782761), so this sends the COMPLETE config —
+// the remaining explanation being that the endpoint replaces rather than merges.
+export function fullTriggerPatch(t, changes) {
+  const out = {};
+  for (const k of TRIGGER_WRITABLE) if (t[k] !== undefined && t[k] !== null) out[k] = t[k];
+  return { ...out, ...changes };
+}
+
 // ---------- pure ----------------------------------------------------------------
 
 // Classify one trigger. A worker has at most two: production (fires on the production
@@ -70,7 +98,7 @@ export function planTriggerUpdates(triggers, opts = {}) {
       // trigger instead (the row carries a deleted_on field) — this is the reversible equivalent.
       // Sent as a PAIR: "12002 Invalid request body" came back for branch_includes alone and for
       // branch_excludes alone, so the branch filter is likely validated as one unit.
-      updates.push({ id, name, role, patch: { branch_includes: ["*"], branch_excludes: ["*"] },
+      updates.push({ id, name, role, patch: fullTriggerPatch(t, { branch_excludes: ["*"] }),
         verify: (x) => (x.branch_excludes || []).includes("*"),
         reason: `disable non-production builds (branch_excludes ${JSON.stringify(t.branch_excludes || [])} -> ["*"], every branch excluded)` });
       continue;
@@ -101,21 +129,11 @@ async function cf(path, { token, method = "GET", body } = {}) {
     // (errors + messages only — never the result, and the token is not echoed back).
     const errs = (j.errors || []).map((e) => `${e.code} ${e.message}`).join("; ") || `HTTP ${r.status}`;
     const detail = JSON.stringify({ errors: j.errors, messages: j.messages });
-    throw new Error(`${method} ${path.replace(/\/accounts\/[^/]+/, "/accounts/***")} -> ${errs}\n       full: ${detail}\n       sent: ${body ? JSON.stringify(body) : "(no body)"}`);
+    // The body can now carry the build token id and build-time variable values, so it goes
+    // through the same redaction as a dumped trigger before it reaches a log (CLAUDE.md §7).
+    throw new Error(`${method} ${path.replace(/\/accounts\/[^/]+/, "/accounts/***")} -> ${errs}\n       full: ${detail}\n       sent: ${body ? JSON.stringify(redactTrigger(body)) : "(no body)"}`);
   }
   return j.result;
-}
-
-// What a trigger really looks like, with anything sensitive removed. environment_variables
-// are build-time values that may hold credentials, so only their KEYS are shown, and the
-// build token id is masked (CLAUDE.md §7).
-export function redactTrigger(t) {
-  const o = { ...t };
-  if (o.environment_variables && typeof o.environment_variables === "object") {
-    o.environment_variables = Object.keys(o.environment_variables).sort().map((k) => k + "=<redacted>");
-  }
-  if (o.build_token_uuid) o.build_token_uuid = "<redacted>";
-  return o;
 }
 
 export async function run({ token, accountId, workers, watchPaths, productionBranch, apply, dump, log = console.log }) {
