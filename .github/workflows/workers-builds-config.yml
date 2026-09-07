@@ -29,6 +29,10 @@ on:
         description: 'false = dry run (default, changes nothing). true = make the change.'
         required: true
         default: 'false'
+      dump:
+        description: 'true = also print each build trigger as JSON (secrets redacted). Diagnostic only; still changes nothing on its own.'
+        required: false
+        default: 'false'
       watch_paths:
         description: 'OPTIONAL and off by default. Comma-separated paths that should trigger a PRODUCTION build, e.g. src/**,wrangler.toml,package*.json,migrations/**. Leave blank to leave production triggers untouched.'
         required: false
@@ -65,8 +69,10 @@ jobs:
           IN_WORKERS: ${{ inputs.workers }}
           IN_WATCH_PATHS: ${{ inputs.watch_paths }}
           IN_APPLY: ${{ inputs.apply }}
+          IN_DUMP: ${{ inputs.dump }}
         run: |
           set -euo pipefail
           args=( "--workers=$IN_WORKERS" "--watch-paths=$IN_WATCH_PATHS" )
           if [ "$IN_APPLY" = "true" ]; then args+=( "--apply" ); fi
+          if [ "$IN_DUMP" = "true" ]; then args+=( "--dump" ); fi
           node scripts/workers_builds_config.mjs "${args[@]}"
