@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { classifyTrigger, planTriggerUpdates } from "../scripts/workers_builds_config.mjs";
+import { classifyTrigger, planTriggerUpdates, previewUrlVerdict} from "../scripts/workers_builds_config.mjs";
 
 // Shapes taken from the live account (survey 2026-09-05): every git-connected worker has a
 // production trigger on ["main"] and a non-production trigger on ["*"] excluding main.
@@ -120,4 +120,28 @@ test("a patch body carrying the build token and env values is redacted before it
   const logged = JSON.stringify(redactTrigger(body));
   assert.equal(logged.includes("live-value"), false);
   assert.equal(logged.includes('"tok"'), false);
+});
+
+// ---- preview-URL exposure -------------------------------------------------------
+// Added 2026-09-08 after PR #104. `preview_urls = false` in wrangler.toml pins the flag for
+// THIS repo; this audits whether it actually took effect on the live worker, and covers the
+// other four workers whose config we do not hold. A green audit run has to MEAN not exposed.
+
+test("previewUrlVerdict: off is the only safe answer", () => {
+  assert.equal(previewUrlVerdict({ previews_enabled: false }).exposed, false);
+  assert.equal(previewUrlVerdict({ previews_enabled: true }).exposed, true);
+});
+
+test("previewUrlVerdict: no workers.dev subdomain means nothing to expose", () => {
+  const v = previewUrlVerdict({ absent: true });
+  assert.equal(v.exposed, false);
+  assert.match(v.label, /no workers\.dev subdomain/);
+});
+
+test("previewUrlVerdict: an unknown flag is reported as exposed, never as safe", () => {
+  // The failure that matters is a silent one: a shape change or an older account that omits
+  // the field must not read as "off". Fail loud, not quiet.
+  for (const sub of [{}, null, undefined, { previews_enabled: null }, { previews_enabled: "false" }]) {
+    assert.equal(previewUrlVerdict(sub).exposed, true, `${JSON.stringify(sub)} must not read as safe`);
+  }
 });

@@ -19,7 +19,14 @@ name: workers-builds-branch-control
 #
 # Run it from the Actions tab. It defaults to a DRY RUN that changes nothing.
 #
-# STATUS 2026-09-07 — READS WORK, THE WRITE DOES NOT (yet).
+# ALSO AUDITS PREVIEW-URL EXPOSURE (2026-09-08, after PR #104). For every worker listed it
+# reads the workers.dev subdomain's `previews_enabled` and fails the run if any worker still
+# serves preview URLs. That is the half of the exposure that `preview_urls = false` in
+# wrangler.toml closes for THIS repo — this proves it actually took effect on the live worker
+# (CLAUDE.md §9: a green commit is not a deploy) and covers the four workers whose config we
+# do not hold. Read-only; it runs on a dry run too.
+#
+# STATUS 2026-09-07 — TRIGGER READS WORK, THE TRIGGER WRITE DOES NOT (yet).
 # Listing workers, reading triggers and planning are all proven against the live account.
 # Every PATCH, however, is refused with a bare "12002 Invalid request body" and no field
 # detail whatsoever ({"errors":[{"code":12002,"message":"Invalid request body"}],"messages":[]}).
