@@ -114,6 +114,25 @@ export function planTriggerUpdates(triggers, opts = {}) {
   return { updates, skips };
 }
 
+// ---------- preview-URL exposure ------------------------------------------------
+
+// A non-production build runs `wrangler versions upload`, uploading a version of the SAME
+// worker on its PRODUCTION bindings. Whether that version is then reachable from the public
+// internet is a separate, worker-level flag: previews_enabled on the workers.dev subdomain.
+// cims-hr-console pins it off via `preview_urls = false` in wrangler.toml (CLAUDE.md §11), but
+// that only covers the repo we control — this audits every worker in the estate the same way.
+//
+// Pure so it is testable without the network. `sub` is the subdomain endpoint's result, or the
+// sentinel {absent:true} when the worker has no workers.dev subdomain at all.
+export function previewUrlVerdict(sub) {
+  if (sub && sub.absent) return { exposed: false, label: "no workers.dev subdomain — no preview URL to serve" };
+  const p = sub ? sub.previews_enabled : undefined;
+  if (p === false) return { exposed: false, label: "preview URLs OFF" };
+  if (p === true) return { exposed: true, label: "preview URLs ON — branch builds are publicly reachable on production bindings" };
+  // Absent field: older accounts, or a shape change. Never report an unknown as safe.
+  return { exposed: true, label: `preview URLs UNKNOWN (previews_enabled=${JSON.stringify(p)}) — treat as ON until confirmed` };
+}
+
 // ---------- network -------------------------------------------------------------
 
 async function cf(path, { token, method = "GET", body } = {}) {
@@ -136,14 +155,30 @@ async function cf(path, { token, method = "GET", body } = {}) {
   return j.result;
 }
 
+// The subdomain endpoint 404s for a worker that never had a workers.dev subdomain. That is a
+// legitimate answer (nothing to expose), not a failure, so it must not abort the audit.
+async function cfSubdomain(path, token) {
+  try { return (await cf(path, { token })) || {}; }
+  catch (e) { return /\b404\b|10007|10090/.test(e.message) ? { absent: true } : { error: e.message }; }
+}
+
 export async function run({ token, accountId, workers, watchPaths, productionBranch, apply, dump, log = console.log }) {
   const scripts = await cf(`/accounts/${accountId}/workers/scripts`, { token });
   const tagByName = Object.fromEntries((scripts || []).map((s) => [s.id, s.tag]));
-  let changed = 0, planned = 0, missing = 0, blocked = 0, unverified = 0;
+  let changed = 0, planned = 0, missing = 0, blocked = 0, unverified = 0, exposed = 0;
   for (const name of workers) {
     const tag = tagByName[name];
     log(`\n## ${name}`);
     if (!tag) { log("   NOT FOUND on this account — nothing was changed for it"); missing++; continue; }
+    // Read-only. Reported for every worker, whether or not it has build triggers — a worker
+    // with preview URLs on is exposed by any version upload, however that version got there.
+    const sub = await cfSubdomain(`/accounts/${accountId}/workers/scripts/${name}/subdomain`, token);
+    if (sub.error) { log(`   preview URLs: could not read — ${sub.error}`); exposed++; }
+    else {
+      const v = previewUrlVerdict(sub);
+      log(`   preview URLs: ${v.label}`);
+      if (v.exposed) exposed++;
+    }
     const triggers = await cf(`/accounts/${accountId}/builds/workers/${tag}/triggers`, { token });
     if (dump) for (const t of triggers || []) log("   " + JSON.stringify(redactTrigger(t)));
     const { updates, skips } = planTriggerUpdates(triggers, { watchPaths, productionBranch });
@@ -167,7 +202,7 @@ export async function run({ token, accountId, workers, watchPaths, productionBra
     }
     if (!updates.length && !skips.length) log("   (no build triggers — this worker is not connected to git)");
   }
-  return { planned, changed, missing, blocked, unverified };
+  return { planned, changed, missing, blocked, unverified, exposed };
 }
 
 // ---------- CLI -----------------------------------------------------------------
@@ -198,6 +233,7 @@ if (isCli) {
   if (res.missing) problems.push(`${res.missing} worker(s) not found on this account`);
   if (res.blocked) problems.push(`${res.blocked} trigger(s) refused for safety`);
   if (res.unverified) problems.push(`${res.unverified} PATCH(es) did not verify`);
+  if (res.exposed) problems.push(`${res.exposed} worker(s) still serve preview URLs (see the preview-URL line per worker)`);
   if (problems.length) { console.error(`\nUNRESOLVED: ${problems.join("; ")}. See the lines above.`); process.exit(1); }
   if (!apply && res.planned) console.log("Re-run with apply = true to make it so.");
 }
