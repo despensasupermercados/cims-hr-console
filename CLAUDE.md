@@ -111,6 +111,13 @@ dated card on the crew. Hard rules:
   `scripts/keyman_snapshot.mjs` (never hand-edited; `KEYMAN_VERSION` = the snapshot date). Pinned by
   `test/keyman_seed_guard.test.js` + `test/keyman_snapshot.test.js`.
 
+- **`preview_urls = false` stays in `wrangler.toml`.** Non-production branch builds run
+  `wrangler versions upload`, which uploads a version of THIS worker on the PRODUCTION D1/R2/MAILER
+  bindings; with preview URLs on, Cloudflare serves it at a public `<version>-cims-hr-console...
+  workers.dev` link posted on the PR — unreviewed code, real crew data. wrangler 3.x treats a MISSING
+  key as ENABLED, so deleting the line silently re-opens it. Pinned by `test/wrangler_config.test.js`;
+  the other half (Settings > Build > Branch control) is dashboard-only — see `docs/BRANCH_CONTROL.md`.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

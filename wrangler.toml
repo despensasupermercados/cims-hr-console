@@ -4,6 +4,26 @@ name = "cims-hr-console"
 main = "src/worker.js"
 compatibility_date = "2025-05-01"
 
+# PREVIEW URLS: OFF. (2026-09-07)
+# A build on a NON-production branch runs `wrangler versions upload`, which uploads a
+# version of THIS worker — bound to the PRODUCTION D1, R2 and MAILER below — and, with
+# preview URLs on, publishes it at a public
+# `<version>-cims-hr-console.<subdomain>.workers.dev` address linked from the PR.
+# That is unreviewed code reachable against real crew data and real bonus history.
+#
+# wrangler 3.x defaults preview URLs to ENABLED when this key is absent (the opt-in
+# default only arrives in wrangler >= 4.34), so the absence of this line was the
+# exposure, not a safe default. Supported since wrangler 3.91; we pin 3.114.
+#
+# This does NOT touch the production deployment or its routes — only routing to
+# versioned/aliased preview URLs. Pinned by test/wrangler_config.test.js.
+#
+# Belt and braces: the other half of this is Cloudflare's Settings > Build >
+# Branch control > "Builds for non-production branches", which stops the build from
+# running at all (and saves the build minutes). That switch lives only in the
+# dashboard/Builds API, not in this file. See docs/BRANCH_CONTROL.md.
+preview_urls = false
+
 # DEPLOY GATE (2026-07-03 white-screen incident; patch retired 2026-09-04): wrangler runs
 # this before every bundle/deploy, no matter how wrangler is invoked (Workers Builds,
 # local, CI). It hard-verifies that every inline <script> the worker serves PARSES as
