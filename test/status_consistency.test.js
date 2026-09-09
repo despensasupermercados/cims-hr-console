@@ -86,3 +86,19 @@ test("self-heal placement prefers live board legs; the constant only backfills u
   assert.match(b, /for \(const h of schedRows\)/);
   assert.doesNotMatch(b, /for \(const h of SHIP_HISTORY\)/, "rotationSections must not iterate the bare constant for placement");
 });
+
+// §11 + import decision D6 (2026-09-09). crew_override.status is a MANUAL PIN: crewStatus()
+// returns it verbatim and never reaches deriveStatus(). apiCrewAdd used to seed it with the
+// starting status, which froze every manually added crew at that value for good — they stayed
+// "Earmarked" after signing on, and the TDG file (which drives status under D6) could not move
+// them either; only a D3 override-conflict ratification could clear it. The base crew.status is
+// the correct home: deriveStatus falls back to it as `imported` when there is no dated leg.
+test("apiCrewAdd does not seed crew_override.status (that pin disables schedule derivation)", () => {
+  const add = body("async function apiCrewAdd(");
+  const ins = add.slice(add.indexOf("INSERT INTO crew_override"));
+  const cols = ins.slice(ins.indexOf("(") + 1, ins.indexOf(")"));
+  assert.ok(cols.includes("agency_id"), "expected to find the crew_override column list, got: " + cols);
+  assert.ok(!/\bstatus\b/.test(cols),
+    "apiCrewAdd must not write status into crew_override — it permanently pins the crew's status. Columns: " + cols);
+  assert.match(add, /INSERT INTO crew\b/, "the base crew row (which carries the starting status) must still be written");
+});
