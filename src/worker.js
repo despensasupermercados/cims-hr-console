@@ -16,7 +16,7 @@ import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
-import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT } from "./shipname.js";
+import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
@@ -1076,7 +1076,7 @@ async function apiDashboard(env) {
   const cs = csRes.results;
   const csOv = {}; for (const o of ovRes.results) csOv[o.agency_id] = o;
   const csSched = scheduleBySc(HIST);
-  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0 };
+  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0, [UNASSIGNED]: 0 };
   for (const c of cs) {
     const ov = csOv[c.agency_id], s = crewStatus(c, ov, csSched[c.agency_id], today);
     statusMap[s] = (statusMap[s] || 0) + 1;
@@ -1123,14 +1123,7 @@ async function apiDashboard(env) {
   });
 }
 
-// Client/brand label from vessel name.
-function clientOf(vessel) {
-  const v = String(vessel || "").toUpperCase();
-  if (v.includes("CELEBRITY")) return "Celebrity";
-  if (v.includes("AZAMARA")) return "Azamara";
-  if (v.includes("NCL") || v.includes("NORWEGIAN")) return "NCL";
-  return "Royal Caribbean";
-}
+// clientOf (client/brand from a vessel name) lives in ./shipname.js — pure + unit-tested.
 // Manual edits live in crew_override and ALWAYS win over the imported base row.
 // applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
 const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
@@ -1271,8 +1264,16 @@ async function apiCrewAdd(request, env, session) {
   const baselineVal = (isMoneyUser(session && session.email) && b.baseline_count != null) ? +b.baseline_count : null;
   await env.DB.prepare("INSERT INTO crew (id,agency_id,agency_code,first_name,middle_name,last_name,status,rank_observed,vessel_observed,dob,pp_no,baseline_count,redacted,created_at,updated_at) VALUES (?,?,'MAN',?,?,?,?,?,?,?,?,?,0,?,?)")
     .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now, now).run();
-  await env.DB.prepare("INSERT INTO crew_override (agency_id,first_name,middle_name,last_name,status,rank_override,vessel_observed,dob,pp_no,baseline_count,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_id) DO UPDATE SET updated_at=excluded.updated_at")
-    .bind(id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now).run();
+  // NOTE: status is deliberately NOT written to the override (2026-09-09). crew_override.status is
+  // a MANUAL PIN — crewStatus() returns it verbatim and never reaches deriveStatus(), so seeding it
+  // here froze every manually added crew at their starting value for good: they stayed "Earmarked"
+  // after signing on (§11 says status is derived from the schedule) and the TDG file could not move
+  // them either (D6: the file drives status). Clearing it afterwards needs a D3 override-conflict
+  // ratification — a lot of ceremony for a field nobody chose to pin. The base crew.status below is
+  // the right home: deriveStatus falls back to it as `imported` when there is no dated leg, so the
+  // card still reads "Earmarked" on day one and starts deriving the moment a leg exists.
+  await env.DB.prepare("INSERT INTO crew_override (agency_id,first_name,middle_name,last_name,rank_override,vessel_observed,dob,pp_no,baseline_count,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_id) DO UPDATE SET updated_at=excluded.updated_at")
+    .bind(id, b.first_name, b.middle_name || null, b.last_name, b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now).run();
   await logActivity(env, session && session.email, "crew_add", id);
   return json({ ok: true, agency_id: id });
 }
@@ -4154,7 +4155,7 @@ async function renderDashboard(){
   var d;try{d=await (await fetch('/api/dashboard')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
   DASH=d;var w=d.workforce,c=d.compliance,bd=d.birthdays||[],bz=d.bonus||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'}];
-  var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'}];
+  var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'},{label:'Unassigned',value:bc['Unassigned']||0,color:'#9AA7B6'}].filter(function(s){return s.label!=='Unassigned'||s.value>0;});
   var compBars=[{label:'Medical',value:c.med_exp_90,color:'#BC3B2C'},{label:'Seaman bk',value:c.sirb_exp_90,color:'#B0741A'},{label:'Passport',value:c.pp_exp_90,color:'#B0741A'},{label:'US visa',value:c.usv_exp_90,color:'#B0741A'},{label:'Schengen',value:c.sch_exp_90,color:'#7A5AA8'}];
   var compTot=compBars.reduce(function(a,b){return a+(b.value||0);},0);
   var h='<div class=bar><h2>Operational dashboard</h2><span class=csub style="margin-left:auto">as of '+d.today+' · '+w.total+' crew</span></div>';

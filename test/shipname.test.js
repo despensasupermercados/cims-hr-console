@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normShip, canonShip, canonShipWith, buildShipKeys, validShipKeys, AZ_DISP, AZAMARA_SHORT } from "../src/shipname.js";
+import { normShip, canonShip, canonShipWith, buildShipKeys, validShipKeys, AZ_DISP, AZAMARA_SHORT, clientOf, UNASSIGNED} from "../src/shipname.js";
 import { VESSEL_REF } from "../src/vessel_ref.js";
 import { SHIP_HISTORY } from "../src/ship_history.js";
 
@@ -96,4 +96,31 @@ test("no ours schedule-history row canonicalizes to a non-board ship", () => {
   }
   assert.ok(ours > 0, "expected ours-history rows present");
   assert.deepEqual(dropped, {}, "history rows dropped for these raw ship names: " + JSON.stringify(dropped));
+});
+
+// ---- clientOf --------------------------------------------------------------------
+// Moved out of worker.js 2026-09-09. The bug it fixes: the old version returned
+// "Royal Caribbean" for EVERY unrecognised input, blank included, so the dashboard's
+// client donut counted every crew with no vessel on file as an RCI crew. In production
+// that was 20 of ~57 active crew drawn into the wrong slice.
+
+test("clientOf: brand words win, in any casing or surrounding text", () => {
+  assert.equal(clientOf("MV CELEBRITY REFLECTION"), "Celebrity");
+  assert.equal(clientOf("Azamara Quest"), "Azamara");
+  assert.equal(clientOf("Norwegian Getaway"), "NCL");
+  assert.equal(clientOf("NCL Epic"), "NCL");
+});
+
+test("clientOf: a NAMED but unmatched hull is still Royal Caribbean", () => {
+  // RCI hulls carry no brand word, so the catch-all is correct here and must not change.
+  assert.equal(clientOf("Wonder of the Seas"), "Royal Caribbean");
+  assert.equal(clientOf("Utopia"), "Royal Caribbean");
+});
+
+test("clientOf: NO vessel is Unassigned, never a brand", () => {
+  // The whole point. A crew we have not placed is not an RCI crew.
+  for (const blank of [null, undefined, "", "   ", "\t"]) {
+    assert.equal(clientOf(blank), UNASSIGNED, JSON.stringify(blank) + " must not be counted as a brand");
+  }
+  assert.notEqual(clientOf(""), "Royal Caribbean");
 });

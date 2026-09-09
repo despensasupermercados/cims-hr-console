@@ -38,6 +38,30 @@ export function canonShipWith(raw, keys) {
 // Convenience: canonicalize a single raw name against a VESSEL_REF array.
 export function canonShip(raw, vesselRef) { return canonShipWith(raw, buildShipKeys(vesselRef)); }
 
+// Client/brand from a raw vessel string.
+//
+// UNASSIGNED IS NOT A BRAND (2026-09-09). This used to live in worker.js and returned
+// "Royal Caribbean" for EVERY unrecognised input — including an empty one. A crew with no
+// vessel on file is not a Royal Caribbean crew; they are a crew we have not placed. Counting
+// them as RCI silently inflated the dashboard's client donut: on the day this was found,
+// 20 of ~57 active crew had no vessel at all and every one of them was drawn as Royal
+// Caribbean. A reporting number that cannot say "I don't know" reports a wrong number
+// instead.
+//
+// The catch-all IS still correct for a NON-empty name: Royal Caribbean hulls ("Wonder of the
+// Seas", "Utopia") carry no brand word, so anything named but unmatched is RCI. Only the
+// blank case changes.
+export const UNASSIGNED = "Unassigned";
+export function clientOf(vessel) {
+  const raw = String(vessel == null ? "" : vessel).trim();
+  if (!raw) return UNASSIGNED;
+  const v = raw.toUpperCase();
+  if (v.includes("CELEBRITY")) return "Celebrity";
+  if (v.includes("AZAMARA")) return "Azamara";
+  if (v.includes("NCL") || v.includes("NORWEGIAN")) return "NCL";
+  return "Royal Caribbean";
+}
+
 // The set of normShip keys that are "real" ships and may anchor a history-only board section:
 // every VESSEL_REF hull plus the four Azamara short names. Junk schedule cells (e.g. a stray
 // "# of flights:" header) canonicalize to themselves, are absent here, and are dropped.
