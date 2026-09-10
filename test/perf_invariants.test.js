@@ -26,6 +26,7 @@ function body(name) {
 const SEQ_READ_ALLOW = {
   "async function apiDashboard(": 0, "async function apiCrew(": 0, "async function rotationSections(": 0,
   "async function apiCrewOne(": 0, "async function apiRotationCrew(": 0, "async function loadFeedbackState(": 0,
+  "async function apiContracts(": 0,
 };
 
 test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), not sequentially", () => {
@@ -35,6 +36,10 @@ test("hot read routes issue their D1 reads as a concurrent wave (Promise.all), n
     "async function apiCrewOne(", "async function apiRotationCrew(",
     // 2026-09-05: the feedback board + scoring queue read ONE shared state (loadFeedbackState).
     "async function loadFeedbackState(",
+    // 2026-09-10: the contract ledger was still six sequential round trips — two ensures back to
+    // back, then four independent reads one after another. It is a user-facing read page and was
+    // simply missed when the others were converted.
+    "async function apiContracts(",
   ]) {
     const b = body(fn);
     assert.match(b, /await Promise\.all\(\[/, fn + " lost its concurrent query wave — each sequential `await env.DB` re-adds a full Worker->D1 round trip on the hot path");

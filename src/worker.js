@@ -1720,13 +1720,22 @@ async function apiBonusCrew(env, url) {
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
 async function apiContracts(env) {
-  await ensureKeyman(env); await ensureCrewExtras(env);
-  const base = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all()).results;
-  const ovs = (await env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all()).results;
-  const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legCounts = await fullContractMap(env); // sc -> FULL-contract count (drives rank + the number shown)
+  // PERF (2026-09-10, §12): this hot read route was SIX sequential Worker->D1 round trips — two
+  // ensures back to back, then four independent reads one after another. The D1 data is tiny; the
+  // cost is the round trips. Same statements, same consumption order, now two waves: the ensures
+  // together (they must finish before the reads, since they create the tables), then every read at
+  // once. Pinned by test/perf_invariants.test.js alongside the other hot routes.
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
+  const [baseRes, ovsRes, legCounts, outRes] = await Promise.all([
+    env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all(),
+    fullContractMap(env), // sc -> FULL-contract count (drives rank + the number shown)
+    env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all(),
+  ]);
+  const base = baseRes.results;
+  const ovm = {}; for (const o of ovsRes.results) ovm[o.agency_id] = o;
   const lastOut = {}, totPay = {};
-  for (const o of (await env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all()).results) {
+  for (const o of outRes.results) {
     lastOut[o.crew_id] = o; totPay[o.crew_id] = (totPay[o.crew_id] || 0) + (o.pay_usd || 0);
   }
   const rows = base.map(b => {
