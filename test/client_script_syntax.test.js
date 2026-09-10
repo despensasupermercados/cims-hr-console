@@ -52,3 +52,45 @@ test("both import-page escapers neutralise quotes (spreadsheet text lands inside
   assert.match(ui, /function esc\(s\)\{[^\n]*&quot;/, "crew_import_ui esc() must escape a double quote");
   assert.match(src, /function impEsc\(s\)\{[^\n]*&quot;/, "worker impEsc() must escape a double quote");
 });
+
+// ---- META-GUARD: the gate's page list must not fall behind the code -------------------------
+// 2026-09-10. The gate was built after the July white-screen outage, then quietly drifted: it was
+// checking 4 of the 9 pages that serve an inline <script>. The five it missed included /ack and
+// /instr — PUBLIC seafarer pages, where a syntax error white-screens a crew member's sign-off link
+// and nobody internal ever sees it. Widening the list fixed today; this stops it drifting again.
+// Adding a new page with an inline script now fails here until it is added to the gate.
+import { readdirSync } from "node:fs";
+import { PAGES, EXTRA, RENDERED } from "../scripts/verify_client_scripts.mjs";
+
+// Comments are stripped first: the explanatory notes in signoff_ack.js / signoff_instructions.js
+// mention "<script>" in prose, and a naive scan reports those as uncovered pages.
+const stripComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, " ");
+
+test("every module serving an inline <script> is covered by the deploy gate", () => {
+  const dir = new URL("../src/", import.meta.url);
+  const covered = new Set([
+    "worker.js",                                         // APP_HTML / LOGIN_HTML / FB_HTML via PAGES
+    ...EXTRA.map(([, url]) => url.pathname.split("/").pop()),
+    ...RENDERED.map(([, url]) => url.pathname.split("/").pop()),
+  ]);
+
+  const uncovered = [];
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".js"))) {
+    const src = stripComments(readFileSync(new URL(f, dir), "utf8"));
+    // An inline script only — a <script src=...> tag has no body to parse.
+    if (!/<script\b(?![^>]*\bsrc=)[^>]*>/.test(src)) continue;
+    if (!covered.has(f)) uncovered.push(f);
+  }
+  assert.deepEqual(uncovered, [],
+    "these modules serve an inline <script> that the deploy gate never parses — add them to " +
+    "EXTRA or RENDERED in scripts/verify_client_scripts.mjs: " + JSON.stringify(uncovered));
+});
+
+test("the gate actually parses the public seafarer pages", () => {
+  // Named explicitly: these two are the ones a broken script would hurt most quietly.
+  const names = [...PAGES, ...EXTRA.map(([n]) => n), ...RENDERED.map(([n]) => n)];
+  for (const n of ["ACK_HTML", "INSTR_HTML", "SBM_SURVEY_HTML"]) {
+    assert.ok(names.includes(n), n + " must be in the deploy gate — it is a public, unauthenticated page");
+  }
+});

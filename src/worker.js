@@ -14,6 +14,7 @@ import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
+import { crewDataGaps, hasGaps } from "./datagaps.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
@@ -938,7 +939,32 @@ async function apiDataStatus(env) {
   ];
   let log = [];
   try { log = (await env.DB.prepare("SELECT source,rows,status,at FROM data_log ORDER BY at DESC LIMIT 12").all()).results; } catch {}
-  return json({ today: TODAY(), datasets, log });
+  // DATA QUALITY, not just volume (2026-09-10). The counts above say how many rows exist; they
+  // cannot see a hole inside one. Status is DERIVED from the live board here (§11) so these numbers
+  // agree with the dashboard and crew list instead of re-reading a raw column.
+  let gaps = null;
+  try {
+    await ensureCrewExtras(env);
+    const today = TODAY();
+    const [baseRes, ovRes, HIST] = await Promise.all([
+      env.DB.prepare("SELECT agency_id, status, vessel_observed, email, ship_crew_id FROM crew WHERE redacted=0").all(),
+      env.DB.prepare("SELECT agency_id, status, retired, vessel_observed, email FROM crew_override").all(),
+      boardLegs(env),
+    ]);
+    const ovm = {}; for (const o of ovRes.results) ovm[o.agency_id] = o;
+    const sched = scheduleBySc(HIST);
+    gaps = crewDataGaps(baseRes.results.map((c) => {
+      const ov = ovm[c.agency_id] || {};
+      return {
+        agency_id: c.agency_id,
+        status: crewStatus(c, ov, sched[c.agency_id], today),
+        vessel: (ov.vessel_observed != null && ov.vessel_observed !== "") ? ov.vessel_observed : c.vessel_observed,
+        email: (ov.email != null && ov.email !== "") ? ov.email : c.email,
+        ship_crew_id: c.ship_crew_id,
+      };
+    }));
+  } catch (e) { console.error("datastatus_gaps", (e && e.message) || e); }
+  return json({ today: TODAY(), datasets, log, gaps, gapsPresent: hasGaps(gaps) });
 }
 // Read all contract rows in the shape billingReport expects.
 // {on,end,ship} shape that contracts.js (full-contract grouping) expects, from a keyman_contract3 row.
@@ -3403,6 +3429,25 @@ async function dataOverview(){
   if(!d.log.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No load events recorded yet.</p>';
   else h+='<table class=tbl><thead><tr><th>Source</th><th>Records</th><th>Status</th><th>When</th></tr></thead><tbody>'
     +d.log.map(function(l){return '<tr><td>'+l.source+'</td><td>'+(l.rows||'')+'</td><td><span class="cchip ok">'+l.status+'</span></td><td>'+(l.at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table>';
+  // DATA QUALITY (2026-09-10). The table above counts rows; it cannot see a hole inside one.
+  // Shown only when something needs attention, so a clean day stays quiet.
+  if(d.gapsPresent&&d.gaps){
+    var g=d.gaps;
+    var row=function(lab,o,warn){
+      if(!o||!o.count)return '';
+      var ids=(o.ids||[]).join(', ')+((o.count>(o.ids||[]).length)?(' +'+(o.count-(o.ids||[]).length)+' more'):'');
+      return '<tr><td>'+lab+'</td><td style="text-align:right;font-weight:700;color:'+(warn?'var(--red)':'var(--amber,#B0741A)')+'">'+o.count+'</td>'
+        +'<td class=csub style="word-break:break-word">'+ids+'</td></tr>';};
+    var body=row('On board, but no vessel on file',g.on_board_without_vessel,true)
+      +row('Active, no vessel on file',g.active_without_vessel,false)
+      +row('Active, no email — auto-timing cannot reach them',g.active_without_email,false)
+      +row('Active, no ship_crew_id — unmatchable in the timecard app',g.active_without_ship_crew_id,false);
+    if(body){
+      h+='<div class=zlabel style="margin-top:18px">Data quality &mdash; needs attention</div>'
+       +'<p class=muted style="text-align:left;padding:4px 2px">'+g.active+' active crew ('+g.on_board+' on board). These are gaps in rows that already exist, so the record counts above still look healthy. Fix them in the next <b>TDG AdvancedQuery</b> import &mdash; this page only reports.</p>'
+       +'<table class=tbl><thead><tr><th>Gap</th><th style="text-align:right">Crew</th><th>Agency IDs</th></tr></thead><tbody>'+body+'</tbody></table>';
+    }
+  }
   h+='<p class=muted style="text-align:left;padding:10px 2px">To import a new crew registry, travel workbook, or vessel file, use <b>Upload data</b> in the menu. Bonus baselines stay gated for Rita.</p>';
   $('#setbody').innerHTML=h;
 }
@@ -4215,7 +4260,6 @@ function paintDashCost(){
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
 var CF={q:'',status:'',comp:'',client:'',ship:'',sort:'az'};
-var CLIENT_COL={'Royal Caribbean':'#1E6FD0','Celebrity':'#0C8C8C','Azamara':'#7A5AA8','NCL':'#E0962B'};
 function ageOf(dob){if(!dob)return'';var d=new Date(dob);if(isNaN(d))return'';var t=new Date(),a=t.getFullYear()-d.getFullYear();if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate()))a--;return a>0&&a<100?a:'';}
 function fmtPhone(p){if(!p)return{txt:'',bad:false};var raw=String(p).replace(/[^0-9+]/g,'');var ok=/^\\+?63\\d{10}$/.test(raw)||/^09\\d{9}$/.test(raw);return{txt:String(p).trim(),bad:!ok};}
 function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
