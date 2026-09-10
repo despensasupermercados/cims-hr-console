@@ -232,6 +232,13 @@ async function ensureCommentTable(env) {
 
 const VPD_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const VPD_BRANDS = new Set(["Celebrity", "Royal Caribbean", "Azamara", "NCL"]);
+// Server-side bound on one vpd-load POST. The deploy screen already chunks at 600 rows
+// (relief_deploy.js CH=600); this makes the server enforce what the client merely happens to do,
+// so a different caller cannot ask the Worker to assemble an unbounded statement.
+const VPD_MAX_ROWS = 2000;
+// Rows per prepared statement. 50 x 9 columns = 450 bind params, far below SQLite's limit,
+// and all statements still go in ONE batch = one D1 round trip (CLAUDE.md §12).
+const VPD_CHUNK = 50;
 
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
@@ -290,6 +297,8 @@ export async function handleRelief(request, url, env) {
     let body;
     try { body = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const rows = body.rows || [];
+    if (!Array.isArray(rows)) return jsonResp({ ok: false, error: "rows_must_be_array" }, 400);
+    if (rows.length > VPD_MAX_ROWS) return jsonResp({ ok: false, error: "too_many_rows", max: VPD_MAX_ROWS, got: rows.length }, 413);
     if (body.reset) {
       const brands = (body.resetBrands || []).filter((b) => VPD_BRANDS.has(b));
       if (brands.length) {
@@ -305,16 +314,39 @@ export async function handleRelief(request, url, env) {
       if (!VPD_BRANDS.has(brand) || !ship || !VPD_DATE.test(date) || !port) { skipped++; continue; }
       good.push(r);
     }
+    // BOUND PARAMETERS, NOT A CONCATENATED STRING (2026-09-10).
+    //
+    // This used to build one giant INSERT by string concatenation, quoting every value with a
+    // hand-rolled esc() that doubled single quotes. That escaping was actually CORRECT — SQLite
+    // has no backslash escape, so '' is the only way out of a literal and doubling closes it —
+    // and it was checked against injection attempts before being replaced. It was not a live
+    // hole. Two things were still wrong with it:
+    //
+    //   1. NO SERVER-SIDE BOUND on rows. The deploy screen chunks at 600 rows per POST
+    //      (relief_deploy.js), but nothing here enforced that, so any other caller could make
+    //      the Worker assemble one arbitrarily large SQL string in memory.
+    //   2. FRAGILE BY CONSTRUCTION. This repo carries test/sqlsafety.test.js because SQL built
+    //      as text has bitten it before. Correct escaping today is one careless edit away from
+    //      injection tomorrow — add a value and forget esc(), and the guarantee is gone with no
+    //      test to catch it. Binding removes the class rather than defending it per-value.
+    //
+    // Still ONE D1 round trip (§12): a batch is a single call. Rows are chunked at 50 per
+    // statement so the bind-parameter count per statement stays far below SQLite's limit.
     if (good.length) {
-      const esc = (s) => String(s == null ? "" : s).replace(/'/g, "''");
-      const vals = good.map((r) =>
-        "('" + esc(r[0]) + "','" + esc(r[1]) + "','" + esc(r[2]) + "'," + (parseInt(r[3], 10) || 1) +
-        ",'" + esc(r[4]) + "'," + (String(r[5]) === "1" ? 1 : 0) + "," + (String(r[6]) === "1" ? 1 : 0) +
-        ",'DEPLOY','" + esc(body.asof || "") + "')"
-      ).join(",");
-      await env.DB.prepare(
-        "INSERT OR REPLACE INTO vessel_port_day (brand,ship_short,berth_date,stop_seq,port_name,is_sea,is_turnaround,source,source_asof) VALUES " + vals
-      ).run();
+      const asof = String(body.asof == null ? "" : body.asof).slice(0, 40);
+      const ROW_PH = "(?,?,?,?,?,?,?,?,?)";
+      const HEAD = "INSERT OR REPLACE INTO vessel_port_day (brand,ship_short,berth_date,stop_seq,port_name,is_sea,is_turnaround,source,source_asof) VALUES ";
+      const stmts = [];
+      for (let i = 0; i < good.length; i += VPD_CHUNK) {
+        const slice = good.slice(i, i + VPD_CHUNK);
+        const binds = [];
+        for (const r of slice) {
+          binds.push(r[0], r[1], r[2], parseInt(r[3], 10) || 1, r[4],
+                     String(r[5]) === "1" ? 1 : 0, String(r[6]) === "1" ? 1 : 0, "DEPLOY", asof);
+        }
+        stmts.push(env.DB.prepare(HEAD + slice.map(() => ROW_PH).join(",")).bind(...binds));
+      }
+      await env.DB.batch(stmts);
     }
     return jsonResp({ ok: true, inserted: good.length, skipped });
   }

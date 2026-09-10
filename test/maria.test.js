@@ -302,3 +302,51 @@ test('knowledge: search_knowledge tool exists with required query, and prompt ha
   assert.match(p, /TABLE wins/);                      // ledger-wins rule
   assert.match(MARIA_GLOSSARY, /maria_knowledge/);    // dictionary knows the store
 });
+
+// ---- run_sql row cap: comments must not be able to defeat it -----------------------------
+// 2026-09-10. run_sql is the one tool where the MODEL writes the SQL, so the 500-row cap is the
+// control that stops an unbounded SELECT dumping the whole crew table into the model's context.
+// Two ways existed to lose it entirely; both are fixed and pinned here.
+
+// Effective SQL as SQLite would see it, so a "LIMIT" hiding inside a comment does not count.
+const liveSql = (s) => s.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ");
+const isCapped = (s) => /\blimit\s+(\d+)/i.test(liveSql(s)) &&
+  parseInt(liveSql(s).match(/\blimit\s+(\d+)/i)[1], 10) <= SQL_MAX_ROWS;
+
+test('assertReadOnlySql: a trailing line comment cannot swallow the appended LIMIT', () => {
+  // The realistic case: models routinely end generated SQL with an explanatory `-- ...`.
+  for (const q of [
+    'SELECT agency_id FROM crew --',
+    'SELECT agency_id FROM crew -- every seafarer please',
+    'SELECT agency_id FROM crew   --trailing',
+  ]) {
+    const out = assertReadOnlySql(q);
+    assert.ok(isCapped(out), 'row cap lost for: ' + JSON.stringify(q) + ' -> ' + JSON.stringify(out));
+  }
+});
+
+test('assertReadOnlySql: a decoy LIMIT in a comment cannot shield the real one', () => {
+  const out = assertReadOnlySql('SELECT * FROM crew -- limit 9\nLIMIT 100000');
+  assert.doesNotMatch(liveSql(out), /100000/, 'the real LIMIT must be clamped, not the decoy');
+  assert.ok(isCapped(out), 'still capped: ' + JSON.stringify(out));
+});
+
+test('assertReadOnlySql: every oversized LIMIT is clamped, not just the first', () => {
+  const out = assertReadOnlySql('SELECT * FROM (SELECT * FROM crew LIMIT 90000) LIMIT 80000');
+  assert.doesNotMatch(out, /90000|80000/, 'all oversized limits must come down to the cap');
+});
+
+test('assertReadOnlySql: an unterminated block comment is REJECTED', () => {
+  // Verified against the live D1: SQLite does NOT error on a lone "/*" — it treats the comment as
+  // running to end of input and silently swallows the appended LIMIT, returning every row. So this
+  // cannot be left to fail safe at the database; it has to be refused here.
+  for (const q of [
+    'SELECT agency_id FROM crew /*',
+    'SELECT agency_id FROM crew /* unclosed',
+    'SELECT agency_id FROM crew /* a */ WHERE 1=1 /* b',
+  ]) {
+    assert.throws(() => assertReadOnlySql(q), /unterminated_block_comment/, 'must reject: ' + q);
+  }
+  // A properly closed block comment is still fine.
+  assert.doesNotThrow(() => assertReadOnlySql('SELECT agency_id /* note */ FROM crew'));
+});

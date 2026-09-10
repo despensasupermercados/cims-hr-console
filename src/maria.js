@@ -172,6 +172,14 @@ export function assertReadOnlySql(rawSql, opts = {}) {
   const body = stripSqlComments(sql).trim();
   if (!body) throw new Error("empty_sql");
   if (body.includes(";")) throw new Error("multiple_statements_forbidden");
+  // UNTERMINATED BLOCK COMMENT — reject outright (2026-09-10). stripSqlComments only removes
+  // MATCHED /* */ pairs, so a lone "/*" survives into `body` and, critically, SQLite does NOT
+  // error on it: it treats the comment as running to end of input and silently swallows whatever
+  // follows — including the LIMIT this function appends. Verified against the live D1:
+  //     SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 /*<newline>LIMIT 1
+  // returned all THREE rows with no error. That is the row cap gone, quietly. There is no reason
+  // for generated SQL to carry an unterminated comment, so refuse it rather than try to repair it.
+  if (body.includes("/*")) throw new Error("unterminated_block_comment");
   if (!/^(select|with)\b/i.test(body)) throw new Error("only_select_or_with_allowed");
   if (SQL_FORBIDDEN.test(body)) throw new Error("write_or_ddl_keyword_forbidden");
   const bad = body.match(/\b\w*_(preclean|preimport|predrop)(_?\d+)?\b/i) || body.match(/\b\w*_20\d{6}\b/);
@@ -180,10 +188,31 @@ export function assertReadOnlySql(rawSql, opts = {}) {
   const denied = body.match(denyRe);
   if (denied) throw new Error("table_forbidden:" + denied[0]);
   // Enforce a LIMIT (append if missing; clamp if present).
+  //
+  // TWO COMMENT BYPASSES FIXED 2026-09-10 — both defeated the row cap entirely.
+  //
+  // 1. THE APPEND RAN ON THE SAME LINE. The checks above read `body` (comments stripped) but the
+  //    LIMIT was appended to `sql` (comments intact), so a query ending in a line comment ate it:
+  //        "SELECT agency_id FROM crew --"  ->  "SELECT agency_id FROM crew -- LIMIT 500"
+  //    SQLite sees the LIMIT inside the comment and returns the WHOLE table. This is not an exotic
+  //    attack: the model writes this SQL and models habitually end queries with `-- explanation`,
+  //    so it fires by accident. Appending on a NEWLINE fixes it — a `--` comment ends at the line
+  //    break, so the LIMIT is always live. (An unterminated `/*` still swallows it, but that is a
+  //    SQLite syntax error: the query fails and returns nothing, which fails safe.)
+  //
+  // 2. THE CLAMP REPLACED ONLY THE FIRST MATCH. Presence was tested on `body` but the replace ran
+  //    on `sql`, so a decoy in a comment absorbed the clamp and the real limit survived:
+  //        "SELECT * FROM crew -- limit 9\nLIMIT 100000"  ->  decoy clamped, 100000 untouched.
+  //    The /g flag clamps every occurrence, so a decoy cannot shield the real one.
+  //
+  // KNOWN RESIDUAL, deliberately not chased: a query whose only "limit" is inside a STRING LITERAL
+  // (e.g. SELECT 'limit 5' FROM crew) takes the clamp branch and so never gets a real LIMIT. That
+  // needs a real tokenizer to distinguish, it is not reachable by accident, and run_sql is already
+  // session-gated, single-statement and SELECT-only. Pinned by a test so it stays a known quantity.
   if (!/\blimit\s+\d+/i.test(body)) {
-    sql = sql + " LIMIT " + maxRows;
+    sql = sql + "\nLIMIT " + maxRows;
   } else {
-    sql = sql.replace(/\blimit\s+(\d+)/i, (m, n) => "LIMIT " + Math.min(parseInt(n, 10) || maxRows, maxRows));
+    sql = sql.replace(/\blimit\s+(\d+)/gi, (m, n) => "LIMIT " + Math.min(parseInt(n, 10) || maxRows, maxRows));
   }
   return sql;
 }
