@@ -39,9 +39,11 @@ import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
+import { installTgUpdate } from "./tg_update.js";
 import { apiRosterExport } from './roster_export.js';
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _tgUpdate = installTgUpdate({ json, htmlResponse, logActivity, sendViaMailer, shipOf: (v) => canonShipWith(v, SHIP_KEYS), brandFor: clientOf });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
 // crew cards. Same install pattern as auto-send. NO money code here -- the
@@ -201,6 +203,11 @@ export default {
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs }); if (ci) return ci; }
+        // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
+        // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
+        // human does. Inside the boundary and behind the session gate (§11). Inert until
+        // TG_NOTIFY is set: /api/tg/send refuses rather than guessing a recipient.
+        if (session) { const tg = await _tgUpdate(p, request, env, url, session); if (tg) return tg; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -3846,10 +3853,49 @@ async function renderRotation(){
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
+    +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
   drawRotation(); loadAutoToggle();
   loadSbmToggle();
+  tgLoadPending();
+}
+// "Update TG" — the return leg of the AdvancedQuery loop. The badge is how many changes are
+// waiting; the click always opens the rendered email first, because sign-off is on the email and
+// never on a description (cims-email-standard §5). Nothing is sent until that tab is open and the
+// confirm is accepted.
+async function tgLoadPending(){
+  var b=$('#tgBtn'); if(!b)return;
+  try{
+    var j=await (await fetch('/api/tg/pending',{cache:'no-store'})).json();
+    window.TG_PENDING=j||null;
+    var n=(j&&j.counts&&j.counts.items)||0, bd=$('#tgBadge');
+    if(bd){ bd.textContent=n; bd.style.display=n?'inline-block':'none'; }
+    b.title=!j||!j.ok ? 'Update TG — could not read pending changes'
+      : !n ? 'Nothing has changed since the last update to TG'
+      : (j.recipient?('Email TG '+n+' change'+(n===1?'':'s')+' across '+((j.counts&&j.counts.ships)||0)+' ship(s)')
+                    :(n+' change'+(n===1?'':'s')+' waiting — no TG recipient configured yet'));
+  }catch(e){}
+}
+async function tgUpdateClick(){
+  await tgLoadPending();
+  var j=window.TG_PENDING;
+  if(!j||!j.ok){ alert('Could not read what has changed since the last update.'); return; }
+  var n=(j.counts&&j.counts.items)||0;
+  if(!n){ alert('Nothing has changed since the last update to TG.'); return; }
+  if(!j.recipient){ alert(n+' change'+(n===1?'':'s')+' are waiting, but no TG recipient is configured yet.\\n\\nSet TG_NOTIFY on the Worker and this button will send to that address.'); return; }
+  window.open('/api/tg/preview','_blank');
+  if(!confirm('Send this digest to '+j.recipient+'?\\n\\n'+n+' change'+(n===1?'':'s')+' across '+((j.counts&&j.counts.ships)||0)+' ship(s).\\n\\nThe preview has opened in a new tab — read it before you confirm.')) return;
+  var b=$('#tgBtn'); if(b){b.disabled=true;}
+  try{
+    var r=await fetch('/api/tg/send',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    var out=await r.json();
+    if(out&&out.sent) alert('Sent to '+out.to+'.');
+    else if(out&&out.empty) alert('Nothing has changed since the last update to TG.');
+    else alert('Not sent: '+((out&&out.error)||'unknown error')+'\\n\\nNothing was recorded, so these changes stay in the next digest.');
+  }catch(e){ alert('Not sent: network error. Nothing was recorded.'); }
+  if(b){b.disabled=false;}
+  tgLoadPending();
 }
 function rmonthChips(){
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
