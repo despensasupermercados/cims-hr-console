@@ -33,6 +33,7 @@ import { annotateReliefCoverage } from "./relief_coverage.js";
 import { maybeSendDocRadar, docRadarPreviewResponse, docRadarSendResponse } from "./doc_radar.js";
 import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
+import { mariaFriendlyError } from "./maria_errors.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
@@ -654,12 +655,19 @@ async function apiAsk(request, env, session) {
   try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run();
     const sqlRun = (res.toolCalls || []).filter(c => c.name === "run_sql").map(c => String((c.input && c.input.sql) || "")).join("\n---\n");
-    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms) VALUES (?,?,?,?,?,?,?,?,?,?)")
-      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms).run();
+    // On a provider failure keep the provider's OWN response body. Without it all we retain is a
+    // bare status code, and the reason has to be guessed after the fact — which is exactly what
+    // made the China 403 hard to diagnose. `note` is otherwise the user's feedback text, and the
+    // two never collide: a failed call has no answer to grade.
+    const noteVal = res.error ? (String(res.detail || "").slice(0, 500) || null) : null;
+    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms, noteVal).run();
     logId = (ins && ins.meta && ins.meta.last_row_id) || null;
   } catch (e) { console.error("maria_log", (e && e.message) || e); }
   await logActivity(env, session.email, "maria_ask", question.slice(0, 120));
-  return json({ answer: res.answer, sources: res.sources, error: res.error, detail: res.detail, log_id: logId });
+  // `error` is what the reader sees, so it is a sentence. `code` carries the raw identifier for
+  // support and diagnosis — it is quotable, but it is not the message.
+  return json({ answer: res.answer, sources: res.sources, error: mariaFriendlyError(res.error), code: res.error || null, detail: res.detail, log_id: logId });
 }
 
 // POST /api/maria/feedback {id, verdict:1|0, note?} — the correction loop's write path.
@@ -2881,7 +2889,7 @@ async function mariaAskCore(q){
     var j=await r.json();
     window.MARIA_HIST.pop();
     if(j&&j.answer){window.MARIA_HIST.push({role:'assistant',html:mariaEsc(j.answer),text:j.answer,sources:j.sources||[],logId:j.log_id||null});}
-    else{window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc((j&&(j.error||j.detail))||'No answer returned.')+'</span>'});}
+    else{var em=(j&&j.error)||'No answer returned.';var cd=(j&&j.code)?'<div class=csub style="margin-top:4px;opacity:.55">Reference: '+mariaEsc(j.code)+'</div>':'';window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc(em)+'</span>'+cd});}
   }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
   mariaRender();mkRender();
 }
