@@ -22,6 +22,7 @@ const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, k
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
+import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
@@ -236,8 +237,8 @@ export default {
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
         if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
         if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
-if (p === "/api/health/preview") return docRadarPreviewResponse(env, url);
-if (p === "/api/health/send" && request.method === "POST") return docRadarSendResponse(request, env, session);
+if (p === "/api/health/preview") return docRadarPreviewResponse(env, url, { boardLegs });
+if (p === "/api/health/send" && request.method === "POST") return docRadarSendResponse(request, env, session, { boardLegs });
         if (p === "/api/rotation/upcoming") return apiRotationUpcoming(env, url);
         if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
         if (p === "/api/maria/feedback" && request.method === "POST") return apiMariaFeedback(request, env, session);
@@ -298,7 +299,7 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
-if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event));
+if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event, { boardLegs }));
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
@@ -1176,21 +1177,8 @@ async function boardLegs(env) {
   if (!db.ok) throw db.e; // fail loud: never quietly serve the frozen constant for a live source
   return db.v;
 }
-// Schedule legs per crew, for the auto status derivation. No legs = no schedule (status falls
-// back to the registry value) — never the frozen constant.
-function scheduleBySc(legs) {
-  const m = {};
-  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
-  return m;
-}
-// Effective status: manual 'Retired' tag wins; else a manual status edit wins; else auto-derive from
-// the live schedule (on a ship now -> On board; signed off -> On Vacation; only future / none -> registry).
-function crewStatus(base, ov, schedLegs, today) {
-  ov = ov || {};
-  if (ov.retired) return "Retired";
-  if (ov.status != null && ov.status !== "") return ov.status;
-  return deriveStatus(schedLegs || [], today, { imported: base && base.status });
-}
+// scheduleBySc + crewStatus now live in src/crew_status.js so doc_radar.js shares the ONE rule
+// instead of keeping a second copy of it (§3, §11). Imported at the top of this file.
 // Returns the FULL enriched crew list (overrides merged, contract count, active span, client,
 // docs). Filtering/sorting is done client-side (≈100 crew) so the UI stays snappy and consistent.
 async function apiCrew(env, url) {

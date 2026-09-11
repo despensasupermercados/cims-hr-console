@@ -16,6 +16,7 @@
  */
 
 import { isMoneyUser } from "./policy.js";
+import { scheduleBySc, crewStatus, isOffFleet } from "./crew_status.js";
 
 // --- recipients (edit here; lives in code so it survives every deploy) -------
 const TO = ["Rita Berenyi <Rita.Berenyi@dg3.com>"];
@@ -116,24 +117,44 @@ export function assessCrew(row, todayStr) {
 }
 
 // --- data --------------------------------------------------------------------
-export async function fetchDocRadar(env, todayStr) {
-  // Apply crew_override (manual corrections that survive AdvancedQuery re-import).
-  // Effective status and doc expiries come from the override when present (retired=0), else crew.
-  const { results } = await env.DB.prepare(
-    "SELECT c.agency_id, c.first_name, c.last_name, " +
-    "COALESCE(o.status, c.status) AS status, " +
-    "COALESCE(o.pp_exp, c.pp_exp) AS pp_exp, " +
-    "COALESCE(o.sirb_exp, c.sirb_exp) AS sirb_exp, " +
-    "COALESCE(o.med_exp, c.med_exp) AS med_exp, " +
-    "COALESCE(o.usv_exp, c.usv_exp) AS usv_exp, " +
-    "COALESCE(o.sch_exp, c.sch_exp) AS sch_exp " +
-    "FROM crew c " +
-    "LEFT JOIN crew_override o ON o.agency_id = c.agency_id AND COALESCE(o.retired,0)=0 " +
-    "WHERE c.redacted=0 AND COALESCE(o.status, c.status) != 'Inactive'"
-  ).all();
+const DOC_COLS = ['pp_exp', 'sirb_exp', 'med_exp', 'usv_exp', 'sch_exp'];
+
+// Reads the registry the SAME way the Crew tab does — that tab is the authority and this email
+// must never contradict it. Status is DERIVED from the live board (retired flag > manual status >
+// schedule > registry), not read off the raw `crew.status` column, which is only whatever the last
+// AdvancedQuery import happened to say (CLAUDE.md §11). It matters here because `deployable`
+// decides urgency: a crew the board shows signed off is not about to join a ship.
+//
+// deps.boardLegs is the ONE schedule (worker.js boardLegs). Without it there is no schedule and
+// every status falls back to the registry value — the old behaviour, kept so tests and tools can
+// call this without a board.
+export async function fetchDocRadar(env, todayStr, deps = {}) {
+  // PERF (§12): the reads are independent — one concurrent wave, never a chain.
+  const [baseRes, ovRes, legs] = await Promise.all([
+    env.DB.prepare(
+      "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp " +
+      "FROM crew WHERE redacted=0"
+    ).all(),
+    env.DB.prepare("SELECT agency_id, status, retired, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp FROM crew_override")
+      .all().catch(() => ({ results: [] })),
+    deps.boardLegs ? deps.boardLegs(env) : Promise.resolve([]),
+  ]);
+  const ovm = {};
+  for (const o of (ovRes.results || [])) ovm[o.agency_id] = o;
+  const sched = scheduleBySc(legs);
+
   const flagged = [];
-  const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, suspect: 0, deployable: 0 };
-  for (const r of (results || [])) {
+  const counts = { crew: 0, expired: 0, expiring: 0, missing: 0, suspect: 0, deployable: 0, offFleet: 0 };
+  for (const b of (baseRes.results || [])) {
+    const ov = ovm[b.agency_id];
+    const status = crewStatus(b, ov, sched[b.agency_id], todayStr);
+    // An expired document on someone who has left the fleet is not an action item, and printing
+    // it buries the people still sailing.
+    if (isOffFleet(status)) { counts.offFleet++; continue; }
+    // Manual document corrections win over the imported row. A RETIRED override contributes
+    // nothing — same rule the crew list applies.
+    const r = { ...b, status };
+    if (ov && !ov.retired) for (const k of DOC_COLS) if (ov[k] != null && ov[k] !== '') r[k] = ov[k];
     const a = assessCrew(r, todayStr);
     if (!a.flagged) continue;
     counts.crew++; counts.expired += a.expired; counts.expiring += a.expiring;
@@ -261,16 +282,16 @@ async function sendViaMailer(env, envelope) {
   }
 }
 
-export async function renderDocRadar(env, runDate) {
+export async function renderDocRadar(env, runDate, deps = {}) {
   const today = nyDateStr();
   const rd = runDate || today;
-  const { rows, counts, urgent, truncated } = await fetchDocRadar(env, today);
+  const { rows, counts, urgent, truncated } = await fetchDocRadar(env, today, deps);
   return { html: buildDocRadarEmail({ runDate: rd, rows, counts, urgent, truncated }), count: counts.crew };
 }
 
 // toOverride: optional single address (or array) for a self-test — sends To that only, no CC.
-export async function sendDocRadar(env, runDate, toOverride) {
-  const { html, count } = await renderDocRadar(env, runDate);
+export async function sendDocRadar(env, runDate, toOverride, deps = {}) {
+  const { html, count } = await renderDocRadar(env, runDate, deps);
   if (!env.MAILER) return { ok: false, sent: false, note: "no_mailer", count };
   const to = toOverride ? (Array.isArray(toOverride) ? toOverride : [toOverride]) : TO;
   const cc = toOverride ? [] : CC;
@@ -286,7 +307,7 @@ export async function sendDocRadar(env, runDate, toOverride) {
 }
 
 // --- weekly cron: Monday 03:00 America/New_York, deduped ---------------------
-export async function maybeSendDocRadar(env, event) {
+export async function maybeSendDocRadar(env, event, deps = {}) {
   try {
     const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
     const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', hour12: false }).formatToParts(now);
@@ -296,7 +317,7 @@ export async function maybeSendDocRadar(env, event) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
     const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='docradar_last_sent'").first();
     if (prev && prev.v === runDate) return;
-    const res = await sendDocRadar(env, runDate);
+    const res = await sendDocRadar(env, runDate, undefined, deps);
     if (res.sent) await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('docradar_last_sent',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(runDate).run();
   } catch (e) { console.error("docradar_cron", (e && e.stack) || e); }
 }
@@ -304,16 +325,16 @@ export async function maybeSendDocRadar(env, event) {
 // --- HTTP handlers (return Response) -----------------------------------------
 const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "Content-Type": "application/json" } });
 
-export async function docRadarPreviewResponse(env, url) {
+export async function docRadarPreviewResponse(env, url, deps = {}) {
   const date = url.searchParams.get('date') || undefined;
-  const { html } = await renderDocRadar(env, date);
+  const { html } = await renderDocRadar(env, date, deps);
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
 
-export async function docRadarSendResponse(request, env, session) {
+export async function docRadarSendResponse(request, env, session, deps = {}) {
   if (!session || !isMoneyUser(session.email)) return json({ error: "forbidden" }, 403);
   const b = await request.json().catch(() => ({}));
   const runDate = b.date || nyDateStr(new Date());
-  const res = await sendDocRadar(env, runDate, b.to); // b.to (your address) => self-test, no CC
+  const res = await sendDocRadar(env, runDate, b.to, deps); // b.to (your address) => self-test, no CC
   return json(res);
 }

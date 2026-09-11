@@ -102,3 +102,41 @@ test("apiCrewAdd does not seed crew_override.status (that pin disables schedule 
     "apiCrewAdd must not write status into crew_override — it permanently pins the crew's status. Columns: " + cols);
   assert.match(add, /INSERT INTO crew\b/, "the base crew row (which carries the starting status) must still be written");
 });
+
+// The Fleet Document Radar is a fourth view of the same seafarers, and it was the last one still
+// reading the raw column: `COALESCE(o.status, c.status)` straight out of SQL. That is whatever the
+// last AdvancedQuery import happened to say, so the weekly email could contradict the Crew tab —
+// and `deployable`, which decides urgency, was decided by it. It now derives status like every
+// other view, from boardLegs(env) handed in by the worker.
+const RADAR = readFileSync(new URL("../src/doc_radar.js", import.meta.url), "utf8")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^[ \t]*\/\/.*$/gm, "")
+  .replace(/[ \t]\/\/ [^\n"'`]*$/gm, "");
+
+test("the doc radar derives status with crewStatus(), never from a raw status column", () => {
+  assert.match(RADAR, /import \{[^}]*crewStatus[^}]*\} from "\.\/crew_status\.js"/,
+    "doc_radar must share the ONE status rule, not keep its own");
+  assert.match(RADAR, /crewStatus\(b, ov, sched\[b\.agency_id\], todayStr\)/,
+    "status has to be derived per crew from the schedule");
+  assert.doesNotMatch(RADAR, /COALESCE\(o\.status/,
+    "a raw crew.status read in SQL is exactly the regression §11 forbids");
+  assert.match(RADAR, /deps\.boardLegs \? deps\.boardLegs\(env\)/,
+    "the schedule must come from the worker's boardLegs(env), never a local copy");
+});
+
+test("every doc radar entry point in the worker hands over boardLegs", () => {
+  for (const fn of ["docRadarPreviewResponse", "docRadarSendResponse", "maybeSendDocRadar"]) {
+    const re = new RegExp(fn + "\\([^)]*\\{ boardLegs \\}\\)");
+    assert.match(SRC, re, fn + " must be given the live board, or it silently reports registry status");
+  }
+});
+
+test("scheduleBySc and crewStatus live in ONE module, not copied per caller", () => {
+  const MOD = readFileSync(new URL("../src/crew_status.js", import.meta.url), "utf8");
+  assert.match(MOD, /export function scheduleBySc/);
+  assert.match(MOD, /export function crewStatus/);
+  // worker.js must import them rather than redeclare them (§3: deployed code equals tested code).
+  assert.match(SRC, /import \{ scheduleBySc, crewStatus \} from "\.\/crew_status\.js"/);
+  assert.doesNotMatch(SRC, /^function (scheduleBySc|crewStatus)\(/m,
+    "a second local copy is how two views start disagreeing");
+});

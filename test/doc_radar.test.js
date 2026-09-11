@@ -4,8 +4,14 @@ import { docStatus, assessCrew, fetchDocRadar, buildDocRadarEmail } from '../src
 
 const TODAY = '2026-07-14';
 
-function stubEnv(rows) {
-  return { DB: { prepare() { return { async all() { return { results: rows }; } }; } } };
+// SQL-aware: fetchDocRadar issues TWO reads (crew, crew_override). A stub that answers both with
+// the same rows passes by accident — the crew rows arrive as their own overrides and every value
+// agrees with itself. Dispatch on the statement so the override path is actually exercised.
+function stubEnv(rows, overrides = []) {
+  return { DB: { prepare(sql) {
+    const isOverride = String(sql).includes('FROM crew_override');
+    return { async all() { return { results: isOverride ? overrides : rows }; } };
+  } } };
 }
 
 test('docStatus: valid / expiring / expired / missing', () => {
@@ -145,4 +151,61 @@ test('buildDocRadarEmail: suspect dates print the full year and carry an instruc
 test('buildDocRadarEmail: no suspect dates means no suspect note', () => {
   const html = buildDocRadarEmail({ runDate: TODAY, rows: [], counts: { crew:0, expired:0, expiring:0, missing:0, suspect:0, deployable:0 }, urgent: null });
   assert.ok(!html.includes('treat as a data error'));
+});
+
+// --- status comes from the board, not the raw crew.status column (CLAUDE.md §11) -------------
+// The radar used to read COALESCE(crew_override.status, crew.status) directly. That is whatever
+// the last AdvancedQuery import happened to say, so this email could contradict the Crew tab
+// about the same seafarer — and `deployable`, which drives urgency, was decided by it.
+const legsFor = (sc, on, off) => [{ ours: 1, sc, on, off }];
+
+test('fetchDocRadar: a crew the board shows aboard is On board, whatever the import said', async () => {
+  const rows = [{ agency_id:'SC-1', first_name:'A', last_name:'B', status:'Earmarked', pp_exp:'2030-01-01', sirb_exp:'2030-01-01', med_exp:'2026-08-01', usv_exp:'2030-01-01', sch_exp:null }];
+  const noBoard = await fetchDocRadar(stubEnv(rows), TODAY);
+  assert.equal(noBoard.rows[0].status, 'Earmarked');
+  assert.equal(noBoard.rows[0].deployable, true, 'without a board we fall back to the registry value');
+
+  const withBoard = await fetchDocRadar(stubEnv(rows), TODAY, { boardLegs: async () => legsFor('SC-1', '2026-05-01', '2026-11-01') });
+  assert.equal(withBoard.rows[0].status, 'On board');
+  assert.equal(withBoard.rows[0].deployable, false, 'someone already aboard is not about to join a ship');
+  assert.equal(withBoard.counts.deployable, 0);
+});
+
+test('fetchDocRadar: a manual override status still wins over the board', async () => {
+  const rows = [{ agency_id:'SC-1', first_name:'A', last_name:'B', status:'On board', pp_exp:'2030-01-01', sirb_exp:'2030-01-01', med_exp:'2026-08-01', usv_exp:'2030-01-01', sch_exp:null }];
+  const r = await fetchDocRadar(stubEnv(rows, [{ agency_id:'SC-1', status:'Earmarked', retired:0 }]), TODAY,
+    { boardLegs: async () => legsFor('SC-1', '2026-05-01', '2026-11-01') });
+  assert.equal(r.rows[0].status, 'Earmarked', 'a manual pin beats derivation');
+});
+
+test('fetchDocRadar: a retired crew is dropped, not reported', async () => {
+  const rows = [
+    { agency_id:'SC-GONE', first_name:'Left', last_name:'Fleet', status:'On board', pp_exp:'2026-01-01', sirb_exp:'2030-01-01', med_exp:'2030-01-01', usv_exp:'2030-01-01', sch_exp:null },
+    { agency_id:'SC-HERE', first_name:'Still', last_name:'Sailing', status:'On board', pp_exp:'2030-01-01', sirb_exp:'2030-01-01', med_exp:'2026-08-01', usv_exp:'2030-01-01', sch_exp:null },
+  ];
+  const r = await fetchDocRadar(stubEnv(rows, [{ agency_id:'SC-GONE', retired:1 }]), TODAY);
+  assert.deepEqual(r.rows.map(x => x.agency_id), ['SC-HERE'], 'an expired passport on someone who has left is not an action item');
+  assert.equal(r.counts.offFleet, 1, 'the skip is counted, not silent');
+});
+
+test('fetchDocRadar: a crew whose import said Inactive is still dropped', async () => {
+  const rows = [{ agency_id:'SC-X', first_name:'In', last_name:'Active', status:'Inactive', pp_exp:'2026-01-01', sirb_exp:'2030-01-01', med_exp:'2030-01-01', usv_exp:'2030-01-01', sch_exp:null }];
+  const r = await fetchDocRadar(stubEnv(rows), TODAY);
+  assert.deepEqual(r.rows, []);
+  assert.equal(r.counts.offFleet, 1);
+});
+
+test('fetchDocRadar: a manual document correction wins over the imported expiry', async () => {
+  const rows = [{ agency_id:'SC-1', first_name:'A', last_name:'B', status:'On board', pp_exp:'2026-01-01', sirb_exp:'2030-01-01', med_exp:'2030-01-01', usv_exp:'2030-01-01', sch_exp:null }];
+  const r = await fetchDocRadar(stubEnv(rows, [{ agency_id:'SC-1', retired:0, pp_exp:'2033-01-01' }]), TODAY);
+  assert.deepEqual(r.rows, [], 'the corrected passport is valid, so nothing is flagged');
+});
+
+test('fetchDocRadar: a RETIRED override contributes no document values', async () => {
+  // retired=1 means the whole override is out of force, documents included — the same rule the
+  // crew list applies. Taking its dates anyway would resurrect a correction we no longer honour.
+  const rows = [{ agency_id:'SC-1', first_name:'A', last_name:'B', status:'On board', pp_exp:'2026-01-01', sirb_exp:'2030-01-01', med_exp:'2030-01-01', usv_exp:'2030-01-01', sch_exp:null }];
+  const r = await fetchDocRadar(stubEnv(rows, [{ agency_id:'SC-1', retired:1, pp_exp:'2033-01-01' }]), TODAY);
+  assert.deepEqual(r.rows, [], 'retired means off-fleet, so the crew is dropped entirely');
+  assert.equal(r.counts.offFleet, 1);
 });
