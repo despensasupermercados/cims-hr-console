@@ -269,7 +269,10 @@ function render(){
   '<span class="chip red">&#9679; <span class="n">'+c.override_conflict+'</span> needs you</span>'+
   '<span class="chip green">&#9677; <span class="n">'+c.cert+'</span> certificates</span>'+
   '<span class="chip navy">&#65291; <span class="n">'+c.new+'</span> new</span>'+
-  '<span class="chip">&#128682; <span class="n">'+c.departed+'</span> departed</span></div>';
+  '<span class="chip">&#128682; <span class="n">'+c.departed+'</span> departed</span>'+
+  ((c.rekeyed||0)?'<span class="chip red">&#9888; <span class="n">'+c.rekeyed+'</span> identity</span>':'')+'</div>';
+ if((g.rekeyed||[]).length){h+='<div class="sec"><h2>&#9888; Identity \u2014 the file used the ship\u2019s crew id</h2><div class="d">These rows name a crew you already hold, keyed on the cruise line\u2019s numeric id instead of the agency id. They were MATCHED, not added, so no duplicate seafarer is created. Nothing here changes an agency id \u2014 get the export fixed at source.</div>';
+  g.rekeyed.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Keyed in file as",it.agency_id,it.incoming_id,badge("cruise-line id "+esc(it.ship_crew_id||"?"),"t-amber"))+'</div>';});h+='</div>';}
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
   g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","dismiss"],["Keep board","Dismiss"])+'</div>';});h+='</div>';}
  if(g.critical.length){h+='<div class="sec"><h2>&#9679; Status changes from TDG</h2><div class="d">Applied by default — the file drives status. Hold any you want left as-is. Crew you pinned by hand are protected and shown below.</div>';

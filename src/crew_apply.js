@@ -20,6 +20,9 @@
 //       than the file's literal value. That is by design (§11: status comes from the schedule).
 //   D4  departed default 'flag' (open sync_conflict, resolved=0); never a delete.
 //   D5  minor auto-applies regardless of decision.
+//   D7  rekeyed (matched on the cruise-line id under a different agency id) is a flag only —
+//       an OPEN sync_conflict row on field 'identity'. The match stops a duplicate seafarer
+//       being inserted; it never rewrites agency_id, which is the roster's stable key.
 
 import { OVR_COL } from "./crew_review.js";
 
@@ -61,6 +64,17 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   for (const it of g.ship_flag || []) {
     const dismissed = dec(`ship:${it.agency_id}`, "flag") === "dismiss";
     conflicts.push({ agency_id: it.agency_id, field: "vessel_observed", old_value: it.old, new_value: it.new, resolved: dismissed ? 1 : 0 });
+  }
+  // D7 rekeyed — the file keyed a crew we already hold on their cruise-line id. diffCrew matched
+  // them, so no duplicate is inserted; this raises an OPEN flag (resolved:0) so the export gets
+  // fixed at source. Never a crew write: agency_id is the roster's stable key (CLAUDE.md §6).
+  for (const it of g.rekeyed || []) {
+    conflicts.push({
+      agency_id: it.agency_id, field: "identity",
+      old_value: it.agency_id,
+      new_value: `file keyed this crew as ${it.incoming_id} (cruise-line id ${it.ship_crew_id || "?"}) — matched, not duplicated`,
+      resolved: 0,
+    });
   }
   // minor — auto-apply
   for (const it of g.minor || []) {

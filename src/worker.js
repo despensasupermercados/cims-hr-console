@@ -14,6 +14,7 @@ import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
+import { crewDataGaps, hasGaps } from "./datagaps.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
@@ -21,6 +22,7 @@ const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, k
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
+import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
@@ -31,14 +33,17 @@ import { annotateReliefCoverage } from "./relief_coverage.js";
 import { maybeSendDocRadar, docRadarPreviewResponse, docRadarSendResponse } from "./doc_radar.js";
 import { runMaria, mariaQuickTitle, rankCrewMatches, assertReadOnlySql, isHiddenTable, SQL_MAX_ROWS } from "./maria.js";
 import { runEvals } from "./maria_eval.js";
+import { mariaFriendlyError } from "./maria_errors.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
+import { installTgUpdate } from "./tg_update.js";
 import { apiRosterExport } from './roster_export.js';
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _tgUpdate = installTgUpdate({ json, htmlResponse, logActivity, sendViaMailer, shipOf: (v) => canonShipWith(v, SHIP_KEYS), brandFor: clientOf });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
 // crew cards. Same install pattern as auto-send. NO money code here -- the
@@ -198,6 +203,11 @@ export default {
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs }); if (ci) return ci; }
+        // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
+        // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
+        // human does. Inside the boundary and behind the session gate (§11). Inert until
+        // TG_NOTIFY is set: /api/tg/send refuses rather than guessing a recipient.
+        if (session) { const tg = await _tgUpdate(p, request, env, url, session); if (tg) return tg; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -235,8 +245,8 @@ export default {
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
         if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
         if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
-if (p === "/api/health/preview") return docRadarPreviewResponse(env, url);
-if (p === "/api/health/send" && request.method === "POST") return docRadarSendResponse(request, env, session);
+if (p === "/api/health/preview") return docRadarPreviewResponse(env, url, { boardLegs });
+if (p === "/api/health/send" && request.method === "POST") return docRadarSendResponse(request, env, session, { boardLegs });
         if (p === "/api/rotation/upcoming") return apiRotationUpcoming(env, url);
         if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
         if (p === "/api/maria/feedback" && request.method === "POST") return apiMariaFeedback(request, env, session);
@@ -297,7 +307,7 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
-if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event));
+if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event, { boardLegs }));
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
@@ -652,12 +662,19 @@ async function apiAsk(request, env, session) {
   try {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run();
     const sqlRun = (res.toolCalls || []).filter(c => c.name === "run_sql").map(c => String((c.input && c.input.sql) || "")).join("\n---\n");
-    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms) VALUES (?,?,?,?,?,?,?,?,?,?)")
-      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms).run();
+    // On a provider failure keep the provider's OWN response body. Without it all we retain is a
+    // bare status code, and the reason has to be guessed after the fact — which is exactly what
+    // made the China 403 hard to diagnose. `note` is otherwise the user's feedback text, and the
+    // two never collide: a failed call has no answer to grade.
+    const noteVal = res.error ? (String(res.detail || "").slice(0, 500) || null) : null;
+    const ins = await env.DB.prepare("INSERT INTO maria_log (user_email, question, answer, error, sources, sql_run, steps, in_tokens, out_tokens, ms, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(session.email || "", question, String(res.answer || "").slice(0, 8000), res.error || null, JSON.stringify(res.sources || []), sqlRun || null, res.steps || 0, (res.usage && res.usage.input_tokens) || 0, (res.usage && res.usage.output_tokens) || 0, ms, noteVal).run();
     logId = (ins && ins.meta && ins.meta.last_row_id) || null;
   } catch (e) { console.error("maria_log", (e && e.message) || e); }
   await logActivity(env, session.email, "maria_ask", question.slice(0, 120));
-  return json({ answer: res.answer, sources: res.sources, error: res.error, detail: res.detail, log_id: logId });
+  // `error` is what the reader sees, so it is a sentence. `code` carries the raw identifier for
+  // support and diagnosis — it is quotable, but it is not the message.
+  return json({ answer: res.answer, sources: res.sources, error: mariaFriendlyError(res.error), code: res.error || null, detail: res.detail, log_id: logId });
 }
 
 // POST /api/maria/feedback {id, verdict:1|0, note?} — the correction loop's write path.
@@ -862,12 +879,15 @@ async function apiCrewImport(request, env, session) {
   const b = await request.json().catch(() => ({}));
   const dryRun = !!b.dryRun;
   const { mapped, invalidCount } = mapRows(b.rows || []);
-  const ex = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, dob, province, phone, email, med_exp, sirb_exp, pp_exp, sch_exp, usv_exp FROM crew").all()).results;
+  const ex = (await env.DB.prepare("SELECT agency_id, ship_crew_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, dob, province, phone, email, med_exp, sirb_exp, pp_exp, sch_exp, usv_exp FROM crew").all()).results;
   const existing = {}; for (const r of ex) existing[r.agency_id] = r;
   const d = diffCrew(mapped, existing);
   if (dryRun) {
-    return json({ dryRun: true, total: d.total, add: d.add.length, change: d.change.length, unchanged: d.unchanged, needsStatus: d.needsStatus.length, invalid: invalidCount, sampleAdd: d.add.slice(0, 10), sampleChange: d.change.slice(0, 10) });
+    return json({ dryRun: true, total: d.total, add: d.add.length, change: d.change.length, unchanged: d.unchanged, needsStatus: d.needsStatus.length, invalid: invalidCount, rekeyed: (d.rekeyed || []).length, sampleAdd: d.add.slice(0, 10), sampleChange: d.change.slice(0, 10), sampleRekeyed: (d.rekeyed || []).slice(0, 10) });
   }
+  // A rekeyed row (matched on the cruise-line id under a different agency id) is deliberately
+  // absent from applyIds: this legacy path has no review UI to decide with, so it neither inserts
+  // a duplicate nor writes through on an id we have not confirmed. It is reported instead.
   const applyIds = new Set([...d.add, ...d.change.map(c => c.agency_id)]);
   const now = new Date().toISOString();
   const stmt = env.DB.prepare(
@@ -889,7 +909,7 @@ async function apiCrewImport(request, env, session) {
   }
   if (batch.length) await env.DB.batch(batch);
   await logData(env, "crew (AdvancedQuery, by " + ((session && session.email) || "?") + ")", batch.length, "refreshed: +" + d.add.length + " ~" + d.change.length);
-  return json({ ok: true, applied: batch.length, added: d.add.length, changed: d.change.length, skippedNoStatus: d.needsStatus.length, invalid: invalidCount });
+  return json({ ok: true, applied: batch.length, added: d.add.length, changed: d.change.length, skippedNoStatus: d.needsStatus.length, invalid: invalidCount, rekeyed: (d.rekeyed || []) });
 }
 
 // Keyman "Contract Counter" import. Client sends the sheet as array-of-arrays. We parse the contract
@@ -938,7 +958,32 @@ async function apiDataStatus(env) {
   ];
   let log = [];
   try { log = (await env.DB.prepare("SELECT source,rows,status,at FROM data_log ORDER BY at DESC LIMIT 12").all()).results; } catch {}
-  return json({ today: TODAY(), datasets, log });
+  // DATA QUALITY, not just volume (2026-09-10). The counts above say how many rows exist; they
+  // cannot see a hole inside one. Status is DERIVED from the live board here (§11) so these numbers
+  // agree with the dashboard and crew list instead of re-reading a raw column.
+  let gaps = null;
+  try {
+    await ensureCrewExtras(env);
+    const today = TODAY();
+    const [baseRes, ovRes, HIST] = await Promise.all([
+      env.DB.prepare("SELECT agency_id, status, vessel_observed, email, ship_crew_id FROM crew WHERE redacted=0").all(),
+      env.DB.prepare("SELECT agency_id, status, retired, vessel_observed, email FROM crew_override").all(),
+      boardLegs(env),
+    ]);
+    const ovm = {}; for (const o of ovRes.results) ovm[o.agency_id] = o;
+    const sched = scheduleBySc(HIST);
+    gaps = crewDataGaps(baseRes.results.map((c) => {
+      const ov = ovm[c.agency_id] || {};
+      return {
+        agency_id: c.agency_id,
+        status: crewStatus(c, ov, sched[c.agency_id], today),
+        vessel: (ov.vessel_observed != null && ov.vessel_observed !== "") ? ov.vessel_observed : c.vessel_observed,
+        email: (ov.email != null && ov.email !== "") ? ov.email : c.email,
+        ship_crew_id: c.ship_crew_id,
+      };
+    }));
+  } catch (e) { console.error("datastatus_gaps", (e && e.message) || e); }
+  return json({ today: TODAY(), datasets, log, gaps, gapsPresent: hasGaps(gaps) });
 }
 // Read all contract rows in the shape billingReport expects.
 // {on,end,ship} shape that contracts.js (full-contract grouping) expects, from a keyman_contract3 row.
@@ -1147,21 +1192,8 @@ async function boardLegs(env) {
   if (!db.ok) throw db.e; // fail loud: never quietly serve the frozen constant for a live source
   return db.v;
 }
-// Schedule legs per crew, for the auto status derivation. No legs = no schedule (status falls
-// back to the registry value) — never the frozen constant.
-function scheduleBySc(legs) {
-  const m = {};
-  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
-  return m;
-}
-// Effective status: manual 'Retired' tag wins; else a manual status edit wins; else auto-derive from
-// the live schedule (on a ship now -> On board; signed off -> On Vacation; only future / none -> registry).
-function crewStatus(base, ov, schedLegs, today) {
-  ov = ov || {};
-  if (ov.retired) return "Retired";
-  if (ov.status != null && ov.status !== "") return ov.status;
-  return deriveStatus(schedLegs || [], today, { imported: base && base.status });
-}
+// scheduleBySc + crewStatus now live in src/crew_status.js so doc_radar.js shares the ONE rule
+// instead of keeping a second copy of it (§3, §11). Imported at the top of this file.
 // Returns the FULL enriched crew list (overrides merged, contract count, active span, client,
 // docs). Filtering/sorting is done client-side (≈100 crew) so the UI stays snappy and consistent.
 async function apiCrew(env, url) {
@@ -1694,13 +1726,22 @@ async function apiBonusCrew(env, url) {
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
 async function apiContracts(env) {
-  await ensureKeyman(env); await ensureCrewExtras(env);
-  const base = (await env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all()).results;
-  const ovs = (await env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all()).results;
-  const ovm = {}; for (const o of ovs) ovm[o.agency_id] = o;
-  const legCounts = await fullContractMap(env); // sc -> FULL-contract count (drives rank + the number shown)
+  // PERF (2026-09-10, §12): this hot read route was SIX sequential Worker->D1 round trips — two
+  // ensures back to back, then four independent reads one after another. The D1 data is tiny; the
+  // cost is the round trips. Same statements, same consumption order, now two waves: the ensures
+  // together (they must finish before the reads, since they create the tables), then every read at
+  // once. Pinned by test/perf_invariants.test.js alongside the other hot routes.
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
+  const [baseRes, ovsRes, legCounts, outRes] = await Promise.all([
+    env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all(),
+    fullContractMap(env), // sc -> FULL-contract count (drives rank + the number shown)
+    env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all(),
+  ]);
+  const base = baseRes.results;
+  const ovm = {}; for (const o of ovsRes.results) ovm[o.agency_id] = o;
   const lastOut = {}, totPay = {};
-  for (const o of (await env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all()).results) {
+  for (const o of outRes.results) {
     lastOut[o.crew_id] = o; totPay[o.crew_id] = (totPay[o.crew_id] || 0) + (o.pay_usd || 0);
   }
   const rows = base.map(b => {
@@ -2855,7 +2896,7 @@ async function mariaAskCore(q){
     var j=await r.json();
     window.MARIA_HIST.pop();
     if(j&&j.answer){window.MARIA_HIST.push({role:'assistant',html:mariaEsc(j.answer),text:j.answer,sources:j.sources||[],logId:j.log_id||null});}
-    else{window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc((j&&(j.error||j.detail))||'No answer returned.')+'</span>'});}
+    else{var em=(j&&j.error)||'No answer returned.';var cd=(j&&j.code)?'<div class=csub style="margin-top:4px;opacity:.55">Reference: '+mariaEsc(j.code)+'</div>':'';window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">'+mariaEsc(em)+'</span>'+cd});}
   }catch(e){window.MARIA_HIST.pop();window.MARIA_HIST.push({role:'assistant',html:'<span style="color:#b4232a">Network error — try again.</span>'});}
   mariaRender();mkRender();
 }
@@ -3403,6 +3444,25 @@ async function dataOverview(){
   if(!d.log.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No load events recorded yet.</p>';
   else h+='<table class=tbl><thead><tr><th>Source</th><th>Records</th><th>Status</th><th>When</th></tr></thead><tbody>'
     +d.log.map(function(l){return '<tr><td>'+l.source+'</td><td>'+(l.rows||'')+'</td><td><span class="cchip ok">'+l.status+'</span></td><td>'+(l.at||'').slice(0,16).replace('T',' ')+'</td></tr>';}).join('')+'</tbody></table>';
+  // DATA QUALITY (2026-09-10). The table above counts rows; it cannot see a hole inside one.
+  // Shown only when something needs attention, so a clean day stays quiet.
+  if(d.gapsPresent&&d.gaps){
+    var g=d.gaps;
+    var row=function(lab,o,warn){
+      if(!o||!o.count)return '';
+      var ids=(o.ids||[]).join(', ')+((o.count>(o.ids||[]).length)?(' +'+(o.count-(o.ids||[]).length)+' more'):'');
+      return '<tr><td>'+lab+'</td><td style="text-align:right;font-weight:700;color:'+(warn?'var(--red)':'var(--amber,#B0741A)')+'">'+o.count+'</td>'
+        +'<td class=csub style="word-break:break-word">'+ids+'</td></tr>';};
+    var body=row('On board, but no vessel on file',g.on_board_without_vessel,true)
+      +row('Active, no vessel on file',g.active_without_vessel,false)
+      +row('Active, no email — auto-timing cannot reach them',g.active_without_email,false)
+      +row('Active, no ship_crew_id — unmatchable in the timecard app',g.active_without_ship_crew_id,false);
+    if(body){
+      h+='<div class=zlabel style="margin-top:18px">Data quality &mdash; needs attention</div>'
+       +'<p class=muted style="text-align:left;padding:4px 2px">'+g.active+' active crew ('+g.on_board+' on board). These are gaps in rows that already exist, so the record counts above still look healthy. Fix them in the next <b>TDG AdvancedQuery</b> import &mdash; this page only reports.</p>'
+       +'<table class=tbl><thead><tr><th>Gap</th><th style="text-align:right">Crew</th><th>Agency IDs</th></tr></thead><tbody>'+body+'</tbody></table>';
+    }
+  }
   h+='<p class=muted style="text-align:left;padding:10px 2px">To import a new crew registry, travel workbook, or vessel file, use <b>Upload data</b> in the menu. Bonus baselines stay gated for Rita.</p>';
   $('#setbody').innerHTML=h;
 }
@@ -3793,10 +3853,49 @@ async function renderRotation(){
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
+    +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
   drawRotation(); loadAutoToggle();
   loadSbmToggle();
+  tgLoadPending();
+}
+// "Update TG" — the return leg of the AdvancedQuery loop. The badge is how many changes are
+// waiting; the click always opens the rendered email first, because sign-off is on the email and
+// never on a description (cims-email-standard §5). Nothing is sent until that tab is open and the
+// confirm is accepted.
+async function tgLoadPending(){
+  var b=$('#tgBtn'); if(!b)return;
+  try{
+    var j=await (await fetch('/api/tg/pending',{cache:'no-store'})).json();
+    window.TG_PENDING=j||null;
+    var n=(j&&j.counts&&j.counts.items)||0, bd=$('#tgBadge');
+    if(bd){ bd.textContent=n; bd.style.display=n?'inline-block':'none'; }
+    b.title=!j||!j.ok ? 'Update TG — could not read pending changes'
+      : !n ? 'Nothing has changed since the last update to TG'
+      : (j.recipient?('Email TG '+n+' change'+(n===1?'':'s')+' across '+((j.counts&&j.counts.ships)||0)+' ship(s)')
+                    :(n+' change'+(n===1?'':'s')+' waiting — no TG recipient configured yet'));
+  }catch(e){}
+}
+async function tgUpdateClick(){
+  await tgLoadPending();
+  var j=window.TG_PENDING;
+  if(!j||!j.ok){ alert('Could not read what has changed since the last update.'); return; }
+  var n=(j.counts&&j.counts.items)||0;
+  if(!n){ alert('Nothing has changed since the last update to TG.'); return; }
+  if(!j.recipient){ alert(n+' change'+(n===1?'':'s')+' are waiting, but no TG recipient is configured yet.\\n\\nSet TG_NOTIFY on the Worker and this button will send to that address.'); return; }
+  window.open('/api/tg/preview','_blank');
+  if(!confirm('Send this digest to '+j.recipient+'?\\n\\n'+n+' change'+(n===1?'':'s')+' across '+((j.counts&&j.counts.ships)||0)+' ship(s).\\n\\nThe preview has opened in a new tab — read it before you confirm.')) return;
+  var b=$('#tgBtn'); if(b){b.disabled=true;}
+  try{
+    var r=await fetch('/api/tg/send',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    var out=await r.json();
+    if(out&&out.sent) alert('Sent to '+out.to+'.');
+    else if(out&&out.empty) alert('Nothing has changed since the last update to TG.');
+    else alert('Not sent: '+((out&&out.error)||'unknown error')+'\\n\\nNothing was recorded, so these changes stay in the next digest.');
+  }catch(e){ alert('Not sent: network error. Nothing was recorded.'); }
+  if(b){b.disabled=false;}
+  tgLoadPending();
 }
 function rmonthChips(){
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -4215,7 +4314,6 @@ function paintDashCost(){
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
 var CF={q:'',status:'',comp:'',client:'',ship:'',sort:'az'};
-var CLIENT_COL={'Royal Caribbean':'#1E6FD0','Celebrity':'#0C8C8C','Azamara':'#7A5AA8','NCL':'#E0962B'};
 function ageOf(dob){if(!dob)return'';var d=new Date(dob);if(isNaN(d))return'';var t=new Date(),a=t.getFullYear()-d.getFullYear();if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate()))a--;return a>0&&a<100?a:'';}
 function fmtPhone(p){if(!p)return{txt:'',bad:false};var raw=String(p).replace(/[^0-9+]/g,'');var ok=/^\\+?63\\d{10}$/.test(raw)||/^09\\d{9}$/.test(raw);return{txt:String(p).trim(),bad:!ok};}
 function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}

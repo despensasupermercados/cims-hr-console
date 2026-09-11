@@ -79,7 +79,7 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
 }
 
 // buildReview: turn a diffCrew() result into review groups the UI renders and the apply route consumes.
-//   diff              : output of crewimport.diffCrew()  ({ add, change, needsStatus, ... })
+//   diff              : output of crewimport.diffCrew()  ({ add, change, needsStatus, rekeyed, ... })
 //   existingByAgency  : agency_id -> existing base crew row
 //   incomingByAgency  : agency_id -> mapped incoming row (crewimport.mapRow output)
 //   overrideByAgency  : agency_id -> crew_override row (may be undefined)
@@ -87,13 +87,24 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
 export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, overrideByAgency = {}) {
   const groups = {
     ship_flag: [], override_conflict: [], critical: [], cert: [], minor: [],
-    new: [], departed: [], needs_status: [],
+    new: [], departed: [], needs_status: [], rekeyed: [],
   };
+
+  // D7 — rows the file keyed on the cruise-line id that diffCrew matched to a crew we already
+  // hold. Without this they would have been INSERTed as duplicate seafarers (see the Ida
+  // Purnama case in crewimport.js). Flag only: the agency id is never rewritten by an import.
+  const rekeyedIncoming = new Set();
+  for (const rk of diff.rekeyed || []) {
+    groups.rekeyed.push(rk);
+    rekeyedIncoming.add(String(rk.incoming_id));
+  }
 
   const seen = new Set(); // agency:field already raised
   for (const ch of diff.change || []) {
     const ex = existingByAgency[ch.agency_id] || {};
-    const inc = incomingByAgency[ch.agency_id] || {};
+    // A rekeyed change is keyed on the EXISTING agency id, so the incoming row lives under the
+    // id the file used. `incoming_id` is only present when the two differ.
+    const inc = incomingByAgency[ch.incoming_id ?? ch.agency_id] || {};
     const ov = overrideByAgency[ch.agency_id];
     const liveOvr = liveOverrideFields(ov);
     for (const field of ch.changed) {
@@ -133,18 +144,25 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
   }
 
   for (const id of diff.add || []) {
+    if (rekeyedIncoming.has(String(id))) continue; // matched an existing member — not new
     groups.new.push({ agency_id: id, fields: incomingByAgency[id] || {} });
   }
   for (const id of diff.needsStatus || []) {
     groups.needs_status.push({ agency_id: id, fields: incomingByAgency[id] || {} });
   }
   // D4 — departed: in the roster, absent from this file. Flag only.
+  // A rekeyed crew IS in the file, just under the cruise-line id, so keying this off
+  // incomingByAgency alone would report them as having left the fleet. Count the existing ids
+  // diffCrew actually matched as present too.
+  const present = new Set(Object.keys(incomingByAgency));
+  for (const ch of diff.change || []) present.add(String(ch.agency_id));
+  for (const rk of diff.rekeyed || []) present.add(String(rk.agency_id));
   for (const id of Object.keys(existingByAgency)) {
-    if (!incomingByAgency[id]) groups.departed.push({ agency_id: id, last: existingByAgency[id] });
+    if (!present.has(String(id))) groups.departed.push({ agency_id: id, last: existingByAgency[id] });
   }
 
   const counts = Object.fromEntries(Object.entries(groups).map(([k, v]) => [k, v.length]));
-  const attention = counts.ship_flag + counts.override_conflict + counts.critical +
+  const attention = counts.ship_flag + counts.override_conflict + counts.critical + counts.rekeyed +
     groups.cert.filter(c => c.earlier).length;
   return { groups, counts, attention };
 }

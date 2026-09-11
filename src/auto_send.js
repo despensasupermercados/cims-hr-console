@@ -194,12 +194,33 @@ export function installAutoSend(deps) {
     { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) { await logRun(env, "disabled", null, null, null); return { skipped: "disabled" }; } }
     var today = todayStr(), t14 = plus(14), t7 = plus(7);
     var sent = [], alerts = [];
-    await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
-    await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts);
-    var seeded = await recentSeeded(env);
-    await sendDigest(env, sent, alerts, seeded, { dry: DRY, date: today, t14: t14, t7: t7 });
-    await logRun(env, "ran", DRY, sent.length, alerts.length);
-    return { ran: true, dry: DRY, sent: sent.length, alerts: alerts.length };
+    // GUARDED 2026-09-10. This was the ONE task in the Worker's scheduled() handler that could
+    // reject: every other cron (intel sweep, movements, backup, doc radar, sbm sweep, leg
+    // projection) either wraps its own body or carries a .catch at the call site. A throw in
+    // processKind/recentSeeded aborted BEFORE both sendDigest and logRun — so a failed run
+    // produced no digest AND no run row, which defeats the exact distinction logRun exists to
+    // make: "the cron is dead" vs "nothing qualified today". Now a failure still records a row
+    // and still tries to tell somebody.
+    try {
+      await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
+      await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts);
+      var seeded = await recentSeeded(env);
+      await sendDigest(env, sent, alerts, seeded, { dry: DRY, date: today, t14: t14, t7: t7 });
+      await logRun(env, "ran", DRY, sent.length, alerts.length);
+      return { ran: true, dry: DRY, sent: sent.length, alerts: alerts.length };
+    } catch (e) {
+      console.error("auto_send_run", (e && e.stack) || e);
+      // Best-effort, in this order: record the failed run, then try to raise it in the digest.
+      // Whatever was already sent before the throw is reported so the picture is not lost.
+      await logRun(env, "failed", DRY, sent.length, alerts.length);
+      try {
+        await sendDigest(env, sent, alerts.concat([{ kind: "signoff", sc: "—", seq: 0, off: today,
+          ship: null, name: "AUTO-TIMING RUN FAILED", to: null, emailed: false,
+          error: String((e && e.message) || e).slice(0, 160) }]), [],
+          { dry: DRY, date: today, t14: t14, t7: t7 });
+      } catch (e2) { console.error("auto_send_run_digest", (e2 && e2.message) || e2); }
+      return { ran: false, failed: true, error: String((e && e.message) || e).slice(0, 160) };
+    }
   }
 
   return runAutoSend;
