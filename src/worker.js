@@ -863,12 +863,15 @@ async function apiCrewImport(request, env, session) {
   const b = await request.json().catch(() => ({}));
   const dryRun = !!b.dryRun;
   const { mapped, invalidCount } = mapRows(b.rows || []);
-  const ex = (await env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, dob, province, phone, email, med_exp, sirb_exp, pp_exp, sch_exp, usv_exp FROM crew").all()).results;
+  const ex = (await env.DB.prepare("SELECT agency_id, ship_crew_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, dob, province, phone, email, med_exp, sirb_exp, pp_exp, sch_exp, usv_exp FROM crew").all()).results;
   const existing = {}; for (const r of ex) existing[r.agency_id] = r;
   const d = diffCrew(mapped, existing);
   if (dryRun) {
-    return json({ dryRun: true, total: d.total, add: d.add.length, change: d.change.length, unchanged: d.unchanged, needsStatus: d.needsStatus.length, invalid: invalidCount, sampleAdd: d.add.slice(0, 10), sampleChange: d.change.slice(0, 10) });
+    return json({ dryRun: true, total: d.total, add: d.add.length, change: d.change.length, unchanged: d.unchanged, needsStatus: d.needsStatus.length, invalid: invalidCount, rekeyed: (d.rekeyed || []).length, sampleAdd: d.add.slice(0, 10), sampleChange: d.change.slice(0, 10), sampleRekeyed: (d.rekeyed || []).slice(0, 10) });
   }
+  // A rekeyed row (matched on the cruise-line id under a different agency id) is deliberately
+  // absent from applyIds: this legacy path has no review UI to decide with, so it neither inserts
+  // a duplicate nor writes through on an id we have not confirmed. It is reported instead.
   const applyIds = new Set([...d.add, ...d.change.map(c => c.agency_id)]);
   const now = new Date().toISOString();
   const stmt = env.DB.prepare(
@@ -890,7 +893,7 @@ async function apiCrewImport(request, env, session) {
   }
   if (batch.length) await env.DB.batch(batch);
   await logData(env, "crew (AdvancedQuery, by " + ((session && session.email) || "?") + ")", batch.length, "refreshed: +" + d.add.length + " ~" + d.change.length);
-  return json({ ok: true, applied: batch.length, added: d.add.length, changed: d.change.length, skippedNoStatus: d.needsStatus.length, invalid: invalidCount });
+  return json({ ok: true, applied: batch.length, added: d.add.length, changed: d.change.length, skippedNoStatus: d.needsStatus.length, invalid: invalidCount, rekeyed: (d.rekeyed || []) });
 }
 
 // Keyman "Contract Counter" import. Client sends the sheet as array-of-arrays. We parse the contract
