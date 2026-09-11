@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { docStatus, assessCrew, fetchDocRadar, buildDocRadarEmail } from '../src/doc_radar.js';
+import { docStatus, assessCrew, fetchDocRadar, buildDocRadarEmail, fetchReconciliation, reconLine } from '../src/doc_radar.js';
 
 const TODAY = '2026-07-14';
 
@@ -208,4 +208,78 @@ test('fetchDocRadar: a RETIRED override contributes no document values', async (
   const r = await fetchDocRadar(stubEnv(rows, [{ agency_id:'SC-1', retired:1, pp_exp:'2033-01-01' }]), TODAY);
   assert.deepEqual(r.rows, [], 'retired means off-fleet, so the crew is dropped entirely');
   assert.equal(r.counts.offFleet, 1);
+});
+
+// --- reconciliation footer ---------------------------------------------------
+// The import writes sync_conflict rows and nothing read them back. On 2026-09-11 production held
+// 292 open vessel flags (oldest 23 July, newest 6 September), 5 absences and one identity
+// collision — a backlog invisible because no report named it. The radar lands in Rita's inbox
+// every week, so the number goes there.
+function reconEnv({ run, conflicts, throwOn }) {
+  return { DB: { prepare(sql) {
+    const S = String(sql);
+    if (throwOn && S.includes(throwOn)) throw new Error('boom');
+    if (S.includes('FROM import_run')) return { async first() { return run || null; } };
+    if (S.includes('FROM sync_conflict')) return { async all() { return { results: conflicts || [] }; } };
+    throw new Error('unhandled SQL: ' + S);
+  } } };
+}
+
+test('fetchReconciliation: counts the open flags by kind and names the last import', async () => {
+  const r = await fetchReconciliation(reconEnv({
+    run: { run_at: '2026-09-06T07:46:17.428Z', run_by: 'Rita.Berenyi@dg3.com' },
+    conflicts: [
+      { field: 'vessel_observed', n: 292 },
+      { field: 'presence', n: 5 },
+      { field: 'identity', n: 1 },
+      { field: 'status', n: 3 },
+      { field: 'something_else', n: 9 },   // unknown kinds are ignored, not miscounted
+    ],
+  }));
+  assert.equal(r.lastImportAt, '2026-09-06T07:46:17.428Z');
+  assert.equal(r.lastImportBy, 'Rita.Berenyi@dg3.com');
+  assert.equal(r.pendingShip, 292);
+  assert.equal(r.pendingAbsence, 5);
+  assert.equal(r.pendingIdentity, 1);
+  assert.equal(r.pendingStatus, 3);
+});
+
+test('fetchReconciliation: a broken footer never stops the compliance report', async () => {
+  const r = await fetchReconciliation(reconEnv({ throwOn: 'sync_conflict' }));
+  assert.deepEqual(r, { lastImportAt: null, lastImportBy: null, pendingStatus: 0, pendingIdentity: 0, pendingShip: 0, pendingAbsence: 0 });
+});
+
+test('reconLine: reads as a sentence, and says so plainly when nothing is pending', () => {
+  const busy = reconLine({ lastImportAt: '2026-09-06T07:46:17.428Z', lastImportBy: 'Rita', pendingShip: 292, pendingStatus: 3, pendingIdentity: 1, pendingAbsence: 5 });
+  assert.match(busy, /06 Sep 2026/);
+  assert.match(busy, /by Rita/);
+  assert.match(busy, /301 changes<\/strong> still unreconciled/, 'lead with the total, not a sum to do in your head');
+  assert.match(busy, /292 ship, 3 status, 1 identity, 5 absence/);
+
+  const clean = reconLine({ lastImportAt: '2026-09-06T00:00:00Z', pendingShip: 0, pendingStatus: 0, pendingIdentity: 0, pendingAbsence: 0 });
+  assert.match(clean, /all imported changes reconciled/);
+
+  assert.match(reconLine({}), /No TDG import on record/);
+  assert.equal(reconLine(null), '', 'no data means no line, not a broken one');
+});
+
+test('reconLine: one pending change is singular', () => {
+  assert.match(reconLine({ lastImportAt: '2026-09-06T00:00:00Z', pendingIdentity: 1 }), /1 change<\/strong> still unreconciled &mdash; 1 identity/);
+});
+
+test('reconLine: an import operator name cannot inject markup into the email', () => {
+  const line = reconLine({ lastImportAt: '2026-09-06T00:00:00Z', lastImportBy: '<script>alert(1)</script>' });
+  assert.ok(!line.includes('<script>'), 'run_by is stored data and must be escaped');
+  assert.match(line, /&lt;script&gt;/);
+});
+
+test('buildDocRadarEmail: the footer carries the reconciliation line', () => {
+  const counts = { crew:0, expired:0, expiring:0, missing:0, suspect:0, deployable:0 };
+  const withRecon = buildDocRadarEmail({ runDate: TODAY, rows: [], counts, urgent: null, recon: { lastImportAt: '2026-09-06T00:00:00Z', pendingShip: 292 } });
+  assert.match(withRecon, /292 ship/);
+  assert.match(withRecon, /Automated weekly report/, 'the standing footer text survives');
+
+  const without = buildDocRadarEmail({ runDate: TODAY, rows: [], counts, urgent: null });
+  assert.ok(!without.includes('unreconciled'), 'no recon data means no half-written line');
+  assert.match(without, /Automated weekly report/);
 });

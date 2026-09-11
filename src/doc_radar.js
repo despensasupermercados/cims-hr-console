@@ -182,6 +182,34 @@ export async function fetchDocRadar(env, todayStr, deps = {}) {
   return { rows: flagged.slice(0, MAX_ROWS), truncated: Math.max(0, flagged.length - MAX_ROWS), counts, urgent };
 }
 
+// --- reconciliation ----------------------------------------------------------
+// The import writes sync_conflict rows and NOTHING reads them back. On 2026-09-11 there were 292
+// open vessel flags, the oldest from 23 July and the newest from 6 September, plus 5 absences and
+// an identity collision — a backlog nobody could see because no report named it. The radar is the
+// one thing that lands in Rita's inbox every week, so it is where the number belongs.
+//
+// Read-only and non-fatal: a failure here logs and returns zeros. A broken footer must never stop
+// the compliance report going out.
+export async function fetchReconciliation(env) {
+  const out = { lastImportAt: null, lastImportBy: null, pendingStatus: 0, pendingIdentity: 0, pendingShip: 0, pendingAbsence: 0 };
+  try {
+    const [run, conflicts] = await Promise.all([   // §12: independent reads go as one wave
+      env.DB.prepare("SELECT run_at, run_by FROM import_run ORDER BY run_at DESC LIMIT 1").first(),
+      env.DB.prepare("SELECT field, COUNT(*) AS n FROM sync_conflict WHERE resolved=0 GROUP BY field").all(),
+    ]);
+    if (run) { out.lastImportAt = run.run_at || null; out.lastImportBy = run.run_by || null; }
+    for (const r of (conflicts.results || [])) {
+      if (r.field === 'status') out.pendingStatus = r.n || 0;
+      else if (r.field === 'identity') out.pendingIdentity = r.n || 0;
+      else if (r.field === 'vessel_observed') out.pendingShip = r.n || 0;
+      else if (r.field === 'presence') out.pendingAbsence = r.n || 0;
+    }
+  } catch (e) {
+    console.error('docradar_reconciliation', (e && e.stack) || e);
+  }
+  return out;
+}
+
 // --- email (pure) ------------------------------------------------------------
 function head(runDate) {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>Fleet Document Radar</title>
@@ -208,7 +236,36 @@ function legend() {
     + `<span style="color:${S.suspect.tx};font-weight:700;">&#9679;</span> Suspect date &nbsp; `
     + `<span style="color:${S.na.tx};font-weight:700;">&#9679;</span> Not held</span></td></tr>`;
 }
-const foot = `<tr><td style="padding:22px 30px 26px;"><div style="border-top:1px solid ${C.border};padding-top:14px;font-family:${F};font-size:11px;color:${C.light};line-height:1.6;">Automated weekly report · Monday 03:00 Miami time · Source: CIMS crew registry. Statuses derived from document expiry dates on file — accuracy depends on the registry being current.</div></td></tr></table></td></tr></table></body></html>`;
+// One line, in the footer, in plain words: when the roster last came in, and how much of what it
+// reported is still sitting unactioned.
+export function reconLine(recon) {
+  if (!recon) return '';
+  const bits = [];
+  if (recon.lastImportAt) {
+    const when = longDate(String(recon.lastImportAt).slice(0, 10)) || String(recon.lastImportAt).slice(0, 10);
+    bits.push(`TDG roster last imported <strong>${esc(when)}</strong>${recon.lastImportBy ? ` by ${esc(recon.lastImportBy)}` : ''}`);
+  } else {
+    bits.push('<strong>No TDG import on record</strong>');
+  }
+  const pend = [];
+  if (recon.pendingShip) pend.push(`${recon.pendingShip} ship`);
+  if (recon.pendingStatus) pend.push(`${recon.pendingStatus} status`);
+  if (recon.pendingIdentity) pend.push(`${recon.pendingIdentity} identity`);
+  if (recon.pendingAbsence) pend.push(`${recon.pendingAbsence} absence`);
+  const total = (recon.pendingShip || 0) + (recon.pendingStatus || 0) + (recon.pendingIdentity || 0) + (recon.pendingAbsence || 0);
+  // Lead with the total. With four categories, a reader should not have to add them up to know
+  // how big the backlog is.
+  bits.push(pend.length
+    ? `<strong>${total} ${total === 1 ? 'change' : 'changes'}</strong> still unreconciled &mdash; ${pend.join(', ')}`
+    : 'all imported changes reconciled');
+  return bits.join(' &middot; ');
+}
+
+function foot(recon) {
+  const rl = reconLine(recon);
+  const reconHtml = rl ? `<div style="font-family:${F};font-size:11px;color:${C.slate};line-height:1.6;padding-bottom:8px;">${rl}</div>` : '';
+  return `<tr><td style="padding:22px 30px 26px;"><div style="border-top:1px solid ${C.border};padding-top:14px;">${reconHtml}<div style="font-family:${F};font-size:11px;color:${C.light};line-height:1.6;">Automated weekly report &middot; Monday 03:00 Miami time &middot; Source: CIMS crew registry, fed by the TDG AdvancedQuery export. Document states are derived from the expiry dates on file &mdash; accuracy depends on the registry being current.</div></div></td></tr></table></td></tr></table></body></html>`;
+}
 
 function cellHtml(state, exp) {
   const o = S[state] || S.na;
@@ -222,7 +279,7 @@ function cellHtml(state, exp) {
   return `<td style="padding:7px 3px;text-align:center;border-bottom:1px solid ${C.border};"><div style="background:${o.bg};border-radius:6px;padding:5px 2px;font-family:${F};font-size:${size};font-weight:600;color:${o.tx};">${txt}</div></td>`;
 }
 
-export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 0 }) {
+export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 0, recon = null }) {
   let banner;
   if (!rows.length) {
     banner = `<tr><td style="padding:16px 30px 0;"><table role="presentation" width="100%" style="background:${S.valid.bg};border:1px solid #CDE9C0;border-radius:10px;"><tr><td width="4" style="background:${S.valid.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:11px 15px;font-family:${F};font-size:12.5px;color:${S.valid.tx};"><strong>All clear:</strong> no active crew has a document expired, expiring within 90 days, or missing.</td></tr></table></td></tr>`;
@@ -263,7 +320,7 @@ export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 
   const note = counts && counts.suspect
     ? `<tr><td style="padding:10px 30px 0;"><table role="presentation" width="100%" style="background:${S.suspect.bg};border:1px solid #DDD6FE;border-radius:10px;"><tr><td width="4" style="background:${S.suspect.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:11px 15px;font-family:${F};font-size:12px;color:${S.suspect.tx};line-height:1.5;"><strong>${counts.suspect} suspect date${counts.suspect > 1 ? 's' : ''}.</strong> Outside the plausible range for an active crew record &mdash; treat as a data error, not a lapse. Correct it on the Crew tab; the correction carries into this report automatically.</td></tr></table></td></tr>`
     : '';
-  return head(runDate) + banner + legend() + table + note + foot;
+  return head(runDate) + banner + legend() + table + note + foot(recon);
 }
 
 // --- delivery (self-contained; mirrors worker.sendViaMailer) -----------------
@@ -285,8 +342,11 @@ async function sendViaMailer(env, envelope) {
 export async function renderDocRadar(env, runDate, deps = {}) {
   const today = nyDateStr();
   const rd = runDate || today;
-  const { rows, counts, urgent, truncated } = await fetchDocRadar(env, today, deps);
-  return { html: buildDocRadarEmail({ runDate: rd, rows, counts, urgent, truncated }), count: counts.crew };
+  const [{ rows, counts, urgent, truncated }, recon] = await Promise.all([
+    fetchDocRadar(env, today, deps),
+    fetchReconciliation(env),
+  ]);
+  return { html: buildDocRadarEmail({ runDate: rd, rows, counts, urgent, truncated, recon }), count: counts.crew };
 }
 
 // toOverride: optional single address (or array) for a self-test — sends To that only, no CC.
