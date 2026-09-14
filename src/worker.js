@@ -26,7 +26,8 @@ import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
-import { removeReliefAssignment } from "./relief_api.js";
+import { removeReliefAssignment, saveReliefAssignment } from "./relief_api.js";
+import { installKeymanDeploy } from "./keyman_deploy.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -46,6 +47,7 @@ import { installTgUpdate } from "./tg_update.js";
 import { apiRosterExport } from './roster_export.js';
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
 const _tgUpdate = installTgUpdate({ json, htmlResponse, logActivity, sendViaMailer, shipOf: (v) => canonShipWith(v, SHIP_KEYS), brandFor: clientOf });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
@@ -211,6 +213,9 @@ export default {
         // human does. Inside the boundary and behind the session gate (§11). Inert until
         // TG_NOTIFY is set: /api/tg/send refuses rather than guessing a recipient.
         if (session) { const tg = await _tgUpdate(p, request, env, url, session); if (tg) return tg; }
+        // Deploy: the CTA on a projection. Sends Joy the seafarer, takes the card off the board and
+        // logs it so it can be put back. Inside the boundary and behind the session gate (§11).
+        if (session) { const kd = await _kmDeploy(p, request, env, url, session); if (kd) return kd; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -1456,7 +1461,7 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, depRes] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all(),
@@ -1465,6 +1470,7 @@ async function rotationSections(env) {
     env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
+    env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
   ]);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
@@ -1590,6 +1596,7 @@ async function rotationSections(env) {
   for (const s of Object.keys(byShip)) { const ks = normShip(s); if (!shipNames[ks] && validShip.has(ks)) shipNames[ks] = s; } // only REAL vessels anchor a section (a cruise-line name like 'Azamara' from a mis-recorded leg must not create a phantom ship)
   for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histDisp[k];
   for (const a of (openAsg || [])) { const cs = shipOf(a.ship) || a.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // a ship with only a projection still gets a section
+  for (const d of ((depRes && depRes.results) || [])) { const cs = shipOf(d.ship) || d.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and so does one with only a sent line
   // Yellow cards that are not already standing on the board: a projection whose contract has not
   // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
   // renderer — the board no longer synthesises a second reliever list of its own.
@@ -1620,6 +1627,23 @@ async function rotationSections(env) {
     });
   }
   for (const ship in projByShip) projByShip[ship].sort((a, b) => String(a.signOn || "9999") < String(b.signOn || "9999") ? -1 : 1);
+  // Deployed and not yet back: one line per ship saying it was sent to TDG. THE LOOP CLOSES on its
+  // own — the moment a Contract Counter carries that seafarer they are a green card again and the
+  // line goes (Miguel, 14 Sep 2026). Until then Restore can put the projection back in one click.
+  const greenOn = new Set();
+  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "green") greenOn.add(c.agency_id + "|" + normShip(ship));
+  const depByShip = {};
+  for (const d of ((depRes && depRes.results) || [])) {
+    const cs = shipOf(d.ship) || d.ship;
+    if (!cs) continue;
+    if (greenOn.has(d.sc + "|" + normShip(cs))) continue;   // back from TDG: the loop closed
+    (depByShip[cs] = depByShip[cs] || []).push({
+      id: d.id, agency_id: d.sc, name: d.crew_name || d.sc, ship: cs,
+      signOn: d.sign_on || null, signOff: d.sign_off || null,
+      sentAt: (d.sent_at || "").slice(0, 10), sentBy: d.sent_by || null, recipient: d.recipient || null,
+      aboard: !!(d.sign_on && d.sign_on <= today),
+    });
+  }
   const sections = Object.values(shipNames).map(ship => {
     const k = normShip(ship);
     const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -1635,7 +1659,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, projections: projByShip[ship] || [], history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   const counts = {};
@@ -2518,7 +2542,20 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .pbtn.danger{color:#b0342f}.pbtn.danger:hover{border-color:#b0342f}
 .pbtn.go{background:var(--navy);border-color:var(--navy);color:#fff}
 .srcnote{font-size:10.5px;color:var(--mut);margin-top:6px}
-.srcnote b{color:#9A6614}.rcard .rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}.rcard .reldot{background:var(--navy)!important}.ghostslot{border:1.5px dashed var(--line-2)!important;background:#fafbfc;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;cursor:pointer;transition:border-color .15s,background .15s;min-height:104px}.ghostslot:hover{border-color:var(--navy)!important;background:#f2f7fd}.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}.ghostslot:hover .gp{background:var(--navy);color:#fff}.ghostslot .gt{font-family:'Outfit';font-weight:700;font-size:13px;color:var(--navy)}.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}.ghostslot.crit{border-color:var(--danger)!important;background:#fdf3f2}.ghostslot.crit .gp{background:#fbe7e6;color:var(--danger)}.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:#d9a441!important;background:#fdf9f0}.ghostslot.due .gp{background:#fbeed6;color:#9a6410}.ghostslot.due .gc{background:#fbeed6;color:#9a6410}.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 14px 12px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.srcnote b{color:#9A6614}
+.sentrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 14px 10px;padding:8px 12px;border-radius:9px;background:#F3F6FA;border-left:3px solid var(--navy);font-size:12.5px;color:var(--body)}
+.sentrow b{color:var(--ink)}
+.sentrow .sentmeta{color:var(--mut);font-size:11.5px}
+.dpv{position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.5);display:flex;align-items:center;justify-content:center;padding:18px}
+.dpvbox{background:var(--surface);border-radius:14px;max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 50px rgba(10,20,35,.3)}
+.dpvhd{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.dpvhd .t{font-weight:800;color:var(--navy);font-size:15px;flex:1}
+.dpvbody{overflow:auto;padding:0;background:#EEF2F7}
+.dpvbody iframe{width:100%;border:0;display:block;background:#EEF2F7;min-height:420px}
+.dpvft{padding:12px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dpvft .to{font-size:12px;color:var(--mut);flex:1;min-width:180px}
+.dpvwarn{margin:0;padding:10px 18px;background:#FBE7E6;color:#8E2A22;font-size:12.5px;border-bottom:1px solid #f0cfcc}
+.dpvwarn b{color:#B0342F}.rcard .rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}.rcard .reldot{background:var(--navy)!important}.ghostslot{border:1.5px dashed var(--line-2)!important;background:#fafbfc;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;cursor:pointer;transition:border-color .15s,background .15s;min-height:104px}.ghostslot:hover{border-color:var(--navy)!important;background:#f2f7fd}.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}.ghostslot:hover .gp{background:var(--navy);color:#fff}.ghostslot .gt{font-family:'Outfit';font-weight:700;font-size:13px;color:var(--navy)}.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}.ghostslot.crit{border-color:var(--danger)!important;background:#fdf3f2}.ghostslot.crit .gp{background:#fbe7e6;color:var(--danger)}.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:#d9a441!important;background:#fdf9f0}.ghostslot.due .gp{background:#fbeed6;color:#9a6410}.ghostslot.due .gc{background:#fbeed6;color:#9a6410}.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 14px 12px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .modwrap{position:fixed;inset:0;background:rgba(16,30,48,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:200;overflow:auto}
 .modcard{background:#fff;border-radius:16px;max-width:680px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .modhd{display:flex;align-items:flex-start;gap:12px}.modhd>div:first-child{flex:1}
@@ -3902,6 +3939,57 @@ async function planDelete(e,el){
     if(r&&r.ok){renderRotation();}else{el.disabled=false;alert('Could not remove: '+((r&&r.error)||'error'));}
   }catch(_){el.disabled=false;alert('Network error');}
 }
+// DEPLOY — the CTA on a projection. Preview the exact email first: it names a real person to a
+// real agency, so it is never sent blind. Expired documents are shown as a warning and never block.
+var DPV=null;
+function dpvClose(){var o=document.getElementById('dpvovl');if(o&&o.parentNode)o.parentNode.removeChild(o);DPV=null;}
+async function planDeploy(e,el){
+  e.stopPropagation();
+  var id=el.getAttribute('data-aid');
+  el.disabled=true;
+  var j=null;
+  try{ j=await (await fetch('/api/keyman/deploy/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json(); }
+  catch(_){ el.disabled=false; alert('Network error'); return; }
+  el.disabled=false;
+  if(!j||j.error){ alert('Could not prepare the deployment: '+((j&&j.error)||'error')); return; }
+  DPV={id:id};
+  var c=j.card||{};
+  var expired=(c.warnings||[]).filter(function(w){return w.status==='expired';});
+  var warnHtml=expired.length?('<div class=dpvwarn><b>'+expired.length+' expired document'+(expired.length===1?'':'s')+'</b> &mdash; '+expired.map(function(w){return escHtml(w.text);}).join('; ')+'. This is a warning, not a block: TDG is told, and you can still send.</div>'):'';
+  var toLine=j.recipient?('To '+escHtml(j.recipient)+((j.cc&&j.cc.length)?(' &middot; cc '+j.cc.map(escHtml).join(', ')):'')):'<b style="color:#B0342F">No recipient configured</b> &mdash; set DEPLOY_TO on the Worker';
+  var o=document.createElement('div');
+  o.id='dpvovl';o.className='dpv';
+  o.innerHTML='<div class=dpvbox onclick="event.stopPropagation()">'
+    +'<div class=dpvhd><span class=t>Deploy '+escHtml(c.name||'')+' to '+escHtml(c.ship||'')+'</span><button class=pbtn onclick="dpvClose()">Close</button></div>'
+    +warnHtml
+    +'<div class=dpvbody><iframe id=dpvframe title="Deployment email preview"></iframe></div>'
+    +'<div class=dpvft><span class=to>'+toLine+'</span>'
+    +(j.recipient?'<button class="pbtn go" id=dpvsend onclick="dpvSend()">Send to TDG and clear the card</button>':'')
+    +'</div></div>';
+  o.onclick=dpvClose;
+  document.body.appendChild(o);
+  var fr=document.getElementById('dpvframe');
+  if(fr){ fr.srcdoc=j.html||''; fr.onload=function(){ try{ fr.style.height=Math.min(560,(fr.contentDocument.body.scrollHeight||460)+20)+'px'; }catch(_){ } }; }
+}
+async function dpvSend(){
+  if(!DPV)return;
+  var b=document.getElementById('dpvsend');
+  if(b){b.disabled=true;b.textContent='Sending…';}
+  try{
+    var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id})})).json();
+    if(r&&r.ok){ dpvClose(); renderRotation(); }
+    else { if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
+  }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Network error'); }
+}
+async function deployRestore(el){
+  var lid=el.getAttribute('data-log');
+  el.disabled=true;
+  try{
+    var r=await (await fetch('/api/keyman/deploy/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({logId:lid})})).json();
+    if(r&&r.ok){ renderRotation(); } else { el.disabled=false; alert('Could not restore: '+((r&&r.error)||'error')); }
+  }catch(_){ el.disabled=false; alert('Network error'); }
+}
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 // ONE card renderer, two states (Miguel, 14 Sep 2026):
 //   green  = what the TDG Contract Counter says. Click to edit; never draggable; it stays green.
 //   yellow = what Rita planned (an open assignment). Draggable between ships, removable, and from
@@ -3935,7 +4023,13 @@ function rotCard(x){
   if(plan)note='<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
   else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
   else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
-  var acts=(plan&&x.assignment_id)?('<div class=pacts><button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+String(x.name||'').replace(/"/g,'&quot;')+'" onclick="planDelete(event,this)">Remove</button></div>'):'';
+  var acts='';
+  if(plan&&x.assignment_id){
+    var safeNm=String(x.name||'').replace(/"/g,'&quot;');
+    acts='<div class=pacts>'
+      +'<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>'
+      +'<button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDelete(event,this)">Remove</button></div>';
+  }
   var cls='rcard '+(plan?('plan'+(x.aboard?' aboard':'')):('green'+(x.current?' cur':'')));
   var dragAttrs=plan?(' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"'):'';
   return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(plan?'Your projection - click to edit, drag to another ship':'TDG contract - click to edit')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
@@ -3951,10 +4045,16 @@ function rotShip(sec){
   var projs=sec.projections||[];
   var cards=sec.crew.map(rotCard).join('')+projs.map(rotCard).join('');
   var body=cards||'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
+  // Sent to TDG and not yet back in a Contract Counter. The line clears itself when they return.
+  var sentRows=(sec.deployed||[]).map(function(d){
+    return '<div class=sentrow><b>'+escHtml(d.name)+'</b> &middot; '+escHtml(d.signOn||'TBA')
+      +' <span class=sentmeta>sent to TDG on '+escHtml(d.sentAt||'')+(d.aboard?' &middot; aboard per your board, awaiting the Counter':' &middot; awaiting the Counter')+'</span>'
+      +'<button class=pbtn data-log="'+escHtml(d.id)+'" onclick="deployRestore(this)" title="Put the projection back on the board">Restore</button></div>';
+  }).join('');
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Also served this ship · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
-  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(projs.length?(' · '+projs.length+' planned'):'')+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
+  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(projs.length?(' · '+projs.length+' planned'):'')+((sec.deployed&&sec.deployed.length)?(' · '+sec.deployed.length+' sent to TDG'):'')+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+_rslot+'</div>'+_rbanner+histBlock+'</div>';
+    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
 }
 function monthsDays(a,b){
   if(!a||!b)return '';

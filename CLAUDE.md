@@ -117,6 +117,13 @@ dated card on the crew. Hard rules:
   `scripts/keyman_snapshot.mjs` (never hand-edited; `KEYMAN_VERSION` = the snapshot date). Pinned by
   `test/keyman_seed_guard.test.js` + `test/keyman_snapshot.test.js`.
 
+- **Deploy is the only outbound to TDG from the board** (`src/keyman_deploy.js`, 2026-09-14). It sends
+  Joy one email, THEN removes the projection, THEN writes `deploy_log` — in that order: a card must
+  never leave the board for an email that did not go. Recipient is `DEPLOY_TO`, else `TG_NOTIFY`;
+  unset = refuse, never a default (the same rule as the TG loop). `DEPLOY_CC` defaults to Rita.
+  Expired documents are ALWAYS a warning on the card, the preview and the email, and NEVER a block.
+  The sent line clears itself when the next Contract Counter carries that seafarer — that is the loop
+  closing, and it is the only thing that closes it. Restore rebuilds the card from the log.
 - **`preview_urls = false` stays in `wrangler.toml`.** Non-production branch builds run
   `wrangler versions upload`, which uploads a version of THIS worker on the PRODUCTION D1/R2/MAILER
   bindings; with preview URLs on, Cloudflare serves it at a public `<version>-cims-hr-console...

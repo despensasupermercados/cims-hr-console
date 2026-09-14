@@ -85,10 +85,34 @@ test("a projection whose contract has started says ABOARD and keeps its solid ou
   assert.match(h, /PLAN &middot; ABOARD/);
 });
 
+test("YELLOW carries the Deploy CTA; green never does", () => {
+  const h = ctx.rotCard(YELLOW);
+  assert.match(h, /onclick="planDeploy\(event,this\)"/);
+  assert.match(h, /class="pbtn go"[^>]*>Deploy</);
+  assert.doesNotMatch(ctx.rotCard(GREEN), /planDeploy/, "a TDG contract is not ours to deploy");
+  assert.equal(typeof ctx.planDeploy, "function");
+  assert.equal(typeof ctx.dpvSend, "function");
+  assert.equal(typeof ctx.deployRestore, "function");
+});
+
+test("the ship section shows what was sent to TDG, with Restore, until the Counter brings it back", () => {
+  const sent = { id: "dep_1", agency_id: "SC-9", name: "Ben Bravo", ship: "Icon", signOn: "2026-11-02", sentAt: "2026-09-14", aboard: false };
+  const sec = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [sent], history: [] });
+  assert.match(sec, /sent to TDG on 2026-09-14/);
+  assert.match(sec, /awaiting the Counter/);
+  assert.match(sec, /data-log="dep_1"[^>]*onclick="deployRestore\(this\)"/);
+  assert.match(sec, /1 sent to TDG/);
+  const ab = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [{ ...sent, aboard: true }], history: [] });
+  assert.match(ab, /aboard per your board, awaiting the Counter/);
+  const none = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [], history: [] });
+  assert.doesNotMatch(none, /sent to TDG/);
+});
+
 test("a yellow card with no projection behind it offers no Remove", () => {
   // An aboard reliever drawn from the schedule may reach the card without an assignment id.
   const h = ctx.rotCard({ ...YELLOW, assignment_id: null });
   assert.doesNotMatch(h, /planDelete/);
+  assert.doesNotMatch(h, /planDeploy/, "nothing to deploy either");
   assert.doesNotMatch(h, /data-aid="null"/);
 });
 

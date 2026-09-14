@@ -55,6 +55,10 @@ test("New York (wall-clock) basis is used by exactly these functions", () => {
 test("UTC basis is used by exactly these functions", () => {
   const actual = callSites(/TODAY\(\)/, (l) => /^const TODAY/.test(l.trim()));
   assert.deepEqual(actual, [
+    // The Deploy installer hands TODAY to keyman_deploy.js at module scope, as a lazy arrow: TODAY
+    // is a const declared further down, so reading it eagerly there is a temporal-dead-zone crash.
+    // The deployment card therefore shares the console's UTC basis, which is the point of listing it.
+    "(top level)",
     "apiAsk", "apiBillingMonth", "apiBonusCrew", "apiCrew", "apiCrewOne",
     "apiDashboard", "apiDataStatus", "apiDaysWorked", "apiFleet", "apiMariaEval",
     "apiMariaKnowledge", "boardLegs", "loadFeedbackState", "rotationSections",
