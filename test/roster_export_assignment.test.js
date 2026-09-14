@@ -41,9 +41,9 @@ CREATE TABLE ship_leg (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT, ship_sh
   on_date TEXT, off_date TEXT, embark TEXT, disembark TEXT,
   is_current INTEGER NOT NULL DEFAULT 0, source TEXT);
 CREATE TABLE keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER,
-  sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq));
+  sign_on TEXT, proj_off TEXT, act_off TEXT, imported_at TEXT, PRIMARY KEY (sc, seq));
 CREATE TABLE contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT,
-  sign_off TEXT, ship TEXT, PRIMARY KEY (sc, seq));
+  sign_off TEXT, ship TEXT, on_key TEXT, updated_at TEXT, PRIMARY KEY (sc, seq));
 CREATE TABLE vessel (id TEXT PRIMARY KEY, name TEXT NOT NULL, brand TEXT NOT NULL);
 CREATE TABLE contract (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, status TEXT);
 CREATE TABLE assignment (id TEXT PRIMARY KEY, contract_id TEXT NOT NULL, vessel_id TEXT,

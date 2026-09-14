@@ -25,6 +25,8 @@ import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
+import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
+import { removeReliefAssignment } from "./relief_api.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -852,6 +854,10 @@ async function ensureKeymanImpl(env) {
   // PRIMARY KEY (sc,seq) + INSERT OR REPLACE = race-proof idempotent seeding. Earlier DELETE+INSERT
   // reseeds raced under concurrent requests and STACKED rows (3x duplication); this can't.
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq))").run();
+  // When this row arrived from a Contract Counter. The clock behind "the newer write wins" between
+  // Rita's edit and the file (Miguel, 14 Sep). NULL on every row imported before this column existed,
+  // which counter_sync.resolveLeg reads as "older than any edit" — i.e. today's behaviour exactly.
+  try { await env.DB.prepare("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT").run(); } catch {}
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()).n;
   const ver = await env.DB.prepare("SELECT v FROM data_meta WHERE k='keyman_version'").first();
@@ -917,46 +923,89 @@ async function apiCrewImport(request, env, session) {
 // blocks, bridge crew to SC by name, and (on apply) refresh keyman_contract3 for the MATCHED crew only
 // (untouched crew keep their rows). This feeds the full-contract count + rank; never a payout input.
 async function apiKeymanImport(request, env, session) {
-  await ensureKeyman(env);
+  await Promise.all([ensureKeyman(env), ensureContractEdit(env)]);
   const b = await request.json().catch(() => ({}));
   const { crew: parsed, unparsed: unparsedDates } = parseContractCounterFull(b.rows || []);
   if (!parsed.length) return json({ error: "no_rows" }, 400);
-  const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all()).results;
+  // One wave (§12): the roster used for bridging, the per-crew row counts, the crew's CURRENT legs, the
+  // open projections (Rita's yellow cards) and her edits — everything the diff needs.
+  const [rosterRes, cntRes, curRes, yellowRes, editRes] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 GROUP BY sc").all(),
+    env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all(),
+    env.DB.prepare(
+      `SELECT a.id, a.sign_on, a.planned_sign_off, COALESCE(v.name, a.vessel_name) AS ship,
+              c.agency_id AS sc, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
+         FROM assignment a
+         JOIN contract k ON k.id = a.contract_id
+         JOIN crew     c ON c.id = k.crew_id
+         LEFT JOIN vessel v ON v.id = a.vessel_id
+        WHERE a.actual_sign_off IS NULL`).all(),
+    env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, updated_at, on_key FROM contract_edit").all(),
+  ]);
+  const roster = rosterRes.results;
   const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
   // Per-crew row counts today: the total for the preview, and the per-crew shrink flag. A Counter
   // with FEWER contract blocks than the console holds (the 6 Jul 2026 current-roster upload) replaces
   // a crew's history with the file's rows — by design, but never again unannounced (CLAUDE.md §6).
-  const cnt = (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 GROUP BY sc").all()).results || [];
   const currentCounts = {};
   let currentRows = 0;
-  for (const r of cnt) { currentCounts[r.sc] = r.n; currentRows += r.n; }
+  for (const r of (cntRes.results || [])) { currentCounts[r.sc] = r.n; currentRows += r.n; }
   const nameOf = {};
   for (const c of roster) nameOf[c.agency_id] = [c.last_name, c.first_name].filter(Boolean).join(", ");
   const shrink = shrinkReport(rows, currentCounts).map(x => ({ ...x, name: nameOf[x.sc] || null }));
+  // What this file would do to the board Rita has been working on (counter_sync.diffCounter):
+  // the yellow cards it absorbs, the ones it contradicts, her edits it would overwrite.
+  const diff = diffCounter({
+    incoming: rows, current: curRes.results || [], yellows: yellowRes.results || [], edits: editRes.results || [],
+  });
+  const named = (arr) => arr.map(x => ({ ...x, name: x.name || x.crew_name || nameOf[x.sc] || null }));
+  const report = {
+    appears: named(diff.appears), leaves: named(diff.leaves), moved: named(diff.moved),
+    absorbs: named(diff.absorbs), conflicts: named(diff.conflicts),
+    overrides: named(diff.overrides), orphans: named(diff.orphans),
+  };
   if (b.dryRun) {
     return json({
       dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
-      contracts: rows.length, currentRows, unparsedDates, shrink,
+      contracts: rows.length, currentRows, unparsedDates, shrink, ...report,
       sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
     });
   }
   // Apply: replace contracts for matched crew only. A crew's DELETE and INSERTs travel in the SAME
   // batch (one D1 transaction), so a failure part-way leaves every crew either untouched or fully
   // refreshed — never emptied. (Before: one batch of all DELETEs, then INSERTs in chunks of 80.)
+  const importedAt = new Date().toISOString();
   const del = env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=?");
-  const ins = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
+  const ins = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off,imported_at) VALUES (?,?,?,?,?,?,?,?,?)");
   for (const batch of replacePlan(rows, matched, 80)) {
     await env.DB.batch(batch.map(st => st.op === "delete"
       ? del.bind(st.sc)
-      : ins.bind(st.row.sc, st.row.km, st.row.ship, st.row.st, st.row.seq, st.row.sign_on, st.row.proj_off, st.row.act_off)));
+      : ins.bind(st.row.sc, st.row.km, st.row.ship, st.row.st, st.row.seq, st.row.sign_on, st.row.proj_off, st.row.act_off, importedAt)));
+  }
+  // THE LOOP CLOSES (Miguel, 14 Sep 2026): a projection the file now carries has done its job, so the
+  // yellow card retires by itself. Only cards the file AGREES with — same crew, same ship, sign-on
+  // within a week. A card the file contradicts is never touched; it is reported for Rita to settle
+  // (CLAUDE.md §6: flag, never silently fix). Opt out with absorb:false.
+  const absorbed = [];
+  if (b.absorb !== false) {
+    for (const a of report.absorbs) {
+      const r = await removeReliefAssignment(env, a.id).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+      absorbed.push({ id: a.id, sc: a.sc, name: a.name || null, ok: !!r.ok, error: r.ok ? null : r.error });
+    }
   }
   // Re-pin the version. Since the reseed guard (ensureKeymanImpl) a populated table is never
   // overwritten by the bundled constant regardless of this pin; it only keeps the guard from logging
   // a spurious "reseed refused" row after this import.
   await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
+  const okAbsorbed = absorbed.filter(x => x.ok).length;
   await logData(env, "keyman_contract (Contract Counter import, by " + ((session && session.email) || "?") + ")", rows.length,
-    "refreshed " + matched.length + " crew" + (shrink.length ? ", " + shrink.length + " with fewer contracts than before" : ""));
-  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length, shrank: shrink.length });
+    "refreshed " + matched.length + " crew"
+    + (shrink.length ? ", " + shrink.length + " with fewer contracts than before" : "")
+    + (okAbsorbed ? ", " + okAbsorbed + " projection" + (okAbsorbed === 1 ? "" : "s") + " absorbed" : "")
+    + (report.conflicts.length ? ", " + report.conflicts.length + " conflicting projection" + (report.conflicts.length === 1 ? "" : "s") + " left for review" : ""));
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length,
+    shrank: shrink.length, absorbed, conflicts: report.conflicts, overrides: report.overrides.length });
 }
 
 async function apiDataStatus(env) {
@@ -1412,7 +1461,7 @@ async function rotationSections(env) {
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all(),
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
-    env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all(),
+    env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
     env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
   ]);
@@ -1431,16 +1480,25 @@ async function rotationSections(env) {
   const rmap = {}; for (const r of rd) rmap[r.agency_id] = r;
   const eds = edsRes.results;const _vpd=vpdRes.results;const _pdBy=groupPortDays(_vpd);
   const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
+  // Rita's edit is matched to the leg by SIGN-ON (position is the fallback), and the newer of the two
+  // writes wins — Miguel, 14 Sep 2026. Before this the edit won forever, so a fresher TDG date could
+  // never reach the board. The card carries source/sourceAt so it can name who set the dates.
+  const editIdx = indexEdits(eds);
   const legs = legsRes.results;
   const byCrew = {};
   for (const r of legs) (byCrew[r.sc] = byCrew[r.sc] || []).push(r);
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
   // Effective leg = base Keyman leg with any saved per-contract edit applied.
-  const eff = (leg) => { const o = emap[leg.sc + "|" + leg.seq] || {}; return {
-    seq: leg.seq, ship: o.ship || leg.ship,
-    signOn: o.sign_on || leg.sign_on, signOff: o.sign_off || leg.act_off || leg.proj_off || null,
-    offConfirmed: o.off_conf != null ? !!o.off_conf : !!leg.act_off, onConfirmed: !!o.on_conf,
-    embark: o.embark || null, disembark: o.disembark || null, eccr: !!o.eccr, air: !!o.air, hotel: !!o.hotel }; };
+  const eff = (leg) => {
+    const o = editFor(leg, editIdx) || emap[leg.sc + "|" + leg.seq] || {};
+    const r = resolveLeg(leg, o.sc ? o : null);
+    return {
+      seq: leg.seq, ship: r.ship || leg.ship,
+      onKey: leg.sign_on || null,   // the COUNTER's sign-on: the key an edit is filed under
+      signOn: r.signOn, signOff: r.signOff,
+      dateSource: r.source, dateSourceAt: r.sourceAt, overridden: r.overridden,
+      offConfirmed: o.off_conf != null ? !!o.off_conf : !!leg.act_off, onConfirmed: !!o.on_conf,
+      embark: o.embark || null, disembark: o.disembark || null, eccr: !!o.eccr, air: !!o.air, hotel: !!o.hotel }; };
   // Latest effective Keyman leg per (ship, crew) — used to ENRICH registry cards (dates) + as history.
   const byShip = {};
   for (const sc in byCrew) {
@@ -1506,7 +1564,7 @@ async function rotationSections(env) {
       }
     }
     if (!ship) { pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: "green", signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1626,6 +1684,15 @@ async function ensureReadyImpl(env) {
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, PRIMARY KEY (sc, seq))").run();
+  // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
+  // contract POSITION, which only survives while the file keeps its shape: every live edit sits on
+  // seq 1 because the 6 Jul file carried one block per crew, so a full multi-block Counter would
+  // renumber them and hand Rita's recorded sign-offs to a 2024 contract (counter_sync.editFor).
+  // The backfill runs inside the ALTER's try: exactly once, on the isolate that adds the column.
+  try {
+    await env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run();
+    await env.DB.prepare("UPDATE contract_edit SET on_key = (SELECT k.sign_on FROM keyman_contract3 k WHERE k.sc = contract_edit.sc AND k.seq = contract_edit.seq) WHERE on_key IS NULL").run();
+  } catch {}
 }
 // Per-contract edit (manual-wins): embark/disembark city, sign-on/off, ship, + confirmed flags.
 async function apiContractEdit(request, env, session) {
@@ -1633,8 +1700,14 @@ async function apiContractEdit(request, env, session) {
   if (!b.sc || b.seq == null) return json({ error: "no_key" }, 400);
   await ensureContractEdit(env);
   const bi = (v) => (v ? 1 : 0);
-  await env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at")
-    .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), new Date().toISOString()).run();
+  // on_key: the Counter sign-on this edit belongs to. Sent by the card; else read from the leg.
+  let onKey = b.on_key || null;
+  if (!onKey) {
+    const leg = await env.DB.prepare("SELECT sign_on FROM keyman_contract3 WHERE sc=? AND seq=?").bind(b.sc, +b.seq).first();
+    onKey = (leg && leg.sign_on) || null;
+  }
+  await env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at,on_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at,on_key=COALESCE(excluded.on_key,contract_edit.on_key)")
+    .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), new Date().toISOString(), onKey).run();
   await logActivity(env, session && session.email, "contract_edit", b.sc + " #" + b.seq);
   return json({ ok: true });
 }
@@ -3227,6 +3300,32 @@ async function previewKeyman(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  // What this file does to the board Rita has been working on. Absorbed projections are the loop
+  // closing (Miguel, 14 Sep); conflicts and overrides are hers to settle before Apply.
+  var kdRow=function(label,items,render){
+    if(!items||!items.length)return '';
+    return '<div style="margin-top:6px"><b style="color:var(--navy)">'+label+' &middot; '+items.length+'</b><br>'
+      +items.slice(0,12).map(render).join('<br>')+(items.length>12?('<br>+'+(items.length-12)+' more'):'')+'</div>';
+  };
+  var nmOf=function(x){return impEsc(x.name||x.crew_name||x.sc);};
+  var dt=function(d){return d?impEsc(d):'TBA';};
+  var boardBits='';
+  boardBits+=kdRow('New on the board',r.appears,function(x){return nmOf(x)+' &rarr; '+impEsc(x.ship||'?')+' '+dt(x.sign_on);});
+  boardBits+=kdRow('Dates or ship change',r.moved,function(x){return nmOf(x)+': '+impEsc(x.from.ship||'?')+' '+dt(x.from.sign_on)+'&ndash;'+dt(x.from.sign_off)+' &rarr; '+impEsc(x.to.ship||'?')+' '+dt(x.to.sign_on)+'&ndash;'+dt(x.to.sign_off);});
+  boardBits+=kdRow('Not in this file (rows kept)',r.leaves,function(x){return nmOf(x)+' &middot; '+impEsc(x.ship||'?');});
+  if(boardBits)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">What changes on the board</b>'+boardBits+'</div>';
+  if(r.absorbs&&r.absorbs.length)
+    h+='<div class=hint style="margin-top:8px;border-left:3px solid #1f7a3d"><b style="color:#1f7a3d">'+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' the file now carries</b> &mdash; the loop closes: '+(r.absorbs.length===1?'this card is':'these cards are')+' removed on Apply and the seafarer comes back as a TDG card.<br>'
+      +r.absorbs.slice(0,12).map(function(x){return nmOf(x)+' &middot; '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &rarr; TDG '+dt(x.counter.sign_on)+(x.gap_days!=null?(' ('+(x.gap_days>0?'+':'')+x.gap_days+'d)'):'');}).join('<br>')+'</div>';
+  if(r.conflicts&&r.conflicts.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.conflicts.length+' projection'+(r.conflicts.length===1?'':'s')+' the file contradicts</b> &mdash; left on the board for you to settle; Apply changes nothing about '+(r.conflicts.length===1?'it':'them')+'.<br>'
+      +r.conflicts.slice(0,12).map(function(x){return nmOf(x)+' &middot; you have '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &middot; TDG says '+impEsc(x.counter.ship||'?')+' '+dt(x.counter.sign_on)+' ('+(x.why==='ship'?'different ship':'dates apart')+')';}).join('<br>')+'</div>';
+  if(r.overrides&&r.overrides.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.overrides.length+' of your edit'+(r.overrides.length===1?'':'s')+' '+(r.overrides.length===1?'is':'are')+' older than this file</b> &mdash; the newer write wins, so the TDG dates take over and the card will say so.<br>'
+      +r.overrides.slice(0,12).map(function(x){return nmOf(x)+' &middot; yours '+dt(x.rita.sign_off)+' &rarr; TDG '+dt(x.counter.sign_off);}).join('<br>')+'</div>';
+  if(r.orphans&&r.orphans.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.orphans.length+' of your edit'+(r.orphans.length===1?'':'s')+' '+(r.orphans.length===1?'points':'point')+' at a contract this file does not carry</b> &mdash; nothing is lost, but '+(r.orphans.length===1?'it':'they')+' will stop showing.<br>'
+      +r.orphans.slice(0,12).map(function(x){return nmOf(x)+' &middot; contract starting '+dt(x.on_key);}).join('<br>')+'</div>';
   if(r.shrink&&r.shrink.length){
     var sh=r.shrink;
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+sh.length+' crew would end up with FEWER contracts than the console holds today</b> &mdash; the file wins for matched crew, so their older contract rows are removed on Apply. Check this is the full Contract Counter, not a current-roster extract.<br>'
@@ -3234,12 +3333,20 @@ async function previewKeyman(){
   }
   if(r.unparsedDates&&r.unparsedDates.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsedDates.length+' date cell'+(r.unparsedDates.length===1?'':'s')+' unreadable</b> (a leg with an unreadable sign-on is skipped; fix the sheet and re-drop)<br>'+r.unparsedDates.slice(0,15).map(function(u){return impEsc(u.last+', '+u.first+' &middot; contract '+u.seq+' '+u.field+': '+u.raw);}).join('<br>')+(r.unparsedDates.length>15?'<br>+'+(r.unparsedDates.length-15)+' more':'')+'</div>';
   h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">'+(r.shrink&&r.shrink.length?'Apply anyway &mdash; refresh '+r.matched+' crew ('+r.shrink.length+' lose rows)':'Refresh contract history for '+r.matched+' crew')+'</button>';
+  if(r.absorbs&&r.absorbs.length)h+=' <label class=csub style="margin-left:8px"><input type=checkbox id=kmabsorb checked> also remove the '+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' this file carries</label>';
   $('#imp').innerHTML=h;
 }
 async function applyKeyman(){
+  var ab=$('#kmabsorb');
+  var absorb=ab?!!ab.checked:true;
   $('#imp').textContent='Refreshing contract history…';
-  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP})})).json();
-  if(r.ok){$('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew. Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
+  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP,absorb:absorb})})).json();
+  if(r.ok){
+    var done=(r.absorbed||[]).filter(function(x){return x.ok;});
+    var extra='';
+    if(done.length)extra+=' '+done.length+' projection'+(done.length===1?'':'s')+' retired — the loop closed.';
+    if(r.conflicts&&r.conflicts.length)extra+=' '+r.conflicts.length+' contradicted projection'+(r.conflicts.length===1?'':'s')+' left on the board for you.';
+    $('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew.'+extra+' Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
 }
 var TRAVELUP=null;

@@ -6,6 +6,9 @@
 //   2. The dry-run FLAGS crew whose row count would drop (the 6 Jul 2026 upload replaced 48 crew's
 //      multi-contract history with one row each, unannounced — data_log 2026-07-06 16:45).
 //   3. Unmatched crew never produce a write; matched crew are refreshed from the file only.
+//   4. The dry-run says what the file would do to the board Rita has been working on, and Apply
+//      retires only the projections the file AGREES with (Miguel, 14 Sep 2026: "the loop closes when
+//      u see it back in the keyman tab from the upload"). A contradiction is never applied.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
@@ -16,7 +19,8 @@ writeFileSync(TMP, readFileSync(SRC, "utf-8") + "\nexport { apiKeymanImport, KEY
 let apiKeymanImport, KEYMAN_VERSION;
 try { ({ apiKeymanImport, KEYMAN_VERSION } = await import(TMP.href)); } finally { unlinkSync(TMP); }
 
-// Recording D1 fake. state.counts = { sc: rows today }, state.roster = crew rows.
+// Recording D1 fake. state.counts = { sc: rows today }, state.roster = crew rows,
+// state.current = the crew's Counter legs today, state.yellows = open assignments, state.edits.
 function fakeEnv(state) {
   const writes = [], batches = [];
   const DB = {
@@ -24,7 +28,16 @@ function fakeEnv(state) {
       const S = String(sql).replace(/\s+/g, " ").trim();
       const s = { sql: S, args: [] };
       s.bind = (...a) => ({ ...s, args: a });
-      s.run = async function () { writes.push(this); return { meta: { changes: 1 } }; };
+      s.run = async function () {
+        // D1 accepts ADD COLUMN once; after that it throws. Modelling that is what keeps the
+        // one-shot on_key backfill from looking like a per-request write.
+        if (/^ALTER TABLE/.test(S)) {
+          if (state._altered && state._altered[S]) throw new Error("duplicate column name");
+          (state._altered = state._altered || {})[S] = true;
+        }
+        writes.push(this);
+        return { meta: { changes: 1 } };
+      };
       s.first = async () => {
         if (S.startsWith("SELECT COUNT(*) n FROM keyman_contract3")) return { n: Object.values(state.counts).reduce((a, b) => a + b, 0) };
         if (S.startsWith("SELECT v FROM data_meta")) return { v: KEYMAN_VERSION }; // populated + current: the seed guard stays silent
@@ -33,6 +46,9 @@ function fakeEnv(state) {
       s.all = async () => {
         if (S.startsWith("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew")) return { results: state.roster };
         if (S.startsWith("SELECT sc, COUNT(*) n FROM keyman_contract3 GROUP BY sc")) return { results: Object.entries(state.counts).map(([sc, n]) => ({ sc, n })) };
+        if (S.startsWith("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3")) return { results: state.current || [] };
+        if (/FROM assignment a/.test(S)) return { results: state.yellows || [] };
+        if (S.startsWith("SELECT sc, seq, sign_on, sign_off, ship, updated_at, on_key FROM contract_edit")) return { results: state.edits || [] };
         throw new Error("fake all: unhandled SQL: " + S);
       };
       return s;
@@ -47,6 +63,28 @@ function fakeEnv(state) {
   return { env: { DB }, writes, batches };
 }
 const req = (body) => ({ json: async () => body });
+// A DATA write: a statement whose TARGET is one of the tables the import owns. The one-shot
+// on_key schema backfill names keyman_contract3 in a subquery but writes contract_edit, so it is
+// matched on the target, not on any mention.
+const dataWrites = (writes) => writes.filter((w) =>
+  /^(INSERT (OR REPLACE )?INTO|DELETE FROM|UPDATE)\s+(keyman_contract3|assignment|data_log|data_meta)\b/.test(w.sql));
+// removeReliefAssignment runs against the same fake; it reads the assignment then batches DELETEs.
+const withRemoval = (env, state) => {
+  const inner = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    const S = String(sql).replace(/\s+/g, " ").trim();
+    const st = inner(sql);
+    if (S.startsWith("SELECT id, contract_id FROM assignment WHERE id=?")) {
+      st.bind = (...a) => ({ ...st, args: a, first: async () => ((state.yellows || []).some((y) => y.id === a[0]) ? { id: a[0], contract_id: "k_" + a[0] } : null) });
+    } else if (S.startsWith("SELECT 1 x FROM bonus_outcome")) {
+      st.bind = (...a) => ({ ...st, args: a, first: async () => null });
+    } else if (/SELECT \(SELECT COUNT\(\*\) FROM assignment WHERE contract_id/.test(S)) {
+      st.bind = (...a) => ({ ...st, args: a, first: async () => ({ n: 0 }) });
+    }
+    return st;
+  };
+  return env;
+};
 const session = { email: "miguel.sanmartin@dg3.com" };
 
 // Three crew on the roster; the sheet carries A (3 contracts), B (1 contract), and a stranger.
@@ -72,7 +110,7 @@ test("dry-run flags the crew whose contract rows would DROP, and writes nothing"
   assert.equal(r.currentRows, 7);
   assert.deepEqual(r.shrink, [{ sc: "SC-B", before: 4, after: 1, name: "Bravo, Ben" }], "B goes 4 -> 1; A grows 1 -> 3; C is not in the file");
   assert.equal(batches.length, 0);
-  assert.ok(!writes.some((w) => /^(INSERT|DELETE|UPDATE)/.test(w.sql)), "dry-run must not write");
+  assert.deepEqual(dataWrites(writes), [], "dry-run must not touch the Counter, the projections or the log");
 });
 
 test("apply: every crew's DELETE and INSERTs are in ONE batch, DELETE first; unmatched crew never written; log says who shrank", async () => {
@@ -119,4 +157,81 @@ test("apply: a D1 failure on the first batch leaves NO crew emptied (no DELETE w
   const insSc = new Set(failed.filter((st) => /^INSERT OR REPLACE INTO keyman_contract3/.test(st.sql)).map((st) => st.args[0]));
   for (const sc of dels) assert.ok(insSc.has(sc), sc + ": its INSERTs were in the same (rolled-back) batch");
   assert.ok(!writes.some((w) => /^INSERT INTO data_log/.test(w.sql)), "nothing logged as refreshed");
+});
+
+
+/* ---- the loop: what a Counter upload does to the board Rita has been working on ---- */
+
+const CUR = [
+  { sc: "SC-A", ship: "Icon", sign_on: "2023-01-01", proj_off: "2023-07-01", act_off: null, seq: 1 },
+  { sc: "SC-B", ship: "Oasis", sign_on: "2026-03-01", proj_off: "2026-09-01", act_off: null, seq: 1 },
+];
+
+test("dry-run: the file's effect on the board is spelled out — appears, moved, absorbs, conflicts, overrides", async () => {
+  const state = {
+    counts: { "SC-A": 1, "SC-B": 1 }, roster: ROSTER, current: CUR,
+    yellows: [
+      // Ana's projection: Icon, three days off what the file says -> ABSORBED, the loop closes.
+      { id: "as_absorb", sc: "SC-A", crew_name: "Ana Alpha", ship: "Icon", sign_on: "2026-01-04", planned_sign_off: "2026-07-04" },
+      // Ben's projection: the file puts him on Oasis, Rita has him on Jewel -> CONFLICT, Rita decides.
+      { id: "as_conflict", sc: "SC-B", crew_name: "Ben Bravo", ship: "Jewel", sign_on: "2026-03-01", planned_sign_off: "2026-09-01" },
+    ],
+    edits: [{ sc: "SC-A", seq: 1, on_key: "2026-01-01", sign_off: "2026-08-15", updated_at: "2026-09-12T08:00:00Z" }],
+  };
+  const { env, writes } = fakeEnv(state);
+  const r = await (await apiKeymanImport(req({ rows: SHEET, dryRun: true }), env, session)).json();
+  assert.deepEqual(r.absorbs.map((x) => x.id), ["as_absorb"]);
+  assert.equal(r.absorbs[0].gap_days, -3);
+  assert.deepEqual(r.conflicts.map((x) => [x.id, x.why]), [["as_conflict", "ship"]]);
+  assert.deepEqual(r.moved.map((x) => x.sc), ["SC-A"], "only Ana's dates move; Ben's file row equals his current leg");
+  assert.equal(r.overrides.length, 1, "Rita's 15 Aug sign-off would be replaced by the file's 1 Jul");
+  assert.equal(r.overrides[0].rita.sign_off, "2026-08-15");
+  assert.equal(r.overrides[0].counter.sign_off, "2026-07-01");
+  assert.ok(r.absorbs[0].name, "every row carries a name Rita can read");
+  assert.deepEqual(dataWrites(writes), [], "dry-run must not touch the Counter, the projections or the log");
+});
+
+test("apply: the absorbed projection is retired, the contradicted one is left standing", async () => {
+  const state = {
+    counts: { "SC-A": 1, "SC-B": 1 }, roster: ROSTER, current: CUR,
+    yellows: [
+      { id: "as_absorb", sc: "SC-A", crew_name: "Ana Alpha", ship: "Icon", sign_on: "2026-01-04", planned_sign_off: "2026-07-04" },
+      { id: "as_conflict", sc: "SC-B", crew_name: "Ben Bravo", ship: "Jewel", sign_on: "2026-03-01", planned_sign_off: "2026-09-01" },
+    ],
+    edits: [],
+  };
+  const { env, writes } = fakeEnv(state);
+  const r = await (await apiKeymanImport(req({ rows: SHEET }), withRemoval(env, state), session)).json();
+  assert.deepEqual(r.absorbed.map((x) => [x.id, x.ok]), [["as_absorb", true]]);
+  assert.deepEqual(r.conflicts.map((x) => x.id), ["as_conflict"]);
+  const deleted = writes.filter((w) => /^DELETE FROM assignment WHERE id=\?/.test(w.sql)).map((w) => w.args[0]);
+  assert.deepEqual(deleted, ["as_absorb"], "only the projection the file AGREES with is retired");
+  const log = writes.find((w) => /^INSERT INTO data_log/.test(w.sql));
+  assert.match(log.args[3], /1 projection absorbed/);
+  assert.match(log.args[3], /1 conflicting projection left for review/);
+});
+
+test("apply: absorb:false retires nothing — the caller can always keep every card", async () => {
+  const state = {
+    counts: { "SC-A": 1 }, roster: ROSTER, current: CUR,
+    yellows: [{ id: "as_absorb", sc: "SC-A", crew_name: "Ana Alpha", ship: "Icon", sign_on: "2026-01-04", planned_sign_off: "2026-07-04" }],
+    edits: [],
+  };
+  const { env, writes } = fakeEnv(state);
+  const r = await (await apiKeymanImport(req({ rows: SHEET, absorb: false }), withRemoval(env, state), session)).json();
+  assert.deepEqual(r.absorbed, []);
+  assert.ok(!writes.some((w) => /^DELETE FROM assignment/.test(w.sql)));
+});
+
+test("apply stamps imported_at on every row — the clock behind 'the newer write wins'", async () => {
+  // A POPULATED table, so the bundled 8-column seed never runs and every INSERT below is the import's.
+  const { env, writes } = fakeEnv({ counts: { "SC-A": 1 }, roster: ROSTER, current: [], yellows: [], edits: [] });
+  await apiKeymanImport(req({ rows: SHEET }), env, session);
+  const ins = writes.filter((w) => /^INSERT OR REPLACE INTO keyman_contract3/.test(w.sql));
+  assert.ok(ins.length > 0);
+  for (const w of ins) {
+    assert.equal(w.args.length, 9, "8 columns + imported_at");
+    assert.match(String(w.args[8]), /^\d{4}-\d{2}-\d{2}T/, "imported_at must be a timestamp");
+  }
+  assert.equal(new Set(ins.map((w) => w.args[8])).size, 1, "one stamp for the whole upload");
 });

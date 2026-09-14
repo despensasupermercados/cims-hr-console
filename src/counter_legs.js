@@ -66,7 +66,7 @@ export const COUNTER_LEG_SQL = COUNTER_LEG_SELECT + `
 // Every Counter leg (all contracts, not just the current one) in the {sc, ship, sign_on, proj_off,
 // act_off, seq} shape the contract grouping (contracts.js) and the card enrichment expect.
 export const KC3_LEGS_SQL =
-  "SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL ORDER BY sc, seq";
+  "SELECT sc, ship, sign_on, proj_off, act_off, seq, imported_at FROM keyman_contract3 WHERE sign_on IS NOT NULL ORDER BY sc, seq";
 
 export async function fetchCounterLegs(env) {
   const { results } = await env.DB.prepare(COUNTER_LEG_SQL).all();

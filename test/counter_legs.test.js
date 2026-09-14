@@ -19,8 +19,8 @@ CREATE TABLE vessel (id TEXT PRIMARY KEY, name TEXT NOT NULL, brand TEXT NOT NUL
 CREATE TABLE ship_leg (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT, ship_short TEXT, sc TEXT, crew_id TEXT,
   ours INTEGER NOT NULL DEFAULT 1, on_date TEXT, off_date TEXT, embark TEXT, disembark TEXT,
   is_current INTEGER NOT NULL DEFAULT 0, source TEXT);
-CREATE TABLE keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq));
-CREATE TABLE contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, PRIMARY KEY (sc, seq));
+CREATE TABLE keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, imported_at TEXT, PRIMARY KEY (sc, seq));
+CREATE TABLE contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, on_key TEXT, updated_at TEXT, PRIMARY KEY (sc, seq));
 INSERT INTO vessel (id,name,brand) VALUES ('v_icon','Icon','Royal Caribbean'), ('v_quest','Quest','Azamara'), ('v_edge','Edge','Celebrity');
 `;
 // The reader every consumer used until 2026-09-14 (ship_leg_source.legsFromShipLeg, verbatim).
