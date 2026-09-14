@@ -96,3 +96,46 @@ test("the board does not draw a reliever who is already aboard", () => {
   assert.match(bline, /aboard since/, "say they were relieved, not that someone is still due");
   assert.match(bline, /overlap/, "an overlap must not be announced as a gap");
 });
+
+// --- a sign-off that already passed is not a countdown ---------------------------------------
+// Freedom, 2026-09-14. Norman Osorio's card read "On Vacation · 8 mos 14 days" — the derived
+// status was right, he had left — while the same panel said "Reliever needed · signs off in
+// -23 days" and offered an "OFF IN -23D" slot. His ship_leg still carried is_current=1 because
+// the planned off date (2026-08-22) passed and no ACTUAL sign-off was ever recorded, and the
+// console deliberately will not invent one. Fifteen of the forty-eight current legs are in that
+// state. Nobody knows who holds those seats, which makes it the most urgent thing on the board.
+import { urgency as urgencyFn } from "../src/relief_board.js";
+
+test("a planned sign-off already in the past is overdue, never a negative countdown", () => {
+  assert.equal(urgencyFn(-23, CONFIG), "overdue");
+  assert.equal(urgencyFn(-1, CONFIG), "overdue");
+  assert.equal(urgencyFn(0, CONFIG), "critical", "today is still a countdown, not a miss");
+  assert.equal(urgencyFn(10, CONFIG), "critical");
+  assert.equal(urgencyFn(20, CONFIG), "due");
+  assert.equal(urgencyFn(40, CONFIG), "open");
+  assert.equal(urgencyFn(null, CONFIG), "open");
+});
+
+test("an overdue seat outranks every other state on the board", () => {
+  const gone = { id: "leg:freedom", role: "printer", crew_name: "Norman Osorio", vessel_key: "Royal Caribbean|Freedom", on_date: "2025-12-08", off_date: "2026-08-22", has_deployment: true };
+  const soon = { id: "leg:x", role: "printer", crew_name: "Someone", vessel_key: "Royal Caribbean|X", on_date: "2026-01-01", off_date: "2026-09-20", has_deployment: true };
+  const rows = buildReliefBoard({ assignments: [soon, gone], config: CONFIG, today: TODAY });
+  assert.equal(rows[0].vessel_key, "Royal Caribbean|Freedom");
+  assert.equal(rows[0].urgency, "overdue");
+  assert.equal(rows[0].status, "overdue", "no reliever, so urgency drives the status");
+  assert.equal(rows[0].days_to_off, -23);
+  assert.equal(rows[1].urgency, "critical");
+});
+
+test("the board never prints a negative day count at the reader", () => {
+  const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb){"));
+  assert.match(slot.slice(0, slot.indexOf("\n")), /OFF WAS '\+\(-d\)\+'D AGO/,
+    "a past sign-off reads as elapsed, not as a countdown");
+  const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
+  assert.match(banner.slice(0, banner.indexOf("\n")), /Sign-off overdue/);
+  assert.match(banner.slice(0, banner.indexOf("\n")), /no sign-off recorded/,
+    "say WHY the seat is unresolved: nobody recorded the sign-off");
+  // the crew card carried the same defect ("OFF in -1d" on Anthem)
+  assert.match(SRC, /dd<0\?\('OFF was '\+\(-dd\)\+'d ago'\)/);
+});

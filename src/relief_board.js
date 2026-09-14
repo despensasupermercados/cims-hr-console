@@ -14,6 +14,13 @@ export function urgency(daysToOff, config) {
   const crit = (config && config.critical_days) != null ? config.critical_days : 14;
   const due = (config && config.due_days) != null ? config.due_days : 30;
   if (daysToOff == null) return "open";
+  // A NEGATIVE days_to_off is not a countdown. The planned sign-off has already passed and no
+  // actual sign-off was ever recorded, so the leg is still marked current: the board was saying
+  // "Reliever needed · signs off in -23 days" about Norman Osorio on Freedom, whose planned
+  // sign-off was 2026-08-22 and whose own derived status already read "On Vacation". Fifteen of
+  // the forty-eight current legs are in that state. It is the most urgent thing on the board —
+  // nobody knows who holds the seat — and it needs its own word, not a negative number.
+  if (daysToOff < 0) return "overdue";
   if (daysToOff <= crit) return "critical";
   if (daysToOff <= due) return "due";
   return "open";
@@ -46,7 +53,7 @@ export function workflowStatus(a) {
 }
 
 // §4.4 cost-of-delay rank: critical → due → gap/mismatch → open → clean.
-const RANK = { critical: 0, due: 1, port_mismatch: 2, gap: 2, open: 3, clean: 4, overlap: 4, none: 3 };
+const RANK = { overdue: -1, critical: 0, due: 1, port_mismatch: 2, gap: 2, open: 3, clean: 4, overlap: 4, none: 3 };
 
 // Build the board. Inputs:
 //   assignments : enriched rows { id, role('printer'|'reliever'), crew_name, vessel_key('<brand>|<ship_short>'),
