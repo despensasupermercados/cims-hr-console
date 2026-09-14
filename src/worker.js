@@ -23,7 +23,7 @@ import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { scheduleBySc, crewStatus } from "./crew_status.js";
-import { parseContractCounterFull, buildKeymanRows } from "./keymanimport.js";
+import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -922,26 +922,40 @@ async function apiKeymanImport(request, env, session) {
   if (!parsed.length) return json({ error: "no_rows" }, 400);
   const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all()).results;
   const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
-  const currentRows = (((await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()) || {}).n) || 0;
+  // Per-crew row counts today: the total for the preview, and the per-crew shrink flag. A Counter
+  // with FEWER contract blocks than the console holds (the 6 Jul 2026 current-roster upload) replaces
+  // a crew's history with the file's rows — by design, but never again unannounced (CLAUDE.md §6).
+  const cnt = (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 GROUP BY sc").all()).results || [];
+  const currentCounts = {};
+  let currentRows = 0;
+  for (const r of cnt) { currentCounts[r.sc] = r.n; currentRows += r.n; }
+  const nameOf = {};
+  for (const c of roster) nameOf[c.agency_id] = [c.last_name, c.first_name].filter(Boolean).join(", ");
+  const shrink = shrinkReport(rows, currentCounts).map(x => ({ ...x, name: nameOf[x.sc] || null }));
   if (b.dryRun) {
     return json({
       dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
-      contracts: rows.length, currentRows, unparsedDates,
+      contracts: rows.length, currentRows, unparsedDates, shrink,
       sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
     });
   }
-  // Apply: replace contracts for matched crew only.
-  if (matched.length) await env.DB.batch(matched.map(sc => env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=?").bind(sc)));
+  // Apply: replace contracts for matched crew only. A crew's DELETE and INSERTs travel in the SAME
+  // batch (one D1 transaction), so a failure part-way leaves every crew either untouched or fully
+  // refreshed — never emptied. (Before: one batch of all DELETEs, then INSERTs in chunks of 80.)
+  const del = env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=?");
   const ins = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
-  for (let i = 0; i < rows.length; i += 80) {
-    await env.DB.batch(rows.slice(i, i + 80).map(r => ins.bind(r.sc, r.km, r.ship, r.st, r.seq, r.sign_on, r.proj_off, r.act_off)));
+  for (const batch of replacePlan(rows, matched, 80)) {
+    await env.DB.batch(batch.map(st => st.op === "delete"
+      ? del.bind(st.sc)
+      : ins.bind(st.row.sc, st.row.km, st.row.ship, st.row.st, st.row.seq, st.row.sign_on, st.row.proj_off, st.row.act_off)));
   }
   // Re-pin the version. Since the reseed guard (ensureKeymanImpl) a populated table is never
   // overwritten by the bundled constant regardless of this pin; it only keeps the guard from logging
   // a spurious "reseed refused" row after this import.
   await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
-  await logData(env, "keyman_contract (Contract Counter import, by " + ((session && session.email) || "?") + ")", rows.length, "refreshed " + matched.length + " crew");
-  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length });
+  await logData(env, "keyman_contract (Contract Counter import, by " + ((session && session.email) || "?") + ")", rows.length,
+    "refreshed " + matched.length + " crew" + (shrink.length ? ", " + shrink.length + " with fewer contracts than before" : ""));
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length, shrank: shrink.length });
 }
 
 async function apiDataStatus(env) {
@@ -1525,8 +1539,9 @@ async function rotationSections(env) {
   return { sections, pool, shoreside, counts, inDock: inDockNow(DRY_DOCK, today) };
 }
 // Days worked THIS MONTH per crew currently active in Keyman, for customer billing. Uses the live
-// board roster (rotationSections) so dates match what's shown on the Keyman page — NOT the historical
-// Contract Counter (keyman_contract3), which holds only closed past contracts. Onboard crew bill from
+// board roster (rotationSections) so dates match what's shown on the Keyman page — NOT the Contract
+// Counter table (keyman_contract3), which is one imported contract per crew, refreshed only by a Counter
+// upload (last 2026-07-06) and not by the relief board. Onboard crew bill from
 // their sign-on through today; crew who signed off this month bill through their sign-off. Days are
 // clipped to [1st-of-month, today]; only crew with >0 days this month appear.
 function clientLabel(brand) {
@@ -1695,7 +1710,8 @@ async function apiBonusCrew(env, url) {
   const count = await crewCount(env, cr.id, baseline);
   // Default sign-on/off for the Score Card (manually editable there). Prefer the live SCHEDULE
   // (current leg or crew aboard per the relief board — the contract just ended, or the current one),
-  // since the Contract Counter only holds completed-contract dates. Fall back to the latest Counter leg.
+  // since the Contract Counter table is only as fresh as its last upload (2026-07-06) and knows nothing
+  // of relief-board contracts. Fall back to the latest Counter leg.
   const td = TODAY();
   let current = null, bestPast = null, bestFut = null;
   for (const h of HIST) {
@@ -3160,6 +3176,9 @@ function handleDrop(files){
       var heads=[];
       try{
         var wb=XLSX.read(e.target.result,{type:'array'});
+        // The CIMS Keyman workbook is recognised by its 'Contract Counter' SHEET, not by the headers of
+        // whichever sheet happens to be first (the header scan below only reads sheet 1).
+        if(wb.SheetNames.some(function(n){return String(n).toLowerCase().indexOf('contract counter')>=0;})){upBand('Keyman contracts',0,0,f);parseKeymanFile(f);return;}
         var ws=wb.Sheets[wb.SheetNames[0]];
         var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
         for(var i=0;i<Math.min(aoa.length,15);i++){
@@ -3207,8 +3226,13 @@ async function previewKeyman(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  if(r.shrink&&r.shrink.length){
+    var sh=r.shrink;
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+sh.length+' crew would end up with FEWER contracts than the console holds today</b> &mdash; the file wins for matched crew, so their older contract rows are removed on Apply. Check this is the full Contract Counter, not a current-roster extract.<br>'
+      +sh.slice(0,15).map(function(x){return impEsc((x.name||x.sc)+' ('+x.sc+')')+': '+x.before+' &rarr; '+x.after;}).join('<br>')+(sh.length>15?'<br>+'+(sh.length-15)+' more':'')+'</div>';
+  }
   if(r.unparsedDates&&r.unparsedDates.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsedDates.length+' date cell'+(r.unparsedDates.length===1?'':'s')+' unreadable</b> (a leg with an unreadable sign-on is skipped; fix the sheet and re-drop)<br>'+r.unparsedDates.slice(0,15).map(function(u){return impEsc(u.last+', '+u.first+' &middot; contract '+u.seq+' '+u.field+': '+u.raw);}).join('<br>')+(r.unparsedDates.length>15?'<br>+'+(r.unparsedDates.length-15)+' more':'')+'</div>';
-  h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">Refresh contract history for '+r.matched+' crew</button>';
+  h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">'+(r.shrink&&r.shrink.length?'Apply anyway &mdash; refresh '+r.matched+' crew ('+r.shrink.length+' lose rows)':'Refresh contract history for '+r.matched+' crew')+'</button>';
   $('#imp').innerHTML=h;
 }
 async function applyKeyman(){

@@ -103,3 +103,38 @@ export function buildKeymanRows(parsed, roster) {
   }
   return { rows, matched: [...matched], unmatched };
 }
+
+// The 6 Jul 2026 lesson: a Counter shaped as ONE block per crew (a current-roster export) was applied
+// over a 216-row history and silently replaced 48 crew's multi-contract history with a single row each
+// (data_log 2026-07-06 16:45). Apply is "the file wins for matched crew" by design; what was missing
+// is the FLAG (CLAUDE.md §6). currentCounts: { sc: rows in keyman_contract3 today }. Returns the
+// matched crew whose row count would DROP, so the dry-run can say so before anyone clicks Apply.
+export function shrinkReport(rows, currentCounts) {
+  const after = {};
+  for (const r of (rows || [])) if (r && r.sc) after[r.sc] = (after[r.sc] || 0) + 1;
+  const out = [];
+  for (const sc in after) {
+    const before = Number((currentCounts || {})[sc] || 0);
+    if (before > after[sc]) out.push({ sc, before, after: after[sc] });
+  }
+  return out.sort((a, b) => (b.before - b.after) - (a.before - a.after) || (a.sc < b.sc ? -1 : 1));
+}
+
+// Group the apply into batches where a crew's DELETE and their INSERTs always land in the SAME
+// batch (a D1 batch is one transaction). The previous shape — one batch of every DELETE, then
+// INSERTs in chunks of 80 — could leave matched crew with NO rows if a later chunk failed.
+// Returns [[{op:'delete',sc} , {op:'insert',row}, ...], ...]; a batch holds at most maxStmts
+// statements unless a single crew alone exceeds it (they are never split).
+export function replacePlan(rows, matched, maxStmts = 80) {
+  const bySc = {};
+  for (const r of (rows || [])) if (r && r.sc) (bySc[r.sc] = bySc[r.sc] || []).push(r);
+  const batches = [];
+  let cur = [];
+  for (const sc of (matched || [])) {
+    const group = [{ op: "delete", sc }, ...(bySc[sc] || []).map((row) => ({ op: "insert", row }))];
+    if (cur.length && cur.length + group.length > maxStmts) { batches.push(cur); cur = []; }
+    cur.push(...group);
+  }
+  if (cur.length) batches.push(cur);
+  return batches;
+}

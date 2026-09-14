@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normDate, parseContractCounter, parseContractCounterFull, buildBridge, bridgeName, buildKeymanRows } from "../src/keymanimport.js";
+import { normDate, parseContractCounter, parseContractCounterFull, buildBridge, bridgeName, buildKeymanRows, shrinkReport, replacePlan } from "../src/keymanimport.js";
 
 // ---------------- EXISTING GOLDEN TESTS (unchanged) ----------------
 test("normDate handles ISO, datetime strings, M/D/YYYY, Date objects, and junk", () => {
@@ -117,4 +117,51 @@ test("buildKeymanRows end-to-end: a km-only match still produces contract rows k
   assert.equal(unmatched.length, 0);
   assert.equal(rows[0].sc, "SC-0038391");
   assert.equal(rows[0].km, "526444");
+});
+
+// ---- the 6 Jul 2026 lesson: a thinner Counter silently replaced 48 crew's history with one row each ----
+test("shrinkReport: names every matched crew whose row count would DROP, biggest loss first; growth and same-size are silent", () => {
+  const rows = [
+    { sc: "SC-1", seq: 1 },                                   // had 4 -> 1 (loses 3)
+    { sc: "SC-2", seq: 1 }, { sc: "SC-2", seq: 2 },           // had 3 -> 2 (loses 1)
+    { sc: "SC-3", seq: 1 }, { sc: "SC-3", seq: 2 },           // had 1 -> 2 (grows)
+    { sc: "SC-4", seq: 1 },                                   // had 1 -> 1 (same)
+    { sc: "SC-5", seq: 1 },                                   // not in the table yet (0 -> 1)
+  ];
+  const r = shrinkReport(rows, { "SC-1": 4, "SC-2": 3, "SC-3": 1, "SC-4": 1, "SC-9": 7 });
+  assert.deepEqual(r, [{ sc: "SC-1", before: 4, after: 1 }, { sc: "SC-2", before: 3, after: 2 }]);
+  assert.deepEqual(shrinkReport([], { "SC-1": 4 }), [], "crew not in the file are untouched, so never 'shrink'");
+  assert.deepEqual(shrinkReport(rows, {}), [], "an empty table cannot shrink");
+});
+
+test("replacePlan: a crew's DELETE and INSERTs are always in the SAME batch, in that order, and matched crew with no rows still get their DELETE", () => {
+  const rows = [
+    { sc: "A", seq: 1 }, { sc: "A", seq: 2 }, { sc: "A", seq: 3 },
+    { sc: "B", seq: 1 },
+    { sc: "C", seq: 1 }, { sc: "C", seq: 2 },
+  ];
+  const plan = replacePlan(rows, ["A", "B", "C"], 5);
+  // A = 4 stmts, B = 2, C = 3. Cap 5: [A(4)] [B(2)+C(3)=5].
+  assert.equal(plan.length, 2);
+  assert.deepEqual(plan[0].map((s) => s.op + ":" + (s.sc || s.row.sc)), ["delete:A", "insert:A", "insert:A", "insert:A"]);
+  assert.deepEqual(plan[1].map((s) => s.op + ":" + (s.sc || s.row.sc)), ["delete:B", "insert:B", "delete:C", "insert:C", "insert:C"]);
+  for (const batch of plan) {
+    const scs = new Set(batch.map((s) => s.sc || s.row.sc));
+    for (const sc of scs) {
+      const ops = batch.filter((s) => (s.sc || s.row.sc) === sc).map((s) => s.op);
+      assert.equal(ops[0], "delete", sc + ": DELETE first");
+      assert.ok(ops.slice(1).every((o) => o === "insert"), sc + ": then only INSERTs");
+    }
+  }
+  // Rows are never dropped or duplicated across batches.
+  const inserted = plan.flat().filter((s) => s.op === "insert").map((s) => s.row.sc + "#" + s.row.seq).sort();
+  assert.deepEqual(inserted, ["A#1", "A#2", "A#3", "B#1", "C#1", "C#2"]);
+  // A crew that is matched but contributes no rows (cannot happen from the parser, but the plan must not lose the DELETE).
+  assert.deepEqual(replacePlan([], ["Z"], 80), [[{ op: "delete", sc: "Z" }]]);
+  // One crew bigger than the cap is never split.
+  const big = Array.from({ length: 7 }, (_, i) => ({ sc: "BIG", seq: i + 1 }));
+  const p2 = replacePlan(big, ["BIG"], 3);
+  assert.equal(p2.length, 1);
+  assert.equal(p2[0].length, 8);
+  assert.deepEqual(replacePlan([], [], 80), []);
 });
