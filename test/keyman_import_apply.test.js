@@ -162,9 +162,12 @@ test("apply: a D1 failure on the first batch leaves NO crew emptied (no DELETE w
 
 /* ---- the loop: what a Counter upload does to the board Rita has been working on ---- */
 
+// Both crew MOVE in this file: Ana from a 2023 Icon contract to a 2024 one, Ben from a 2025 Oasis
+// contract to a 2026 one. (A Counter that has not moved for a crew says nothing about their next
+// projection — review, 14 Sep 2026 — so a fixture with an unchanged row would test nothing.)
 const CUR = [
   { sc: "SC-A", ship: "Icon", sign_on: "2023-01-01", proj_off: "2023-07-01", act_off: null, seq: 1 },
-  { sc: "SC-B", ship: "Oasis", sign_on: "2026-03-01", proj_off: "2026-09-01", act_off: null, seq: 1 },
+  { sc: "SC-B", ship: "Oasis", sign_on: "2025-09-01", proj_off: "2026-02-28", act_off: null, seq: 1 },
 ];
 
 test("dry-run: the file's effect on the board is spelled out — appears, moved, absorbs, conflicts, overrides", async () => {
@@ -183,7 +186,7 @@ test("dry-run: the file's effect on the board is spelled out — appears, moved,
   assert.deepEqual(r.absorbs.map((x) => x.id), ["as_absorb"]);
   assert.equal(r.absorbs[0].gap_days, -3);
   assert.deepEqual(r.conflicts.map((x) => [x.id, x.why]), [["as_conflict", "ship"]]);
-  assert.deepEqual(r.moved.map((x) => x.sc), ["SC-A"], "only Ana's dates move; Ben's file row equals his current leg");
+  assert.deepEqual(r.moved.map((x) => x.sc), ["SC-A", "SC-B"], "both crew get a new contract in this file");
   assert.equal(r.overrides.length, 1, "Rita's 15 Aug sign-off would be replaced by the file's 1 Jul");
   assert.equal(r.overrides[0].rita.sign_off, "2026-08-15");
   assert.equal(r.overrides[0].counter.sign_off, "2026-07-01");

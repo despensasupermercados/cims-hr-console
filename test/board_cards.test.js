@@ -180,3 +180,39 @@ test("exactly one definition of each relief renderer survives — the shadowing 
     assert.equal(n, 1, fn + " is defined " + n + " times; the last one silently wins and the others are dead weight");
   }
 });
+
+/* ---- review, 14 Sep 2026: the drag path ---- */
+
+test("dropping a PROJECTION moves the assignment; it never writes the crew's registry ship", () => {
+  const src = readFileSync(SRC, "utf-8");
+  assert.equal(typeof ctx.moveProjection, "function", "moveProjection must exist on the page");
+  const drop = src.slice(src.indexOf("z.ondrop=function(e){e.preventDefault();z.classList.remove('dragover');"));
+  const body = drop.slice(0, drop.indexOf("};", 0) + 2);
+  assert.match(body, /var aid=DRAGEL&&DRAGEL\.getAttribute\('data-aid'\)/, "the drop must look at WHICH card was dragged");
+  assert.match(body, /if\(aid\)\{moveProjection\(aid,ship\);\}else\{assignCrew\(DRAGID,ship\);\}/,
+    "a yellow card goes through moveProjection; the crew_override path is only for a card with no projection behind it");
+  const mv = src.slice(src.indexOf("async function moveProjection(aid,ship){"));
+  assert.match(mv.slice(0, mv.indexOf("\n}")), /fetch\('\/api\/relief\/save'[\s\S]*vessel_name:ship/, "the move is the relief board's own save: id + vessel_name");
+  assert.doesNotMatch(mv.slice(0, mv.indexOf("\n}")), /rotation\/assign/, "never the registry-ship route");
+});
+
+test("a Counter leg takes its edit from editFor only — no position fallback that could reattach an edit", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const eff = src.slice(src.indexOf("const eff = (leg) => {"));
+  const body = eff.slice(0, eff.indexOf("}; };") + 5);
+  assert.match(body, /const o = editFor\(leg, editIdx\) \|\| \{\};/);
+  assert.doesNotMatch(body, /emap\[leg\.sc/, "emap[sc|seq] is keyed by POSITION — exactly what on_key exists to stop");
+  assert.doesNotMatch(src, /emap\[c\.agency_id\+"\|"\+\(enr\.seq\|\|1\)\]/, "the readiness flags must come through the same resolved edit, not a second position lookup");
+});
+
+test("the on_key backfill is its own statement, not hidden inside the ALTER's try", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const fn = src.slice(src.indexOf("async function ensureContractEditImpl("));
+  const body = fn.slice(0, fn.indexOf("\n}") + 2);
+  const alter = body.indexOf("ALTER TABLE contract_edit ADD COLUMN on_key");
+  const upd = body.indexOf("UPDATE contract_edit SET on_key");
+  assert.ok(alter > 0 && upd > alter, "both statements present, ALTER first");
+  const between = body.slice(alter, upd);
+  assert.match(between, /catch \{\}/, "the ALTER's try must be CLOSED before the UPDATE begins — a thrown ALTER must not skip the backfill, and a thrown backfill must not be lost behind an ALTER that already succeeded");
+  assert.match(body.slice(upd), /WHERE on_key IS NULL/, "idempotent: a no-op once backfilled");
+});

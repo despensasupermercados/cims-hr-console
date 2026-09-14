@@ -1498,10 +1498,13 @@ async function rotationSections(env) {
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
   // Effective leg = base Keyman leg with any saved per-contract edit applied.
   const eff = (leg) => {
-    const o = editFor(leg, editIdx) || emap[leg.sc + "|" + leg.seq] || {};
+    // editFor only: it already falls back to position for edits written before on_key existed. An
+    // extra emap[sc|seq] fallback here would hand a renumbered leg an edit that KNOWS it belongs to
+    // another contract — the exact misattachment on_key exists to prevent.
+    const o = editFor(leg, editIdx) || {};
     const r = resolveLeg(leg, o.sc ? o : null);
     return {
-      seq: leg.seq, ship: r.ship || leg.ship,
+      seq: leg.seq, hasEdit: !!o.sc, ship: r.ship || leg.ship,
       onKey: leg.sign_on || null,   // the COUNTER's sign-on: the key an edit is filed under
       signOn: r.signOn, signOff: r.signOff,
       dateSource: r.source, dateSourceAt: r.sourceAt, overridden: r.overridden,
@@ -1601,7 +1604,7 @@ async function rotationSections(env) {
       }
     }
     if (!ship) { pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1781,8 +1784,12 @@ async function ensureContractEditImpl(env) {
   // seq 1 because the 6 Jul file carried one block per crew, so a full multi-block Counter would
   // renumber them and hand Rita's recorded sign-offs to a 2024 contract (counter_sync.editFor).
   // The backfill runs inside the ALTER's try: exactly once, on the isolate that adds the column.
+  try { await env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run(); } catch {}
+  // The backfill is its own statement, idempotent (WHERE on_key IS NULL), and runs once per isolate
+  // like every other ensure — NOT inside the ALTER's try: on an isolate where keyman_contract3 did
+  // not exist yet the UPDATE would throw, the ALTER would already have succeeded, and no isolate
+  // would ever retry. A no-op UPDATE on a warm table costs nothing.
   try {
-    await env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run();
     await env.DB.prepare("UPDATE contract_edit SET on_key = (SELECT k.sign_on FROM keyman_contract3 k WHERE k.sc = contract_edit.sc AND k.seq = contract_edit.seq) WHERE on_key IS NULL").run();
   } catch {}
 }
@@ -4002,7 +4009,7 @@ async function dpvSend(){
   if(b){b.disabled=true;b.textContent='Sending…';}
   try{
     var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id})})).json();
-    if(r&&r.ok){ dpvClose(); renderRotation(); }
+    if(r&&r.ok){ dpvClose(); renderRotation(); if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
     else { if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
   }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Network error'); }
 }
@@ -4320,7 +4327,11 @@ function drawRotation(){
       }
       // Optimistic, animated move: drop the card into the target ship immediately (no full-board flash).
       if(DRAGEL&&DRAGEL.parentNode!==z){var el=DRAGEL;el.classList.add('landing');z.appendChild(el);setTimeout(function(){el.classList.remove('landing');},260);}
-      assignCrew(DRAGID,ship);
+      // A yellow card is a PROJECTION: the drop moves the assignment itself. The old path wrote the
+      // crew's registry ship (crew_override.vessel_observed), which is not what a plan is and would
+      // have out-voted the TDG registry for that seafarer. Only projections are draggable now.
+      var aid=DRAGEL&&DRAGEL.getAttribute('data-aid');
+      if(aid){moveProjection(aid,ship);}else{assignCrew(DRAGID,ship);}
     };
   });
 }
@@ -4357,6 +4368,13 @@ async function exportDaysExcel(){
     var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='days-worked_'+from.slice(0,7)+'.csv';a.click();
   }catch(e){alert('Could not export days worked.');}
+}
+async function moveProjection(aid,ship){
+  DRAGID=null; DRAGEL=null;
+  try{
+    var r=await (await fetch('/api/relief/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:aid,vessel_name:ship})})).json();
+    if(!r||!r.ok){renderRotation();alert('Could not move the projection: '+((r&&r.error)||'error'));}
+  }catch(e){renderRotation();}
 }
 async function assignCrew(id,ship){
   if(!id)return; DRAGID=null; DRAGEL=null;

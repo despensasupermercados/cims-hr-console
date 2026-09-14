@@ -198,3 +198,41 @@ test("an empty upload changes nothing and reports nothing", () => {
   const d = diffCounter({});
   for (const k of ["appears", "leaves", "moved", "absorbs", "conflicts", "overrides", "orphans"]) assert.deepEqual(d[k], [], k);
 });
+
+/* ---- review, 14 Sep 2026: defects found reading the diff, each pinned so it fails on the old code ---- */
+
+test("a Counter that has NOT moved for a crew says nothing about their next projection — no conflict, no absorb", () => {
+  const cur = [{ sc: "SC-9", ship: "Icon", sign_on: "2026-03-08", proj_off: "2026-09-14", act_off: null, seq: 1 }];
+  const d = diffCounter({
+    incoming: [{ sc: "SC-9", ship: "Icon", seq: 1, sign_on: "2026-03-08", proj_off: "2026-09-14" }],   // unchanged
+    current: cur,
+    yellows: [yellow({ ship: "Oasis", sign_on: "2026-11-02" })],                                          // her plan for his NEXT hull
+    edits: [],
+  });
+  assert.deepEqual([d.absorbs.length, d.conflicts.length], [0, 0],
+    "an unchanged Counter row must not be read as contradicting a future projection");
+  // The moment the file DOES move him — to another ship than she planned — that is a conflict.
+  const moved = diffCounter({
+    incoming: [{ sc: "SC-9", ship: "Jewel", seq: 2, sign_on: "2026-11-05", proj_off: "2027-05-05" }],
+    current: cur, yellows: [yellow({ ship: "Oasis", sign_on: "2026-11-02" })], edits: [],
+  });
+  assert.equal(moved.conflicts.length, 1);
+  assert.equal(moved.conflicts[0].why, "ship");
+  // ...and to the ship she planned, near her date — the loop closes.
+  const closed = diffCounter({
+    incoming: [{ sc: "SC-9", ship: "Oasis", seq: 2, sign_on: "2026-11-05", proj_off: "2027-05-05" }],
+    current: cur, yellows: [yellow({ ship: "Oasis", sign_on: "2026-11-02" })], edits: [],
+  });
+  assert.equal(closed.absorbs.length, 1);
+});
+
+test("overridden is FALSE when the newer Counter agrees with Rita, or has nothing to replace hers with", () => {
+  const agree = resolveLeg({ ...LEG, imported_at: "2026-09-20" }, { sign_off: "2026-09-14", updated_at: "2026-09-12T08:00:00Z" });
+  assert.equal(agree.overridden, false, "same date on both sides: nothing was replaced");
+  const gap = resolveLeg({ sign_on: "2026-03-08", proj_off: null, ship: "Icon", imported_at: "2026-09-20" }, { sign_off: "2026-10-01", updated_at: "2026-09-12T08:00:00Z" });
+  assert.equal(gap.signOff, "2026-10-01", "the Counter has no sign-off, so Rita's stands");
+  assert.equal(gap.source, "rita");
+  assert.equal(gap.overridden, false, "a card must not say TDG replaced a date it never had");
+  const real = resolveLeg({ ...LEG, imported_at: "2026-09-20" }, { sign_off: "2026-09-30", updated_at: "2026-09-12T08:00:00Z" });
+  assert.equal(real.overridden, true, "different date, file newer: this one really was replaced");
+});

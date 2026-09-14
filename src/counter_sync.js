@@ -88,12 +88,16 @@ export function resolveLeg(leg, edit) {
   const usedRita = (signOn != null && signOn === day(edit.sign_on)) ||
                    (signOff != null && signOff === day(edit.sign_off)) ||
                    (ship != null && ship === edit.ship && ship !== counter.ship);
+  // "Overridden" means a value Rita SET was REPLACED by a different Counter value because the file
+  // is newer. Not "the file is newer" on its own: if the two agree there is nothing to report, and
+  // if the Counter has no value at all Rita's stands and the card must not claim it was replaced.
+  const lost = (ritaValue, chosen) => ritaValue != null && ritaValue !== "" && chosen != null && chosen !== ritaValue;
+  const overridden = !ritaWins && (lost(day(edit.sign_on), signOn) || lost(day(edit.sign_off), signOff) || lost(edit.ship, ship));
   return {
     signOn, signOff, ship,
     source: usedRita ? "rita" : "counter",
     sourceAt: usedRita ? day(edit.updated_at) : (day(leg.imported_at) || null),
-    // TRUE when the Counter is the newer write and it replaced a value Rita had set.
-    overridden: !ritaWins && !!(day(edit.sign_off) || day(edit.sign_on) || edit.ship),
+    overridden,
   };
 }
 
@@ -148,10 +152,17 @@ export function diffCounter({ incoming, current, yellows, edits } = {}) {
 
   // Yellow cards: absorbed when the file carries the same crew on the same ship within ABSORB_DAYS
   // of the projection; contradicted when the file puts that crew somewhere else, or far away in time.
+  const sameLeg = (a, b) => !!a && !!b && norm(a.ship) === norm(b.ship) && day(a.sign_on) === day(b.sign_on)
+    && (day(a.act_off) || day(a.proj_off) || null) === (day(b.act_off) || day(b.proj_off) || null);
   for (const y of (yellows || [])) {
     if (!y || !y.sc) continue;
     const a = inc[y.sc];
     if (!a) continue;                                   // the file says nothing about them: card stands
+    // The file carries this crew, but only the contract the board ALREADY shows (a Counter that has
+    // not moved for them). It says nothing new about a projection for their NEXT contract, so the
+    // card stands. Without this, every future projection for a crew already in the Counter would be
+    // reported as a "conflict" on every upload — and Rita would learn to ignore the panel.
+    if (sameLeg(a, cur[y.sc])) continue;
     const gap = daysBetween(y.sign_on, a.sign_on);
     const sameShip = norm(y.ship) === norm(a.ship);
     const close = gap != null && Math.abs(gap) <= ABSORB_DAYS;
