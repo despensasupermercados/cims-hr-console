@@ -1,10 +1,14 @@
 // src/ship_leg_source.js
-// Phase 2 (P3.12): the board reads leg data from the ship_leg D1 table (the write-master,
-// spec §2.1/§6) instead of the SHIP_HISTORY code constant. This module returns rows in the
-// EXACT SHIP_HISTORY shape, so the existing readers only swap their data source — no logic change.
+// The board's live schedule: current legs from the Contract Counter (counter_legs.js, since
+// 2026-09-14; before that the frozen ship_leg snapshot of the 6 Jul Counter) merged with the crew
+// aboard per the relief board (in-force `assignment` rows). This module returns rows in the EXACT
+// SHIP_HISTORY shape, so the existing readers only swap their data source — no logic change.
 //
 // Flip is a DATA change (no redeploy): app_config key 'board_source' = 'ship_leg' | 'ship_history'.
-// Default (missing/anything else) = 'ship_history' — the current behavior, fail-safe.
+// 'ship_leg' means "the live database read" (its historical name); 'ship_history' / missing = the
+// frozen SHIP_HISTORY code constant, fail-safe.
+
+import { fetchCounterLegs } from "./counter_legs.js";
 
 const BRAND_SHORT = {
   "Royal Caribbean": "Royal",
@@ -25,30 +29,16 @@ export async function boardSource(env) {
   }
 }
 
-// Returns SHIP_HISTORY-shaped rows from ship_leg:
-//   { ship, name, sc, ours, on, off, brand, is_current[, embark][, disembark] }
+// Returns SHIP_HISTORY-shaped rows from the Contract Counter (counter_legs.COUNTER_LEG_SQL):
+//   { ship, name, sc, ours, on, off, brand, is_current[, embark][, disembark], crew_id, source }
 // off === null  => TBA sign-off (readers already treat null off as still-onboard).
 //
-// EXCLUDES projected forward legs (2026-07-27). Unlike every other ship_leg
-// reader this one has no `is_current = 1` filter, so the is_current=0 rows written
-// by src/leg_projection.js WOULD flow into HIST -> scheduleBySc / schEnr / histByShip
-// in rotationSections. A forward leg always has the latest off_date, so it would win
-// the schEnr date-enrichment race and silently rewrite a crew member's displayed
-// sign-on/sign-off — and, for crew with no keyman leg, their billed days via
-// apiBillingMonth. Excluding them here is a NO-OP today (all 48 real rows are
-// is_current=1) and keeps this reader admitting genuine history if it is ever
-// backfilled.
-export async function legsFromShipLeg(env) {
-  const { results } = await env.DB.prepare(
-    `SELECT l.brand, l.ship_short, l.sc, l.on_date, l.off_date,
-            l.embark, l.disembark, l.ours, l.is_current, l.crew_id,
-            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
-       FROM ship_leg l
-       LEFT JOIN crew c ON c.id = l.crew_id
-      WHERE l.ours = 1
-        AND NOT (l.source LIKE 'assignment:%' AND l.is_current = 0)
-      ORDER BY l.brand, l.ship_short, l.on_date`
-  ).all();
+// Until 2026-09-14 this read `ship_leg`, the frozen 6 Jul snapshot. Projected forward legs
+// (leg_projection.js, source 'assignment:%', is_current=0) never enter: the Counter has none and
+// the orphan arm admits keyman_roster rows only — a forward leg would otherwise win the schEnr
+// date-enrichment race in rotationSections and rewrite a crew's displayed sign-on/off.
+export async function legsFromCounter(env) {
+  const results = await fetchCounterLegs(env);
   return (results || []).map((r) => {
     const o = {
       ship: r.ship_short,
@@ -60,12 +50,15 @@ export async function legsFromShipLeg(env) {
       brand: BRAND_SHORT[r.brand] || r.brand,
       is_current: !!r.is_current,
       crew_id: r.crew_id || null,
+      source: r.source || "counter",
     };
     if (r.embark) o.embark = r.embark;
     if (r.disembark) o.disembark = r.disembark;
     return o;
   });
 }
+// Old name, same contract — kept so nothing that imported it breaks.
+export const legsFromShipLeg = legsFromCounter;
 
 // -----------------------------------------------------------------------------
 // Crew currently ABOARD per the relief board (2026-09-04).
@@ -86,7 +79,8 @@ export async function legsFromShipLeg(env) {
 // -----------------------------------------------------------------------------
 
 // The ONLY place the in-force set is read. Mirrors roster_export.ROSTER_SQL's assignment
-// arm: started (sign_on <= today), not signed off, exactly one per crew.
+// arm: started (sign_on <= today), not signed off, one per crew PER SHIP (Miguel, 14 Sep 2026:
+// "one crew can be in 2 ships" — travellers and jumpers; a second ship is never collapsed away).
 export async function fetchCurrentAssignments(env, today) {
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.sign_on, a.planned_sign_off, a.on_port_seed, a.off_port_seed,
@@ -105,6 +99,7 @@ export async function fetchCurrentAssignments(env, today) {
                      WHERE k2.crew_id = c.id
                        AND a2.actual_sign_off IS NULL
                        AND a2.sign_on <= ?1
+                       AND COALESCE(a2.vessel_id, a2.vessel_name) = COALESCE(a.vessel_id, a.vessel_name)
                      ORDER BY a2.sign_on DESC
                      LIMIT 1)
       ORDER BY ship, a.sign_on`
@@ -148,22 +143,28 @@ export async function fetchRecentSignoffs(env, today, days = ENDED_WINDOW_DAYS) 
 // never dropped either: brand is simply null and downstream readers derive brand from VESSEL_REF.
 export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
   const legs = shipLegRows || [];
+  // "Taken" is per crew PER SHIP (Miguel, 14 Sep 2026: one crew can be on two ships — a jumper
+  // holds a current leg on one hull and a next one on another). A Counter leg only suppresses the
+  // assignment that duplicates it: same crew, same ship, still spanning today.
+  const shipKey = (s) => String(s == null ? "" : s).trim().toLowerCase();
   const taken = new Set();
   const brandByShip = {};
   for (const r of legs) {
     if (r.is_current && (!today || !r.off || r.off >= today)) {
-      if (r.sc) taken.add("sc:" + r.sc);
-      if (r.crew_id) taken.add("id:" + r.crew_id);
+      if (r.sc) taken.add("sc:" + r.sc + "|" + shipKey(r.ship));
+      if (r.crew_id) taken.add("id:" + r.crew_id + "|" + shipKey(r.ship));
     }
     if (r.ship && r.brand && !brandByShip[r.ship]) brandByShip[r.ship] = r.brand;
   }
-  const bySc = new Map(); // one per crew, latest sign_on wins (defensive; the SQL already picks one)
+  const bySc = new Map(); // one per crew per ship, latest sign_on wins (defensive; the SQL already picks one)
   for (const a of assignmentRows || []) {
     if (!a || !a.sc) continue;
-    if (taken.has("sc:" + a.sc) || (a.crew_id && taken.has("id:" + a.crew_id))) continue;
-    const prev = bySc.get(a.sc);
+    const sk = shipKey(a.ship);
+    if (taken.has("sc:" + a.sc + "|" + sk) || (a.crew_id && taken.has("id:" + a.crew_id + "|" + sk))) continue;
+    const key = a.sc + "|" + sk;
+    const prev = bySc.get(key);
     if (prev && (prev.sign_on || "") >= (a.sign_on || "")) continue;
-    bySc.set(a.sc, a);
+    bySc.set(key, a);
   }
   const out = legs.slice();
   for (const a of bySc.values()) {
@@ -246,7 +247,7 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 // recorded sign-off folded into the snapshot legs. All reads fire together (one wave, CLAUDE.md §12).
 export async function boardLegsFromDb(env, today) {
   const [legs, asg, ended, recMap] = await Promise.all([
-    legsFromShipLeg(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
+    legsFromCounter(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
   ]);
   return mergeBoardLegs(applyRecordedSignoffs(legs, recMap, today), asg, today, ended);
 }

@@ -231,7 +231,9 @@ test('glossary: tool exists, is module-handled, and states the locked rules', ()
   assert.match(text, /5 months on Azamara/);           // full-contract minimums
   assert.match(text, /9\+->2000/);                     // bonus ladder top rung
   assert.match(text, /floor 80%/);                     // payout floor
-  assert.match(text, /ship_leg — TRUTH/);              // authoritative source
+  assert.match(text, /keyman_contract3 \(kc3\) — the Contract Counter/); // authoritative source of current legs (2026-09-14)
+  assert.match(text, /boardLegs\(\) — the ONE schedule/);
+  assert.match(text, /ship_leg — a frozen snapshot/);   // and what it is NOT any more
   assert.match(text, /APPEND-ONLY money ledger/);      // bonus_outcome semantics
   assert.match(text, /baseline pending/);              // money guardrail
 });

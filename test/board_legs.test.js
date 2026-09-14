@@ -73,14 +73,25 @@ test("a NON-current ship_leg row (history) does not block the assignment", () =>
   assert.equal(out[1].is_current, true);
 });
 
-test("one leg per crew: the latest sign_on wins when two in-force assignments exist", () => {
+// Miguel, 14 Sep 2026: "one crew can be in 2 ships" — travellers and jumpers. One leg per crew
+// PER SHIP: two assignments on two ships are both kept; two on the same ship collapse to the latest.
+test("one leg per crew PER SHIP: two ships are both kept; on the same ship the latest sign_on wins", () => {
   const out = mergeBoardLegs([], [
     asg({ id: "a", sign_on: "2026-07-01", ship: "Jewel" }),
     asg({ id: "b", sign_on: "2026-08-20", ship: "Harmony" }),
     asg({ id: "c", sign_on: "2026-05-01", ship: "Vision" }),
+    asg({ id: "d", sign_on: "2026-08-01", ship: "Harmony" }),
   ]);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].ship, "Harmony");
+  assert.deepEqual(out.map((o) => o.ship + "@" + o.on).sort(), ["Harmony@2026-08-20", "Jewel@2026-07-01", "Vision@2026-05-01"]);
+});
+
+test("a current Counter leg spanning today blocks only the assignment on the SAME ship; another ship is kept (jumper)", () => {
+  const cur = leg({ sc: "SC-9", crew_id: "c9", ship: "Icon" });
+  const same = mergeBoardLegs([cur], [asg({ sc: "SC-9", crew_id: "c9", ship: "icon " })], TODAY);
+  assert.equal(same.length, 1, "same ship (case/space-insensitive) = the Counter already has it");
+  const other = mergeBoardLegs([cur], [asg({ sc: "SC-9", crew_id: "c9", ship: "Oasis" })], TODAY);
+  assert.equal(other.length, 2, "a second ship is a second card, never collapsed");
+  assert.equal(other[1].ship, "Oasis");
 });
 
 test("brand falls back to the board's own brand for that ship, else null — the row is kept", () => {
@@ -124,7 +135,7 @@ function stubEnv({ legs = [], assignments = [], ended = [] } = {}) {
             rec.t = calls.length; calls.push(rec);
             if (/actual_sign_off IS NOT NULL/i.test(rec.sql)) return { results: ended };
             if (/FROM assignment/i.test(rec.sql)) return { results: assignments };
-            if (/FROM ship_leg/i.test(rec.sql)) return { results: legs };
+            if (/FROM keyman_contract3 k/i.test(rec.sql)) return { results: legs }; // counter_legs.COUNTER_LEG_SQL
             return { results: [] };
           },
         };
@@ -145,8 +156,9 @@ test("fetchCurrentAssignments: only ?1 placeholders, exactly one bound arg, in-f
   assert.deepEqual(c.args, ["2026-09-04"]);
   assert.match(c.sql, /a\.actual_sign_off IS NULL/);
   assert.match(c.sql, /a\.sign_on <= \?1/);
-  assert.match(c.sql, /ORDER BY a2\.sign_on DESC LIMIT 1/, "one assignment per crew");
-  assert.doesNotMatch(c.sql, /FROM ship_leg/i, "exclusion by current ship_leg is done in JS (mergeBoardLegs), not SQL");
+  assert.match(c.sql, /ORDER BY a2\.sign_on DESC LIMIT 1/, "one assignment per crew per ship");
+  assert.match(c.sql, /COALESCE\(a2\.vessel_id, a2\.vessel_name\) = COALESCE\(a\.vessel_id, a\.vessel_name\)/, "the one-per-crew pick is PER SHIP (14 Sep 2026: one crew can be on two ships)");
+  assert.doesNotMatch(c.sql, /FROM ship_leg|FROM keyman_contract3/i, "exclusion by a current Counter leg is done in JS (mergeBoardLegs), not SQL");
 });
 
 test("fetchRecentSignoffs: trailing window [today-60, today], both bound, actual_sign_off filter", async () => {
@@ -171,17 +183,19 @@ test("an ended assignment becomes a NON-current leg with off = actual sign-off; 
   assert.equal(mergeBoardLegs([], [], "2026-09-05", [{ ...ended, actual_sign_off: null }]).length, 0, "no actual sign-off = not ended");
 });
 
-test("boardLegsFromDb fires all four reads concurrently and merges", async () => {
+test("boardLegsFromDb fires all four reads concurrently and merges (current legs from the Contract Counter)", async () => {
   const { env, calls } = stubEnv({
-    legs: [{ brand: "Royal Caribbean", ship_short: "Harmony", sc: "SC-1", crew_id: "c1", on_date: "2026-02-01", off_date: "2026-09-01", ours: 1, is_current: 1, crew_name: "A B" }],
+    legs: [{ brand: "Royal Caribbean", ship_short: "Harmony", sc: "SC-1", crew_id: "c1", on_date: "2026-02-01", off_date: "2026-09-01", ours: 1, is_current: 1, crew_name: "A B", source: "counter" }],
     assignments: [asg()],
   });
   const out = await boardLegsFromDb(env, "2026-09-04");
   assert.equal(calls.length, 4);
+  assert.ok(calls.some((c) => /FROM keyman_contract3 k/.test(c.sql)), "the current legs must come from the Contract Counter");
   assert.equal(out.length, 2);
   assert.equal(out[0].sc, "SC-1");
   assert.equal(out[0].brand, "Royal");
-  assert.equal(out[0].crew_id, "c1", "legsFromShipLeg must expose crew_id so the merge can exclude by id");
+  assert.equal(out[0].source, "counter");
+  assert.equal(out[0].crew_id, "c1", "legsFromCounter must expose crew_id so the merge can exclude by id");
   assert.equal(out[1].sc, "SC-9");
   assert.equal(out[1].is_current, true);
 });

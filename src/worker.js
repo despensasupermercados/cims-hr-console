@@ -24,6 +24,7 @@ import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js"
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
+import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -513,7 +514,7 @@ async function maybeExportBackup(env, event) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
     const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='export_last_date'").first();
     if (prev && prev.v === day) return;
-    const rows = (await env.DB.prepare("SELECT l.ship_short AS ship, l.brand, l.sc, l.embark, l.on_date, l.off_date, l.disembark, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew FROM ship_leg l LEFT JOIN crew c ON c.id = l.crew_id WHERE l.is_current = 1 AND l.ours = 1 ORDER BY l.brand, l.ship_short").all()).results;
+    const rows = (await fetchCurrentCounterLegs(env)).map((l) => ({ ship: l.ship_short, brand: l.brand, sc: l.sc, embark: l.embark, on_date: l.on_date, off_date: l.off_date, disembark: l.disembark, crew: l.crew_name }));
     const esc = (x) => { x = String(x == null ? "" : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
     const head = ["Ship","Brand","Keyman","Agency ID","Embark port","Sign-on","Sign-off","Debark port","Reliever","Reliever embark","Reliever sign-off","Reliever debark"];
     const lines = [head.join(",")];
@@ -1005,7 +1006,7 @@ function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, shi
 // sc -> number of FULL contracts (legs grouped by the <=3-week transfer rule, each reaching the line
 // duration minimum). This — not the raw leg count — drives the rank tier and the "Contracts" number.
 async function fullContractMap(env) {
-  const rows = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
+  const rows = (await env.DB.prepare(KC3_LEGS_SQL).all()).results; // every Counter contract (2026-09-14: was the frozen snapshot, one leg per crew)
   const byCrew = {};
   for (const r of rows) (byCrew[r.sc] = byCrew[r.sc] || []).push(legShape(r));
   const map = {};
@@ -1112,7 +1113,7 @@ async function apiDashboard(env) {
   const curY = +today.slice(0, 4), curM = +today.slice(5, 7);
   const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
   const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy, HIST] = await Promise.all([
-    env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(off_date)-julianday(on_date))) AS INTEGER) days FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL AND off_date IS NOT NULL AND off_date>on_date").first(),
+    env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").first(),
     env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew").bind(in90).first(),
     env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all(),
@@ -1222,7 +1223,7 @@ async function apiCrew(env, url) {
   const [baseRes, ovsRes, legsRes, nlRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
-    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+    env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
     boardLegs(env), // the live schedule — same source as the rotation board and dashboard (§11)
   ]);
@@ -1413,7 +1414,7 @@ async function rotationSections(env) {
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
     env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all(),
     env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
-    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+    env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
   ]);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }

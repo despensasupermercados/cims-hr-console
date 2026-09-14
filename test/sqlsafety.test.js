@@ -14,10 +14,15 @@ test("no SELECT column aliased to the reserved word `on` (unquoted)", () => {
   assert.equal(bad.test(SRC), false, "found a column aliased to reserved word `on` — quote it or rename");
 });
 
-// P3.13: the board (rotationSections) AND the billing/days-worked surfaces now read the single
-// source of truth `ship_leg` — NOT keyman_contract3. kc3 remains only for the bonus/score (sbm).
-// This still guards against the reserved-word-alias breakage the old test caught: the mapped
-// columns (ship_short AS ship, on_date AS sign_on, off_date AS proj_off) use no reserved aliases.
-test("days-worked / board legs read ship_leg mapped columns (no keyword alias)", () => {
-  assert.match(SRC, /SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off FROM ship_leg/);
+// 2026-09-14: the board (rotationSections), the crew list and the rank map read every Counter
+// contract through counter_legs.KC3_LEGS_SQL — one statement, raw column names, no reserved alias.
+// (P3.13 had them on the frozen ship_leg snapshot; before that a `sign_on AS on` alias silently
+// broke days-worked, which is what this guard exists for.)
+test("board / crew-list / rank legs come from KC3_LEGS_SQL, which uses no keyword alias", async () => {
+  const { KC3_LEGS_SQL, COUNTER_LEG_SQL } = await import("../src/counter_legs.js");
+  assert.match(SRC, /env\.DB\.prepare\(KC3_LEGS_SQL\)\.all\(\)/);
+  assert.doesNotMatch(SRC, /FROM ship_leg WHERE ours=1 AND is_current=1/, "a reader still takes current legs from the frozen snapshot");
+  const bad = /\b\w+\s+(?:as\s+)?on\b(?=\s*[,)]|\s+from\b)/i;
+  assert.equal(bad.test(KC3_LEGS_SQL), false);
+  assert.equal(bad.test(COUNTER_LEG_SQL), false);
 });

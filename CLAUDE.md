@@ -92,8 +92,14 @@ dated card on the crew. Hard rules:
   consistently in apiCrew, apiRotation, AND apiDashboard. Don't reintroduce a raw-`crew.status` count in
   one view only (the donut/tiles must use the same derived set). Manual `crew_override.status` and the
   `retired` flag win over derivation. Status does NOT come from the historical Contract Counter.
-  The ONE schedule is `boardLegs(env)` = current `ship_leg` rows + crew aboard per the relief board
-  (in-force `assignment` rows, `ship_leg_source.boardLegsFromDb`, 2026-09-04). Never call
+  The ONE schedule is `boardLegs(env)` = current legs from the **Contract Counter** (`keyman_contract3`,
+  the TDG file that carries sign-on / sign-off; `src/counter_legs.js` is the ONE definition, 2026-09-14)
+  + crew aboard per the relief board (in-force `assignment` rows, `ship_leg_source.boardLegsFromDb`).
+  `ship_leg` is no longer a source of current legs: it survives inside `counter_legs.js` only as port
+  memory for the July snapshot and as the orphan arm (a snapshot leg whose crew has no Counter row).
+  The relief printers, the roster export and the backup CSV read the same definition. A Counter leg
+  past its projected sign-off is overdue, not gone: only Rita's recorded sign-off or the next Counter
+  ends it. One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
   crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
   The same schedule feeds the Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue
