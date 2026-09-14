@@ -2378,10 +2378,10 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
 .zlabel{font-family:'Outfit';font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin:20px 0 10px;display:flex;align-items:center;gap:12px}
 .zlabel::after{content:'';height:1px;background:var(--line-2);flex:1}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}
-.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;box-shadow:0 1px 2px rgba(20,45,72,.05);text-align:center}
-.tile .n{font-family:'Outfit';font-size:30px;font-weight:800;color:var(--navy);line-height:1}
-.tile .l{font-size:10.5px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-top:8px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:8px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:11px 9px;box-shadow:0 1px 2px rgba(20,45,72,.05);text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.tile .n{font-family:'Outfit';font-size:21px;font-weight:800;color:var(--navy);line-height:1}
+.tile .l{font-size:9px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:5px;line-height:1.25}
 .tile.green .n{color:var(--green-d)}.tile.amber .n{color:var(--amber)}.tile.royal .n{color:var(--royal)}.tile.gray .n{color:#6B7C93}.tile.red .n{color:var(--red)}
 .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:6px 0 14px}
 .bar h2{font-size:19px;color:var(--navy);margin-right:auto}
@@ -2528,7 +2528,7 @@ select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(
 .modcard,.modal{border-radius:22px;box-shadow:0 30px 70px -15px rgba(16,38,64,.45);border:1px solid rgba(255,255,255,.7);animation:modin .22s cubic-bezier(.2,.7,.3,1)}
 @keyframes modin{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
 /* Cards / tiles / ship sections — softer shadow + hover lift */
-.tile{border-radius:16px;border-color:var(--line);box-shadow:0 1px 3px rgba(20,45,72,.05);transition:transform .14s ease,box-shadow .14s ease}
+.tile{border-radius:12px;border-color:var(--line);box-shadow:0 1px 3px rgba(20,45,72,.05);transition:transform .14s ease,box-shadow .14s ease}
 .tile[data-rf],.tile[data-kind],.tile[data-go],.tile[data-fm]{cursor:pointer}
 .tile[data-rf]:hover,.tile[data-kind]:hover,.tile[data-go]:hover,.tile[data-fm]:hover{transform:translateY(-2px);box-shadow:0 10px 24px -8px rgba(20,45,72,.22)}
 .card{border-radius:15px;box-shadow:0 1px 3px rgba(20,45,72,.06);transition:transform .14s ease,box-shadow .14s ease}
