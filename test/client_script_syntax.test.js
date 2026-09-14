@@ -94,3 +94,28 @@ test("the gate actually parses the public seafarer pages", () => {
     assert.ok(names.includes(n), n + " must be in the deploy gate — it is a public, unauthenticated page");
   }
 });
+
+// A page constant is a template literal holding a whole HTML document. A stray backtick inside it
+// closes the literal, the file stops parsing, and the error surfaces as an unrelated identifier
+// hundreds of lines away. It happened on 2026-09-14: a code comment naming the vessel table in
+// backticks took the whole console out and `npm test` reported "Unexpected identifier 'vessel'".
+// The import-based gate cannot catch this — a file that does not parse cannot be imported — so the
+// raw text is scanned first and the failure is named.
+test("a stray backtick inside a page literal is caught on the raw text, and named", async () => {
+  const { scanPageLiterals } = await import("../scripts/verify_client_scripts.mjs");
+  const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  assert.deepEqual(scanPageLiterals(src), [], "a page literal is closed early somewhere in worker.js");
+
+  const anchor = "const APP_HTML = `";
+  const at = src.indexOf(anchor) + anchor.length;
+  const broken = src.slice(0, at + 40) + "`" + src.slice(at + 40);
+  const found = scanPageLiterals(broken);
+  assert.equal(found.length, 1, "the scanner must see a backtick dropped into APP_HTML");
+  assert.equal(found[0].name, "APP_HTML");
+  assert.ok(found[0].line > 1, "it must say WHICH line, or it saves nobody any time");
+  assert.match(found[0].why, /closes the page literal early/);
+
+  // An ESCAPED backtick is legitimate (a template literal inside an inline script) and must pass.
+  const escaped = src.slice(0, at + 40) + "\\`" + src.slice(at + 40);
+  assert.deepEqual(scanPageLiterals(escaped), []);
+});

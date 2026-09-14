@@ -151,6 +151,28 @@ test("a ship with ONLY a projection still renders the card, not the empty hint",
   assert.doesNotMatch(sec, /drag crew here/);
 });
 
+test("expired documents are a warning on BOTH states, never a block", () => {
+  const docs = { worst: "expired", label: "2 EXPIRED", title: "Expired: Passport, Seaman's Book", expired: 2, missing: 0, expiring: 0 };
+  for (const card of [{ ...GREEN, docs }, { ...YELLOW, docs }]) {
+    const h = ctx.rotCard(card);
+    assert.match(h, /class="rtag bad"[^>]*>2 EXPIRED</);
+    assert.match(h, /title="Expired: Passport, Seaman&quot;?.?s Book"|title="Expired: Passport, Seaman's Book"/);
+  }
+  const soon = ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "Within 90 days: US C1/D Visa", expiring: 1 } });
+  assert.match(soon, /class="rtag warn"[^>]*>1 EXPIRING</);
+  assert.doesNotMatch(ctx.rotCard(GREEN), /rtag bad|rtag warn/, "a clean seafarer carries no document chip");
+  // The Deploy button is still there: a warning never blocks the send.
+  assert.match(ctx.rotCard({ ...YELLOW, docs }), /planDeploy/);
+});
+
+test("a Junior PS on a restricted hull is flagged on the card, and the drop asks before it moves", () => {
+  const h = ctx.rotCard({ ...YELLOW, jrWarn: "block" });
+  assert.match(h, /Junior PS on a <b>block<\/b> ship/);
+  assert.doesNotMatch(ctx.rotCard(YELLOW), /jrnote/, "no rule, no note");
+  const sec = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, jrPsRule: "block", crew: [], projections: [], history: [] });
+  assert.match(sec, /data-jr="block"/, "the drop zone carries the rule, so the warning happens before anything is written");
+});
+
 test("exactly one definition of each relief renderer survives — the shadowing is gone for good", () => {
   const src = readFileSync(SRC, "utf-8");
   for (const fn of ["reliefSlot", "reliefBanner", "openRelief", "rotCard"]) {

@@ -56,6 +56,29 @@ export function documentLines(crew, today, warnDays = 60) {
   return out;
 }
 
+// The document standing of ONE seafarer, compressed to what fits on a board card.
+// Miguel, 14 Sep 2026: "expired required documents for that specific seafarer are always a warning"
+// — on the yellow card, on the green card, and in the Deploy email. A warning, never a block.
+export const CARD_WARN_DAYS = 90;
+export function docBadge(crew, today, warnDays = CARD_WARN_DAYS) {
+  const docs = documentLines(crew, today, warnDays);
+  const expired = docs.filter((d) => d.status === "expired");
+  const missing = docs.filter((d) => d.status === "missing" && d.required);
+  const expiring = docs.filter((d) => d.status === "expiring");
+  if (!expired.length && !missing.length && !expiring.length) return null;
+  const worst = expired.length ? "expired" : missing.length ? "missing" : "expiring";
+  const short = (arr) => arr.map((d) => d.doc).join(", ");
+  const label = expired.length ? (expired.length + " EXPIRED")
+              : missing.length ? (missing.length + " MISSING")
+              : (expiring.length + " EXPIRING");
+  const title = [
+    expired.length ? "Expired: " + short(expired) : "",
+    missing.length ? "No expiry on record: " + short(missing) : "",
+    expiring.length ? "Within " + warnDays + " days: " + short(expiring) : "",
+  ].filter(Boolean).join(" · ");
+  return { worst, label, title, expired: expired.length, missing: missing.length, expiring: expiring.length };
+}
+
 // The warnings that ride on the card and in the email. Expired first, then expiring, then missing.
 // A warning never blocks the send.
 export function deployWarnings(docs) {

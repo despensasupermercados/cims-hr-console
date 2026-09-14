@@ -27,7 +27,7 @@ import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } 
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
 import { removeReliefAssignment, saveReliefAssignment } from "./relief_api.js";
-import { installKeymanDeploy } from "./keyman_deploy.js";
+import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -1461,15 +1461,16 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, depRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes] = await Promise.all([
     boardLegs(env),
-    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all(),
+    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
     env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
     env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
+    env.DB.prepare("SELECT name, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
   ]);
   const shipHome = {}, shipBrand = {};
@@ -1555,6 +1556,21 @@ async function rotationSections(env) {
   // Contract Counter says, yellow is what Rita planned). A crew whose current leg came from the
   // relief board is aboard per Rita and not yet in a Counter: their card is YELLOW until the next
   // upload carries them, which is the loop closing. Anything else is green.
+  // Document standing per seafarer, for the card. crew_override wins field by field, the same
+  // precedence every other read uses (AdvancedQuery COALESCEs onto the base row).
+  const DOCF = ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"];
+  const docsBy = {};
+  for (const c of crewRows) {
+    const o = ovMap[c.agency_id] || {};
+    const merged = {};
+    for (const f of DOCF) merged[f] = (o[f] != null && o[f] !== "") ? o[f] : c[f];
+    docsBy[c.agency_id] = docBadge(merged, today);
+  }
+  // The ship's Junior PS rule, seeded in `vessel` since July and read here for the first time.
+  // WARN only (Miguel, 14 Sep 2026: "Warn on drop now; block once Rita re-confirms the four hulls").
+  const jrRule = {};
+  for (const v of ((vesRes && vesRes.results) || [])) if (v && v.name) jrRule[normShip(v.name)] = v.jr_ps_rule || null;
+  const isJr = (rank) => /junior|jr/i.test(String(rank || ""));
   const cardSrc = {}, cardAsg = {};
   for (const h of HIST) {
     if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue;
@@ -1585,7 +1601,7 @@ async function rotationSections(env) {
       }
     }
     if (!ship) { pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1623,6 +1639,8 @@ async function rotationSections(env) {
       eccr: !!a.eccr, air: !!a.air, hotel: !!a.hotel,
       onConfirmed: !!a.on_date_conf, offConfirmed: !!a.off_date_conf,
       instructionsSent: a.instructions_sent_at || null, signoffLinkSent: a.signoff_link_sent_at || null,
+      docs: docsBy[a.sc] || null,
+      jrWarn: (isJr(a.rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
       hasNote: !!(rm2.note && String(rm2.note).trim()),
     });
   }
@@ -1659,7 +1677,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   const counts = {};
@@ -2543,6 +2561,9 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .pbtn.go{background:var(--navy);border-color:var(--navy);color:#fff}
 .srcnote{font-size:10.5px;color:var(--mut);margin-top:6px}
 .srcnote b{color:#9A6614}
+.rtag.bad{background:#FBE7E6;border-color:#f0cfcc;color:#B0342F}
+.rtag.warn{background:#FBF0DA;border-color:#eddcb6;color:#9A6410}
+.jrnote{margin-top:6px;font-size:10.5px;color:#9A6410;background:#FBF0DA;border-radius:6px;padding:4px 8px}
 .sentrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 14px 10px;padding:8px 12px;border-radius:9px;background:#F3F6FA;border-left:3px solid var(--navy);font-size:12.5px;color:var(--body)}
 .sentrow b{color:var(--ink)}
 .sentrow .sentmeta{color:var(--mut);font-size:11.5px}
@@ -4017,12 +4038,16 @@ function rotCard(x){
   if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';
   if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
+  // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
+  if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
   var lab=plan?('<span class="rlab plan">'+(x.aboard?'PLAN &middot; ABOARD':'PLAN')+'</span>'):'';
   // Who set the dates on this card. Blank when nobody has touched the TDG values.
   var note='';
   if(plan)note='<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
   else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
   else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
+  // The ship's Junior PS rule, seeded in the vessel table since July and shown for the first time.
+  var jr=x.jrWarn?('<div class=jrnote>Junior PS on a <b>'+escHtml(x.jrWarn)+'</b> ship &mdash; check this placement</div>'):'';
   var acts='';
   if(plan&&x.assignment_id){
     var safeNm=String(x.name||'').replace(/"/g,'&quot;');
@@ -4037,7 +4062,7 @@ function rotCard(x){
     +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +(tg?'<div class=rtags>'+tg+'</div>':'')
-    +note+acts+'</div>';
+    +note+jr+acts+'</div>';
 }
 function rotShip(sec){
   var col=BRANDCOL[sec.brand]||'#1E6FD0',closed=!!ROT_CLOSED[sec.ship];
@@ -4054,7 +4079,7 @@ function rotShip(sec){
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Also served this ship · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
   var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(projs.length?(' · '+projs.length+' planned'):'')+((sec.deployed&&sec.deployed.length)?(' · '+sec.deployed.length+' sent to TDG'):'')+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
+    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
 }
 function monthsDays(a,b){
   if(!a||!b)return '';
@@ -4284,6 +4309,11 @@ function drawRotation(){
     z.ondragleave=function(){z.classList.remove('dragover');};
     z.ondrop=function(e){e.preventDefault();z.classList.remove('dragover');
       var ship=z.getAttribute('data-ship');
+      // Junior PS gate: warn, never block (Miguel, 14 Sep 2026 — block once Rita re-confirms the hulls).
+      var rule=(z.getAttribute('data-jr')||'');
+      if(rule&&rule!=='open'&&DRAGEL&&/jr ps/i.test(DRAGEL.textContent||'')){
+        if(!confirm(ship+' is a "'+rule+'" ship for Junior PS.\\n\\nMove this seafarer there anyway?'))return;
+      }
       // Optimistic, animated move: drop the card into the target ship immediately (no full-board flash).
       if(DRAGEL&&DRAGEL.parentNode!==z){var el=DRAGEL;el.classList.add('landing');z.appendChild(el);setTimeout(function(){el.classList.remove('landing');},260);}
       assignCrew(DRAGID,ship);

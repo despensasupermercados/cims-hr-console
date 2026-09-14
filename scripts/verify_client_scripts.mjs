@@ -49,9 +49,52 @@ export const RENDERED = [
 // sibling imports resolve) and return { page -> [inline script source, ...] }. Throws SyntaxError
 // on the first unparseable script, naming the page.
 const WORKER = new URL("../src/worker.js", import.meta.url);
+
+// A page constant is a JS TEMPLATE LITERAL holding a whole HTML document. A stray backtick inside
+// it — in markup, in a string, or (this is how it happens) in a code comment in the inline script —
+// CLOSES the literal. The file then fails to parse and the failure reads as some unrelated
+// identifier hundreds of lines later, which is a bad half hour. The import below cannot report
+// this, because a file that does not parse cannot be imported. So it is checked on the raw text
+// FIRST, and named for what it is. (Found 2026-09-14: a comment mentioning the vessel table in
+// backticks took the whole console out; `npm test` said "Unexpected identifier 'vessel'".)
+export function scanPageLiterals(text) {
+  const bad = [];
+  for (const m of text.matchAll(/^const (\w*_?HTML) = `/gm)) {
+    const name = m[1];
+    let i = m.index + m[0].length;
+    for (;;) {
+      const ch = text[i];
+      if (ch === undefined) { bad.push({ name, line: null, why: "the literal is never closed" }); break; }
+      if (ch === "\\") { i += 2; continue; }                       // escaped character
+      if (ch === "$" && text[i + 1] === "{") {                      // ${...} interpolation: skip it whole
+        let depth = 1; i += 2;
+        while (i < text.length && depth) { if (text[i] === "{") depth++; else if (text[i] === "}") depth--; i++; }
+        continue;
+      }
+      if (ch === "`") {
+        // The first unescaped backtick CLOSES the literal. If what follows is not the end of the
+        // assignment, this backtick is a stray and everything after it has been reinterpreted as code.
+        const after = text.slice(i + 1, i + 3);
+        if (!/^\s*[;,)]/.test(after)) {
+          bad.push({ name, line: text.slice(0, i).split("\n").length, why: "an unescaped backtick closes the page literal early — escape it or reword" });
+        }
+        break;
+      }
+      i++;
+    }
+  }
+  return bad;
+}
+
 export async function verifyClientScripts() {
+  const raw = readFileSync(WORKER, "utf-8");
+  const stray = scanPageLiterals(raw);
+  if (stray.length) {
+    throw new Error("unescaped backtick inside a page literal:\n  " +
+      stray.map((b) => `${b.name} at src/worker.js:${b.line} — ${b.why}`).join("\n  "));
+  }
   const tmp = new URL(`../src/__verify_${process.pid}__.mjs`, import.meta.url);
-  writeFileSync(tmp, readFileSync(WORKER, "utf-8") + `\nexport { ${PAGES.join(", ")} };\n`, "utf-8");
+  writeFileSync(tmp, raw + `\nexport { ${PAGES.join(", ")} };\n`, "utf-8");
   let m;
   try {
     m = await import(tmp.href);
