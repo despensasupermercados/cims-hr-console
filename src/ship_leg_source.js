@@ -181,6 +181,7 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
       is_current: true,
       crew_id: a.crew_id || null,
       source: "assignment",
+      assignment_id: a.id || null,   // which projection placed them here: the card acts on this
     };
     if (a.on_port_seed) o.embark = a.on_port_seed;   // honest nulls: no homeport guess here
     if (a.off_port_seed) o.disembark = a.off_port_seed;
@@ -250,4 +251,51 @@ export async function boardLegsFromDb(env, today) {
     legsFromCounter(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
   ]);
   return mergeBoardLegs(applyRecordedSignoffs(legs, recMap, today), asg, today, ended);
+}
+
+// -----------------------------------------------------------------------------
+// Rita's projections — every OPEN assignment, with what a board card needs.
+//
+// This is the yellow-card feed (Miguel, 14 Sep 2026: "rita create projections .. and when she is
+// sure .. cta is trigger to joy"). Unlike fetchCurrentAssignments it has NO date filter: a
+// projection that has not started yet is exactly the card Rita is working on, and a projection
+// whose sign-on has passed is a seafarer aboard per her board and not yet in a Contract Counter.
+// Nothing here feeds status or the schedule — boardLegs still decides who is aboard.
+// -----------------------------------------------------------------------------
+export async function fetchOpenAssignments(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.on_port_seed, a.off_port_seed,
+            a.override_on_city, a.override_off_city, a.succeeds_assignment_id,
+            a.eccr, a.air, a.hotel, a.on_date_conf, a.off_date_conf,
+            a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
+            COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
+            c.id AS crew_id, c.agency_id AS sc,
+            COALESCE(NULLIF(o.rank_override,''), c.rank_override, c.rank_observed) AS rank,
+            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
+       FROM assignment a
+       JOIN contract k ON k.id = a.contract_id
+       JOIN crew     c ON c.id = k.crew_id
+       LEFT JOIN crew_override o ON o.agency_id = c.agency_id
+      WHERE a.actual_sign_off IS NULL
+      ORDER BY ship, a.sign_on`
+  ).all();
+  return results || [];
+}
+
+// PURE. Which open assignments still need a card of their own.
+//
+// An assignment already drawn on the board — its crew is standing on that ship because of it —
+// must not be drawn twice. `drawn` is the set of "sc|ship" a caller has already rendered as a
+// yellow card. Everything else is a projection: a future contract, or a crew Rita has placed on a
+// ship the board does not otherwise show them on.
+export function pendingProjections(open, drawn) {
+  const key = (sc, ship) => sc + "|" + String(ship == null ? "" : ship).trim().toLowerCase();
+  const seen = drawn instanceof Set ? drawn : new Set(drawn || []);
+  const out = [];
+  for (const a of (open || [])) {
+    if (!a || !a.sc || !a.ship) continue;
+    if (seen.has(key(a.sc, a.ship))) continue;
+    out.push(a);
+  }
+  return out;
 }

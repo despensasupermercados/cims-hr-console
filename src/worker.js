@@ -15,7 +15,7 @@ import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
@@ -1456,7 +1456,7 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all(),
@@ -1464,6 +1464,7 @@ async function rotationSections(env) {
     env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
     env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
+    fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
   ]);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
@@ -1544,6 +1545,20 @@ async function rotationSections(env) {
     if (isCur) { if (!e || !e.cur || off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: true }; }
     else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; else if (!e.cur && off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; }
   }
+  // WHICH SOURCE PUT THIS SEAFARER ON THIS SHIP TODAY (Miguel, 14 Sep 2026: green is what TDG's
+  // Contract Counter says, yellow is what Rita planned). A crew whose current leg came from the
+  // relief board is aboard per Rita and not yet in a Counter: their card is YELLOW until the next
+  // upload carries them, which is the loop closing. Anything else is green.
+  const cardSrc = {}, cardAsg = {};
+  for (const h of HIST) {
+    if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue;
+    if (h.on > today || (h.off || "9999") < today) continue;
+    const k2 = normShip(shipOf(h.ship) || h.ship || "");
+    cardSrc[h.sc + "|" + k2] = h.source === "assignment" ? "yellow" : "green";
+    if (h.assignment_id) cardAsg[h.sc + "|" + k2] = h.assignment_id;
+  }
+  // The board's own key for a ship, matching window.reliefKey in the page: the relief editor opens on it.
+  const vkOf = (ship) => (brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship;
   const promByShip = {}, shoreside = [], pool = [];
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
@@ -1564,7 +1579,7 @@ async function rotationSections(env) {
       }
     }
     if (!ship) { pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: "green", signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1574,6 +1589,37 @@ async function rotationSections(env) {
   for (const s of Object.keys(promByShip)) shipNames[normShip(s)] = s;
   for (const s of Object.keys(byShip)) { const ks = normShip(s); if (!shipNames[ks] && validShip.has(ks)) shipNames[ks] = s; } // only REAL vessels anchor a section (a cruise-line name like 'Azamara' from a mis-recorded leg must not create a phantom ship)
   for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histDisp[k];
+  for (const a of (openAsg || [])) { const cs = shipOf(a.ship) || a.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // a ship with only a projection still gets a section
+  // Yellow cards that are not already standing on the board: a projection whose contract has not
+  // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
+  // renderer — the board no longer synthesises a second reliever list of its own.
+  const drawn = new Set();
+  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "yellow") drawn.add(c.agency_id + "|" + normShip(ship));
+  const projByShip = {};
+  for (const a of pendingProjections(openAsg, drawn)) {
+    const ship = shipOf(a.ship) || a.ship;
+    if (!ship) continue;
+    const kk = normShip(ship);
+    const pdl = (_pdBy[(brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship] || []);
+    const onC = resolveCity({ date: a.sign_on, seed: a.on_port_seed || shipHome[kk], override: a.override_on_city, portDays: pdl });
+    const offC = resolveCity({ date: a.planned_sign_off, seed: a.off_port_seed || shipHome[kk], override: a.override_off_city, portDays: pdl });
+    const rm2 = rmap[a.sc] || {};
+    (projByShip[ship] = projByShip[ship] || []).push({
+      agency_id: a.sc, assignment_id: a.id, name: a.crew_name || a.sc, rank: a.rank || null,
+      ship, vessel_key: vkOf(ship), state: "yellow", role: a.role || "reliever",
+      status: (cmap[a.sc] && cmap[a.sc].status) || "Unknown",
+      contracts: contracts[a.sc] || 0,
+      signOn: a.sign_on || null, signOff: a.planned_sign_off || null,
+      aboard: !!(a.sign_on && a.sign_on <= today),
+      embark: a.on_port_seed || null, disembark: a.off_port_seed || null,
+      on_city: onC.city, on_conf: onC.conf, off_city: offC.city, off_conf: offC.conf,
+      eccr: !!a.eccr, air: !!a.air, hotel: !!a.hotel,
+      onConfirmed: !!a.on_date_conf, offConfirmed: !!a.off_date_conf,
+      instructionsSent: a.instructions_sent_at || null, signoffLinkSent: a.signoff_link_sent_at || null,
+      hasNote: !!(rm2.note && String(rm2.note).trim()),
+    });
+  }
+  for (const ship in projByShip) projByShip[ship].sort((a, b) => String(a.signOn || "9999") < String(b.signOn || "9999") ? -1 : 1);
   const sections = Object.values(shipNames).map(ship => {
     const k = normShip(ship);
     const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -1589,7 +1635,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, projections: projByShip[ship] || [], history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   const counts = {};
@@ -2460,7 +2506,19 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .rtag.rtoggle{cursor:pointer;user-select:none}
 .poolwrap{background:#fff;border:1px dashed var(--line-2);border-radius:13px;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:8px;min-height:48px}
 .rcard.cur{box-shadow:0 0 0 2px var(--green) inset}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset}.ghostslot{border-style:dashed!important;display:flex;flex-direction:column;justify-content:center;color:var(--mut);cursor:pointer}.ghostslot.crit{border-color:var(--danger)!important;background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:var(--amber)!important;background:#fbeed6;color:#9a6410}
-.rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}.rcard .rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}.rcard .reldot{background:var(--navy)!important}.ghostslot{border:1.5px dashed var(--line-2)!important;background:#fafbfc;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;cursor:pointer;transition:border-color .15s,background .15s;min-height:104px}.ghostslot:hover{border-color:var(--navy)!important;background:#f2f7fd}.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}.ghostslot:hover .gp{background:var(--navy);color:#fff}.ghostslot .gt{font-family:'Outfit';font-weight:700;font-size:13px;color:var(--navy)}.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}.ghostslot.crit{border-color:var(--danger)!important;background:#fdf3f2}.ghostslot.crit .gp{background:#fbe7e6;color:var(--danger)}.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:#d9a441!important;background:#fdf9f0}.ghostslot.due .gp{background:#fbeed6;color:#9a6410}.ghostslot.due .gc{background:#fbeed6;color:#9a6410}.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 14px 12px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
+.rcard.plan{border:1.5px dashed var(--amber)!important;background:#fffdf7;box-shadow:none}
+.rcard.plan.aboard{box-shadow:0 0 0 2px var(--amber) inset;border-style:solid!important}
+.rcard.green{cursor:pointer}
+.rlab.plan{color:#9A6614;background:#FBF0DA}
+.rlab.tdg{color:var(--green-d);background:#EAF6E6}
+.pacts{display:flex;gap:6px;margin-top:8px}
+.pbtn{font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.03em;padding:4px 9px;border-radius:7px;border:1px solid var(--line-2);background:#fff;color:var(--navy);cursor:pointer}
+.pbtn:hover{border-color:var(--navy)}
+.pbtn.danger{color:#b0342f}.pbtn.danger:hover{border-color:#b0342f}
+.pbtn.go{background:var(--navy);border-color:var(--navy);color:#fff}
+.srcnote{font-size:10.5px;color:var(--mut);margin-top:6px}
+.srcnote b{color:#9A6614}.rcard .rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}.rcard .reldot{background:var(--navy)!important}.ghostslot{border:1.5px dashed var(--line-2)!important;background:#fafbfc;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;cursor:pointer;transition:border-color .15s,background .15s;min-height:104px}.ghostslot:hover{border-color:var(--navy)!important;background:#f2f7fd}.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}.ghostslot:hover .gp{background:var(--navy);color:#fff}.ghostslot .gt{font-family:'Outfit';font-weight:700;font-size:13px;color:var(--navy)}.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}.ghostslot.crit{border-color:var(--danger)!important;background:#fdf3f2}.ghostslot.crit .gp{background:#fbe7e6;color:var(--danger)}.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:#d9a441!important;background:#fdf9f0}.ghostslot.due .gp{background:#fbeed6;color:#9a6410}.ghostslot.due .gc{background:#fbeed6;color:#9a6410}.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 14px 12px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .modwrap{position:fixed;inset:0;background:rgba(16,30,48,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:200;overflow:auto}
 .modcard{background:#fff;border-radius:16px;max-width:680px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .modhd{display:flex;align-items:flex-start;gap:12px}.modhd>div:first-child{flex:1}
@@ -3832,32 +3890,69 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+rb.reliever.on_city:'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=(h.days!=null?h.days+'-day gap':'gap')+' before reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t='Handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t='Sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t='Reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t='Reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t='Slot open · signs off in '+(d!=null?d+' days':'TBA');fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
+async function planDelete(e,el){
+  e.stopPropagation();
+  var id=el.getAttribute('data-aid'),nm=el.getAttribute('data-nm')||'this projection';
+  if(!confirm('Remove '+nm+' from the board?\\n\\nThis deletes the projection. TDG cards are never touched.'))return;
+  el.disabled=true;
+  try{
+    var r=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json();
+    if(r&&r.ok){renderRotation();}else{el.disabled=false;alert('Could not remove: '+((r&&r.error)||'error'));}
+  }catch(_){el.disabled=false;alert('Network error');}
+}
+// ONE card renderer, two states (Miguel, 14 Sep 2026):
+//   green  = what the TDG Contract Counter says. Click to edit; never draggable; it stays green.
+//   yellow = what Rita planned (an open assignment). Draggable between ships, removable, and from
+//            phase 4 deployable. It leaves the board when the next Counter carries it.
 function rotCard(x){
-  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';var _chip='';if(x.current&&x.signOff){var _dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var _cc=_dd<=14?' crit':_dd<=30?' due':'';_chip='<span class="offchip'+_cc+'">OFF in '+_dd+'d</span>';}
-  var _cf2=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc2=function(ct,cf){return '<b style="color:'+_cf2(cf)+'">'+ct+'</b>';};var on=x.signOn?((x.on_city?_oc2(x.on_city,x.on_conf):(x.embark?x.embark:tba))+'<span style="white-space:nowrap"> · ON '+x.signOn+'</span>'):'';
-  var off=x.signOff?((x.off_city?_oc2(x.off_city,x.off_conf):(x.disembark?x.disembark:tba))+'<span style="white-space:nowrap"> · OFF '+x.signOff+'</span>'):'';
+  var plan=x.state==='yellow';
+  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
+  var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};
+  var oc=function(ct,cfl){return '<b style="color:'+cf(cfl)+'">'+ct+'</b>';};
+  var nm=(x.name||'').split(' ').filter(Boolean);
+  var ini=((nm[0]||'').charAt(0)+(nm[1]||'').charAt(0)).toUpperCase()||'?';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
+  var live=plan?!!x.aboard:!!x.current;
+  var chip='';
+  if(live&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip='<span class="offchip'+cc+'">'+(dd<0?('OFF was '+(-dd)+'d ago'):('OFF in '+dd+'d'))+'</span>';}
+  else if(plan&&x.signOn){var ds=Math.round((new Date(x.signOn+'T00:00:00Z').getTime()-Date.now())/86400000);if(ds>=0)chip='<span class=offchip>ON in '+ds+'d</span>';}
+  var rw=function(lbl,city,date){return '<div class=rrow><span class=rlbl>'+lbl+'</span><span class=rcity>'+city+'</span><span class=rdate>'+date+'</span></div>';};
+  var rows='';
+  if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?x.embark:tba),x.signOn);
+  if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?x.disembark:tba),x.signOff);
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
   if(x.air)tg+='<span class="rtag on">AIR</span>';
   if(x.hotel)tg+='<span class="rtag on">HOTEL</span>';
-  if(x.onConfirmed)tg+='<span class="rtag on">ON ✓</span>';
-  if(x.offConfirmed)tg+='<span class="rtag on">OFF ✓</span>';
+  if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';
+  if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
-  return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragStart(this,\\''+x.agency_id+'\\')" ondragend="dragEnd(this)" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
-    +_chip+'<div class=rnm>'+x.name+(x.rank?(' <span style="color:var(--mut);font-weight:600;font-size:11px">'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
-    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' · '+dur):'')+'</div>'
-    +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
-    +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
+  var lab=plan?('<span class="rlab plan">'+(x.aboard?'PLAN &middot; ABOARD':'PLAN')+'</span>'):'';
+  // Who set the dates on this card. Blank when nobody has touched the TDG values.
+  var note='';
+  if(plan)note='<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
+  else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
+  else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
+  var acts=(plan&&x.assignment_id)?('<div class=pacts><button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+String(x.name||'').replace(/"/g,'&quot;')+'" onclick="planDelete(event,this)">Remove</button></div>'):'';
+  var cls='rcard '+(plan?('plan'+(x.aboard?' aboard':'')):('green'+(x.current?' cur':'')));
+  var dragAttrs=plan?(' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"'):'';
+  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(plan?'Your projection - click to edit, drag to another ship':'TDG contract - click to edit')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
+    +chip
+    +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
+    +(rows?'<div class=rrot>'+rows+'</div>':'')
     +(tg?'<div class=rtags>'+tg+'</div>':'')
-    +'</div>';
+    +note+acts+'</div>';
 }
-function openRelief(){location.href='/relief';}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var dn='<i style="width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--navy)"></i> ';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" onclick="openRelief()" title="reliever"><div class=rnm>'+r.crew_name+' <span style="color:var(--navy);font-weight:700;font-size:10px;letter-spacing:.04em">RELIEVER</span></div><div class=rleg>'+dn+'Signs on'+(r.auto_on?' follows printer':'')+'</div><div class=rleg2>'+dn+'<b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" onclick="openRelief()" title="add reliever"><div style="font-weight:700">+ Add reliever</div><div style="font-size:11px;opacity:.85;margin-top:2px">empty slot'+(d!=null?' off in '+d+'d':'')+'</div></div>';}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,bg,fg;if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' - '+rb.reliever.on_city:'')+(rb.reliever.on_date?' - '+rb.reliever.on_date:'');bg='#e3f5e8';fg='#1f7a3d';}else if(rb.reliever&&h.kind==='gap'){t=(h.days!=null?h.days+'-day gap':'gap')+' between OFF and reliever ON';bg='#fbeed6';fg='#9a6410';}else if(rb.reliever&&h.kind==='port_mismatch'){t='Same day, port differs';bg='#fbeed6';fg='#9a6410';}else if(d!=null&&rb.urgency==='critical'){t='Reliever needed - printer signs off in '+d+' days';bg='#fbe7e6';fg='#b0342f';}else if(d!=null&&rb.urgency==='due'){t='Reliever due - printer signs off in '+d+' days';bg='#fbeed6';fg='#9a6410';}else{t='Slot open'+(d!=null?' - printer signs off in '+d+' days':'');bg='var(--surface-1)';fg='var(--mut)';}return '<div style="margin:0 14px 12px;padding:7px 12px;border-radius:8px;font-size:12.5px;background:'+bg+';color:'+fg+'">'+t+'</div>';}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d!=null)?('OFF IN '+d+'D'):'NO OFF DATE';var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" onclick="openRelief()" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" onclick="openRelief()" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+rb.reliever.on_city:'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=(h.days!=null?h.days+'-day gap':'gap')+' before reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t='Handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t='Sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t='Reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t='Reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t='Slot open · signs off in '+(d!=null?d+' days':'TBA');fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcClick(el){cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}function rotCard(x){var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var oc=function(ct,cfl){return '<b style="color:'+cf(cfl)+'">'+ct+'</b>';};var nm=(x.name||'').split(' ').filter(Boolean);var ini=((nm[0]||'').charAt(0)+(nm[1]||'').charAt(0)).toUpperCase()||'?';var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);var chip='';if(x.current&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip='<span class="offchip'+cc+'">'+(dd<0?('OFF was '+(-dd)+'d ago'):('OFF in '+dd+'d'))+'</span>';}var rw=function(lbl,city,date){return '<div class=rrow><span class=rlbl>'+lbl+'</span><span class=rcity>'+city+'</span><span class=rdate>'+date+'</span></div>';};var rows='';if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?x.embark:tba),x.signOn);if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?x.disembark:tba),x.signOff);var tg='';if(x.eccr)tg+='<span class="rtag on">ECCR</span>';if(x.air)tg+='<span class="rtag on">AIR</span>';if(x.hotel)tg+='<span class="rtag on">HOTEL</span>';if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit" onmousedown="dragMoved=false" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)" onclick="rcClick(this)">'+chip+'<div class=rhead><div class="ravatar'+(x.current?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' · '+dur):'')+'</div></div></div>'+(rows?'<div class=rrot>'+rows+'</div>':'')+(tg?'<div class=rtags>'+tg+'</div>':'')+'</div>';}function rotShip(sec){
+function rotShip(sec){
   var col=BRANDCOL[sec.brand]||'#1E6FD0',closed=!!ROT_CLOSED[sec.ship];
   var hist=sec.history||[];
-  var body=sec.crew.length?sec.crew.map(rotCard).join(''):'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
+  var projs=sec.projections||[];
+  var cards=sec.crew.map(rotCard).join('')+projs.map(rotCard).join('');
+  var body=cards||'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Also served this ship · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
-  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
+  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(projs.length?(' · '+projs.length+' planned'):'')+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+_rslot+'</div>'+_rbanner+histBlock+'</div>';
 }
