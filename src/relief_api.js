@@ -81,6 +81,9 @@ export async function reliefBoardData(env, today) {
     };
   });
 
+  // IN-FORCE assignments only. This query had no WHERE clause at all, so a reliever who signed off
+  // months ago was still a candidate for "who is relieving this printer" — buildReliefBoard takes the
+  // first reliever it finds for the ship.
   const rows = (await env.DB.prepare(
     `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.actual_sign_off,
             a.on_port_seed, a.off_port_seed, a.override_on_city, a.override_off_city,
@@ -91,7 +94,8 @@ export async function reliefBoardData(env, today) {
        FROM assignment a
        JOIN contract c ON c.id = a.contract_id
        JOIN crew cr    ON cr.id = c.crew_id
-       LEFT JOIN vessel v ON v.id = a.vessel_id`
+       LEFT JOIN vessel v ON v.id = a.vessel_id
+      WHERE a.actual_sign_off IS NULL`
   ).all()).results;
 
   const relievers = rows.map((r) => ({

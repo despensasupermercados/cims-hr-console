@@ -20,13 +20,20 @@ export function urgency(daysToOff, config) {
 }
 
 // §4.1 handover status: reliever `on` vs the printer it relieves `off`. Computed, never stored.
+//
+// A GAP and an OVERLAP are not the same thing and must never be reported as one. Math.abs() used to
+// erase the sign, so a reliever who signed on two days BEFORE the printer leaves (both aboard, cover
+// is fine) read exactly like a two-day hole with nobody aboard. Anthem showed "2-day gap before
+// reliever signs on" while the reliever had already been aboard for two days.
 export function handoverStatus(printer, reliever) {
   if (!reliever) return { kind: "none" };
   const sameDay = reliever.on_date && printer && printer.off_date && reliever.on_date === printer.off_date;
   if (sameDay && reliever.on_city === printer.off_city) return { kind: "clean" };
   if (sameDay) return { kind: "port_mismatch", printerCity: printer.off_city, relieverCity: reliever.on_city };
   const g = printer ? dayDiff(reliever.on_date, printer.off_date) : null;
-  return { kind: "gap", days: g == null ? null : Math.abs(g) };
+  if (g == null) return { kind: "gap", days: null };
+  // g < 0 -> the reliever boards BEFORE the printer leaves: overlap, the seat is covered throughout.
+  return g < 0 ? { kind: "overlap", days: -g } : { kind: "gap", days: g };
 }
 
 // §4.3 workflow status — derived from presence of each *_sent_at.
@@ -39,7 +46,7 @@ export function workflowStatus(a) {
 }
 
 // §4.4 cost-of-delay rank: critical → due → gap/mismatch → open → clean.
-const RANK = { critical: 0, due: 1, port_mismatch: 2, gap: 2, open: 3, clean: 4, none: 3 };
+const RANK = { critical: 0, due: 1, port_mismatch: 2, gap: 2, open: 3, clean: 4, overlap: 4, none: 3 };
 
 // Build the board. Inputs:
 //   assignments : enriched rows { id, role('printer'|'reliever'), crew_name, vessel_key('<brand>|<ship_short>'),
@@ -57,7 +64,16 @@ export function buildReliefBoard({ assignments = [], portDaysByShip = {}, config
   const rows = Object.keys(byShip).map((key) => {
     const list = byShip[key];
     const printerRaw = list.find((a) => a.role === "printer") || null;
-    const relieverRaw = list.find((a) => a.role === "reliever") || null;
+    // Pick the reliever who has NOT yet boarded, in date order. A reliever whose sign-on has passed
+    // is already aboard and already drawn as a crew card on this ship — advertising them again as
+    // "Signs on <past date>" is the same person twice on the same vessel. On 2026-09-14 fifteen
+    // in-force reliever assignments had a sign-on in the past, so this was every one of them.
+    // If the only reliever on file has boarded, keep them but mark it: the seat is covered, not open.
+    const relievers = list.filter((a) => a.role === "reliever")
+      .sort((a, b) => String(a.on_date || "9999").localeCompare(String(b.on_date || "9999")));
+    const pending = relievers.filter((a) => !a.on_date || a.on_date > today);
+    const relieverRaw = pending[0] || relievers[relievers.length - 1] || null;
+    const relieverAboard = !!(relieverRaw && relieverRaw.on_date && relieverRaw.on_date <= today);
     const pd = portDaysByShip[key] || [];
     const hasDep = pd.length > 0 ||
       (printerRaw && printerRaw.has_deployment) || (relieverRaw && relieverRaw.has_deployment) || false;
@@ -86,6 +102,7 @@ export function buildReliefBoard({ assignments = [], portDaysByShip = {}, config
       relieverInput = Object.assign({}, relieverRaw, { on_date: printer.off_date, auto_on: true });
     }
     const reliever = enrich(relieverInput);
+    if (reliever) reliever.aboard = relieverAboard;   // already signed on; the UI must not re-advertise them
     const handover = handoverStatus(printer, reliever);
     const daysToOff = printer ? printer.days_to_off : null;
     const urg = urgency(daysToOff, config);
