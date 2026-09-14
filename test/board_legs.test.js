@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBoardLegs, fetchCurrentAssignments, fetchRecentSignoffs, boardLegsFromDb, legWithRecordedSignoff, applyRecordedSignoffs } from "../src/ship_leg_source.js";
+import { mergeBoardLegs, fetchCurrentAssignments, fetchRecentSignoffs, boardLegsFromDb, legWithRecordedSignoff, applyRecordedSignoffs, fetchOpenAssignments, pendingProjections } from "../src/ship_leg_source.js";
 
 // The board's current set = ship_leg is_current=1 rows PLUS crew aboard per the relief board
 // (in-force `assignment` rows). Verified on prod 2026-09-04: 13 crew were aboard per Rita's
@@ -234,4 +234,34 @@ test("applyRecordedSignoffs: no map / no match -> legs returned unchanged", () =
   const legs = [{ sc: "SC-1", on: "2025-12-21", off: "2026-07-16", is_current: true }];
   assert.deepEqual(applyRecordedSignoffs(legs, null, "2026-09-07"), legs);
   assert.deepEqual(applyRecordedSignoffs(legs, {}, "2026-09-07"), legs);
+});
+
+/* ---- Rita's projections: which still need a card of their own ---- */
+
+test("pendingProjections drops the assignments already drawn on the board, keeps the rest", () => {
+  const open = [
+    { id: "a1", sc: "SC-1", ship: "Icon" },        // already drawn (aboard per Rita)
+    { id: "a2", sc: "SC-1", ship: "Oasis" },       // same crew, second ship: a jumper's next hull
+    { id: "a3", sc: "SC-2", ship: "Icon" },        // future contract
+    { id: "a4", sc: "SC-3", ship: null },          // no vessel: never invented
+    { id: "a5", sc: null, ship: "Icon" },          // no crew: never invented
+  ];
+  const out = pendingProjections(open, new Set(["SC-1|icon"]));
+  assert.deepEqual(out.map((x) => x.id), ["a2", "a3"]);
+  assert.deepEqual(pendingProjections(open, []).map((x) => x.id), ["a1", "a2", "a3"], "nothing drawn, everything pending");
+  assert.deepEqual(pendingProjections([], ["SC-1|icon"]), []);
+});
+
+test("pendingProjections matches a ship name however it is cased or spaced", () => {
+  const out = pendingProjections([{ id: "a1", sc: "SC-1", ship: "  ICON " }], new Set(["SC-1|icon"]));
+  assert.deepEqual(out, [], "a case or spacing difference must not resurrect a card that is already on screen");
+});
+
+test("fetchOpenAssignments has NO date filter — a projection that has not started is still a card", async () => {
+  const { env, calls } = stubEnv({ assignments: [] });
+  await fetchOpenAssignments(env);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /WHERE a\.actual_sign_off IS NULL/);
+  assert.doesNotMatch(calls[0].sql, /sign_on <=/, "a future contract is exactly the card Rita is working on");
+  assert.match(calls[0].sql, /LEFT JOIN crew_override o/, "her manual rank must win over the imported one");
 });

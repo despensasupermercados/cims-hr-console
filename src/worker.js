@@ -1616,11 +1616,15 @@ async function rotationSections(env) {
   // Yellow cards that are not already standing on the board: a projection whose contract has not
   // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
   // renderer — the board no longer synthesises a second reliever list of its own.
+  // Both sides of this comparison must speak the SAME ship name. promByShip is keyed by the
+  // canonical display name; an assignment carries whatever the vessel row says, so it is
+  // canonicalised first and both are lower-cased — pendingProjections keys on exactly that.
+  const canonAsg = (openAsg || []).map((a) => ({ ...a, ship: shipOf(a.ship) || a.ship }));
   const drawn = new Set();
-  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "yellow") drawn.add(c.agency_id + "|" + normShip(ship));
+  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "yellow") drawn.add(c.agency_id + "|" + String(ship).trim().toLowerCase());
   const projByShip = {};
-  for (const a of pendingProjections(openAsg, drawn)) {
-    const ship = shipOf(a.ship) || a.ship;
+  for (const a of pendingProjections(canonAsg, drawn)) {
+    const ship = a.ship;
     if (!ship) continue;
     const kk = normShip(ship);
     const pdl = (_pdBy[(brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship] || []);
