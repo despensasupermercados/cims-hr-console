@@ -76,7 +76,9 @@ test("populated table + matching version: no data writes at all (DDL guards only
   assert.equal(kc3Writes(writes).length, 0);
   assert.equal(pin(writes), undefined);
   assert.equal(log(writes), undefined);
-  for (const w of writes) assert.match(w.sql, /^CREATE TABLE IF NOT EXISTS/, "unexpected write: " + w.sql);
+  // DDL guards only: CREATE TABLE IF NOT EXISTS, and the additive ALTER that adds imported_at (the
+  // clock behind "the newer write wins", 14 Sep 2026). Still ZERO data writes, which is the rule.
+  for (const w of writes) assert.match(w.sql, /^CREATE TABLE IF NOT EXISTS|^ALTER TABLE \w+ ADD COLUMN/, "unexpected write: " + w.sql);
 });
 
 test("empty table: seeds every bundled row and pins the version", async () => {

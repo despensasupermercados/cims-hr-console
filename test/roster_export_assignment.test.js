@@ -38,7 +38,12 @@ CREATE TABLE crew_override (agency_id TEXT, first_name TEXT, last_name TEXT,
   rank_override TEXT, vessel_observed TEXT, status TEXT, email TEXT, retired INTEGER DEFAULT 0);
 CREATE TABLE ship_leg (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT, ship_short TEXT,
   vessel_id TEXT, sc TEXT, crew_id TEXT, ours INTEGER NOT NULL DEFAULT 1,
-  on_date TEXT, off_date TEXT, is_current INTEGER NOT NULL DEFAULT 0, source TEXT);
+  on_date TEXT, off_date TEXT, embark TEXT, disembark TEXT,
+  is_current INTEGER NOT NULL DEFAULT 0, source TEXT);
+CREATE TABLE keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER,
+  sign_on TEXT, proj_off TEXT, act_off TEXT, imported_at TEXT, PRIMARY KEY (sc, seq));
+CREATE TABLE contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT,
+  sign_off TEXT, ship TEXT, on_key TEXT, updated_at TEXT, PRIMARY KEY (sc, seq));
 CREATE TABLE vessel (id TEXT PRIMARY KEY, name TEXT NOT NULL, brand TEXT NOT NULL);
 CREATE TABLE contract (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, status TEXT);
 CREATE TABLE assignment (id TEXT PRIMARY KEY, contract_id TEXT NOT NULL, vessel_id TEXT,
@@ -63,9 +68,14 @@ const addCrew = (d, id, last, status = 'On board', vesselObserved = null) =>
   d.prepare(`INSERT INTO crew (id,ship_crew_id,agency_id,last_name,first_name,status,
               vessel_observed,redacted) VALUES (?,?,?,?,'X',?,?,0)`)
     .run(id, id.toUpperCase(), 'AG-' + id, last, status, vesselObserved);
+// A CURRENT leg = a Contract Counter row (2026-09-14; brand comes from the vessel table).
+// isCurrent=0 = a projected mirror in ship_leg (source 'assignment:…'), which the source must ignore.
 const addLeg = (d, crewId, ship, brand, isCurrent, on = YESTERYEAR) =>
-  d.prepare(`INSERT INTO ship_leg (brand,ship_short,crew_id,ours,on_date,is_current)
-             VALUES (?,?,?,1,?,?)`).run(brand, ship, crewId, on, isCurrent);
+  isCurrent
+    ? d.prepare(`INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off)
+                 VALUES (?,?,?,?,1,?,'2027-01-01',NULL)`).run('AG-' + crewId, crewId.toUpperCase(), ship, 'Onboard', on)
+    : d.prepare(`INSERT INTO ship_leg (brand,ship_short,sc,crew_id,ours,on_date,is_current,source)
+                 VALUES (?,?,?,?,1,?,0,'assignment:x')`).run(brand, ship, 'AG-' + crewId, crewId, on);
 const addAssignment = (d, crewId, aid, vesselId, name, signOn, actualOff = null) => {
   d.prepare('INSERT OR IGNORE INTO contract (id,crew_id,status) VALUES (?,?,\'Active\')')
     .run('k_' + crewId, crewId);
@@ -183,8 +193,30 @@ test('MUTATION GUARD: without the assignment join the eleven stay invisible', ()
   assert.equal(one(d, 'vicedo').ship, 'Journey', 'and the new one must fix it');
 });
 
-test('billing is untouched: the export neither writes nor promotes a leg', () => {
+test('the export neither writes nor promotes a leg', () => {
   assert.doesNotMatch(ROSTER_SQL, /\b(INSERT|UPDATE|DELETE)\b/i);
   assert.doesNotMatch(ROSTER_SQL, /is_current\s*=\s*0/);
   assert.match(ROSTER_SQL, /l\.is_current = 1/, 'the leg join stays pinned to the current set');
+});
+
+test('an orphan snapshot leg (crew with no Counter row) still places the crew — nothing vanishes at the cutover', () => {
+  const d = db();
+  addCrew(d, 'tba', 'Journey');
+  d.prepare(`INSERT INTO ship_leg (brand,ship_short,sc,crew_id,ours,on_date,is_current,source)
+             VALUES ('Azamara','Journey','AG-tba','tba',1,NULL,1,'keyman_roster;on=TBA(Rita)')`).run();
+  const r = one(d, 'tba');
+  assert.equal(r.ship, 'Journey');
+  assert.equal(r.brand, 'Azamara');
+});
+
+test('a Counter crew with several contracts: only the LATEST is the current leg', () => {
+  const d = db();
+  addCrew(d, 'multi', 'Multi');
+  addLeg(d, 'multi', 'Quest', 'Azamara', 1, '2024-01-01');
+  d.prepare(`INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off)
+             VALUES ('AG-multi','MULTI','Journey','Onboard',2,'2026-03-01','2026-09-30',NULL)`).run();
+  const rows = run(d).filter((r) => r.ship_crew_id === 'MULTI');
+  assert.equal(rows.length, 1, 'one row per crew even with two Counter contracts');
+  assert.equal(rows[0].ship, 'Journey');
+  assert.equal(rows[0].sign_on, '2026-03-01');
 });

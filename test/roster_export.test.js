@@ -11,15 +11,17 @@ const envWith = (rows, secret = 'shh') => ({
   DB: { prepare: () => ({ all: async () => ({ results: rows }) }) },
 });
 
-test('never reads keyman_contract3 — bonus layer, not movements (P3.13)', () => {
-  assert.doesNotMatch(ROSTER_SQL, /keyman_contract3/i);
-});
-
-test('reads ship_leg as the movement source, current + ours only', () => {
+// 2026-09-14: the movement source is the Contract Counter (the TDG file with the dates), through
+// the ONE definition in counter_legs.js. ship_leg survives inside it only as port memory and the
+// orphan arm. (Until then this file pinned the opposite: ship_leg as truth, kc3 never.)
+test('reads the Contract Counter as the movement source, through counter_legs.COUNTER_LEG_SELECT', () => {
   assert.match(ROSTER_SQL, /FROM crew c/);
-  assert.match(ROSTER_SQL, /JOIN ship_leg l/);
+  assert.match(ROSTER_SQL, /LEFT JOIN \(/);
+  assert.match(ROSTER_SQL, /FROM keyman_contract3 k/);
+  assert.match(ROSTER_SQL, /'ship_leg:orphan'/, 'the orphan arm keeps a snapshot leg with no Counter row');
   assert.match(ROSTER_SQL, /l\.is_current = 1/);
   assert.match(ROSTER_SQL, /l\.ours = 1/);
+  assert.doesNotMatch(ROSTER_SQL, /JOIN ship_leg l\b/, 'no direct join on the frozen table any more');
 });
 
 test('honours the three exclusion flags', () => {
@@ -27,7 +29,7 @@ test('honours the three exclusion flags', () => {
   assert.match(ROSTER_SQL, /COALESCE\(o\.retired,0\) = 0/); // retired overrides must not win
 });
 
-test('uses only columns that exist on ship_leg', () => {
+test('uses only columns that exist on the leg source', () => {
   // off_actual does not exist. An earlier draft referenced it and would have
   // thrown at runtime on every call.
   assert.doesNotMatch(ROSTER_SQL, /off_actual/);

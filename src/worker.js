@@ -15,7 +15,7 @@ import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
@@ -24,6 +24,10 @@ import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js"
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
+import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
+import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
+import { removeReliefAssignment, saveReliefAssignment } from "./relief_api.js";
+import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -43,6 +47,7 @@ import { installTgUpdate } from "./tg_update.js";
 import { apiRosterExport } from './roster_export.js';
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
 const _tgUpdate = installTgUpdate({ json, htmlResponse, logActivity, sendViaMailer, shipOf: (v) => canonShipWith(v, SHIP_KEYS), brandFor: clientOf });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
@@ -208,6 +213,9 @@ export default {
         // human does. Inside the boundary and behind the session gate (§11). Inert until
         // TG_NOTIFY is set: /api/tg/send refuses rather than guessing a recipient.
         if (session) { const tg = await _tgUpdate(p, request, env, url, session); if (tg) return tg; }
+        // Deploy: the CTA on a projection. Sends Joy the seafarer, takes the card off the board and
+        // logs it so it can be put back. Inside the boundary and behind the session gate (§11).
+        if (session) { const kd = await _kmDeploy(p, request, env, url, session); if (kd) return kd; }
         if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
@@ -513,7 +521,7 @@ async function maybeExportBackup(env, event) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
     const prev = await env.DB.prepare("SELECT v FROM data_meta WHERE k='export_last_date'").first();
     if (prev && prev.v === day) return;
-    const rows = (await env.DB.prepare("SELECT l.ship_short AS ship, l.brand, l.sc, l.embark, l.on_date, l.off_date, l.disembark, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew FROM ship_leg l LEFT JOIN crew c ON c.id = l.crew_id WHERE l.is_current = 1 AND l.ours = 1 ORDER BY l.brand, l.ship_short").all()).results;
+    const rows = (await fetchCurrentCounterLegs(env)).map((l) => ({ ship: l.ship_short, brand: l.brand, sc: l.sc, embark: l.embark, on_date: l.on_date, off_date: l.off_date, disembark: l.disembark, crew: l.crew_name }));
     const esc = (x) => { x = String(x == null ? "" : x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
     const head = ["Ship","Brand","Keyman","Agency ID","Embark port","Sign-on","Sign-off","Debark port","Reliever","Reliever embark","Reliever sign-off","Reliever debark"];
     const lines = [head.join(",")];
@@ -851,6 +859,10 @@ async function ensureKeymanImpl(env) {
   // PRIMARY KEY (sc,seq) + INSERT OR REPLACE = race-proof idempotent seeding. Earlier DELETE+INSERT
   // reseeds raced under concurrent requests and STACKED rows (3x duplication); this can't.
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq))").run();
+  // When this row arrived from a Contract Counter. The clock behind "the newer write wins" between
+  // Rita's edit and the file (Miguel, 14 Sep). NULL on every row imported before this column existed,
+  // which counter_sync.resolveLeg reads as "older than any edit" — i.e. today's behaviour exactly.
+  try { await env.DB.prepare("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT").run(); } catch {}
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
   const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()).n;
   const ver = await env.DB.prepare("SELECT v FROM data_meta WHERE k='keyman_version'").first();
@@ -916,46 +928,89 @@ async function apiCrewImport(request, env, session) {
 // blocks, bridge crew to SC by name, and (on apply) refresh keyman_contract3 for the MATCHED crew only
 // (untouched crew keep their rows). This feeds the full-contract count + rank; never a payout input.
 async function apiKeymanImport(request, env, session) {
-  await ensureKeyman(env);
+  await Promise.all([ensureKeyman(env), ensureContractEdit(env)]);
   const b = await request.json().catch(() => ({}));
   const { crew: parsed, unparsed: unparsedDates } = parseContractCounterFull(b.rows || []);
   if (!parsed.length) return json({ error: "no_rows" }, 400);
-  const roster = (await env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all()).results;
+  // One wave (§12): the roster used for bridging, the per-crew row counts, the crew's CURRENT legs, the
+  // open projections (Rita's yellow cards) and her edits — everything the diff needs.
+  const [rosterRes, cntRes, curRes, yellowRes, editRes] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 GROUP BY sc").all(),
+    env.DB.prepare("SELECT sc, ship, sign_on, proj_off, act_off, seq FROM keyman_contract3 WHERE sign_on IS NOT NULL").all(),
+    env.DB.prepare(
+      `SELECT a.id, a.sign_on, a.planned_sign_off, COALESCE(v.name, a.vessel_name) AS ship,
+              c.agency_id AS sc, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
+         FROM assignment a
+         JOIN contract k ON k.id = a.contract_id
+         JOIN crew     c ON c.id = k.crew_id
+         LEFT JOIN vessel v ON v.id = a.vessel_id
+        WHERE a.actual_sign_off IS NULL`).all(),
+    env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, updated_at, on_key FROM contract_edit").all(),
+  ]);
+  const roster = rosterRes.results;
   const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
   // Per-crew row counts today: the total for the preview, and the per-crew shrink flag. A Counter
   // with FEWER contract blocks than the console holds (the 6 Jul 2026 current-roster upload) replaces
   // a crew's history with the file's rows — by design, but never again unannounced (CLAUDE.md §6).
-  const cnt = (await env.DB.prepare("SELECT sc, COUNT(*) n FROM keyman_contract3 GROUP BY sc").all()).results || [];
   const currentCounts = {};
   let currentRows = 0;
-  for (const r of cnt) { currentCounts[r.sc] = r.n; currentRows += r.n; }
+  for (const r of (cntRes.results || [])) { currentCounts[r.sc] = r.n; currentRows += r.n; }
   const nameOf = {};
   for (const c of roster) nameOf[c.agency_id] = [c.last_name, c.first_name].filter(Boolean).join(", ");
   const shrink = shrinkReport(rows, currentCounts).map(x => ({ ...x, name: nameOf[x.sc] || null }));
+  // What this file would do to the board Rita has been working on (counter_sync.diffCounter):
+  // the yellow cards it absorbs, the ones it contradicts, her edits it would overwrite.
+  const diff = diffCounter({
+    incoming: rows, current: curRes.results || [], yellows: yellowRes.results || [], edits: editRes.results || [],
+  });
+  const named = (arr) => arr.map(x => ({ ...x, name: x.name || x.crew_name || nameOf[x.sc] || null }));
+  const report = {
+    appears: named(diff.appears), leaves: named(diff.leaves), moved: named(diff.moved),
+    absorbs: named(diff.absorbs), conflicts: named(diff.conflicts),
+    overrides: named(diff.overrides), orphans: named(diff.orphans),
+  };
   if (b.dryRun) {
     return json({
       dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
-      contracts: rows.length, currentRows, unparsedDates, shrink,
+      contracts: rows.length, currentRows, unparsedDates, shrink, ...report,
       sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
     });
   }
   // Apply: replace contracts for matched crew only. A crew's DELETE and INSERTs travel in the SAME
   // batch (one D1 transaction), so a failure part-way leaves every crew either untouched or fully
   // refreshed — never emptied. (Before: one batch of all DELETEs, then INSERTs in chunks of 80.)
+  const importedAt = new Date().toISOString();
   const del = env.DB.prepare("DELETE FROM keyman_contract3 WHERE sc=?");
-  const ins = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off) VALUES (?,?,?,?,?,?,?,?)");
+  const ins = env.DB.prepare("INSERT OR REPLACE INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,act_off,imported_at) VALUES (?,?,?,?,?,?,?,?,?)");
   for (const batch of replacePlan(rows, matched, 80)) {
     await env.DB.batch(batch.map(st => st.op === "delete"
       ? del.bind(st.sc)
-      : ins.bind(st.row.sc, st.row.km, st.row.ship, st.row.st, st.row.seq, st.row.sign_on, st.row.proj_off, st.row.act_off)));
+      : ins.bind(st.row.sc, st.row.km, st.row.ship, st.row.st, st.row.seq, st.row.sign_on, st.row.proj_off, st.row.act_off, importedAt)));
+  }
+  // THE LOOP CLOSES (Miguel, 14 Sep 2026): a projection the file now carries has done its job, so the
+  // yellow card retires by itself. Only cards the file AGREES with — same crew, same ship, sign-on
+  // within a week. A card the file contradicts is never touched; it is reported for Rita to settle
+  // (CLAUDE.md §6: flag, never silently fix). Opt out with absorb:false.
+  const absorbed = [];
+  if (b.absorb !== false) {
+    for (const a of report.absorbs) {
+      const r = await removeReliefAssignment(env, a.id).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+      absorbed.push({ id: a.id, sc: a.sc, name: a.name || null, ok: !!r.ok, error: r.ok ? null : r.error });
+    }
   }
   // Re-pin the version. Since the reseed guard (ensureKeymanImpl) a populated table is never
   // overwritten by the bundled constant regardless of this pin; it only keeps the guard from logging
   // a spurious "reseed refused" row after this import.
   await env.DB.prepare("INSERT INTO data_meta (k,v) VALUES ('keyman_version',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(KEYMAN_VERSION).run();
+  const okAbsorbed = absorbed.filter(x => x.ok).length;
   await logData(env, "keyman_contract (Contract Counter import, by " + ((session && session.email) || "?") + ")", rows.length,
-    "refreshed " + matched.length + " crew" + (shrink.length ? ", " + shrink.length + " with fewer contracts than before" : ""));
-  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length, shrank: shrink.length });
+    "refreshed " + matched.length + " crew"
+    + (shrink.length ? ", " + shrink.length + " with fewer contracts than before" : "")
+    + (okAbsorbed ? ", " + okAbsorbed + " projection" + (okAbsorbed === 1 ? "" : "s") + " absorbed" : "")
+    + (report.conflicts.length ? ", " + report.conflicts.length + " conflicting projection" + (report.conflicts.length === 1 ? "" : "s") + " left for review" : ""));
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length,
+    shrank: shrink.length, absorbed, conflicts: report.conflicts, overrides: report.overrides.length });
 }
 
 async function apiDataStatus(env) {
@@ -1005,7 +1060,7 @@ function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, shi
 // sc -> number of FULL contracts (legs grouped by the <=3-week transfer rule, each reaching the line
 // duration minimum). This — not the raw leg count — drives the rank tier and the "Contracts" number.
 async function fullContractMap(env) {
-  const rows = (await env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all()).results;
+  const rows = (await env.DB.prepare(KC3_LEGS_SQL).all()).results; // every Counter contract (2026-09-14: was the frozen snapshot, one leg per crew)
   const byCrew = {};
   for (const r of rows) (byCrew[r.sc] = byCrew[r.sc] || []).push(legShape(r));
   const map = {};
@@ -1112,7 +1167,7 @@ async function apiDashboard(env) {
   const curY = +today.slice(0, 4), curM = +today.slice(5, 7);
   const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
   const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy, HIST] = await Promise.all([
-    env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(off_date)-julianday(on_date))) AS INTEGER) days FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL AND off_date IS NOT NULL AND off_date>on_date").first(),
+    env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").first(),
     env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew").bind(in90).first(),
     env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all(),
@@ -1222,7 +1277,7 @@ async function apiCrew(env, url) {
   const [baseRes, ovsRes, legsRes, nlRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
-    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+    env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
     boardLegs(env), // the live schedule — same source as the rotation board and dashboard (§11)
   ]);
@@ -1406,14 +1461,17 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes] = await Promise.all([
     boardLegs(env),
-    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired FROM crew_override").all(),
+    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
-    env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf FROM contract_edit").all(),
+    env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
     env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
-    env.DB.prepare("SELECT sc, ship_short AS ship, on_date AS sign_on, off_date AS proj_off, NULL AS act_off, 1 AS seq FROM ship_leg WHERE ours=1 AND is_current=1 AND on_date IS NOT NULL").all(),
+    env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
+    fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
+    env.DB.prepare("SELECT name, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
   ]);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
@@ -1430,16 +1488,28 @@ async function rotationSections(env) {
   const rmap = {}; for (const r of rd) rmap[r.agency_id] = r;
   const eds = edsRes.results;const _vpd=vpdRes.results;const _pdBy=groupPortDays(_vpd);
   const emap = {}; for (const e of eds) emap[e.sc + "|" + e.seq] = e;
+  // Rita's edit is matched to the leg by SIGN-ON (position is the fallback), and the newer of the two
+  // writes wins — Miguel, 14 Sep 2026. Before this the edit won forever, so a fresher TDG date could
+  // never reach the board. The card carries source/sourceAt so it can name who set the dates.
+  const editIdx = indexEdits(eds);
   const legs = legsRes.results;
   const byCrew = {};
   for (const r of legs) (byCrew[r.sc] = byCrew[r.sc] || []).push(r);
   for (const sc in byCrew) byCrew[sc].sort((a, b) => (a.seq || 0) - (b.seq || 0));
   // Effective leg = base Keyman leg with any saved per-contract edit applied.
-  const eff = (leg) => { const o = emap[leg.sc + "|" + leg.seq] || {}; return {
-    seq: leg.seq, ship: o.ship || leg.ship,
-    signOn: o.sign_on || leg.sign_on, signOff: o.sign_off || leg.act_off || leg.proj_off || null,
-    offConfirmed: o.off_conf != null ? !!o.off_conf : !!leg.act_off, onConfirmed: !!o.on_conf,
-    embark: o.embark || null, disembark: o.disembark || null, eccr: !!o.eccr, air: !!o.air, hotel: !!o.hotel }; };
+  const eff = (leg) => {
+    // editFor only: it already falls back to position for edits written before on_key existed. An
+    // extra emap[sc|seq] fallback here would hand a renumbered leg an edit that KNOWS it belongs to
+    // another contract — the exact misattachment on_key exists to prevent.
+    const o = editFor(leg, editIdx) || {};
+    const r = resolveLeg(leg, o.sc ? o : null);
+    return {
+      seq: leg.seq, hasEdit: !!o.sc, ship: r.ship || leg.ship,
+      onKey: leg.sign_on || null,   // the COUNTER's sign-on: the key an edit is filed under
+      signOn: r.signOn, signOff: r.signOff,
+      dateSource: r.source, dateSourceAt: r.sourceAt, overridden: r.overridden,
+      offConfirmed: o.off_conf != null ? !!o.off_conf : !!leg.act_off, onConfirmed: !!o.on_conf,
+      embark: o.embark || null, disembark: o.disembark || null, eccr: !!o.eccr, air: !!o.air, hotel: !!o.hotel }; };
   // Latest effective Keyman leg per (ship, crew) — used to ENRICH registry cards (dates) + as history.
   const byShip = {};
   for (const sc in byCrew) {
@@ -1485,6 +1555,35 @@ async function rotationSections(env) {
     if (isCur) { if (!e || !e.cur || off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: true }; }
     else if (isPast) { if (!e) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; else if (!e.cur && off > e.off) schedEff[h.sc] = { ship: h.ship, on: h.on, off, cur: false }; }
   }
+  // WHICH SOURCE PUT THIS SEAFARER ON THIS SHIP TODAY (Miguel, 14 Sep 2026: green is what TDG's
+  // Contract Counter says, yellow is what Rita planned). A crew whose current leg came from the
+  // relief board is aboard per Rita and not yet in a Counter: their card is YELLOW until the next
+  // upload carries them, which is the loop closing. Anything else is green.
+  // Document standing per seafarer, for the card. crew_override wins field by field, the same
+  // precedence every other read uses (AdvancedQuery COALESCEs onto the base row).
+  const DOCF = ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"];
+  const docsBy = {};
+  for (const c of crewRows) {
+    const o = ovMap[c.agency_id] || {};
+    const merged = {};
+    for (const f of DOCF) merged[f] = (o[f] != null && o[f] !== "") ? o[f] : c[f];
+    docsBy[c.agency_id] = docBadge(merged, today);
+  }
+  // The ship's Junior PS rule, seeded in `vessel` since July and read here for the first time.
+  // WARN only (Miguel, 14 Sep 2026: "Warn on drop now; block once Rita re-confirms the four hulls").
+  const jrRule = {};
+  for (const v of ((vesRes && vesRes.results) || [])) if (v && v.name) jrRule[normShip(v.name)] = v.jr_ps_rule || null;
+  const isJr = (rank) => /junior|jr/i.test(String(rank || ""));
+  const cardSrc = {}, cardAsg = {};
+  for (const h of HIST) {
+    if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue;
+    if (h.on > today || (h.off || "9999") < today) continue;
+    const k2 = normShip(shipOf(h.ship) || h.ship || "");
+    cardSrc[h.sc + "|" + k2] = h.source === "assignment" ? "yellow" : "green";
+    if (h.assignment_id) cardAsg[h.sc + "|" + k2] = h.assignment_id;
+  }
+  // The board's own key for a ship, matching window.reliefKey in the page: the relief editor opens on it.
+  const vkOf = (ship) => (brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship;
   const promByShip = {}, shoreside = [], pool = [];
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
@@ -1505,7 +1604,7 @@ async function rotationSections(env) {
       }
     }
     if (!ship) { pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].eccr:base.eccr), air: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].air:base.air), hotel: (emap[c.agency_id+"|"+(enr.seq||1)]?!!emap[c.agency_id+"|"+(enr.seq||1)].hotel:base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1515,6 +1614,61 @@ async function rotationSections(env) {
   for (const s of Object.keys(promByShip)) shipNames[normShip(s)] = s;
   for (const s of Object.keys(byShip)) { const ks = normShip(s); if (!shipNames[ks] && validShip.has(ks)) shipNames[ks] = s; } // only REAL vessels anchor a section (a cruise-line name like 'Azamara' from a mis-recorded leg must not create a phantom ship)
   for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histDisp[k];
+  for (const a of (openAsg || [])) { const cs = shipOf(a.ship) || a.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // a ship with only a projection still gets a section
+  for (const d of ((depRes && depRes.results) || [])) { const cs = shipOf(d.ship) || d.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and so does one with only a sent line
+  // Yellow cards that are not already standing on the board: a projection whose contract has not
+  // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
+  // renderer — the board no longer synthesises a second reliever list of its own.
+  // Both sides of this comparison must speak the SAME ship name. promByShip is keyed by the
+  // canonical display name; an assignment carries whatever the vessel row says, so it is
+  // canonicalised first and both are lower-cased — pendingProjections keys on exactly that.
+  const canonAsg = (openAsg || []).map((a) => ({ ...a, ship: shipOf(a.ship) || a.ship }));
+  const drawn = new Set();
+  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "yellow") drawn.add(c.agency_id + "|" + String(ship).trim().toLowerCase());
+  const projByShip = {};
+  for (const a of pendingProjections(canonAsg, drawn)) {
+    const ship = a.ship;
+    if (!ship) continue;
+    const kk = normShip(ship);
+    const pdl = (_pdBy[(brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship] || []);
+    const onC = resolveCity({ date: a.sign_on, seed: a.on_port_seed || shipHome[kk], override: a.override_on_city, portDays: pdl });
+    const offC = resolveCity({ date: a.planned_sign_off, seed: a.off_port_seed || shipHome[kk], override: a.override_off_city, portDays: pdl });
+    const rm2 = rmap[a.sc] || {};
+    (projByShip[ship] = projByShip[ship] || []).push({
+      agency_id: a.sc, assignment_id: a.id, name: a.crew_name || a.sc, rank: a.rank || null,
+      ship, vessel_key: vkOf(ship), state: "yellow", role: a.role || "reliever",
+      status: (cmap[a.sc] && cmap[a.sc].status) || "Unknown",
+      contracts: contracts[a.sc] || 0,
+      signOn: a.sign_on || null, signOff: a.planned_sign_off || null,
+      aboard: !!(a.sign_on && a.sign_on <= today),
+      embark: a.on_port_seed || null, disembark: a.off_port_seed || null,
+      on_city: onC.city, on_conf: onC.conf, off_city: offC.city, off_conf: offC.conf,
+      eccr: !!a.eccr, air: !!a.air, hotel: !!a.hotel,
+      onConfirmed: !!a.on_date_conf, offConfirmed: !!a.off_date_conf,
+      instructionsSent: a.instructions_sent_at || null, signoffLinkSent: a.signoff_link_sent_at || null,
+      docs: docsBy[a.sc] || null,
+      jrWarn: (isJr(a.rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
+      hasNote: !!(rm2.note && String(rm2.note).trim()),
+    });
+  }
+  for (const ship in projByShip) projByShip[ship].sort((a, b) => String(a.signOn || "9999") < String(b.signOn || "9999") ? -1 : 1);
+  // Deployed and not yet back: one line per ship saying it was sent to TDG. THE LOOP CLOSES on its
+  // own — the moment a Contract Counter carries that seafarer they are a green card again and the
+  // line goes (Miguel, 14 Sep 2026). Until then Restore can put the projection back in one click.
+  const greenOn = new Set();
+  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "green") greenOn.add(c.agency_id + "|" + normShip(ship));
+  const depByShip = {};
+  for (const d of ((depRes && depRes.results) || [])) {
+    const cs = shipOf(d.ship) || d.ship;
+    if (!cs) continue;
+    if (greenOn.has(d.sc + "|" + normShip(cs))) continue;   // back from TDG: the loop closed
+    (depByShip[cs] = depByShip[cs] || []).push({
+      id: d.id, agency_id: d.sc, name: d.crew_name || d.sc, ship: cs,
+      signOn: d.sign_on || null, signOff: d.sign_off || null,
+      sentAt: (d.sent_at || "").slice(0, 10), sentBy: d.sent_by || null, recipient: d.recipient || null,
+      aboard: !!(d.sign_on && d.sign_on <= today),
+    });
+  }
   const sections = Object.values(shipNames).map(ship => {
     const k = normShip(ship);
     const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -1530,7 +1684,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, crew, history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   const counts = {};
@@ -1625,6 +1779,19 @@ async function ensureReadyImpl(env) {
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, PRIMARY KEY (sc, seq))").run();
+  // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
+  // contract POSITION, which only survives while the file keeps its shape: every live edit sits on
+  // seq 1 because the 6 Jul file carried one block per crew, so a full multi-block Counter would
+  // renumber them and hand Rita's recorded sign-offs to a 2024 contract (counter_sync.editFor).
+  // The backfill runs inside the ALTER's try: exactly once, on the isolate that adds the column.
+  try { await env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run(); } catch {}
+  // The backfill is its own statement, idempotent (WHERE on_key IS NULL), and runs once per isolate
+  // like every other ensure — NOT inside the ALTER's try: on an isolate where keyman_contract3 did
+  // not exist yet the UPDATE would throw, the ALTER would already have succeeded, and no isolate
+  // would ever retry. A no-op UPDATE on a warm table costs nothing.
+  try {
+    await env.DB.prepare("UPDATE contract_edit SET on_key = (SELECT k.sign_on FROM keyman_contract3 k WHERE k.sc = contract_edit.sc AND k.seq = contract_edit.seq) WHERE on_key IS NULL").run();
+  } catch {}
 }
 // Per-contract edit (manual-wins): embark/disembark city, sign-on/off, ship, + confirmed flags.
 async function apiContractEdit(request, env, session) {
@@ -1632,8 +1799,14 @@ async function apiContractEdit(request, env, session) {
   if (!b.sc || b.seq == null) return json({ error: "no_key" }, 400);
   await ensureContractEdit(env);
   const bi = (v) => (v ? 1 : 0);
-  await env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at")
-    .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), new Date().toISOString()).run();
+  // on_key: the Counter sign-on this edit belongs to. Sent by the card; else read from the leg.
+  let onKey = b.on_key || null;
+  if (!onKey) {
+    const leg = await env.DB.prepare("SELECT sign_on FROM keyman_contract3 WHERE sc=? AND seq=?").bind(b.sc, +b.seq).first();
+    onKey = (leg && leg.sign_on) || null;
+  }
+  await env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at,on_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at,on_key=COALESCE(excluded.on_key,contract_edit.on_key)")
+    .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), new Date().toISOString(), onKey).run();
   await logActivity(env, session && session.email, "contract_edit", b.sc + " #" + b.seq);
   return json({ ok: true });
 }
@@ -2386,7 +2559,35 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .rtag.rtoggle{cursor:pointer;user-select:none}
 .poolwrap{background:#fff;border:1px dashed var(--line-2);border-radius:13px;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:8px;min-height:48px}
 .rcard.cur{box-shadow:0 0 0 2px var(--green) inset}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset}.ghostslot{border-style:dashed!important;display:flex;flex-direction:column;justify-content:center;color:var(--mut);cursor:pointer}.ghostslot.crit{border-color:var(--danger)!important;background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:var(--amber)!important;background:#fbeed6;color:#9a6410}
-.rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}.rcard .rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}.rcard .reldot{background:var(--navy)!important}.ghostslot{border:1.5px dashed var(--line-2)!important;background:#fafbfc;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;cursor:pointer;transition:border-color .15s,background .15s;min-height:104px}.ghostslot:hover{border-color:var(--navy)!important;background:#f2f7fd}.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}.ghostslot:hover .gp{background:var(--navy);color:#fff}.ghostslot .gt{font-family:'Outfit';font-weight:700;font-size:13px;color:var(--navy)}.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}.ghostslot.crit{border-color:var(--danger)!important;background:#fdf3f2}.ghostslot.crit .gp{background:#fbe7e6;color:var(--danger)}.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:#d9a441!important;background:#fdf9f0}.ghostslot.due .gp{background:#fbeed6;color:#9a6410}.ghostslot.due .gc{background:#fbeed6;color:#9a6410}.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 14px 12px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
+.rcard.plan{border:1.5px dashed var(--amber)!important;background:#fffdf7;box-shadow:none}
+.rcard.plan.aboard{box-shadow:0 0 0 2px var(--amber) inset;border-style:solid!important}
+.rcard.green{cursor:pointer}
+.rlab.plan{color:#9A6614;background:#FBF0DA}
+.rlab.tdg{color:var(--green-d);background:#EAF6E6}
+.pacts{display:flex;gap:6px;margin-top:8px}
+.pbtn{font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.03em;padding:4px 9px;border-radius:7px;border:1px solid var(--line-2);background:#fff;color:var(--navy);cursor:pointer}
+.pbtn:hover{border-color:var(--navy)}
+.pbtn.danger{color:#b0342f}.pbtn.danger:hover{border-color:#b0342f}
+.pbtn.go{background:var(--navy);border-color:var(--navy);color:#fff}
+.srcnote{font-size:10.5px;color:var(--mut);margin-top:6px}
+.srcnote b{color:#9A6614}
+.rtag.bad{background:#FBE7E6;border-color:#f0cfcc;color:#B0342F}
+.rtag.warn{background:#FBF0DA;border-color:#eddcb6;color:#9A6410}
+.jrnote{margin-top:6px;font-size:10.5px;color:#9A6410;background:#FBF0DA;border-radius:6px;padding:4px 8px}
+.sentrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 14px 10px;padding:8px 12px;border-radius:9px;background:#F3F6FA;border-left:3px solid var(--navy);font-size:12.5px;color:var(--body)}
+.sentrow b{color:var(--ink)}
+.sentrow .sentmeta{color:var(--mut);font-size:11.5px}
+.dpv{position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.5);display:flex;align-items:center;justify-content:center;padding:18px}
+.dpvbox{background:var(--surface);border-radius:14px;max-width:760px;width:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 50px rgba(10,20,35,.3)}
+.dpvhd{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.dpvhd .t{font-weight:800;color:var(--navy);font-size:15px;flex:1}
+.dpvbody{overflow:auto;padding:0;background:#EEF2F7}
+.dpvbody iframe{width:100%;border:0;display:block;background:#EEF2F7;min-height:420px}
+.dpvft{padding:12px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dpvft .to{font-size:12px;color:var(--mut);flex:1;min-width:180px}
+.dpvwarn{margin:0;padding:10px 18px;background:#FBE7E6;color:#8E2A22;font-size:12.5px;border-bottom:1px solid #f0cfcc}
+.dpvwarn b{color:#B0342F}.rcard .rlab{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.05em;background:#eef3fb;padding:1px 6px;border-radius:5px;vertical-align:middle}.rcard .reldot{background:var(--navy)!important}.ghostslot{border:1.5px dashed var(--line-2)!important;background:#fafbfc;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:5px;cursor:pointer;transition:border-color .15s,background .15s;min-height:104px}.ghostslot:hover{border-color:var(--navy)!important;background:#f2f7fd}.ghostslot .gp{width:30px;height:30px;border-radius:50%;background:#eef2f7;color:var(--navy);font-size:19px;display:flex;align-items:center;justify-content:center;line-height:1}.ghostslot:hover .gp{background:var(--navy);color:#fff}.ghostslot .gt{font-family:'Outfit';font-weight:700;font-size:13px;color:var(--navy)}.ghostslot .gc{font-size:10px;font-weight:800;letter-spacing:.03em;padding:2px 9px;border-radius:20px;background:#eef2f7;color:var(--mut)}.ghostslot.crit{border-color:var(--danger)!important;background:#fdf3f2}.ghostslot.crit .gp{background:#fbe7e6;color:var(--danger)}.ghostslot.crit .gc{background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:#d9a441!important;background:#fdf9f0}.ghostslot.due .gp{background:#fbeed6;color:#9a6410}.ghostslot.due .gc{background:#fbeed6;color:#9a6410}.rbanner{display:inline-flex;align-items:center;gap:7px;margin:2px 14px 12px;padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}.rbanner .bdot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .modwrap{position:fixed;inset:0;background:rgba(16,30,48,.55);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:200;overflow:auto}
 .modcard{background:#fff;border-radius:16px;max-width:680px;width:100%;padding:20px 22px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
 .modhd{display:flex;align-items:flex-start;gap:12px}.modhd>div:first-child{flex:1}
@@ -3226,6 +3427,32 @@ async function previewKeyman(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  // What this file does to the board Rita has been working on. Absorbed projections are the loop
+  // closing (Miguel, 14 Sep); conflicts and overrides are hers to settle before Apply.
+  var kdRow=function(label,items,render){
+    if(!items||!items.length)return '';
+    return '<div style="margin-top:6px"><b style="color:var(--navy)">'+label+' &middot; '+items.length+'</b><br>'
+      +items.slice(0,12).map(render).join('<br>')+(items.length>12?('<br>+'+(items.length-12)+' more'):'')+'</div>';
+  };
+  var nmOf=function(x){return impEsc(x.name||x.crew_name||x.sc);};
+  var dt=function(d){return d?impEsc(d):'TBA';};
+  var boardBits='';
+  boardBits+=kdRow('New on the board',r.appears,function(x){return nmOf(x)+' &rarr; '+impEsc(x.ship||'?')+' '+dt(x.sign_on);});
+  boardBits+=kdRow('Dates or ship change',r.moved,function(x){return nmOf(x)+': '+impEsc(x.from.ship||'?')+' '+dt(x.from.sign_on)+'&ndash;'+dt(x.from.sign_off)+' &rarr; '+impEsc(x.to.ship||'?')+' '+dt(x.to.sign_on)+'&ndash;'+dt(x.to.sign_off);});
+  boardBits+=kdRow('Not in this file (rows kept)',r.leaves,function(x){return nmOf(x)+' &middot; '+impEsc(x.ship||'?');});
+  if(boardBits)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">What changes on the board</b>'+boardBits+'</div>';
+  if(r.absorbs&&r.absorbs.length)
+    h+='<div class=hint style="margin-top:8px;border-left:3px solid #1f7a3d"><b style="color:#1f7a3d">'+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' the file now carries</b> &mdash; the loop closes: '+(r.absorbs.length===1?'this card is':'these cards are')+' removed on Apply and the seafarer comes back as a TDG card.<br>'
+      +r.absorbs.slice(0,12).map(function(x){return nmOf(x)+' &middot; '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &rarr; TDG '+dt(x.counter.sign_on)+(x.gap_days!=null?(' ('+(x.gap_days>0?'+':'')+x.gap_days+'d)'):'');}).join('<br>')+'</div>';
+  if(r.conflicts&&r.conflicts.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.conflicts.length+' projection'+(r.conflicts.length===1?'':'s')+' the file contradicts</b> &mdash; left on the board for you to settle; Apply changes nothing about '+(r.conflicts.length===1?'it':'them')+'.<br>'
+      +r.conflicts.slice(0,12).map(function(x){return nmOf(x)+' &middot; you have '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &middot; TDG says '+impEsc(x.counter.ship||'?')+' '+dt(x.counter.sign_on)+' ('+(x.why==='ship'?'different ship':'dates apart')+')';}).join('<br>')+'</div>';
+  if(r.overrides&&r.overrides.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.overrides.length+' of your edit'+(r.overrides.length===1?'':'s')+' '+(r.overrides.length===1?'is':'are')+' older than this file</b> &mdash; the newer write wins, so the TDG dates take over and the card will say so.<br>'
+      +r.overrides.slice(0,12).map(function(x){return nmOf(x)+' &middot; yours '+dt(x.rita.sign_off)+' &rarr; TDG '+dt(x.counter.sign_off);}).join('<br>')+'</div>';
+  if(r.orphans&&r.orphans.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.orphans.length+' of your edit'+(r.orphans.length===1?'':'s')+' '+(r.orphans.length===1?'points':'point')+' at a contract this file does not carry</b> &mdash; nothing is lost, but '+(r.orphans.length===1?'it':'they')+' will stop showing.<br>'
+      +r.orphans.slice(0,12).map(function(x){return nmOf(x)+' &middot; contract starting '+dt(x.on_key);}).join('<br>')+'</div>';
   if(r.shrink&&r.shrink.length){
     var sh=r.shrink;
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+sh.length+' crew would end up with FEWER contracts than the console holds today</b> &mdash; the file wins for matched crew, so their older contract rows are removed on Apply. Check this is the full Contract Counter, not a current-roster extract.<br>'
@@ -3233,12 +3460,20 @@ async function previewKeyman(){
   }
   if(r.unparsedDates&&r.unparsedDates.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsedDates.length+' date cell'+(r.unparsedDates.length===1?'':'s')+' unreadable</b> (a leg with an unreadable sign-on is skipped; fix the sheet and re-drop)<br>'+r.unparsedDates.slice(0,15).map(function(u){return impEsc(u.last+', '+u.first+' &middot; contract '+u.seq+' '+u.field+': '+u.raw);}).join('<br>')+(r.unparsedDates.length>15?'<br>+'+(r.unparsedDates.length-15)+' more':'')+'</div>';
   h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">'+(r.shrink&&r.shrink.length?'Apply anyway &mdash; refresh '+r.matched+' crew ('+r.shrink.length+' lose rows)':'Refresh contract history for '+r.matched+' crew')+'</button>';
+  if(r.absorbs&&r.absorbs.length)h+=' <label class=csub style="margin-left:8px"><input type=checkbox id=kmabsorb checked> also remove the '+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' this file carries</label>';
   $('#imp').innerHTML=h;
 }
 async function applyKeyman(){
+  var ab=$('#kmabsorb');
+  var absorb=ab?!!ab.checked:true;
   $('#imp').textContent='Refreshing contract history…';
-  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP})})).json();
-  if(r.ok){$('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew. Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
+  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP,absorb:absorb})})).json();
+  if(r.ok){
+    var done=(r.absorbed||[]).filter(function(x){return x.ok;});
+    var extra='';
+    if(done.length)extra+=' '+done.length+' projection'+(done.length===1?'':'s')+' retired — the loop closed.';
+    if(r.conflicts&&r.conflicts.length)extra+=' '+r.conflicts.length+' contradicted projection'+(r.conflicts.length===1?'':'s')+' left on the board for you.';
+    $('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew.'+extra+' Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
 }
 var TRAVELUP=null;
@@ -3724,34 +3959,138 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+rb.reliever.on_city:'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=(h.days!=null?h.days+'-day gap':'gap')+' before reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t='Handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t='Sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t='Reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t='Reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t='Slot open · signs off in '+(d!=null?d+' days':'TBA');fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
+async function planDelete(e,el){
+  e.stopPropagation();
+  var id=el.getAttribute('data-aid'),nm=el.getAttribute('data-nm')||'this projection';
+  if(!confirm('Remove '+nm+' from the board?\\n\\nThis deletes the projection. TDG cards are never touched.'))return;
+  el.disabled=true;
+  try{
+    var r=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json();
+    if(r&&r.ok){renderRotation();}else{el.disabled=false;alert('Could not remove: '+((r&&r.error)||'error'));}
+  }catch(_){el.disabled=false;alert('Network error');}
+}
+// DEPLOY — the CTA on a projection. Preview the exact email first: it names a real person to a
+// real agency, so it is never sent blind. Expired documents are shown as a warning and never block.
+var DPV=null;
+function dpvClose(){var o=document.getElementById('dpvovl');if(o&&o.parentNode)o.parentNode.removeChild(o);DPV=null;}
+async function planDeploy(e,el){
+  e.stopPropagation();
+  var id=el.getAttribute('data-aid');
+  el.disabled=true;
+  var j=null;
+  try{ j=await (await fetch('/api/keyman/deploy/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json(); }
+  catch(_){ el.disabled=false; alert('Network error'); return; }
+  el.disabled=false;
+  if(!j||j.error){ alert('Could not prepare the deployment: '+((j&&j.error)||'error')); return; }
+  DPV={id:id};
+  var c=j.card||{};
+  var expired=(c.warnings||[]).filter(function(w){return w.status==='expired';});
+  var warnHtml=expired.length?('<div class=dpvwarn><b>'+expired.length+' expired document'+(expired.length===1?'':'s')+'</b> &mdash; '+expired.map(function(w){return escHtml(w.text);}).join('; ')+'. This is a warning, not a block: TDG is told, and you can still send.</div>'):'';
+  var toLine=j.recipient?('To '+escHtml(j.recipient)+((j.cc&&j.cc.length)?(' &middot; cc '+j.cc.map(escHtml).join(', ')):'')):'<b style="color:#B0342F">No recipient configured</b> &mdash; set DEPLOY_TO on the Worker';
+  var o=document.createElement('div');
+  o.id='dpvovl';o.className='dpv';
+  o.innerHTML='<div class=dpvbox onclick="event.stopPropagation()">'
+    +'<div class=dpvhd><span class=t>Deploy '+escHtml(c.name||'')+' to '+escHtml(c.ship||'')+'</span><button class=pbtn onclick="dpvClose()">Close</button></div>'
+    +warnHtml
+    +'<div class=dpvbody><iframe id=dpvframe title="Deployment email preview"></iframe></div>'
+    +'<div class=dpvft><span class=to>'+toLine+'</span>'
+    +(j.recipient?'<button class="pbtn go" id=dpvsend onclick="dpvSend()">Send to TDG and clear the card</button>':'')
+    +'</div></div>';
+  o.onclick=dpvClose;
+  document.body.appendChild(o);
+  var fr=document.getElementById('dpvframe');
+  if(fr){ fr.srcdoc=j.html||''; fr.onload=function(){ try{ fr.style.height=Math.min(560,(fr.contentDocument.body.scrollHeight||460)+20)+'px'; }catch(_){ } }; }
+}
+async function dpvSend(){
+  if(!DPV)return;
+  var b=document.getElementById('dpvsend');
+  if(b){b.disabled=true;b.textContent='Sending…';}
+  try{
+    var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id})})).json();
+    if(r&&r.ok){ dpvClose(); renderRotation(); if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
+    else { if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
+  }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Network error'); }
+}
+async function deployRestore(el){
+  var lid=el.getAttribute('data-log');
+  el.disabled=true;
+  try{
+    var r=await (await fetch('/api/keyman/deploy/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({logId:lid})})).json();
+    if(r&&r.ok){ renderRotation(); } else { el.disabled=false; alert('Could not restore: '+((r&&r.error)||'error')); }
+  }catch(_){ el.disabled=false; alert('Network error'); }
+}
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// ONE card renderer, two states (Miguel, 14 Sep 2026):
+//   green  = what the TDG Contract Counter says. Click to edit; never draggable; it stays green.
+//   yellow = what Rita planned (an open assignment). Draggable between ships, removable, and from
+//            phase 4 deployable. It leaves the board when the next Counter carries it.
 function rotCard(x){
-  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';var _chip='';if(x.current&&x.signOff){var _dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var _cc=_dd<=14?' crit':_dd<=30?' due':'';_chip='<span class="offchip'+_cc+'">OFF in '+_dd+'d</span>';}
-  var _cf2=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc2=function(ct,cf){return '<b style="color:'+_cf2(cf)+'">'+ct+'</b>';};var on=x.signOn?((x.on_city?_oc2(x.on_city,x.on_conf):(x.embark?x.embark:tba))+'<span style="white-space:nowrap"> · ON '+x.signOn+'</span>'):'';
-  var off=x.signOff?((x.off_city?_oc2(x.off_city,x.off_conf):(x.disembark?x.disembark:tba))+'<span style="white-space:nowrap"> · OFF '+x.signOff+'</span>'):'';
+  var plan=x.state==='yellow';
+  var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
+  var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};
+  var oc=function(ct,cfl){return '<b style="color:'+cf(cfl)+'">'+ct+'</b>';};
+  var nm=(x.name||'').split(' ').filter(Boolean);
+  var ini=((nm[0]||'').charAt(0)+(nm[1]||'').charAt(0)).toUpperCase()||'?';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
+  var live=plan?!!x.aboard:!!x.current;
+  var chip='';
+  if(live&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip='<span class="offchip'+cc+'">'+(dd<0?('OFF was '+(-dd)+'d ago'):('OFF in '+dd+'d'))+'</span>';}
+  else if(plan&&x.signOn){var ds=Math.round((new Date(x.signOn+'T00:00:00Z').getTime()-Date.now())/86400000);if(ds>=0)chip='<span class=offchip>ON in '+ds+'d</span>';}
+  var rw=function(lbl,city,date){return '<div class=rrow><span class=rlbl>'+lbl+'</span><span class=rcity>'+city+'</span><span class=rdate>'+date+'</span></div>';};
+  var rows='';
+  if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?x.embark:tba),x.signOn);
+  if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?x.disembark:tba),x.signOff);
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
   if(x.air)tg+='<span class="rtag on">AIR</span>';
   if(x.hotel)tg+='<span class="rtag on">HOTEL</span>';
-  if(x.onConfirmed)tg+='<span class="rtag on">ON ✓</span>';
-  if(x.offConfirmed)tg+='<span class="rtag on">OFF ✓</span>';
+  if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';
+  if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
-  return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit · drag to reassign" onmousedown="dragMoved=false" ondragstart="dragStart(this,\\''+x.agency_id+'\\')" ondragend="dragEnd(this)" onclick="cardClick(\\''+x.agency_id+'\\','+x.seq+')">'
-    +_chip+'<div class=rnm>'+x.name+(x.rank?(' <span style="color:var(--mut);font-weight:600;font-size:11px">'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment">●</span>':'')+'</div>'
-    +'<div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' · '+dur):'')+'</div>'
-    +(on?'<div class=rleg2><i class=ondot></i>'+on+'</div>':'')
-    +(off?'<div class=rleg2><i class=offdot></i>'+off+'</div>':'')
+  // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
+  if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
+  var lab=plan?('<span class="rlab plan">'+(x.aboard?'PLAN &middot; ABOARD':'PLAN')+'</span>'):'';
+  // Who set the dates on this card. Blank when nobody has touched the TDG values.
+  var note='';
+  if(plan)note='<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
+  else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
+  else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
+  // The ship's Junior PS rule, seeded in the vessel table since July and shown for the first time.
+  var jr=x.jrWarn?('<div class=jrnote>Junior PS on a <b>'+escHtml(x.jrWarn)+'</b> ship &mdash; check this placement</div>'):'';
+  var acts='';
+  if(plan&&x.assignment_id){
+    var safeNm=String(x.name||'').replace(/"/g,'&quot;');
+    acts='<div class=pacts>'
+      +'<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>'
+      +'<button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDelete(event,this)">Remove</button></div>';
+  }
+  var cls='rcard '+(plan?('plan'+(x.aboard?' aboard':'')):('green'+(x.current?' cur':'')));
+  var dragAttrs=plan?(' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"'):'';
+  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(plan?'Your projection - click to edit, drag to another ship':'TDG contract - click to edit')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
+    +chip
+    +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
+    +(rows?'<div class=rrot>'+rows+'</div>':'')
     +(tg?'<div class=rtags>'+tg+'</div>':'')
-    +'</div>';
+    +note+jr+acts+'</div>';
 }
-function openRelief(){location.href='/relief';}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var dn='<i style="width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--navy)"></i> ';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" onclick="openRelief()" title="reliever"><div class=rnm>'+r.crew_name+' <span style="color:var(--navy);font-weight:700;font-size:10px;letter-spacing:.04em">RELIEVER</span></div><div class=rleg>'+dn+'Signs on'+(r.auto_on?' follows printer':'')+'</div><div class=rleg2>'+dn+'<b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" onclick="openRelief()" title="add reliever"><div style="font-weight:700">+ Add reliever</div><div style="font-size:11px;opacity:.85;margin-top:2px">empty slot'+(d!=null?' off in '+d+'d':'')+'</div></div>';}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,bg,fg;if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' - '+rb.reliever.on_city:'')+(rb.reliever.on_date?' - '+rb.reliever.on_date:'');bg='#e3f5e8';fg='#1f7a3d';}else if(rb.reliever&&h.kind==='gap'){t=(h.days!=null?h.days+'-day gap':'gap')+' between OFF and reliever ON';bg='#fbeed6';fg='#9a6410';}else if(rb.reliever&&h.kind==='port_mismatch'){t='Same day, port differs';bg='#fbeed6';fg='#9a6410';}else if(d!=null&&rb.urgency==='critical'){t='Reliever needed - printer signs off in '+d+' days';bg='#fbe7e6';fg='#b0342f';}else if(d!=null&&rb.urgency==='due'){t='Reliever due - printer signs off in '+d+' days';bg='#fbeed6';fg='#9a6410';}else{t='Slot open'+(d!=null?' - printer signs off in '+d+' days':'');bg='var(--surface-1)';fg='var(--mut)';}return '<div style="margin:0 14px 12px;padding:7px 12px;border-radius:8px;font-size:12.5px;background:'+bg+';color:'+fg+'">'+t+'</div>';}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d!=null)?('OFF IN '+d+'D'):'NO OFF DATE';var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" onclick="openRelief()" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" onclick="openRelief()" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+rb.reliever.on_city:'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=(h.days!=null?h.days+'-day gap':'gap')+' before reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t='Handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t='Sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t='Reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t='Reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t='Slot open · signs off in '+(d!=null?d+' days':'TBA');fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefSlot(rb){if(!rb||!rb.printer)return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b style="color:'+cf(r.on_conf)+'">'+(r.on_city||'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcClick(el){cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}function rotCard(x){var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';var cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var oc=function(ct,cfl){return '<b style="color:'+cf(cfl)+'">'+ct+'</b>';};var nm=(x.name||'').split(' ').filter(Boolean);var ini=((nm[0]||'').charAt(0)+(nm[1]||'').charAt(0)).toUpperCase()||'?';var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);var chip='';if(x.current&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip='<span class="offchip'+cc+'">'+(dd<0?('OFF was '+(-dd)+'d ago'):('OFF in '+dd+'d'))+'</span>';}var rw=function(lbl,city,date){return '<div class=rrow><span class=rlbl>'+lbl+'</span><span class=rcity>'+city+'</span><span class=rdate>'+date+'</span></div>';};var rows='';if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?x.embark:tba),x.signOn);if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?x.disembark:tba),x.signOff);var tg='';if(x.eccr)tg+='<span class="rtag on">ECCR</span>';if(x.air)tg+='<span class="rtag on">AIR</span>';if(x.hotel)tg+='<span class="rtag on">HOTEL</span>';if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';return '<div class="rcard'+(x.current?' cur':'')+'" draggable="true" data-crew="'+x.agency_id+'" data-seq="'+x.seq+'" title="click to edit" onmousedown="dragMoved=false" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)" onclick="rcClick(this)">'+chip+'<div class=rhead><div class="ravatar'+(x.current?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' · '+dur):'')+'</div></div></div>'+(rows?'<div class=rrot>'+rows+'</div>':'')+(tg?'<div class=rtags>'+tg+'</div>':'')+'</div>';}function rotShip(sec){
+function rotShip(sec){
   var col=BRANDCOL[sec.brand]||'#1E6FD0',closed=!!ROT_CLOSED[sec.ship];
   var hist=sec.history||[];
-  var body=sec.crew.length?sec.crew.map(rotCard).join(''):'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
+  var projs=sec.projections||[];
+  var cards=sec.crew.map(rotCard).join('')+projs.map(rotCard).join('');
+  var body=cards||'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
+  // Sent to TDG and not yet back in a Contract Counter. The line clears itself when they return.
+  var sentRows=(sec.deployed||[]).map(function(d){
+    return '<div class=sentrow><b>'+escHtml(d.name)+'</b> &middot; '+escHtml(d.signOn||'TBA')
+      +' <span class=sentmeta>sent to TDG on '+escHtml(d.sentAt||'')+(d.aboard?' &middot; aboard per your board, awaiting the Counter':' &middot; awaiting the Counter')+'</span>'
+      +'<button class=pbtn data-log="'+escHtml(d.id)+'" onclick="deployRestore(this)" title="Put the projection back on the board">Restore</button></div>';
+  }).join('');
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Also served this ship · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
-  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
+  var meta=sec.brand+' · '+sec.onboard+' onboard · '+sec.crew.length+' current'+(projs.length?(' · '+projs.length+' planned'):'')+((sec.deployed&&sec.deployed.length)?(' · '+sec.deployed.length+' sent to TDG'):'')+(hist.length?(' · '+hist.length+' history'):'');var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;var _rbc=(_rb&&_rb.urgency==='critical')?'var(--danger)':(_rb&&_rb.urgency==='due')?'var(--amber)':'var(--line-2)';var _cf=function(c){return c==='derived'?'#1f7a3d':c==='provisional'?'#a8791a':c==='seed'?'#b0342f':c==='override'?'#1f5fa8':'#888780';};var _oc=function(ct,cf){return '<b style="color:'+_cf(cf)+'">'+(ct||'TBA')+'</b>';};var _hv=_rb&&_rb.handover;var _hvt=(_hv&&_hv.kind==='clean')?'<span style="color:#1f7a3d">clean</span>':(_hv&&_hv.kind==='port_mismatch')?'<span style="color:#b0342f">port mismatch</span>':(_hv&&_hv.kind==='gap')?('<span style="color:#a8791a">'+(_hv.days!=null?_hv.days+'-day gap':'gap')+'</span>'):'';var _rban=(_rb&&_rb.printer)?('<div style="font-size:12px;padding:5px 10px;background:var(--surface-1);border-left:3px solid '+_rbc+';border-radius:0 6px 6px 0;margin:0 0 4px"><b>Relief</b> · off '+_oc(_rb.printer.off_city,_rb.printer.off_conf)+' · '+(_rb.printer.off_date||'TBA')+' · '+(_rb.reliever?('reliever '+_rb.reliever.crew_name+' → on '+_oc(_rb.reliever.on_city,_rb.reliever.on_conf)+' '+(_rb.reliever.on_date||'TBA')+(_hvt?(' · '+_hvt):'')):'reliever unassigned')+((_rb.urgency&&_rb.urgency!=='open')?(' · '+_rb.urgency):'')+'</div>'):'';var _rslot=reliefSlot(_rb);var _rbanner=reliefBanner(_rb);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'">'+body+_rslot+'</div>'+_rbanner+histBlock+'</div>';
+    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
 }
 function monthsDays(a,b){
   if(!a||!b)return '';
@@ -3981,9 +4320,18 @@ function drawRotation(){
     z.ondragleave=function(){z.classList.remove('dragover');};
     z.ondrop=function(e){e.preventDefault();z.classList.remove('dragover');
       var ship=z.getAttribute('data-ship');
+      // Junior PS gate: warn, never block (Miguel, 14 Sep 2026 — block once Rita re-confirms the hulls).
+      var rule=(z.getAttribute('data-jr')||'');
+      if(rule&&rule!=='open'&&DRAGEL&&/jr ps/i.test(DRAGEL.textContent||'')){
+        if(!confirm(ship+' is a "'+rule+'" ship for Junior PS.\\n\\nMove this seafarer there anyway?'))return;
+      }
       // Optimistic, animated move: drop the card into the target ship immediately (no full-board flash).
       if(DRAGEL&&DRAGEL.parentNode!==z){var el=DRAGEL;el.classList.add('landing');z.appendChild(el);setTimeout(function(){el.classList.remove('landing');},260);}
-      assignCrew(DRAGID,ship);
+      // A yellow card is a PROJECTION: the drop moves the assignment itself. The old path wrote the
+      // crew's registry ship (crew_override.vessel_observed), which is not what a plan is and would
+      // have out-voted the TDG registry for that seafarer. Only projections are draggable now.
+      var aid=DRAGEL&&DRAGEL.getAttribute('data-aid');
+      if(aid){moveProjection(aid,ship);}else{assignCrew(DRAGID,ship);}
     };
   });
 }
@@ -4020,6 +4368,13 @@ async function exportDaysExcel(){
     var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
     var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='days-worked_'+from.slice(0,7)+'.csv';a.click();
   }catch(e){alert('Could not export days worked.');}
+}
+async function moveProjection(aid,ship){
+  DRAGID=null; DRAGEL=null;
+  try{
+    var r=await (await fetch('/api/relief/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:aid,vessel_name:ship})})).json();
+    if(!r||!r.ok){renderRotation();alert('Could not move the projection: '+((r&&r.error)||'error'));}
+  }catch(e){renderRotation();}
 }
 async function assignCrew(id,ship){
   if(!id)return; DRAGID=null; DRAGEL=null;

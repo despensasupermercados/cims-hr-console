@@ -11,6 +11,7 @@ const WORKER = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8"
 const PROJ = readFileSync(new URL("../src/leg_projection.js", import.meta.url), "utf8");
 const RELIEF = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
 const LEGSRC = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf8");
+const COUNTER = readFileSync(new URL("../src/counter_legs.js", import.meta.url), "utf8");
 
 // These guards must inspect CODE, not prose: this module's header deliberately
 // discusses is_current=1 at length, and a guard that greps the comments would
@@ -51,8 +52,12 @@ test("HALF 1: every existing ship_leg reader excludes projected forward legs", (
     ...shipLegSelects(WORKER),
     ...shipLegSelects(RELIEF),
     ...shipLegSelects(LEGSRC),
+    ...shipLegSelects(COUNTER),
   ];
-  assert.ok(readers.length >= 8, `expected the known ship_leg readers, found ${readers.length}`);
+  // 2026-09-14: the board, printers, roster export and backup CSV read the Contract Counter
+  // (counter_legs.js); ship_leg survives as that module's port memory + orphan arm, the relief
+  // ports lookups and the projector's own maintenance. Fewer readers, same rule for each.
+  assert.ok(readers.length >= 3, `expected the known ship_leg readers, found ${readers.length}`);
   for (const sql of readers) {
     // Must be excluded in the WHERE clause, not merely mentioned in the SELECT list.
     // (The first cut of this guard only grepped for the token `is_current` and went green
@@ -77,14 +82,17 @@ test("HALF 1: every existing ship_leg reader excludes projected forward legs", (
   }
 });
 
-test("HALF 1: legsFromShipLeg specifically excludes projected rows", () => {
-  const sql = LEGSRC.replace(/\s+/g, " ");
-  assert.match(
-    sql,
-    /WHERE l\.ours = 1 AND NOT \(l\.source LIKE 'assignment:%' AND l\.is_current = 0\)/,
-    "legsFromShipLeg lost its projected-leg exclusion. It has no is_current=1 filter, so " +
-    "projected legs would win the schEnr off_date race and rewrite board dates + billed days."
-  );
+test("HALF 1: the Counter leg source admits only keyman_roster snapshot rows from ship_leg — never a projected mirror", () => {
+  const sql = stripComments(COUNTER).replace(/\s+/g, " ");
+  // Port memory arm: joined on the snapshot rows only.
+  assert.match(sql, /LEFT JOIN ship_leg m ON m\.sc = k\.sc AND m\.on_date = k\.sign_on AND m\.is_current = 1 AND m\.ours = 1 AND m\.source LIKE 'keyman_roster%'/,
+    "the port-memory join must be pinned to is_current=1 keyman_roster rows");
+  // Orphan arm: snapshot rows only, and only for crew the Counter does not know.
+  assert.match(sql, /WHERE l\.ours = 1 AND l\.is_current = 1 AND l\.source LIKE 'keyman_roster%' AND NOT EXISTS \(SELECT 1 FROM keyman_contract3 k WHERE k\.sc = l\.sc AND k\.sign_on IS NOT NULL\)/,
+    "the orphan arm lost its keyman_roster / no-Counter-row filter — a projected forward leg would " +
+    "win the schEnr off_date race and rewrite board dates.");
+  assert.doesNotMatch(sql, /is_current = 0/, "nothing in the Counter source may admit an is_current=0 row");
+  assert.match(LEGSRC.replace(/\s+/g, " "), /legsFromCounter\(env\), fetchCurrentAssignments/, "boardLegsFromDb must take its legs from legsFromCounter");
 });
 
 test("HALF 2: the projection never writes is_current=1", () => {

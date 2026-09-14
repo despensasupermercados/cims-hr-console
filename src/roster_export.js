@@ -18,12 +18,15 @@
 //   - never widen EXPORT_FIELDS without re-reading this paragraph
 //
 // AUTHORITATIVE SOURCES (per the glossary in maria.js)
-//   crew            identity, docs, status, ship_crew_id
-//   crew_override   Rita's manual edits; ALWAYS win, but only when not retired
-//   ship_leg        TRUTH for rotation/movements. brand + ship_short live here.
-//   assignment      the relief board's record of who is on which hull NOW.
-//                   Read ONLY as a fallback where ship_leg has no current leg.
-// NEVER keyman_contract3 — bonus/scoring only, never movements (P3.13 audit).
+//   crew              identity, docs, status, ship_crew_id
+//   crew_override     Rita's manual edits; ALWAYS win, but only when not retired
+//   keyman_contract3  the Contract Counter, the TDG file that carries sign-on / sign-off.
+//                     Since 2026-09-14 the current leg comes from it through the ONE
+//                     definition in counter_legs.js (brand from vessel, ports from Rita's
+//                     edit or the snapshot's port memory, orphan snapshot legs kept).
+//                     Before that this joined ship_leg, a frozen copy of the 6 Jul Counter.
+//   assignment        the relief board's record of who is on which hull NOW.
+//                     Read ONLY as a fallback where the Counter has no current leg.
 //
 // WHY assignment IS READ HERE (3 Sep 2026)
 // ship_leg is a one-time keyman_roster snapshot; nothing writes a CURRENT leg to
@@ -66,6 +69,8 @@
 // visa, medical, DOB or phone crosses this boundary — the timecard app has no
 // use for them and every field exported is a field that can leak.
 
+import { COUNTER_LEG_SELECT } from "./counter_legs.js";
+
 /** Columns this endpoint is permitted to emit. Anything not listed cannot leave. */
 export const EXPORT_FIELDS = [
   'ship_crew_id', 'agency_id', 'first_name', 'last_name',
@@ -89,7 +94,7 @@ export const ROSTER_SQL = `
     LEFT JOIN crew_override o
            ON o.agency_id = c.agency_id
           AND COALESCE(o.retired,0) = 0
-    LEFT JOIN ship_leg l
+    LEFT JOIN (${COUNTER_LEG_SELECT}) l
            ON l.crew_id = c.id
           AND l.is_current = 1
           AND l.ours = 1

@@ -3,6 +3,7 @@
 import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
+import { fetchCurrentCounterLegs } from "./counter_legs.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
 
 export const MIN_COVERAGE_MONTHS = 12;
@@ -43,12 +44,9 @@ export async function reliefBoardData(env, today) {
   const flagsByKey = {};
   for (const f of flagRows) flagsByKey[f.vessel_key] = f;
 
-  const legs = (await env.DB.prepare(
-    `SELECT l.brand, l.ship_short, l.on_date, l.off_date, l.embark, l.disembark,
-            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
-       FROM ship_leg l LEFT JOIN crew c ON c.id = l.crew_id
-      WHERE l.is_current = 1 AND l.ours = 1`
-  ).all()).results;
+  // Printers = current legs from the Contract Counter (counter_legs.js, the ONE definition;
+  // until 2026-09-14 this read the frozen ship_leg snapshot).
+  const legs = await fetchCurrentCounterLegs(env);
   const printers = legs.map((l) => {
     const vk = l.brand + "|" + l.ship_short;
     const f = flagsByKey[vk];
