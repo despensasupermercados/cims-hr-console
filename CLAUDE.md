@@ -118,8 +118,8 @@ dated card on the crew. Hard rules:
   `test/keyman_seed_guard.test.js` + `test/keyman_snapshot.test.js`.
 
 - **Deploy is the only outbound to TDG from the board** (`src/keyman_deploy.js`, 2026-09-14). It sends
-  Joy one email, THEN removes the projection, THEN writes `deploy_log` — in that order: a card must
-  never leave the board for an email that did not go. Recipient is `DEPLOY_TO`, else `TG_NOTIFY`;
+  Joy one email, THEN writes `deploy_log`, THEN removes the projection — in that order: a card must
+  never leave the board for an email that did not go, and the log is written before the card goes. Recipient is `DEPLOY_TO`, else `TG_NOTIFY`;
   unset = refuse, never a default (the same rule as the TG loop). `DEPLOY_CC` defaults to Rita.
   Expired documents are ALWAYS a warning on the card, the preview and the email, and NEVER a block.
   The sent line clears itself when the next Contract Counter carries that seafarer — that is the loop

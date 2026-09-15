@@ -44,3 +44,33 @@ test("the pinned wrangler is new enough to honour preview_urls", () => {
   const major = Number(String(range).replace(/^[^\d]*/, "").split(".")[0]);
   assert.ok(major >= 3, `wrangler pin ${range} is older than 3.x`);
 });
+
+// 2026-09-15: `wrangler deploy` (what Workers Builds runs on every merge) deletes every
+// plain-text variable set in the dashboard unless keep_vars is true. A DEPLOY_TO typed into
+// the dashboard would silently die on the next merge and the Deploy button would refuse
+// again with `no_recipient`. Keep both the switch and the recipient in this file.
+test("dashboard variables survive deploys (keep_vars = true, top level)", () => {
+  assert.match(
+    TOML,
+    /^keep_vars\s*=\s*true\s*$/m,
+    "wrangler.toml must set `keep_vars = true` — otherwise every deploy wipes dashboard-set vars",
+  );
+  const firstTable = TOML.search(/^\[/m);
+  const setting = TOML.search(/^keep_vars\s*=/m);
+  assert.ok(
+    firstTable === -1 || setting < firstTable,
+    "keep_vars must sit above the first [table] header or TOML scopes it into that table",
+  );
+});
+
+test("the Keyman Deploy recipient is pinned in [vars] to a dg3.com address", () => {
+  assert.match(
+    TOML,
+    /^DEPLOY_TO\s*=\s*"[^"@\s]+@dg3\.com"\s*$/m,
+    "wrangler.toml [vars] must carry DEPLOY_TO (a dg3.com address) — the Deploy button refuses without it",
+  );
+  const vars = TOML.search(/^\[vars\]/m);
+  const setting = TOML.search(/^DEPLOY_TO\s*=/m);
+  const nextTable = TOML.slice(vars + 1).search(/^\[/m) + vars + 1;
+  assert.ok(vars !== -1 && setting > vars && setting < nextTable, "DEPLOY_TO must sit inside [vars]");
+});
