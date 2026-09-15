@@ -133,7 +133,10 @@ test("the board never prints a negative day count at the reader", () => {
   assert.match(slot.slice(0, slot.indexOf("\n")), /OFF WAS '\+\(-d\)\+'D AGO/,
     "a past sign-off reads as elapsed, not as a countdown");
   const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
-  assert.match(banner.slice(0, banner.indexOf("\n")), /Sign-off overdue/);
+  // 15 Sep 2026: the banner sat under two cards saying "Sign-off overdue" with no name. On a ship with
+  // more than one seafarer nothing on the page said WHOSE sign-off. It leads with the name now.
+  assert.match(banner.slice(0, banner.indexOf("\n")), /var who=rb\.printer\.crew_name\?\(rb\.printer\.crew_name\+' \\u00b7 '\)/);
+  assert.match(banner.slice(0, banner.indexOf("\n")), /t=who\+'sign-off overdue/);
   assert.match(banner.slice(0, banner.indexOf("\n")), /no sign-off recorded/,
     "say WHY the seat is unresolved: nobody recorded the sign-off");
   // the crew card carried the same defect ("OFF in -1d" on Anthem)
