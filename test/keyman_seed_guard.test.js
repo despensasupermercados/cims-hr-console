@@ -35,6 +35,7 @@ function fakeEnv(state) {
       s.bind = (...a) => ({ ...s, args: a }); // fresh statement per bind, like real D1
       s.run = async function () { writes.push(this); return { meta: { changes: (/INSERT INTO data_meta/.test(S) && state.pinChanges != null) ? state.pinChanges : 1 } }; };
       s.first = async () => {
+        if (S.startsWith("SELECT (SELECT COUNT(*) FROM keyman_contract3) AS n")) return { n: state.n, v: state.version || null }; // the ONE combined read (15 Sep 2026)
         if (S.startsWith("SELECT COUNT(*) n FROM keyman_contract3")) return { n: state.n };
         if (S.startsWith("SELECT v FROM data_meta WHERE k='keyman_version'")) return state.version ? { v: state.version } : null;
         throw new Error("fake first: unhandled SQL: " + S);

@@ -122,3 +122,32 @@ test("the board's two reads (rotation + relief board) are in flight together, an
   assert.match(SRC, /const ensurePerfLog = memoEnsure\(/, "perf_log DDL is memoized like every other guard (§12)");
   assert.match(SRC, /async fetch\(request, env, ctx\) \{/, "the handler must accept ctx to have waitUntil at all");
 });
+
+// 15 Sep 2026, perf_log from prod: /api/rotation 2043ms, /api/dashboard 1494ms at GRU against the PRG
+// primary — nearly all of it the cold-start guards, one ~220ms round trip per statement. Each guard is
+// now at most: one batch (CREATEs + reference rows), then ONE more round trip (an ALTER that must stay
+// out of the batch, or the ALTER beside a single combined read). Sequential .run()/.first() chains in
+// these bodies are the regression this pins against.
+test("the board's cold-start guards are two round trips at most, not one per statement", () => {
+  const k = body("async function ensureKeymanImpl(");
+  assert.match(k, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS keyman_contract3[^\n]*\.run\(\),\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS data_meta/, "the two CREATEs leave together");
+  assert.match(k, /SELECT \(SELECT COUNT\(\*\) FROM keyman_contract3\) AS n, \(SELECT v FROM data_meta WHERE k='keyman_version'\) AS v/, "count + version are ONE read");
+  assert.match(k, /await Promise\.all\(\[\s*env\.DB\.prepare\("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT"\)\.run\(\)\.catch/, "the ALTER rides beside the read");
+  const c = body("async function ensureCrewExtrasImpl(");
+  assert.match(c, /await env\.DB\.batch\(\[/, "crew_override + crew_note_log + the MAN agency row are one batch");
+  assert.equal((c.match(/\.run\(\)/g) || []).length, 1, "only the retired-column ALTER runs alone");
+  const r = body("async function ensureReadyImpl(");
+  assert.match(r, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS crew_ready/, "CREATE and legacy ALTER leave together");
+  const e = body("async function ensureContractEditImpl(");
+  assert.match(e, /CREATE TABLE IF NOT EXISTS contract_edit \([^"]*, on_key TEXT, PRIMARY KEY \(sc, seq\)\)/, "the CREATE carries on_key (as a column, before the table constraint) so the ALTER is legacy-only");
+  assert.match(e, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS contract_edit/, "CREATE and ALTER leave together; only the backfill follows");
+  const R = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
+  assert.match(R, /const _commentEnsured = new WeakMap\(\);\nfunction ensureCommentTable\(env\)/, "relief_comment DDL is memoized, not per request");
+});
+
+test("the board is not blanked while it refreshes after a save or drag", () => {
+  const fn = body("async function renderRotation(");
+  assert.match(fn, /if\(document\.querySelector\('#view \.shipsec'\)\)\{document\.body\.classList\.add\('rot-refreshing'\);\}/);
+  assert.match(fn, /drawRotation\(\); loadAutoToggle\(\); document\.body\.classList\.remove\('rot-refreshing'\);/);
+  assert.match(SRC, /body\.rot-refreshing #view\{opacity:\.6/);
+});

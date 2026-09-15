@@ -225,7 +225,7 @@ test("the on_key backfill is its own statement, not hidden inside the ALTER's tr
   const upd = body.indexOf("UPDATE contract_edit SET on_key");
   assert.ok(alter > 0 && upd > alter, "both statements present, ALTER first");
   const between = body.slice(alter, upd);
-  assert.match(between, /catch \{\}/, "the ALTER's try must be CLOSED before the UPDATE begins — a thrown ALTER must not skip the backfill, and a thrown backfill must not be lost behind an ALTER that already succeeded");
+  assert.match(between, /catch \{\}|\.catch\(\(\) => null\)/, "the ALTER's try must be CLOSED before the UPDATE begins — a thrown ALTER must not skip the backfill, and a thrown backfill must not be lost behind an ALTER that already succeeded");
   assert.match(body.slice(upd), /WHERE on_key IS NULL/, "idempotent: a no-op once backfilled");
 });
 
@@ -242,4 +242,22 @@ test("drawRotation hands the ship renderer its projections, deployed lines and J
   }
   assert.match(map[0], /projections:sfilt\(s\.projections\)/, "the status/month filter applies to projections like it does to crew");
   assert.match(body, /s\.crew\.length>0\|\|s\.projections\.length>0/, "a ship with only projections must survive the status filter");
+});
+
+// Miguel, 15 Sep 2026: "the yellow always go last, not in front of the people who are already onboard".
+// An aboard plan (state 'yellow') sat inside promByShip with the greens and sorted among them by name.
+test("inside a ship section every TDG (green) card precedes every plan (yellow) card", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const i = src.indexOf("const crew = (promByShip[ship] || []).slice().sort(");
+  assert.ok(i > 0, "section sort not found");
+  const sortSrc = src.slice(i, src.indexOf(";", i));
+  assert.match(sortSrc, /\(a\.state === "yellow" \? 1 : 0\) - \(b\.state === "yellow" \? 1 : 0\)\s*\|\| \(b\.current \? 1 : 0\) - \(a\.current \? 1 : 0\)/,
+    "state (green first) must be the FIRST sort key, current the second, name the third");
+  // Behavioural check of the same comparator on a sample.
+  const cmp = new Function("a", "b", "return " + sortSrc.slice(sortSrc.indexOf("(a, b) =>") + "(a, b) =>".length).trim().replace(/\)$/, ""));
+  const rows = [
+    { name: "Alpha", state: "yellow", current: true }, { name: "Bravo", state: "green", current: false },
+    { name: "Charlie", state: "green", current: true }, { name: "Delta", state: "yellow", current: false },
+  ].sort(cmp).map((x) => x.name);
+  assert.deepEqual(rows, ["Charlie", "Bravo", "Alpha", "Delta"]);
 });

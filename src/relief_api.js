@@ -224,10 +224,17 @@ function jsonResp(obj, status = 200) {
   return new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json" } });
 }
 
-async function ensureCommentTable(env) {
-  await env.DB.prepare(
-    "CREATE TABLE IF NOT EXISTS relief_comment (id TEXT PRIMARY KEY, assignment_id TEXT, vessel_key TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL)"
-  ).run();
+// Memoized once per isolate (CLAUDE.md §12): this DDL used to run on every comment read and write.
+const _commentEnsured = new WeakMap();
+function ensureCommentTable(env) {
+  let pr = _commentEnsured.get(env.DB);
+  if (!pr) {
+    pr = env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS relief_comment (id TEXT PRIMARY KEY, assignment_id TEXT, vessel_key TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL)"
+    ).run().catch((e) => { _commentEnsured.delete(env.DB); throw e; });
+    _commentEnsured.set(env.DB, pr);
+  }
+  return pr;
 }
 
 const VPD_DATE = /^\d{4}-\d{2}-\d{2}$/;
