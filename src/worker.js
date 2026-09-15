@@ -160,6 +160,7 @@ export default {
     const url = new URL(request.url);
     const p = url.pathname;
     const t0 = Date.now(); // PERF: request start, for the Server-Timing header on /api responses
+    const g0 = GUARDS.ms, gn0 = GUARDS.n; // cold-start cost attributable to this request
     try {
       // Await the whole dispatch so an async handler's rejection is caught here and returned as a
       // clean JSON 500 — routes do `return apiX(...)` without await, and an unawaited rejection would
@@ -286,14 +287,15 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
       // copy failure we return the original response untouched.
       if (p.startsWith("/api/") && res instanceof Response) {
         const dur = Date.now() - t0;
+        const gms = GUARDS.ms - g0, gn = GUARDS.n - gn0;
         // SLOW-REQUEST LOG (15 Sep 2026, "still takes sooo much to save"): anything over 600ms is written
         // to perf_log AFTER the response has gone (waitUntil), with the Worker's colo, so prod latency is
         // read from a table instead of guessed. The D1 primary is one fixed region; a Worker far from it
         // pays that distance on EVERY sequential round trip — this is the evidence for moving it.
-        if (dur > 600 && ctx && ctx.waitUntil) ctx.waitUntil(logSlowRequest(env, p, request.method, dur, request.cf && request.cf.colo));
+        if (dur > 600 && ctx && ctx.waitUntil) ctx.waitUntil(logSlowRequest(env, p, request.method, dur, request.cf && request.cf.colo, gms, gn));
         try {
           const out = new Response(res.body, res);
-          out.headers.set("Server-Timing", "app;dur=" + dur);
+          out.headers.set("Server-Timing", "app;dur=" + dur + ", guards;dur=" + gms);
           return out;
         } catch { return res; }
       }
@@ -376,13 +378,19 @@ function sessionCookie(token) {
 // perf_log: created once per isolate (memoEnsure below), written only from waitUntil — never on the
 // request path. Read it with: SELECT path, dur, colo, at FROM perf_log ORDER BY at DESC.
 const ensurePerfLog = memoEnsure(async (env) => {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS perf_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, path TEXT NOT NULL, method TEXT, dur INTEGER NOT NULL, colo TEXT)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS perf_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, path TEXT NOT NULL, method TEXT, dur INTEGER NOT NULL, colo TEXT, guard_ms INTEGER, guards INTEGER)").run();
+  // guard_ms / guards were added 15 Sep 2026 to a table that already existed in prod.
+  try { await env.DB.prepare("ALTER TABLE perf_log ADD COLUMN guard_ms INTEGER").run(); } catch {}
+  try { await env.DB.prepare("ALTER TABLE perf_log ADD COLUMN guards INTEGER").run(); } catch {}
 });
-async function logSlowRequest(env, path, method, dur, colo) {
+// guard_ms = of this request's `dur`, how much was first-time schema-guard work (a cold isolate).
+// guards  = how many guards ran for the first time. Both zero on a warm isolate, which is the point:
+// it separates "the Worker was cold" from "this route's own reads are slow".
+async function logSlowRequest(env, path, method, dur, colo, guardMs, guardN) {
   try {
     await ensurePerfLog(env);
-    await env.DB.prepare("INSERT INTO perf_log (at,path,method,dur,colo) VALUES (?,?,?,?,?)")
-      .bind(new Date().toISOString(), path, method || null, Math.round(dur), colo || null).run();
+    await env.DB.prepare("INSERT INTO perf_log (at,path,method,dur,colo,guard_ms,guards) VALUES (?,?,?,?,?,?,?)")
+      .bind(new Date().toISOString(), path, method || null, Math.round(dur), colo || null, Math.round(guardMs || 0), guardN || 0).run();
   } catch {}
 }
 async function logActivity(env, email, action, detail) {
@@ -862,13 +870,20 @@ const KEYMAN_VERSION = "2026-09-05-cc-v4"; // = the snapshot date in src/keyman_
 // with independent fake DBs keep their own state; a rejected ensure clears its slot and retries on
 // the next request instead of caching the failure.
 const _ensureMemo = new WeakMap();
+// Running total of time spent INSIDE first-time guard execution, and how many first-ran. The fetch
+// handler snapshots it around each request, so a slow /api response can say whether it paid a cold start
+// or whether its own reads are the cost — the question PR #117 could not answer from the outside.
+const GUARDS = { ms: 0, n: 0 };
 function memoEnsure(fn) {
   return (env) => {
     let m = _ensureMemo.get(env.DB);
     if (!m) { m = new Map(); _ensureMemo.set(env.DB, m); }
     let pr = m.get(fn);
     if (!pr) {
-      pr = Promise.resolve().then(() => fn(env)).catch((e) => { m.delete(fn); throw e; });
+      const t0 = Date.now();
+      pr = Promise.resolve().then(() => fn(env))
+        .then((v) => { GUARDS.ms += Date.now() - t0; GUARDS.n += 1; return v; },
+              (e) => { GUARDS.ms += Date.now() - t0; GUARDS.n += 1; m.delete(fn); throw e; });
       m.set(fn, pr);
     }
     return pr;
@@ -1154,10 +1169,19 @@ async function insertTravel(env, recs, year) {
 }
 const ensureTravel = memoEnsure(ensureTravelImpl);
 async function ensureTravelImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run();
-  // Steady state = one combined count. If 'kind' is missing (legacy table) the query throws -> migrate once.
+  // COLD START, part two (15 Sep 2026). PR #117 collapsed every guard on the board's path but this one,
+  // and /api/dashboard is its caller — which is exactly the route that did NOT get faster (perf_log:
+  // 1494ms before, 1636ms after). The CREATE is a no-op on a live table, so it no longer blocks the read:
+  // both leave together and the count comes back in the same round trip. If the table really is missing or
+  // legacy, the count simply fails and the migrate-once path below runs, as before.
   let st = null;
-  try { st = await env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first(); } catch (e) { st = null; }
+  try {
+    const r = await Promise.all([
+      env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run(),
+      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch(() => null),
+    ]);
+    st = r[1];
+  } catch (e) { st = null; }
   if (!st) {
     try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'").run(); } catch {}
     try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0").run(); } catch {}
