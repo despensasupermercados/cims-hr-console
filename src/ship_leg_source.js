@@ -275,6 +275,7 @@ export async function fetchOpenAssignments(env) {
        FROM assignment a
        JOIN contract k ON k.id = a.contract_id
        JOIN crew     c ON c.id = k.crew_id
+       LEFT JOIN vessel v ON v.id = a.vessel_id
        LEFT JOIN crew_override o ON o.agency_id = c.agency_id
       WHERE a.actual_sign_off IS NULL
       ORDER BY ship, a.sign_on`

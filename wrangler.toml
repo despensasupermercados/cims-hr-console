@@ -24,6 +24,13 @@ compatibility_date = "2025-05-01"
 # dashboard/Builds API, not in this file. See docs/BRANCH_CONTROL.md.
 preview_urls = false
 
+# KEEP DASHBOARD VARIABLES (2026-09-15). Workers Builds runs `wrangler deploy` on every
+# merge to main, and `wrangler deploy` DELETES every plain-text variable that was set in the
+# Cloudflare dashboard unless this is true (secrets survive; vars do not). Without it a
+# DEPLOY_TO typed into Settings > Variables is wiped by the next merge and the Deploy button
+# refuses again with `no_recipient`. Pinned by test/wrangler_config.test.js.
+keep_vars = true
+
 # DEPLOY GATE (2026-07-03 white-screen incident; patch retired 2026-09-04): wrangler runs
 # this before every bundle/deploy, no matter how wrangler is invoked (Workers Builds,
 # local, CI). It hard-verifies that every inline <script> the worker serves PARSES as
@@ -47,6 +54,11 @@ MAIL_FROM = "CIMS <cims@cims.work>"
 # enable, so nobody is emailed retroactively). Set to "true" to rehearse instead:
 # the daily digest reports what WOULD send, nothing goes to seafarers, nothing is logged.
 AUTO_SEND_DRY_RUN = "false"
+# Keyman Deploy recipient (src/keyman_deploy.js, 2026-09-15): the ONE email a card leaves the
+# board on goes to Joy (Maryjoy Manzanares, DG3 Crew Admin, assists Rita and TDG, issues crew
+# flights). Unset = the Deploy button refuses (`no_recipient`); it never defaults. DEPLOY_CC
+# defaults to Rita in code. Lives here, not the dashboard, so it survives every deploy.
+DEPLOY_TO = "maryjoy.manzanares@dg3.com"
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,
