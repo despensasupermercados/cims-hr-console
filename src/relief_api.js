@@ -4,6 +4,8 @@ import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { fetchCurrentCounterLegs } from "./counter_legs.js";
+import { fetchBoardPortDays, fetchAzamaraTurnarounds } from "./port_days.js";
+import { docBadge } from "./keyman_deploy.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
 
 export const MIN_COVERAGE_MONTHS = 12;
@@ -13,7 +15,7 @@ export const MIN_COVERAGE_MONTHS = 12;
 // now). Rita's override (leg_flags.override_off_date) always wins.
 export const AZAMARA_MONTHS = 5;
 
-function addMonthsISO(d, n) {
+export function addMonthsISO(d, n) {
   if (!d) return null;
   const dt = new Date(d + "T00:00:00Z");
   dt.setUTCMonth(dt.getUTCMonth() + n);
@@ -21,32 +23,26 @@ function addMonthsISO(d, n) {
 }
 
 export async function reliefBoardData(env, today) {
-  const cfg = (await env.DB.prepare(
-    "SELECT critical_days, due_days FROM relief_window_config WHERE key='default'"
-  ).first()) || { critical_days: 14, due_days: 30 };
-
-  const pd = (await env.DB.prepare(
-    "SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day"
-  ).all()).results;
+  // ONE wave (CLAUDE.md §12). The itinerary is fetched for the card dates only — never the whole
+  // 40k-row table (port_days.js, 2026-09-15). Azamara turnarounds come as their own small list.
+  const [cfgRow, pd, taRows, flagRes, legs] = await Promise.all([
+    env.DB.prepare("SELECT critical_days, due_days FROM relief_window_config WHERE key='default'").first(),
+    fetchBoardPortDays(env),
+    fetchAzamaraTurnarounds(env, today || new Date().toISOString().slice(0, 10)),
+    env.DB.prepare("SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags").all(),
+    fetchCurrentCounterLegs(env),
+  ]);
+  const cfg = cfgRow || { critical_days: 14, due_days: 30 };
   const portDaysByShip = groupPortDays(pd);
-  // Turnarounds per ship (crew-change ports), sorted ascending — the projection candidates.
+  // Turnarounds per Azamara ship (crew-change ports), ascending — the sign-off projection candidates.
   const taByShip = {};
-  for (const r of pd) {
-    if (Number(r.is_turnaround) === 1 && Number(r.is_sea) !== 1 && r.port_name) {
-      (taByShip[r.ship_short] = taByShip[r.ship_short] || []).push({ berth_date: r.berth_date, port_name: r.port_name });
-    }
-  }
+  for (const r of taRows) (taByShip[r.ship_short] = taByShip[r.ship_short] || []).push({ berth_date: r.berth_date, port_name: r.port_name });
   for (const k in taByShip) taByShip[k].sort((a, b) => (a.berth_date < b.berth_date ? -1 : a.berth_date > b.berth_date ? 1 : 0));
-
-  const flagRows = (await env.DB.prepare(
-    "SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags"
-  ).all()).results;
   const flagsByKey = {};
-  for (const f of flagRows) flagsByKey[f.vessel_key] = f;
+  for (const f of (flagRes.results || [])) flagsByKey[f.vessel_key] = f;
 
   // Printers = current legs from the Contract Counter (counter_legs.js, the ONE definition;
   // until 2026-09-14 this read the frozen ship_leg snapshot).
-  const legs = await fetchCurrentCounterLegs(env);
   const printers = legs.map((l) => {
     const vk = l.brand + "|" + l.ship_short;
     const f = flagsByKey[vk];
@@ -242,6 +238,24 @@ const VPD_MAX_ROWS = 2000;
 // and all statements still go in ONE batch = one D1 round trip (CLAUDE.md §12).
 const VPD_CHUNK = 50;
 
+// Every active seafarer with what the reliever picker shows beside the name. crew_override wins
+// field by field (the same precedence as every other read); `planned` lists the ships they already
+// hold an open projection on; the document fields feed docBadge().
+export const RELIEF_CREW_PICKER_SQL =
+  `SELECT c.id, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS name,
+          COALESCE(NULLIF(o.status,''), c.status) AS status,
+          COALESCE(NULLIF(o.rank_override,''), c.rank_override, c.rank_observed) AS rank,
+          COALESCE(NULLIF(o.vessel_observed,''), c.vessel_observed) AS vessel,
+          COALESCE(NULLIF(o.med_exp,''), c.med_exp) AS med_exp, COALESCE(NULLIF(o.sirb_exp,''), c.sirb_exp) AS sirb_exp,
+          COALESCE(NULLIF(o.pp_exp,''), c.pp_exp) AS pp_exp, COALESCE(NULLIF(o.usv_exp,''), c.usv_exp) AS usv_exp,
+          COALESCE(NULLIF(o.sch_exp,''), c.sch_exp) AS sch_exp,
+          (SELECT GROUP_CONCAT(COALESCE(v.name, a.vessel_name), ', ')
+             FROM assignment a JOIN contract k ON k.id = a.contract_id LEFT JOIN vessel v ON v.id = a.vessel_id
+            WHERE k.crew_id = c.id AND a.actual_sign_off IS NULL) AS planned
+     FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id
+    WHERE c.redacted = 0
+    ORDER BY name`;
+
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
   if (p === "/relief" && request.method === "GET") {
@@ -255,10 +269,15 @@ export async function handleRelief(request, url, env) {
     return jsonResp(await reliefBoardData(env, today));
   }
   if (p === "/api/relief/crew" && request.method === "GET") {
-    const rows = (await env.DB.prepare(
-      "SELECT id, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS name FROM crew WHERE redacted=0 ORDER BY name"
-    ).all()).results;
-    return jsonResp({ crew: rows });
+    // The picker (plan v5, phase 5): status, current ship, open projections and document standing
+    // beside every name, so Rita sees a double booking or an expired passport BEFORE she picks.
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = (await env.DB.prepare(RELIEF_CREW_PICKER_SQL).all()).results || [];
+    const crew = rows.map((r) => ({
+      id: r.id, name: r.name, status: r.status || null, rank: r.rank || null, vessel: r.vessel || null,
+      planned: r.planned || null, docs: docBadge(r, today),
+    }));
+    return jsonResp({ crew });
   }
   if (p === "/api/relief/ports" && request.method === "GET") {
     const ship = url.searchParams.get("ship") || "";

@@ -124,6 +124,23 @@ dated card on the crew. Hard rules:
   Expired documents are ALWAYS a warning on the card, the preview and the email, and NEVER a block.
   The sent line clears itself when the next Contract Counter carries that seafarer — that is the loop
   closing, and it is the only thing that closes it. Restore rebuilds the card from the log.
+- **A drop on the Keyman board creates or moves a PROJECTION, never a registry ship** (2026-09-15,
+  `src/projection.js`, `POST /api/rotation/project`). Every card drags: a yellow card MOVES (the
+  assignment changes ship; on the pool it is removed after one confirm); a green or pool card CREATES a
+  yellow card on the target ship and stays where it is (one crew, two ships). Dates = the target ship's
+  current printer sign-off if ahead, else today; + 6 months (+ 5 Azamara); the same ship twice is refused
+  (`already_projected`). The old `/api/rotation/assign` (crew_override.vessel_observed) is retired: it
+  produced an undated green, undraggable card. A crew with an open projection leaves the unassigned pool.
+  Pinned by `test/projection.test.js` + `test/board_cards.test.js`.
+- **Never read the whole itinerary table.** `vessel_port_day` is ~40k rows (one per ship per day, 2.5
+  years); reading it on every board request was the "takes forever to save". `src/port_days.js` fetches
+  only the card dates ±1 day per ship (three ≤5-term compound queries in the wave) plus the Azamara
+  turnarounds; rotationSections and the relief board both use it. Pinned by `test/port_days.test.js`
+  (real SQLite) and its static guard (`FROM vessel_port_day` with no WHERE/JOIN fails the suite).
+- **The reliever picker shows status · ship · open projections · document standing** beside each name
+  (`RELIEF_CREW_PICKER_SQL`, `/api/relief/crew`) and confirms before a double booking.
+- **A failed board API must say so on the page.** `renderRotation` shows the HTTP status and error instead
+  of an empty ship list (the 15 Sep empty-board incident hid a 500 behind a blank board).
 - **`preview_urls = false` stays in `wrangler.toml`.** Non-production branch builds run
   `wrangler versions upload`, which uploads a version of THIS worker on the PRODUCTION D1/R2/MAILER
   bindings; with preview URLs on, Cloudflare serves it at a public `<version>-cims-hr-console...

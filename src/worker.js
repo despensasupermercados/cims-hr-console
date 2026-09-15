@@ -26,7 +26,9 @@ import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
-import { removeReliefAssignment, saveReliefAssignment } from "./relief_api.js";
+import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./relief_api.js";
+import { fetchBoardPortDays } from "./port_days.js";
+import { createProjection } from "./projection.js";
 import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
@@ -216,7 +218,7 @@ export default {
         // Deploy: the CTA on a projection. Sends Joy the seafarer, takes the card off the board and
         // logs it so it can be put back. Inside the boundary and behind the session gate (§11).
         if (session) { const kd = await _kmDeploy(p, request, env, url, session); if (kd) return kd; }
-        if (p === "/api/rotation/assign" && request.method === "POST") return apiRotationAssign(request, env, session);
+        if (p === "/api/rotation/project" && request.method === "POST") return apiRotationProject(request, env, session);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
         if (p === "/api/rotation/note" && request.method === "POST") return apiNote(request, env, session);
@@ -1467,7 +1469,7 @@ async function rotationSections(env) {
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
     env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
-    env.DB.prepare("SELECT brand, ship_short, berth_date, port_name, is_sea, is_turnaround FROM vessel_port_day").all(),
+    fetchBoardPortDays(env).then((rows) => ({ results: rows })), // card dates ±1 day only — never the whole 40k-row itinerary (port_days.js)
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
     env.DB.prepare("SELECT name, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
@@ -1585,6 +1587,7 @@ async function rotationSections(env) {
   // The board's own key for a ship, matching window.reliefKey in the page: the relief editor opens on it.
   const vkOf = (ship) => (brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship;
   const promByShip = {}, shoreside = [], pool = [];
+  const plannedScs = new Set((openAsg || []).map((a) => a.sc).filter(Boolean));
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
     const rm = rmap[c.agency_id] || {}; base.eccr = !!rm.eccr; base.air = !!rm.air; base.hotel = !!rm.hotel; base.hasNote = !!(rm.note && String(rm.note).trim());
@@ -1603,7 +1606,9 @@ async function rotationSections(env) {
         sEnr = (schEnr[k] || {})[c.agency_id] || {};
       }
     }
-    if (!ship) { pool.push(base); continue; }
+    // The pool is "active, no ship, no plan": a crew who already holds an open projection is drawn as a
+    // yellow card on that ship, not offered again as unassigned (15 Sep 2026).
+    if (!ship) { if (!plannedScs.has(c.agency_id)) pool.push(base); continue; }
     const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
   }
   const histByShip = {}, histDisp = {};
@@ -1823,26 +1828,17 @@ async function apiReady(request, env, session) {
   await logActivity(env, session && session.email, "crew_ready", b.agency_id + " " + f + "=" + v);
   return json({ ok: true });
 }
-async function apiRotationAssign(request, env, session) {
+// POST /api/rotation/project {agency_id, ship} — a drop on the board creates a PROJECTION (a yellow
+// card = an open assignment), never a registry write. The old /api/rotation/assign wrote
+// crew_override.vessel_observed and came back as a green, undated, undraggable card (15 Sep 2026).
+// Dates: the ship's current printer's sign-off (if ahead) else today; +6 months (+5 Azamara).
+async function apiRotationProject(request, env, session) {
   const b = await request.json().catch(() => ({}));
-  const id = b.agency_id, ship = b.ship;
-  if (!id) return json({ error: "no_id" }, 400);
-  const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(id).first();
-  if (!cr) return json({ error: "not_found" }, 404);
-  const v = (ship === "__POOL__" || !ship) ? null : ship;
-  const now = new Date().toISOString();
-  await ensureCrewExtras(env);
-  // Persist the reassignment in crew_override (which always wins and is untouched by AdvancedQuery
-  // imports) instead of the base crew row — otherwise the next import's COALESCE(excluded.vessel,...)
-  // would silently revert a manual drag. Pool = clear both the override and the base vessel.
-  if (v === null) {
-    await env.DB.prepare("UPDATE crew_override SET vessel_observed=NULL, updated_at=? WHERE agency_id=?").bind(now, id).run();
-    await env.DB.prepare("UPDATE crew SET vessel_observed=NULL, updated_at=? WHERE agency_id=?").bind(now, id).run();
-  } else {
-    await env.DB.prepare("INSERT INTO crew_override (agency_id,vessel_observed,updated_at) VALUES (?,?,?) ON CONFLICT(agency_id) DO UPDATE SET vessel_observed=excluded.vessel_observed, updated_at=excluded.updated_at").bind(id, v, now).run();
-  }
-  await logActivity(env, session && session.email, "rotation_assign", id + " -> " + (v || "pool"));
-  return json({ ok: true });
+  const res = await createProjection(env, { agencyId: b.agency_id, ship: b.ship, today: TODAY() },
+    { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO });
+  if (res && res.ok) await logActivity(env, session && session.email, "projection_create", String(b.agency_id) + " -> " + String(b.ship) + " on " + res.sign_on + " (" + res.id + ")");
+  const status = res && res.ok ? 200 : (res && (res.error === "not_found" || res.error === "unknown_ship") ? 404 : 400);
+  return json(res, status);
 }
 function apiFleet() {
   const today = TODAY();
@@ -4067,8 +4063,10 @@ function rotCard(x){
       +'<button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDelete(event,this)">Remove</button></div>';
   }
   var cls='rcard '+(plan?('plan'+(x.aboard?' aboard':'')):('green'+(x.current?' cur':'')));
-  var dragAttrs=plan?(' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"'):'';
-  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(plan?'Your projection - click to edit, drag to another ship':'TDG contract - click to edit')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
+  // Every card drags. A yellow card MOVES (the assignment changes ship); a green or pool card dropped on
+  // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
+  var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
+  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
     +chip
     +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
@@ -4196,7 +4194,11 @@ async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).j
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  ROT=await (await fetch('/api/rotation')).json();window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};try{var _rel=await (await fetch('/api/relief/board')).json();(_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});}catch(_){}
+  var _rr=await fetch('/api/rotation');ROT=await _rr.json().catch(function(){return {error:'bad_json'};});
+  // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
+  // and nobody could tell the server from the page.
+  if(!_rr.ok||!ROT||ROT.error||!ROT.sections){$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
+  window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};try{var _rel=await (await fetch('/api/relief/board')).json();(_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});}catch(_){}
   ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
   var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
   var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
@@ -4307,9 +4309,13 @@ function drawRotation(){
     var hist=(s.history||[]).slice();
     (s.crew||[]).forEach(function(x){if(x.status==='Retired'&&x.signOn&&x.signOff&&x.signOn!==x.signOff)hist.push({name:x.name,sc:x.agency_id,ours:true,on:x.signOn,off:x.signOff});});
     hist.sort(function(a,b){return (a.off||'')<(b.off||'')?1:-1;});
-    return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),history:hist};
+    // Carry EVERY field the ship renderer reads. Until 15 Sep 2026 this rebuilt the section with
+    // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
+    // (sec.deployed) and the Junior PS rule (sec.jrPsRule) were silently dropped on the way to the page:
+    // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
+    return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:sfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
   });
-  if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0;});
+  if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   h+='<div class=zlabel style="margin-top:14px">Ships ('+secs.length+')</div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
   document.querySelectorAll('#rotbody .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
@@ -4325,13 +4331,17 @@ function drawRotation(){
       if(rule&&rule!=='open'&&DRAGEL&&/jr ps/i.test(DRAGEL.textContent||'')){
         if(!confirm(ship+' is a "'+rule+'" ship for Junior PS.\\n\\nMove this seafarer there anyway?'))return;
       }
-      // Optimistic, animated move: drop the card into the target ship immediately (no full-board flash).
-      if(DRAGEL&&DRAGEL.parentNode!==z){var el=DRAGEL;el.classList.add('landing');z.appendChild(el);setTimeout(function(){el.classList.remove('landing');},260);}
-      // A yellow card is a PROJECTION: the drop moves the assignment itself. The old path wrote the
-      // crew's registry ship (crew_override.vessel_observed), which is not what a plan is and would
-      // have out-voted the TDG registry for that seafarer. Only projections are draggable now.
       var aid=DRAGEL&&DRAGEL.getAttribute('data-aid');
-      if(aid){moveProjection(aid,ship);}else{assignCrew(DRAGID,ship);}
+      var fromPool=!!(DRAGEL&&DRAGEL.parentNode&&DRAGEL.parentNode.getAttribute&&DRAGEL.parentNode.getAttribute('data-ship')==='__POOL__');
+      // Dropped on the pool: a projection is removed (one confirm, logged); anything else just goes back.
+      if(ship==='__POOL__'){if(aid){removeProjection(aid);}else{DRAGID=null;DRAGEL=null;}return;}
+      // A yellow card MOVES: optimistic, animated (no full-board flash), then the assignment changes ship.
+      if(aid){if(DRAGEL&&DRAGEL.parentNode!==z){var el=DRAGEL;el.classList.add('landing');z.appendChild(el);setTimeout(function(){el.classList.remove('landing');},260);}moveProjection(aid,ship);return;}
+      // A green card or a pool card CREATES a projection on the target ship (yellow, dated, draggable).
+      // The green stays where it is - one crew can hold two ships (Miguel, 14 Sep 2026). The old path
+      // wrote crew_override.vessel_observed and produced an undated green card: retired 15 Sep 2026.
+      if(fromPool&&DRAGEL&&DRAGEL.parentNode!==z){var el2=DRAGEL;el2.classList.add('landing');el2.style.opacity='.5';z.appendChild(el2);}
+      createProjection(DRAGID,ship);
     };
   });
 }
@@ -4376,13 +4386,22 @@ async function moveProjection(aid,ship){
     if(!r||!r.ok){renderRotation();alert('Could not move the projection: '+((r&&r.error)||'error'));}
   }catch(e){renderRotation();}
 }
-async function assignCrew(id,ship){
+async function createProjection(id,ship){
   if(!id)return; DRAGID=null; DRAGEL=null;
   try{
-    var r=await (await fetch('/api/rotation/assign',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,ship:ship})})).json();
-    // Success: keep the optimistic card placement (no jarring full re-render). Reconciles on next load.
-    if(!r||!r.ok)renderRotation();
-  }catch(e){renderRotation();}
+    var r=await (await fetch('/api/rotation/project',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,ship:ship})})).json();
+    if(!r||!r.ok){alert(r&&r.error==='already_projected'?'This seafarer already has a projection on '+ship+'. Edit that card instead.':'Could not plan this move: '+((r&&r.error)||'error'));}
+  }catch(e){alert('Network error - the plan was not saved.');}
+  renderRotation();
+}
+async function removeProjection(aid){
+  DRAGID=null; DRAGEL=null;
+  if(!confirm('Remove this projection from the board?\\n\\nThe TDG card, if any, is never touched.')){renderRotation();return;}
+  try{
+    var r=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:aid})})).json();
+    if(!r||!r.ok)alert('Could not remove: '+((r&&r.error)||'error'));
+  }catch(e){alert('Network error');}
+  renderRotation();
 }
 let COMP=null;
 async function renderCompliance(){
