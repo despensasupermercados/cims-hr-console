@@ -55,12 +55,15 @@ test("the page's inline script runs top to bottom without throwing", () => {
   }
 });
 
-test("GREEN is a TDG card: never draggable, click opens the contract editor", () => {
+// 15 Sep 2026 (Miguel: "I cannot drag and drop"): a green card DRAGS, but a drop never moves it —
+// it creates a yellow projection on the target ship and the green stays (one crew, two ships).
+// TDG still owns the green card: no Remove, no PLAN label, the click still opens the contract editor.
+test("GREEN is a TDG card: drags to PLAN elsewhere, never moves; click opens the contract editor", () => {
   const h = ctx.rotCard(GREEN);
   assert.match(h, /class="rcard green cur"/);
-  assert.doesNotMatch(h, /draggable/, "a TDG contract is not Rita's to drag — she edits it, TDG moves it");
-  assert.doesNotMatch(h, /ondragstart/);
-  assert.match(h, /title="TDG contract - click to edit"/);
+  assert.match(h, /draggable="true"/, "a green card must drag: the drop creates a projection on the target ship");
+  assert.match(h, /ondragstart="rcDrag\(event,this\)"/);
+  assert.match(h, /title="TDG contract - click to edit, drag to another ship to plan them there"/);
   assert.doesNotMatch(h, /planDelete/, "a TDG card has no Remove: what is in the import stays");
   assert.doesNotMatch(h, /rlab plan/);
   assert.match(h, /Ana Alpha/);
@@ -183,17 +186,26 @@ test("exactly one definition of each relief renderer survives — the shadowing 
 
 /* ---- review, 14 Sep 2026: the drag path ---- */
 
-test("dropping a PROJECTION moves the assignment; it never writes the crew's registry ship", () => {
+test("dropping a PROJECTION moves the assignment; dropping anything else CREATES one; the registry ship is never written", () => {
   const src = readFileSync(SRC, "utf-8");
   assert.equal(typeof ctx.moveProjection, "function", "moveProjection must exist on the page");
+  assert.equal(typeof ctx.createProjection, "function", "createProjection must exist on the page");
+  assert.equal(typeof ctx.removeProjection, "function", "removeProjection must exist on the page");
   const drop = src.slice(src.indexOf("z.ondrop=function(e){e.preventDefault();z.classList.remove('dragover');"));
-  const body = drop.slice(0, drop.indexOf("};", 0) + 2);
+  const body = drop.slice(0, drop.indexOf("createProjection(DRAGID,ship);") + "createProjection(DRAGID,ship);".length);
   assert.match(body, /var aid=DRAGEL&&DRAGEL\.getAttribute\('data-aid'\)/, "the drop must look at WHICH card was dragged");
-  assert.match(body, /if\(aid\)\{moveProjection\(aid,ship\);\}else\{assignCrew\(DRAGID,ship\);\}/,
-    "a yellow card goes through moveProjection; the crew_override path is only for a card with no projection behind it");
+  assert.match(body, /if\(ship==='__POOL__'\)\{if\(aid\)\{removeProjection\(aid\);\}/, "a projection dropped on the pool is removed; nothing else happens to a green card there");
+  assert.match(body, /if\(aid\)\{[^\n]*moveProjection\(aid,ship\);return;\}/, "a yellow card goes through moveProjection");
+  assert.match(body, /createProjection\(DRAGID,ship\);/, "a green or pool card creates a projection on the target ship (15 Sep 2026)");
+  // The registry-write path is gone for good: no client caller, no route, no handler.
+  assert.doesNotMatch(src, /assignCrew\(/, "the old drag path (crew_override.vessel_observed) must not come back");
+  assert.doesNotMatch(src, /"\/api\/rotation\/assign"/, "the registry-ship route is retired");
+  assert.doesNotMatch(src, /async function apiRotationAssign/, "the registry-ship handler is retired");
+  assert.match(src, /"\/api\/rotation\/project" && request\.method === "POST"/, "the projection route is wired");
   const mv = src.slice(src.indexOf("async function moveProjection(aid,ship){"));
   assert.match(mv.slice(0, mv.indexOf("\n}")), /fetch\('\/api\/relief\/save'[\s\S]*vessel_name:ship/, "the move is the relief board's own save: id + vessel_name");
-  assert.doesNotMatch(mv.slice(0, mv.indexOf("\n}")), /rotation\/assign/, "never the registry-ship route");
+  const cp = src.slice(src.indexOf("async function createProjection(id,ship){"));
+  assert.match(cp.slice(0, cp.indexOf("\n}")), /fetch\('\/api\/rotation\/project'[\s\S]*agency_id:id,ship:ship/, "create posts crew + ship; the server picks the dates");
 });
 
 test("a Counter leg takes its edit from editFor only — no position fallback that could reattach an edit", () => {
@@ -215,4 +227,19 @@ test("the on_key backfill is its own statement, not hidden inside the ALTER's tr
   const between = body.slice(alter, upd);
   assert.match(between, /catch \{\}/, "the ALTER's try must be CLOSED before the UPDATE begins — a thrown ALTER must not skip the backfill, and a thrown backfill must not be lost behind an ALTER that already succeeded");
   assert.match(body.slice(upd), /WHERE on_key IS NULL/, "idempotent: a no-op once backfilled");
+});
+
+/* ---- 15 Sep 2026: the page dropped the projections on the way to the renderer ---- */
+
+test("drawRotation hands the ship renderer its projections, deployed lines and Junior PS rule", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const draw = src.slice(src.indexOf("function drawRotation(){"));
+  const body = draw.slice(0, draw.indexOf("document.getElementById('rotbody').innerHTML=h;"));
+  const map = body.match(/return \{ship:s\.ship,[^\n]*\};/);
+  assert.ok(map, "the per-section rebuild must still exist");
+  for (const k of ["projections:", "deployed:", "jrPsRule:", "crew:", "history:"]) {
+    assert.ok(map[0].includes(k), "the rebuilt section lost `" + k + "` — rotShip reads it, so it silently rendered nothing (this hid 26 yellow cards)");
+  }
+  assert.match(map[0], /projections:sfilt\(s\.projections\)/, "the status/month filter applies to projections like it does to crew");
+  assert.match(body, /s\.crew\.length>0\|\|s\.projections\.length>0/, "a ship with only projections must survive the status filter");
 });
