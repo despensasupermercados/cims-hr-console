@@ -1001,6 +1001,18 @@ async function apiKeymanImport(request, env, session) {
       absorbed.push({ id: a.id, sc: a.sc, name: a.name || null, ok: !!r.ok, error: r.ok ? null : r.error });
     }
   }
+  // PER-ROW SETTLE (15 Sep 2026): the dry-run lists the projections the file CONTRADICTS; Rita ticks
+  // the ones the Counter should win and they retire here. Only ids the diff itself reported as
+  // conflicts are honoured — the body can never name an arbitrary card. Unticked cards stay, reported.
+  const wanted = new Set((Array.isArray(b.dropConflicts) ? b.dropConflicts : []).map(String));
+  const dropped = [];
+  for (const c of report.conflicts) {
+    if (!wanted.has(String(c.id))) continue;
+    const r = await removeReliefAssignment(env, c.id).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+    dropped.push({ id: c.id, sc: c.sc, name: c.name || null, ok: !!r.ok, error: r.ok ? null : r.error });
+  }
+  const droppedOk = new Set(dropped.filter(x => x.ok).map(x => String(x.id)));
+  const conflictsLeft = report.conflicts.filter(c => !droppedOk.has(String(c.id)));
   // Re-pin the version. Since the reseed guard (ensureKeymanImpl) a populated table is never
   // overwritten by the bundled constant regardless of this pin; it only keeps the guard from logging
   // a spurious "reseed refused" row after this import.
@@ -1010,9 +1022,10 @@ async function apiKeymanImport(request, env, session) {
     "refreshed " + matched.length + " crew"
     + (shrink.length ? ", " + shrink.length + " with fewer contracts than before" : "")
     + (okAbsorbed ? ", " + okAbsorbed + " projection" + (okAbsorbed === 1 ? "" : "s") + " absorbed" : "")
-    + (report.conflicts.length ? ", " + report.conflicts.length + " conflicting projection" + (report.conflicts.length === 1 ? "" : "s") + " left for review" : ""));
+    + (droppedOk.size ? ", " + droppedOk.size + " contradicted projection" + (droppedOk.size === 1 ? "" : "s") + " replaced by the file" : "")
+    + (conflictsLeft.length ? ", " + conflictsLeft.length + " conflicting projection" + (conflictsLeft.length === 1 ? "" : "s") + " left for review" : ""));
   return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length,
-    shrank: shrink.length, absorbed, conflicts: report.conflicts, overrides: report.overrides.length });
+    shrank: shrink.length, absorbed, dropped, conflicts: conflictsLeft, overrides: report.overrides.length });
 }
 
 async function apiDataStatus(env) {
@@ -1247,6 +1260,11 @@ async function ensureCrewExtrasImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_override (agency_id TEXT PRIMARY KEY, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_override TEXT, vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT, baseline_count INTEGER, notes TEXT, updated_at TEXT)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)").run();
   try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
+  // The manual-entry agency (15 Sep 2026). crew.agency_code REFERENCES agency(code) and the only seeded
+  // row was TDG (0001_init), so every "+ Add crew" (agency_code 'MAN') died on the foreign key with a
+  // bare 500 — prod's activity_log holds ZERO crew_add rows, ever. Reference data, idempotent, memoized
+  // with the rest of this guard; migrations/0018_agency_manual.sql carries the same row for the record.
+  await env.DB.prepare("INSERT OR IGNORE INTO agency (id,code,name) VALUES ('agency-man','MAN','Manual entry (CIMS console)')").run();
 }
 // Board legs = the live schedule: current ship_leg rows + crew aboard per the relief board
 // (ship_leg_source.boardLegsFromDb). The source flip is a DATA change (app_config.board_source);
@@ -1355,6 +1373,10 @@ async function apiCrewSave(request, env, session) {
   return json({ ok: true });
 }
 // + Add crew (manual): write a base row AND an override so a later AdvancedQuery import can't clobber it.
+// A ship on the Add form is a PLAN (15 Sep 2026, Keyman Board Redesign v5): it becomes a yellow
+// projection on the board (createProjection, the same path as a drag), NOT a registry ship. Writing
+// vessel_observed here produced the undated green card that out-voted TDG; the registry ship is TDG's
+// word (AdvancedQuery) or an explicit correction in Edit crew → Current vessel.
 async function apiCrewAdd(request, env, session) {
   const b = await request.json().catch(() => ({}));
   const id = String(b.agency_id || "").trim();
@@ -1365,8 +1387,8 @@ async function apiCrewAdd(request, env, session) {
   const now = new Date().toISOString();
   // A starting bonus baseline is money: only money users may seed it on add.
   const baselineVal = (isMoneyUser(session && session.email) && b.baseline_count != null) ? +b.baseline_count : null;
-  await env.DB.prepare("INSERT INTO crew (id,agency_id,agency_code,first_name,middle_name,last_name,status,rank_observed,vessel_observed,dob,pp_no,baseline_count,redacted,created_at,updated_at) VALUES (?,?,'MAN',?,?,?,?,?,?,?,?,?,0,?,?)")
-    .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now, now).run();
+  await env.DB.prepare("INSERT INTO crew (id,agency_id,agency_code,first_name,middle_name,last_name,status,rank_observed,vessel_observed,dob,pp_no,baseline_count,redacted,created_at,updated_at) VALUES (?,?,'MAN',?,?,?,?,?,NULL,?,?,?,0,?,?)")
+    .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.dob || null, b.pp_no || null, baselineVal, now, now).run();
   // NOTE: status is deliberately NOT written to the override (2026-09-09). crew_override.status is
   // a MANUAL PIN — crewStatus() returns it verbatim and never reaches deriveStatus(), so seeding it
   // here froze every manually added crew at their starting value for good: they stayed "Earmarked"
@@ -1375,10 +1397,21 @@ async function apiCrewAdd(request, env, session) {
   // ratification — a lot of ceremony for a field nobody chose to pin. The base crew.status below is
   // the right home: deriveStatus falls back to it as `imported` when there is no dated leg, so the
   // card still reads "Earmarked" on day one and starts deriving the moment a leg exists.
-  await env.DB.prepare("INSERT INTO crew_override (agency_id,first_name,middle_name,last_name,rank_override,vessel_observed,dob,pp_no,baseline_count,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_id) DO UPDATE SET updated_at=excluded.updated_at")
-    .bind(id, b.first_name, b.middle_name || null, b.last_name, b.rank_observed || null, b.vessel_observed || null, b.dob || null, b.pp_no || null, baselineVal, now).run();
+  await env.DB.prepare("INSERT INTO crew_override (agency_id,first_name,middle_name,last_name,rank_override,dob,pp_no,baseline_count,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(agency_id) DO UPDATE SET updated_at=excluded.updated_at")
+    .bind(id, b.first_name, b.middle_name || null, b.last_name, b.rank_observed || null, b.dob || null, b.pp_no || null, baselineVal, now).run();
   await logActivity(env, session && session.email, "crew_add", id);
-  return json({ ok: true, agency_id: id });
+  // The plan, if a ship was picked: a yellow card on that ship with the board's default dates. The crew
+  // row is already saved — a failed plan (unknown ship) is reported, never a reason to lose the add.
+  let projection = null;
+  const planShip = String(b.ship || b.vessel_observed || "").trim();
+  if (planShip) {
+    const ship = canonShipWith(planShip, SHIP_KEYS) || planShip;
+    projection = await createProjection(env, { agencyId: id, ship, today: TODAY() },
+      { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO })
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+    if (projection && projection.ok) await logActivity(env, session && session.email, "projection_create", id + " -> " + ship + " on " + projection.sign_on + " (" + projection.id + ", from Add crew)");
+  }
+  return json({ ok: true, agency_id: id, projection });
 }
 // Hide / restore a crew card (reversible). Flips the existing crew.redacted flag that EVERY roster
 // query already filters on (WHERE redacted=0), so a hidden card disappears from all views but keeps
@@ -3441,8 +3474,8 @@ async function previewKeyman(){
     h+='<div class=hint style="margin-top:8px;border-left:3px solid #1f7a3d"><b style="color:#1f7a3d">'+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' the file now carries</b> &mdash; the loop closes: '+(r.absorbs.length===1?'this card is':'these cards are')+' removed on Apply and the seafarer comes back as a TDG card.<br>'
       +r.absorbs.slice(0,12).map(function(x){return nmOf(x)+' &middot; '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &rarr; TDG '+dt(x.counter.sign_on)+(x.gap_days!=null?(' ('+(x.gap_days>0?'+':'')+x.gap_days+'d)'):'');}).join('<br>')+'</div>';
   if(r.conflicts&&r.conflicts.length)
-    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.conflicts.length+' projection'+(r.conflicts.length===1?'':'s')+' the file contradicts</b> &mdash; left on the board for you to settle; Apply changes nothing about '+(r.conflicts.length===1?'it':'them')+'.<br>'
-      +r.conflicts.slice(0,12).map(function(x){return nmOf(x)+' &middot; you have '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &middot; TDG says '+impEsc(x.counter.ship||'?')+' '+dt(x.counter.sign_on)+' ('+(x.why==='ship'?'different ship':'dates apart')+')';}).join('<br>')+'</div>';
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.conflicts.length+' projection'+(r.conflicts.length===1?'':'s')+' the file contradicts</b> &mdash; unticked '+(r.conflicts.length===1?'it stays':'they stay')+' on the board for you to settle; tick a row and the Counter wins (your card is removed on Apply).<br>'
+      +r.conflicts.map(function(x){return '<label class=csub style="display:block;margin-top:3px"><input type=checkbox class=kmdrop value="'+impEsc(x.id)+'"> '+nmOf(x)+' &middot; you have '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &middot; TDG says '+impEsc(x.counter.ship||'?')+' '+dt(x.counter.sign_on)+' ('+(x.why==='ship'?'different ship':'dates apart')+')</label>';}).join('')+'</div>';
   if(r.overrides&&r.overrides.length)
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.overrides.length+' of your edit'+(r.overrides.length===1?'':'s')+' '+(r.overrides.length===1?'is':'are')+' older than this file</b> &mdash; the newer write wins, so the TDG dates take over and the card will say so.<br>'
       +r.overrides.slice(0,12).map(function(x){return nmOf(x)+' &middot; yours '+dt(x.rita.sign_off)+' &rarr; TDG '+dt(x.counter.sign_off);}).join('<br>')+'</div>';
@@ -3462,12 +3495,15 @@ async function previewKeyman(){
 async function applyKeyman(){
   var ab=$('#kmabsorb');
   var absorb=ab?!!ab.checked:true;
+  var drop=Array.prototype.map.call(document.querySelectorAll('.kmdrop:checked'),function(x){return x.value;});
   $('#imp').textContent='Refreshing contract history…';
-  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP,absorb:absorb})})).json();
+  var r=await (await fetch('/api/keyman/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rows:KEYMANUP,absorb:absorb,dropConflicts:drop})})).json();
   if(r.ok){
     var done=(r.absorbed||[]).filter(function(x){return x.ok;});
+    var gone=(r.dropped||[]).filter(function(x){return x.ok;});
     var extra='';
     if(done.length)extra+=' '+done.length+' projection'+(done.length===1?'':'s')+' retired — the loop closed.';
+    if(gone.length)extra+=' '+gone.length+' contradicted projection'+(gone.length===1?'':'s')+' replaced by the file.';
     if(r.conflicts&&r.conflicts.length)extra+=' '+r.conflicts.length+' contradicted projection'+(r.conflicts.length===1?'':'s')+' left on the board for you.';
     $('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew.'+extra+' Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
@@ -4349,7 +4385,7 @@ function drawRotation(){
 // mirroring the Crew tab's edit screen. Same money-gated, reversible /api/crew/hide underneath.
 // Restore lives behind the toolbar's "Hidden cards" button (shared hiddenCardsModal).
 async function hideCrewFromBoard(id){
-  if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Keyman, Crew, Dashboard, Billing). You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
+  if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Keyman, Crew, Dashboard, Billing) AND from the timecard roster export. You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
   var em=document.getElementById('cmtmsg');if(em)em.textContent='Hiding…';
   try{
     var r=await (await fetch('/api/crew/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,hidden:1})})).json();
@@ -5006,11 +5042,11 @@ function crewById(id){return CREW.filter(function(c){return c.agency_id===id;})[
 function closeCrewModal(){var m=document.getElementById('crewmodal');if(m)m.remove();}
 function addCrewModal(){
   var fg=function(lab,inp){return '<div class=fg><label>'+lab+'</label>'+inp+'</div>';};
-  var h='<div class=modcard><div class=modhd><div><div class=cname>Add crew</div><div class=csub>Manual entry — protected from AdvancedQuery overwrites.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
+  var h='<div class=modcard><div class=modhd><div><div class=cname>Add crew</div><div class=csub>Manual entry — protected from AdvancedQuery overwrites. A ship here is a PLAN: it becomes a yellow card on the Keyman board (Deploy sends it to TDG). Already on board? Add, then Edit → Current vessel.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
    +'<div class=f2 style="margin-top:12px">'
    +fg('First name','<input id=aFirst>')+fg('Last name','<input id=aLast>')
    +fg('Crew ID','<input id=aId placeholder="e.g. SC-0046000">')+fg('Passport no.','<input id=aPass>')
-   +fg('Status','<select id=aStatus>'+statusOptions('Earmarked')+'</select>')+fg('Current vessel','<select id=aShip>'+shipOptions('')+'</select>')
+   +fg('Status','<select id=aStatus>'+statusOptions('Earmarked')+'</select>')+fg('Ship (plan — yellow card)','<select id=aShip>'+shipOptions('')+'</select>')
    +fg('Date of birth','<input id=aDob type=date>')+fg('Starting rank','<select id=aRank><option value="">Junior Printer Specialist</option><option value="Printer Specialist">Printer Specialist</option></select>')
    +'</div>'
    +'<div style="margin-top:10px;text-align:right"><span id=aMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveNewCrew()">Add crew</button></div></div>';
@@ -5020,9 +5056,9 @@ async function saveNewCrew(){
   var g=function(x){return document.getElementById(x).value.trim();};
   if(!g('aId')||!g('aFirst')||!g('aLast')){document.getElementById('aMsg').textContent='ID, first and last name are required.';return;}
   document.getElementById('aMsg').textContent='Saving…';
-  var body={agency_id:g('aId'),first_name:g('aFirst'),last_name:g('aLast'),pp_no:g('aPass')||null,status:g('aStatus'),vessel_observed:document.getElementById('aShip').value||null,dob:g('aDob')||null,rank_observed:document.getElementById('aRank').value||'Junior Printer Specialist'};
+  var body={agency_id:g('aId'),first_name:g('aFirst'),last_name:g('aLast'),pp_no:g('aPass')||null,status:g('aStatus'),ship:document.getElementById('aShip').value||null,dob:g('aDob')||null,rank_observed:document.getElementById('aRank').value||'Junior Printer Specialist'};
   try{var r=await (await fetch('/api/crew/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(r.ok){closeCrewModal();renderCrew();}else document.getElementById('aMsg').textContent=r.error==='exists'?'That crew ID already exists.':'Could not add.';
+    if(r.ok){closeCrewModal();renderCrew();if(r.projection&&!r.projection.ok)alert('Crew added, but the plan on '+(body.ship||'?')+' was not created: '+(r.projection.error||'error')+'. Drag the card onto the ship on the Keyman board instead.');}else document.getElementById('aMsg').textContent=r.error==='exists'?'That crew ID already exists.':'Could not add.';
   }catch(e){document.getElementById('aMsg').textContent='Could not add.';}
 }
 async function editCrewModal(id){
@@ -5058,7 +5094,7 @@ async function saveEditCrew(id){
 }
 // Hide (void) a crew card — reversible. Removes it from every roster via the server's redacted flag.
 async function hideCrew(id){
-  if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Crew, Dashboard, Rotation, Billing). You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
+  if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Crew, Dashboard, Keyman, Billing) AND from the timecard roster export. You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
   var em=document.getElementById('eMsg');if(em)em.textContent='Hiding…';
   try{
     var r=await (await fetch('/api/crew/hide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,hidden:1})})).json();

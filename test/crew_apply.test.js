@@ -130,3 +130,31 @@ test("importRun summary counts touched rows and open conflicts", () => {
   assert.equal(plan.importRun.rows_upserted, 4); // SC-2 status now auto-applies (D6)
   assert.equal(plan.importRun.conflicts, 2);
 });
+
+// D1 amendment (2026-09-15, Keyman Board Redesign v5): the ship row is a real per-row decision.
+test("ship flag 'take' -> shipTakes (its OWN list, never crewUpdates) + resolved audit row marked taken", () => {
+  const plan = buildApplyPlan(sampleReview(), { "ship:SC-1": "take" });
+  assert.deepEqual(plan.shipTakes, [{ agency_id: "SC-1", value: "Celebrity Apex", expect: "Celebrity Edge" }]);
+  assert.equal(plan.crewUpdates.some(u => u.field === "vessel_observed"), false, "still never a crewUpdate");
+  const ship = plan.conflicts.find(c => c.field === "vessel_observed" && c.agency_id === "SC-1");
+  assert.equal(ship.resolved, 1);
+  assert.equal(ship.taken, true);
+  assert.equal(plan.importRun.rows_upserted >= 1 && plan.importRun.conflicts, 1, "the departed flag is the only open conflict left");
+});
+
+test("ship flag 'dismiss' -> no shipTakes, audit row resolved but NOT taken; default 'flag' stays open", () => {
+  const dis = buildApplyPlan(sampleReview(), { "ship:SC-1": "dismiss" });
+  assert.deepEqual(dis.shipTakes, []);
+  const d = dis.conflicts.find(c => c.field === "vessel_observed");
+  assert.equal(d.resolved, 1); assert.equal(d.taken, undefined);
+  const def = buildApplyPlan(sampleReview(), {});
+  assert.deepEqual(def.shipTakes, []);
+  assert.equal(def.conflicts.find(c => c.field === "vessel_observed").resolved, 0);
+});
+
+test("'take' only comes from the ship_flag tier — the same decision key on another tier writes nothing", () => {
+  const review = { groups: { cert: [{ agency_id: "SC-1", field: "vessel_observed", old: "A", new: "B" }] } };
+  const plan = buildApplyPlan(review, { "ship:SC-1": "take", "SC-1:vessel_observed": "accept" });
+  assert.deepEqual(plan.shipTakes, []);
+  assert.equal(plan.crewUpdates.length, 0);
+});

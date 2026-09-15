@@ -35,6 +35,12 @@ untested migration or data load against the production database.
 Anything else — and ALWAYS anything touching money, auth, schema, or crew data — must be
 a PR for human review, not an auto-merge.
 
+**Interactive sessions (Miguel's standing instruction, 2026-09-15: "next time u go ahead and merge
+them"):** a session Miguel is driving may merge its OWN pull request once (a) CI is green, (b) the
+change was verified locally (tests + the rendered page where UI changed) and (c) the PR is not a
+money change under §1. Money changes (`src/bonus.js`, payout, `bonus_outcome`, baselines) stay
+Miguel's to merge, always. §9 still applies after the merge: prove the deploy is live.
+
 ## 6. Data integrity is a first-class job
 The crew identity bridge is fragile: AdvancedQuery uses agency IDs `SC-00NNNNN`; Keyman
 uses 6-digit Royal IDs; they are matched by name until `ship_crew_id` is stored on crew.

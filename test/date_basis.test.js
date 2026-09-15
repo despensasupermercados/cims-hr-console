@@ -59,7 +59,10 @@ test("UTC basis is used by exactly these functions", () => {
     // is a const declared further down, so reading it eagerly there is a temporal-dead-zone crash.
     // The deployment card therefore shares the console's UTC basis, which is the point of listing it.
     "(top level)",
-    "apiAsk", "apiBillingMonth", "apiBonusCrew", "apiCrew", "apiCrewOne",
+    "apiAsk", "apiBillingMonth", "apiBonusCrew", "apiCrew",
+    // 2026-09-15: a ship on the Add-crew form is a projection (same path and day basis as a drop).
+    "apiCrewAdd",
+    "apiCrewOne",
     "apiDashboard", "apiDataStatus", "apiDaysWorked", "apiFleet", "apiMariaEval",
     "apiMariaKnowledge",
     // 2026-09-15: a drop creates a projection dated from the board's own day (TODAY, UTC) — the same

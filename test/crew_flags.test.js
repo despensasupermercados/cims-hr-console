@@ -89,3 +89,14 @@ test("boardShipsFromLegs: the leg spanning today decides; ended and future legs 
   assert.equal(b("SC-5"), null);
   assert.equal(AUTO_CLOSED, 2, "0 open · 1 decided by a person · 2 closed automatically");
 });
+
+test("a flag Rita TOOK closes every open flag on that crew, whichever ship they named (the ship is settled)", () => {
+  const taken = { ...flag("SC-1", "Celebrity Apex", 1), taken: true };
+  const r = reconcileShipFlags({
+    open: [{ id: "f1", agency_id: "SC-1", new_value: "Apex" }, { id: "f2", agency_id: "SC-1", new_value: "Quest" }, { id: "f3", agency_id: "SC-2", new_value: "Apex" }],
+    incoming: [taken], boardShip: board({}), shipOf,
+  });
+  assert.deepEqual(r.close, [{ id: "f1", why: "taken" }, { id: "f2", why: "taken" }]);
+  assert.equal(r.counts.closed_taken, 2);
+  assert.equal(r.insert.length, 1, "the resolved=1 audit row is still written");
+});
