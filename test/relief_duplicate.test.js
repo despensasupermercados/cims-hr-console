@@ -88,7 +88,7 @@ test("the reliever query reads IN-FORCE assignments only", () => {
 test("the board does not draw a reliever who is already aboard", () => {
   const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   // The LAST definition of each is the one the browser runs.
-  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb){"));
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
   assert.match(slot.slice(0, slot.indexOf("\n")), /if\(rb\.reliever&&rb\.reliever\.aboard\)return '';/,
     "an aboard reliever is already on the ship as a crew card — drawing the slot too is the duplicate");
   const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
@@ -129,7 +129,7 @@ test("an overdue seat outranks every other state on the board", () => {
 
 test("the board never prints a negative day count at the reader", () => {
   const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb){"));
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
   assert.match(slot.slice(0, slot.indexOf("\n")), /OFF WAS '\+\(-d\)\+'D AGO/,
     "a past sign-off reads as elapsed, not as a countdown");
   const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
@@ -138,4 +138,23 @@ test("the board never prints a negative day count at the reader", () => {
     "say WHY the seat is unresolved: nobody recorded the sign-off");
   // the crew card carried the same defect ("OFF in -1d" on Anthem)
   assert.match(SRC, /dd<0\?\('OFF was '\+\(-dd\)\+'d ago'\)/);
+});
+
+// 15 Sep 2026, Miguel, twice: "It's not yellow." The first time the card was missing; the second time it
+// was drawn but its background was #fffdf7 — white to the eye — with a thin dashed border, and the SAME
+// projection was drawn again below it by reliefSlot as a white RELIEVER card (every projection is a
+// reliever-role assignment, so the old slot duplicated every plan card). Two pins: the plan card is a
+// colour a person calls yellow, and the slot never repeats a plan card.
+test("a plan card is unmistakably yellow, and the reliever slot does not repeat it", () => {
+  const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const m = SRC.match(/\.rcard\.plan\{[^}]*background:#([0-9a-fA-F]{6})[^}]*\}/);
+  assert.ok(m, ".rcard.plan must set a hex background");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
+  assert.ok(r >= 240 && g >= 220 && b <= 190, `plan background #${m[1]} is not a yellow a person would call yellow (r${r} g${g} b${b})`);
+  assert.doesNotMatch(m[0], /dashed/, "a solid border: the dashed one read as a placeholder, not a card");
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
+  const line = slot.slice(0, slot.indexOf("\n"));
+  assert.match(line, /projs\.some\(function\(p\)\{return \(p\.assignment_id&&p\.assignment_id===rb\.reliever\.id\)/,
+    "a reliever already drawn as a plan card (same assignment) must not be drawn again as a RELIEVER card");
+  assert.match(SRC, /var _rslot=reliefSlot\(_rb,projs\);/, "rotShip must hand the section's projections to the slot");
 });

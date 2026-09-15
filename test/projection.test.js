@@ -27,7 +27,9 @@ function envFor(d) {
     first: async () => d.prepare(sql).get(...args) ?? null,
     run: async () => { d.prepare(sql).run(...args); return { success: true }; },
   });
-  return { DB: { prepare: (sql) => stmt(sql) } };
+  // batch = one transaction, statements in order (saveReliefAssignment inserts contract + assignment this way)
+  const batch = async (stmts) => { const out = []; d.exec("BEGIN"); try { for (const s of stmts) out.push(await s.run()); d.exec("COMMIT"); } catch (e) { d.exec("ROLLBACK"); throw e; } return out; };
+  return { DB: { prepare: (sql) => stmt(sql), batch } };
 }
 const TODAY = "2026-09-15";
 // The board as boardLegs(env) returns it: the Adventure printer signs off 2026-11-29; Quest's is overdue.

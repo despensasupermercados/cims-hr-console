@@ -93,3 +93,32 @@ test("dashboard compliance counts stay consolidated into one pass over crew", ()
   // One aggregate query instead of five COUNT(*) round trips.
   assert.match(b, /SUM\(CASE WHEN med_exp/, "apiDashboard compliance counts were split back into separate queries");
 });
+
+// 15 Sep 2026 — "still takes sooo much to save". The D1 primary is one fixed region; every SEQUENTIAL
+// round trip from a distant Worker pays that distance. These pin the save path at its new shape.
+test("Add crew writes crew + override + activity_log in ONE batch and places the plan in the background", () => {
+  const i = SRC.indexOf("async function apiCrewAdd(");
+  const add = SRC.slice(i, SRC.indexOf("\n}\n", i));
+  assert.match(add, /await env\.DB\.batch\(writes\)/, "one batch for the three inserts");
+  assert.doesNotMatch(add, /\)\.run\(\);/, "no per-statement .run() left on the save path");
+  assert.match(add, /if \(ctx && ctx\.waitUntil\) \{ ctx\.waitUntil\(placePlan\(\)\);/, "the projection rides behind the response");
+  assert.match(add, /Promise\.all\(\[\s*env\.DB\.prepare\("SELECT agency_id FROM crew WHERE agency_id=\?"\)[^]*?ensureCrewExtras\(env\),\s*\]\)/, "the exists check and the schema guard leave together");
+});
+
+test("saveReliefAssignment inserts contract + assignment in ONE batch", () => {
+  const R = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
+  const i = R.indexOf("export async function saveReliefAssignment(");
+  const fn = R.slice(i, R.indexOf("\n}\n", i));
+  assert.match(fn, /await env\.DB\.batch\(\[contractIns, env\.DB\.prepare\("INSERT INTO assignment/);
+  assert.doesNotMatch(fn, /INSERT INTO contract[^]*?\.run\(\)/, "the contract insert must not be its own round trip");
+});
+
+test("the board's two reads (rotation + relief board) are in flight together, and slow /api requests are logged off the request path", () => {
+  const i = SRC.indexOf("async function renderRotation(){");
+  const fn = SRC.slice(i, i + 1500);
+  assert.match(fn, /var _relP=fetch\('\/api\/relief\/board'\)/, "relief board fetch starts before the rotation await");
+  assert.ok(fn.indexOf("var _relP=fetch('/api/relief/board')") < fn.indexOf("var _rr=await fetch('/api/rotation')"));
+  assert.match(SRC, /if \(dur > 600 && ctx && ctx\.waitUntil\) ctx\.waitUntil\(logSlowRequest\(/, "slow requests are persisted after the response");
+  assert.match(SRC, /const ensurePerfLog = memoEnsure\(/, "perf_log DDL is memoized like every other guard (§12)");
+  assert.match(SRC, /async fetch\(request, env, ctx\) \{/, "the handler must accept ctx to have waitUntil at all");
+});

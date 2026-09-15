@@ -21,7 +21,7 @@ function body(sig) {
 // C. A ship on the Add-crew form is a PROJECTION, not a registry ship.
 test("apiCrewAdd never writes vessel_observed (crew or crew_override) and creates a projection instead", () => {
   const add = body("async function apiCrewAdd(");
-  const crewIns = add.slice(add.indexOf("INSERT INTO crew ("), add.indexOf(".run()", add.indexOf("INSERT INTO crew (")));
+  const crewIns = add.slice(add.indexOf("INSERT INTO crew ("), add.indexOf("));", add.indexOf("INSERT INTO crew (")));
   assert.match(crewIns, /vessel_observed,dob,pp_no,baseline_count,redacted,created_at,updated_at\) VALUES \(\?,\?,'MAN',\?,\?,\?,\?,\?,NULL,/,
     "crew.vessel_observed must be a literal NULL on add — the registry ship is TDG's word, not the form's");
   assert.doesNotMatch(crewIns, /b\.vessel_observed/, "the form's ship must not be bound into the crew row");
@@ -31,7 +31,9 @@ test("apiCrewAdd never writes vessel_observed (crew or crew_override) and create
   assert.match(add, /createProjection\(env, \{ agencyId: id, ship, today: TODAY\(\) \}/, "the ship becomes a projection through the drag's own path");
   assert.match(add, /canonShipWith\(planShip, SHIP_KEYS\)/, "the form's 'MV ADVENTURE' must canonicalise to the vessel table's short name");
   assert.match(add, /projection_create/, "a created plan is logged like a drop");
-  assert.match(add, /return json\(\{ ok: true, agency_id: id, projection \}\)/, "the crew row is saved even when the plan fails; the plan result travels back");
+  assert.match(add, /projection: \{ pending: true, ship \}/, "with ctx the plan is placed in the background and the response says so");
+  assert.match(add, /projection: await placePlan\(\)/, "without ctx (tests, tools) the plan runs inline and its result travels back");
+  assert.match(add, /projection_failed/, "a failed background plan is logged, never lost silently");
 });
 
 test("the Add-crew form sends the ship as a plan and tells the user when the plan failed", () => {
@@ -39,6 +41,7 @@ test("the Add-crew form sends the ship as a plan and tells the user when the pla
   assert.match(save, /ship:document\.getElementById\('aShip'\)\.value\|\|null/);
   assert.doesNotMatch(save, /vessel_observed/, "the client must not send vessel_observed from Add crew");
   assert.match(save, /r\.projection&&!r\.projection\.ok/, "a failed plan is surfaced, not swallowed");
+  assert.match(save, /r\.projection&&r\.projection\.pending\)uiToast\(/, "a pending plan is announced without blocking");
   const modal = body("function addCrewModal(");
   assert.match(modal, /Ship \(plan/, "the field is labelled as a plan");
   assert.match(modal, /yellow card/, "the hint says what the ship becomes");
@@ -78,7 +81,7 @@ test("ensureCrewExtras seeds the MAN agency row that apiCrewAdd's INSERT depends
   const ens = body("async function ensureCrewExtrasImpl(");
   assert.match(ens, /INSERT OR IGNORE INTO agency \(id,code,name\) VALUES \('agency-man','MAN',/);
   const add = body("async function apiCrewAdd(");
-  assert.match(add, /await ensureCrewExtras\(env\)/, "apiCrewAdd must run the guard before its INSERT");
+  assert.match(add, /ensureCrewExtras\(env\),\s*\]\)/, "apiCrewAdd must run the guard (in the opening wave) before its INSERT");
   assert.ok(add.indexOf("ensureCrewExtras(env)") < add.indexOf("INSERT INTO crew ("), "guard runs before the crew insert");
   assert.match(add, /'MAN'/, "the manual agency code apiCrewAdd writes");
   const mig = readFileSync(new URL("../migrations/0018_agency_manual.sql", import.meta.url), "utf8");

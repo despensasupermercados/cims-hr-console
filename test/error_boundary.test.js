@@ -18,7 +18,7 @@ const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 // Scope strictly to the fetch handler. The client-side app HTML further down the file is full of
 // fetch('/api/...') string literals that are not routes and must not be mistaken for them.
 function fetchHandler() {
-  const start = SRC.indexOf("async fetch(request, env) {");
+  const start = SRC.indexOf("async fetch(request, env, ctx) {");
   assert.notEqual(start, -1, "fetch handler not found");
   const end = SRC.indexOf("async email(message, env, ctx)", start);
   assert.notEqual(end, -1, "could not find the end of the fetch handler");
