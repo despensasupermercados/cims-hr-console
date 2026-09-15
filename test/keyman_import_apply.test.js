@@ -39,6 +39,7 @@ function fakeEnv(state) {
         return { meta: { changes: 1 } };
       };
       s.first = async () => {
+        if (S.startsWith("SELECT (SELECT COUNT(*) FROM keyman_contract3) AS n")) return { n: Object.values(state.counts).reduce((a, b) => a + b, 0), v: KEYMAN_VERSION }; // the ONE combined read
         if (S.startsWith("SELECT COUNT(*) n FROM keyman_contract3")) return { n: Object.values(state.counts).reduce((a, b) => a + b, 0) };
         if (S.startsWith("SELECT v FROM data_meta")) return { v: KEYMAN_VERSION }; // populated + current: the seed guard stays silent
         throw new Error("fake first: unhandled SQL: " + S);

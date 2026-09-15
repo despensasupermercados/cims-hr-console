@@ -878,14 +878,23 @@ const ensureKeyman = memoEnsure(ensureKeymanImpl);
 async function ensureKeymanImpl(env) {
   // PRIMARY KEY (sc,seq) + INSERT OR REPLACE = race-proof idempotent seeding. Earlier DELETE+INSERT
   // reseeds raced under concurrent requests and STACKED rows (3x duplication); this can't.
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq))").run();
+  // COLD START (15 Sep 2026): this guard was SEVEN sequential round trips on every new isolate — the
+  // bulk of the 2s /api/rotation measured from GRU against the PRG primary. Now: the two CREATEs side
+  // by side (not a batch: every batch here is a DATA write by the seed-guard tests' definition), then
+  // the ALTER and ONE combined read side by side. Two round trips of wall clock instead of seven.
+  await Promise.all([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, seq INTEGER, sign_on TEXT, proj_off TEXT, act_off TEXT, PRIMARY KEY (sc, seq))").run(),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run(),
+  ]);
   // When this row arrived from a Contract Counter. The clock behind "the newer write wins" between
   // Rita's edit and the file (Miguel, 14 Sep). NULL on every row imported before this column existed,
   // which counter_sync.resolveLeg reads as "older than any edit" — i.e. today's behaviour exactly.
-  try { await env.DB.prepare("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT").run(); } catch {}
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS data_meta (k TEXT PRIMARY KEY, v TEXT)").run();
-  const n = (await env.DB.prepare("SELECT COUNT(*) n FROM keyman_contract3").first()).n;
-  const ver = await env.DB.prepare("SELECT v FROM data_meta WHERE k='keyman_version'").first();
+  const [, st] = await Promise.all([
+    env.DB.prepare("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT").run().catch(() => null),
+    env.DB.prepare("SELECT (SELECT COUNT(*) FROM keyman_contract3) AS n, (SELECT v FROM data_meta WHERE k='keyman_version') AS v").first(),
+  ]);
+  const n = st ? st.n : 0;
+  const ver = st && st.v != null ? { v: st.v } : null;
   const stale = !ver || ver.v !== KEYMAN_VERSION;
   if (n === 0 && KEYMAN_CONTRACTS.length) {
     // Empty table: seed from the bundled constant and pin the version.
@@ -1275,14 +1284,20 @@ async function apiDashboard(env) {
 // applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
 const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
 async function ensureCrewExtrasImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_override (agency_id TEXT PRIMARY KEY, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_override TEXT, vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT, baseline_count INTEGER, notes TEXT, updated_at TEXT)").run();
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)").run();
+  // COLD START (15 Sep 2026, perf_log: /api/dashboard 1.5s, /api/rotation 2s at GRU against a PRG
+  // primary): every statement here used to be its own ~220ms round trip, on every new isolate. Now
+  // one batch (the CREATEs + the reference row) and one ALTER; the ALTER stays alone because a
+  // duplicate-column error would abort a batch (the column is already there in prod).
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_override (agency_id TEXT PRIMARY KEY, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_override TEXT, vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT, baseline_count INTEGER, notes TEXT, updated_at TEXT)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_note_log (id INTEGER PRIMARY KEY AUTOINCREMENT, agency_id TEXT, ts TEXT, text TEXT)"),
+    // The manual-entry agency (15 Sep 2026). crew.agency_code REFERENCES agency(code) and the only seeded
+    // row was TDG (0001_init), so every "+ Add crew" (agency_code 'MAN') died on the foreign key with a
+    // bare 500 — prod's activity_log held ZERO crew_add rows. Reference data, idempotent, memoized with
+    // the rest of this guard; migrations/0018_agency_manual.sql carries the same row for the record.
+    env.DB.prepare("INSERT OR IGNORE INTO agency (id,code,name) VALUES ('agency-man','MAN','Manual entry (CIMS console)')"),
+  ]);
   try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
-  // The manual-entry agency (15 Sep 2026). crew.agency_code REFERENCES agency(code) and the only seeded
-  // row was TDG (0001_init), so every "+ Add crew" (agency_code 'MAN') died on the foreign key with a
-  // bare 500 — prod's activity_log holds ZERO crew_add rows, ever. Reference data, idempotent, memoized
-  // with the rest of this guard; migrations/0018_agency_manual.sql carries the same row for the record.
-  await env.DB.prepare("INSERT OR IGNORE INTO agency (id,code,name) VALUES ('agency-man','MAN','Manual entry (CIMS console)')").run();
 }
 // Board legs = the live schedule: current ship_leg rows + crew aboard per the relief board
 // (ship_leg_source.boardLegsFromDb). The source flip is a DATA change (app_config.board_source);
@@ -1741,7 +1756,13 @@ async function rotationSections(env) {
   }
   const sections = Object.values(shipNames).map(ship => {
     const k = normShip(ship);
-    const crew = (promByShip[ship] || []).slice().sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    // Order (Miguel, 15 Sep 2026: "the yellow always go last, not in front of the people who are already
+    // onboard"): every TDG card (green) before every plan card (yellow), current first inside each, then
+    // by name. Before this, an aboard plan sorted among the greens alphabetically.
+    const crew = (promByShip[ship] || []).slice().sort((a, b) =>
+      (a.state === "yellow" ? 1 : 0) - (b.state === "yellow" ? 1 : 0)
+      || (b.current ? 1 : 0) - (a.current ? 1 : 0)
+      || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const cur = new Set(crew.map(c => c.agency_id));
     // Also-served = ACTUAL per-contract legs from the SCHEDULE (ship_history): one entry per contract
     // with its real sign-on/off. No min-on/max-off collapse and no merge with the Contract Counter,
@@ -1843,18 +1864,25 @@ async function apiNote(request, env, session) {
 }
 const ensureReady = memoEnsure(ensureReadyImpl);
 async function ensureReadyImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_ready (agency_id TEXT PRIMARY KEY, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, note TEXT, updated_at TEXT)").run();
-  try { await env.DB.prepare("ALTER TABLE crew_ready ADD COLUMN note TEXT").run(); } catch {}
+  // One round trip (15 Sep 2026): the CREATE already carries `note`; the ALTER is for a legacy table only.
+  await Promise.all([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_ready (agency_id TEXT PRIMARY KEY, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, note TEXT, updated_at TEXT)").run(),
+    env.DB.prepare("ALTER TABLE crew_ready ADD COLUMN note TEXT").run().catch(() => null),
+  ]);
 }
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, PRIMARY KEY (sc, seq))").run();
   // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
   // contract POSITION, which only survives while the file keeps its shape: every live edit sits on
   // seq 1 because the 6 Jul file carried one block per crew, so a full multi-block Counter would
   // renumber them and hand Rita's recorded sign-offs to a 2024 contract (counter_sync.editFor).
   // The backfill runs inside the ALTER's try: exactly once, on the isolate that adds the column.
-  try { await env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run(); } catch {}
+  // (15 Sep 2026) The CREATE now carries on_key, so the ALTER only matters for a table made before the
+  // column existed (prod): the two leave together — one round trip instead of two.
+  await Promise.all([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, on_key TEXT, PRIMARY KEY (sc, seq))").run(),
+    env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run().catch(() => null),
+  ]);
   // The backfill is its own statement, idempotent (WHERE on_key IS NULL), and runs once per isolate
   // like every other ensure — NOT inside the ALTER's try: on an isolate where keyman_contract3 did
   // not exist yet the UPDATE would throw, the ALTER would already have succeeded, and no isolate
@@ -2626,6 +2654,7 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .rcard.cur{box-shadow:0 0 0 2px var(--green) inset}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset}.ghostslot{border-style:dashed!important;display:flex;flex-direction:column;justify-content:center;color:var(--mut);cursor:pointer}.ghostslot.crit{border-color:var(--danger)!important;background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:var(--amber)!important;background:#fbeed6;color:#9a6410}
 .rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
 .rcard.plan{border:2px solid #E3B100!important;background:#FFF1A8;box-shadow:none}
+body.rot-refreshing #view{opacity:.6;transition:opacity .15s}
 .rcard.plan.aboard{box-shadow:0 0 0 2px #C99A00 inset}
 .rcard.green{cursor:pointer}
 .rlab.plan{color:#9A6614;background:#FBF0DA}
@@ -4265,14 +4294,17 @@ function ensureSbmToggle(){var a=document.getElementById('autoToggle');if(!a)ret
 async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function renderRotation(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
+  // Keep the board on screen while it refreshes (15 Sep 2026): blanking it to "Loading…" after every
+  // save/drag made a 1s round trip read as "takes forever to save". First paint still says Loading.
+  if(document.querySelector('#view .shipsec')){document.body.classList.add('rot-refreshing');}
+  else{$('#view').innerHTML='<div class=muted>Loading…</div>';}
   // Both board reads leave together (15 Sep 2026): the relief board used to be fetched only AFTER the
   // rotation had arrived — one whole round trip added to every render, every drag, every save.
   var _relP=fetch('/api/relief/board').then(function(r){return r.json();}).catch(function(){return {};});
   var _rr=await fetch('/api/rotation');ROT=await _rr.json().catch(function(){return {error:'bad_json'};});
   // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
   // and nobody could tell the server from the page.
-  if(!_rr.ok||!ROT||ROT.error||!ROT.sections){$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
+  if(!_rr.ok||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
   window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};try{var _rel=await _relP;(_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});}catch(_){}
   ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
   var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
@@ -4296,7 +4328,7 @@ async function renderRotation(){
     +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
-  drawRotation(); loadAutoToggle();
+  drawRotation(); loadAutoToggle(); document.body.classList.remove('rot-refreshing');
   loadSbmToggle();
   tgLoadPending();
 }
