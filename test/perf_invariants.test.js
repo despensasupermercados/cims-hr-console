@@ -151,3 +151,27 @@ test("the board is not blanked while it refreshes after a save or drag", () => {
   assert.match(fn, /drawRotation\(\); loadAutoToggle\(\); document\.body\.classList\.remove\('rot-refreshing'\);/);
   assert.match(SRC, /body\.rot-refreshing #view\{opacity:\.6/);
 });
+
+// 15 Sep 2026, round two. perf_log after PR #117 (Worker GRU, D1 primary PRG): /api/rotation fell from
+// 2043ms to 760ms warm but /api/dashboard did not move at all (1494 -> 1636). apiDashboard is the caller
+// of ensureTravel, the one guard PR #117 left on the old shape. And the instrument could not say whether
+// a slow request paid a cold start or its own reads — so it now measures that too.
+test("the travel guard steady-states in ONE round trip, like every other guard", () => {
+  const t = body("async function ensureTravelImpl(");
+  assert.match(t, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS travel_expense/,
+    "the CREATE is a no-op on a live table and must not block the count that follows it");
+  assert.match(t, /SELECT COUNT\(\*\) total, SUM\(CASE WHEN kind='shoreside'[^)]*\) shore FROM travel_expense"\)\.first\(\)\.catch/,
+    "the count rides with it and falls back to the migrate-once path when the table is legacy");
+});
+
+test("a slow /api response says how much of it was a cold start, not just how long it took", () => {
+  assert.match(SRC, /const GUARDS = \{ ms: 0, n: 0 \};/, "guard time is accumulated where the guards actually run");
+  const memo = body("function memoEnsure(");
+  assert.match(memo, /GUARDS\.ms \+= Date\.now\(\) - t0; GUARDS\.n \+= 1;/, "timed on both the success and the failure path");
+  assert.match(SRC, /const g0 = GUARDS\.ms, gn0 = GUARDS\.n;/, "snapshotted at request start");
+  assert.match(SRC, /const gms = GUARDS\.ms - g0, gn = GUARDS\.n - gn0;/);
+  assert.match(SRC, /"Server-Timing", "app;dur=" \+ dur \+ ", guards;dur=" \+ gms/, "visible in devtools without a query");
+  assert.match(SRC, /INSERT INTO perf_log \(at,path,method,dur,colo,guard_ms,guards\)/);
+  const ens = body("const ensurePerfLog = memoEnsure(");
+  assert.match(ens, /ALTER TABLE perf_log ADD COLUMN guard_ms INTEGER/, "prod already holds a perf_log without these columns");
+});
