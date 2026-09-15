@@ -141,8 +141,14 @@ test("a future projection counts down to its sign-on, not to a sign-off it has n
 test("the ship section draws both feeds through the ONE renderer and counts them apart", () => {
   const sec = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 1, crew: [GREEN], projections: [YELLOW], history: [] });
   assert.equal((sec.match(/class="rcard /g) || []).length, 2, "one green, one yellow");
-  assert.match(sec, /1 current/);
+  // 15 Sep 2026: the header used to read "N current", counting CARDS — it called a seafarer whose
+  // sign-off passed weeks ago "current" alongside the one actually at work. It now states what is true.
+  assert.match(sec, /1 onboard/);
+  assert.doesNotMatch(sec, /current/, "'current' counted cards, not people aboard");
   assert.match(sec, /1 planned/);
+  const ovd = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [{ ...GREEN, current: false, status: "On Vacation", signOff: "2020-01-01" }], projections: [], history: [] });
+  assert.match(ovd, /1 overdue/, "a green card past its sign-off is counted, and named, as overdue");
+  assert.doesNotMatch(ovd, /onboard/, "nobody is aboard that seat");
   const sec0 = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], history: [] });
   assert.doesNotMatch(sec0, /planned/, "no projections, no count");
   assert.match(sec0, /drag crew here/);
@@ -260,4 +266,69 @@ test("inside a ship section every TDG (green) card precedes every plan (yellow) 
     { name: "Charlie", state: "green", current: true }, { name: "Delta", state: "yellow", current: false },
   ].sort(cmp).map((x) => x.name);
   assert.deepEqual(rows, ["Charlie", "Bravo", "Alpha", "Delta"]);
+});
+
+/* ---- 15 Sep 2026, Freedom: the UI of a ship section, read off the screenshot Miguel sent ----
+   Two cards side by side. Queencel Sapungan: "On board", and an EMPTY box stretched to the height of his
+   neighbour — no dates, nothing. Norman Osorio: "On Vacation · 8 mos 14 days", a sign-off planned for
+   2026-08-22 that passed 24 days ago, and NOT ONE MARK on his card; only an unnamed red banner under both
+   of them said a sign-off was overdue. Plus "Miami" (red) above "MIAMI, FLORIDA" (green) on the same card,
+   and a header reading "1 onboard · 2 current" for a section with one person actually at work. */
+
+const OVERDUE = { ...GREEN, current: false, status: "On Vacation", signOn: "2025-12-08", signOff: "2020-08-22" };
+
+test("a seat whose sign-off has passed is marked ON THE CARD, whatever the derived status says", () => {
+  const h = ctx.rotCard(OVERDUE);
+  assert.match(h, /class="rcard green overdue"/, "the ring is on the card that needs attention");
+  assert.match(h, /class="offchip crit">OFF was \d+d ago</, "the countdown chip is not reserved for people the status calls current");
+  assert.match(h, /No sign-off recorded\./, "say why the seat is still held");
+  // the old rule: live = status === 'On board', so this exact card carried no chip and no ring at all
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: "2099-01-01" }), /overdue/, "a future sign-off is not overdue");
+  assert.doesNotMatch(ctx.rotCard({ ...YELLOW, signOff: "2020-01-01" }), /rcard plan overdue/, "a plan is Rita's to move, not an overdue seat");
+});
+
+test("a card with no contract dates says so instead of rendering an empty box", () => {
+  const h = ctx.rotCard({ ...GREEN, ship: "Icon", signOn: null, signOff: null });
+  assert.match(h, /No contract dates/, "an empty card reads as broken; this one names the gap");
+  // The unassigned pool and the shoreside team have no contract dates BY DEFINITION (no ship on the card).
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, ship: null, signOn: null, signOff: null }), /No contract dates/,
+    "a pool or shoreside card is not a seat with a missing contract");
+  assert.match(h, /TDG registry/, "and where the seat came from");
+  assert.doesNotMatch(h, /class=rrot/, "no empty date block");
+  assert.doesNotMatch(ctx.rotCard(GREEN), /No contract dates/, "a dated card says nothing");
+});
+
+test("ports read the same whichever source they came from, and no source is painted as an error", () => {
+  const h = ctx.rotCard({ ...GREEN, on_city: "Miami", on_conf: "seed", off_city: "MIAMI, FLORIDA", off_conf: "derived" });
+  assert.match(h, />Miami</, "the homeport seed stays as it is");
+  assert.match(h, />Miami, Florida</, "the itinerary's ALL-CAPS port is cased to match it");
+  assert.match(h, /class="pc pc-seed" title="the homeport of the ship[^"]*"/, "a fallback port explains itself");
+  assert.match(h, /class="pc pc-derived" title="from the itinerary[^"]*"/);
+  // #b0342f is this palette's danger red. A port taken from the homeport is low confidence, not an error.
+  assert.doesNotMatch(h, /b0342f/, "seed must not be painted in the danger colour");
+  const keep = ctx.rotCard({ ...GREEN, on_city: "ST. THOMAS, USVI", on_conf: "derived" });
+  assert.match(keep, />St\. Thomas, USVI</, "an abbreviation survives the casing pass");
+});
+
+test("cards size to their own content — the grid must not stretch a short card to a tall neighbour", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const m = src.match(/\.shipbody\{display:grid;[^}]*\}/);
+  assert.ok(m, ".shipbody grid rule not found");
+  assert.match(m[0], /align-items:start/, "without this a crew with no dates renders as a tall empty box");
+  assert.match(src, /\.rtags\{[^}]*align-items:center/, "chips stretched to the tallest chip in the row");
+});
+
+test("a yellow card whose sign-on has passed reads ABOARD, whichever feed built it", () => {
+  // Anthem, local render 15 Sep 2026: the relief banner said "Relieved · aboard since 2026-09-12" while
+  // the same seafarer's card said "PLAN" with no countdown. A card turns yellow through EITHER the
+  // projection feed (which set `aboard`) or the crew feed (a Counter leg Rita's newer assignment
+  // overrode, which did not). The renderer no longer trusts one feed to have set the flag.
+  const started = ctx.rotCard({ ...YELLOW, aboard: undefined, signOn: "2020-01-02", signOff: "2099-01-01" });
+  assert.match(started, /PLAN &middot; ABOARD/);
+  assert.match(started, /class="rcard plan aboard"/);
+  assert.match(started, /class="offchip/, "someone aboard gets their sign-off countdown");
+  assert.match(ctx.rotCard({ ...YELLOW, aboard: undefined }), /class="rlab plan">PLAN</, "a future sign-on is still just a plan");
+  const src = readFileSync(SRC, "utf-8");
+  assert.match(src, /aboard: !!\(\(enr\.signOn \|\| sEnr\.on\) && \(enr\.signOn \|\| sEnr\.on\) <= today\)/,
+    "the crew feed must set aboard by the same rule as the projection feed");
 });
