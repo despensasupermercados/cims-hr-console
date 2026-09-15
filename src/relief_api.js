@@ -144,9 +144,9 @@ export async function saveReliefAssignment(env, payload) {
   if (!cleaned.role) return { ok: false, error: "role_required_for_insert" };
 
   const contractId = "ct_" + crypto.randomUUID();
-  await env.DB.prepare(
+  const contractIns = env.DB.prepare(
     "INSERT INTO contract (id, crew_id, contract_group_id, status, created_at, updated_at) VALUES (?,?,?,?,?,?)"
-  ).bind(contractId, cleaned.crew_id, contractId, "Active", now, now).run();
+  ).bind(contractId, cleaned.crew_id, contractId, "Active", now, now);
 
   const asId = "as_" + crypto.randomUUID();
   const cols = ["id", "contract_id", "created_at", "updated_at"];
@@ -157,7 +157,9 @@ export async function saveReliefAssignment(env, payload) {
   if (!cols.includes("vessel_name")) { cols.push("vessel_name"); vals.push(cleaned.vessel_name || "?"); }
   if (!cols.includes("sign_on")) { cols.push("sign_on"); vals.push(cleaned.sign_on || now.slice(0, 10)); }
   const ph = cols.map(() => "?").join(",");
-  await env.DB.prepare("INSERT INTO assignment (" + cols.join(",") + ") VALUES (" + ph + ")").bind(...vals).run();
+  // Contract + assignment travel in ONE batch (one round trip, one transaction): the relief Save, a
+  // drop on the board and Add crew all come through here, and the D1 primary is far from the Worker.
+  await env.DB.batch([contractIns, env.DB.prepare("INSERT INTO assignment (" + cols.join(",") + ") VALUES (" + ph + ")").bind(...vals)]);
   return { ok: true, id: asId, mode: "insert" };
 }
 
