@@ -264,4 +264,5 @@ test("fetchOpenAssignments has NO date filter — a projection that has not star
   assert.match(calls[0].sql, /WHERE a\.actual_sign_off IS NULL/);
   assert.doesNotMatch(calls[0].sql, /sign_on <=/, "a future contract is exactly the card Rita is working on");
   assert.match(calls[0].sql, /LEFT JOIN crew_override o/, "her manual rank must win over the imported one");
+  assert.match(calls[0].sql, /LEFT JOIN vessel v ON v\.id = a\.vessel_id/, "selects v.name / v.brand — without the join D1 throws 'no such column: v.name' (2026-09-15, the empty board)");
 });
