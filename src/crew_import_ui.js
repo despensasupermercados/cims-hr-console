@@ -6,7 +6,8 @@
 // Brand: CIMS / DG3 (docs/DATA_PAGE_REDESIGN_DECISIONS.md §F). Navy #1B3A5C primary, DG3 green
 // #5FB946 accent-chrome only, green-ink #3C7A2A for readable green text + Apply fill, Outfit
 // headings / DM Sans body. Layout + cart + auto-detect settled with Miguel over the 2026-07-14
-// session (R1–R5). Ship allocation is NEVER written by the file — a mismatch is flagged only.
+// session (R1–R5). Ship allocation is never written by the file on its own — a mismatch is a per-row
+// decision: Keep board (flag, default) / Take TDG (explicit registry write, 2026-09-15) / Dismiss.
 //
 // IMPORTANT: this whole file is a single template literal. Do NOT use nested backticks or ${}.
 // All dynamic markup is built with string concatenation inside <script>; buttons use
@@ -256,10 +257,9 @@ async function stage(){
 function badge(txt,cls){return ' <span class="tag '+cls+'">'+txt+'</span>';}
 function diff(lab,o,n,b){return '<div class="row"><span class="k">'+esc(lab)+'</span><span class="diff"><span class="old">'+esc(o)+'</span> <span class="arw">&#8594;</span> <span class="new">'+esc(n)+'</span>'+(b||"")+'</span></div>';}
 function seg(key,def,opts,labels,soft){
- var cur=DEC[key]||def;
- return '<div class="seg'+(soft?' soft':'')+'">'+
-  '<button class="'+(cur===opts[0]?'on':'')+'" data-key="'+key+'" data-v="'+opts[0]+'">'+labels[0]+'</button>'+
-  '<button class="'+(cur===opts[1]?'on':'')+'" data-key="'+key+'" data-v="'+opts[1]+'">'+labels[1]+'</button></div>';
+ var cur=DEC[key]||def,h='<div class="seg'+(soft?' soft':'')+'">';
+ for(var i=0;i<opts.length;i++)h+='<button class="'+(cur===opts[i]?'on':'')+'" data-key="'+key+'" data-v="'+opts[i]+'">'+labels[i]+'</button>';
+ return h+'</div>';
 }
 function render(){
  var g=STAGE.review.groups,c=STAGE.review.counts,h="";
@@ -274,7 +274,7 @@ function render(){
  if((g.rekeyed||[]).length){h+='<div class="sec"><h2>&#9888; Identity \u2014 the file used the ship\u2019s crew id</h2><div class="d">These rows name a crew you already hold, keyed on the cruise line\u2019s numeric id instead of the agency id. They were MATCHED, not added, so no duplicate seafarer is created. Nothing here changes an agency id \u2014 get the export fixed at source.</div>';
   g.rekeyed.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Keyed in file as",it.agency_id,it.incoming_id,badge("cruise-line id "+esc(it.ship_crew_id||"?"),"t-amber"))+'</div>';});h+='</div>';}
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
-  g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","dismiss"],["Keep board","Dismiss"])+'</div>';});h+='</div>';}
+  g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","take","dismiss"],["Keep board","Take TDG","Dismiss"])+'</div>';});h+='</div>';}
  if(g.critical.length){h+='<div class="sec"><h2>&#9679; Status changes from TDG</h2><div class="d">Applied by default — the file drives status. Hold any you want left as-is. Crew you pinned by hand are protected and shown below.</div>';
   g.critical.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,"")+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
  if(g.override_conflict.length){h+='<div class="sec"><h2>&#9995; Fields you set by hand</h2><div class="d">Your manual entries. Kept unless you accept the file.</div>';
@@ -295,12 +295,12 @@ function computeCart(){
  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")crAcc++;else crKeep++;});
  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
  var minor=g.minor.length;
- var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"flag")==="flag")shipFlag++;});
+ var shipFlag=0,shipTake=0;g.ship_flag.forEach(function(it){var v=d("ship:"+it.agency_id,"flag");if(v==="flag")shipFlag++;else if(v==="take")shipTake++;});
  var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
  var fieldSave=ovAcc+crAcc;
- var willSave=certAcc+newAdd+minor+fieldSave;
+ var willSave=certAcc+newAdd+minor+fieldSave+shipTake;
  var kept=shipFlag+ovKeep+crKeep;
- return{g:g,certAcc:certAcc,fieldSave:fieldSave,newAdd:newAdd,minor:minor,shipFlag:shipFlag,ovKeep:ovKeep+crKeep,depFlag:depFlag,willSave:willSave,kept:kept};
+ return{g:g,certAcc:certAcc,fieldSave:fieldSave,newAdd:newAdd,minor:minor,shipFlag:shipFlag,shipTake:shipTake,ovKeep:ovKeep+crKeep,depFlag:depFlag,willSave:willSave,kept:kept};
 }
 function renderCart(){
  var x=computeCart(),g=x.g,items="";
@@ -308,7 +308,8 @@ function renderCart(){
  if(g.override_conflict.length+g.critical.length && x.fieldSave)items+=cline("i-green","&#9998;","Field updates","status, contact",x.fieldSave+" save","save");
  if(g.new.length)items+=cline("i-navy","&#65291;","New crew","added to roster",x.newAdd+" save","save");
  if(g.minor.length)items+=cline("i-gray","&#9881;","Minor tidy-ups","spelling, spacing",x.minor+" save","save");
- if(g.ship_flag.length)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
+ if(g.ship_flag.length&&x.shipTake)items+=cline("i-green","&#9875;","Ship from file","registry updated",x.shipTake+" save","save");
+ if(g.ship_flag.length&&x.shipFlag)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
  if(g.override_conflict.length+g.critical.length && x.ovKeep)items+=cline("i-red","&#9995;","Your edits","kept as yours",x.ovKeep+" held","held");
  if(!items)items='<div class="li"><span class="nm" style="color:var(--slate);font-weight:400">Nothing to apply — all rows match.</span></div>';
  var flags=x.shipFlag+x.depFlag;

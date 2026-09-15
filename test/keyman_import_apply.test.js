@@ -238,3 +238,38 @@ test("apply stamps imported_at on every row — the clock behind 'the newer writ
   }
   assert.equal(new Set(ins.map((w) => w.args[8])).size, 1, "one stamp for the whole upload");
 });
+
+// 15 Sep 2026: contradicted projections are settled PER ROW. Only ids the dry-run itself reported as
+// conflicts are honoured; anything else in dropConflicts is ignored, never removed.
+test("apply: dropConflicts retires the ticked contradicted projection; an id that is not a conflict is ignored", async () => {
+  const state = {
+    counts: { "SC-A": 1, "SC-B": 1 }, roster: ROSTER, current: CUR,
+    yellows: [
+      { id: "as_absorb", sc: "SC-A", crew_name: "Ana Alpha", ship: "Icon", sign_on: "2026-01-04", planned_sign_off: "2026-07-04" },
+      { id: "as_conflict", sc: "SC-B", crew_name: "Ben Bravo", ship: "Jewel", sign_on: "2026-03-01", planned_sign_off: "2026-09-01" },
+    ],
+    edits: [],
+  };
+  const { env, writes } = fakeEnv(state);
+  const r = await (await apiKeymanImport(req({ rows: SHEET, absorb: false, dropConflicts: ["as_conflict", "as_absorb", "as_somebody_else"] }), withRemoval(env, state), session)).json();
+  assert.deepEqual(r.dropped.map((x) => [x.id, x.ok]), [["as_conflict", true]], "only the conflict row is honoured");
+  assert.deepEqual(r.conflicts, [], "a settled conflict is no longer reported as left");
+  const deleted = writes.filter((w) => /^DELETE FROM assignment WHERE id=\?/.test(w.sql)).map((w) => w.args[0]);
+  assert.deepEqual(deleted, ["as_conflict"], "absorb:false kept the absorbable card; the stranger id never reached the DB");
+  const log = writes.find((w) => /^INSERT INTO data_log/.test(w.sql));
+  assert.match(log.args[3], /1 contradicted projection replaced by the file/);
+  assert.doesNotMatch(log.args[3], /left for review/);
+});
+
+test("apply without dropConflicts: the contradicted projection stays and is still reported (the 14 Sep default)", async () => {
+  const state = {
+    counts: { "SC-B": 1 }, roster: ROSTER, current: CUR,
+    yellows: [{ id: "as_conflict", sc: "SC-B", crew_name: "Ben Bravo", ship: "Jewel", sign_on: "2026-03-01", planned_sign_off: "2026-09-01" }],
+    edits: [],
+  };
+  const { env, writes } = fakeEnv(state);
+  const r = await (await apiKeymanImport(req({ rows: SHEET }), withRemoval(env, state), session)).json();
+  assert.deepEqual(r.dropped, []);
+  assert.deepEqual(r.conflicts.map((x) => x.id), ["as_conflict"]);
+  assert.ok(!writes.some((w) => /^DELETE FROM assignment/.test(w.sql)));
+});

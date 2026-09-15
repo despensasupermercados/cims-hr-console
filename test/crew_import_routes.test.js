@@ -226,3 +226,33 @@ test("handleCrewImport routes stage + unknown path returns null", async () => {
   const miss = await handleCrewImport({ method: "GET" }, { pathname: "/api/other" }, env);
   assert.equal(miss, null, "unknown path returns null so worker.js falls through");
 });
+
+// D1 amendment (2026-09-15): an explicit per-row "Take TDG" is the ONE ship write, through its own fixed
+// statement — the general UPDATE path (CREW_WRITABLE) still never carries vessel_observed.
+test("apply with 'take' on the ship row: UPDATE crew SET vessel_observed (fixed statement) + override ship cleared + flag resolved", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING, overrides: [{ agency_id: "SC-1", vessel_observed: "Celebrity Edge", retired: 0 }] }) };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-take" }), env)).json();
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: { "ship:SC-1": "take" }, file_hash: "h-take", run_by: "Rita" }), env);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.ship_taken, 1);
+  assert.match(body.summary, /1 ship taken from the file/);
+  const takes = env.DB._batched.filter(s => /^UPDATE crew SET vessel_observed=\?, updated_at=\? WHERE agency_id=\?$/.test(s.sql));
+  assert.equal(takes.length, 1);
+  assert.deepEqual([takes[0].args[0], takes[0].args[2]], ["Celebrity Apex", "SC-1"]);
+  const clears = env.DB._batched.filter(s => /^UPDATE crew_override SET vessel_observed=NULL/.test(s.sql));
+  assert.equal(clears.length, 1);
+  assert.equal(clears[0].args[1], "SC-1");
+  const flagRow = env.DB._batched.find(s => /INSERT INTO sync_conflict/.test(s.sql) && s.args[3] === "vessel_observed");
+  assert.equal(flagRow.args[6], 1, "audit row written as resolved");
+});
+
+test("apply with 'dismiss' or the default still emits NO ship write", async () => {
+  for (const decisions of [{}, { "ship:SC-1": "dismiss" }]) {
+    const env = { DB: fakeDB({ existing: EXISTING }) };
+    const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-nt" }), env)).json();
+    const body = await (await apiCrewImportApply(req({ review: stage.review, decisions, file_hash: "h-nt", run_by: "Rita" }), env)).json();
+    assert.equal(body.ship_taken, 0);
+    assert.equal(env.DB._batched.some(s => /vessel_observed=/.test(s.sql)), false, "no ship write for " + JSON.stringify(decisions));
+  }
+});

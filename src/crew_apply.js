@@ -6,6 +6,10 @@
 // Enforces the session decisions (docs/CREW_IMPORT_DECISIONS.md):
 //   D1  vessel_observed is NEVER in crewUpdates (belt-and-suspenders filter). Ship changes
 //       become sync_conflict flags only. (Allowed on a NEW-crew insert: no allocation exists yet.)
+//       AMENDED 2026-09-15 (Keyman Board Redesign v5): the ship row is a real decision — Keep board
+//       (open flag, the default) / Take TDG / Dismiss. "Take TDG" travels in its OWN list
+//       (shipTakes), never through crewUpdates, so the D1 filter and the route's CREW_WRITABLE
+//       whitelist both stay intact; the route writes the registry ship from that list alone.
 //   D2  cert fields default 'accept'.
 //   D3  override_conflict + status default 'keep'; kept OR accepted, both write an audit
 //       sync_conflict row (resolved=1) so we can prove Rita saw it. An ACCEPTED override
@@ -35,6 +39,7 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   const newCrew = [];       // full mapped field object
   const conflicts = [];     // { agency_id, field, old_value, new_value, resolved }
   const overrideClears = []; // { agency_id, field, expect } — crew_override field to NULL (accepted D3 only)
+  const shipTakes = [];      // { agency_id, value, expect } — an EXPLICIT per-row "Take TDG" on a ship flag (D1 amendment)
 
   // cert (incl. name/email/rank) — default accept
   for (const it of g.cert || []) {
@@ -60,10 +65,16 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     }
     conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: manual ?? null, new_value: it.new, resolved: 1 });
   }
-  // ship flag — NEVER a crew write; open to-do unless dismissed
+  // ship flag — default an open to-do (Keep board). "dismiss" closes it without a write. "take"
+  // (2026-09-15) adopts the file's ship into the registry through shipTakes — an explicit, per-row,
+  // human decision; it is the ONLY way a ship value leaves this planner as a write. The audit row is
+  // kept in every case (resolved=1 for take/dismiss) and carries `taken` so crew_flags can close every
+  // older open flag on that crew: the ship is settled.
   for (const it of g.ship_flag || []) {
-    const dismissed = dec(`ship:${it.agency_id}`, "flag") === "dismiss";
-    conflicts.push({ agency_id: it.agency_id, field: "vessel_observed", old_value: it.old, new_value: it.new, resolved: dismissed ? 1 : 0 });
+    const d = dec(`ship:${it.agency_id}`, "flag");
+    const taken = d === "take";
+    if (taken) shipTakes.push({ agency_id: it.agency_id, value: it.new ?? null, expect: it.old ?? null });
+    conflicts.push({ agency_id: it.agency_id, field: "vessel_observed", old_value: it.old, new_value: it.new, resolved: d === "flag" ? 0 : 1, ...(taken ? { taken: true } : {}) });
   }
   // D7 rekeyed — the file keyed a crew we already hold on their cruise-line id. diffCrew matched
   // them, so no duplicate is inserted; this raises an OPEN flag (resolved:0) so the export gets
@@ -95,7 +106,7 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   const safeUpdates = crewUpdates.filter(u => u.field !== "vessel_observed");
   const droppedShipWrites = crewUpdates.length - safeUpdates.length;
 
-  const touched = new Set(safeUpdates.map(u => u.agency_id).concat(newCrew.map(n => n.agency_id)));
+  const touched = new Set(safeUpdates.map(u => u.agency_id).concat(newCrew.map(n => n.agency_id), shipTakes.map(t => t.agency_id)));
   const importRun = {
     file_hash: meta.file_hash ?? null,
     filename: meta.filename ?? null,
@@ -106,5 +117,5 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     run_at: meta.run_at ?? null,
   };
 
-  return { crewUpdates: safeUpdates, newCrew, conflicts, overrideClears, importRun, droppedShipWrites };
+  return { crewUpdates: safeUpdates, newCrew, conflicts, overrideClears, shipTakes, importRun, droppedShipWrites };
 }

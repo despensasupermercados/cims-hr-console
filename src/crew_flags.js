@@ -47,7 +47,7 @@ export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf
   const openBySc = {};
   for (const o of open) (openBySc[o.agency_id] = openBySc[o.agency_id] || []).push(o);
   const closeRow = (o, why) => { if (closed.has(o.id)) return; closed.add(o.id); close.push({ id: o.id, why }); };
-  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, skipped_board_matches: 0, skipped_duplicate: 0 };
+  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, closed_taken: 0, skipped_board_matches: 0, skipped_duplicate: 0 };
 
   // 1) Open flags the board already satisfies: the crew is on the ship the file named.
   for (const o of open) {
@@ -60,8 +60,11 @@ export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf
     const want = canon(c.new_value);
     const mine = openBySc[c.agency_id] || [];
     if (c.resolved !== 0) {
-      // Dismissed by Rita on this review: the audit row is kept, and older open copies close with it.
-      for (const o of mine) if (canon(o.new_value) === want) closeRow(o, "dismissed");
+      // Taken (2026-09-15): the file's ship is now the registry ship — EVERY open flag on this crew is
+      // settled, whichever ship it named. Dismissed: the audit row is kept, and older open copies of
+      // the same ship close with it.
+      if (c.taken) { for (const o of mine) closeRow(o, "taken"); }
+      else { for (const o of mine) if (canon(o.new_value) === want) closeRow(o, "dismissed"); }
       insert.push(c);
       continue;
     }

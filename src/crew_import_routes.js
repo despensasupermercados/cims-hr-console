@@ -7,7 +7,8 @@
 //
 // Safety at this layer (defense in depth, on top of crew_apply's own guarantees):
 //   - column names for UPDATE are whitelisted (CREW_WRITABLE) — vessel_observed is NOT in it,
-//     so a ship value can never be written even if a bad plan slipped through.
+//     so a ship value can never be written even if a bad plan slipped through. The ONE ship write
+//     (plan.shipTakes, an explicit per-row "Take TDG", 2026-09-15) has its own fixed statement below.
 //   - idempotent by import_run.file_hash (re-dropping the same file is a no-op).
 
 import { mapRows, diffCrew } from "./crewimport.js";
@@ -130,6 +131,16 @@ export async function apiCrewImportApply(request, env, deps) {
     stmts.push(env.DB.prepare(`UPDATE crew_override SET ${o.field}=NULL, updated_at=? WHERE agency_id=? AND ${o.field} IS ?`)
       .bind(run_at, o.agency_id, o.expect ?? null));
   }
+  // D1 amendment (2026-09-15): an explicit per-row "Take TDG" adopts the file's ship into the registry.
+  // Fixed statement, no column interpolation, fed ONLY by plan.shipTakes (which only the ship_flag tier
+  // with decision "take" can populate). The manual override ship is cleared with it — else the override
+  // keeps winning at read time and the take never reaches the card (the same lesson as D3).
+  for (const t of plan.shipTakes || []) {
+    stmts.push(env.DB.prepare("UPDATE crew SET vessel_observed=?, updated_at=? WHERE agency_id=?")
+      .bind(t.value ?? null, run_at, t.agency_id));
+    stmts.push(env.DB.prepare("UPDATE crew_override SET vessel_observed=NULL, updated_at=? WHERE agency_id=? AND vessel_observed IS NOT NULL")
+      .bind(run_at, t.agency_id));
+  }
   for (const n of plan.newCrew) {
     const vals = INSERT_COLS.map(c =>
       c === "id" ? crypto.randomUUID()
@@ -152,6 +163,7 @@ export async function apiCrewImportApply(request, env, deps) {
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
     override_cleared, override_skipped: clears.length - override_cleared,
+    ship_taken: (plan.shipTakes || []).length,
     open_conflicts: openInserted, ship_flags: flags.counts, board_unavailable, droppedShipWrites: plan.droppedShipWrites,
   };
   res.summary = applySummary(res); // ONE sentence for both import screens (they used to each compose their own)
@@ -167,8 +179,10 @@ export function applySummary(r) {
   if (f.closed_board_matches) closed.push(n(f.closed_board_matches, "already matched the board", "already matched the board"));
   if (f.closed_superseded) closed.push(n(f.closed_superseded, "superseded by this file", "superseded by this file"));
   if (f.closed_dismissed) closed.push(n(f.closed_dismissed, "dismissed", "dismissed"));
+  if (f.closed_taken) closed.push(n(f.closed_taken, "settled by taking the file's ship", "settled by taking the file's ship"));
   if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
+  if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");
   if (r.override_cleared) parts.push(n(r.override_cleared, "manual entry", "manual entries") + " replaced by the file" + (r.override_skipped ? " (" + n(r.override_skipped, "changed", "changed") + " since review, left alone)" : ""));
   parts.push("logged to import history");
   return parts.join(" · ") + ".";

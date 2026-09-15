@@ -19,13 +19,19 @@ Purpose: preserve the reasoning so no future agent or person re-litigates settle
 | Domain | Fields | Source of truth | Import behavior |
 |--------|--------|-----------------|-----------------|
 | Certificates | medical, BDOS/SIRB, passport, visas | **TDG** (agency keeps current) | Default **Accept** |
-| Ship allocation | current ship / vessel_observed | **Rita** (she dictates placement) | **Never written** — flag only |
+| Ship allocation | current ship / vessel_observed | **Rita** (she dictates placement) | **Never written by default** — flag; per-row **Take TDG** is her explicit call (D1, 2026-09-15) |
 | Status | on board / vacation / earmarked / inactive | **TDG** file, unless pinned by a manual override | Default **Accept** (D6) — override-guarded, audited |
 
 TDG's file lags Rita's real moves and is often wrong on ship placement — so its ship column is a lagging record of her decisions, not truth. "Current ship" also lives in two places: `crew.vessel_observed` (file) vs `ship_leg`/`assignment` (the board Rita runs); a disagreement between them is the high-value signal.
 
 ## D. Locked decisions
-- **D1** Import NEVER writes ship allocation → mismatch becomes a flag resolved on the board. No "adopt agency" path.
+- **D1** Import NEVER writes ship allocation on its own → mismatch becomes a flag resolved on the board.
+  **Amended 2026-09-15 (Keyman Board Redesign v5):** the ship row is a real per-row decision — **Keep board**
+  (open flag, default) / **Take TDG** / **Dismiss**. "Take TDG" is an explicit human choice on ONE row: it
+  writes `crew.vessel_observed` from the file and clears `crew_override.vessel_observed` through its own
+  fixed statement (`plan.shipTakes` → route), never via the general update path (`CREW_WRITABLE` still
+  excludes the column). Every open ship flag on that crew closes as settled. There is still no default or
+  bulk "adopt agency" path.
 - **D2** Certificates default Accept; an expiry moving **earlier** is flagged (still one click).
 - **D3** A change to a field with a **live** crew_override defaults Keep; if accepted, logged (audit row
   records the manual value replaced) AND that one crew_override field is cleared — otherwise the manual
