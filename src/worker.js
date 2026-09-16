@@ -18,7 +18,7 @@ import { crewDataGaps, hasGaps } from "./datagaps.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
-import { htmlPage } from "./etag.js";
+import { htmlPage, etagFor } from "./etag.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
@@ -48,6 +48,7 @@ import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
 import { installTgUpdate } from "./tg_update.js";
 import { apiRosterExport } from './roster_export.js';
+
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
@@ -296,7 +297,10 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
       }
       if (p.startsWith("/api/") && res instanceof Response) {
         const dur = Date.now() - t0;
-        const gms = GUARDS.ms - g0, gn = GUARDS.n - gn0;
+        // GUARDS is isolate-wide, so three parallel requests each saw all three totals and guard_ms
+        // could exceed dur (prod, 16 Sep: dur 710, guard_ms 1852). Clamp to this request's own time:
+        // it reads as "how much of THIS request was schema work", which is the question being asked.
+        const gn = GUARDS.n - gn0, gms = Math.min(GUARDS.ms - g0, dur);
         // SLOW-REQUEST LOG (15 Sep 2026, "still takes sooo much to save"): anything over 600ms is written
         // to perf_log AFTER the response has gone (waitUntil), with the Worker's colo, so prod latency is
         // read from a table instead of guessed. The D1 primary is one fixed region; a Worker far from it
@@ -878,11 +882,39 @@ const KEYMAN_VERSION = "2026-09-05-cc-v4"; // = the snapshot date in src/keyman_
 // new deploys create fresh isolates and re-check automatically. Keyed by env.DB (WeakMap) so tests
 // with independent fake DBs keep their own state; a rejected ensure clears its slot and retries on
 // the next request instead of caching the failure.
-const _ensureMemo = new WeakMap();
+
 // Running total of time spent INSIDE first-time guard execution, and how many first-ran. The fetch
 // handler snapshots it around each request, so a slow /api response can say whether it paid a cold start
-// or whether its own reads are the cost — the question PR #117 could not answer from the outside.
+// or whether its own reads are the cost.
 const GUARDS = { ms: 0, n: 0 };
+
+// THE SCHEMA GATE (16 Sep 2026). perf_log, from Miguel's own session: EVERY request carried guards=3,
+// and guard work was the largest part of a 1619ms board load. A console used a few times a day never
+// keeps a Worker isolate alive, so essentially every visit was a cold start — and every cold start paid
+// to create tables and add columns that have existed since June. Migration code was living on the hot
+// path, forever, for every user.
+//
+// Now ONE read per isolate, shared by every guard, answers "which of these has already been applied to
+// this database?". Applied -> the guard does nothing at all. Not applied (a fresh database, or a deploy
+// that CHANGED that guard) -> it runs exactly as it always did, then records itself.
+//
+// The key is the FINGERPRINT OF THE GUARD'S OWN SOURCE, never a hand-maintained number: change any DDL
+// and that guard runs again by itself. There is no constant to forget to bump, which is the one way a
+// scheme like this turns into a missing table in production.
+const _applied = new WeakMap();
+function appliedGuards(env) {
+  let pr = _applied.get(env.DB);
+  if (!pr) {
+    // data_meta is itself created by one of the guards, so on a brand-new database this read fails and
+    // every guard runs — which is exactly right.
+    pr = env.DB.prepare("SELECT k FROM data_meta WHERE k LIKE 'guard:%'").all()
+      .then((r) => new Set((r.results || []).map((x) => x.k)))
+      .catch(() => new Set());
+    _applied.set(env.DB, pr);
+  }
+  return pr;
+}
+const _ensureMemo = new WeakMap();
 function memoEnsure(fn) {
   return (env) => {
     let m = _ensureMemo.get(env.DB);
@@ -890,9 +922,18 @@ function memoEnsure(fn) {
     let pr = m.get(fn);
     if (!pr) {
       const t0 = Date.now();
-      pr = Promise.resolve().then(() => fn(env))
-        .then((v) => { GUARDS.ms += Date.now() - t0; GUARDS.n += 1; return v; },
-              (e) => { GUARDS.ms += Date.now() - t0; GUARDS.n += 1; m.delete(fn); throw e; });
+      pr = (async () => {
+        const key = "guard:" + etagFor(fn.toString());
+        const applied = await appliedGuards(env);
+        if (applied.has(key)) return; // already applied, long ago: no DDL, no writes, nothing
+        await fn(env);
+        applied.add(key); // other guards on this isolate see it immediately
+        await env.DB.prepare("INSERT OR IGNORE INTO data_meta (k,v) VALUES (?,?)")
+          .bind(key, new Date().toISOString()).run().catch(() => null);
+      })().then(
+        (v) => { GUARDS.ms += Date.now() - t0; GUARDS.n += 1; return v; },
+        (e) => { GUARDS.ms += Date.now() - t0; GUARDS.n += 1; m.delete(fn); throw e; },
+      );
       m.set(fn, pr);
     }
     return pr;
@@ -4091,7 +4132,7 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
+let ROT_CHROME=0,TG_LAST=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
 function dragStart(el,id){dragMoved=true;DRAGID=id;DRAGEL=el;setTimeout(function(){el.classList.add('dragging');},0);}
 function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('.shipdrop.dragover').forEach(function(z){z.classList.remove('dragover');});}
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
@@ -4425,9 +4466,14 @@ async function renderRotation(){
     +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
     +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
-  drawRotation(); loadAutoToggle(); document.body.classList.remove('rot-refreshing');
-  loadSbmToggle();
-  tgLoadPending();
+  drawRotation(); document.body.classList.remove('rot-refreshing');
+  // PAGE CHROME, NOT BOARD DATA (16 Sep 2026, Starlink). Every render fired five requests: the board,
+  // the relief board, and these three. A render happens after EVERY save and EVERY drag, so a card move
+  // cost three extra satellite round trips for things a card move cannot change — the two toggles only
+  // move when the user clicks them, and each click already updates its own state. The TG badge does
+  // change on a save, but it is informational, so it refreshes at most every 30 seconds.
+  if(!ROT_CHROME){ROT_CHROME=1;loadAutoToggle();loadSbmToggle();}
+  if(Date.now()-TG_LAST>30000){TG_LAST=Date.now();tgLoadPending();}
 }
 // "Update TG" — the return leg of the AdvancedQuery loop. The badge is how many changes are
 // waiting; the click always opens the rendered email first, because sign-off is on the email and

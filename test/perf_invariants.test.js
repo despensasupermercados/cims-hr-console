@@ -148,7 +148,7 @@ test("the board's cold-start guards are two round trips at most, not one per sta
 test("the board is not blanked while it refreshes after a save or drag", () => {
   const fn = body("async function renderRotation(");
   assert.match(fn, /if\(document\.querySelector\('#view \.shipsec'\)\)\{document\.body\.classList\.add\('rot-refreshing'\);\}/);
-  assert.match(fn, /drawRotation\(\); loadAutoToggle\(\); document\.body\.classList\.remove\('rot-refreshing'\);/);
+  assert.match(fn, /drawRotation\(\); document\.body\.classList\.remove\('rot-refreshing'\);/);
   assert.match(SRC, /body\.rot-refreshing #view\{opacity:\.6/);
 });
 
@@ -167,9 +167,12 @@ test("the travel guard steady-states in ONE round trip, like every other guard",
 test("a slow /api response says how much of it was a cold start, not just how long it took", () => {
   assert.match(SRC, /const GUARDS = \{ ms: 0, n: 0 \};/, "guard time is accumulated where the guards actually run");
   const memo = body("function memoEnsure(");
-  assert.match(memo, /GUARDS\.ms \+= Date\.now\(\) - t0; GUARDS\.n \+= 1;/, "timed on both the success and the failure path");
+  assert.equal((memo.match(/GUARDS\.ms \+= Date\.now\(\) - t0; GUARDS\.n \+= 1;/g) || []).length, 2,
+    "timed on both the success and the failure path");
   assert.match(SRC, /const g0 = GUARDS\.ms, gn0 = GUARDS\.n;/, "snapshotted at request start");
-  assert.match(SRC, /const gms = GUARDS\.ms - g0, gn = GUARDS\.n - gn0;/);
+  // GUARDS is isolate-wide, so parallel requests each saw the others' totals: prod logged dur 710 with
+  // guard_ms 1852. Clamped to this request's own duration, which is the question the column asks.
+  assert.match(SRC, /const gn = GUARDS\.n - gn0, gms = Math\.min\(GUARDS\.ms - g0, dur\);/);
   assert.match(SRC, /"Server-Timing", "app;dur=" \+ dur \+ ", guards;dur=" \+ gms/, "visible in devtools without a query");
   assert.match(SRC, /INSERT INTO perf_log \(at,path,method,dur,colo,guard_ms,guards\)/);
   const ens = body("const ensurePerfLog = memoEnsure(");
@@ -214,4 +217,32 @@ test("the save paths are one or two round trips, not five", () => {
     "the Counter sign-on is a subselect inside the INSERT, not its own round trip");
   assert.match(ce, /await env\.DB\.batch\(\[/, "edit + audit row in one batch");
   assert.equal((ce.match(/await env\.DB/g) || []).length, 1, "one database call on the card save path");
+});
+
+
+// 16 Sep 2026 — the measurement that changed the plan. perf_log from Miguel's session: EVERY request
+// carried guards=3, on four different Cloudflare colos, and guard work was the largest single part of a
+// 1619ms board load. A console used a few times a day never keeps an isolate warm, so every visit was a
+// cold start paying to create tables that have existed since June.
+test("a guard that has already been applied to this database does nothing at all", () => {
+  const memo = body("function memoEnsure(");
+  assert.match(memo, /const key = "guard:" \+ etagFor\(fn\.toString\(\)\);/,
+    "the marker is the fingerprint of the guard's own source — no constant anyone can forget to bump");
+  assert.match(memo, /if \(applied\.has\(key\)\) return;/, "applied means: no DDL, no writes, nothing");
+  assert.match(memo, /INSERT OR IGNORE INTO data_meta \(k,v\) VALUES \(\?,\?\)/, "and it records itself once");
+  const ag = body("function appliedGuards(");
+  assert.match(ag, /SELECT k FROM data_meta WHERE k LIKE 'guard:%'/, "ONE read, shared by every guard");
+  assert.match(ag, /_applied\.set\(env\.DB, pr\)/, "memoized per isolate");
+  assert.match(ag, /\.catch\(\(\) => new Set\(\)\)/, "a database with no data_meta yet runs every guard, as before");
+});
+
+test("a save refreshes the board, not the page chrome around it", () => {
+  const fn = body("async function renderRotation(");
+  assert.match(fn, /if\(!ROT_CHROME\)\{ROT_CHROME=1;loadAutoToggle\(\);loadSbmToggle\(\);\}/,
+    "the two toggles cannot change because a card moved; they used to be re-fetched on every render");
+  assert.match(fn, /if\(Date\.now\(\)-TG_LAST>30000\)\{TG_LAST=Date\.now\(\);tgLoadPending\(\);\}/,
+    "the TG badge is informational: at most once every 30s, not on every drag");
+  // the click handlers still refresh their own state, so a toggle is never stale after the user acts
+  assert.match(SRC, /async function autoToggleClick\(/);
+  assert.match(SRC, /async function sbmToggleClick\(/);
 });
