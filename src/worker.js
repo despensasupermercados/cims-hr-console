@@ -3218,6 +3218,56 @@ document.addEventListener('click',function(e){
 function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6'}[st]||'#9aa7b6';}
 function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
+// TAB SWITCHES (16 Sep 2026). Miguel: "when I change tabs still slower". Every tab refetched from
+// scratch, so going back to a tab you were just on cost a full round trip — perf_log measured 620-1100ms
+// per call from Buenos Aires with the isolate already WARM and guards=0, so this is the distance to
+// Prague and nothing else. There is no code that makes that trip quick; the answer is not to wait for it.
+//
+// cachedJson does two things:
+//   1. A tab you have already opened paints INSTANTLY from the last answer, and revalidates behind you.
+//      When the fresh answer differs, the render runs again. A first visit is unchanged.
+//   2. Concurrent callers of the same URL share ONE request. Production showed /api/relief/board fetched
+//      five times in fourteen seconds, twice within three milliseconds of itself.
+//
+// Revalidation is skipped for two seconds after a successful read, which is also what stops the
+// re-render from starting another round of revalidation.
+var API_CACHE={};
+function cachedJson(url,rerender){
+  var e=API_CACHE[url]||(API_CACHE[url]={});
+  var live=function(){
+    e.inflight=fetch(url,{cache:'no-store'}).then(function(r){
+      if(!r.ok){var err=new Error('http_'+r.status);err.status=r.status;throw err;}
+      return r.json();
+    }).then(function(j){
+      e.inflight=null;e.at=Date.now();
+      var raw=JSON.stringify(j),changed=(e.raw!==undefined&&raw!==e.raw);
+      e.raw=raw;e.data=j;
+      if(changed&&rerender){try{rerender();}catch(_){}}
+      return j;
+    },function(err){e.inflight=null;throw err;});
+    return e.inflight;
+  };
+  if(e.inflight)return e.inflight;                       // one request, however many callers
+  if(e.data!==undefined){
+    if(Date.now()-(e.at||0)>2000)live().catch(function(){});  // paint now, refresh behind
+    return Promise.resolve(e.data);
+  }
+  return live();
+}
+// A save must NEVER be answered from memory. Rather than keep a list of save paths in sync forever,
+// every non-GET call to /api/ empties the cache as it completes — so any save written in future is
+// covered without anyone remembering this rule. The shim runs before the caller's own continuation,
+// which is what guarantees the re-render that follows a save reads from the network.
+function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
+(function(){
+  var _f=window.fetch;
+  window.fetch=function(u,o){
+    var m=((o&&o.method)||'GET').toUpperCase();
+    var p=_f.apply(this,arguments);
+    if(m!=='GET'&&typeof u==='string'&&u.indexOf('/api/')===0)p.then(apiDirty,function(){});
+    return p;
+  };
+})();
 async function show(tab){
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
@@ -3920,7 +3970,7 @@ var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','D
 
 async function renderTravel(){
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2><span class=muted style="padding:0">Loading…</span></div>';
-  try{ TRV=await (await fetch('/api/travel')).json(); if(TRV&&TRV.error)throw new Error(TRV.error); }
+  try{ TRV=await cachedJson('/api/travel',renderTravel); if(TRV&&TRV.error)throw new Error(TRV.error); }
   catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
   TSEL=null;
@@ -4057,7 +4107,7 @@ async function loadTravel(){return renderTravel();}
 let FLEET=null,FLT={mode:'all',q:''};
 async function renderFleet(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  FLEET=await (await fetch('/api/fleet')).json();
+  FLEET=await cachedJson('/api/fleet',renderFleet);
   FLT={mode:'all',q:''};
   $('#view').innerHTML='<div class=bar><h2>Fleet</h2><input id=fq placeholder="Search ship, port, region, class, brand…" oninput="FLT.q=this.value;paintFleet()" style="margin-left:auto;width:300px"></div><div id=fleettiles class=tiles></div><div id=fleetbody></div>';
   paintFleet();
@@ -4427,11 +4477,12 @@ async function renderRotation(){
   else{$('#view').innerHTML='<div class=muted>Loading…</div>';}
   // Both board reads leave together (15 Sep 2026): the relief board used to be fetched only AFTER the
   // rotation had arrived — one whole round trip added to every render, every drag, every save.
-  var _relP=fetch('/api/relief/board').then(function(r){return r.json();}).catch(function(){return {};});
-  var _rr=await fetch('/api/rotation');ROT=await _rr.json().catch(function(){return {error:'bad_json'};});
+  var _relP=cachedJson('/api/relief/board',renderRotation).catch(function(){return {};});
+  var _st=0;
+  try{ROT=await cachedJson('/api/rotation',renderRotation);}catch(e){_st=(e&&e.status)||0;ROT={error:(e&&e.message)||'network'};}
   // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
   // and nobody could tell the server from the page.
-  if(!_rr.ok||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
+  if(_st||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
   window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};
   // TWO-PHASE (16 Sep 2026, Starlink). The ships draw as soon as the board data lands; the relief banners
   // and the Add-reliever slots paint when their own request answers. Awaiting both made every load — and
@@ -4899,7 +4950,7 @@ function rptSbm(){
 var DASH=null,DASH_SH=false;
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  var d;try{d=await (await fetch('/api/dashboard')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
+  var d;try{d=await cachedJson('/api/dashboard',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
   DASH=d;var w=d.workforce,c=d.compliance,bd=d.birthdays||[],bz=d.bonus||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'}];
   var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'},{label:'Unassigned',value:bc['Unassigned']||0,color:'#9AA7B6'}].filter(function(s){return s.label!=='Unassigned'||s.value>0;});
@@ -4980,7 +5031,7 @@ function crewMatchesComp(c){
 async function renderCrew(){
   CREW=[];CF.q='';CF.status='';CF.comp='';CF.client='';CF.ship='';CF.sort='az';
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
-  try{var r=await (await fetch('/api/crew')).json();CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
+  try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   var clients=Array.from(new Set(CREW.map(function(c){return c.client;}).filter(Boolean))).sort();
   $('#view').innerHTML=
    '<div class=bar><h2>Crew</h2>'
@@ -5423,7 +5474,7 @@ function rng(id,label,max){return '<div class=fg><label>'+label+' — '+max+'%</
 var CTL=null,CTLF={q:'',client:'',sort:'az'};
 async function renderContracts(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  var d;try{d=await (await fetch('/api/contracts')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderContracts()">Retry</button></div>';return;}
+  var d;try{d=await cachedJson('/api/contracts',renderContracts);}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderContracts()">Retry</button></div>';return;}
   CTL=d;CTLF={q:'',client:'',sort:'az'};
   var clients=Array.from(new Set((d.rows||[]).map(function(r){return r.client;}).filter(Boolean))).sort();
   $('#view').innerHTML='<div class=bar><h2>Contracts &amp; Bonus</h2>'

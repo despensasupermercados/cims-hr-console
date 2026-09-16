@@ -116,8 +116,9 @@ test("saveReliefAssignment inserts contract + assignment in ONE batch", () => {
 test("the board's two reads (rotation + relief board) are in flight together, and slow /api requests are logged off the request path", () => {
   const i = SRC.indexOf("async function renderRotation(){");
   const fn = SRC.slice(i, i + 1500);
-  assert.match(fn, /var _relP=fetch\('\/api\/relief\/board'\)/, "relief board fetch starts before the rotation await");
-  assert.ok(fn.indexOf("var _relP=fetch('/api/relief/board')") < fn.indexOf("var _rr=await fetch('/api/rotation')"));
+  // both still leave together; both now go through the read cache (16 Sep 2026)
+  assert.match(fn, /var _relP=cachedJson\('\/api\/relief\/board',renderRotation\)/, "relief board starts before the rotation await");
+  assert.ok(fn.indexOf("var _relP=cachedJson('/api/relief/board'") < fn.indexOf("ROT=await cachedJson('/api/rotation'"));
   assert.match(SRC, /if \(dur > 600 && ctx && ctx\.waitUntil\) ctx\.waitUntil\(logSlowRequest\(/, "slow requests are persisted after the response");
   assert.match(SRC, /const ensurePerfLog = memoEnsure\(/, "perf_log DDL is memoized like every other guard (§12)");
   assert.match(SRC, /async fetch\(request, env, ctx\) \{/, "the handler must accept ctx to have waitUntil at all");
@@ -245,4 +246,27 @@ test("a save refreshes the board, not the page chrome around it", () => {
   // the click handlers still refresh their own state, so a toggle is never stale after the user acts
   assert.match(SRC, /async function autoToggleClick\(/);
   assert.match(SRC, /async function sbmToggleClick\(/);
+});
+
+
+// 16 Sep 2026. Miguel: "when I change tabs still slower". perf_log, same session, isolate already WARM
+// (guards=0): /api/rotation 625ms, /api/relief/board 637-1093ms, /api/relief/crew 620ms, all from EZE.
+// That is the distance to Prague and nothing else — no code makes that trip quick, so the fix is to
+// stop waiting for it on a tab you have already opened.
+test("a tab you have already opened paints from the last answer and revalidates behind you", () => {
+  const fn = body("function cachedJson(");
+  assert.match(fn, /if\(e\.inflight\)return e\.inflight;/, "concurrent callers of one URL share ONE request");
+  assert.match(fn, /if\(Date\.now\(\)-\(e\.at\|\|0\)>2000\)live\(\)/, "revalidate behind the paint, throttled so a re-render cannot loop");
+  assert.match(fn, /return Promise\.resolve\(e\.data\);/, "the remembered answer is returned at once");
+  assert.match(fn, /if\(changed&&rerender\)/, "re-render only when the fresh answer actually differs");
+  assert.match(fn, /err\.status=r\.status/, "an HTTP failure keeps its status: the board banner reports it (§11)");
+  for (const t of ["renderDashboard", "renderCrew", "renderContracts", "renderFleet", "renderTravel"]) {
+    assert.match(SRC, new RegExp("cachedJson\\('/api/[a-z/]+'," + t + "\\)"), t + " still refetches from scratch on every visit");
+  }
+});
+
+test("a write empties the read cache, so a save is never answered from memory", () => {
+  assert.match(SRC, /function apiDirty\(\)\{ for\(var k in API_CACHE\) delete API_CACHE\[k\]; \}/);
+  // one shim instead of a list of save paths that someone has to keep in sync
+  assert.match(SRC, /if\(m!=='GET'&&typeof u==='string'&&u\.indexOf\('\/api\/'\)===0\)p\.then\(apiDirty,function\(\)\{\}\);/);
 });
