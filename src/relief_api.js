@@ -3,6 +3,7 @@
 import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
+import { htmlPage } from "./etag.js";
 import { fetchCurrentCounterLegs } from "./counter_legs.js";
 import { fetchBoardPortDays, fetchAzamaraTurnarounds } from "./port_days.js";
 import { docBadge } from "./keyman_deploy.js";
@@ -116,6 +117,19 @@ const ASSIGN_COLS = new Set([
   "instructions_sent_at", "signoff_link_sent_at", "review_invite_sent_at", "end_reason", "readiness",
 ]);
 
+// `vessel` is reference data: 54 hulls, added by migration, never edited at runtime. Resolving the name
+// to an id cost a round trip on EVERY save (16 Sep 2026). Cached per isolate, and only HITS are cached —
+// a miss stays uncached so a hull added while this isolate is alive is still found on the next save.
+const _vesselIds = new WeakMap();
+async function vesselIdFor(env, name) {
+  let m = _vesselIds.get(env.DB);
+  if (!m) { m = new Map(); _vesselIds.set(env.DB, m); }
+  if (m.has(name)) return m.get(name);
+  const v = await env.DB.prepare("SELECT id FROM vessel WHERE name=?").bind(name).first();
+  if (v && v.id) m.set(name, v.id);
+  return v ? v.id : null;
+}
+
 export async function saveReliefAssignment(env, payload) {
   const { id: _keyId, ...toValidate } = (payload || {});
   const { ok, cleaned, rejected } = validateWrite(toValidate);
@@ -123,8 +137,8 @@ export async function saveReliefAssignment(env, payload) {
   const now = new Date().toISOString();
 
   if (cleaned.vessel_name && !cleaned.vessel_id) {
-    const v = await env.DB.prepare("SELECT id FROM vessel WHERE name=?").bind(cleaned.vessel_name).first();
-    if (v) cleaned.vessel_id = v.id;
+    const vid = await vesselIdFor(env, cleaned.vessel_name);
+    if (vid) cleaned.vessel_id = vid;
   }
 
   if (payload.id) {
@@ -172,27 +186,37 @@ export async function removeReliefAssignment(env, id) {
   id = String(id || "").trim();
   if (!id) return { ok: false, error: "id_required" };
   if (!id.startsWith("as_")) return { ok: false, error: "not_removable" };
-  const a = await env.DB.prepare("SELECT id, contract_id FROM assignment WHERE id=?").bind(id).first();
+  // ONE round trip for every question, then ONE for every write (16 Sep 2026). This was FIVE sequential
+  // trips to a D1 primary on another continent — read the assignment, check bonus history, delete, count
+  // what still depends on the contract, delete the contract — and perf_log measured a card removal at
+  // 1179ms, which is almost exactly 5 x the ~220ms GRU-to-PRG round trip. Every read keys off the
+  // assignment id directly, so they travel together; the deletes then travel as one batch.
+  // The two deliberate fallbacks are unchanged: a bonus check that ERRORS still reads as "no bonus"
+  // (that is the pre-existing behaviour, not a new one), and a dependency count that errors keeps the
+  // contract shell.
+  const [a, bonus, dep] = await Promise.all([
+    env.DB.prepare("SELECT id, contract_id FROM assignment WHERE id=?").bind(id).first(),
+    env.DB.prepare("SELECT 1 x FROM bonus_outcome WHERE contract_id=(SELECT contract_id FROM assignment WHERE id=?) LIMIT 1").bind(id).first().catch(() => null),
+    // Counts what will REMAIN once this assignment is gone, so the contract shell can be dropped in the
+    // same batch instead of a second round trip after the delete.
+    env.DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM assignment WHERE contract_id=c.cid AND id<>?) " +
+      "     + (SELECT COUNT(*) FROM feedback_request WHERE contract_id=c.cid) " +
+      "     + (SELECT COUNT(*) FROM feedback_response WHERE contract_id=c.cid) AS n " +
+      "FROM (SELECT contract_id AS cid FROM assignment WHERE id=?) c"
+    ).bind(id, id).first().catch(() => ({ n: 1 })),
+  ]);
   if (!a) return { ok: false, error: "not_found" };
-  const cid = a.contract_id;
-
-  const bonus = await env.DB.prepare("SELECT 1 x FROM bonus_outcome WHERE contract_id=? LIMIT 1").bind(cid).first().catch(() => null);
   if (bonus) return { ok: false, error: "has_bonus_history" };
-
-  await env.DB.batch([
+  const cid = a.contract_id;
+  const contract_removed = !!(dep && Number(dep.n) === 0);
+  const writes = [
     env.DB.prepare("DELETE FROM assignment WHERE id=?").bind(id),
     env.DB.prepare("DELETE FROM ship_leg WHERE source=? AND source LIKE 'assignment:%' AND is_current=0").bind("assignment:" + id),
     env.DB.prepare("DELETE FROM relief_comment WHERE assignment_id=?").bind(id),
-  ]);
-
-  // Clean up the contract shell only when nothing else depends on it.
-  const dep = await env.DB.prepare(
-    "SELECT (SELECT COUNT(*) FROM assignment WHERE contract_id=?1) " +
-    "     + (SELECT COUNT(*) FROM feedback_request WHERE contract_id=?1) " +
-    "     + (SELECT COUNT(*) FROM feedback_response WHERE contract_id=?1) AS n"
-  ).bind(cid).first().catch(() => ({ n: 1 }));
-  const contract_removed = !!(dep && Number(dep.n) === 0);
-  if (contract_removed) await env.DB.prepare("DELETE FROM contract WHERE id=?").bind(cid).run();
+  ];
+  if (contract_removed) writes.push(env.DB.prepare("DELETE FROM contract WHERE id=?").bind(cid));
+  await env.DB.batch(writes);
   return { ok: true, id, mode: "remove", contract_removed };
 }
 
@@ -268,7 +292,9 @@ export const RELIEF_CREW_PICKER_SQL =
 export async function handleRelief(request, url, env) {
   const p = url.pathname;
   if (p === "/relief" && request.method === "GET") {
-    return new Response(RELIEF_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+    // The card editor opens as an iframe on every click. Over Starlink that was a full page download each
+    // time; it now revalidates and comes back as a 304 when unchanged (16 Sep 2026).
+    return htmlPage(RELIEF_HTML);
   }
   if (p === "/api/relief/deploy" && request.method === "GET") {
     return new Response(DEPLOY_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });

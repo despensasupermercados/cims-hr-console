@@ -18,6 +18,7 @@ import { crewDataGaps, hasGaps } from "./datagaps.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
+import { htmlPage } from "./etag.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
@@ -285,6 +286,14 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
       // PERF instrumentation: stamp total server time on every API response so per-request cost
       // is visible in browser devtools (Network -> Timing -> Server Timing). Read-only; on any
       // copy failure we return the original response untouched.
+      // An unchanged page costs ~200 bytes instead of its whole body (16 Sep 2026, Starlink). Only ever
+      // reached when the client already holds the identical bytes, so it can never serve a stale UI.
+      if (res instanceof Response && res.status === 200) {
+        const et = res.headers.get("ETag");
+        if (et && request.headers.get("If-None-Match") === et) {
+          return new Response(null, { status: 304, headers: { ETag: et, "Cache-Control": res.headers.get("Cache-Control") || "private, no-cache" } });
+        }
+      }
       if (p.startsWith("/api/") && res instanceof Response) {
         const dur = Date.now() - t0;
         const gms = GUARDS.ms - g0, gn = GUARDS.n - gn0;
@@ -1921,15 +1930,17 @@ async function apiContractEdit(request, env, session) {
   if (!b.sc || b.seq == null) return json({ error: "no_key" }, 400);
   await ensureContractEdit(env);
   const bi = (v) => (v ? 1 : 0);
-  // on_key: the Counter sign-on this edit belongs to. Sent by the card; else read from the leg.
-  let onKey = b.on_key || null;
-  if (!onKey) {
-    const leg = await env.DB.prepare("SELECT sign_on FROM keyman_contract3 WHERE sc=? AND seq=?").bind(b.sc, +b.seq).first();
-    onKey = (leg && leg.sign_on) || null;
-  }
-  await env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at,on_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at,on_key=COALESCE(excluded.on_key,contract_edit.on_key)")
-    .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), new Date().toISOString(), onKey).run();
-  await logActivity(env, session && session.email, "contract_edit", b.sc + " #" + b.seq);
+  // ONE round trip (16 Sep 2026). This was three: look the Counter sign-on up, write the edit, write the
+  // audit row. The lookup is now a subselect inside the INSERT (same value, no extra trip) and the audit
+  // row rides in the same batch. on_key = the Counter sign-on this edit belongs to; sent by the card when
+  // it has it, else read from the leg exactly as before.
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO contract_edit (sc,seq,embark,disembark,sign_on,sign_off,ship,eccr,air,hotel,on_conf,off_conf,updated_at,on_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(?,(SELECT sign_on FROM keyman_contract3 WHERE sc=? AND seq=?))) ON CONFLICT(sc,seq) DO UPDATE SET embark=excluded.embark,disembark=excluded.disembark,sign_on=excluded.sign_on,sign_off=excluded.sign_off,ship=excluded.ship,eccr=excluded.eccr,air=excluded.air,hotel=excluded.hotel,on_conf=excluded.on_conf,off_conf=excluded.off_conf,updated_at=excluded.updated_at,on_key=COALESCE(excluded.on_key,contract_edit.on_key)")
+      .bind(b.sc, +b.seq, b.embark || null, b.disembark || null, b.sign_on || null, b.sign_off || null, b.ship || null, bi(b.eccr), bi(b.air), bi(b.hotel), bi(b.on_conf), b.off_conf == null ? null : bi(b.off_conf), now, b.on_key || null, b.sc, +b.seq),
+    env.DB.prepare("INSERT INTO activity_log (id,user_id,action,detail,at) VALUES (?,?,?,?,?)")
+      .bind("log_" + crypto.randomUUID(), (session && session.email) || null, "contract_edit", b.sc + " #" + b.seq, now),
+  ]);
   return json({ ok: true });
 }
 // POST {agency_id, field in [eccr,air,hotel], value} — Rita ticks crew-change readiness.
@@ -2616,8 +2627,9 @@ async function apiFeedbackBoard(env, state) {
 
 /* ----------------------- HTML ----------------------- */
 function htmlResponse(body, status = 200) {
-  // no-store: the app shell is dynamic + ships often; never let the browser serve a stale UI.
-  return new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, must-revalidate" } });
+  // ALL SHIPS ARE ON STARLINK (Miguel, 16 Sep 2026). See src/etag.js: the page still revalidates on every
+  // load, so a deploy is picked up immediately, but an unchanged 255KB shell comes back as a 304.
+  return htmlPage(body, status);
 }
 // Serve a base64-embedded binary asset (icons). Long cache; immutable per deploy.
 function assetResponse(b64, type) {
@@ -4379,7 +4391,18 @@ async function renderRotation(){
   // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
   // and nobody could tell the server from the page.
   if(!_rr.ok||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
-  window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};try{var _rel=await _relP;(_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});}catch(_){}
+  window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};
+  // TWO-PHASE (16 Sep 2026, Starlink). The ships draw as soon as the board data lands; the relief banners
+  // and the Add-reliever slots paint when their own request answers. Awaiting both made every load — and
+  // every refresh after a save — as slow as the SLOWER of the two requests, on a satellite link where the
+  // two do not even arrive together. If the relief data wins the race the redraw is skipped, because the
+  // first paint below already reads window.RELIEF.
+  _relP.then(function(_rel){
+    try{
+      (_rel&&_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});
+      if(document.getElementById('rotbody'))drawRotation();
+    }catch(_){}
+  });
   ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
   var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
   var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
