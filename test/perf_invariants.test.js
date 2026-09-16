@@ -175,3 +175,43 @@ test("a slow /api response says how much of it was a cold start, not just how lo
   const ens = body("const ensurePerfLog = memoEnsure(");
   assert.match(ens, /ALTER TABLE perf_log ADD COLUMN guard_ms INTEGER/, "prod already holds a perf_log without these columns");
 });
+
+// 16 Sep 2026. Miguel: "all ships use starlink". On a satellite link the number of browser round trips
+// and the bytes on the wire cost more than server time does, which reorders every remaining fix.
+test("an unchanged page costs a 304, not its whole body", () => {
+  const E = readFileSync(new URL("../src/etag.js", import.meta.url), "utf8");
+  assert.match(E, /export function etagFor\(body\)/);
+  assert.match(E, /"Cache-Control": "private, no-cache", ETag: etagFor\(body\)/,
+    "revalidate every load (a deploy must still be picked up at once) but hand over a validator");
+  // scoped to the code, not the comment that explains what it replaced
+  const fnBody = E.slice(E.indexOf("export function htmlPage("));
+  assert.doesNotMatch(fnBody, /no-store/, "no-store is what made the 255KB shell re-download on every load");
+  // one place converts a matching If-None-Match into a 304, so a page only has to set the header
+  assert.match(SRC, /if \(et && request\.headers\.get\("If-None-Match"\) === et\) \{[^}]*status: 304/s);
+  assert.match(SRC, /return htmlPage\(body, status\);/, "worker htmlResponse delegates to the one helper");
+  for (const f of ["../src/relief_api.js", "../src/crew_import_routes.js"]) {
+    const M = readFileSync(new URL(f, import.meta.url), "utf8");
+    assert.match(M, /htmlPage\(/, f + " still serves its page raw, so it re-downloads every time");
+  }
+});
+
+test("the board paints as soon as its own data lands, without waiting on the relief board", () => {
+  const fn = body("async function renderRotation(");
+  assert.match(fn, /_relP\.then\(function\(_rel\)\{/, "the relief board is no longer awaited before the first paint");
+  assert.doesNotMatch(fn, /await _relP/, "awaiting it made every load as slow as the slower request");
+  assert.match(fn, /if\(document\.getElementById\('rotbody'\)\)drawRotation\(\);/, "redraw only once there is something to redraw");
+});
+
+test("the save paths are one or two round trips, not five", () => {
+  const R = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
+  const rm = R.slice(R.indexOf("export async function removeReliefAssignment("), R.indexOf("\n}\n", R.indexOf("export async function removeReliefAssignment(")));
+  assert.match(rm, /const \[a, bonus, dep\] = await Promise\.all\(\[/, "the three reads travel together");
+  assert.match(rm, /await env\.DB\.batch\(writes\)/, "and every delete in one batch, the contract shell included");
+  assert.equal((rm.match(/await /g) || []).length, 2, "exactly two awaits: one read wave, one write batch");
+  assert.match(R, /async function vesselIdFor\(env, name\)/, "the vessel id is reference data, not a per-save lookup");
+  const ce = body("async function apiContractEdit(");
+  assert.match(ce, /COALESCE\(\?,\(SELECT sign_on FROM keyman_contract3 WHERE sc=\? AND seq=\?\)\)/,
+    "the Counter sign-on is a subselect inside the INSERT, not its own round trip");
+  assert.match(ce, /await env\.DB\.batch\(\[/, "edit + audit row in one batch");
+  assert.equal((ce.match(/await env\.DB/g) || []).length, 1, "one database call on the card save path");
+});

@@ -15,6 +15,7 @@ import { mapRows, diffCrew } from "./crewimport.js";
 import { buildReview, OVR_COL } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
+import { htmlPage } from "./etag.js";
 import { OVR_FIELDS } from "./override.js";
 import { isMoneyUser } from "./policy.js";
 import { reconcileShipFlags, boardShipsFromLegs, strictShipMatcher, AUTO_CLOSED } from "./crew_flags.js";
@@ -44,7 +45,7 @@ const str = (v) => (v == null ? null : String(v));
 
 // GET /api/crew/import — the review UI (session-gated by the caller).
 export function crewImportPage() {
-  return new Response(CREW_IMPORT_HTML, { headers: { "content-type": "text/html; charset=utf-8" } });
+  return htmlPage(CREW_IMPORT_HTML); // revalidated, 304 when unchanged (16 Sep 2026, Starlink)
 }
 
 async function loadContext(env) {
