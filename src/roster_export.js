@@ -70,6 +70,7 @@
 // use for them and every field exported is a field that can leak.
 
 import { COUNTER_LEG_SELECT } from "./counter_legs.js";
+import { indexEdits, editFor, resolveLeg } from "./counter_sync.js";
 
 /** Columns this endpoint is permitted to emit. Anything not listed cannot leave. */
 export const EXPORT_FIELDS = [
@@ -169,10 +170,44 @@ export async function apiRosterExport(request, env) {
     });
   }
 
-  const { results } = await env.DB.prepare(ROSTER_SQL).all();
+  // WHAT THE TIMECARD SEES IS WHAT THE BOARD SHOWS (23 Sep 2026).
+  // ROSTER_SQL reads the Contract Counter and the relief board, and never read contract_edit — so a
+  // sign-off Rita recorded in the console stopped at the console. Alonzo SC-0041465 left here as
+  // "Rhapsody, off 2026-08-01" (the July Counter) while the board had shown "Symphony, off
+  // 2026-09-12" since 22 Aug. Two systems disagreeing about where a seafarer is, from one missing
+  // join. The rule is not re-implemented in SQL: this runs the board's OWN pair (editFor +
+  // resolveLeg, the newer write wins) over the same current leg, so there is one definition of
+  // precedence in the console and the export cannot drift from the card again.
+  const [{ results }, editRes, legRes] = await Promise.all([
+    env.DB.prepare(ROSTER_SQL).all(),
+    env.DB.prepare('SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit').all().catch(() => ({ results: [] })),
+    env.DB.prepare('SELECT sc, seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sign_on IS NOT NULL').all().catch(() => ({ results: [] })),
+  ]);
+  const idx = indexEdits(editRes.results || []);
+  // The current leg is the crew's highest seq — the same definition counter_legs.js uses for is_current.
+  const currentLeg = {};
+  for (const l of (legRes.results || [])) {
+    const held = currentLeg[l.sc];
+    if (!held || (l.seq || 0) > (held.seq || 0)) currentLeg[l.sc] = l;
+  }
+  const resolved = {};
+  for (const sc of Object.keys(currentLeg)) {
+    const leg = currentLeg[sc];
+    const e = editFor(leg, idx);
+    resolved[sc] = resolveLeg(leg, e && e.sc ? e : null);
+  }
+
   const crew = (results || []).map((r) => {
     const out = {};
     for (const f of EXPORT_FIELDS) out[f] = r[f] ?? null;
+    const rl = resolved[r.agency_id];
+    // Only a crew whose ship came FROM that Counter leg is corrected here. A crew placed by the
+    // relief board alone has no Counter row and keeps the assignment's ship and dates.
+    if (rl && out.ship) {
+      if (rl.ship) out.ship = rl.ship;
+      if (rl.signOn) out.sign_on = rl.signOn;
+      if (rl.signOff) out.sign_off = rl.signOff;
+    }
     return out;
   });
 
