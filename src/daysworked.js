@@ -1,5 +1,5 @@
 // Days-worked / sea-days computation — pure, testable. Feeds the billing export.
-// Off date precedence for billing: actual sign-off > projected > (open → asOf).
+// Off date precedence: actual sign-off > projected > (open → asOf).
 // Days are whole calendar days between sign-on and the effective sign-off,
 // clipped to the requested billing period. Never negative.
 
@@ -13,7 +13,7 @@ export function contractDays(on, off) {
   return d > 0 ? d : 0;
 }
 
-// Effective sign-off for billing: actual, else projected, else asOf (still onboard).
+// Effective sign-off: actual, else projected, else asOf (still onboard).
 export function effectiveOff(c, asOf) { return c.act || c.proj || asOf || null; }
 
 // Whole days of [on, off] that fall inside [from, to]. Null bound = open on that side.

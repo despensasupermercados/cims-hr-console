@@ -86,6 +86,22 @@ dated card on the crew. Hard rules:
 - `contract_no` on a `crew_intel` row is the crew's contract count snapshotted AT FILING; don't
   recompute it for already-filed rows (only the lazy backfill of legacy NULLs is allowed).
 
+## 10b. NOT A BILLING PLATFORM — Miguel, 14 Sep 2026: "this is not a billing platform .. remember that"
+`/api/daysworked` and `/api/billing/month` are **reference reads**. Neither is an invoice source.
+A change to the board's data source is NOT a money change because those routes move — §1 (the money
+gate) is about the **bonus**, and nothing else. A date on the Keyman board is a ROTATION fact: do not
+translate a discrepancy into days, dollars, or payroll. This rule is in the brain (recz3DgTDbcf6RIA9)
+because one session treated the console as a billing system; a second did it again on 23 Sep 2026.
+
+**The loop, and why a stale Counter is not a defect** (his words): *"whats in the tdg import stay
+forever .. rita create projections .. and when she is sure .. cta is trigger to joy for action and
+the loop closes when u see it back in the keyman tab from the upload"*. Counter rows are never edited
+or removed by the console — only the NEXT Contract Counter replaces them. Past its projected sign-off
+is **overdue, not gone**. Dates are never hand-keyed; they come from the next Counter and we wait for
+it. So the board disagreeing with the live TDG file is the loop still OPEN, not an error to
+reconcile. Anyone with a login may upload the Counter; the dry-run lists every edit it would
+override. The agent never infers, reconciles or corrects a contract date — ever.
+
 ## 11. Invariants from the Session-6 audit (don't regress these)
 - **Every API route must run under the error boundary.** The fetch handler wraps the whole dispatch in
   `return await (async () => { ...routes... })();`. Routes use `return apiX(...)` without their own await,
@@ -123,10 +139,11 @@ dated card on the crew. Hard rules:
   `scripts/keyman_snapshot.mjs` (never hand-edited; `KEYMAN_VERSION` = the snapshot date). Pinned by
   `test/keyman_seed_guard.test.js` + `test/keyman_snapshot.test.js`.
 - **A NULL `imported_at` is never backfilled.** An import stamps `imported_at` on the rows it writes
-  (since 2026-09-14); the ~33 rows written before that carry NULL, and `resolveLeg` reads a missing
+  (since 2026-09-14); every row written before that carries NULL, and `resolveLeg` reads a missing
   stamp as "older than anything", so a recorded `contract_edit` outranks them. Writing a date onto
   those rows would silently flip the 8 crew whose Counter disagrees with Rita from her recorded
-  sign-off to the Counter's projection — and those dates feed the days-worked billing export. The
+  sign-off to the Counter's projection. (ALL 47 rows carry NULL, not the ~33 first written here: no
+  Counter has been uploaded through the console, so every row is the bundled July seed.) The
   origin of a legacy row is genuinely unknown: report it as not recorded (`counter.origin` on
   `/api/rotation/crew`), never invent one. A real fix is a fresh Counter upload, which stamps itself
   and shows every override in the dry-run diff BEFORE anyone clicks Apply.
