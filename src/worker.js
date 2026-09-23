@@ -1861,7 +1861,8 @@ async function rotationSections(env) {
   counts.shoreside = shoreside.length; counts.vessels = sections.length;
   return { sections, pool, shoreside, counts, inDock: inDockNow(DRY_DOCK, today) };
 }
-// Days worked THIS MONTH per crew currently active in Keyman, for customer billing. Uses the live
+// Days worked THIS MONTH per crew currently active in Keyman. A REFERENCE read, not an invoice
+// source (Miguel, 14 Sep 2026: "this is not a billing platform .. remember that"). Uses the live
 // board roster (rotationSections) so dates match what's shown on the Keyman page — NOT the Contract
 // Counter table (keyman_contract3), which is one imported contract per crew, refreshed only by a Counter
 // upload (last 2026-07-06) and not by the relief board. Onboard crew bill from
@@ -4558,7 +4559,7 @@ async function renderRotation(){
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
     +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
-    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew, for customer billing">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
+    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew — a reference view, not an invoice">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
     +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
   drawRotation(); document.body.classList.remove('rot-refreshing');
   // PAGE CHROME, NOT BOARD DATA (16 Sep 2026, Starlink). Every render fired five requests: the board,
@@ -4713,7 +4714,7 @@ async function exportDaysExcel(){
       ['Period (month-to-date):',from+' to '+to],
       ['Crew active this month:',(T.crew||0),'Total sea-days:',(T.days||0)],
       [],
-      ['BY CREW — for customer billing'],
+      ['BY CREW — days worked this month'],
       ['Crew','Agency ID','Vessel','Customer','Status','Sign-on','Days worked']
     ];
     (d.perCrew||[]).forEach(function(c){rows.push([c.name,c.sc,c.ship||'',c.client||'',c.status||'',c.signOn||'',c.days]);});
