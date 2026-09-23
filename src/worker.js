@@ -500,6 +500,10 @@ async function movementsData(env, runDate, days = 7) {
          // Badge a new hire ONLY on a positively-known zero. Absent from the
          // roster map means unknown, not new — a wrong badge is worse than none.
          newHire: contractsBy[a.agency_id] === 0,
+         // A forward leg is a PLAN until Rita ticks the date on the relief card; the projection
+         // carries that tick through as on_conf. Unticked reads "projected" in the email, which is
+         // what it is (23 Sep 2026 — see seafarer_movements.dateMark).
+         confirmed: !!a.on_conf,
        });
      }
      md.signOns.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
@@ -1946,7 +1950,18 @@ async function apiRotationCrew(env, url) {
       // WHO the board is quoting for this contract, and what the other side said.
       shown_from: rl.source === "rita" ? "recorded in the console" : "Contract Counter (TDG)",
       source: rl.source, overridden: !!rl.overridden,
-      counter: { ship: leg.ship, sign_on: leg.sign_on, projected_sign_off: leg.proj_off, actual_sign_off: leg.act_off, imported_at: leg.imported_at || null },
+      counter: {
+        ship: leg.ship, sign_on: leg.sign_on, projected_sign_off: leg.proj_off, actual_sign_off: leg.act_off,
+        imported_at: leg.imported_at || null,
+        // PROVENANCE, SAID OUT LOUD (Miguel, 23 Sep 2026). A Counter row written before the import
+        // stamp existed carries no imported_at, so the console cannot name the TDG file it came from
+        // — and because "newer write wins" reads a missing stamp as older than anything, ANY recorded
+        // edit outranks it. 33 crew are in that state today. An unknown that nobody states is how
+        // "the dates are not coming from TDG" stood up as an explanation (Rita, 21 Sep 2026).
+        origin: leg.imported_at
+          ? ("Contract Counter file imported " + String(leg.imported_at).slice(0, 10))
+          : "not recorded: this row predates import stamping, so the console cannot name which TDG file it came from",
+      },
       recorded: hasEdit ? { sign_on: e.sign_on || null, sign_off: e.sign_off || null, ship: e.ship || null, updated_at: e.updated_at || null } : null,
       // The Counter's own date is a PLAN until somebody records the real one. Say so rather than let a
       // projected date be read as a fact — the whole point of Rita's 21 Sep question.

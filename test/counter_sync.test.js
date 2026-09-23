@@ -236,3 +236,20 @@ test("overridden is FALSE when the newer Counter agrees with Rita, or has nothin
   const real = resolveLeg({ ...LEG, imported_at: "2026-09-20" }, { sign_off: "2026-09-30", updated_at: "2026-09-12T08:00:00Z" });
   assert.equal(real.overridden, true, "different date, file newer: this one really was replaced");
 });
+
+test("a card names the FILE when both sides say the same thing — agreement is not an override", () => {
+  // 23 Sep 2026. The mirror of Rita's question: the console used to label a date "Rita" whenever her
+  // edit happened to match the Counter, even when the file was the newer write. Nothing was
+  // overridden, so nothing is attributed to her.
+  const agree = resolveLeg({ ...LEG, imported_at: "2026-09-20" }, { sign_on: "2026-03-08", sign_off: "2026-09-14", updated_at: "2026-09-12T08:00:00Z" });
+  assert.equal(agree.signOff, "2026-09-14");
+  assert.equal(agree.source, "counter", "identical values: the upstream file is the source");
+  assert.equal(agree.overridden, false);
+  // She still wins where she actually differs and her write is newer.
+  const differs = resolveLeg({ ...LEG, imported_at: null }, { sign_off: "2026-09-25", updated_at: "2026-07-14T10:33:13.054Z" });
+  assert.equal(differs.signOff, "2026-09-25");
+  assert.equal(differs.source, "rita");
+  // ...and where the Counter simply has no value of its own.
+  const gap = resolveLeg({ sign_on: "2026-03-08", proj_off: null, ship: "Icon", imported_at: "2026-09-20" }, { sign_off: "2026-10-01", updated_at: "2026-09-12T08:00:00Z" });
+  assert.equal(gap.source, "rita", "nothing to agree with: the date is hers");
+});

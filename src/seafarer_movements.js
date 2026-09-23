@@ -85,6 +85,10 @@ function shapeMovements(crew, runDate, days = 7) {
           name: c.name, vessel: c.ship, port: c.embark || 'TBA',
           date: ymd(c.signOn), contract: monthsLabel(c.signOn, c.signOff),
           newHire: (c.contracts || 0) === 0,
+          // Is this date a FACT or a PLAN? The board already knows (onConfirmed/offConfirmed = the
+          // Counter's actual date, or the tick Rita puts on a date she has confirmed). Carrying it
+          // here is what lets the email say so instead of printing every date as if it were settled.
+          confirmed: !!c.onConfirmed,
         });
       }
     }
@@ -92,7 +96,7 @@ function shapeMovements(crew, runDate, days = 7) {
       const key = c.agency_id + '|' + ymd(c.signOff);
       if (!seenOff.has(key)) {
         seenOff.add(key);
-        signOffs.push({ name: c.name, vessel: c.ship, port: c.disembark || 'TBA', date: ymd(c.signOff) });
+        signOffs.push({ name: c.name, vessel: c.ship, port: c.disembark || 'TBA', date: ymd(c.signOff), confirmed: !!c.offConfirmed });
       }
     }
   }
@@ -146,6 +150,19 @@ function badgeNewHire() {
   return ` ${pill(C.cloud, C.slate, 'New hire')}`;
 }
 
+// IS THIS DATE A FACT OR A PLAN? (Miguel, 23 Sep 2026.)
+// Rita read a PROJECTED sign-off in this email as a settled fact on 21 Sep, could not see where it
+// came from, and concluded the whole report was wrong. The date was right; the email simply never
+// said what kind of date it was. Every date in this report now says so on its own line:
+//   confirmed = a real sign-on/off is recorded (the Counter's actual date, or the tick in the console)
+//   projected = the plan of record (TDG's projected sign-off, or a relief projection) — not a fact
+// A projection is not a defect; printing one as though it were confirmed is.
+function dateMark(confirmed) {
+  const tx = confirmed ? C.greenInk : C.warnTx;
+  const word = confirmed ? 'confirmed' : 'projected';
+  return ` <span style="font-family:${FONT};font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:${tx};">${word}</span>`;
+}
+
 // card wrapper with a coloured left accent
 function card(accent, inner) {
   return `
@@ -161,7 +178,7 @@ function card(accent, inner) {
 
 function onCard(p) {
   const title = `<span style="font-family:${FONT};font-size:14.5px;font-weight:600;color:${C.ink};">${esc(p.name)}</span>${p.newHire ? badgeNewHire() : ''}`;
-  const sub = `${esc(p.vessel)} · ${esc(p.port)} · on ${esc(fmtDay(p.date))}`;
+  const sub = `${esc(p.vessel)} · ${esc(p.port)} · on ${esc(fmtDay(p.date))}${dateMark(p.confirmed)}`;
   const inner = `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td style="vertical-align:top;">
@@ -175,16 +192,20 @@ function onCard(p) {
   return card(C.green, inner);
 }
 
+// The pill on the right of a departing card is about COVERAGE — is there a reliever — and it says
+// "Relief ..." so it cannot be read as a statement about the DATE beside the name. Both words used
+// to be a bare "Confirmed" on the same card, meaning two different things (caught in the rendered
+// preview, 23 Sep 2026).
 function reliefBits(r) {
   if (!r || r.state === 'unknown') return { accent: C.lightSlate, pill: `<span style="font-family:${FONT};font-size:12px;color:${C.lightSlate};">—</span>`, sub: '' };
-  if (r.state === 'confirmed') return { accent: C.okAccent,   pill: pill(C.okBg,   C.okTx,   'Confirmed'),   sub: `${esc(r.reliever || '')}${r.signon ? ' · ' + fmtShort(r.signon) : ''}` };
-  if (r.state === 'planned')   return { accent: C.warnAccent, pill: pill(C.warnBg, C.warnTx, 'Unconfirmed'), sub: `${esc(r.reliever || '')}${r.signon ? ' · ' + fmtShort(r.signon) : ''}` };
+  if (r.state === 'confirmed') return { accent: C.okAccent,   pill: pill(C.okBg,   C.okTx,   'Relief confirmed'),   sub: `${esc(r.reliever || '')}${r.signon ? ' · ' + fmtShort(r.signon) : ''}` };
+  if (r.state === 'planned')   return { accent: C.warnAccent, pill: pill(C.warnBg, C.warnTx, 'Relief unconfirmed'), sub: `${esc(r.reliever || '')}${r.signon ? ' · ' + fmtShort(r.signon) : ''}` };
   return { accent: C.badAccent, pill: pill(C.badBg, C.badTx, 'No relief'), sub: '' };
 }
 
 function offCard(p) {
   const rb = reliefBits(p.relief);
-  const sub = `${esc(p.vessel)} · ${esc(p.port)} · off ${esc(fmtDay(p.date))}`;
+  const sub = `${esc(p.vessel)} · ${esc(p.port)} · off ${esc(fmtDay(p.date))}${dateMark(p.confirmed)}`;
   const rsub = rb.sub ? `<div style="font-family:${FONT};font-size:12px;color:${C.lightSlate};padding-top:5px;">${rb.sub}</div>` : '';
   const inner = `
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -277,7 +298,9 @@ function buildSeafarerMovementEmail({ runDate = new Date(), signOns = [], signOf
    <tr><td style="padding:26px 30px 26px 30px;">
      <div style="border-top:1px solid ${C.border};padding-top:14px;font-family:${FONT};font-size:11px;color:${C.lightSlate};line-height:1.6;">
        Automated report · generated ${fmt(runDate)} 07:00 Miami time.<br>
-       Movements within the next 7 days only. Source: CIMS Keyman board (our crew only).
+       Movements within the next 7 days only. Source: CIMS Keyman board (our crew only).<br>
+       <strong style="color:${C.slate};">Confirmed</strong> = a sign-on/off is recorded against the contract.
+       <strong style="color:${C.slate};">Projected</strong> = the plan of record (TDG's projected date, or a relief projection) and still subject to change.
      </div>
    </td></tr>
 

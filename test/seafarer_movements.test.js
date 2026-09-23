@@ -60,7 +60,7 @@ test('buildSeafarerMovementEmail: relief column + coverage banner', () => {
   ];
   const html = buildSeafarerMovementEmail({ runDate: RUN, signOns: [], signOffs });
   assert.match(html, /No relief/);            // uncovered pill
-  assert.match(html, /Confirmed/);            // covered pill
+  assert.match(html, /Relief confirmed/);     // covered pill — says what it is confirming
   assert.match(html, /Cruz, Juan/);           // reliever name shown
   assert.match(html, /Coverage alert/);       // banner fires when a seat is uncovered
 });
