@@ -1913,19 +1913,47 @@ function histEntries(hs, excludeSc) {
   return Object.values(byp).sort((a, b) => (a.ours === b.ours) ? ((a.off || "") < (b.off || "") ? 1 : -1) : (a.ours ? -1 : 1));
 }
 // Full detail for one crew (modal): all contract legs + readiness + note.
+// WHERE A DATE COMES FROM (23 Sep 2026). Rita asked Maria where the Keyman tab's sign-off came from.
+// Maria answered with the Counter's raw projected date and named the wrong table, so a date Rita had
+// recorded HERSELF looked to her like an invention — and the weekly Movements email, which was showing
+// her own date, got reported as wrong. The cause is here: this endpoint returned the raw
+// keyman_contract3 rows and never looked at contract_edit, so it could not show what the BOARD shows.
+// Today 33 crew carry an edit and 8 of those have a sign-off the Counter disagrees with.
+//
+// It now also returns `resolved`: per contract, the effective values through the board's OWN rule
+// (editFor + resolveLeg, the same pair rotationSections uses), each with both candidate values and
+// which one won. `legs` keeps its exact shape — the card modal renders it.
 async function apiRotationCrew(env, url) {
   // PERF (2026-09): the rotation card was 3 sequential round trips after 2 sequential ensures.
-  // Ensures together, then all three reads as one wave. Same statements, same output, same 404.
-  await Promise.all([ensureKeyman(env), ensureReady(env)]);
+  // Ensures together, then all reads as one wave. Same statements, same output, same 404.
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env)]);
   const id = url.searchParams.get("id");
-  const [c, legsRes, r] = await Promise.all([
+  const [c, legsRes, r, editRes] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, pp_exp, usv_exp FROM crew WHERE agency_id=?").bind(id).first(),
-    env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
+    env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first(),
+    env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit WHERE sc=?").bind(id).all().catch(() => ({ results: [] })),
   ]);
   if (!c) return json({ error: "not_found" }, 404);
   const legs = legsRes.results;
-  return json({ crew: c, legs, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
+  const idx = indexEdits((editRes.results || []).map((e) => ({ ...e, sc: e.sc || id })));
+  const resolved = legs.map((leg) => {
+    const e = editFor({ ...leg, sc: id }, idx) || {};
+    const hasEdit = !!e.sc;
+    const rl = resolveLeg(leg, hasEdit ? e : null);
+    return {
+      seq: leg.seq, ship: rl.ship || leg.ship, sign_on: rl.signOn, sign_off: rl.signOff,
+      // WHO the board is quoting for this contract, and what the other side said.
+      shown_from: rl.source === "rita" ? "recorded in the console" : "Contract Counter (TDG)",
+      source: rl.source, overridden: !!rl.overridden,
+      counter: { ship: leg.ship, sign_on: leg.sign_on, projected_sign_off: leg.proj_off, actual_sign_off: leg.act_off, imported_at: leg.imported_at || null },
+      recorded: hasEdit ? { sign_on: e.sign_on || null, sign_off: e.sign_off || null, ship: e.ship || null, updated_at: e.updated_at || null } : null,
+      // The Counter's own date is a PLAN until somebody records the real one. Say so rather than let a
+      // projected date be read as a fact — the whole point of Rita's 21 Sep question.
+      sign_off_is_projected: !leg.act_off && !(hasEdit && e.sign_off),
+    };
+  });
+  return json({ crew: c, legs, resolved, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
 }
 async function apiNote(request, env, session) {
   const b = await request.json().catch(() => ({}));
