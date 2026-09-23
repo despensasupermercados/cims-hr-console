@@ -91,3 +91,32 @@ test("Maria is told which field is authoritative, and is no longer pointed at sh
   assert.match(M, /never name ship_leg as the source of a current leg or a sign-off date/);
   assert.doesNotMatch(M, /upcoming_movements \(ship_leg\)/, "this line is what produced the wrong table name");
 });
+
+// ---------------------------------------------------------------------------
+// PROVENANCE (23 Sep 2026). Rita's second point was the one the console could not answer: WHICH TDG
+// file is a date from? A Counter row written before import stamping carries no imported_at, so the
+// honest answer is "not recorded" — and it must be said, not left blank. Silence is what let "the
+// dates are not coming from TDG" stand up as an explanation.
+test("a Counter row with no import stamp says so, instead of leaving the question open", async () => {
+  const r = (await call(envFor())).resolved[0];
+  assert.equal(r.counter.imported_at, null);
+  assert.match(r.counter.origin, /not recorded/, "the unknown is stated");
+  assert.match(r.counter.origin, /TDG file/, "and what exactly is unknown");
+});
+
+test("a stamped row names its import date — the whole point of the stamp", async () => {
+  const stamped = { ...LEG, imported_at: "2026-09-20T11:02:00.000Z" };
+  const r = (await call(envFor({ legs: [stamped] }))).resolved[0];
+  assert.match(r.counter.origin, /imported 2026-09-20/);
+  assert.doesNotMatch(r.counter.origin, /not recorded/);
+  // And with a stamp newer than her edit, the file wins — the rule, unchanged by any of this.
+  assert.equal(r.sign_off, "2026-09-18", "the newer write is the Counter");
+  assert.equal(r.source, "counter");
+});
+
+test("the origin line never invents a date for a row that has none", async () => {
+  for (const blank of [null, "", undefined]) {
+    const r = (await call(envFor({ legs: [{ ...LEG, imported_at: blank }] }))).resolved[0];
+    assert.doesNotMatch(r.counter.origin, /\d{4}-\d{2}-\d{2}/, "no fabricated file date");
+  }
+});

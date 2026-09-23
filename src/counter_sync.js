@@ -85,9 +85,17 @@ export function resolveLeg(leg, edit) {
   const signOn = pick(day(edit.sign_on), counter.signOn);
   const signOff = pick(day(edit.sign_off), counter.signOff);
   const ship = pick(edit.ship, counter.ship);
-  const usedRita = (signOn != null && signOn === day(edit.sign_on)) ||
-                   (signOff != null && signOff === day(edit.sign_off)) ||
-                   (ship != null && ship === edit.ship && ship !== counter.ship);
+  // WHO A CARD NAMES AS THE SOURCE. A value counts as Rita's only when hers was CHOSEN and it is
+  // actually different from the Counter's (or the Counter has none). When the two agree there is
+  // nothing she overrode, and naming her invites the mirror of Rita's own 21 Sep question — "why
+  // does the console call a TDG date mine?". Agreement is attributed to the file; her edit is still
+  // returned in full alongside it, so the whole answer stays visible.
+  const fromRita = (ritaValue, chosen, counterValue) =>
+    ritaValue != null && ritaValue !== "" && chosen === ritaValue &&
+    (counterValue == null || counterValue === "" || counterValue !== ritaValue);
+  const usedRita = fromRita(day(edit.sign_on), signOn, counter.signOn) ||
+                   fromRita(day(edit.sign_off), signOff, counter.signOff) ||
+                   fromRita(edit.ship, ship, counter.ship);
   // "Overridden" means a value Rita SET was REPLACED by a different Counter value because the file
   // is newer. Not "the file is newer" on its own: if the two agree there is nothing to report, and
   // if the Counter has no value at all Rita's stands and the card must not claim it was replaced.

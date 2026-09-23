@@ -259,7 +259,8 @@ async function projectFutureLegs(env, { today, dryRun = false } = {}) {
 async function fetchArrivals(env, startDate, endDate) {
   const { results } = await env.DB.prepare(
     `SELECT l.ship_short AS ship, l.sc AS agency_id, l.on_date AS signOn, l.off_date AS signOff,
-            l.embark, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS name
+            l.embark, l.on_conf,
+            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS name
        FROM ship_leg l
        LEFT JOIN crew c ON c.id = l.crew_id
       WHERE l.ours = 1 AND l.is_current = 0
