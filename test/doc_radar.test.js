@@ -283,3 +283,36 @@ test('buildDocRadarEmail: the footer carries the reconciliation line', () => {
   assert.ok(!without.includes('unreconciled'), 'no recon data means no half-written line');
   assert.match(without, /Automated weekly report/);
 });
+
+// --- mobile (23 Sep 2026) ----------------------------------------------------
+// Miguel, with a screenshot of this report in Outlook on iOS: the same complaint as the Movements
+// email. Five document columns cannot fit a phone — names wrapped three lines deep and every date
+// broke into "27 / Nov / 28". On a phone the matrix becomes a list; on a desktop it stays a matrix.
+test('buildDocRadarEmail: the matrix collapses to a list on a phone, and only on a phone', () => {
+  const rows = [{ agency_id:'SC-1', name:'Cyrus Anthony Talucod', status:'Earmarked', deployable:true,
+    docs:{ pp_exp:'2028-05-29', sirb_exp:'2031-10-13', med_exp:'2026-06-18', usv_exp:'2033-07-17', sch_exp:null },
+    cells:{ pp_exp:'valid', sirb_exp:'valid', med_exp:'expired', usv_exp:'valid', sch_exp:'na' } }];
+  const html = buildDocRadarEmail({ runDate: TODAY, rows, counts:{ crew:1, expired:1, expiring:0, missing:0, deployable:1 }, urgent:null });
+
+  assert.match(html, /@media only screen and \(max-width:620px\)/, 'a phone breakpoint');
+  assert.match(html, /\.hdr\{display:none!important\}/, 'the column header goes');
+  assert.match(html, /\.crow\{display:block!important/, 'each crew row becomes a block');
+  assert.match(html, /\.dcell\{display:inline-block!important/, 'each document becomes a chip');
+
+  // The header is what a column means. Take it away and the chip has to say so itself.
+  assert.match(html, /<span class="dlbl" style="display:none;[^"]*">PP <\/span>/, 'the chip carries its label');
+  assert.match(html, /\.dlbl\{display:inline!important\}/, 'shown only under the phone rule');
+
+  // ...and the desktop matrix is untouched: the header row still carries every column.
+  for (const col of ['PP', 'SIRB', 'MED', 'C1/D', 'SCH']) {
+    assert.ok(html.includes(`>${col}</th>`), `the ${col} column header survives for desktop`);
+  }
+});
+
+test('buildDocRadarEmail: fluid width and no iOS date-linking', () => {
+  const html = buildDocRadarEmail({ runDate: TODAY, rows: [], counts:{ crew:0, expired:0, expiring:0, missing:0, deployable:0 }, urgent:null });
+  assert.match(html, /width:100%;max-width:600px/, 'a ceiling, not a fixed width');
+  assert.doesNotMatch(html, /style="width:600px/, 'the fixed width is what squeezed it');
+  assert.match(html, /<meta name="format-detection" content="telephone=no,date=no,address=no,email=no">/);
+  assert.match(html, /a\[x-apple-data-detectors\]/);
+});
