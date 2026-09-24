@@ -21,9 +21,9 @@ import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, U
 import { htmlPage, etagFor } from "./etag.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
 import { applyOverride, OVR_FIELDS } from "./override.js";
-import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
+import { contractLedgerRow, psRank, psSalary } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
-import { parseCompletedContracts, bridgeCounts, diffCounts } from "./contract_count.js";
+import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts } from "./contract_count.js";
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
@@ -1437,18 +1437,19 @@ async function boardLegs(env) {
 async function apiCrew(env, url) {
   // PERF (2026-07): ensures + the four reads are independent — run them concurrently instead of
   // paying 6 sequential Worker->D1 round trips. Same statements, same outputs.
-  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureContractCount(env)]);
   const today = TODAY();
   // ?hidden=1 returns the HIDDEN cards (redacted=1) for the "Hidden cards" restore list; default is
   // the live roster (redacted=0). Fixed 0/1 literal — no user string reaches the SQL.
   const onlyHidden = !!(url && url.searchParams.get("hidden") === "1");
   const redFlag = onlyHidden ? "1" : "0";
-  const [baseRes, ovsRes, legsRes, nlRes, HIST] = await Promise.all([
+  const [baseRes, ovsRes, legsRes, nlRes, HIST, TDG] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count FROM crew WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
     boardLegs(env), // the live schedule — same source as the rotation board and dashboard (§11)
+    contractCountMap(env), // TDG's stated completed-contract count (§10c); a crew the file does not carry falls back to the derived number
   ]);
   const base = baseRes.results;
   const ovs = ovsRes.results;
@@ -1467,19 +1468,21 @@ async function apiCrew(env, url) {
     const ls = (byCrew[b.agency_id] || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
     let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1]
       || (histAct[b.agency_id] ? { sign_on: histAct[b.agency_id].on, proj_off: histAct[b.agency_id].off, act_off: null } : null);
+    const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, c.baseline_count, fullContracts(ls.map(legShape)));
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
       status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
       rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
       client: clientOf(c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
       med_exp: c.med_exp, sirb_exp: c.sirb_exp, pp_exp: c.pp_exp, usv_exp: c.usv_exp, sch_exp: c.sch_exp,
-      // contract_count = CUMULATIVE completed contracts (seeded baseline + full legs since); drives the
-      // HR grade below. tier/base_salary_usd are display/HR only, never a payout input. baseline NULL =
-      // 'baseline pending' -> tier still computes from legs alone (0 -> Junior) until Rita confirms.
+      // contract_count = CUMULATIVE completed contracts: TDG's stated count (§10c) when the count file
+      // carries the crew, else seeded baseline + full legs derived from Counter dates. Drives the HR
+      // grade below. tier/base_salary_usd are display/HR only, never a payout input. baseline NULL =
+      // 'baseline pending' -> the derived fallback still computes from legs alone (0 -> Junior).
       baseline_count: c.baseline_count,
-      contract_count: tierContracts(c.baseline_count, fullContracts(ls.map(legShape))),
-      tier: psRank(tierContracts(c.baseline_count, fullContracts(ls.map(legShape))), true),
-      base_salary_usd: psSalary(tierContracts(c.baseline_count, fullContracts(ls.map(legShape)))),
+      contract_count: cc.n, contracts_source: cc.source, contracts_as_of: cc.source === "tdg" ? TDG[b.agency_id].as_of : null,
+      tier: psRank(cc.n, true),
+      base_salary_usd: psSalary(cc.n),
       active_on: act ? act.sign_on : null, active_off: act ? (act.act_off || act.proj_off) : null,
       hasNote: !!noteMap[c.agency_id] || !!(c.notes && String(c.notes).trim())
     };
@@ -2049,6 +2052,13 @@ async function ensureContractCountImpl(env) {
 }
 // sc -> TDG's completed-contract count, or an empty map when nothing has been imported yet.
 function countMapOf(rows) { const m = {}; for (const r of (rows || [])) if (r && r.sc) m[r.sc] = r.completed; return m; }
+// sc -> { completed, as_of } from the last count import; {} until one has been applied. Read inside a
+// route's existing wave (§12), never as its own round trip.
+async function contractCountMap(env) {
+  const r = await env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] }));
+  const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null };
+  return m;
+}
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
   // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
@@ -2145,14 +2155,16 @@ async function apiBonusCrew(env, url) {
     env.DB.prepare("SELECT id, agency_id, first_name, middle_name, last_name, status, rank_observed, vessel_observed, baseline_count FROM crew WHERE agency_id=?").bind(id).first(),
     boardLegs(env),
     ensureKeyman(env),
+    ensureContractCount(env),
   ]);
   if (!cr) return json({ error: "not found" }, 404);
   // The reads keyed by the crew row fire as a second wave (was 5 sequential round trips). The bonus
   // math is untouched: same helpers (effectiveBaseline, crewCount), same statements, same output.
-  const [baseline, outs, legRowsRes] = await Promise.all([
+  const [baseline, outs, legRowsRes, tdgRow] = await Promise.all([
     effectiveBaseline(env, cr.agency_id, cr.baseline_count),
     env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all(),
     env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all(),
+    env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(cr.agency_id).first().catch(() => null), // TDG's stated count (§10c)
   ]);
   const count = await crewCount(env, cr.id, baseline);
   // Default sign-on/off for the Score Card (manually editable there). Prefer the live SCHEDULE
@@ -2183,8 +2195,11 @@ async function apiBonusCrew(env, url) {
   }
   const legRows = legRowsRes.results;
   const legN = fullContracts(legRows.map(legShape));
-  const effN = tierContracts(baseline, legN); // cumulative completed -> grade/pay (never resets)
-  return json({ crew: cr, count, contracts: effN, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  // cumulative completed -> grade/pay (never resets): TDG's stated count, else baseline + derived legs.
+  // `count` (the consecutive bonus count: ledger + ladder) is untouched by this — that is money (§1).
+  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN);
+  const effN = cc.n;
+  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -2194,12 +2209,13 @@ async function apiContracts(env) {
   // cost is the round trips. Same statements, same consumption order, now two waves: the ensures
   // together (they must finish before the reads, since they create the tables), then every read at
   // once. Pinned by test/perf_invariants.test.js alongside the other hot routes.
-  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
-  const [baseRes, ovsRes, legCounts, outRes] = await Promise.all([
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureContractCount(env)]);
+  const [baseRes, ovsRes, legCounts, outRes, TDG] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all(),
     fullContractMap(env), // sc -> FULL-contract count (drives rank + the number shown)
     env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all(),
+    contractCountMap(env), // TDG's stated completed-contract count (§10c)
   ]);
   const base = baseRes.results;
   const ovm = {}; for (const o of ovsRes.results) ovm[o.agency_id] = o;
@@ -2214,12 +2230,14 @@ async function apiContracts(env) {
     // Baseline + count + rank + next rung via the shared ledger helper (override-wins through the
     // SAME resolveBaseline as the commit/PDF path — no inline copy that could silently drift).
     const L = contractLedgerRow(b.baseline_count, ov.baseline_count, lo);
-    // Grade/pay ride the CUMULATIVE count (seeded baseline + full legs), not the consecutive `count`,
-    // so a bonus reset never demotes anyone. Display only — payout still uses L.count + the ladder.
-    const eff = tierContracts(L.baseline, legCounts[b.agency_id] || 0);
+    // Grade/pay ride the CUMULATIVE count (TDG's stated count, else seeded baseline + full legs), not
+    // the consecutive `count`, so a bonus reset never demotes anyone. Display only — payout still uses
+    // L.count + the ladder.
+    const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, L.baseline, legCounts[b.agency_id] || 0);
+    const eff = cc.n;
     return {
       agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
-      vessel: vessel || null, client: clientOf(vessel), contracts: eff,
+      vessel: vessel || null, client: clientOf(vessel), contracts: eff, contracts_source: cc.source,
       count: L.count, baseline_set: L.baseline_set, rank: psRank(eff), base_salary_usd: psSalary(eff), nextRung: L.nextRung,
       lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
       lastGate: lo ? lo.gate : null, lastPay: lo ? lo.pay_usd : null, totalPay: totPay[b.id] || 0
@@ -2239,9 +2257,12 @@ async function gatherStatement(env, id) {
   const baseline = await effectiveBaseline(env, id, crew.baseline_count);
   const count = await crewCount(env, crew.id, baseline);
   const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
+  await ensureContractCount(env);
+  const tdgRow = await env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first().catch(() => null);
   const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
-  const effFc = tierContracts(baseline, fc); // cumulative completed -> grade/pay on the statement
-  const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
+  const effFc = cc.n;
+  const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
@@ -5378,8 +5399,8 @@ async function openCrew(id){
   }
   if(bz&&!bz.error){
     h+='<div class=zlabel style="margin-top:16px">Bonus standing</div>';
-    h+='<div class=csub style="margin-bottom:8px">Rank: <b style="color:var(--navy)">'+(bz.rank||'—')+'</b> · '+(bz.count!=null?bz.count:0)+' completed contract(s)'+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
-    h+='<div class=tiles>'+tile((bz.count!=null?bz.count:0),'Completed')+tile('$'+(bz.nextRungIfClean!=null?Number(bz.nextRungIfClean).toLocaleString():'—'),'Next rung if clean')+'</div>';
+    h+='<div class=csub style="margin-bottom:8px">Rank: <b style="color:var(--navy)">'+(bz.rank||'—')+'</b> · '+(bz.contracts!=null?bz.contracts:0)+' completed contract(s) '+ctSrc(bz)+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
+    h+='<div class=tiles>'+tile((bz.contracts!=null?bz.contracts:0),'Completed')+tile((bz.count!=null?bz.count:0),'Bonus count (consecutive)')+tile('$'+(bz.nextRungIfClean!=null?Number(bz.nextRungIfClean).toLocaleString():'—'),'Next rung if clean')+'</div>';
     var outs=bz.outcomes||[];
     if(outs.length) h+='<table class=tbl><thead><tr><th>Date</th><th>Ships</th><th>Score</th><th>Gate</th><th>Pay</th></tr></thead><tbody>'
       +outs.map(function(o){var ships='';try{ships=JSON.parse(o.ships_json||'[]').join(', ');}catch(e){}return '<tr><td>'+(o.committed_at||'').slice(0,10)+'</td><td>'+ships+'</td><td>'+o.score_pct+'%</td><td>'+(o.gate||'—')+'</td><td>$'+(o.pay_usd||0).toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
@@ -5663,6 +5684,13 @@ async function renderContracts(){
    +'<div id=ctcount class=csub style="margin-bottom:8px"></div><div id=cttable></div>';
   paintContracts();
 }
+// Where a completed-contract count came from (§10c): TDG's count file (with its as-of date) or the
+// console's own date-derived fallback. Shown beside every rank so the reader knows which they are seeing.
+function ctSrc(x){
+  if(!x)return '';
+  if(x.contracts_source==='tdg')return '<span class=csub style="display:inline">· TDG count'+(x.contracts_as_of?' as of '+fmtDate(x.contracts_as_of):'')+'</span>';
+  return '<span class=csub style="display:inline;color:#b45309">· date-derived, count file not loaded</span>';
+}
 function paintContracts(){
   if(!CTL)return;var q=CTLF.q.trim().toLowerCase();
   var rows=(CTL.rows||[]).filter(function(r){if(CTLF.client&&r.client!==CTLF.client)return false;if(q&&((r.name||'')+' '+(r.agency_id||'')).toLowerCase().indexOf(q)<0)return false;return true;});
@@ -5842,7 +5870,7 @@ async function openScore(id){
        :'<div class="sbadge idle">● '+(cr.status||'status unknown')+'</div>');
   var body=''
    +sb
-   +'<div class=hint>'+cr.agency_id+' · '+d.rank+' · Contract count <b>'+d.count+'</b> → completing makes it <b>'+(d.count+1)+'</b>. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
+   +'<div class=hint>'+cr.agency_id+' · '+d.rank+' ('+d.contracts+' completed '+ctSrc(d)+') · Bonus count <b>'+d.count+'</b> → completing makes it <b>'+(d.count+1)+'</b>. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
    +warn+hist+'<div id=fbPanel></div>'
    +'<div class=sec><span class=n>1</span>Contract</div>'
    +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore();applySeval(_SEVAL.sc)"></div></div>'

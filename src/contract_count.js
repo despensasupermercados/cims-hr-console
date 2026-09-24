@@ -19,6 +19,8 @@
 //
 // Pure: no IO. Everything here is unit-tested, and the importer route in worker.js is the only writer.
 
+import { tierContracts } from "./ledger.js";
+
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z]/g, "");
 export const normId = (v) => String(v == null ? "" : v).replace(/^\s*pcn\s*:?\s*/i, "").replace(/\.0$/, "").trim();
 
@@ -94,6 +96,15 @@ export function bridgeCounts(parsed, roster) {
     matched.push({ ...r, sc });
   }
   return { matched, unmatched };
+}
+
+// The number the GRADE reads (psRank / psSalary — display and HR only, never a payout input).
+// TDG's stated count when the file carries the crew; otherwise the pre-24-Sep rule, seeded baseline +
+// full contracts derived from Counter dates, so a crew the file does not name keeps the number they
+// had. `source` says which, so every screen can say where its number came from.
+export function cumulativeContracts(stated, baseline, derived) {
+  if (typeof stated === "number" && Number.isFinite(stated)) return { n: stated, source: "tdg" };
+  return { n: tierContracts(baseline, derived), source: "derived" };
 }
 
 // What an apply would change. current = { sc: completed today } (from contract_count), derived =

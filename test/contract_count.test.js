@@ -5,7 +5,15 @@
 // crew (Espenilla Zandro: TDG 7, derived 0). Rank sits on this number. The count is an import.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCountTab, parseCompletedContracts, bridgeCounts, diffCounts, normId } from "../src/contract_count.js";
+import { parseCountTab, parseCompletedContracts, bridgeCounts, diffCounts, normId, cumulativeContracts } from "../src/contract_count.js";
+
+test("the grade count: TDG's stated number when the file carries the crew, else baseline + derived, and it says which", () => {
+  assert.deepEqual(cumulativeContracts(7, 0, 0), { n: 7, source: "tdg" }, "Espenilla: TDG 7, derived 0 -> 7 (Senior)");
+  assert.deepEqual(cumulativeContracts(0, 3, 2), { n: 0, source: "tdg" }, "'Ongoing' is a stated 0, not a missing value — the file wins");
+  assert.deepEqual(cumulativeContracts(null, 3, 2), { n: 5, source: "derived" }, "not in the file: the pre-24-Sep rule, seeded baseline + full legs");
+  assert.deepEqual(cumulativeContracts(undefined, null, 0), { n: 0, source: "derived" }, "baseline pending, no legs -> 0, Junior");
+  assert.deepEqual(cumulativeContracts("7", 1, 1), { n: 2, source: "derived" }, "a string is not a count — only a real number from the table is trusted");
+});
 
 const HEAD = ["CREW ID", "CREW NAME", "COMPLETED CONTRACTS", "POSITION"];
 const ACTIVE = [
