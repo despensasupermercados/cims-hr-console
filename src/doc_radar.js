@@ -17,6 +17,7 @@
 
 import { isMoneyUser } from "./policy.js";
 import { scheduleBySc, crewStatus, isOffFleet } from "./crew_status.js";
+import { mastRows } from "./cims-mast.js";
 
 // --- recipients (edit here; lives in code so it survives every deploy) -------
 const TO = ["Rita Berenyi <Rita.Berenyi@dg3.com>"];
@@ -39,15 +40,17 @@ const MAX_ROWS = 60;      // safety cap on email size
 const SUSPECT_PAST_YEARS = 5;
 const SUSPECT_FUTURE_YEARS = 50;
 
-// --- brand palette -----------------------------------------------------------
-const C = { navy:'#1B3A5C', green:'#5FB946', ink:'#1F2A37', slate:'#6B7280', light:'#9CA3AF', border:'#E5E7EB', page:'#EAEDF1', card:'#FFFFFF' };
+// --- brand palette: CIMS tokens only (cims-email-standard §3; Daylight §9) -----
+// Solid tints, never rgba (Outlook drops rgba). Suspect keeps its own look (dashed outline) so a
+// registry defect never reads as a compliance colour.
+const C = { navy:'#1B3A5C', green:'#5FB946', greenInk:'#3E7F2E', ink:'#1F2A37', slate:'#6B7280', light:'#9CA3AF', border:'#E5E7EB', page:'#F3F4F6', card:'#FFFFFF', body:'#374151', red:'#96281B', amber:'#B7791F' };
 const S = {
-  valid:   { bg:'#E7F4E1', tx:'#357D2A', ac:'#5FB946' },
-  expiring:{ bg:'#FBF0DA', tx:'#8A6620', ac:'#E0A64B' },
-  expired: { bg:'#FDE7E7', tx:'#9B1C1C', ac:'#DC2626' },
-  missing: { bg:'#ECEFF3', tx:'#4B5563', ac:'#94A3B8' },
-  suspect: { bg:'#EDE9FE', tx:'#5B21B6', ac:'#8B5CF6' },
-  na:      { bg:'#F5F6F7', tx:'#B7B6B2', ac:'#E5E7EB' },
+  valid:   { bg:'#EAF4E6', tx:'#3E7F2E', ac:'#5FB946' },
+  expiring:{ bg:'#F6EEE1', tx:'#B7791F', ac:'#B7791F' },
+  expired: { bg:'#F4E5E3', tx:'#96281B', ac:'#96281B' },
+  missing: { bg:'#F3F4F6', tx:'#374151', ac:'#9CA3AF' },
+  suspect: { bg:'#FFFFFF', tx:'#1B3A5C', ac:'#9CA3AF', bd:'1px dashed #9CA3AF' },
+  na:      { bg:'#FFFFFF', tx:'#9CA3AF', ac:'#E5E7EB' },
 };
 const F  = "'DM Sans','Segoe UI',Helvetica,Arial,sans-serif";
 const FH = "'Outfit','Segoe UI',Helvetica,Arial,sans-serif";
@@ -211,15 +214,15 @@ export async function fetchReconciliation(env) {
 }
 
 // --- email (pure) ------------------------------------------------------------
-function head(runDate) {
+function head(runDate, preheader = '') {
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="x-apple-disable-message-reformatting"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>Fleet Document Radar</title>
 <style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap');
 a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important;font-size:inherit!important;font-family:inherit!important;font-weight:inherit!important;line-height:inherit!important;pointer-events:none!important}
 @media only screen and (max-width:620px){
   .wrap{width:100%!important;max-width:100%!important}
-  .pagepad{padding:14px 10px!important}
-  .px{padding-left:14px!important;padding-right:14px!important}
-  .h1{font-size:21px!important}
+  .pagepad{padding:0!important}
+  .px{padding-left:20px!important;padding-right:20px!important}
+  .h1{font-size:30px!important}
   .sub,.note,.bnr{font-size:13.5px!important}
   /* THE MATRIX BECOMES A LIST (Miguel, 23 Sep 2026). Five document columns cannot fit a phone:
      names wrapped three lines deep and every date broke into "27 / Nov / 28". Each crew row turns
@@ -237,26 +240,37 @@ a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important
   .more{display:block!important;width:100%!important}
 }</style></head>
 <body style="margin:0;padding:0;background:${C.page};-webkit-text-size-adjust:100%;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="background:${C.page};"><tr><td align="center" class="pagepad" style="padding:30px 14px;">
-<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:${C.card};border:1px solid ${C.border};border-radius:14px;">
-<tr><td class="px" style="background:${C.navy};padding:20px 28px;border-radius:14px 14px 0 0;"><table role="presentation" width="100%"><tr>
-<td style="vertical-align:middle;"><div style="font-family:${FH};font-size:22px;font-weight:700;letter-spacing:5px;color:#fff;line-height:1;">CIMS</div>
-<div style="height:2px;width:34px;background:${C.green};margin:7px 0 6px;font-size:0;line-height:0;">&nbsp;</div>
-<div style="font-family:${F};font-size:8px;font-weight:600;letter-spacing:2.4px;text-transform:uppercase;color:rgba(255,255,255,.6);">Cruise Industry Managed Services</div></td>
-<td align="right" style="vertical-align:top;"><div style="font-family:${F};font-size:10px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase;color:rgba(255,255,255,.7);">Crew Compliance</div>
-<div style="font-family:${F};font-size:8px;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,.4);padding-top:6px;">A division of <span style="color:${C.green};font-weight:700;">DG3</span></div></td>
-</tr></table></td></tr>
-<tr><td class="px" style="padding:24px 28px 2px;"><div class="h1" style="font-family:${FH};font-size:23px;font-weight:700;color:${C.navy};line-height:1.25;">Fleet document radar</div>
-<div class="sub" style="font-family:${F};font-size:13px;color:${C.slate};padding-top:6px;line-height:1.5;">Active crew with a document expired, expiring &le;90 days, or missing · ${fmtRun(runDate)}</div></td></tr>`;
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;color:${C.page};">Fleet document radar · ${esc(preheader)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="background:${C.page};"><tr><td align="center" class="pagepad" style="padding:24px 14px;">
+<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.card}" style="width:100%;max-width:600px;background:${C.card};">
+${mastRows()}
+<tr><td class="px" style="padding:22px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+<td style="font-family:${F};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.greenInk};">FLEET DOCUMENT RADAR</td>
+<td align="right" style="font-family:${F};font-size:13px;color:${C.slate};white-space:nowrap;">${fmtRun(runDate)}</td></tr></table></td></tr>`;
 }
+
+// Daylight headline (§9): the first line says the answer; grey second clause; one plain lead.
+function headline(dark, grey, lead) {
+  return `<tr><td class="px" style="padding:16px 28px 0;"><div class="h1" style="font-family:${FH};font-size:36px;font-weight:600;line-height:1.1;letter-spacing:-.6px;color:${C.navy};">${esc(dark)}${grey ? `<br><span style="color:${C.light};">${esc(grey)}</span>` : ''}</div>`
+    + (lead ? `<div class="sub" style="font-family:${F};font-size:15px;line-height:1.5;color:${C.body};margin-top:14px;">${lead}</div>` : '') + `</td></tr>`;
+}
+
+// Three counts, centred under a 3px status rule (§9 + amendment 24 Sep: centred).
+function statStrip(stats) {
+  const cells = stats.map((x, i) => `${i ? '<td width="12" style="font-size:0;">&nbsp;</td>' : ''}<td width="33%" valign="top" align="center" style="text-align:center;padding:14px 0 0;border-top:3px solid ${x.rule};">`
+    + `<div style="font-family:${FH};font-size:30px;font-weight:700;color:${C.navy};line-height:1;">${x.n}</div>`
+    + `<div style="font-family:${F};font-size:12px;color:${C.slate};margin-top:6px;">${esc(x.label)}</div></td>`).join('');
+  return `<tr><td class="px" style="padding:22px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cells}</tr></table></td></tr>`;
+}
+
 function legend() {
   return `<tr><td class="px" style="padding:14px 28px 2px;"><span class="note" style="font-family:${F};font-size:11.5px;color:${C.slate};line-height:2;">`
     + `<span style="color:${S.valid.tx};font-weight:700;">&#9679;</span> Valid &nbsp; `
     + `<span style="color:${S.expiring.tx};font-weight:700;">&#9679;</span> Expiring &nbsp; `
     + `<span style="color:${S.expired.tx};font-weight:700;">&#9679;</span> Expired &nbsp; `
     + `<span style="color:${S.missing.tx};font-weight:700;">&#9679;</span> Missing &nbsp; `
-    + `<span style="white-space:nowrap;"><span style="color:${S.suspect.tx};font-weight:700;">&#9679;</span> Suspect date</span> &nbsp; `
-    + `<span style="white-space:nowrap;"><span style="color:${S.na.tx};font-weight:700;">&#9679;</span> Not held</span></span></td></tr>`;
+    + `<span style="white-space:nowrap;"><span style="color:${S.suspect.ac};font-weight:700;">&#9675;</span> Suspect date</span> &nbsp; `
+    + `<span style="white-space:nowrap;"><span style="color:${C.border};font-weight:700;">&#9679;</span> Not held</span></span></td></tr>`;
 }
 // One line, in the footer, in plain words: when the roster last came in, and how much of what it
 // reported is still sitting unactioned.
@@ -286,7 +300,7 @@ export function reconLine(recon) {
 function foot(recon) {
   const rl = reconLine(recon);
   const reconHtml = rl ? `<div class="note" style="font-family:${F};font-size:12px;color:${C.slate};line-height:1.7;padding-bottom:9px;">${rl}</div>` : '';
-  return `<tr><td class="px" style="padding:22px 28px 26px;"><div style="border-top:1px solid ${C.border};padding-top:15px;">${reconHtml}<div class="note" style="font-family:${F};font-size:11.5px;color:${C.light};line-height:1.7;">Automated weekly report &middot; Monday 03:00 Miami time &middot; Source: CIMS crew registry, fed by the TDG AdvancedQuery export. Document states are derived from the expiry dates on file &mdash; accuracy depends on the registry being current.</div></div></td></tr></table></td></tr></table></body></html>`;
+  return `<tr><td class="px" style="padding:22px 28px 26px;"><div style="border-top:1px solid ${C.border};padding-top:15px;">${reconHtml}<div class="note" style="font-family:${F};font-size:12px;color:${C.slate};line-height:1.7;">Automated weekly report &middot; Monday 03:00 Miami time &middot; Source: CIMS crew registry, fed by the TDG AdvancedQuery export. Document states are derived from the expiry dates on file &mdash; accuracy depends on the registry being current.</div></div></td></tr></table></td></tr></table></body></html>`;
 }
 
 function cellHtml(state, exp, label) {
@@ -300,13 +314,16 @@ function cellHtml(state, exp, label) {
   const size = state === 'suspect' ? '9px' : '10px';
   // The label is hidden inline (so every desktop client keeps the clean matrix) and unhidden only
   // by the phone media query, where the column header is gone and a bare date means nothing.
-  return `<td class="dcell" style="padding:7px 3px;text-align:center;border-bottom:1px solid ${C.border};"><div class="dchip" style="background:${o.bg};border-radius:6px;padding:5px 2px;font-family:${F};font-size:${size};font-weight:600;color:${o.tx};"><span class="dlbl" style="display:none;font-weight:700;">${label} </span>${txt}</div></td>`;
+  return `<td class="dcell" style="padding:7px 3px;text-align:center;border-bottom:1px solid ${C.border};"><div class="dchip" style="background:${o.bg};${o.bd ? `border:${o.bd};` : ''}border-radius:6px;padding:5px 2px;font-family:${F};font-size:${size};font-weight:600;color:${o.tx};"><span class="dlbl" style="display:none;font-weight:700;">${label} </span>${txt}</div></td>`;
 }
 
 export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 0, recon = null }) {
-  let banner;
+  // Daylight top: headline answer, lead sentence, stat strip (none when all clear).
+  let banner, pre;
   if (!rows.length) {
-    banner = `<tr><td class="px" style="padding:16px 28px 0;"><table role="presentation" width="100%" style="background:${S.valid.bg};border:1px solid #CDE9C0;border-radius:10px;"><tr><td width="4" style="background:${S.valid.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td style="padding:11px 15px;font-family:${F};font-size:13px;color:${S.valid.tx};line-height:1.55;" class="bnr"><strong>All clear:</strong> no active crew has a document expired, expiring within 90 days, or missing.</td></tr></table></td></tr>`;
+    pre = 'All clear. No document lapses in the next 90 days.';
+    banner = headline('All clear.', 'No document lapses in the next 90 days.',
+      'No active crew has a document expired, expiring within 90 days, or missing.');
   } else {
     const bits = [];
     if (counts.expired) bits.push(`${counts.expired} expired`);
@@ -319,7 +336,17 @@ export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 
       const dep = urgent.deployable ? ` — <strong>${esc(urgent.status)}</strong> (next to deploy)` : '';
       urgentLine = ` Most urgent: <strong>${esc(urgent.name)}</strong>${dep}, ${where}.`;
     }
-    banner = `<tr><td class="px" style="padding:16px 28px 0;"><table role="presentation" width="100%" style="background:${S.expired.bg};border:1px solid #F5C2C2;border-radius:10px;"><tr><td width="4" style="background:${S.expired.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td class="bnr" style="padding:12px 16px;font-family:${F};font-size:13px;color:${S.expired.tx};line-height:1.55;"><strong>${counts.crew} crew · ${bits.join(' + ')} documents.</strong>${urgentLine}</td></tr></table></td></tr>`;
+    const dark = `${counts.crew} crew need a document fixed.`;
+    pre = urgent && urgent.label ? `${dark} Most urgent: ${urgent.name}.` : dark;
+    const grey = counts.expired ? `${counts.expired} already expired.`
+      : counts.missing ? `${counts.missing} not on file.`
+      : `${counts.expiring} expiring within 90 days.`;
+    banner = headline(dark, grey, `<strong>${counts.crew} crew · ${bits.join(' + ')} documents.</strong>${urgentLine}`)
+      + statStrip([
+        { n: counts.expired || 0, label: 'Expired', rule: C.red },
+        { n: counts.expiring || 0, label: 'Expiring', rule: C.amber },
+        { n: counts.missing || 0, label: 'Missing', rule: C.light },
+      ]);
   }
 
   let table = '';
@@ -336,15 +363,15 @@ export function buildDocRadarEmail({ runDate, rows, counts, urgent, truncated = 
       body += `<tr class="crow" style="background:${bg};"><td class="cname" style="padding:7px 10px;border-bottom:1px solid ${C.border};"><div class="cnm" style="font-family:${F};font-size:12.5px;font-weight:600;color:${C.ink};line-height:1.35;">${esc(c.name)}</div><div style="padding-top:2px;">${tag}</div></td>${cells}</tr>`;
     });
     const more = truncated ? `<tr class="more"><td colspan="6" style="padding:9px 10px;font-family:${F};font-size:11px;color:${C.light};text-align:center;">+ ${truncated} more crew flagged — see the console.</td></tr>` : '';
-    table = `<tr><td class="px" style="padding:12px 28px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid ${C.border};border-radius:8px;overflow:hidden;">${hdr}${body}${more}</table></td></tr>`;
+    table = `<tr><td class="px" style="padding:14px 28px 4px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;border:1px solid ${C.border};border-radius:8px;overflow:hidden;">${hdr}${body}${more}</table></td></tr>`;
   }
 
   // A suspect date is a registry defect, so it gets an explicit instruction rather than sitting in
   // the matrix looking like a compliance failure someone has to chase a seafarer about.
   const note = counts && counts.suspect
-    ? `<tr><td class="px" style="padding:10px 28px 0;"><table role="presentation" width="100%" style="background:${S.suspect.bg};border:1px solid #DDD6FE;border-radius:10px;"><tr><td width="4" style="background:${S.suspect.ac};border-radius:10px 0 0 10px;font-size:0;">&nbsp;</td><td class="bnr" style="padding:12px 16px;font-family:${F};font-size:12.5px;color:${S.suspect.tx};line-height:1.55;"><strong>${counts.suspect} suspect date${counts.suspect > 1 ? 's' : ''}.</strong> Outside the plausible range for an active crew record &mdash; treat as a data error, not a lapse. Correct it on the Crew tab; the correction carries into this report automatically.</td></tr></table></td></tr>`
+    ? `<tr><td class="px" style="padding:12px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="background:${C.page};border-radius:16px;"><tr><td style="padding:16px 20px;"><div class="bnr" style="padding-left:12px;border-left:3px solid ${C.light};font-family:${F};font-size:13.5px;color:${C.body};line-height:1.55;"><strong style="color:${C.navy};">${counts.suspect} suspect date${counts.suspect > 1 ? 's' : ''}.</strong> Outside the plausible range for an active crew record &mdash; treat as a data error, not a lapse. Correct it on the Crew tab; the correction carries into this report automatically.</div></td></tr></table></td></tr>`
     : '';
-  return head(runDate) + banner + legend() + table + note + foot(recon);
+  return head(runDate, pre) + banner + legend() + table + note + foot(recon);
 }
 
 // --- delivery (self-contained; mirrors worker.sendViaMailer) -----------------
