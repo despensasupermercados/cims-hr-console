@@ -125,10 +125,42 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   assert.match(src, /no upload since 14 Sep 2026/, "a NULL stamp is a missing STAMP, not a missing upload: the 6 Jul file predates stamping");
 });
 
-test("the money paths still read their own count until Miguel moves them (§1)", () => {
-  // apiBonusCrew, the statement and the ledger rows keep tierContracts(baseline, fullContracts(...)).
+test("every grade reader takes TDG's stated count first, in its own wave, and keeps the derived fallback (static)", () => {
+  // The four places a rank / base salary is computed: the crew list, the Score Card, the ledger and
+  // the PDF statement. Each reads contract_count INSIDE its existing wave (§12) and passes the result
+  // through cumulativeContracts, whose fallback is the pre-24-Sep baseline + derived rule.
   const src = readFileSync(SRC, "utf-8");
-  const bonus = src.slice(src.indexOf("async function apiBonusCrew("), src.indexOf("async function apiBonusCrew(") + 4000);
-  assert.match(bonus, /fullContracts\(legRows\.map\(legShape\)\)/, "the bonus route was not switched in this change");
-  assert.doesNotMatch(bonus, /contract_count/, "the bonus route does not read the imported count yet");
+  const fn = (name, len = 6000) => src.slice(src.indexOf(name), src.indexOf(name) + len);
+  const wave = (body) => { const at = body.indexOf("= await Promise.all(["); return body.slice(at, body.indexOf("]);", at)); };
+  const crew = fn("async function apiCrew(");
+  assert.match(wave(crew), /contractCountMap\(env\)/, "crew list: the count is read in the wave");
+  assert.match(crew, /ensureContractCount\(env\)\]\)/, "crew list: the table is ensured in the ensure wave, not per crew");
+  const bonus = fn("async function apiBonusCrew(");
+  const bonusWave2 = bonus.slice(bonus.indexOf("const [baseline, outs, legRowsRes, tdgRow]"));
+  assert.match(bonusWave2.slice(0, bonusWave2.indexOf("]);")), /FROM contract_count WHERE sc=\?/, "Score Card: the count is read in the second wave");
+  assert.match(bonus, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, legN\)/);
+  assert.match(bonus, /fullContracts\(legRows\.map\(legShape\)\)/, "the derived number is still computed — it is the fallback");
+  const ledger = fn("async function apiContracts(");
+  assert.match(wave(ledger), /contractCountMap\(env\)/, "ledger: the count is read in the wave");
+  assert.match(ledger, /cumulativeContracts\(TDG\[b\.agency_id\]/);
+  const stmt = fn("async function gatherStatement(", 3000);
+  assert.match(stmt, /FROM contract_count WHERE sc=\?/);
+  assert.match(stmt, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, fc\)/);
+  // Every one of them says where its number came from.
+  for (const [n, body] of [["crew", crew], ["bonus", bonus], ["ledger", ledger], ["statement", stmt]]) assert.match(body, /contracts_source: cc\.source/, n + " reports contracts_source");
+  // The consecutive bonus count (money, §1) is not what changed: crewCount / contractLedgerRow still feed `count`.
+  assert.match(bonus, /const count = await crewCount\(env, cr\.id, baseline\)/);
+  assert.match(ledger, /contractLedgerRow\(b\.baseline_count, ov\.baseline_count, lo\)/);
+  assert.match(bonus, /nextRungIfClean: ladderValue\(count \+ 1\)/, "the ladder still reads the consecutive count, never the cumulative one");
+});
+
+test("the page labels the two counts apart: completed (grade) vs bonus count (consecutive)", () => {
+  const src = readFileSync(SRC, "utf-8");
+  // Before this change the crew card printed the CONSECUTIVE bonus count under the label
+  // "completed contract(s)" — a crew reset by a gate read as having completed fewer contracts.
+  assert.match(src, /\(bz\.contracts!=null\?bz\.contracts:0\)\+' completed contract\(s\) '\+ctSrc\(bz\)/);
+  assert.match(src, /tile\(\(bz\.count!=null\?bz\.count:0\),'Bonus count \(consecutive\)'\)/);
+  assert.match(src, /d\.rank\+' \('\+d\.contracts\+' completed '\+ctSrc\(d\)\+'\) · Bonus count <b>'\+d\.count/);
+  assert.match(src, /function ctSrc\(x\)/);
+  assert.match(src, /date-derived, count file not loaded/, "a missing count file is said, in amber, not hidden");
 });
