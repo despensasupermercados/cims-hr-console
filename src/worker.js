@@ -23,6 +23,7 @@ const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, k
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary, tierContracts } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
+import { parseCompletedContracts, bridgeCounts, diffCounts } from "./contract_count.js";
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
@@ -232,6 +233,7 @@ export default {
         if (p === "/api/sbmtoggle") return apiSbmToggle(request, env, session);
         if (p === "/api/crew/import" && request.method === "POST") return json({ error: "retired_use_reviewed_importer", detail: "The direct crew import was retired. Use the reviewed importer: GET /api/crew/import, POST /api/crew/import/stage, POST /api/crew/import/apply." });
         if (p === "/api/keyman/import" && request.method === "POST") return apiKeymanImport(request, env, session);
+        if (p === "/api/contracts/count/import" && request.method === "POST") return apiContractCountImport(request, env, session);
         if (p === "/api/daysworked") return apiDaysWorked(env, url);
         if (p === "/api/billing/month") return apiBillingMonth(env);
         if (p === "/api/travel")     return apiTravel(env, url);
@@ -1166,6 +1168,42 @@ async function apiDataStatus(env) {
   return json({ today: TODAY(), datasets, log, gaps, gapsPresent: hasGaps(gaps) });
 }
 // Read all contract rows in the shape billingReport expects.
+// "DG3 Printer Specialist Completed Contract as of <date>.xlsx" — TDG's OWN count, both tabs. The client
+// sends { sheets: { ACTIVE: aoa, INACTIVE: aoa }, asOf, dryRun }. Anyone with a login uploads it (the same
+// rule as the Counter). The dry-run says exactly which crew's count changes, which file rows matched
+// nobody, and which the file contradicts itself on (a duplicate id is never imported — §6, flag not pick).
+// Apply upserts the MATCHED crew only. This is the number rank sits on; the bonus ladder keeps reading
+// its own path until Miguel moves it (§1).
+async function apiContractCountImport(request, env, session) {
+  await ensureContractCount(env);
+  const b = await request.json().catch(() => ({}));
+  const parsed = parseCompletedContracts(b.sheets || {});
+  if (parsed.error) return json({ error: parsed.error, have: parsed.have || [] }, 400);
+  if (!parsed.rows.length) return json({ error: "no_rows" }, 400);
+  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(b.asOf || "")) ? String(b.asOf) : TODAY();
+  const [rosterRes, curRes, derived] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT sc, completed FROM contract_count").all().catch(() => ({ results: [] })),
+    fullContractMap(env).catch(() => ({})),
+  ]);
+  const { matched, unmatched } = bridgeCounts(parsed, rosterRes.results || []);
+  const { changes, same } = diffCounts(matched, countMapOf(curRes.results), derived);
+  const report = {
+    asOf, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
+    matched: matched.length, unmatched: unmatched.length, changes, unchanged: same.length,
+    duplicates: parsed.duplicates, unparsed: parsed.unparsed,
+    sampleUnmatched: unmatched.slice(0, 20).map((u) => u.name + " (" + (u.id || "no id") + ", " + u.tab + ")"),
+  };
+  if (b.dryRun) return json({ dryRun: true, ...report });
+  const at = new Date().toISOString(), by = (session && session.email) || "?";
+  const up = env.DB.prepare("INSERT INTO contract_count (sc, km, completed, position, tab, as_of, imported_at, imported_by) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sc) DO UPDATE SET km=excluded.km, completed=excluded.completed, position=excluded.position, tab=excluded.tab, as_of=excluded.as_of, imported_at=excluded.imported_at, imported_by=excluded.imported_by");
+  for (let i = 0; i < matched.length; i += 80) {
+    await env.DB.batch(matched.slice(i, i + 80).map((m) => up.bind(m.sc, m.id || null, m.completed, m.position || null, m.tab, asOf, at, by)));
+  }
+  await logData(env, "contract_count (TDG completed contracts as of " + asOf + ", by " + by + ")", matched.length, "applied");
+  await logActivity(env, by, "contract_count_import", asOf + " " + matched.length + " crew, " + changes.length + " changed");
+  return json({ ok: true, applied: matched.length, ...report });
+}
 // {on,end,ship} shape that contracts.js (full-contract grouping) expects, from a keyman_contract3 row.
 function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, ship: r.ship }; }
 // sc -> number of FULL contracts (legs grouped by the <=3-week transfer rule, each reaching the line
@@ -1617,11 +1655,11 @@ async function apiRotation(env) { return json(await rotationSections(env)); }
 async function rotationSections(env) {
   // PERF (2026-07): ensures first (concurrently), then ALL independent reads in one concurrent
   // wave instead of 7 sequential Worker->D1 round trips. Same statements, same downstream logic.
-  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env)]);
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env)]);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
@@ -1632,7 +1670,19 @@ async function rotationSections(env) {
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
     env.DB.prepare("SELECT name, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026)
+    env.DB.prepare("SELECT MAX(imported_at) AS stamp, COUNT(*) AS rows, COUNT(DISTINCT sc) AS crew FROM keyman_contract3").all().catch(() => ({ results: [] })), // how old the Counter is
   ]);
+  // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
+  // file, or that the count had been flat since 6 July; Rita found it from the outside. A NULL stamp
+  // means the rows are the bundled seed (KEYMAN_VERSION is the snapshot date), not an upload.
+  const _age = (ageRes.results || [])[0] || {};
+  const _cnt = cntRes.results || [];
+  const sources = {
+    counter: { stamp: _age.stamp ? String(_age.stamp).slice(0, 10) : null, seed: KEYMAN_VERSION, rows: _age.rows || 0, crew: _age.crew || 0 },
+    count: { as_of: _cnt.length ? _cnt.reduce((m, r) => (r.as_of && r.as_of > m ? r.as_of : m), "") || null : null, crew: _cnt.length },
+  };
+  const tdgCount = countMapOf(_cnt);
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
@@ -1683,7 +1733,10 @@ async function rotationSections(env) {
     }
   }
   const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
-  const contracts = {}; for (const sc in byCrew) contracts[sc] = fullContracts(byCrew[sc].map(legShape)); // FULL contracts, not raw legs
+  // THE CONTRACTS NUMBER: TDG's stated count when it has been imported, the date-derived count only for
+  // a crew the count file does not carry. Measured 24 Sep 2026: the derivation was low on 18 of 41.
+  const contracts = {}; for (const sc in byCrew) contracts[sc] = fullContracts(byCrew[sc].map(legShape)); // derived fallback (FULL contracts, not raw legs)
+  for (const sc in tdgCount) contracts[sc] = tdgCount[sc];
   // Registry/keyman/schedule vessel string -> ONE canonical short ship name. Single source of truth
   // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
   // three data sources below so their sections key-align instead of fragmenting (Celebrity-prefixed
@@ -1859,7 +1912,7 @@ async function rotationSections(env) {
   const counts = {};
   ["On board", "On Vacation", "Earmarked", "Inactive"].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length;
-  return { sections, pool, shoreside, counts, inDock: inDockNow(DRY_DOCK, today) };
+  return { sections, pool, shoreside, counts, sources, inDock: inDockNow(DRY_DOCK, today) };
 }
 // Days worked THIS MONTH per crew currently active in Keyman. A REFERENCE read, not an invoice
 // source (Miguel, 14 Sep 2026: "this is not a billing platform .. remember that"). Uses the live
@@ -1988,6 +2041,14 @@ async function ensureReadyImpl(env) {
     env.DB.prepare("ALTER TABLE crew_ready ADD COLUMN note TEXT").run().catch(() => null),
   ]);
 }
+// TDG's stated completed-contract count (src/contract_count.js). One row per crew; the file's as-of
+// date travels with every row so the board can say how old the count is.
+const ensureContractCount = memoEnsure(ensureContractCountImpl);
+async function ensureContractCountImpl(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_count (sc TEXT PRIMARY KEY, km TEXT, completed INTEGER NOT NULL, position TEXT, tab TEXT, as_of TEXT, imported_at TEXT, imported_by TEXT)").run();
+}
+// sc -> TDG's completed-contract count, or an empty map when nothing has been imported yet.
+function countMapOf(rows) { const m = {}; for (const r of (rows || [])) if (r && r.sc) m[r.sc] = r.completed; return m; }
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
   // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
@@ -3652,6 +3713,9 @@ function handleDrop(files){
         // The CIMS Keyman workbook is recognised by its 'Contract Counter' SHEET, not by the headers of
         // whichever sheet happens to be first (the header scan below only reads sheet 1).
         if(wb.SheetNames.some(function(n){return String(n).toLowerCase().indexOf('contract counter')>=0;})){upBand('Keyman contracts',0,0,f);parseKeymanFile(f);return;}
+        // TDG's completed-contract COUNT file is recognised by its two tabs, ACTIVE and INACTIVE (24 Sep 2026).
+        var _tabs=wb.SheetNames.map(function(n){return String(n).trim().toUpperCase();});
+        if(_tabs.indexOf('ACTIVE')>=0&&_tabs.indexOf('INACTIVE')>=0){upBand('Completed contracts (TDG count)',0,0,f);parseCountFile(f);return;}
         var ws=wb.Sheets[wb.SheetNames[0]];
         var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
         for(var i=0;i<Math.min(aoa.length,15);i++){
@@ -3750,6 +3814,55 @@ async function applyKeyman(){
     if(r.conflicts&&r.conflicts.length)extra+=' '+r.conflicts.length+' contradicted projection'+(r.conflicts.length===1?'':'s')+' left on the board for you.';
     $('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew.'+extra+' Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
+}
+var COUNTUP=null,COUNTASOF=null;
+// "DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx": TDG's OWN count, both tabs sent.
+function parseCountFile(f){
+  $('#imp').textContent='Reading '+f.name+'…';
+  var m=/as[_ ]of[_ ](\d{1,2})[_ ]([A-Za-z]{3})[_ ](\d{4})/i.exec(String(f.name||''));
+  var MO={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+  COUNTASOF=(m&&MO[m[2].toLowerCase()])?(m[3]+'-'+MO[m[2].toLowerCase()]+'-'+('0'+m[1]).slice(-2)):null;
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array'});
+        var sheets={};
+        wb.SheetNames.forEach(function(n){var k=String(n).trim().toUpperCase();if(k==='ACTIVE'||k==='INACTIVE')sheets[k]=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:false,defval:''});});
+        if(!sheets.ACTIVE||!sheets.INACTIVE){$('#imp').innerHTML='<div style="'+BADBOX+'">This file needs BOTH tabs, ACTIVE and INACTIVE. Found: '+impEsc(wb.SheetNames.join(', '))+'</div>';return;}
+        COUNTUP=sheets;previewCount();
+      }catch(err){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not parse that file: '+err.message+'</div>';}
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+async function previewCount(){
+  if(!COUNTUP){$('#imp').innerHTML='<div style="'+BADBOX+'">No tabs read.</div>';return;}
+  $('#imp').textContent='Comparing TDG\u2019s count with the console\u2026';
+  var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF,dryRun:true})})).json();
+  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+impEsc(r.error)+(r.have?(' (tabs: '+impEsc(r.have.join(', '))+')'):'')+'</div>';return;}
+  var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> &middot; ACTIVE '+r.tabs.ACTIVE+' &middot; INACTIVE '+r.tabs.INACTIVE
+    +' &middot; <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> &middot; count as of <b>'+impEsc(r.asOf)+'</b>'
+    +'<div class=csub style="margin-top:4px">TDG states the completed-contract count. This replaces the console\u2019s date-derived number for every matched crew; rank follows it.</div></div>';
+  if(r.changes&&r.changes.length){
+    h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">'+r.changes.length+' crew whose count changes</b><br>'
+      +r.changes.slice(0,40).map(function(x){return impEsc(x.name)+' ('+impEsc(x.tab.toLowerCase())+'): '+(x.before==null?'\u2014':x.before)+' &rarr; <b>'+x.after+'</b>'+(x.derived!=null&&x.derived!==x.after?' <span class=csub>(dates said '+x.derived+')</span>':'');}).join('<br>')
+      +(r.changes.length>40?('<br>+'+(r.changes.length-40)+' more'):'')+'</div>';
+  }
+  if(r.duplicates&&r.duplicates.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.duplicates.length+' crew id'+(r.duplicates.length===1?'':'s')+' appear'+(r.duplicates.length===1?'s':'')+' more than once in the file</b> &mdash; NOT imported until the file says one thing:<br>'
+      +r.duplicates.map(function(d){return impEsc(d.id)+': '+d.rows.map(function(x){return impEsc(x.name)+' = '+x.completed+' ('+impEsc(x.tab.toLowerCase())+' row '+x.row+')';}).join(' / ');}).join('<br>')+'</div>';
+  if(r.unparsed&&r.unparsed.length)
+    h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsed.length+' row'+(r.unparsed.length===1?'':'s')+' unreadable</b> (skipped):<br>'+r.unparsed.map(function(x){return impEsc(x.tab.toLowerCase())+' row '+x.row+' '+impEsc(x.name)+': \u201c'+impEsc(x.raw)+'\u201d';}).join('<br>')+'</div>';
+  if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.map(impEsc).join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  h+='<button class="btn" style="margin-top:10px" onclick="applyCount()">Set the completed-contract count for '+r.matched+' crew</button>';
+  $('#imp').innerHTML=h;
+}
+async function applyCount(){
+  $('#imp').textContent='Saving TDG\u2019s count\u2026';
+  var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF})})).json();
+  if(r.ok)$('#imp').innerHTML='<div style="'+NOCHG+'">\u2713 Saved \u2014 completed-contract count as of '+impEsc(r.asOf)+' for '+r.applied+' crew ('+(r.changes||[]).length+' changed). The Keyman board and rank now read it.</div>';
+  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+impEsc(r.error)):'')+'.</div>';
 }
 var TRAVELUP=null;
 function parseTravelFile(f){
@@ -4514,6 +4627,24 @@ async function autoToggleClick(){var c=document.getElementById('autoToggleCb');v
 function ensureSbmToggle(){var a=document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
 async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
+// THE BOARD SAYS ITS OWN AGE (24 Sep 2026). Nobody inside the console could see that the Contract Counter
+// was the July file, or that the count had been flat since 6 July; Rita found both from the outside.
+function rotSourcesLine(){
+  var s=ROT&&ROT.sources;if(!s)return '';
+  var d=function(iso){if(!iso)return null;var a=Date.parse(iso.slice(0,10)+'T00:00:00Z');return isNaN(a)?null:Math.round((Date.now()-a)/86400000);};
+  var c=s.counter||{},n=s.count||{};
+  var cAge=c.stamp?d(c.stamp):d(String(c.seed||'').slice(0,10));
+  // A NULL stamp = no upload since stamping began (14 Sep 2026); the rows are the bundled seed. The 6 Jul
+  // upload happened — it just predates the stamp — so the line says "no stamped upload", not "never".
+  var cTxt=c.stamp?('Contract Counter uploaded '+c.stamp):('Contract Counter: <b>no upload since 14 Sep 2026</b> \u2014 rows are the bundled '+String(c.seed||'').slice(0,10)+' seed (July file)');
+  var cWarn=(cAge!=null&&cAge>45);
+  var nTxt=n.as_of?('completed-contract count as of '+n.as_of+' ('+n.crew+' crew)'):'<b>completed-contract count not loaded</b> \u2014 rank is date-derived';
+  var nAge=n.as_of?d(n.as_of):null;
+  var nWarn=!n.as_of||(nAge!=null&&nAge>60);
+  return '<div class=csub style="margin:-2px 0 8px;padding:6px 10px;border-radius:8px;background:'+((cWarn||nWarn)?'#FBF0DA':'#EEF3F8')+';color:'+((cWarn||nWarn)?'#8A6620':'var(--muted)')+'">'
+    +cTxt+(cAge!=null?(' \u00b7 '+cAge+(cAge===1?' day':' days')+' ago'):'')+' \u00b7 '+c.crew+' crew, '+c.rows+' contract rows'
+    +' &nbsp;|&nbsp; '+nTxt+(nAge!=null?(' \u00b7 '+nAge+(nAge===1?' day':' days')+' ago'):'')+'</div>';
+}
 async function renderRotation(){
   // Keep the board on screen while it refreshes (15 Sep 2026): blanking it to "Loading…" after every
   // save/drag made a 1s round trip read as "takes forever to save". First paint still says Loading.
@@ -4553,6 +4684,7 @@ async function renderRotation(){
     +'.shipbody{transition:max-height .2s ease}'
     +'</style>'
     +'<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
+    +rotSourcesLine()
     +'<div class=bar style="margin-bottom:8px;flex-wrap:wrap"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:170px">'
     +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
     +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
