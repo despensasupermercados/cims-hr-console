@@ -102,6 +102,26 @@ it. So the board disagreeing with the live TDG file is the loop still OPEN, not 
 reconcile. Anyone with a login may upload the Counter; the dry-run lists every edit it would
 override. The agent never infers, reconciles or corrects a contract date — ever.
 
+## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
+TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
+<date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS
+· POSITION). It is imported by `POST /api/contracts/count/import` (`src/contract_count.js`) into
+`contract_count`, one row per crew, stamped with the file's as-of date. The Keyman board's Contracts
+number and rank read that row; the date-derived count (`fullContracts` over Counter dates) is only the
+fallback for a crew the file does not carry. Measured 24 Sep: the derivation was LOW on 18 of 41 crew
+(Espenilla Zandro: TDG 7, derived 0) — the ≥6-month rule drops contracts TDG counts. Rules:
+- **Both tabs or nothing.** A workbook missing ACTIVE or INACTIVE is refused (`need_both_tabs`).
+- **A crew id that appears twice with different counts is never imported** (Paygane, Erik 517755: 2 and
+  4 in the same file). Flag, never pick (§6). "Ongoing" is a junior with no completed contract: 0.
+- **The bonus ladder still reads its own path** (`apiBonusCrew`, the statement, the ledger rows use
+  `tierContracts(baseline, fullContracts(...))`). Moving it to the imported count is a §1 change: PR,
+  Miguel merges. Pinned by `test/contract_count_import.test.js`.
+- **The board says its own age** (`sources` on `/api/rotation`, `rotSourcesLine` on the page): when the
+  Counter was last uploaded (or that it never was — a NULL `imported_at` is the bundled seed), and the
+  count's as-of date. Nobody inside the console could see either until 24 Sep; Rita found both from outside.
+- The two TDG contract files have different jobs and both live in the Brain in full: the DATES file
+  (Contract Counter sheet, recIWAATss33kZKNZ) and the COUNT file (recM1e5dbyfvhfm5m). Never ask for either.
+
 ## 11. Invariants from the Session-6 audit (don't regress these)
 - **Every API route must run under the error boundary.** The fetch handler wraps the whole dispatch in
   `return await (async () => { ...routes... })();`. Routes use `return apiX(...)` without their own await,
