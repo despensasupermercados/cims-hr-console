@@ -1183,30 +1183,45 @@ async function apiContractCountImport(request, env, session) {
   const parsed = parseCompletedContracts(b.sheets || {});
   if (parsed.error) return json({ error: parsed.error, have: parsed.have || [] }, 400);
   if (!parsed.rows.length) return json({ error: "no_rows" }, 400);
-  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(b.asOf || "")) ? String(b.asOf) : TODAY();
+  // THE FILE SAYS ITS OWN DATE (5 Oct 2026 review): "as of <date>" is in TDG's filename. A file with no
+  // readable date is refused — the import day used to be stamped instead, and a renamed old workbook
+  // would have labelled September's count as today's.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.asOf || ""))) return json({ error: "need_as_of", detail: "The filename must carry TDG's 'as of <date>' (e.g. 'Completed Contract as of 24 September 2026.xlsx'). Keep TDG's filename." }, 400);
+  const asOf = String(b.asOf);
   const [rosterRes, curRes, derived] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT sc, completed FROM contract_count").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })),
     fullContractMap(env).catch(() => ({})),
   ]);
   const { matched, unmatched, collisions } = bridgeCounts(parsed, rosterRes.results || []);
   const { changes, same } = diffCounts(matched, countMapOf(curRes.results), derived);
+  // An OLDER file than the one loaded would silently roll every count back; it is refused unless the
+  // apply says force (the screen asks). Rows the new file does not carry are listed and, on apply,
+  // removed: ACTIVE + INACTIVE is TDG's whole population, so a crew missing from it has no TDG count and
+  // falls back to the derived number (§10c) instead of keeping a stale "tdg" one.
+  const loadedAsOf = (curRes.results || []).reduce((m, r) => (r.as_of && r.as_of > m ? r.as_of : m), "") || null;
+  const olderThanLoaded = !!(loadedAsOf && asOf < loadedAsOf);
+  const inFile = new Set(matched.map((m) => m.sc));
+  const notInFile = (curRes.results || []).filter((r) => r.sc && !inFile.has(r.sc)).map((r) => ({ sc: r.sc, completed: r.completed, as_of: r.as_of || null }));
   const report = {
-    asOf, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
+    asOf, loadedAsOf, olderThanLoaded, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
     matched: matched.length, unmatched: unmatched.length, changes, unchanged: same.length,
     duplicates: parsed.duplicates, unparsed: parsed.unparsed,
     collisions, // two file rows on one roster crew: neither imported (§6)
+    notInFile,  // crew with a TDG count today that this file does not carry: their row goes on apply
     sampleUnmatched: unmatched.filter((u) => !u.collision).slice(0, 20).map((u) => u.name + " (" + (u.id || "no id") + ", " + u.tab + ")"),
   };
   if (b.dryRun) return json({ dryRun: true, ...report });
+  if (olderThanLoaded && !b.force) return json({ error: "older_than_loaded", asOf, loadedAsOf, detail: "This file is dated " + asOf + "; the count loaded is as of " + loadedAsOf + ". Replace it anyway only on purpose." }, 409);
   const at = new Date().toISOString(), by = (session && session.email) || "?";
   const up = env.DB.prepare("INSERT INTO contract_count (sc, km, completed, position, tab, as_of, imported_at, imported_by) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sc) DO UPDATE SET km=excluded.km, completed=excluded.completed, position=excluded.position, tab=excluded.tab, as_of=excluded.as_of, imported_at=excluded.imported_at, imported_by=excluded.imported_by");
   for (let i = 0; i < matched.length; i += 80) {
     await env.DB.batch(matched.slice(i, i + 80).map((m) => up.bind(m.sc, m.id || null, m.completed, m.position || null, m.tab, asOf, at, by)));
   }
-  await logData(env, "contract_count (TDG completed contracts as of " + asOf + ", by " + by + ")", matched.length, "applied");
-  await logActivity(env, by, "contract_count_import", asOf + " " + matched.length + " crew, " + changes.length + " changed");
-  return json({ ok: true, applied: matched.length, ...report });
+  if (notInFile.length) await env.DB.prepare("DELETE FROM contract_count WHERE imported_at IS NOT ?").bind(at).run(); // only the rows this apply did not write
+  await logData(env, "contract_count (TDG completed contracts as of " + asOf + ", by " + by + ")", matched.length, "applied" + (notInFile.length ? ", " + notInFile.length + " crew no longer in the file (count removed)" : "") + (olderThanLoaded ? ", OLDER than the " + loadedAsOf + " count it replaced (forced)" : ""));
+  await logActivity(env, by, "contract_count_import", asOf + " " + matched.length + " crew, " + changes.length + " changed" + (notInFile.length ? ", " + notInFile.length + " removed" : ""));
+  return json({ ok: true, applied: matched.length, removed: notInFile.length, ...report });
 }
 // {on,end,ship} shape that contracts.js (full-contract grouping) expects, from a keyman_contract3 row.
 function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, ship: r.ship }; }
@@ -1330,13 +1345,14 @@ async function apiDashboard(env) {
   const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
   const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy, HIST] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").first(),
-    env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew").bind(in90).first(),
+    env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew WHERE redacted=0").bind(in90).first(),
     env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all(),
     // Bonus committed to date (money path — read only). Resilient like the old try/catch.
     env.DB.prepare("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome").first().catch(() => null),
     // Birthdays today (match MM-DD of dob).
-    env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND status='On board' ORDER BY last_name").bind(md).all(),
+    // Birthdays today: every visible crew with the date; "aboard" is decided below by the DERIVED status (§11), not the raw column.
+    env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND redacted=0 ORDER BY last_name").bind(md).all(),
     env.DB.prepare("SELECT MAX(year) y FROM travel_expense").first(),
     env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=" + TY + " GROUP BY kind").all(),
     env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=" + TY + " GROUP BY month ORDER BY month").all(),
@@ -1352,16 +1368,17 @@ async function apiDashboard(env) {
   const cs = csRes.results;
   const csOv = {}; for (const o of ovRes.results) csOv[o.agency_id] = o;
   const csSched = scheduleBySc(HIST);
-  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0, [UNASSIGNED]: 0 };
+  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0, [UNASSIGNED]: 0 }, statusBy = {};
   for (const c of cs) {
     const ov = csOv[c.agency_id], s = crewStatus(c, ov, csSched[c.agency_id], today);
+    statusBy[c.agency_id] = s;
     statusMap[s] = (statusMap[s] || 0) + 1;
     // Donut counts the same ACTIVE set as the tiles (exclude Retired/Inactive), by client/brand.
     if (s !== "Retired" && s !== "Inactive") byClient[clientOf((ov && ov.vessel_observed) || c.vessel_observed)] += 1;
   }
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
-  const birthdays = bdRes.results.map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: b.vessel_observed || "" }));
+  const birthdays = bdRes.results.filter(b => statusBy[b.agency_id] === "On board").map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: ((csOv[b.agency_id] || {}).vessel_observed) || b.vessel_observed || "" }));
   // Travel budget (latest year on file), split crew vs shoreside management.
   const ty = tyRow.y;
   const travel = { year: ty || null, all: 0, shoreside: 0, crew: 0, months: [], air: 0 };
@@ -1668,8 +1685,8 @@ async function rotationSections(env) {
   const AZ = ["journey", "onward", "quest", "pursuit"];
   const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes] = await Promise.all([
     boardLegs(env),
-    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
+    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
     env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
     fetchBoardPortDays(env).then((rows) => ({ results: rows })), // card dates ±1 day only — never the whole 40k-row itinerary (port_days.js)
@@ -1756,8 +1773,20 @@ async function rotationSections(env) {
   const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
   // THE CONTRACTS NUMBER: TDG's stated count when it has been imported, the date-derived count only for
   // a crew the count file does not carry. Measured 24 Sep 2026: the derivation was low on 18 of 41.
-  const contracts = {}; for (const sc in byCrew) contracts[sc] = fullContracts(byCrew[sc].map(legShape)); // derived fallback (FULL contracts, not raw legs)
-  for (const sc in tdgCount) contracts[sc] = tdgCount[sc];
+  // THE SAME NUMBER AS EVERY OTHER READER (5 Oct 2026 review): cumulativeContracts — TDG's count when the
+  // file carries the crew, else the seeded baseline + FULL contracts derived from Counter dates. The
+  // board used to drop the baseline from its fallback ("Contracts 0" here, 3 on the crew list), and
+  // that 0 fed the Movements digest's "new hire".
+  const contracts = {}, contractsSource = {};
+  {
+    const derivedBy = {}; for (const sc in byCrew) derivedBy[sc] = fullContracts(byCrew[sc].map(legShape));
+    for (const c of crewRows) {
+      const sc = c.agency_id;
+      const cc = cumulativeContracts(tdgCount[sc] != null ? tdgCount[sc] : null, applyOverride(c, ovMap[sc]).baseline_count, derivedBy[sc] || 0);
+      contracts[sc] = cc.n; contractsSource[sc] = cc.source;
+    }
+    for (const sc in tdgCount) if (!(sc in contracts)) contracts[sc] = tdgCount[sc]; // a crew the roster hides but the file carries
+  }
   // Registry/keyman/schedule vessel string -> ONE canonical short ship name. Single source of truth
   // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
   // three data sources below so their sections key-align instead of fragmenting (Celebrity-prefixed
@@ -2349,14 +2378,17 @@ async function apiContracts(env) {
 async function gatherStatement(env, id) {
   const crew = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first();
   if (!crew) return null;
-  await ensureKeyman(env);
-  const contracts = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
-  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
-  const baseline = await effectiveBaseline(env, id, crew.baseline_count);
-  const count = await crewCount(env, crew.id, baseline);
-  const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
-  await ensureContractCount(env);
-  const tdgRow = await env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first().catch(() => null);
+  await Promise.all([ensureKeyman(env), ensureContractCount(env)]); // guards together (§12), both memoized
+  // The reads that only need the crew row travel together (§12: this chain was eight serial trips).
+  const [ctRes, dw, baseline, tdgRow, outs] = await Promise.all([
+    env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
+    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
+    effectiveBaseline(env, id, crew.baseline_count),
+    env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
+  ]);
+  const contracts = ctRes.results;
+  const count = await crewCount(env, crew.id, baseline); // needs the baseline: its own trip, after the wave
   const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
   const effFc = cc.n;
@@ -3780,7 +3812,9 @@ function parseCrewFile(f){
         // AdvancedQuery exports can have a blank/title row before the real headers, so don't assume
         // row 1 is the header. Read as a grid, find the row that has the CREW ID label, and build
         // objects from there. Without this the parser reads blank keys and the preview shows nothing.
-        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+        // raw:false + dateNF: a real Excel date cell leaves as 'yyyy-mm-dd' text. With raw:true it left as a Date
+        // at LOCAL midnight, which JSON sent as UTC — one day early for Rita (UTC+8). Same as the Counter path.
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd',defval:''});
         var hi=-1;
         for(var i=0;i<Math.min(aoa.length,15);i++){ if((aoa[i]||[]).some(function(c){return /crew\\s*id/i.test(String(c));})){hi=i;break;} }
         if(hi<0)hi=0;
@@ -3936,7 +3970,7 @@ async function applyKeyman(){
     $('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew.'+extra+' Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
 }
-var COUNTUP=null,COUNTASOF=null;
+var COUNTUP=null,COUNTASOF=null,COUNTDRY=null;
 // "DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx": TDG's OWN count, both tabs sent.
 function parseCountFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
@@ -3961,10 +3995,14 @@ async function previewCount(){
   if(!COUNTUP){$('#imp').innerHTML='<div style="'+BADBOX+'">No tabs read.</div>';return;}
   $('#imp').textContent='Comparing TDG\u2019s count with the console\u2026';
   var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF,dryRun:true})})).json();
-  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+impEsc(r.error)+(r.have?(' (tabs: '+impEsc(r.have.join(', '))+')'):'')+'</div>';return;}
+  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+impEsc(r.detail||r.error)+(r.have?(' (tabs: '+impEsc(r.have.join(', '))+')'):'')+'</div>';return;}
+  COUNTDRY=r;
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> &middot; ACTIVE '+r.tabs.ACTIVE+' &middot; INACTIVE '+r.tabs.INACTIVE
     +' &middot; <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> &middot; count as of <b>'+impEsc(r.asOf)+'</b>'
     +'<div class=csub style="margin-top:4px">TDG states the completed-contract count. This replaces the console\u2019s date-derived number for every matched crew; rank follows it.</div></div>';
+  // An OLDER file than the count loaded (5 Oct 2026): said in red, applied only on purpose (force).
+  if(r.olderThanLoaded)h+='<div style="'+BADBOX+'"><b>This file is older than the count loaded.</b> File: as of '+impEsc(r.asOf)+' &middot; loaded: as of '+impEsc(r.loadedAsOf)+'. Applying it rolls every count back to '+impEsc(r.asOf)+'.</div>';
+  if(r.notInFile&&r.notInFile.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.notInFile.length+' crew with a TDG count today '+(r.notInFile.length===1?'is':'are')+' not in this file</b> &mdash; their TDG count is removed on apply and rank falls back to the date-derived number:<br>'+r.notInFile.map(function(x){return impEsc(x.sc)+' ('+x.completed+', as of '+impEsc(x.as_of||'?')+')';}).join('<br>')+'</div>';
   if(r.changes&&r.changes.length){
     h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">'+r.changes.length+' crew whose count changes</b><br>'
       +r.changes.slice(0,40).map(function(x){return impEsc(x.name)+' ('+impEsc(x.tab.toLowerCase())+'): '+(x.before==null?'\u2014':x.before)+' &rarr; <b>'+x.after+'</b>'+(x.derived!=null&&x.derived!==x.after?' <span class=csub>(dates said '+x.derived+')</span>':'');}).join('<br>')
@@ -3981,10 +4019,12 @@ async function previewCount(){
   $('#imp').innerHTML=h;
 }
 async function applyCount(){
+  var force=false;
+  if(COUNTDRY&&COUNTDRY.olderThanLoaded){if(!confirm('This file (as of '+COUNTDRY.asOf+') is OLDER than the count loaded (as of '+COUNTDRY.loadedAsOf+').\\n\\nReplace the newer count with this older file?'))return;force=true;}
   $('#imp').textContent='Saving TDG\u2019s count\u2026';
-  var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF})})).json();
+  var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF,force:force})})).json();
   if(r.ok)$('#imp').innerHTML='<div style="'+NOCHG+'">\u2713 Saved \u2014 completed-contract count as of '+impEsc(r.asOf)+' for '+r.applied+' crew ('+(r.changes||[]).length+' changed). The Keyman board and rank now read it.</div>';
-  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+impEsc(r.error)):'')+'.</div>';
+  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+impEsc(r.detail||r.error)):'')+'.</div>';
 }
 var TRAVELUP=null;
 function parseTravelFile(f){

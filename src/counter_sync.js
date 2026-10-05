@@ -171,6 +171,12 @@ export function diffCounter({ incoming, current, yellows, edits } = {}) {
     // card stands. Without this, every future projection for a crew already in the Counter would be
     // reported as a "conflict" on every upload — and Rita would learn to ignore the panel.
     if (sameLeg(a, cur[y.sc])) continue;
+    // A plan that starts AFTER the file's current contract ends is their NEXT contract: the file says
+    // nothing about it (5 Oct 2026 review — an extended proj_off, or a jumper's new Apex leg, turned
+    // every later plan into a "conflict" Rita could tick away). Within ABSORB_DAYS of the end still counts.
+    const legEnd = day(a.act_off) || day(a.proj_off);
+    const after = daysBetween(legEnd, y.sign_on);
+    if (legEnd && after != null && after > ABSORB_DAYS) continue;
     const gap = daysBetween(y.sign_on, a.sign_on);
     const sameShip = norm(y.ship) === norm(a.ship);
     const close = gap != null && Math.abs(gap) <= ABSORB_DAYS;

@@ -253,3 +253,20 @@ test("a card names the FILE when both sides say the same thing — agreement is 
   const gap = resolveLeg({ sign_on: "2026-03-08", proj_off: null, ship: "Icon", imported_at: "2026-09-20" }, { sign_off: "2026-10-01", updated_at: "2026-09-12T08:00:00Z" });
   assert.equal(gap.source, "rita", "nothing to agree with: the date is hers");
 });
+
+// 5 Oct 2026 review: a plan that starts AFTER the file's current contract ends is the crew's NEXT
+// contract — the file says nothing about it. It was reported as a "conflict" Rita could tick away.
+test("diffCounter: a projection starting after the incoming leg ends is neither absorbed nor a conflict", () => {
+  const d = diffCounter({
+    incoming: [{ sc: "SC-1", ship: "Apex", seq: 1, sign_on: "2026-04-01", proj_off: "2026-11-15" }],   // proj_off moved 10-18 -> 11-15
+    current:  [{ sc: "SC-1", ship: "Apex", sign_on: "2026-04-01", proj_off: "2026-10-18", act_off: null }],
+    yellows:  [
+      { id: "y-next", sc: "SC-1", crew_name: "Ana", ship: "Equinox", sign_on: "2027-01-10", planned_sign_off: "2027-07-10" }, // next contract
+      { id: "y-soon", sc: "SC-1", crew_name: "Ana", ship: "Equinox", sign_on: "2026-11-18", planned_sign_off: "2027-05-18" }, // within a week of the end: still judged
+    ],
+    edits: [],
+  });
+  assert.deepEqual(d.absorbs.map((a) => a.id), []);
+  assert.deepEqual(d.conflicts.map((c) => c.id), ["y-soon"], "only a card inside the leg's span (plus ABSORB_DAYS) is the file's business");
+  assert.deepEqual(d.moved.map((m) => m.sc), ["SC-1"]);
+});

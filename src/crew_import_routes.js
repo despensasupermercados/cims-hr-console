@@ -89,19 +89,30 @@ export async function apiCrewImportStage(request, env, deps) {
     const dup = await env.DB.prepare("SELECT 1 AS x FROM import_run WHERE file_hash=?").bind(file_hash).first();
     if (dup) return J({ ok: false, error: "already_processed" });
   }
-  const { mapped, invalidCount, unparsed } = mapRows(rows);
+  const { mapped: mappedAll, invalidCount, unparsed } = mapRows(rows);
+  // The same agency id twice in one file (5 Oct 2026 review): two INSERTs for a new crew failed the
+  // whole batch (UNIQUE), and for an existing crew the first row's values were silently ignored. The
+  // LAST row stands (what the review already compared against) and the repeat is reported (§6).
+  const lastRow = {}, duplicateIds = [];
+  for (const m of mappedAll) { if (m.agency_id in lastRow) duplicateIds.push(m.agency_id); lastRow[m.agency_id] = m; }
+  const mapped = Object.values(lastRow);
   const incomingByAgency = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
   const { existingByAgency, overrideByAgency, projections } = await loadContext(env, deps);
   const diff = diffCrew(mapped, existingByAgency);
   const review = buildReview(diff, existingByAgency, incomingByAgency, overrideByAgency);
   // THE BOARD AGAINST THE FILE (Miguel, 5 Oct 2026). Every open projection is compared with what the
   // registry says about that crew — shown here, written on Apply. The file's per-crew word travels
-  // inside the review so Apply compares against what Rita reviewed, not a second reading.
+  // inside the review so Apply compares against what Rita reviewed, not a second reading. A row the
+  // file keyed on the cruise-line id (D7 rekeyed) is carried under the crew's REAL agency id, so the
+  // snapshot, the verdict and the flag closures all find them.
   const today = new Date().toISOString().slice(0, 10);
-  const proj = reconcileProjections({ projections, registry: mapped, today, shipOf: SHIP_OF });
+  const realId = {}; for (const rk of (diff.rekeyed || [])) realId[String(rk.incoming_id)] = String(rk.agency_id);
+  const registry = registryOf(mapped).map(r => (realId[r.agency_id] ? { ...r, agency_id: realId[r.agency_id] } : r));
+  const proj = reconcileProjections({ projections, registry, today, shipOf: SHIP_OF });
   review.projections = proj.items;
   review.projection_counts = proj.counts;
-  review.registry = registryOf(mapped);
+  review.registry = registry;
+  review.duplicate_ids = [...new Set(duplicateIds)];
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
   return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
@@ -134,7 +145,7 @@ export async function apiCrewImportApply(request, env, deps) {
   // ensureRegistrySnapshot); absent in tests and tools.
   if (deps && deps.ensureRegistrySnapshot) await deps.ensureRegistrySnapshot(env);
   const [openRes, legs, projections] = await Promise.all([
-    env.DB.prepare("SELECT id, agency_id, new_value FROM sync_conflict WHERE field='vessel_observed' AND resolved=0").all(),
+    env.DB.prepare("SELECT id, agency_id, field, new_value FROM sync_conflict WHERE field IN ('vessel_observed','presence') AND resolved=0").all(),
     deps && deps.boardLegs ? deps.boardLegs(env).catch(() => null) : Promise.resolve(null),
     openProjections(env, deps),
   ]);
@@ -147,7 +158,8 @@ export async function apiCrewImportApply(request, env, deps) {
   // says nothing and closes nothing.
   const flaggedNow = new Set(plan.conflicts.filter(c => c.field === "vessel_observed").map(c => c.agency_id));
   const agree = new Set(registry.filter(r => r && r.agency_id && r.vessel_observed && !flaggedNow.has(r.agency_id)).map(r => String(r.agency_id)));
-  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF, agree });
+  const present = new Set(registry.filter(r => r && r.agency_id).map(r => String(r.agency_id)));
+  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF, agree, present });
   const openInserted = flags.insert.filter(c => c.resolved === 0).length;
   const proj = reconcileProjections({ projections: projections || [], registry, today, shipOf: SHIP_OF });
 
@@ -244,6 +256,7 @@ export function applySummary(r) {
   if (f.closed_dismissed) closed.push(n(f.closed_dismissed, "dismissed", "dismissed"));
   if (f.closed_taken) closed.push(n(f.closed_taken, "settled by taking the file's ship", "settled by taking the file's ship"));
   if (f.closed_file_agrees) closed.push(n(f.closed_file_agrees, "the file now agrees with the registry", "the file now agrees with the registry"));
+  if (f.closed_reappeared) closed.push(n(f.closed_reappeared, "crew back in the file", "crew back in the file"));
   if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
   if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");
