@@ -133,17 +133,23 @@ export function registryFromStore({ snapshot, crew, openFlags, statusAudit, abse
     // value), else crew.status (D6 writes it on every upload), unknown under a manual status edit.
     // crew.vessel_observed is NOT the file's vessel — the import never writes it (D1), so it can be
     // months stale (De Torres: 'MV JEWEL OF THE SEAS' from July while the file has him earmarked
-    // elsewhere). Only an OPEN ship flag carries the file's vessel, and it is dated by the file that
-    // raised it (an older flag stays open when a later file comes back into agreement, see
-    // crew_flags.reconcileShipFlags `agree`); without one the ship is unknown — never confirm, never
-    // name a hull.
+    // elsewhere). Only an OPEN ship flag carries the file's vessel; without one the ship is unknown —
+    // never confirm, never name a hull.
+    // THE DATE IS THE LATEST FILE'S (Miguel, 5 Oct 2026, "still appearing like this": Gayda's card read
+    // "TDG registry 2026-08-22: Inactive, Voyager" while Rita had applied the 5 Oct file an hour before).
+    // The crew is not absent, so the latest file carried them and its word on the STATUS is lastRun's.
+    // A flag is stamped when it was FIRST raised (a repeat of the same hull is skipped while one is open,
+    // crew_flags.reconcileShipFlags), so an older flag dates the hull, not the word: vessel_at carries it
+    // and the card prints "named <date>" beside the hull when it is older than the file.
     const f = flag[c.agency_id];
     const a = audit[c.agency_id];
+    const vesselAt = (f && f.new_value && f.created_at) ? f.created_at : null;
     out.push({
       agency_id: c.agency_id,
       status: a ? (a.new_value || null) : (c.manual ? null : (c.status || null)),
       vessel_observed: (f && f.new_value) || null,
-      run_at: (f && f.new_value && f.created_at) ? f.created_at : (lastRun || null),
+      run_at: lastRun || vesselAt || null,
+      vessel_at: vesselAt,
       source: "registry",
     });
   }

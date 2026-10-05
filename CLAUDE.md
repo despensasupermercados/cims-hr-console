@@ -151,7 +151,9 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   schedule has closed is released — the crew goes where the schedule puts them, else to their
   projection, else to the pool — never drawn red off the registry's stale `vessel_observed` (Calayag
   on Navigator; 18 such seats on 5 Oct). A leg with NO recorded sign-off stays overdue, not gone.
-  One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew. Never call
+  One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew — the Keyman board draws
+  EVERY seat the Counter holds for a crew today (`heldSeatsBySc`, B15 fix 2026-10-05), not just the one the
+  registry names; both cards say ALSO ON the other hull. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
   crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
   The same schedule feeds the Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue
@@ -203,8 +205,10 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   (`registry_snapshot`: status + `vessel` as the file said them, stamped with the run; the column is
   `vessel`, not an allocation — D1 holds; rows the latest file does not carry are removed), and a crew
   without a row yet is read off the latest run's status audit row (the file's status even where Rita HELD
-  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag dated by
-  the file that raised it — never `crew.vessel_observed`, which the import does not write and which can
+  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag for the hull
+  (the line is dated by the LATEST file, `lastRun`; a flag is stamped when FIRST raised, so an older one
+  prints "named <date>" beside the hull — Gayda read "2026-08-22" an hour after the 5 Oct upload) — never
+  `crew.vessel_observed`, which the import does not write and which can
   be months stale; a crew under an open `presence` flag (absent from the latest file) gets no word at all.
   An open ship flag now closes when a later file agrees with the registry (`reconcileShipFlags` `agree`).
   Verdicts:
