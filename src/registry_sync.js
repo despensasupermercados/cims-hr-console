@@ -53,7 +53,9 @@ export function reconcileProjections({ projections, registry, today, shipOf } = 
     let verdict;
     if (status === "On board") {
       // On board with no readable vessel: TDG says aboard but not where — nothing to confirm or contradict.
-      verdict = sameShip ? "confirmed" : fileShip ? "elsewhere" : "pending";
+      // On board on ANOTHER hull contradicts a card that says they are aboard HERE; it says nothing against
+      // a FUTURE plan (a crew aboard Quantum today with a Utopia plan for January is exactly normal).
+      verdict = sameShip ? "confirmed" : fileShip ? (aboardByCard ? "elsewhere" : "pending") : "pending";
     } else if (status === "Earmarked") {
       verdict = sameShip ? "earmarked" : fileShip ? (aboardByCard ? "ashore" : "elsewhere") : (aboardByCard ? "ashore" : "pending");
     } else if (status === "On Vacation" || status === "Inactive") {
@@ -86,4 +88,46 @@ export function projectionSummary(counts) {
   if (c.ashore) parts.push(n(c.ashore, "card aboard per your board but not per the file", "cards aboard per your board but not per the file"));
   if (c.earmarked) parts.push(n(c.earmarked, "projection earmarked by TDG", "projections earmarked by TDG"));
   return parts.join(" · ");
+}
+
+// THE FILE'S WORD, READ FROM WHAT THE CONSOLE ALREADY HOLDS (Miguel, 5 Oct 2026, an hour after the
+// first cut: "still see no updates in the console"). Writing the verdict only at upload time meant the
+// board could not say what the 4 Oct file said until the NEXT file. It can: the registry import already
+// wrote crew.status (D6) and raised a ship flag (sync_conflict, field vessel_observed) where the file's
+// vessel differs from the registry. From now on each apply also keeps a per-crew snapshot of the file's
+// row (registry_snapshot); until a crew has one, the raw crew row + the latest open ship flag stand in.
+//
+// snapshot  : registry_snapshot rows [{ agency_id, status, vessel, run_at }] (the column is `vessel`: it is the FILE's word, not an allocation)
+// crew      : RAW crew rows before derivation / override merge [{ agency_id, status, vessel_observed }]
+// openFlags : open ship flags [{ agency_id, new_value, created_at }]
+// lastRun   : when the last registry file was applied (import_run.run_at), for the fallback's date
+export function registryFromStore({ snapshot, crew, openFlags, lastRun } = {}) {
+  const snap = {};
+  for (const r of (snapshot || [])) if (r && r.agency_id) snap[r.agency_id] = r;
+  const flag = {};
+  for (const f of (openFlags || [])) {
+    if (!f || !f.agency_id) continue;
+    const cur = flag[f.agency_id];
+    if (!cur || String(f.created_at || "") > String(cur.created_at || "")) flag[f.agency_id] = f;
+  }
+  const out = [];
+  const seen = new Set();
+  for (const c of (crew || [])) {
+    if (!c || !c.agency_id || seen.has(c.agency_id)) continue;
+    seen.add(c.agency_id);
+    const s = snap[c.agency_id];
+    if (s) { out.push({ agency_id: c.agency_id, status: s.status || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, source: "snapshot" }); continue; }
+    // FALLBACK: the status is the file's (D6 writes it on every upload), but crew.vessel_observed is NOT
+    // the file's vessel — the import never writes it (D1), so it can be months stale (De Torres: 'MV
+    // JEWEL OF THE SEAS' from July while the file has him earmarked elsewhere). Only an OPEN ship flag
+    // carries the file's vessel; without one the ship is unknown — never confirm, never name a hull.
+    const f = flag[c.agency_id];
+    out.push({
+      agency_id: c.agency_id, status: c.status || null,
+      vessel_observed: (f && f.new_value) || null,
+      run_at: lastRun || null, source: "registry",
+    });
+  }
+  for (const id in snap) if (!seen.has(id)) out.push({ agency_id: id, status: snap[id].status || null, vessel_observed: snap[id].vessel || null, run_at: snap[id].run_at || null, source: "snapshot" });
+  return out;
 }
