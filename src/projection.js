@@ -11,8 +11,10 @@
 // + 6 months, + 5 on Azamara. Rita adjusts either on the card afterwards.
 
 export function defaultProjectionDates({ ship, legs, today, brand, addMonths, months = 6, azamaraMonths = 5 }) {
+  // Ship names meet case-insensitively: a Counter row's "navigator" is the vessel table's "Navigator".
+  const key = (s) => String(s == null ? "" : s).trim().toLowerCase();
   const offs = (legs || [])
-    .filter((l) => l && l.is_current && l.ours && l.ship === ship && l.off && l.off >= today)
+    .filter((l) => l && l.is_current && l.ours && key(l.ship) === key(ship) && l.off && l.off >= today)
     .map((l) => l.off)
     .sort();
   const signOn = offs[0] || today;

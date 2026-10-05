@@ -79,3 +79,12 @@ test("refusals: unknown crew, hidden crew, unknown ship, the pool, and the same 
   assert.equal(second.ok, true, "one crew can be on two ships — a jumper's next hull is a second yellow card");
   assert.equal(d.prepare("SELECT COUNT(*) n FROM assignment").get().n, 2);
 });
+
+// 5 Oct 2026 review: a Counter row's ship string can differ in case from the vessel table's name;
+// the new projection then started today instead of following the current printer's sign-off.
+test("defaultProjectionDates matches the ship case-insensitively", () => {
+  const legs = [{ ours: true, is_current: true, ship: "ADVENTURE", on: "2026-03-01", off: "2026-11-20" }];
+  const r = defaultProjectionDates({ ship: "Adventure", legs, today: "2026-10-05", brand: "Royal Caribbean", addMonths: addMonthsISO });
+  assert.equal(r.signOn, "2026-11-20");
+  assert.equal(r.follows, true);
+});

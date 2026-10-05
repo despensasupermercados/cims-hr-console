@@ -29,7 +29,7 @@ import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts 
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
-import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
+import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
 import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./relief_api.js";
 import { fetchBoardPortDays } from "./port_days.js";
 import { createProjection } from "./projection.js";
@@ -1952,13 +1952,22 @@ async function rotationSections(env) {
   // Deployed and not yet back: one line per ship saying it was sent to TDG. THE LOOP CLOSES on its
   // own — the moment a Contract Counter carries that seafarer they are a green card again and the
   // line goes (Miguel, 14 Sep 2026). Until then Restore can put the projection back in one click.
-  const greenOn = new Set();
-  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "green") greenOn.add(c.agency_id + "|" + normShip(ship));
+  // THE LOOP CLOSES ON THE COUNTER, NOT ON ANY GREEN CARD (5 Oct 2026 review): the line used to vanish
+  // the moment ANY green card for that crew sat on that ship — a registry-only card, or the crew's
+  // CURRENT Counter leg when the deployed card was their NEXT contract on the same hull — and came back
+  // months later once that card went. Now: closed only by a Counter leg for that crew on that ship whose
+  // sign-on sits within ABSORB_DAYS of the deployed sign-on, the same test the Counter upload's absorb uses.
+  const counterOn = {};
+  for (const h of HIST) {
+    if (!h || !h.ours || !h.sc || !h.on || h.source !== "counter") continue;
+    (counterOn[h.sc + "|" + normShip(shipOf(h.ship) || h.ship || "")] = counterOn[h.sc + "|" + normShip(shipOf(h.ship) || h.ship || "")] || []).push(h.on);
+  }
+  const carriedByCounter = (sc, ship, signOn) => (counterOn[sc + "|" + normShip(ship)] || []).some((on) => { const g = daysBetween(on, signOn); return g != null && Math.abs(g) <= ABSORB_DAYS; });
   const depByShip = {};
   for (const d of ((depRes && depRes.results) || [])) {
     const cs = shipOf(d.ship) || d.ship;
     if (!cs) continue;
-    if (greenOn.has(d.sc + "|" + normShip(cs))) continue;   // back from TDG: the loop closed
+    if (carriedByCounter(d.sc, cs, d.sign_on)) continue;   // back from TDG: the loop closed
     (depByShip[cs] = depByShip[cs] || []).push({
       id: d.id, agency_id: d.sc, name: d.crew_name || d.sc, ship: cs,
       signOn: d.sign_on || null, signOff: d.sign_off || null,
@@ -4460,7 +4469,7 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -4510,7 +4519,11 @@ async function dpvSend(){
   if(b){b.disabled=true;b.textContent='Sending…';}
   try{
     var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id})})).json();
-    if(r&&r.ok){ dpvClose(); renderRotation(); if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
+    // ok means THE EMAIL WENT. A failure after that is said as what it is — never "Not sent", which made a
+    // retry email Joy twice (5 Oct 2026).
+    if(r&&r.ok){ dpvClose(); renderRotation();
+      if(r.logError){alert('Sent to TDG, but the console could not write its log ('+r.logError+'). The card stays on the board; do NOT send again - tell Miguel.');}
+      else if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
     else { if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
   }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Network error'); }
 }
@@ -4544,6 +4557,7 @@ function niceCity(v){
 // Counter ends a leg (CLAUDE.md §11), so this seat is still held — by someone nobody has signed off.
 function cardOverdue(x){
   if(!x||x.state==='yellow'||!x.signOff)return false;
+  if(x.offConfirmed)return false; // a sign-off IS recorded (a manual status pin kept the seat): never say it is not
   return x.signOff < new Date().toISOString().slice(0,10);
 }
 // The projection card's source line: what the last AdvancedQuery (TDG registry) upload said about it
@@ -4662,9 +4676,10 @@ function monthsDays(a,b){
   if(!a||!b)return '';
   var d1=new Date(a),d2=new Date(b);
   if(isNaN(d1)||isNaN(d2)||d2<d1)return '';
-  var m=(d2.getFullYear()-d1.getFullYear())*12+(d2.getMonth()-d1.getMonth());
-  var d=d2.getDate()-d1.getDate();
-  if(d<0){m--;d+=new Date(d2.getFullYear(),d2.getMonth(),0).getDate();}
+  // ISO dates parse as UTC midnight: read UTC fields, or Santiago shows "6 mos 3 days" for exactly 6 months.
+  var m=(d2.getUTCFullYear()-d1.getUTCFullYear())*12+(d2.getUTCMonth()-d1.getUTCMonth());
+  var d=d2.getUTCDate()-d1.getUTCDate();
+  if(d<0){m--;d+=new Date(Date.UTC(d2.getUTCFullYear(),d2.getUTCMonth(),0)).getUTCDate();}
   if(m<0)return '';
   var parts=[];if(m)parts.push(m+' mo'+(m===1?'':'s'));if(d)parts.push(d+' day'+(d===1?'':'s'));
   return parts.join(' ')||'0 days';
@@ -4950,6 +4965,8 @@ function drawRotation(){
       // A green card or a pool card CREATES a projection on the target ship (yellow, dated, draggable).
       // The green stays where it is - one crew can hold two ships (Miguel, 14 Sep 2026). The old path
       // wrote crew_override.vessel_observed and produced an undated green card: retired 15 Sep 2026.
+      // Dropped back on its OWN section: a slipped drag, not a plan for a next contract here (5 Oct 2026).
+      if(DRAGEL&&DRAGEL.parentNode===z){DRAGID=null;DRAGEL=null;return;}
       if(fromPool&&DRAGEL&&DRAGEL.parentNode!==z){var el2=DRAGEL;el2.classList.add('landing');el2.style.opacity='.5';z.appendChild(el2);}
       createProjection(DRAGID,ship);
     };

@@ -110,12 +110,16 @@ export function buildReliefBoard({ assignments = [], portDaysByShip = {}, config
     }
     const reliever = enrich(relieverInput);
     if (reliever) reliever.aboard = relieverAboard;   // already signed on; the UI must not re-advertise them
+    // EVERY open assignment on the ship, by id (5 Oct 2026 review): the editor opened from a Keyman card
+    // must open THAT card's projection, not the one `reliever` happens to pick — Icon with A (Oct) and
+    // B (April): clicking B opened A, and Save / Remove acted on A.
+    const relieversAll = relievers.map((a) => { const e = enrich(a); if (e) e.aboard = !!(a.on_date && a.on_date <= today); return e; }).filter(Boolean);
     const handover = handoverStatus(printer, reliever);
     const daysToOff = printer ? printer.days_to_off : null;
     const urg = urgency(daysToOff, config);
     const statusKind = reliever ? handover.kind : urg; // reliever present → handover drives; else urgency
     const _rank = RANK[statusKind] != null ? RANK[statusKind] : 3;
-    return { vessel_key: key, printer, reliever, handover, urgency: urg, days_to_off: daysToOff, status: statusKind, _rank };
+    return { vessel_key: key, printer, reliever, relievers: relieversAll, handover, urgency: urg, days_to_off: daysToOff, status: statusKind, _rank };
   });
 
   rows.sort((a, b) =>
