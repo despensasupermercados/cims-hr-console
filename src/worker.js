@@ -1803,6 +1803,10 @@ async function rotationSections(env) {
   // Seats the schedule has closed (a recorded sign-off has passed, nothing current replaces it on that
   // ship) — read off the SAME legs crewStatus() just used, so the card and the status beside it agree.
   const released = releasedSeatKeys(HIST, today, (s) => normShip(shipOf(s) || s));
+  // A MANUAL status edit (crew_override.status — the same test crewStatus applies) keeps the registry
+  // seat. A DERIVED status does not: De Torres reads "On board" because the schedule has him aboard
+  // Navigator by projection, and that is exactly why his Jewel seat must go (5 Oct, second screenshot).
+  const manualStatus = (sc) => { const o = ovMap[sc]; return !!(o && o.status != null && o.status !== ""); };
   const promByShip = {}, shoreside = [], pool = [];
   const plannedScs = new Set((openAsg || []).map((a) => a.sc).filter(Boolean));
   for (const c of crewRows) {
@@ -1827,10 +1831,12 @@ async function rotationSections(env) {
     // still names this ship, but the schedule has already closed the leg — Rita's recorded sign-off has
     // passed (ship_leg_source.applyRecordedSignoffs) and nothing current replaces it here. The status
     // beside the card reads On Vacation off that same schedule; the seat must agree instead of staying
-    // red as "no sign-off recorded". A manual On board status still wins. The crew goes where the
-    // schedule puts them today, else to their projection (yellow, pendingProjections), else to the pool.
-    // A leg past its PROJECTED sign-off with no recorded one is untouched: overdue, not gone (§11).
-    if (ship && released.has(c.agency_id + "|" + k) && c.status !== "On board") {
+    // red as "no sign-off recorded". A MANUAL status edit still wins (not a derived "On board": that
+    // can mean aboard ANOTHER ship by projection, De Torres on Jewel, which is the case to release).
+    // The crew goes where the schedule puts them today, else to their projection (yellow,
+    // pendingProjections), else to the pool. A leg past its PROJECTED sign-off with no recorded one is
+    // untouched: overdue, not gone (§11).
+    if (ship && released.has(c.agency_id + "|" + k) && !manualStatus(c.agency_id)) {
       const se = schedEff[c.agency_id];
       const effShip = se && se.cur ? (shipOf(se.ship) || se.ship) : null;
       if (effShip && normShip(effShip) !== k) {

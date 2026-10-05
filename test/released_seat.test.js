@@ -64,7 +64,12 @@ test("rotationSections applies the rule off the same HIST the status came from (
   const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
   const b = src.slice(src.indexOf("async function rotationSections("), src.indexOf("const histByShip = {}, histDisp = {};"));
   assert.match(b, /const released = releasedSeatKeys\(HIST, today, \(s\) => normShip\(shipOf\(s\) \|\| s\)\);/, "computed once, before the roster loop, from HIST");
-  assert.match(b, /if \(ship && released\.has\(c\.agency_id \+ "\|" \+ k\) && c\.status !== "On board"\)/, "a manual On board status still wins");
+  // The guard is a MANUAL status edit (crew_override.status, the same test crewStatus applies) — not
+  // "status is On board". De Torres IS On board (on Navigator, by projection) and that is exactly why his
+  // Jewel seat must go; the first cut of this rule (b34ea57) kept him red on Jewel for that reason.
+  assert.match(b, /const manualStatus = \(sc\) => \{ const o = ovMap\[sc\]; return !!\(o && o\.status != null && o\.status !== ""\); \};/, "the manual-override test is the one crewStatus uses");
+  assert.match(b, /if \(ship && released\.has\(c\.agency_id \+ "\|" \+ k\) && !manualStatus\(c\.agency_id\)\)/, "a manual status edit still wins; a DERIVED On board elsewhere does not keep the old seat");
+  assert.doesNotMatch(b, /released\.has\(c\.agency_id \+ "\|" \+ k\) && c\.status !== "On board"/, "the b34ea57 guard that kept De Torres red on Jewel");
   assert.match(b, /const effShip = se && se\.cur \? \(shipOf\(se\.ship\) \|\| se\.ship\) : null;/, "the crew goes where the schedule puts them today");
   assert.match(b, /if \(!plannedScs\.has\(c\.agency_id\)\) pool\.push\(base\);\s*continue;/, "else their projection draws them, else the pool");
   // No new D1 read was added for this: the rule runs on HIST already in the wave (§12).
