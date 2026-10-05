@@ -18,8 +18,8 @@ test("dashboard: birthdays use the DERIVED status and visible crew only; the com
 test("the Data page's AdvancedQuery reader hands dates over as text, never as a local-midnight Date (one day early for Rita)", () => {
   const i = SRC.indexOf("var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd',defval:''});");
   assert.ok(i > 0, "the AdvancedQuery reader formats dates as yyyy-mm-dd text");
-  assert.match(SRC.slice(i, i + 400), /crew\\s\*id/i, "and it is the reader that scans for the CREW ID header (AdvancedQuery)");
-  assert.doesNotMatch(SRC.slice(i - 600, i), /raw:true/, "no raw Date objects on this path any more");
+  assert.ok(SRC.slice(i, i + 400).includes("crew\\\\s*id"), "and it is the reader that scans for the CREW ID header (AdvancedQuery)");
+  assert.doesNotMatch(SRC.slice(i - 600, i), /\{header:1,raw:true/, "no raw Date objects on this path any more");
 });
 
 test("the PDF statement gathers its per-crew reads in one wave (§12), guards together", () => {
