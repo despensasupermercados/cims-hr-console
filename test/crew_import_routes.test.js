@@ -274,7 +274,7 @@ test("stage lists every open projection against the file, and carries the file's
   assert.equal(env.DB._batched.length, 0, "stage still writes nothing");
 });
 
-test("apply writes the verdict onto the projection it read itself — and still never a vessel_observed UPDATE", async () => {
+test("apply keeps the file's word per crew (registry_snapshot) — and still never a vessel_observed UPDATE", async () => {
   const env = { DB: fakeDB({ existing: EXISTING }) };
   const deps = { openProjections: async () => APEX_PLAN };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj2" }), env, deps)).json();
@@ -283,19 +283,18 @@ test("apply writes the verdict onto the projection it read itself — and still 
   assert.equal(body.projections.counts.confirmed, 1);
   assert.match(body.summary, /1 projection confirmed aboard by the file/);
   const st = env.DB._batched;
-  const upd = st.filter(s => /UPDATE assignment SET registry_verdict=\?/.test(s.sql));
-  assert.equal(upd.length, 1);
-  assert.equal(upd[0].args[0], "confirmed");
-  assert.equal(upd[0].args[1], "On board");
-  assert.equal(upd[0].args[2], "Celebrity Apex");
-  assert.equal(upd[0].args[7], "as_1");
-  assert.match(upd[0].sql, /COALESCE\(registry_confirmed_at, \?\)/, "the FIRST confirmation is kept");
-  assert.match(upd[0].sql, /WHERE id=\? AND actual_sign_off IS NULL/, "only an open projection is ever touched");
-  assert.equal(st.some(s => /UPDATE crew SET vessel_observed/.test(s.sql)), false, "D1 still holds: the registry never writes a ship");
+  const snap = st.filter(s => /INSERT INTO registry_snapshot \(agency_id, status, vessel, run_at, import_run_id\)/.test(s.sql));
+  assert.equal(snap.length, 1, "one row per crew the file carried");
+  assert.equal(snap[0].args[0], "SC-1");
+  assert.equal(snap[0].args[1], "On board");
+  assert.equal(snap[0].args[2], "Celebrity Apex");
+  assert.match(snap[0].sql, /ON CONFLICT\(agency_id\) DO UPDATE SET status=excluded\.status, vessel=excluded\.vessel, run_at=excluded\.run_at/, "the latest file is the latest word");
+  assert.equal(st.some(s => /UPDATE assignment/.test(s.sql)), false, "no verdict is written on the card: the board derives it at read time");
+  assert.equal(st.some(s => /vessel_observed=/.test(s.sql)), false, "D1 still holds: the registry never writes a ship");
   assert.equal(st.some(s => /keyman_contract3|contract_edit/.test(s.sql)), false, "no Counter row or edit is touched (§10b)");
 });
 
-test("apply: a contradicted card is marked, never removed; a crew the file does not carry gets no verdict", async () => {
+test("apply: a contradicted card is shown as such, never removed; a crew the file does not carry gets no verdict", async () => {
   const rows = [
     { "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "Inactive", "VESSEL NAME": "" },
   ];
@@ -306,22 +305,57 @@ test("apply: a contradicted card is marked, never removed; a crew the file does 
   assert.deepEqual(stage.review.projections.map(p => [p.id, p.verdict]), [["as_1", "ashore"]], "Gayda's shape: aboard per the card, Inactive per the file");
   const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj3", run_by: "Rita" }), env, deps)).json();
   const st = env.DB._batched;
-  const upd = st.filter(s => /UPDATE assignment SET registry_verdict=\?/.test(s.sql));
-  assert.equal(upd.length, 1);
-  assert.equal(upd[0].args[0], "ashore");
-  assert.equal(upd[0].args[7], "as_1");
+  const snap = st.filter(s => /INSERT INTO registry_snapshot/.test(s.sql));
+  assert.equal(snap.length, 1);
+  assert.deepEqual(snap[0].args.slice(0, 3), ["SC-1", "Inactive", null], "the file's word, blank vessel kept blank");
   assert.equal(st.some(s => /DELETE FROM assignment/.test(s.sql)), false, "flagged on the card, never removed (§6)");
   assert.match(body.summary, /1 card aboard per your board but not per the file/);
 });
 
-test("apply: without the projection feed nothing is compared, and a review cannot name a card the feed did not return", async () => {
+test("apply: without the projection feed nothing is compared for the review, the snapshot is still kept, and a review cannot name a card", async () => {
   const env = { DB: fakeDB({ existing: EXISTING }) };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj4" }), env)).json();
   assert.deepEqual(stage.review.projections, []);
-  // A tampered review listing a projection id: the apply reads the feed itself (here: none) and writes none.
   stage.review.projections = [{ id: "as_evil", sc: "SC-1", verdict: "confirmed" }];
   const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj4", run_by: "Rita" }), env)).json();
   assert.equal(body.ok, true);
-  assert.equal(env.DB._batched.some(s => /UPDATE assignment/.test(s.sql)), false);
+  assert.equal(env.DB._batched.some(s => /UPDATE assignment|DELETE FROM assignment/.test(s.sql)), false);
+  assert.equal(env.DB._batched.filter(s => /INSERT INTO registry_snapshot/.test(s.sql)).length, 1, "the file's word is kept regardless");
   assert.doesNotMatch(body.summary, /projection/);
+});
+
+test("apply: the snapshot rows a file does not carry are removed in the same batch; an empty registry (old page) removes nothing", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj5" }), env)).json();
+  await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj5", run_by: "Rita" }), env);
+  const st = env.DB._batched;
+  const run = st.find(s => /INSERT INTO import_run/i.test(s.sql));
+  const del = st.find(s => /DELETE FROM registry_snapshot WHERE import_run_id IS NOT \?/.test(s.sql));
+  assert.ok(del, "rows the latest file did not touch go");
+  assert.equal(del.args[0], run.args[0], "bound to THIS run's id");
+  assert.ok(st.indexOf(del) > st.findIndex(s => /INSERT INTO registry_snapshot/.test(s.sql)), "after the upserts");
+  const env2 = { DB: fakeDB({ existing: EXISTING }) };
+  const stage2 = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj6" }), env2)).json();
+  stage2.review.registry = [];
+  await apiCrewImportApply(req({ review: stage2.review, decisions: {}, file_hash: "h-pj6", run_by: "Rita" }), env2);
+  assert.equal(env2.DB._batched.some(s => /DELETE FROM registry_snapshot/.test(s.sql)), false, "no rows carried: the table is left alone");
+});
+
+test("apply: a crew whose vessel in this file AGREES with the registry closes their older open ship flag (file_agrees)", async () => {
+  // registry says Celebrity Edge; the file says Celebrity Edge too; an old flag still names Apex
+  const rows = [{ "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Edge" }];
+  const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f-old", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-pj7" }), env)).json();
+  assert.equal(stage.review.counts.ship_flag, 0, "no disagreement in this file");
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj7", run_by: "Rita" }), env)).json();
+  assert.equal(body.ship_flags.closed_file_agrees, 1);
+  const upd = env.DB._batched.find(s => /UPDATE sync_conflict SET resolved=\? WHERE id=\? AND resolved=0/.test(s.sql));
+  assert.ok(upd && upd.args[1] === "f-old");
+  assert.match(body.summary, /the file now agrees with the registry/);
+  // a BLANK vessel in the file says nothing and closes nothing
+  const rows2 = [{ "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "" }];
+  const env2 = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f-old", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
+  const stage2 = await (await apiCrewImportStage(req({ rows: rows2, file_hash: "h-pj8" }), env2)).json();
+  const body2 = await (await apiCrewImportApply(req({ review: stage2.review, decisions: {}, file_hash: "h-pj8", run_by: "Rita" }), env2)).json();
+  assert.equal(body2.ship_flags.closed_file_agrees, 0);
 });

@@ -50,15 +50,25 @@ TDG's file lags Rita's real moves and is often wrong on ship placement — so it
   a board leg — it fixes the email/fallback and the stored value, not the schedule-derived views.
 - **D8** (2026-10-05, Miguel, Jewel: "if the person is onboard .. and if rita has already a card in there ..
   it should automatically compare with what the tdg file has and deploy it and remove the one in draft").
-  Every upload compares each OPEN Keyman projection with the file (`src/registry_sync.js`, pure) and writes
-  the verdict onto that assignment on Apply — never onto crew, the Counter or an override. **confirmed**
-  (file: On board, same hull by the strict matcher): the card turns green, keeps Rita's dates (the registry
-  carries none) and loses Deploy; the Counter absorbs it later as before. **elsewhere** (file: another hull)
-  and **ashore** (card aboard, file On Vacation / Inactive / earmarked elsewhere): flagged on the card,
-  nothing removed (§6). **earmarked** / **pending**: informational. A crew the file does not carry gets no
-  verdict. Shown in the review (read-only), counted in the apply sentence. The projections come to the
-  importer only through `deps.openProjections` (the worker's `fetchOpenAssignments`); D1 still holds — the
-  registry never writes a ship.
+  Every Apply keeps the file's row per crew (`registry_snapshot`: status + `vessel` exactly as the file said
+  them, stamped with the run — a record of the file, not an allocation, so D1 still holds). The Keyman board
+  DERIVES each open projection's verdict from it at read time (`src/registry_sync.js`, pure); a crew without
+  a snapshot row yet is read off the latest run's status audit row (the file's status even where Rita held
+  the change), else `crew.status` (D6; unknown under a manual status edit), + the newest open ship flag
+  dated by the file that raised it — never `crew.vessel_observed`, which the import does not write; a crew
+  under an open presence flag (absent from the latest file) gets no word. Rows the latest file does not
+  carry leave the snapshot. An open ship flag closes when a later file agrees with the registry (`agree`,
+  closed_file_agrees). Miguel, an hour
+  after the first cut wrote the verdict at upload time: "still see no updates in the console" — the board
+  must reflect the last upload the moment it is applied. **confirmed** (file: On board, same hull by the
+  strict matcher): the card turns green, keeps Rita's dates (the registry carries none) and loses Deploy;
+  the Counter absorbs it later as before. **elsewhere** (the card says aboard HERE and the file has them
+  aboard on another hull, or TDG earmarks them elsewhere) and **ashore** (card aboard, file On Vacation /
+  Inactive / Earmarked): flagged on the card, nothing removed (§6). **earmarked** / **pending**:
+  informational — a crew aboard one hull today with a future plan on another is normal. A crew the file
+  does not carry gets no verdict. Shown in the review (read-only), counted in the apply sentence. The
+  projections come to the importer only through `deps.openProjections` (the worker's
+  `fetchOpenAssignments`).
 
 ## E. UX principles ("Review & Apply")
 - Upload is a **proposal Rita ratifies** (Word tracked-changes model). Nothing saves until Apply.

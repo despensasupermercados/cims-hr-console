@@ -6,6 +6,8 @@ import { buildRotationBoard } from "./rotation.js";import { resolveCity, groupPo
 import { KEYMAN_CONTRACTS } from "./keyman_data.js";
 import { billingReport, periodDays } from "./daysworked.js";
 import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
+import { strictShipMatcher } from "./crew_flags.js";
+import { reconcileProjections, registryFromStore } from "./registry_sync.js";
 import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
 import { mapRows, diffCrew } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
@@ -213,7 +215,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections }); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot }); if (ci) return ci; }
         // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
         // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
         // human does. Inside the boundary and behind the session gate (§11). Inert until
@@ -1658,11 +1660,11 @@ async function apiRotation(env) { return json(await rotationSections(env)); }
 async function rotationSections(env) {
   // PERF (2026-07): ensures first (concurrently), then ALL independent reads in one concurrent
   // wave instead of 7 sequential Worker->D1 round trips. Same statements, same downstream logic.
-  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureProjectionRegistry(env)]);
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureRegistrySnapshot(env)]);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
@@ -1675,6 +1677,15 @@ async function rotationSections(env) {
     env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026)
     env.DB.prepare("SELECT MAX(imported_at) AS stamp, COUNT(*) AS rows, COUNT(DISTINCT sc) AS crew FROM keyman_contract3").all().catch(() => ({ results: [] })), // how old the Counter is
+    // The last AdvancedQuery's word per crew, for the projection verdict (registry_sync.js, 5 Oct 2026):
+    // the kept snapshot, the open ship flags (the file's vessel where it differs from the registry), and
+    // when the last registry file was applied. Same wave, three small reads (§12).
+    env.DB.prepare("SELECT agency_id, status, vessel, run_at FROM registry_snapshot").all().catch(() => ({ results: [] })),
+    // open ship flags (the file's vessel where it differs from the registry) · the LATEST run's status
+    // audit rows (the file's status even where Rita held the change) · open presence flags (crew the
+    // latest file does not carry) — one read, three fields
+    env.DB.prepare("SELECT agency_id, field, new_value, created_at FROM sync_conflict WHERE (field='vessel_observed' AND resolved=0) OR (field='presence' AND resolved=0) OR (field='status' AND import_run_id=(SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1))").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT MAX(run_at) AS run_at FROM import_run").all().catch(() => ({ results: [] })),
   ]);
   // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
   // file, or that the count had been flat since 6 July; Rita found it from the outside. A NULL stamp
@@ -1692,6 +1703,11 @@ async function rotationSections(env) {
   const crewRows = crewRowsRes.results;
   const ovRows = ovRowsRes.results;
   const ovVessel = {}, ovMap = {}; for (const o of ovRows) { ovMap[o.agency_id] = o; if (o.vessel_observed != null && o.vessel_observed !== "") ovVessel[o.agency_id] = o.vessel_observed; }
+  // The RAW registry row (status + vessel as the last import left them), captured before the override
+  // merge and the schedule derivation below: it is the fallback word of the file for a crew with no
+  // registry_snapshot row yet (registry_sync.registryFromStore).
+  // `manual` = a crew_override.status is live, so crew.status is NOT the file's (D3 keeps the manual value).
+  const rawReg = crewRows.map((c) => { const o = ovMap[c.agency_id]; return { agency_id: c.agency_id, status: c.status, vessel_observed: c.vessel_observed, manual: !!(o && o.status != null && o.status !== "") }; });
   for (const c of crewRows) if (ovVessel[c.agency_id]) c.vessel_observed = ovVessel[c.agency_id]; // manual edits win
   const schedMap = scheduleBySc(HIST);
   for (const c of crewRows) c.status = crewStatus(c, ovMap[c.agency_id], schedMap[c.agency_id], today); // auto status (On board / On Vacation), retired/manual win
@@ -1798,18 +1814,33 @@ async function rotationSections(env) {
     cardSrc[h.sc + "|" + k2] = h.source === "assignment" ? "yellow" : "green";
     if (h.assignment_id) cardAsg[h.sc + "|" + k2] = h.assignment_id;
   }
-  // What the last AdvancedQuery upload said about each OPEN assignment (registry_sync.js, 5 Oct 2026),
-  // keyed by assignment id so BOTH card paths carry it: a projection the schedule already places
-  // (aboard — drawn by the roster loop, Gayda on Jewel) and one drawn by the projection loop below.
-  // A 'confirmed' verdict is the loop closing from the registry side: the card draws green, keeps
-  // Rita's dates until the Counter carries the leg, and offers no Deploy (TDG has them aboard).
+  // What the last AdvancedQuery upload says about each OPEN assignment (registry_sync.js, 5 Oct 2026),
+  // DERIVED HERE at read time — like status (§11) — from the file's row per crew (registry_snapshot,
+  // else crew.status + the open ship flag), keyed by assignment id so BOTH card paths carry it: a
+  // projection the schedule already places (aboard — drawn by the roster loop, Gayda on Jewel) and one
+  // drawn by the projection loop below. A 'confirmed' verdict is the loop closing from the registry
+  // side: the card draws green, keeps Rita's dates until the Counter carries the leg, and offers no
+  // Deploy (TDG has them aboard). Nothing is written: the board reflects the last upload at once.
   const regByAsg = {};
-  for (const a of (openAsg || [])) {
-    if (!a || !a.id || !a.registry_verdict) continue;
-    regByAsg[a.id] = {
-      verdict: a.registry_verdict, status: a.registry_status || null, ship: a.registry_ship ? (shipOf(a.registry_ship) || a.registry_ship) : null,
-      at: String(a.registry_at || "").slice(0, 10) || null, confirmedAt: String(a.registry_confirmed_at || "").slice(0, 10) || null,
-    };
+  {
+    const lastRun = ((runRes && runRes.results) || [])[0];
+    const sc = (flagRes && flagRes.results) || [];
+    const registry = registryFromStore({
+      snapshot: (snapRes && snapRes.results) || [], crew: rawReg,
+      openFlags: sc.filter((r) => r.field === "vessel_observed"),
+      statusAudit: sc.filter((r) => r.field === "status"),
+      absent: sc.filter((r) => r.field === "presence"),
+      lastRun: (lastRun && lastRun.run_at) || null,
+    });
+    const regAt = {}; for (const r of registry) regAt[r.agency_id] = r;
+    const verdicts = reconcileProjections({ projections: openAsg || [], registry, today, shipOf: STRICT_SHIP });
+    for (const it of verdicts.items) {
+      const src = regAt[it.sc] || {};
+      regByAsg[it.id] = {
+        verdict: it.verdict, status: it.file.status, ship: it.file.ship_canon || it.file.ship || null,
+        at: String(src.run_at || "").slice(0, 10) || null, source: src.source || null,
+      };
+    }
   }
   const regOf = (asgId) => (asgId && regByAsg[asgId]) || null;
   const regConfirmed = (asgId) => !!(regOf(asgId) && regOf(asgId).verdict === "confirmed");
@@ -2105,17 +2136,16 @@ async function contractCountMap(env) {
   const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null };
   return m;
 }
-// What the last AdvancedQuery upload said about each of Rita's projections (registry_sync.js, 5 Oct
-// 2026): the verdict, the file's status + vessel for that crew, when, and the FIRST confirmation. Read
-// by fetchOpenAssignments for the card; written only by the registry import's apply. Five ALTERs
-// leave together, each a no-op once the column exists; memoized like every other guard (§12).
-const ensureProjectionRegistry = memoEnsure(async (env) => {
-  await Promise.all(["registry_verdict TEXT", "registry_status TEXT", "registry_ship TEXT", "registry_at TEXT", "registry_confirmed_at TEXT"]
-    .map((col) => env.DB.prepare("ALTER TABLE assignment ADD COLUMN " + col).run().catch(() => null)));
+// The file's row per crew from the last AdvancedQuery upload (registry_sync.js, 5 Oct 2026): status +
+// vessel as the file said them, stamped with the run. Written only by the registry import's apply;
+// read by rotationSections to derive each projection's verdict at read time. Memoized like every
+// other guard (§12). A crew without a row yet is read off crew.status + the open ship flag instead.
+const ensureRegistrySnapshot = memoEnsure(async (env) => {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT)").run();
 });
-// The yellow-card feed handed to the registry importer (crew_import_routes.js): the ONE definition,
-// guard first so the verdict columns it selects and the importer writes both exist.
-async function openProjections(env) { await ensureProjectionRegistry(env); return fetchOpenAssignments(env); }
+// The STRICT hull matcher for the registry comparison (crew_flags.js): "MV JEWEL OF THE SEAS" meets
+// "Jewel"; an unreadable vessel never confirms anything. Built once per isolate.
+const STRICT_SHIP = strictShipMatcher(VESSEL_REF);
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
   // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
@@ -4525,7 +4555,7 @@ function regNote(reg,confirmed){
   if(reg.verdict==='elsewhere')return '<div class=srcnote><b style="color:var(--amber)">TDG registry'+at+': '+st+(sh?(' &middot; '+sh):'')+'</b> &middot; not this ship</div>';
   if(reg.verdict==='ashore')return '<div class=srcnote><b style="color:var(--red)">TDG registry'+at+': '+st+(sh?(', '+sh):'')+'</b> &middot; not aboard here per the file</div>';
   if(reg.verdict==='earmarked')return '<div class=srcnote>TDG registry'+at+': earmarked for this ship &middot; not aboard yet</div>';
-  return '<div class=srcnote>Your projection &middot; not in a TDG file yet (registry'+at+': '+st+')</div>';
+  return '<div class=srcnote>Your projection &middot; TDG registry'+at+': '+st+(sh?(' &middot; '+sh):(reg.status==='On board'?' (ship not on file yet)':''))+'</div>';
 }
 // What each port colour MEANS (city_resolver.js). Colour with no key is noise; 'seed' was painted the
 // danger red, which read as an error on a card that was simply falling back to the ship's homeport.

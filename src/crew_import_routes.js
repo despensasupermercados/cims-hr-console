@@ -27,18 +27,21 @@ const SHIP_OF = strictShipMatcher(VESSEL_REF); // built once per isolate, not pe
 // Rita's open projections (the yellow cards) come in through deps.openProjections — the worker's
 // fetchOpenAssignments, the ONE yellow-card feed (ship_leg_source.js). This module never reads the
 // schedule tables itself (status_consistency.test.js); without the dep (tests, tools) there are no
-// projections to compare and no verdict is written.
+// projections to show in the review. The comparison here is for the REVIEW SCREEN and the apply
+// sentence; the board derives the same verdict itself at read time from the snapshot written below.
 const openProjections = (env, deps) => (deps && deps.openProjections ? deps.openProjections(env).catch(() => []) : Promise.resolve([]));
 // What the file says per crew, carried from stage to apply inside the review (the groups only hold
 // CHANGES, and a crew whose status is still "On board" has no change to show).
 const registryOf = (mapped) => mapped.map((m) => ({ agency_id: m.agency_id, status: m.status || null, vessel_observed: m.vessel_observed || null }));
-// The verdict write. The latest file is the latest word (registry_verdict / status / ship / at);
-// registry_confirmed_at keeps the FIRST confirmation so the card can say since when TDG has had them
-// aboard. Only an OPEN projection is ever touched, and only ids this route read itself.
-const VERDICT_SQL =
-  "UPDATE assignment SET registry_verdict=?, registry_status=?, registry_ship=?, registry_at=?, " +
-  "registry_confirmed_at=CASE WHEN ?='confirmed' THEN COALESCE(registry_confirmed_at, ?) ELSE registry_confirmed_at END, " +
-  "updated_at=? WHERE id=? AND actual_sign_off IS NULL";
+// THE FILE'S WORD PER CREW, kept (registry_snapshot, 5 Oct 2026). One row per crew the file carried:
+// status + vessel exactly as the file said them, stamped with the run. The Keyman board derives each
+// projection's verdict from this at READ time (registry_sync.registryFromStore + reconcileProjections)
+// — not from a value written here — so the board reflects the last upload the moment it is applied,
+// and a crew without a snapshot row yet falls back to crew.status + the open ship flag. This is NOT a
+// ship allocation (D1): nothing here reaches crew.vessel_observed or the board's placement.
+const SNAPSHOT_SQL =
+  "INSERT INTO registry_snapshot (agency_id, status, vessel, run_at, import_run_id) VALUES (?,?,?,?,?) " +
+  "ON CONFLICT(agency_id) DO UPDATE SET status=excluded.status, vessel=excluded.vessel, run_at=excluded.run_at, import_run_id=excluded.import_run_id";
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -126,20 +129,26 @@ export async function apiCrewImportApply(request, env, deps) {
   // The import itself never depends on the board: if the live read fails, the apply still runs and
   // only the "board already matches" rule is off for this run (reported as board_unavailable).
   const today = run_at.slice(0, 10);
-  // deps.openProjections (the worker's fetchOpenAssignments) runs the registry-column guard itself, so
-  // the verdict UPDATEs below can join the batch (one D1 transaction: a missing column would fail
-  // the whole import). Absent in tests and tools: no projections, no verdict written.
+  // registry_snapshot must exist before its upserts join the batch (one D1 transaction: a missing
+  // table would fail the whole import). Memoized once per isolate by the caller (worker.js
+  // ensureRegistrySnapshot); absent in tests and tools.
+  if (deps && deps.ensureRegistrySnapshot) await deps.ensureRegistrySnapshot(env);
   const [openRes, legs, projections] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, new_value FROM sync_conflict WHERE field='vessel_observed' AND resolved=0").all(),
     deps && deps.boardLegs ? deps.boardLegs(env).catch(() => null) : Promise.resolve(null),
     openProjections(env, deps),
   ]);
   const board_unavailable = !!(deps && deps.boardLegs) && legs == null;
-  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF });
-  const openInserted = flags.insert.filter(c => c.resolved === 0).length;
-  // Rita's projections against the file (registry_sync.js): the projections are read HERE, so only an
-  // open assignment this route found can be written; the file's word per crew is the one staged.
+  // Rita's projections against the file (registry_sync.js), for the response; the file's word per crew
+  // is the one staged (review.registry), kept below as the snapshot.
   const registry = Array.isArray(body.review && body.review.registry) ? body.review.registry : [];
+  // Crew whose vessel in this file AGREES with the registry: the file names a vessel and the plan raised
+  // no ship flag for them. Their older open flags close (crew_flags `agree`). A blank vessel in the file
+  // says nothing and closes nothing.
+  const flaggedNow = new Set(plan.conflicts.filter(c => c.field === "vessel_observed").map(c => c.agency_id));
+  const agree = new Set(registry.filter(r => r && r.agency_id && r.vessel_observed && !flaggedNow.has(r.agency_id)).map(r => String(r.agency_id)));
+  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF, agree });
+  const openInserted = flags.insert.filter(c => c.resolved === 0).length;
   const proj = reconcileProjections({ projections: projections || [], registry, today, shipOf: SHIP_OF });
 
   const importRunId = crypto.randomUUID();
@@ -192,13 +201,21 @@ export async function apiCrewImportApply(request, env, deps) {
       "INSERT INTO sync_conflict (id,import_run_id,agency_id,field,old_value,new_value,resolved,created_at) VALUES (?,?,?,?,?,?,?,?)")
       .bind(crypto.randomUUID(), importRunId, c.agency_id, c.field, str(c.old_value), str(c.new_value), c.resolved, run_at));
   }
-  // THE LOOP CLOSES FROM THE REGISTRY TOO (Miguel, 5 Oct 2026). A projection the file confirms aboard
-  // turns green on the board by itself; one it contradicts is flagged ON THE CARD; nothing is removed
-  // (§6: flag, never silently fix). The verdict is an annotation on Rita's own card — crew, Counter and
-  // override rows are untouched, and the Counter still absorbs the card when it finally carries the leg.
-  for (const it of proj.items) {
-    stmts.push(env.DB.prepare(VERDICT_SQL).bind(it.verdict, it.file.status, it.file.ship, run_at, it.verdict, run_at, run_at, it.id));
+  // THE LOOP CLOSES FROM THE REGISTRY TOO (Miguel, 5 Oct 2026). The file's row per crew is kept, and the
+  // board derives each projection's verdict from it at read time: one the file confirms aboard turns
+  // green by itself; one it contradicts is flagged ON THE CARD; nothing is removed (§6: flag, never
+  // silently fix). crew, Counter and override rows are untouched, and the Counter still absorbs the
+  // card when it finally carries the leg.
+  let kept = 0;
+  for (const r of registry) {
+    if (!r || !r.agency_id) continue;
+    stmts.push(env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, run_at, importRunId));
+    kept++;
   }
+  // A crew the latest file does NOT carry has no word in it: their old snapshot row goes, so the board
+  // never shows a previous file's verdict as current (silence is not a verdict). Only when this body
+  // actually carried the file's rows — an empty list (an old cached page) must not wipe the table.
+  if (kept) stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(importRunId));
 
   const results = await env.DB.batch(stmts);
   // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
@@ -226,6 +243,7 @@ export function applySummary(r) {
   if (f.closed_superseded) closed.push(n(f.closed_superseded, "superseded by this file", "superseded by this file"));
   if (f.closed_dismissed) closed.push(n(f.closed_dismissed, "dismissed", "dismissed"));
   if (f.closed_taken) closed.push(n(f.closed_taken, "settled by taking the file's ship", "settled by taking the file's ship"));
+  if (f.closed_file_agrees) closed.push(n(f.closed_file_agrees, "the file now agrees with the registry", "the file now agrees with the registry"));
   if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
   if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");

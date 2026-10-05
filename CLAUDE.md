@@ -182,18 +182,29 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   Expired documents are ALWAYS a warning on the card, the preview and the email, and NEVER a block.
   The sent line clears itself when the next Contract Counter carries that seafarer — that is the loop
   closing, and it is the only thing that closes it. Restore rebuilds the card from the log.
-- **The registry upload compares every projection with the file** (`src/registry_sync.js`, 2026-10-05;
-  Miguel: "if the person is onboard .. and rita has already a card in there .. it should automatically
-  compare with what the tdg file has"). Gayda sat on Jewel as "not in a TDG file yet" through five
-  AdvancedQuery uploads because that import never looked at the board. Now each apply writes a verdict on
-  the OPEN assignment (`registry_verdict/status/ship/at`, `registry_confirmed_at` = first confirmation;
-  columns added by the memoized `ensureProjectionRegistry` guard, the same way every column since June —
-  no migration file, so a later `migrations apply` cannot collide with it): **confirmed** (file: On board, same hull by the strict
-  matcher) draws GREEN, keeps Rita's dates (the registry has none) and offers no Deploy; **elsewhere /
-  ashore** stay yellow and print the file's word on the card; **earmarked / pending** inform. Nothing is
-  removed — the Counter still absorbs the card when it carries the leg, and a crew the file does not
-  carry gets no verdict. The projections reach the importer ONLY through `deps.openProjections`
-  (= `fetchOpenAssignments`, guard first); the importer never reads `assignment` itself. Pinned by
+- **The Keyman card says what the last registry file said about every projection, at read time**
+  (`src/registry_sync.js`, 2026-10-05; Miguel: "if the person is onboard .. and rita has already a card in
+  there .. it should automatically compare with what the tdg file has", then an hour later "still see no
+  updates in the console"). Gayda sat on Jewel as "not in a TDG file yet" through five AdvancedQuery
+  uploads because that import never looked at the board. The verdict is DERIVED in `rotationSections`,
+  like status — never a column written at upload: each apply keeps the file's row per crew
+  (`registry_snapshot`: status + `vessel` as the file said them, stamped with the run; the column is
+  `vessel`, not an allocation — D1 holds; rows the latest file does not carry are removed), and a crew
+  without a row yet is read off the latest run's status audit row (the file's status even where Rita HELD
+  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag dated by
+  the file that raised it — never `crew.vessel_observed`, which the import does not write and which can
+  be months stale; a crew under an open `presence` flag (absent from the latest file) gets no word at all.
+  An open ship flag now closes when a later file agrees with the registry (`reconcileShipFlags` `agree`).
+  Verdicts:
+  **confirmed** (file: On board, same hull by the strict matcher, and the card says aboard NOW — a next
+  contract projected on the same hull stays a plan) draws GREEN, keeps Rita's dates (the registry has
+  none) and offers no Deploy; **elsewhere** (the card says aboard HERE, the file has them
+  aboard elsewhere — or TDG earmarks them elsewhere) and **ashore** (card aboard, file On Vacation /
+  Inactive / Earmarked) stay yellow and print the file's word; **earmarked / pending** inform — a crew
+  aboard one hull today with a FUTURE plan on another is normal, not a contradiction. Nothing is removed;
+  the Counter still absorbs the card when it carries the leg; a crew the file does not carry gets no
+  verdict. The three reads ride the board's wave (§12); the projections reach the importer only through
+  `deps.openProjections` (= `fetchOpenAssignments`) for the review screen. Pinned by
   `test/registry_sync.test.js`, `test/crew_import_routes.test.js`, `test/board_cards.test.js`.
 - **A drop on the Keyman board creates or moves a PROJECTION, never a registry ship** (2026-09-15,
   `src/projection.js`, `POST /api/rotation/project`). Every card drags: a yellow card MOVES (the
