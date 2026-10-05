@@ -143,7 +143,7 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   assert.match(wave, /baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " \+ TDG_ABSENT_COL \+ " FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=0/, "the baseline rides the existing crew read");
   assert.match(wave, /retired, baseline_count, med_exp/, "and the manual baseline rides the override read (0 is a valid override)");
   // ...and the response says where its numbers come from.
-  assert.match(body, /sources, issues, inDock/, "the response carries its sources and the TDG-says-otherwise list");
+  assert.match(body, /sources, issues, fileKept, inDock/, "the response carries its sources and the TDG-says-otherwise list");
   assert.match(body, /seed: KEYMAN_VERSION/, "a NULL stamp is named as the bundled seed, not left blank");
   // The page renders it above the ships.
   assert.match(src, /function rotSourcesLine\(\)/);

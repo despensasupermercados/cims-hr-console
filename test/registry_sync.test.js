@@ -204,8 +204,10 @@ test("registryFromStore: a snapshot row wins over the raw crew row, keeps its ow
     lastRun: "2026-10-04T13:12:10.010Z",
   });
   const by = Object.fromEntries(registry.map((r) => [r.agency_id, r]));
-  assert.deepEqual(by["SC-1"], { agency_id: "SC-1", status: "On board", vessel_observed: "MV JEWEL OF THE SEAS", run_at: "2026-10-11T09:00:00.000Z", vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot" });
+  assert.deepEqual(by["SC-1"], { agency_id: "SC-1", status: "On board", vessel_observed: "MV JEWEL OF THE SEAS", run_at: "2026-10-11T09:00:00.000Z", vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot", name: null, raw_status: null });
   assert.equal(by["SC-9"].source, "snapshot");
+  assert.equal(by["SC-9"].on_roster, false, "a file row the roster does not carry is marked as such");
+  assert.equal(by["SC-1"].on_roster, undefined);
   assert.equal(registryFromStore({}).length, 0);
   // a snapshot row for a crew an open presence flag says the latest file does not carry is skipped too
   assert.equal(registryFromStore({ snapshot: [{ agency_id: "SC-9", status: "On board", vessel: null, run_at: "2026-09-01" }], absent: [{ agency_id: "SC-9" }] }).length, 0);

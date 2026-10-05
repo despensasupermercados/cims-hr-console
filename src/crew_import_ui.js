@@ -251,7 +251,7 @@ async function stage(){
  $("msg").innerHTML='<div class="msg">Reading '+esc(PENDING.filename)+' …</div>';
  META={file_hash:PENDING.file_hash,filename:PENDING.filename,rows_seen:PENDING.rows.length};
  var res;try{res=await fetch("/api/crew/import/stage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({rows:PENDING.rows,file_hash:PENDING.file_hash,filename:PENDING.filename})}).then(function(r){return r.json();});}catch(e){res={ok:false,error:"network"};}
- if(!res.ok){$("msg").innerHTML='<div class="msg">'+(res.error==="already_processed"?"This exact file was already imported — nothing to do.":"Stage failed: "+esc(res.error))+'</div>';return;}
+ if(!res.ok){$("msg").innerHTML='<div class="msg">'+(res.error==="already_processed"?(res.snapshot_saved?("This exact file was already imported. The Keyman board now reads it directly: "+res.snapshot_saved+" rows kept."):"This exact file was already imported — nothing to do."):"Stage failed: "+esc(res.error))+'</div>';return;}
  $("msg").innerHTML="";STAGE=res;DEC={};render();
 }
 function badge(txt,cls){return ' <span class="tag '+cls+'">'+txt+'</span>';}

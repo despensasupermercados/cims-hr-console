@@ -137,7 +137,7 @@ export function registryFromStore({ snapshot, crew, openFlags, vesselFlags, stat
     seen.add(c.agency_id);
     if (gone.has(c.agency_id)) continue;                 // the latest file does not carry them: no word
     const s = snap[c.agency_id];
-    if (s) { out.push({ agency_id: c.agency_id, status: s.status || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot" }); continue; }
+    if (s) { out.push(snapRow(c.agency_id, s)); continue; }
     // FALLBACK (BOOTSTRAP), for a crew with no snapshot row yet — every crew until the first registry
     // upload after 5 Oct 2026 fills registry_snapshot. The STATUS is the file's: the latest run's audit
     // row where the file changed it (accepted or HELD — a held change leaves crew.status at the old
@@ -179,6 +179,13 @@ export function registryFromStore({ snapshot, crew, openFlags, vesselFlags, stat
       source: "registry",
     });
   }
-  for (const id in snap) if (!seen.has(id) && !gone.has(id)) out.push({ agency_id: id, status: snap[id].status || null, vessel_observed: snap[id].vessel || null, run_at: snap[id].run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot" });
+  // A file row the roster does not carry (no crew under that agency id): kept, with the name the FILE
+  // gives it, so the board can list it rather than lose it.
+  for (const id in snap) if (!seen.has(id) && !gone.has(id)) out.push({ ...snapRow(id, snap[id]), on_roster: false });
   return out;
+}
+// One kept row of the file: status + vessel as written, the file's name for the row and its own status
+// word (raw_status: a word the console cannot read leaves status null but stays visible).
+function snapRow(id, s) {
+  return { agency_id: id, status: s.status || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot", name: s.name || null, raw_status: s.raw_status || null };
 }

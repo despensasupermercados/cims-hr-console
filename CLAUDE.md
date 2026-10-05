@@ -232,6 +232,14 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   LATEST file (`lastRun`); a flag stamped when FIRST raised prints "named <date>" beside the hull. A crew
   under an open `presence` flag (absent from the latest file) gets no word at all.
   An open ship flag now closes when a later file agrees with the registry (`reconcileShipFlags` `agree`).
+  **The bootstrap is a REBUILD, and the page says so** (Miguel, 5 Oct 2026: "I dont think so u are reading
+  well the tdg file"): until `registry_snapshot` holds rows, "TDG says otherwise" carries a note, every
+  rebuilt hull prints "(ship named <date>)", and an empty hull reads "in the TDG uploads the console kept",
+  never "per the TDG file". Re-dropping the LATEST applied file (same hash) fills the snapshot under that
+  run's id and date and writes nothing else (`keepCopyOfAppliedFile`); an older file or a run already
+  copied keeps nothing. The snapshot keeps the file's own `name` and `raw_status`: a file row the roster
+  does not carry is a `file_only` row (or "hidden on the console" for a redacted crew), and a status word
+  `normalizeStatus` cannot read is a `status_unread` row — it used to vanish and leave the old status.
   Verdicts:
   **confirmed** (file: On board, same hull by the strict matcher, and the card says aboard NOW — a next
   contract projected on the same hull stays a plan) draws GREEN, keeps Rita's dates (the registry has

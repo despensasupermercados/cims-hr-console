@@ -45,6 +45,8 @@ export function fileWordBySc(registry, { shipOf, keyOf, valid } = {}) {
       at: day(r.run_at) || null, vesselAt: day(r.vessel_at) || null,
       hullUnknown: !!r.vessel_unknown,                  // bootstrap: older than an in-force card elsewhere
       source: r.source || null,
+      name: r.name || null, rawStatus: r.raw_status || null, // the file's own words (kept copy only)
+      onRoster: r.on_roster !== false,
     };
   }
   return out;
@@ -66,7 +68,7 @@ export function completedOff(legs, sc, key, today, keyOf, maxDays = COMPLETION_D
   return age != null && age <= maxDays ? off : null;
 }
 
-const KIND_ORDER = ["empty_hull", "dropped", "contradicted", "completed_still_aboard", "counter", "held", "no_dates", "unknown_ship", "onboard_no_ship", "earmarked_no_card"];
+const KIND_ORDER = ["empty_hull", "dropped", "file_only", "status_unread", "contradicted", "completed_still_aboard", "counter", "held", "no_dates", "unknown_ship", "onboard_no_ship", "earmarked_no_card"];
 
 // The "what is wrong" list. Every row: { kind, sc, name, ship, text }. Plain text: the page escapes it.
 //   crew        : [{ sc, name, manual, held, retired, absentSince, last: {status, ship} }]  visible, non-shore
@@ -78,11 +80,17 @@ const KIND_ORDER = ["empty_hull", "dropped", "contradicted", "completed_still_ab
 //   counter     : [{ sc, ship, key, on, off }]        Counter legs current today (incl. overdue)
 //   completed   : { "sc|key": off }                   known completions (completedOff)
 //   sections    : [{ ship, key, seated, fileAboard, aboardCards }] every hull on the board
-export function boardIssues({ crew, file, seats, cards, counter, completed, sections, today } = {}) {
+//   fileKept    : the console holds a copy of the latest file (registry_snapshot). false = every ship here
+//                 was REBUILT from older uploads' change flags, so no row may claim to be "the file".
+export function boardIssues({ crew, file, seats, cards, counter, completed, sections, today, fileKept = true } = {}) {
   const rows = [];
   const F = file || {}, S = seats || {}, C = completed || {};
   const name = {}; for (const c of (crew || [])) name[c.sc] = c.name || c.sc;
-  const word = (w) => (w ? (w.status || "status not readable") + (w.ship ? ", " + w.ship : "") : "no word");
+  // A hull rebuilt from a change flag carries the date that flag was raised: "Inactive, Voyager" under
+  // the 5 Oct date read as if the 5 Oct file named Voyager; it was named on 22 Aug (Miguel, 5 Oct 2026:
+  // "I dont think so u are reading well the tdg file").
+  const hull = (ship, w) => (ship ? ", " + ship + (w && w.vesselAt ? " (ship named " + w.vesselAt + ")" : "") : "");
+  const word = (w) => (w ? (w.status || (w.rawStatus ? "'" + w.rawStatus + "'" : "status not readable")) + hull(w.ship, w) : "no word");
   const fileAt = (w) => (w && w.at ? " " + w.at : "");
   // 1. A hull with nobody per the file. Not raised while a placeholder aboard is merely unconfirmed
   //    (the bootstrap cannot read the file's hull for it yet) — only when every card aboard is contradicted.
@@ -90,7 +98,14 @@ export function boardIssues({ crew, file, seats, cards, counter, completed, sect
     if (s.seated || s.fileAboard) continue;   // fileAboard: the file has someone aboard whom Rita's edit keeps off
     const aboard = (s.aboardCards || []);
     if (aboard.length && aboard.some((v) => v !== "ashore" && v !== "elsewhere")) continue;
-    rows.push({ kind: "empty_hull", sc: null, name: s.ship, ship: s.ship, text: "Nobody on board per the TDG file" + (aboard.length ? " · your card here is contradicted" : "") });
+    rows.push({ kind: "empty_hull", sc: null, name: s.ship, ship: s.ship, text: (fileKept ? "Nobody on board per the TDG file" : "Nobody on board in the TDG uploads the console kept") + (aboard.length ? " · your card here is contradicted" : "") });
+  }
+  // 1b. A row of the file the roster does not carry (a new id, a re-registered seafarer): listed by the
+  //     name the FILE gives it. Matching it to a crew is a person's call (§6), never the console's.
+  for (const sc in F) {
+    const w = F[sc];
+    if (!w || w.onRoster !== false) continue;
+    rows.push({ kind: "file_only", sc, name: w.name || sc, ship: w.ship || null, text: "In the TDG file " + (w.at || "") + " as " + sc + (w.hidden ? " · hidden on the console" : " · not on the console roster") + " · " + word(w) });
   }
   for (const c of (crew || [])) {
     // Rita's Retired tag or status edit against a file that still has them On board (Valdesco: tagged
@@ -107,9 +122,12 @@ export function boardIssues({ crew, file, seats, cards, counter, completed, sect
       continue;
     }
     if (!w) continue;
+    // 2b. A status word the console cannot read (it is none of On board / On Vacation / Earmarked /
+    //     Inactive): the import used to drop it silently and keep the older status.
+    if (!w.status && w.rawStatus) rows.push({ kind: "status_unread", sc: c.sc, name: c.name, ship: w.ship || null, text: "TDG file" + fileAt(w) + " status '" + w.rawStatus + "' is not one the console reads · it still shows " + (c.shown || "the older status") });
     // 3. The file has them On board a hull the console knows they left.
     if (w.status === "On board" && w.key && C[c.sc + "|" + w.key]) {
-      rows.push({ kind: "completed_still_aboard", sc: c.sc, name: c.name, ship: w.ship, text: "Your recorded sign-off " + C[c.sc + "|" + w.key] + " · TDG file" + fileAt(w) + " still: On board, " + w.ship });
+      rows.push({ kind: "completed_still_aboard", sc: c.sc, name: c.name, ship: w.ship, text: "Your recorded sign-off " + C[c.sc + "|" + w.key] + " · TDG file" + fileAt(w) + " still: On board" + hull(w.ship, w) });
     }
     // 4. A status edit or a held status change against the file.
     if (c.manual && w.status && c.manual !== w.status && !(c.fileRaw && c.fileRaw.status === "On board")) rows.push({ kind: "held", sc: c.sc, name: c.name, ship: w.ship, text: "Your status edit: " + c.manual + " · TDG file" + fileAt(w) + ": " + word(w) });
@@ -127,10 +145,10 @@ export function boardIssues({ crew, file, seats, cards, counter, completed, sect
   // 7. Rita's placeholder the file contradicts.
   for (const k of (cards || [])) {
     if (k.verdict !== "ashore" && k.verdict !== "elsewhere") continue;
-    rows.push({ kind: "contradicted", sc: k.sc, name: k.name || name[k.sc] || k.sc, ship: k.ship, text: "Your card: " + (k.aboard ? "aboard " + k.ship + " since " + k.on : k.ship + " from " + k.on) + " · TDG file" + (k.at ? " " + k.at : "") + ": " + (k.fileStatus || "status not readable") + (k.fileShip ? ", " + k.fileShip : "") });
+    rows.push({ kind: "contradicted", sc: k.sc, name: k.name || name[k.sc] || k.sc, ship: k.ship, text: "Your card: " + (k.aboard ? "aboard " + k.ship + " since " + k.on : k.ship + " from " + k.on) + " · TDG file" + (k.at ? " " + k.at : "") + ": " + (k.fileStatus || "status not readable") + hull(k.fileShip, F[k.sc]) });
   }
   // 8. A seat with no dates anywhere.
-  for (const sc in S) if (!S[sc].dated) rows.push({ kind: "no_dates", sc, name: name[sc] || sc, ship: S[sc].ship, text: "TDG file: On board " + S[sc].ship + " · no contract dates yet (no Counter leg, no card)" });
+  for (const sc in S) if (!S[sc].dated) rows.push({ kind: "no_dates", sc, name: name[sc] || sc, ship: S[sc].ship, text: "TDG file: On board " + S[sc].ship + (F[sc] && F[sc].vesselAt ? " (ship named " + F[sc].vesselAt + ")" : "") + " · no contract dates yet (no Counter leg, no card)" });
   // 9. The Contract Counter says mid-contract on a hull where the file has no seat for them. A Counter
   //    leg whose projected sign-off has PASSED while the file no longer has them aboard is not wrong: the
   //    file changed and the date is past — that contract completed (Miguel), and it sits underneath.
@@ -139,7 +157,7 @@ export function boardIssues({ crew, file, seats, cards, counter, completed, sect
     if (!w || (S[l.sc] && S[l.sc].key === l.key) || C[l.sc + "|" + l.key]) continue;
     if (w.hullUnknown) continue;
     if (l.off && day(l.off) < today) continue;
-    const said = w.status === "On board" && w.ship ? "On board " + w.ship : word(w);
+    const said = w.status === "On board" && w.ship ? "On board" + hull(w.ship, w).replace(/^,/, "") : word(w);
     rows.push({ kind: "counter", sc: l.sc, name: name[l.sc] || l.sc, ship: l.ship, text: "Contract Counter: " + l.ship + " " + (l.on || "?") + " → " + (l.off || "TBA") + " · TDG file" + fileAt(w) + ": " + said });
   }
   rows.sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || String(a.ship || "").localeCompare(String(b.ship || "")) || String(a.name || "").localeCompare(String(b.name || "")));

@@ -32,7 +32,12 @@ const SHIP_OF = strictShipMatcher(VESSEL_REF); // built once per isolate, not pe
 const openProjections = (env, deps) => (deps && deps.openProjections ? deps.openProjections(env).catch(() => []) : Promise.resolve([]));
 // What the file says per crew, carried from stage to apply inside the review (the groups only hold
 // CHANGES, and a crew whose status is still "On board" has no change to show).
-const registryOf = (mapped) => mapped.map((m) => ({ agency_id: m.agency_id, status: m.status || null, vessel_observed: m.vessel_observed || null }));
+// name + status_raw (5 Oct 2026): the file's own words, so the board can list a row it cannot match to
+// the roster by the name TDG gives it, and a status word the console cannot read.
+const registryOf = (mapped) => mapped.map((m) => ({
+  agency_id: m.agency_id, status: m.status || null, vessel_observed: m.vessel_observed || null,
+  name: [m.first_name, m.last_name].filter(Boolean).join(" ").trim() || null, status_raw: m.status_raw || null,
+}));
 // THE FILE'S WORD PER CREW, kept (registry_snapshot, 5 Oct 2026). One row per crew the file carried:
 // status + vessel exactly as the file said them, stamped with the run. The Keyman board derives each
 // projection's verdict from this at READ time (registry_sync.registryFromStore + reconcileProjections)
@@ -40,8 +45,42 @@ const registryOf = (mapped) => mapped.map((m) => ({ agency_id: m.agency_id, stat
 // and a crew without a snapshot row yet falls back to crew.status + the open ship flag. This is NOT a
 // ship allocation (D1): nothing here reaches crew.vessel_observed or the board's placement.
 const SNAPSHOT_SQL =
-  "INSERT INTO registry_snapshot (agency_id, status, vessel, run_at, import_run_id) VALUES (?,?,?,?,?) " +
-  "ON CONFLICT(agency_id) DO UPDATE SET status=excluded.status, vessel=excluded.vessel, run_at=excluded.run_at, import_run_id=excluded.import_run_id";
+  "INSERT INTO registry_snapshot (agency_id, status, vessel, run_at, import_run_id, name, raw_status) VALUES (?,?,?,?,?,?,?) " +
+  "ON CONFLICT(agency_id) DO UPDATE SET status=excluded.status, vessel=excluded.vessel, run_at=excluded.run_at, import_run_id=excluded.import_run_id, name=excluded.name, raw_status=excluded.raw_status";
+const snapshotStmt = (env, r, runAt, runId) =>
+  env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, runAt, runId, r.name ?? null, r.status_raw ?? null);
+
+// The file's word per crew, from the parsed rows: the LAST row of a repeated agency id stands, and a row
+// the file keyed on the cruise-line id (D7 rekeyed) is carried under the crew's real agency id.
+function stagedRegistry(mapped, diff) {
+  const realId = {}; for (const rk of (diff.rekeyed || [])) realId[String(rk.incoming_id)] = String(rk.agency_id);
+  return registryOf(mapped).map(r => (realId[r.agency_id] ? { ...r, agency_id: realId[r.agency_id] } : r));
+}
+
+// THE SAME FILE, DROPPED AGAIN, FILLS THE BOARD'S COPY (Miguel, 5 Oct 2026: "I dont think so u are
+// reading well the tdg file"). The console kept no copy of a registry file until #134; the 5 Oct 18:54
+// upload ran before it, so the board rebuilt ships from change flags. Re-dropping that file used to be a
+// no-op (already_processed). Now, when it is the LATEST run and the board holds no copy of it, its rows
+// are kept as that run's snapshot — nothing else: no crew row, flag or status is touched (they were
+// applied the first time). An older file never overwrites a newer word. Returns the rows kept.
+async function keepCopyOfAppliedFile(env, deps, mapped, file_hash) {
+  if (!deps || !deps.ensureRegistrySnapshot || !file_hash) return 0;
+  await deps.ensureRegistrySnapshot(env);
+  const [run, latest] = await Promise.all([
+    env.DB.prepare("SELECT id, run_at FROM import_run WHERE file_hash=?").bind(file_hash).first(),
+    env.DB.prepare("SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1").first(),
+  ]);
+  if (!run || !latest || run.id !== latest.id) return 0;
+  const held = await env.DB.prepare("SELECT COUNT(*) AS n FROM registry_snapshot WHERE import_run_id=?").bind(run.id).first();
+  if (held && Number(held.n) > 0) return 0;
+  const { existingByAgency } = await loadContext(env, null);
+  const registry = stagedRegistry(mapped, diffCrew(mapped, existingByAgency)).filter(r => r && r.agency_id);
+  if (!registry.length) return 0;
+  const stmts = registry.map(r => snapshotStmt(env, r, run.run_at, run.id));
+  stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(run.id));
+  await env.DB.batch(stmts);
+  return registry.length;
+}
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -83,15 +122,12 @@ async function loadContext(env, deps) {
   return { existingByAgency, overrideByAgency, projections: projections || [] };
 }
 
-// POST /api/crew/import/stage — body { rows, file_hash, filename }. WRITES NOTHING.
+// POST /api/crew/import/stage — body { rows, file_hash, filename }. WRITES NOTHING — except the board's
+// copy of a file that was already applied, when it is dropped again (keepCopyOfAppliedFile).
 export async function apiCrewImportStage(request, env, deps) {
   const body = await request.json();
   const rows = body.rows || [];
   const file_hash = body.file_hash || null;
-  if (file_hash) {
-    const dup = await env.DB.prepare("SELECT 1 AS x FROM import_run WHERE file_hash=?").bind(file_hash).first();
-    if (dup) return J({ ok: false, error: "already_processed" });
-  }
   const { mapped: mappedAll, invalidCount, unparsed } = mapRows(rows);
   // The same agency id twice in one file (5 Oct 2026 review): two INSERTs for a new crew failed the
   // whole batch (UNIQUE), and for an existing crew the first row's values were silently ignored. The
@@ -99,6 +135,13 @@ export async function apiCrewImportStage(request, env, deps) {
   const lastRow = {}, duplicateIds = [];
   for (const m of mappedAll) { if (m.agency_id in lastRow) duplicateIds.push(m.agency_id); lastRow[m.agency_id] = m; }
   const mapped = Object.values(lastRow);
+  if (file_hash) {
+    const dup = await env.DB.prepare("SELECT 1 AS x FROM import_run WHERE file_hash=?").bind(file_hash).first();
+    if (dup) {
+      const kept = await keepCopyOfAppliedFile(env, deps, mapped, file_hash);
+      return J(kept ? { ok: false, error: "already_processed", snapshot_saved: kept } : { ok: false, error: "already_processed" });
+    }
+  }
   const incomingByAgency = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
   const { existingByAgency, overrideByAgency, projections } = await loadContext(env, deps);
   const diff = diffCrew(mapped, existingByAgency);
@@ -109,8 +152,7 @@ export async function apiCrewImportStage(request, env, deps) {
   // file keyed on the cruise-line id (D7 rekeyed) is carried under the crew's REAL agency id, so the
   // snapshot, the verdict and the flag closures all find them.
   const today = new Date().toISOString().slice(0, 10);
-  const realId = {}; for (const rk of (diff.rekeyed || [])) realId[String(rk.incoming_id)] = String(rk.agency_id);
-  const registry = registryOf(mapped).map(r => (realId[r.agency_id] ? { ...r, agency_id: realId[r.agency_id] } : r));
+  const registry = stagedRegistry(mapped, diff);
   const proj = reconcileProjections({ projections, registry, today, shipOf: SHIP_OF });
   review.projections = proj.items;
   review.projection_counts = proj.counts;
@@ -224,7 +266,7 @@ export async function apiCrewImportApply(request, env, deps) {
   let kept = 0;
   for (const r of registry) {
     if (!r || !r.agency_id) continue;
-    stmts.push(env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, run_at, importRunId));
+    stmts.push(snapshotStmt(env, r, run_at, importRunId));
     kept++;
   }
   // A crew the latest file does NOT carry has no word in it: their old snapshot row goes, so the board

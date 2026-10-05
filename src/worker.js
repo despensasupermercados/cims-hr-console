@@ -1686,7 +1686,7 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes, hiddenRes] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
@@ -1702,7 +1702,7 @@ async function rotationSections(env) {
     // The last AdvancedQuery's word per crew, for the projection verdict (registry_sync.js, 5 Oct 2026):
     // the kept snapshot, the open ship flags (the file's vessel where it differs from the registry), and
     // when the last registry file was applied. Same wave, three small reads (§12).
-    env.DB.prepare("SELECT agency_id, status, vessel, run_at FROM registry_snapshot").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT agency_id, status, vessel, run_at, name, raw_status FROM registry_snapshot").all().catch(() => ({ results: [] })),
     // open ship flags (the file's vessel where it differs from the registry) · the LATEST run's status
     // audit rows (the file's status even where Rita held the change) · open presence flags (crew the
     // latest file does not carry) — one read, three fields
@@ -1710,6 +1710,9 @@ async function rotationSections(env) {
     // registry_sync.registryFromStore) — one statement, still one round trip.
     env.DB.prepare("SELECT agency_id, field, new_value, created_at, resolved FROM sync_conflict WHERE (field='presence' AND resolved=0) OR (field='status' AND import_run_id=(SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1)) UNION ALL SELECT agency_id, field, new_value, created_at, resolved FROM (SELECT agency_id, field, new_value, created_at, resolved, ROW_NUMBER() OVER (PARTITION BY agency_id ORDER BY created_at DESC, resolved ASC) AS rn FROM sync_conflict WHERE field='vessel_observed') WHERE rn=1").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT MAX(run_at) AS run_at FROM import_run").all().catch(() => ({ results: [] })),
+    // Crew hidden on the console (redacted=1): a file row under one of these ids is on the roster, just
+    // hidden — said as such, never "not on the roster" (Encina, Serenade).
+    env.DB.prepare("SELECT agency_id FROM crew WHERE redacted=1").all().catch(() => ({ results: [] })),
   ]);
   // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
   // file, or that the count had been flat since 6 July; Rita found it from the outside. A NULL stamp
@@ -1851,6 +1854,10 @@ async function rotationSections(env) {
   // the latest file does not carry, since the first open presence flag.
   let fileOf = {};
   const absentSince = {};
+  // The console holds a copy of the latest registry file (registry_snapshot, written by every Apply since
+  // #134 and by a re-drop of an applied file). Until it does, ships are REBUILT from change flags and the
+  // page says so above the list.
+  const fileKept = ((snapRes && snapRes.results) || []).length > 0;
   const validShip = validShipKeys(VESSEL_REF);
   const keyOf = (s) => normShip(shipOf(s) || s || "");
   {
@@ -1868,6 +1875,7 @@ async function rotationSections(env) {
       inForce, shipKey: keyOf,
     });
     fileOf = fileWordBySc(registry, { shipOf, keyOf: (s) => normShip(s), valid: validShip });
+    for (const h of ((hiddenRes && hiddenRes.results) || [])) if (fileOf[h.agency_id]) fileOf[h.agency_id].hidden = true;
     const regAt = {}; for (const r of registry) regAt[r.agency_id] = r;
     const verdicts = reconcileProjections({ projections: openAsg || [], registry, today, shipOf: STRICT_SHIP });
     for (const it of verdicts.items) {
@@ -2056,7 +2064,7 @@ async function rotationSections(env) {
         last = { status: raw.status || null, ship: hull ? (shipOf(hull) || hull) : null };
       }
       const fHull = lastShipFlag[sc] ? lastShipFlag[sc].new_value : raw.vessel_observed;
-      crew.push({ sc, name: cmap[sc].name, manual, retired: !!o.retired, absentSince: absentSince[sc] || null, last,
+      crew.push({ sc, name: cmap[sc].name, manual, retired: !!o.retired, absentSince: absentSince[sc] || null, last, shown: cmap[sc].status || null,
         held: (!manual && w && w.status && raw.status && raw.status !== w.status) ? raw.status : null,
         fileRaw: (manual || o.retired) ? { status: raw.status || null, ship: fHull ? (shipOf(fHull) || fHull) : null } : null });
     }
@@ -2075,12 +2083,12 @@ async function rotationSections(env) {
       aboardCards: x.crew.filter((c) => c.state === "yellow" && !c.confirmed).map((c) => (c.registry && c.registry.verdict) || "pending")
         .concat((x.projections || []).filter((p) => p.aboard).map((p) => (p.registry && p.registry.verdict) || "pending")),
     }));
-    return boardIssues({ crew, file: fileOf, seats, cards, counter, completed: completedBy, sections: secs, today });
+    return boardIssues({ crew, file: fileOf, seats, cards, counter, completed: completedBy, sections: secs, today, fileKept });
   })();
   const counts = {};
   ["On board", "On Vacation", "Earmarked", "Inactive", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length; counts.issues = issues.length;
-  return { sections, pool, shoreside, counts, sources, issues, inDock: inDockNow(DRY_DOCK, today) };
+  return { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
 }
 // Days worked THIS MONTH per crew currently active in Keyman. A REFERENCE read, not an invoice
 // source (Miguel, 14 Sep 2026: "this is not a billing platform .. remember that"). Uses the live
@@ -2229,8 +2237,11 @@ async function contractCountMap(env) {
 // read by rotationSections to derive each projection's verdict at read time. Memoized like every
 // other guard (§12). A crew without a row yet is read off crew.status + the open ship flag instead.
 const ensureRegistrySnapshot = memoEnsure(async (env) => {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT)").run();
   await Promise.all([
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT)").run(),
+    // The file's own words (5 Oct 2026): the name TDG gives a row, and the status word as written.
+    env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN name TEXT").run().catch(() => null),
+    env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN raw_status TEXT").run().catch(() => null),
     // A deployed card stays on the ship, stamped (Miguel, 5 Oct 2026); the board reads these columns.
     env.DB.prepare("ALTER TABLE assignment ADD COLUMN deployed_at TEXT").run().catch(() => null),
     env.DB.prepare("ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT").run().catch(() => null),
@@ -3048,6 +3059,7 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .tdgissues .isrow b{color:var(--navy);white-space:nowrap}
 .tdgissues .isship{color:var(--mut);white-space:nowrap}
 .tdgissues .istxt{color:#7A2A24}
+.tdgissues .isnote{padding:7px 10px;font-size:12px;background:#FBF0DA;color:#8A6620;border-top:1px solid var(--line)}
 .dpvcontra{background:#FBE9E7;color:#8A1F17;border:1px solid #F0B9B2;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12.5px}
 .pc{font-weight:700}
 .pc-derived{color:#1f7a3d}
@@ -4171,7 +4183,7 @@ async function cimsStage(){
   (IMPROWS||[]).forEach(function(row){var id="",fn="",ln="";for(var k in row){var nk=k.toLowerCase();if(nk.indexOf("crew id")>=0||nk.indexOf("crewid")>=0)id=String(row[k]).trim();else if(nk.indexOf("first")>=0)fn=String(row[k]).trim();else if(nk.indexOf("last")>=0||nk.indexOf("surname")>=0)ln=String(row[k]).trim();}if(id)NMAP[id]=(fn+" "+ln).trim()||id;});
   $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
   var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
-  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"This exact file was already imported &mdash; nothing to do.":"Stage failed: "+impEsc(res.error))+'</div>';return;}
+  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?(res.snapshot_saved?("This exact file was already imported. The Keyman board now reads it directly: "+res.snapshot_saved+" rows kept."):"This exact file was already imported &mdash; nothing to do."):"Stage failed: "+impEsc(res.error))+'</div>';return;}
   STAGE=res;DEC={};cimsRender();
 }
 function impSeg(key,def,a,b,la,lb,soft){var cur=DEC[key]||def;return '<span class="iseg'+(soft?" soft":"")+'"><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
@@ -4758,8 +4770,12 @@ function rotIssuesBlock(list){
       +(i.ship&&i.kind!=='empty_hull'?'<span class=isship>'+escHtml(i.ship)+'</span>':'')
       +'<span class=istxt>'+escHtml(i.text||'')+'</span></div>';
   }).join('');
+  // No copy of the file kept yet (Miguel, 5 Oct 2026: "I dont think so u are reading well the tdg file"):
+  // the ships below are rebuilt from older uploads, and the page says so instead of calling it the file.
+  var kept=!(ROT&&ROT.fileKept===false);
+  var warn=kept?'':'<div class=isnote>The console has not kept a whole TDG file yet. Ships below are rebuilt from older uploads (each dated where it was named). Drop the latest AdvancedQuery on Import once, the same file is fine, and this list reads the file itself.</div>';
   return '<div class="shipsec tdgissues" style="margin-top:4px"><div class=shiphdr data-toggle="__ISSUES__" style="border-left-color:#B0342F"><span class=nm>TDG says otherwise</span><span class=meta>'+list.length+' to settle &middot; the TDG file is the truth <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody isbody'+(closed?' closed':'')+'">'+rows+'</div></div>';
+    +'<div class="shipbody isbody'+(closed?' closed':'')+'">'+warn+rows+'</div></div>';
 }
 function rotJump(el){
   var ship=el.getAttribute('data-jump');if(!ship)return;
