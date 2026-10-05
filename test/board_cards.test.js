@@ -74,12 +74,12 @@ test("GREEN is a TDG card: drags to PLAN elsewhere, never moves; click opens the
   assert.match(h, /2026-03-08/);
 });
 
-test("YELLOW is Rita's projection: draggable, labelled PLAN, removable", () => {
+test("YELLOW is Rita's placeholder: draggable, labelled PLACEHOLDER, removable (Miguel, 5 Oct 2026)", () => {
   const h = ctx.rotCard(YELLOW);
   assert.match(h, /class="rcard plan"/);
   assert.match(h, /draggable="true"/);
   assert.match(h, /ondragstart="rcDrag\(event,this\)"/);
-  assert.match(h, /<span class="rlab plan">PLAN<\/span>/);
+  assert.match(h, /<span class="rlab plan">PLACEHOLDER<\/span>/);
   assert.match(h, /data-aid="as_1"/);
   assert.match(h, /onclick="planDelete\(event,this\)"/);
   assert.match(h, /data-vk="Royal Caribbean\|Icon"/, "clicking a projection must open the relief editor for its ship");
@@ -89,7 +89,7 @@ test("YELLOW is Rita's projection: draggable, labelled PLAN, removable", () => {
 test("a projection whose contract has started says ABOARD and keeps its solid outline", () => {
   const h = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-08-01" });
   assert.match(h, /class="rcard plan aboard"/);
-  assert.match(h, /PLAN &middot; ABOARD/);
+  assert.match(h, /PLACEHOLDER &middot; ABOARD/);
 });
 
 test("YELLOW carries the Deploy CTA; green never does", () => {
@@ -300,7 +300,7 @@ test("a card with no contract dates says so instead of rendering an empty box", 
   // The unassigned pool and the shoreside team have no contract dates BY DEFINITION (no ship on the card).
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, ship: null, signOn: null, signOff: null }), /No contract dates/,
     "a pool or shoreside card is not a seat with a missing contract");
-  assert.match(h, /TDG registry/, "and where the seat came from");
+  assert.match(h, /the TDG file has them aboard; the Contract Counter does not carry this contract/, "and where the seat came from: the file, not the Counter");
   assert.doesNotMatch(h, /class=rrot/, "no empty date block");
   assert.doesNotMatch(ctx.rotCard(GREEN), /No contract dates/, "a dated card says nothing");
 });
@@ -331,10 +331,10 @@ test("a yellow card whose sign-on has passed reads ABOARD, whichever feed built 
   // projection feed (which set `aboard`) or the crew feed (a Counter leg Rita's newer assignment
   // overrode, which did not). The renderer no longer trusts one feed to have set the flag.
   const started = ctx.rotCard({ ...YELLOW, aboard: undefined, signOn: "2020-01-02", signOff: "2099-01-01" });
-  assert.match(started, /PLAN &middot; ABOARD/);
+  assert.match(started, /PLACEHOLDER &middot; ABOARD/);
   assert.match(started, /class="rcard plan aboard"/);
   assert.match(started, /class="offchip/, "someone aboard gets their sign-off countdown");
-  assert.match(ctx.rotCard({ ...YELLOW, aboard: undefined }), /class="rlab plan">PLAN</, "a future sign-on is still just a plan");
+  assert.match(ctx.rotCard({ ...YELLOW, aboard: undefined }), /class="rlab plan">PLACEHOLDER</, "a future sign-on is still just a placeholder");
   const src = readFileSync(SRC, "utf-8");
   assert.match(src, /aboard: !!\(\(enr\.signOn \|\| sEnr\.on\) && \(enr\.signOn \|\| sEnr\.on\) <= today\)/,
     "the crew feed must set aboard by the same rule as the projection feed");
@@ -392,12 +392,16 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
   const at = b.indexOf("= await Promise.all([");
   const wave = b.slice(at, b.indexOf("]);", at));
   assert.match(wave, /FROM registry_snapshot/);
-  assert.match(wave, /FROM sync_conflict WHERE \(field='vessel_observed' AND resolved=0\) OR \(field='presence' AND resolved=0\) OR \(field='status' AND import_run_id=\(SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1\)\)/, "open ship flags, open presence flags and the latest run's status audit: one read");
+  // open presence flags + the latest run's status audit + the NEWEST ship flag per crew of any state
+  // (the last hull the file named — the board's bootstrap of TDG's word): still one read (§12)
+  assert.match(wave, /FROM sync_conflict WHERE \(field='presence' AND resolved=0\) OR \(field='status' AND import_run_id=\(SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1\)\) UNION ALL SELECT agency_id, field, new_value, created_at, resolved FROM \(SELECT agency_id, field, new_value, created_at, resolved, ROW_NUMBER\(\) OVER \(PARTITION BY agency_id ORDER BY created_at DESC, resolved ASC\) AS rn FROM sync_conflict WHERE field='vessel_observed'\) WHERE rn=1/, "presence, status audit and the newest ship flag: one read");
+  assert.match(b, /vesselFlags: ship,/, "the newest ship flag of any state is the file's last named hull");
+  assert.match(b, /inForce, shipKey: keyOf,/, "an in-force card on another hull guards a stale hull");
   assert.match(b, /statusAudit: sc\.filter\(\(r\) => r\.field === "status"\),/);
   assert.match(b, /absent: sc\.filter\(\(r\) => r\.field === "presence"\),/);
   assert.match(wave, /SELECT MAX\(run_at\) AS run_at FROM import_run/);
   // the roster-loop card (an aboard projection the schedule already places) and the projection-loop card
-  assert.match(b, /assignment_id: cardAsg\[c\.agency_id \+ "\|" \+ k\] \|\| null, registry: regOf\(cardAsg\[c\.agency_id \+ "\|" \+ k\]\), confirmed: regConfirmed\(cardAsg\[c\.agency_id \+ "\|" \+ k\]\),/);
+  assert.match(b, /state: x\.state, assignment_id: x\.asgId \|\| null, registry: regOf\(x\.asgId\), confirmed: !!x\.confirmed, deployedAt: deployedAtOf\(x\.asgId\),/, "the seat card carries the card it absorbed, or the placeholder it is");
   assert.match(b, /registry: regOf\(a\.id\), confirmed: regConfirmed\(a\.id\),/);
   assert.match(b, /projByShip\[ship\]\.sort\(\(a, b\) => \(b\.confirmed \? 1 : 0\) - \(a\.confirmed \? 1 : 0\)/);
   const tail = src.slice(src.indexOf("const sections = Object.values(shipNames)"), src.indexOf("async function rotationSections(") + 60000);
@@ -452,7 +456,7 @@ test("the send dialog asks before a resend and posts resend:true; the server sta
   assert.match(dpv, /if\(DPV\.sentAt\)\{if\(!confirm\('This card was already sent to TDG on '\+DPV\.sentAt\+/);
   assert.match(dpv, /body:JSON\.stringify\(\{id:DPV\.id,resend:resend\}\)/);
   assert.match(dpv, /r\.markError/, "a stamp failure after the email went is said on the screen");
-  assert.match(src, /DPV=\{id:id,sentAt:el\.getAttribute\('data-sent'\)\|\|null\};/, "the button's date reaches the dialog");
+  assert.match(src, /DPV=\{id:id,sentAt:el\.getAttribute\('data-sent'\)\|\|null,contra:el\.getAttribute\('data-contra'\)\|\|null\};/, "the button's date and the file's contradiction reach the dialog");
   assert.doesNotMatch(src, /Send to TDG and clear the card/, "the button no longer promises to clear anything");
   const WSRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
   const sec = WSRC.slice(WSRC.indexOf("async function rotationSections("), WSRC.indexOf("async function rotationSections(") + 60000);
@@ -464,13 +468,9 @@ test("the send dialog asks before a resend and posts resend:true; the server sta
   assert.doesNotMatch(dep.slice(dep.indexOf("/api/keyman/deploy/send")), /await removeReliefAssignment\(/, "the send path never removes a card");
 });
 
-test("a jumper's card names the other hull(s); a one-ship card carries no such tag (B15)", () => {
-  const h = ctx.rotCard({ ...GREEN, alsoOn: ["Harmony"] });
-  assert.match(h, /class="rtag"[^>]*jumper[^>]*>ALSO ON HARMONY</);
-  assert.match(ctx.rotCard({ ...GREEN, alsoOn: ["Harmony", "Icon"] }), />ALSO ON HARMONY, ICON</);
-  assert.doesNotMatch(ctx.rotCard(GREEN), /ALSO ON/);
-  assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: [] }), /ALSO ON/);
-  assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: null }), /ALSO ON/);
+test("no ALSO ON tag any more: the file names one hull per crew, a Counter leg elsewhere is a row in issues (5 Oct 2026)", () => {
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: ["Harmony"] }), /ALSO ON/, "the jumper tag was the console drawing a second seat TDG's file does not hold");
+  assert.doesNotMatch(APP_HTML, /x\.alsoOn/, "nothing reads it");
 });
 
 // Miguel, 5 Oct 2026 ("still appearing like this"): Gayda's card read "TDG registry 2026-08-22: Inactive,
@@ -486,4 +486,40 @@ test("the registry line is dated by the latest file, and a hull named by an olde
   assert.match(same, /TDG registry 2026-10-05: Inactive, Voyager</);
   assert.doesNotMatch(same, /named/);
   assert.match(ctx.regNote({ verdict: "elsewhere", status: "On board", ship: "Odyssey", at: "2026-10-05", shipAt: "2026-09-01" }, false), /Odyssey \(named 2026-09-01\)/);
+});
+
+// Miguel, 5 Oct 2026: "display what is in the TDG file, and ... what is wrong".
+test("the 'TDG says otherwise' list renders every row, escapes it, and jumps to the ship", () => {
+  assert.equal(ctx.rotIssuesBlock([]), "", "nothing wrong, nothing drawn");
+  const h = ctx.rotIssuesBlock([
+    { kind: "empty_hull", sc: null, name: "Jewel", ship: "Jewel", text: "Nobody on board per the TDG file" },
+    { kind: "contradicted", sc: "GAY", name: "Cherry <b>Gayda</b>", ship: "Jewel", text: "Your card: aboard Jewel since 2026-07-20 · TDG file 2026-10-05: Inactive, Voyager" },
+  ]);
+  assert.match(h, /<span class=nm>TDG says otherwise<\/span><span class=meta>2 to settle &middot; the TDG file is the truth/);
+  assert.match(h, /data-jump="Jewel" onclick="rotJump\(this\)"><b>Jewel<\/b><span class=istxt>Nobody on board per the TDG file<\/span>/, "a hull row names the hull once");
+  assert.match(h, /<b>Cherry &lt;b&gt;Gayda&lt;\/b&gt;<\/b><span class=isship>Jewel<\/span><span class=istxt>Your card: aboard Jewel since 2026-07-20/);
+  assert.equal(typeof ctx.rotJump, "function");
+  assert.match(APP_HTML, /h\+=rotIssuesBlock\(b\.issues\|\|\[\]\);/, "drawn on the Keyman tab, from the server's list");
+  assert.match(APP_HTML, /\(c\['Not in TDG file'\]\?rfTile\(c\['Not in TDG file'\],'Not in TDG file','red','Not in TDG file'\):''\)/, "a tile for crew the file dropped, when there are any");
+});
+
+test("a card TDG's file contradicts carries the contradiction to Deploy: red in the dialog, asked once more — never blocked", () => {
+  const h = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-07-20", registry: { verdict: "ashore", status: "Inactive", ship: "Voyager", at: "2026-10-05" } });
+  assert.match(h, /data-contra="TDG file 2026-10-05: Inactive, Voyager" onclick="planDeploy\(event,this\)"/);
+  assert.doesNotMatch(ctx.rotCard({ ...YELLOW, registry: { verdict: "pending", status: "On board", at: "2026-10-05" } }), /data-contra/, "an unjudged card warns of nothing");
+  const dpv = APP_HTML.slice(APP_HTML.indexOf("async function dpvSend("), APP_HTML.indexOf("async function deployRestore("));
+  assert.match(dpv, /if\(DPV\.contra&&!confirm\(DPV\.contra\+/, "asked before sending");
+  assert.match(APP_HTML, /\(DPV\.contra\?\('<div class=dpvcontra><b>'\+escHtml\(DPV\.contra\)\+'<\/b> &mdash; the TDG file does not have this seafarer where this card says/);
+});
+
+test("a card the file confirms renders once, green, with Remove; the ship lists what completed underneath", () => {
+  const h = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-08-09", confirmed: true, registry: { verdict: "confirmed", status: "On board", ship: "Beyond", at: "2026-10-05" } });
+  assert.match(h, /class="rcard green cur confirmed"|rcard green/);
+  assert.match(h, /ABOARD &middot; TDG REGISTRY/);
+  assert.match(h, /planDelete/, "Rita may still delete her card");
+  assert.doesNotMatch(h, /planDeploy/, "TDG already has them aboard: nothing to deploy");
+  const sec = ctx.rotShip({ ship: "Navigator", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [], history: [{ name: "Andrea Calayag", sc: "SC-1", ours: true, on: "2026-02-02", off: "2026-09-25" }] });
+  assert.match(sec, /Contract completed · 1/);
+  assert.match(sec, /1 completed/);
+  assert.doesNotMatch(sec, /Also served this ship/);
 });

@@ -140,10 +140,10 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   // dropped the baseline and showed "Contracts 0" for a crew the crew list showed at 3).
   assert.match(body, /const cc = cumulativeContracts\(tdgCount\[sc\] != null \? tdgCount\[sc\] : null, applyOverride\(c, ovMap\[sc\]\)\.baseline_count, derivedBy\[sc\] \|\| 0\);/);
   assert.match(body, /derivedBy\[sc\] = fullContracts\(/, "derived remains the fallback for a crew the count file does not carry");
-  assert.match(wave, /baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0/, "the baseline rides the existing crew read");
+  assert.match(wave, /baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " \+ TDG_ABSENT_COL \+ " FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=0/, "the baseline rides the existing crew read");
   assert.match(wave, /retired, baseline_count, med_exp/, "and the manual baseline rides the override read (0 is a valid override)");
   // ...and the response says where its numbers come from.
-  assert.match(body, /sources, inDock/);
+  assert.match(body, /sources, issues, inDock/, "the response carries its sources and the TDG-says-otherwise list");
   assert.match(body, /seed: KEYMAN_VERSION/, "a NULL stamp is named as the bundled seed, not left blank");
   // The page renders it above the ships.
   assert.match(src, /function rotSourcesLine\(\)/);

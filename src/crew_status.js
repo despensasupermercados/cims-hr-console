@@ -12,7 +12,42 @@
 // Extracted from worker.js (2026-09-11) so doc_radar.js can share the rule instead of growing a
 // second copy of it — §3: deployed code must equal tested code, and duplication is how the two
 // drift apart.
-import { deriveStatus } from "./contracts.js";
+import { deriveStatus, REGISTRY_STATUSES } from "./contracts.js";
+import { VESSEL_REF } from "./vessel_ref.js";
+import { buildShipKeys, canonShipWith, normShip } from "./shipname.js";
+
+const SHIP_KEYS = buildShipKeys(VESSEL_REF);
+const hullKey = (v) => (v ? normShip(canonShipWith(v, SHIP_KEYS) || v) : "");
+
+// A crew the latest AdvancedQuery does not carry (an open 'presence' flag, crew_apply D4). Their last
+// word is not today's (Jaramiz Tuazon: absent from seven files since 6 Sep 2026 while the console still
+// counted him On board, Explorer). The status says so instead of freezing at the last word.
+export const NOT_IN_FILE = "Not in TDG file";
+// ONE way every crew read learns that fact: one LEFT JOIN, no extra round trip (§12). Splice it after
+// `FROM crew` and select TDG_ABSENT_COL; crewStatus reads base.tdg_absent.
+// It also brings the hull the file last NAMED (the newest ship flag, any state; else the registry column):
+// tdg_ship, which tells a completed contract on THAT hull from an old one elsewhere (knownCompleted).
+export const TDG_ABSENT_JOIN = "LEFT JOIN (SELECT DISTINCT agency_id AS ab_id FROM sync_conflict WHERE field='presence' AND resolved=0) ab ON ab.ab_id = crew.agency_id " +
+  "LEFT JOIN (SELECT agency_id AS vf_id, new_value AS vf_ship FROM (SELECT agency_id, new_value, ROW_NUMBER() OVER (PARTITION BY agency_id ORDER BY created_at DESC, resolved ASC) AS vf_rn FROM sync_conflict WHERE field='vessel_observed') WHERE vf_rn=1) vf ON vf.vf_id = crew.agency_id";
+export const TDG_ABSENT_COL = "(ab.ab_id IS NOT NULL) AS tdg_absent, COALESCE(vf.vf_ship, crew.vessel_observed) AS tdg_ship";
+
+// The console KNOWS the contract ended: nothing on the schedule spans today, no current leg is overdue,
+// the newest started leg was closed by a recorded sign-off within the last 180 days, and — when the file
+// names a hull — it was on THAT hull. An older closure, or one on another hull (Santos: Quest closed 29 Jul,
+// the file has him On board Wonder), under a file that says On board is a new contract the Counter does not
+// carry yet, not a completed one.
+export function knownCompleted(legs, today, fileShip, maxDays = 180) {
+  const L = (legs || []).filter((l) => l && l.on && l.on <= today);
+  if (!L.length) return false;
+  for (const l of L) {
+    if (!l.off || today <= l.off) return false;      // aboard today per the schedule
+    if (l.is_current) return false;                  // past its PROJECTED sign-off: overdue, not gone
+  }
+  const last = L.reduce((m, l) => (l.on > m.on ? l : m), L[0]);
+  if (fileShip && last.ship && hullKey(last.ship) !== hullKey(fileShip)) return false;
+  const off = Date.parse(last.off + "T00:00:00Z"), now = Date.parse(today + "T00:00:00Z");
+  return Number.isFinite(off) && Number.isFinite(now) && (now - off) / 86400000 <= maxDays;
+}
 
 // Schedule legs per crew, keyed by agency id. No legs = no schedule, and status falls back to the
 // registry value. Feed this `boardLegs(env)` — the ONE schedule — never the frozen SHIP_HISTORY
@@ -21,17 +56,29 @@ export function scheduleBySc(legs) {
   const m = {};
   // is_current rides along (5 Oct 2026): deriveStatus needs to tell a leg past its PROJECTED sign-off
   // (still current: overdue, not gone) from one Rita closed with a recorded sign-off.
-  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off, is_current: !!h.is_current }); }
+  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off, is_current: !!h.is_current, ship: h.ship || null }); }
   return m;
 }
 
-// Effective status: manual 'Retired' tag wins; else a manual status edit wins; else auto-derive from
-// the live schedule (on a ship now -> On board; signed off -> On Vacation; only future / none -> registry).
+// Effective status (Miguel, 5 Oct 2026: "TDG is the one true source of knowledge"):
+//   1. the manual 'Retired' tag; 2. a manual status edit (Rita's — the board lists it where it disagrees
+//   with the file); 3. not in the latest TDG file -> NOT_IN_FILE; 4. THE FILE'S WORD (crew.status, which the
+//   registry import writes every upload, D6) — except On board where the console KNOWS the contract ended
+//   (a recorded sign-off, nothing aboard since): On Vacation, and the board lists the disagreement;
+//   5. no readable word -> derived from the live schedule, as before 5 Oct.
+// Until 5 Oct the schedule outranked the file: a July Counter leg kept a crew On board after TDG said On
+// Vacation, and a crew TDG had aboard on a contract the Counter did not carry read On Vacation.
 export function crewStatus(base, ov, schedLegs, today) {
   ov = ov || {};
   if (ov.retired) return "Retired";
   if (ov.status != null && ov.status !== "") return ov.status;
-  return deriveStatus(schedLegs || [], today, { imported: base && base.status });
+  if (base && (base.tdg_absent === true || Number(base.tdg_absent) > 0)) return NOT_IN_FILE;
+  const file = base && base.status;
+  if (REGISTRY_STATUSES.has(file)) {
+    if (file === "On board" && knownCompleted(schedLegs, today, base.tdg_ship || null)) return "On Vacation";
+    return file;
+  }
+  return deriveStatus(schedLegs || [], today, { imported: file });
 }
 
 // Crew who have left the fleet. An expired document on someone who is gone is not an action item,

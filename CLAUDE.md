@@ -136,28 +136,47 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **Rank + the "Contracts" number come from FULL contracts, not raw Keyman legs** — via
   `fullContracts()` / `fullContractMap()` (`src/contracts.js`: ≤21-day gap = same contract; full =
   ≥5mo Azamara / ≥6mo others). Never feed `psRank` a raw leg count again.
-- **Status is derived at read time from the SCHEDULE** (`scheduleBySc` + `crewStatus`/`deriveStatus`),
-  consistently in apiCrew, apiRotation, AND apiDashboard. Don't reintroduce a raw-`crew.status` count in
-  one view only (the donut/tiles must use the same derived set). Manual `crew_override.status` and the
-  `retired` flag win over derivation. Status does NOT come from the historical Contract Counter.
-  The ONE schedule is `boardLegs(env)` = current legs from the **Contract Counter** (`keyman_contract3`,
-  the TDG file that carries sign-on / sign-off; `src/counter_legs.js` is the ONE definition, 2026-09-14)
-  + crew aboard per the relief board (in-force `assignment` rows, `ship_leg_source.boardLegsFromDb`).
-  `ship_leg` is no longer a source of current legs: it survives inside `counter_legs.js` only as port
-  memory for the July snapshot and as the orphan arm (a snapshot leg whose crew has no Counter row).
-  The relief printers, the roster export and the backup CSV read the same definition. A Counter leg
-  past its projected sign-off is overdue, not gone: only Rita's recorded sign-off or the next Counter
-  ends it. The Keyman card obeys the same rule (`releasedSeatKeys`, 2026-10-05): a seat whose leg the
-  schedule has closed is released — the crew goes where the schedule puts them, else to their
-  projection, else to the pool — never drawn red off the registry's stale `vessel_observed` (Calayag
-  on Navigator; 18 such seats on 5 Oct). A leg with NO recorded sign-off stays overdue, not gone.
-  One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew — the Keyman board draws
-  EVERY seat the Counter holds for a crew today (`heldSeatsBySc`, B15 fix 2026-10-05), not just the one the
-  registry names; both cards say ALSO ON the other hull. Never call
-  `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
-  crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
-  The same schedule feeds the Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue
-  (`apiScoreQueue`); no route loops over the `SHIP_HISTORY` constant directly — it is history backfill only.
+- **THE KEYMAN BOARD IS TDG'S FILE, AND WHAT IS WRONG** (Miguel, 5 Oct 2026, Brain recddHTPgWjLy39AU: "TDG is
+  the one true source of knowledge ... force the Keyman tab to display what is in the TDG item, and ... what is
+  wrong. We created a yellow thing ... as a placeholder ... If ... you know that that person ... completed his
+  contract, ... underneath as a contract completed"). `src/board_truth.js` holds the rules, `rotationSections`
+  applies them; nothing is written.
+  **Green** = the latest AdvancedQuery has the crew On board a hull the console knows (`fileWordBySc` over
+  `registryFromStore`), the crew is still in the file, and the console does not KNOW that contract completed.
+  Dates come only from a leg still running on that hull (`liveLeg`); none = "No contract dates yet" + a row.
+  **Yellow** = Rita's PLACEHOLDER (an open assignment). An in-force card on the file's hull is absorbed into
+  the seat (rendered once, green "ABOARD · TDG REGISTRY", Remove kept); one on any other hull is drawn yellow
+  with the file's verdict. **Underneath** = "Contract completed": only legs whose sign-off has passed.
+  KNOWN completion (`completedOff`) = a recorded sign-off on that hull, past, within 180 days, nothing current
+  on it since; an overdue Counter leg (projected sign-off passed, nothing recorded) is NOT one (§11).
+  **What is wrong** = `issues` on `/api/rotation` (`boardIssues`), drawn as "TDG says otherwise · N" on the
+  Keyman tab with a count: empty hull per the file, crew dropped from the file, a card the file contradicts,
+  a recorded completion the file still has aboard, the Counter mid-contract where the file has no seat, a
+  manual/Retired/held status against the file, a seat with no dates, an unknown or missing ship, an earmark
+  with no card. Rita settles every row; the console never resolves one (§6, 7 Sep rule).
+  **Gone** (do not restore): the seat read off `crew.vessel_observed`, the schedule "self-heal" placement and
+  its SHIP_HISTORY backfill, the released-seat detour, the second-hull (jumper) draw and its ALSO ON tag —
+  each was the console deciding where a seafarer is. One crew may still hold Counter legs on two hulls: the
+  one the file does not name is a row in `issues`. Deploy on a card the file contradicts warns in red and asks
+  once more (warn, never block). Pinned by `test/board_truth.test.js`, `test/released_seat.test.js`,
+  `test/board_cards.test.js`, `test/registry_sync.test.js`.
+- **Status is TDG's word, everywhere** (`crewStatus`, `src/crew_status.js`, 5 Oct 2026), consistently in
+  apiCrew, apiDashboard, apiCompliance, rotationSections, the feedback board, the data page and the doc radar:
+  1. the manual `retired` flag; 2. a manual `crew_override.status` (listed on the board where it disagrees with
+  the file); 3. not in the latest file (an open `presence` flag) → "Not in TDG file"; 4. the file's word
+  (`crew.status`, written by every registry upload, D6) — except On board where the console KNOWS the contract
+  on the file's hull (`tdg_ship`) ended (`knownCompleted`: a recorded sign-off, nothing aboard since, ≤180 days)
+  → On Vacation; 5. no readable word → derived from the schedule (`deriveStatus`, incl. the overdue rule).
+  Every crew read that feeds `crewStatus` carries `tdg_absent` + `tdg_ship` through ONE shared join
+  (`TDG_ABSENT_JOIN` / `TDG_ABSENT_COL`) — no extra round trip (§12). Until 5 Oct the schedule outranked the
+  file: a July Counter leg kept a crew On board after TDG said otherwise. Pinned by
+  `test/status_consistency.test.js`.
+  The ONE schedule is still `boardLegs(env)` = current legs from the **Contract Counter** (`keyman_contract3`,
+  `src/counter_legs.js`) + crew aboard per the relief board (in-force `assignment` rows); it dates the seats,
+  feeds the overdue rule, the relief printers, the roster export and the backup CSV. A Counter leg past its
+  projected sign-off is overdue, not gone: only Rita's recorded sign-off or the next Counter ends it. Never call
+  `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant. The same schedule feeds the
+  Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue (`apiScoreQueue`).
 - **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
   type=checkbox style="pointer-events:none">`. Native label-wrapped checkboxes double-fire per tap
   (one flip cancels the other). Don't add a bare clickable checkbox.
@@ -202,14 +221,16 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   updates in the console"). Gayda sat on Jewel as "not in a TDG file yet" through five AdvancedQuery
   uploads because that import never looked at the board. The verdict is DERIVED in `rotationSections`,
   like status — never a column written at upload: each apply keeps the file's row per crew
-  (`registry_snapshot`: status + `vessel` as the file said them, stamped with the run; the column is
-  `vessel`, not an allocation — D1 holds; rows the latest file does not carry are removed), and a crew
-  without a row yet is read off the latest run's status audit row (the file's status even where Rita HELD
-  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag for the hull
-  (the line is dated by the LATEST file, `lastRun`; a flag is stamped when FIRST raised, so an older one
-  prints "named <date>" beside the hull — Gayda read "2026-08-22" an hour after the 5 Oct upload) — never
-  `crew.vessel_observed`, which the import does not write and which can
-  be months stale; a crew under an open `presence` flag (absent from the latest file) gets no word at all.
+  (`registry_snapshot`: status + `vessel` as the file said them, stamped with the run; rows the latest file
+  does not carry are removed), and a crew without a row yet (every crew until the first upload after 5 Oct)
+  is BOOTSTRAPPED: status = the latest run's status audit row (the file's status even where Rita HELD it),
+  else `crew.status` (unknown under a manual status edit); hull = the newest ship flag of ANY state (the last
+  hull the file named — open, or closed because the board matched or it was taken/dismissed), else the
+  registry column — but NOT against an in-force card on a different hull that started after it (the import
+  is silent when the file agrees with the board, so an older hull cannot be told from a current one: Calang,
+  flag Edge 22 Aug, card Silhouette 5 Sep → unknown, card stays a placeholder). The line is dated by the
+  LATEST file (`lastRun`); a flag stamped when FIRST raised prints "named <date>" beside the hull. A crew
+  under an open `presence` flag (absent from the latest file) gets no word at all.
   An open ship flag now closes when a later file agrees with the registry (`reconcileShipFlags` `agree`).
   Verdicts:
   **confirmed** (file: On board, same hull by the strict matcher, and the card says aboard NOW — a next
