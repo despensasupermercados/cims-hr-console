@@ -113,9 +113,12 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **Both tabs or nothing.** A workbook missing ACTIVE or INACTIVE is refused (`need_both_tabs`).
 - **A crew id that appears twice with different counts is never imported** (Paygane, Erik 517755: 2 and
   4 in the same file). Flag, never pick (§6). "Ongoing" is a junior with no completed contract: 0.
-- **The bonus ladder still reads its own path** (`apiBonusCrew`, the statement, the ledger rows use
-  `tierContracts(baseline, fullContracts(...))`). Moving it to the imported count is a §1 change: PR,
-  Miguel merges. Pinned by `test/contract_count_import.test.js`.
+- **Two counts, never confused.** The CUMULATIVE completed count drives the grade (`psRank` /
+  `psSalary`, display + HR): TDG's stated count when the file carries the crew, else seeded baseline +
+  date-derived legs (`cumulativeContracts` in `contract_count.js`); every reader — crew list, Score
+  Card, ledger, PDF statement — carries `contracts_source` and the page prints it beside the rank. The
+  CONSECUTIVE bonus count (`crewCount` / `contractLedgerRow`, resets on gates) drives the ladder and
+  payout and NEVER reads the imported count — that is §1. Pinned by `test/contract_count_import.test.js`.
 - **The board says its own age** (`sources` on `/api/rotation`, `rotSourcesLine` on the page): when the
   Counter was last uploaded (or that it never was — a NULL `imported_at` is the bundled seed), and the
   count's as-of date. Nobody inside the console could see either until 24 Sep; Rita found both from outside.
@@ -141,7 +144,11 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   memory for the July snapshot and as the orphan arm (a snapshot leg whose crew has no Counter row).
   The relief printers, the roster export and the backup CSV read the same definition. A Counter leg
   past its projected sign-off is overdue, not gone: only Rita's recorded sign-off or the next Counter
-  ends it. One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew. Never call
+  ends it. The Keyman card obeys the same rule (`releasedSeatKeys`, 2026-10-05): a seat whose leg the
+  schedule has closed is released — the crew goes where the schedule puts them, else to their
+  projection, else to the pool — never drawn red off the registry's stale `vessel_observed` (Calayag
+  on Navigator; 18 such seats on 5 Oct). A leg with NO recorded sign-off stays overdue, not gone.
+  One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
   crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
   The same schedule feeds the Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue
