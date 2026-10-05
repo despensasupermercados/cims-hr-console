@@ -288,6 +288,7 @@ export async function fetchOpenAssignments(env) {
             a.override_on_city, a.override_off_city, a.succeeds_assignment_id,
             a.eccr, a.air, a.hotel, a.on_date_conf, a.off_date_conf,
             a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
+            a.registry_verdict, a.registry_status, a.registry_ship, a.registry_at, a.registry_confirmed_at,
             COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
             c.id AS crew_id, c.agency_id AS sc,
             COALESCE(NULLIF(o.rank_override,''), c.rank_override, c.rank_observed) AS rank,

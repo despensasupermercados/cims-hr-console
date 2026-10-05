@@ -263,8 +263,13 @@ function seg(key,def,opts,labels,soft){
 }
 function render(){
  var g=STAGE.review.groups,c=STAGE.review.counts,h="";
+ // Rita's Keyman projections against this file (registry_sync.js, Miguel 5 Oct 2026). Shown here,
+ // written on Apply: a card the file has ON BOARD its ship turns green on the board by itself.
+ var pj=STAGE.review.projections||[],pc=STAGE.review.projection_counts||{};
+ var pjFlag=(pc.elsewhere||0)+(pc.ashore||0);
  $("work").style.display="grid";
  h+='<div class="chips">'+
+  (pj.length?('<span class="chip green">&#9873; <span class="n">'+(pc.confirmed||0)+'</span> projections confirmed</span>'+(pjFlag?('<span class="chip red">&#9873; <span class="n">'+pjFlag+'</span> projections not confirmed</span>'):'')):'')+
   '<span class="chip amber">&#9875; <span class="n">'+c.ship_flag+'</span> ship</span>'+
   '<span class="chip red">&#9679; <span class="n">'+c.override_conflict+'</span> needs you</span>'+
   '<span class="chip green">&#9677; <span class="n">'+c.cert+'</span> certificates</span>'+
@@ -273,6 +278,11 @@ function render(){
   ((c.rekeyed||0)?'<span class="chip red">&#9888; <span class="n">'+c.rekeyed+'</span> identity</span>':'')+'</div>';
  if((g.rekeyed||[]).length){h+='<div class="sec"><h2>&#9888; Identity \u2014 the file used the ship\u2019s crew id</h2><div class="d">These rows name a crew you already hold, keyed on the cruise line\u2019s numeric id instead of the agency id. They were MATCHED, not added, so no duplicate seafarer is created. Nothing here changes an agency id \u2014 get the export fixed at source.</div>';
   g.rekeyed.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Keyed in file as",it.agency_id,it.incoming_id,badge("cruise-line id "+esc(it.ship_crew_id||"?"),"t-amber"))+'</div>';});h+='</div>';}
+ if(pj.length){h+='<div class="sec"><h2>&#9873; Your Keyman projections against this file</h2><div class="d">Applied on its own. A card the file has <b>On board</b> its ship is confirmed: it turns green on the Keyman board, keeps your dates until the Contract Counter carries the leg, and loses its Deploy button. A card the file contradicts is marked on the card for you to settle. Nothing is removed.</div>';
+  var PJL={confirmed:["confirmed aboard","t-green"],earmarked:["earmarked for this ship","t-green"],elsewhere:["file puts them on another ship","t-amber"],ashore:["aboard on your board, not per the file","t-red"],pending:["nothing to confirm yet",""]};
+  pj.forEach(function(it){var l=PJL[it.verdict]||[it.verdict,""];var f=it.file||{};
+   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div><div class="row"><span class="k">Registry says</span><span class="diff"><span class="new">'+esc((f.status||"status not readable")+(f.ship?(" · "+f.ship):""))+'</span>'+badge(l[0],l[1])+'</span></div></div>';});
+  h+='</div>';}
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
   g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","take","dismiss"],["Keep board","Take TDG","Dismiss"])+'</div>';});h+='</div>';}
  if(g.critical.length){h+='<div class="sec"><h2>&#9679; Status changes from TDG</h2><div class="d">Applied by default — the file drives status. Hold any you want left as-is. Crew you pinned by hand are protected and shown below.</div>';
@@ -310,6 +320,9 @@ function renderCart(){
  if(g.minor.length)items+=cline("i-gray","&#9881;","Minor tidy-ups","spelling, spacing",x.minor+" save","save");
  if(g.ship_flag.length&&x.shipTake)items+=cline("i-green","&#9875;","Ship from file","registry updated",x.shipTake+" save","save");
  if(g.ship_flag.length&&x.shipFlag)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
+ var pc=STAGE.review.projection_counts||{};
+ if(pc.confirmed)items+=cline("i-green","&#9873;","Projections confirmed","turn green on the Keyman board",pc.confirmed+" auto","save");
+ if((pc.elsewhere||0)+(pc.ashore||0))items+=cline("i-amber","&#9873;","Projections not confirmed","marked on the card",((pc.elsewhere||0)+(pc.ashore||0))+" flagged","held");
  if(g.override_conflict.length+g.critical.length && x.ovKeep)items+=cline("i-red","&#9995;","Your edits","kept as yours",x.ovKeep+" held","held");
  if(!items)items='<div class="li"><span class="nm" style="color:var(--slate);font-weight:400">Nothing to apply — all rows match.</span></div>';
  var flags=x.shipFlag+x.depFlag;

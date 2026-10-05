@@ -19,9 +19,26 @@ import { htmlPage } from "./etag.js";
 import { OVR_FIELDS } from "./override.js";
 import { isMoneyUser } from "./policy.js";
 import { reconcileShipFlags, boardShipsFromLegs, strictShipMatcher, AUTO_CLOSED } from "./crew_flags.js";
+import { reconcileProjections, projectionSummary } from "./registry_sync.js";
 import { VESSEL_REF } from "./vessel_ref.js";
 
 const SHIP_OF = strictShipMatcher(VESSEL_REF); // built once per isolate, not per request
+
+// Rita's open projections (the yellow cards) come in through deps.openProjections — the worker's
+// fetchOpenAssignments, the ONE yellow-card feed (ship_leg_source.js). This module never reads the
+// schedule tables itself (status_consistency.test.js); without the dep (tests, tools) there are no
+// projections to compare and no verdict is written.
+const openProjections = (env, deps) => (deps && deps.openProjections ? deps.openProjections(env).catch(() => []) : Promise.resolve([]));
+// What the file says per crew, carried from stage to apply inside the review (the groups only hold
+// CHANGES, and a crew whose status is still "On board" has no change to show).
+const registryOf = (mapped) => mapped.map((m) => ({ agency_id: m.agency_id, status: m.status || null, vessel_observed: m.vessel_observed || null }));
+// The verdict write. The latest file is the latest word (registry_verdict / status / ship / at);
+// registry_confirmed_at keeps the FIRST confirmation so the card can say since when TDG has had them
+// aboard. Only an OPEN projection is ever touched, and only ids this route read itself.
+const VERDICT_SQL =
+  "UPDATE assignment SET registry_verdict=?, registry_status=?, registry_ship=?, registry_at=?, " +
+  "registry_confirmed_at=CASE WHEN ?='confirmed' THEN COALESCE(registry_confirmed_at, ?) ELSE registry_confirmed_at END, " +
+  "updated_at=? WHERE id=? AND actual_sign_off IS NULL";
 
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
@@ -48,16 +65,20 @@ export function crewImportPage() {
   return htmlPage(CREW_IMPORT_HTML); // revalidated, 304 when unchanged (16 Sep 2026, Starlink)
 }
 
-async function loadContext(env) {
-  const ex = await env.DB.prepare("SELECT * FROM crew").all();
+async function loadContext(env, deps) {
+  // One wave (§12): the roster, the manual overrides and Rita's open projections travel together.
+  const [ex, ov, projections] = await Promise.all([
+    env.DB.prepare("SELECT * FROM crew").all(),
+    env.DB.prepare("SELECT * FROM crew_override WHERE COALESCE(retired,0)=0").all(),
+    openProjections(env, deps),
+  ]);
   const existingByAgency = Object.fromEntries((ex.results || []).map(r => [r.agency_id, r]));
-  const ov = await env.DB.prepare("SELECT * FROM crew_override WHERE COALESCE(retired,0)=0").all();
   const overrideByAgency = Object.fromEntries((ov.results || []).map(r => [r.agency_id, r]));
-  return { existingByAgency, overrideByAgency };
+  return { existingByAgency, overrideByAgency, projections: projections || [] };
 }
 
 // POST /api/crew/import/stage — body { rows, file_hash, filename }. WRITES NOTHING.
-export async function apiCrewImportStage(request, env) {
+export async function apiCrewImportStage(request, env, deps) {
   const body = await request.json();
   const rows = body.rows || [];
   const file_hash = body.file_hash || null;
@@ -67,9 +88,17 @@ export async function apiCrewImportStage(request, env) {
   }
   const { mapped, invalidCount, unparsed } = mapRows(rows);
   const incomingByAgency = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
-  const { existingByAgency, overrideByAgency } = await loadContext(env);
+  const { existingByAgency, overrideByAgency, projections } = await loadContext(env, deps);
   const diff = diffCrew(mapped, existingByAgency);
   const review = buildReview(diff, existingByAgency, incomingByAgency, overrideByAgency);
+  // THE BOARD AGAINST THE FILE (Miguel, 5 Oct 2026). Every open projection is compared with what the
+  // registry says about that crew — shown here, written on Apply. The file's per-crew word travels
+  // inside the review so Apply compares against what Rita reviewed, not a second reading.
+  const today = new Date().toISOString().slice(0, 10);
+  const proj = reconcileProjections({ projections, registry: mapped, today, shipOf: SHIP_OF });
+  review.projections = proj.items;
+  review.projection_counts = proj.counts;
+  review.registry = registryOf(mapped);
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
   return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
@@ -97,13 +126,21 @@ export async function apiCrewImportApply(request, env, deps) {
   // The import itself never depends on the board: if the live read fails, the apply still runs and
   // only the "board already matches" rule is off for this run (reported as board_unavailable).
   const today = run_at.slice(0, 10);
-  const [openRes, legs] = await Promise.all([
+  // deps.openProjections (the worker's fetchOpenAssignments) runs the registry-column guard itself, so
+  // the verdict UPDATEs below can join the batch (one D1 transaction: a missing column would fail
+  // the whole import). Absent in tests and tools: no projections, no verdict written.
+  const [openRes, legs, projections] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, new_value FROM sync_conflict WHERE field='vessel_observed' AND resolved=0").all(),
     deps && deps.boardLegs ? deps.boardLegs(env).catch(() => null) : Promise.resolve(null),
+    openProjections(env, deps),
   ]);
   const board_unavailable = !!(deps && deps.boardLegs) && legs == null;
   const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF });
   const openInserted = flags.insert.filter(c => c.resolved === 0).length;
+  // Rita's projections against the file (registry_sync.js): the projections are read HERE, so only an
+  // open assignment this route found can be written; the file's word per crew is the one staged.
+  const registry = Array.isArray(body.review && body.review.registry) ? body.review.registry : [];
+  const proj = reconcileProjections({ projections: projections || [], registry, today, shipOf: SHIP_OF });
 
   const importRunId = crypto.randomUUID();
   const stmts = [];
@@ -155,6 +192,13 @@ export async function apiCrewImportApply(request, env, deps) {
       "INSERT INTO sync_conflict (id,import_run_id,agency_id,field,old_value,new_value,resolved,created_at) VALUES (?,?,?,?,?,?,?,?)")
       .bind(crypto.randomUUID(), importRunId, c.agency_id, c.field, str(c.old_value), str(c.new_value), c.resolved, run_at));
   }
+  // THE LOOP CLOSES FROM THE REGISTRY TOO (Miguel, 5 Oct 2026). A projection the file confirms aboard
+  // turns green on the board by itself; one it contradicts is flagged ON THE CARD; nothing is removed
+  // (§6: flag, never silently fix). The verdict is an annotation on Rita's own card — crew, Counter and
+  // override rows are untouched, and the Counter still absorbs the card when it finally carries the leg.
+  for (const it of proj.items) {
+    stmts.push(env.DB.prepare(VERDICT_SQL).bind(it.verdict, it.file.status, it.file.ship, run_at, it.verdict, run_at, run_at, it.id));
+  }
 
   const results = await env.DB.batch(stmts);
   // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
@@ -166,6 +210,7 @@ export async function apiCrewImportApply(request, env, deps) {
     override_cleared, override_skipped: clears.length - override_cleared,
     ship_taken: (plan.shipTakes || []).length,
     open_conflicts: openInserted, ship_flags: flags.counts, board_unavailable, droppedShipWrites: plan.droppedShipWrites,
+    projections: { counts: proj.counts, items: proj.items.map(i => ({ id: i.id, sc: i.sc, crew_name: i.crew_name, ship: i.ship, verdict: i.verdict, file: i.file })) },
   };
   res.summary = applySummary(res); // ONE sentence for both import screens (they used to each compose their own)
   return J(res);
@@ -185,6 +230,8 @@ export function applySummary(r) {
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
   if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");
   if (r.override_cleared) parts.push(n(r.override_cleared, "manual entry", "manual entries") + " replaced by the file" + (r.override_skipped ? " (" + n(r.override_skipped, "changed", "changed") + " since review, left alone)" : ""));
+  const pj = r.projections && r.projections.counts ? projectionSummary(r.projections.counts) : "";
+  if (pj) parts.push(pj);
   parts.push("logged to import history");
   return parts.join(" · ") + ".";
 }
@@ -196,7 +243,7 @@ export function applySummary(r) {
 export async function handleCrewImport(request, url, env, session, deps) {
   const p = url.pathname;
   if (p === "/api/crew/import" && request.method === "GET") return crewImportPage();
-  if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env);
+  if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env, deps);
   if (p === "/api/crew/import/apply" && request.method === "POST") {
     if (!isMoneyUser(session && session.email)) return J({ ok: false, error: "money_users_only" }, 403);
     return apiCrewImportApply(request, env, deps);
