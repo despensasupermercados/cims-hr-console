@@ -147,19 +147,25 @@ test("registryFromStore: a crew with no snapshot row is read off the raw crew ro
       { agency_id: "SC-H", status: "On board", vessel_observed: null },                                    // Rita HELD the file's Inactive: crew.status kept
       { agency_id: "SC-M", status: "On board", vessel_observed: null, manual: true },                      // manual status edit: the file's status is unknown
       { agency_id: "SC-G", status: "On board", vessel_observed: null },                                    // not in the latest file (open presence flag)
+      { agency_id: "SC-V", status: "Inactive", vessel_observed: null },                                     // Gayda-shaped, 5 Oct: Voyager flag first raised 22 Aug
     ],
     openFlags: [
       { agency_id: "SC-0040153", new_value: "MV ODYSSEY OF THE SEAS", created_at: "2026-10-04T13:12:10.010Z" },
       { agency_id: "SC-0040153", new_value: "MV LIBERTY OF THE SEAS", created_at: "2026-09-01T00:00:00.000Z" }, // older flag loses
+      { agency_id: "SC-V", new_value: "MV VOYAGER OF THE SEAS", created_at: "2026-08-22T10:43:38.669Z" },
     ],
     statusAudit: [{ agency_id: "SC-H", new_value: "Inactive" }],
     absent: [{ agency_id: "SC-G" }],
     lastRun: "2026-10-04T13:12:10.010Z",
   });
   const by = Object.fromEntries(registry.map((r) => [r.agency_id, r]));
-  assert.deepEqual(by["SC-0044872"], { agency_id: "SC-0044872", status: "Inactive", vessel_observed: null, run_at: "2026-10-04T13:12:10.010Z", source: "registry" });
+  assert.deepEqual(by["SC-0044872"], { agency_id: "SC-0044872", status: "Inactive", vessel_observed: null, run_at: "2026-10-04T13:12:10.010Z", vessel_at: null, source: "registry" });
   assert.equal(by["SC-0040153"].vessel_observed, "MV ODYSSEY OF THE SEAS", "the file's vessel lives in the newest open ship flag");
-  assert.equal(by["SC-0040153"].run_at, "2026-10-04T13:12:10.010Z", "dated by the file that raised the flag");
+  assert.equal(by["SC-0040153"].run_at, "2026-10-04T13:12:10.010Z", "dated by the latest file");
+  // Miguel, 5 Oct ("still appearing like this"): the line is dated by the LATEST file, never by an old
+  // flag; the flag's own date rides along so the card can say when the hull was first named.
+  assert.deepEqual(by["SC-V"], { agency_id: "SC-V", status: "Inactive", vessel_observed: "MV VOYAGER OF THE SEAS", run_at: "2026-10-04T13:12:10.010Z", vessel_at: "2026-08-22T10:43:38.669Z", source: "registry" });
+  assert.equal(registryFromStore({ crew: [{ agency_id: "SC-V", status: "Inactive" }], openFlags: [{ agency_id: "SC-V", new_value: "MV VOYAGER OF THE SEAS", created_at: "2026-08-22T10:43:38.669Z" }] })[0].run_at, "2026-08-22T10:43:38.669Z", "no run recorded at all: the flag's date is the only one there is");
   assert.equal(by["SC-0046170"].vessel_observed, null);
   assert.equal(by["SC-H"].status, "Inactive", "a HELD status change: the file's word is the audit row, not crew.status");
   assert.equal(by["SC-M"].status, null, "a manual status edit: the file's status is unknown, never crew.status");

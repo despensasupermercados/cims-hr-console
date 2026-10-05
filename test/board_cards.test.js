@@ -472,3 +472,18 @@ test("a jumper's card names the other hull(s); a one-ship card carries no such t
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: [] }), /ALSO ON/);
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: null }), /ALSO ON/);
 });
+
+// Miguel, 5 Oct 2026 ("still appearing like this"): Gayda's card read "TDG registry 2026-08-22: Inactive,
+// Voyager" an hour after Rita applied the 5 Oct file. The line is dated by the latest file; a hull first
+// named by an older file says so beside the hull.
+test("the registry line is dated by the latest file, and a hull named by an older file says when", () => {
+  const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  assert.match(SRC, /shipAt: \(shipAt && shipAt !== at\) \? shipAt : null/, "the server hands the older hull date to the card only when it differs from the line's date");
+  const ashore = ctx.regNote({ verdict: "ashore", status: "Inactive", ship: "Voyager", at: "2026-10-05", shipAt: "2026-08-22" }, false);
+  assert.match(ashore, /TDG registry 2026-10-05: Inactive, Voyager \(named 2026-08-22\)/);
+  assert.match(ashore, /not aboard here per the file/);
+  const same = ctx.regNote({ verdict: "ashore", status: "Inactive", ship: "Voyager", at: "2026-10-05", shipAt: null }, false);
+  assert.match(same, /TDG registry 2026-10-05: Inactive, Voyager</);
+  assert.doesNotMatch(same, /named/);
+  assert.match(ctx.regNote({ verdict: "elsewhere", status: "On board", ship: "Odyssey", at: "2026-10-05", shipAt: "2026-09-01" }, false), /Odyssey \(named 2026-09-01\)/);
+});

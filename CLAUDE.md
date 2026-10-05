@@ -205,8 +205,10 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   (`registry_snapshot`: status + `vessel` as the file said them, stamped with the run; the column is
   `vessel`, not an allocation — D1 holds; rows the latest file does not carry are removed), and a crew
   without a row yet is read off the latest run's status audit row (the file's status even where Rita HELD
-  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag dated by
-  the file that raised it — never `crew.vessel_observed`, which the import does not write and which can
+  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag for the hull
+  (the line is dated by the LATEST file, `lastRun`; a flag is stamped when FIRST raised, so an older one
+  prints "named <date>" beside the hull — Gayda read "2026-08-22" an hour after the 5 Oct upload) — never
+  `crew.vessel_observed`, which the import does not write and which can
   be months stale; a crew under an open `presence` flag (absent from the latest file) gets no word at all.
   An open ship flag now closes when a later file agrees with the registry (`reconcileShipFlags` `agree`).
   Verdicts:

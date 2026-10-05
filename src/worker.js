@@ -1869,9 +1869,11 @@ async function rotationSections(env) {
     const verdicts = reconcileProjections({ projections: openAsg || [], registry, today, shipOf: STRICT_SHIP });
     for (const it of verdicts.items) {
       const src = regAt[it.sc] || {};
+      const at = String(src.run_at || "").slice(0, 10) || null, shipAt = String(src.vessel_at || "").slice(0, 10) || null;
       regByAsg[it.id] = {
         verdict: it.verdict, status: it.file.status, ship: it.file.ship_canon || it.file.ship || null,
-        at: String(src.run_at || "").slice(0, 10) || null, source: src.source || null,
+        at, source: src.source || null,
+        shipAt: (shipAt && shipAt !== at) ? shipAt : null, // the hull was first named by an OLDER file than the one the line is dated by
       };
     }
   }
@@ -4636,7 +4638,7 @@ function regNote(reg,confirmed){
   if(!reg)return '<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
   var at=reg.at?(' '+escHtml(reg.at)):'';
   var st=escHtml(reg.status||'status not readable');
-  var sh=reg.ship?escHtml(reg.ship):'';
+  var sh=reg.ship?(escHtml(reg.ship)+(reg.shipAt?(' (named '+escHtml(reg.shipAt)+')'):'')):'';
   if(confirmed)return '<div class=srcnote><b style="color:var(--green-d)">Aboard per the TDG registry</b> (file of'+at+') &middot; your dates until the Counter carries them</div>';
   if(reg.verdict==='elsewhere')return '<div class=srcnote><b style="color:var(--amber)">TDG registry'+at+': '+st+(sh?(' &middot; '+sh):'')+'</b> &middot; not this ship</div>';
   if(reg.verdict==='ashore')return '<div class=srcnote><b style="color:var(--red)">TDG registry'+at+': '+st+(sh?(', '+sh):'')+'</b> &middot; not aboard here per the file</div>';
