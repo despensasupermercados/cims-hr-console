@@ -258,6 +258,27 @@ export function applyRecordedSignoffs(legs, recMap, today) {
   });
 }
 
+// PURE. Every seat the Counter holds for a crew TODAY, keyed sc -> [{ key, ship }] in leg order: a
+// current leg from a non-assignment source whose sign-on has passed (a projected sign-off that merely
+// passed is overdue, not gone — §11). Projections are not seats of this kind: pendingProjections draws
+// them yellow. The board places ONE card per crew from the registry / schedule; a jumper's OTHER
+// Counter hull (Miguel, 14 Sep 2026: "one crew can be in 2 ships") is read from here so it is drawn
+// too — until 5 Oct 2026 (B15) the second ship showed nobody.
+export function heldSeatsBySc(legs, today, shipKeyOf) {
+  const keyOf = shipKeyOf || ((s) => String(s == null ? "" : s).trim().toLowerCase());
+  const out = {};
+  for (const h of (legs || [])) {
+    if (!h || !h.ours || !h.sc || !h.ship || !h.is_current || !h.on) continue;
+    if (String(h.source || "").startsWith("assignment")) continue;
+    if (today && h.on > today) continue;
+    const key = keyOf(h.ship);
+    if (!key) continue;
+    const list = (out[h.sc] = out[h.sc] || []);
+    if (!list.some((x) => x.key === key)) list.push({ key, ship: h.ship });
+  }
+  return out;
+}
+
 // PURE. Seats the schedule has already RELEASED, keyed "sc|shipKey": the crew has a leg on that ship
 // that is no longer current and whose off-date has passed (a recorded sign-off folded in above, or an
 // ended assignment), and NO current leg on that ship. A current leg past its PROJECTED sign-off is not

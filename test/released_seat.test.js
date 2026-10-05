@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { releasedSeatKeys, applyRecordedSignoffs } from "../src/ship_leg_source.js";
+import { releasedSeatKeys, applyRecordedSignoffs, heldSeatsBySc } from "../src/ship_leg_source.js";
 
 const TODAY = "2026-10-05";
 const leg = (o) => ({ ours: true, source: "counter", ...o });
@@ -76,4 +76,39 @@ test("rotationSections applies the rule off the same HIST the status came from (
   const at = b.indexOf("= await Promise.all([");
   const wave = b.slice(at, b.indexOf("]);", at));
   assert.doesNotMatch(wave, /released/);
+});
+
+// B15 (5 Oct 2026 review): the roster loop places ONE card per crew, where the registry or the schedule
+// puts them. A jumper — one crew, Counter seats on two hulls (Miguel, 14 Sep 2026: "one crew can be in
+// 2 ships") — lost the second card; that ship showed nobody. heldSeatsBySc is the pure rule the board
+// now draws the other hull(s) from.
+test("heldSeatsBySc: every current Counter seat whose sign-on has passed, per crew, deduped per hull; projections, future and closed legs excluded", () => {
+  const hist = [
+    leg({ sc: "SC-J", ship: "Icon", on: "2026-03-01", off: "2026-09-01", is_current: true }),      // overdue: still held
+    leg({ sc: "SC-J", ship: "Harmony", on: "2026-09-20", off: "2027-03-20", is_current: true }),   // the second hull
+    leg({ sc: "SC-J", ship: "MV HARMONY OF THE SEAS", on: "2026-09-20", off: "2027-03-20", is_current: true }), // same hull, other spelling
+    leg({ sc: "SC-J", ship: "Jewel", on: "2025-01-01", off: "2025-07-01", is_current: false }),    // history
+    leg({ sc: "SC-J", ship: "Anthem", on: "2026-12-01", off: "2027-06-01", is_current: true }),    // not started
+    { ours: true, source: "assignment", sc: "SC-J", ship: "Oasis", on: "2026-09-25", off: "2027-03-25", is_current: true, assignment_id: "as_1" }, // Rita's plan: pendingProjections' job
+    { ours: false, source: "counter", sc: "SC-X", ship: "Edge", on: "2026-01-01", off: "2026-07-01", is_current: true }, // not ours
+    leg({ sc: "SC-N", ship: "", on: "2026-01-01", off: "2026-07-01", is_current: true }),           // no hull
+  ];
+  const norm = (s) => String(s || "").toLowerCase().replace(/^mv\s+/, "").replace(/\s+of the seas$/, "").replace(/[^a-z0-9]/g, "");
+  const held = heldSeatsBySc(hist, TODAY, norm);
+  assert.deepEqual(held["SC-J"], [{ key: "icon", ship: "Icon" }, { key: "harmony", ship: "Harmony" }], "two hulls, the overdue one included, the duplicate spelling folded");
+  assert.equal(held["SC-X"], undefined);
+  assert.equal(held["SC-N"], undefined);
+  assert.deepEqual(heldSeatsBySc(null, TODAY, norm), {});
+  assert.deepEqual(heldSeatsBySc(hist, "2026-02-01", norm), {}, "before any sign-on: nothing held");
+});
+
+test("the board draws a jumper's other Counter hull(s) through ONE seat renderer, skipping released seats (B15)", () => {
+  const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  const b = SRC.slice(SRC.indexOf("async function rotationSections("), SRC.indexOf("async function rotationSections(") + 80000);
+  assert.match(b, /const heldSeats = heldSeatsBySc\(HIST, today, \(s\) => normShip\(shipOf\(s\) \|\| s\)\);/, "the held seats are read off the SAME legs crewStatus and releasedSeatKeys use");
+  assert.equal((b.match(/const drawSeat = \(c, base, ship, k, enr, sEnr, alsoOn\) => \{/g) || []).length, 1, "one seat renderer");
+  assert.equal((b.match(/\(promByShip\[ship\] = promByShip\[ship\] \|\| \[\]\)\.push\(/g) || []).length, 1, "no second copy of the card expression");
+  assert.match(b, /const others = \(heldSeats\[c\.agency_id\] \|\| \[\]\)\.filter\(\(s2\) => s2\.key !== k && !released\.has\(c\.agency_id \+ "\|" \+ s2\.key\)\)/, "the other hulls: not the one just drawn, not a released seat");
+  assert.match(b, /drawSeat\(c, base, ship, k, enr, sEnr, others\.map\(\(o\) => o\.ship\)\);/, "the primary card names the other hulls");
+  assert.match(b, /for \(const o of others\) drawSeat\(c, base, o\.ship, o\.key, \(legBSC\[o\.key\] \|\| \{\}\)\[c\.agency_id\] \|\| \{\}, \(schEnr\[o\.key\] \|\| \{\}\)\[c\.agency_id\] \|\| \{\}/, "each other hull gets its own card with that hull's dates");
 });

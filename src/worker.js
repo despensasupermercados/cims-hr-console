@@ -17,7 +17,7 @@ import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections, releasedSeatKeys } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections, releasedSeatKeys, heldSeatsBySc } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
 import { htmlPage, etagFor } from "./etag.js";
@@ -1885,11 +1885,17 @@ async function rotationSections(env) {
   // Seats the schedule has closed (a recorded sign-off has passed, nothing current replaces it on that
   // ship) — read off the SAME legs crewStatus() just used, so the card and the status beside it agree.
   const released = releasedSeatKeys(HIST, today, (s) => normShip(shipOf(s) || s));
+  // Every seat the Counter holds per crew today (ship_leg_source.heldSeatsBySc): the loop below places
+  // ONE card per crew; a jumper's other hull is drawn from this (B15, 5 Oct 2026).
+  const heldSeats = heldSeatsBySc(HIST, today, (s) => normShip(shipOf(s) || s));
   // A MANUAL status edit (crew_override.status — the same test crewStatus applies) keeps the registry
   // seat. A DERIVED status does not: De Torres reads "On board" because the schedule has him aboard
   // Navigator by projection, and that is exactly why his Jewel seat must go (5 Oct, second screenshot).
   const manualStatus = (sc) => { const o = ovMap[sc]; return !!(o && o.status != null && o.status !== ""); };
   const promByShip = {}, shoreside = [], pool = [];
+  // ONE seat card, drawn from the registry row + the leg that enriches it (Keyman leg, then the schedule).
+  // alsoOn names the crew's other hull(s) when the Counter holds more than one seat for them (a jumper).
+  const drawSeat = (c, base, ship, k, enr, sEnr, alsoOn) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, registry: regOf(cardAsg[c.agency_id + "|" + k]), confirmed: regConfirmed(cardAsg[c.agency_id + "|" + k]), deployedAt: deployedAtOf(cardAsg[c.agency_id + "|" + k]), vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null , alsoOn: (alsoOn && alsoOn.length) ? alsoOn : null })); };
   const plannedScs = new Set((openAsg || []).map((a) => a.sc).filter(Boolean));
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
@@ -1933,7 +1939,14 @@ async function rotationSections(env) {
     // The pool is "active, no ship, no plan": a crew who already holds an open projection is drawn as a
     // yellow card on that ship, not offered again as unassigned (15 Sep 2026).
     if (!ship) { if (!plannedScs.has(c.agency_id)) pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, registry: regOf(cardAsg[c.agency_id + "|" + k]), confirmed: regConfirmed(cardAsg[c.agency_id + "|" + k]), deployedAt: deployedAtOf(cardAsg[c.agency_id + "|" + k]), vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
+    // THE SECOND HULL (B15, 5 Oct 2026 review; Miguel, 14 Sep: "one crew can be in 2 ships"): the loop
+    // places ONE card per crew, where the registry or the schedule puts them. A jumper whose Counter still
+    // holds a seat on another hull lost that card — the second ship showed nobody. Every other seat the
+    // Counter holds today that the schedule has not released is drawn too, as the green card it is. A seat
+    // held by a PROJECTION is not this loop's: pendingProjections draws it yellow below.
+    const others = (heldSeats[c.agency_id] || []).filter((s2) => s2.key !== k && !released.has(c.agency_id + "|" + s2.key)).map((s2) => ({ key: s2.key, ship: shipOf(s2.ship) || s2.ship }));
+    drawSeat(c, base, ship, k, enr, sEnr, others.map((o) => o.ship));
+    for (const o of others) drawSeat(c, base, o.ship, o.key, (legBSC[o.key] || {})[c.agency_id] || {}, (schEnr[o.key] || {})[c.agency_id] || {}, [ship].concat(others.filter((x) => x.key !== o.key).map((x) => x.ship)));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -4662,6 +4675,7 @@ function rotCard(x){
   if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';
   if(plan&&x.deployedAt)tg+='<span class="rtag on" title="Sent to TDG for action">SENT TO TDG '+escHtml(x.deployedAt)+'</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
+  if(x.alsoOn&&x.alsoOn.length)tg+='<span class="rtag" title="This seafarer also holds a seat on another ship (jumper)">ALSO ON '+escHtml(x.alsoOn.join(', ').toUpperCase())+'</span>';
   // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
   if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
   var lab=confirmed?'<span class="rlab tdg">ABOARD &middot; TDG REGISTRY</span>':plan?('<span class="rlab plan">'+(aboard?'PLAN &middot; ABOARD':'PLAN')+'</span>'):'';

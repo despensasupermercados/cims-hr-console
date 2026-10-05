@@ -463,3 +463,12 @@ test("the send dialog asks before a resend and posts resend:true; the server sta
   const dep = readFileSync(new URL("../src/keyman_deploy.js", import.meta.url), "utf-8");
   assert.doesNotMatch(dep.slice(dep.indexOf("/api/keyman/deploy/send")), /await removeReliefAssignment\(/, "the send path never removes a card");
 });
+
+test("a jumper's card names the other hull(s); a one-ship card carries no such tag (B15)", () => {
+  const h = ctx.rotCard({ ...GREEN, alsoOn: ["Harmony"] });
+  assert.match(h, /class="rtag"[^>]*jumper[^>]*>ALSO ON HARMONY</);
+  assert.match(ctx.rotCard({ ...GREEN, alsoOn: ["Harmony", "Icon"] }), />ALSO ON HARMONY, ICON</);
+  assert.doesNotMatch(ctx.rotCard(GREEN), /ALSO ON/);
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: [] }), /ALSO ON/);
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, alsoOn: null }), /ALSO ON/);
+});

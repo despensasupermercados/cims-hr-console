@@ -151,7 +151,9 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   schedule has closed is released — the crew goes where the schedule puts them, else to their
   projection, else to the pool — never drawn red off the registry's stale `vessel_observed` (Calayag
   on Navigator; 18 such seats on 5 Oct). A leg with NO recorded sign-off stays overdue, not gone.
-  One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew. Never call
+  One crew may hold legs on two ships (jumpers); nothing collapses to one-per-crew — the Keyman board draws
+  EVERY seat the Counter holds for a crew today (`heldSeatsBySc`, B15 fix 2026-10-05), not just the one the
+  registry names; both cards say ALSO ON the other hull. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant, which is how the
   crew list and dashboard silently diverged from the board (pinned by `test/status_consistency.test.js`).
   The same schedule feeds the Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue
