@@ -119,3 +119,53 @@ test("STATIC GUARD: any assignment query that reads the vessel alias declares th
     if (/\bv\.(name|brand)\b/.test(q)) assert.match(q, /LEFT JOIN vessel v ON v\.id = a\.vessel_id/, "selects v.* without joining vessel v:\n" + q);
   }
 });
+
+// 5 Oct 2026 review: the edit belongs to a CONTRACT (on_key = the leg's sign-on), never to a position.
+// Joining contract_edit by seq handed Rita's recorded sign-off to whatever contract landed on that seq
+// after a multi-block Counter renumbered the rows — every live edit sits on seq 1 today.
+test("a recorded sign-off follows its contract (on_key) when a multi-block Counter renumbers the rows; a legacy edit without on_key still joins by seq", async () => {
+  const d = db();
+  // X: edit filed at seq 1 with on_key 2026-03-14 = the current contract. A full Counter then arrives as
+  // three blocks: seq 1 = 2023, seq 2 = 2024, seq 3 = 2026-03-14 (current).
+  d.exec(`
+    INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off) VALUES
+      ('SC-X','kmx','Anthem','Onboard',1,'2023-01-10','2023-07-10'),
+      ('SC-X','kmx','Anthem','Onboard',2,'2024-09-01','2025-03-01'),
+      ('SC-X','kmx','Anthem','Onboard',3,'2026-03-14','2026-09-14');
+    INSERT INTO contract_edit (sc,seq,sign_off,on_key,updated_at) VALUES ('SC-X',1,'2026-09-20','2026-03-14','2026-09-12T10:00:00Z');
+    -- Y: an edit written before on_key existed: position is all it has
+    INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off) VALUES ('SC-Y','kmy','Beyond','Onboard',1,'2026-01-05','2026-07-05');
+    INSERT INTO contract_edit (sc,seq,sign_off,on_key,updated_at) VALUES ('SC-Y',1,'2026-07-01',NULL,'2026-06-20T10:00:00Z');
+  `);
+  const env = envFor(d);
+  const rec = await fetchRecordedSignoffs(env);
+  assert.equal(rec["SC-X|2026-03-14"], "2026-09-20", "the 20 Sep sign-off sits on the 2026 contract");
+  assert.equal(rec["SC-X|2023-01-10"], undefined, "and NOT on the 2023 contract that now occupies seq 1");
+  assert.equal(rec["SC-Y|2026-01-05"], "2026-07-01", "legacy edit: by position");
+  // the schedule legs carry the same attachment (COUNTER_LEG_SELECT joins the same way)
+  const legs = await legsFromCounter(env);
+  const x = legs.filter((l) => l.sc === "SC-X").sort((a, b) => (a.on < b.on ? -1 : 1));
+  assert.deepEqual(x.map((l) => [l.on, l.is_current]), [["2023-01-10", false], ["2024-09-01", false], ["2026-03-14", true]]);
+});
+
+// THE NEWER WRITE WINS (Miguel, 14 Sep 2026) applies to the recorded sign-off too: a Counter stamped
+// AFTER Rita's edit reopens the leg (the upload's dry-run listed it under "overrides"); an unstamped
+// row (every row today) is older than any edit, so her sign-off stands.
+test("a Counter row stamped after the edit reopens the leg; an unstamped row keeps Rita's sign-off; TDG's act_off always counts", async () => {
+  const d = db();
+  d.exec(`
+    INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off,imported_at) VALUES
+      ('SC-N','kmn','Anthem','Onboard',1,'2026-04-01','2026-11-15','2026-10-03T09:00:00Z'),   -- newer than the edit
+      ('SC-O','kmo','Anthem','Onboard',1,'2026-04-01','2026-11-15',NULL),                      -- the July seed
+      ('SC-A','kma','Anthem','Onboard',1,'2026-04-01','2026-11-15','2026-10-03T09:00:00Z');
+    UPDATE keyman_contract3 SET act_off='2026-09-30' WHERE sc='SC-A';
+    INSERT INTO contract_edit (sc,seq,sign_off,on_key,updated_at) VALUES
+      ('SC-N',1,'2026-10-01','2026-04-01','2026-09-20T10:00:00Z'),
+      ('SC-O',1,'2026-10-01','2026-04-01','2026-09-20T10:00:00Z'),
+      ('SC-A',1,'2026-10-20','2026-04-01','2026-10-04T10:00:00Z');
+  `);
+  const rec = await fetchRecordedSignoffs(envFor(d));
+  assert.equal(rec["SC-N|2026-04-01"], undefined, "the 3 Oct Counter is newer than the 20 Sep edit: the leg is open again, projected 15 Nov");
+  assert.equal(rec["SC-O|2026-04-01"], "2026-10-01", "unstamped row: Rita's recorded sign-off stands");
+  assert.equal(rec["SC-A|2026-04-01"], "2026-09-30", "TDG's own act_off wins over everything");
+});

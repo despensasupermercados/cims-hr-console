@@ -46,7 +46,9 @@ export const COUNTER_LEG_SELECT = `
     FROM keyman_contract3 k
     LEFT JOIN crew c ON c.agency_id = k.sc
     LEFT JOIN vessel v ON lower(v.name) = lower(k.ship)
-    LEFT JOIN contract_edit e ON e.sc = k.sc AND e.seq = k.seq
+    LEFT JOIN contract_edit e ON e.sc = k.sc
+                              AND ((e.on_key IS NOT NULL AND substr(e.on_key,1,10) = substr(k.sign_on,1,10))
+                                   OR (e.on_key IS NULL AND e.seq = k.seq))
     LEFT JOIN ship_leg m ON m.sc = k.sc AND m.on_date = k.sign_on AND m.is_current = 1 AND m.ours = 1
                         AND m.source LIKE 'keyman_roster%'
    WHERE k.sign_on IS NOT NULL

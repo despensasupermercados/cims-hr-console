@@ -1051,7 +1051,7 @@ async function apiKeymanImport(request, env, session) {
     env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, updated_at, on_key FROM contract_edit").all(),
   ]);
   const roster = rosterRes.results;
-  const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
+  const { rows, matched, unmatched, collisions } = buildKeymanRows(parsed, roster);
   // Per-crew row counts today: the total for the preview, and the per-crew shrink flag. A Counter
   // with FEWER contract blocks than the console holds (the 6 Jul 2026 current-roster upload) replaces
   // a crew's history with the file's rows — by design, but never again unannounced (CLAUDE.md §6).
@@ -1076,7 +1076,8 @@ async function apiKeymanImport(request, env, session) {
     return json({
       dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
       contracts: rows.length, currentRows, unparsedDates, shrink, ...report,
-      sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
+      collisions, // two sheet rows on one crew: neither imported (§6)
+      sampleUnmatched: unmatched.filter(u => !u.collision).slice(0, 15).map(u => (u.last + ", " + u.first).trim())
     });
   }
   // Apply: replace contracts for matched crew only. A crew's DELETE and INSERTs travel in the SAME
@@ -1124,7 +1125,7 @@ async function apiKeymanImport(request, env, session) {
     + (okAbsorbed ? ", " + okAbsorbed + " projection" + (okAbsorbed === 1 ? "" : "s") + " absorbed" : "")
     + (droppedOk.size ? ", " + droppedOk.size + " contradicted projection" + (droppedOk.size === 1 ? "" : "s") + " replaced by the file" : "")
     + (conflictsLeft.length ? ", " + conflictsLeft.length + " conflicting projection" + (conflictsLeft.length === 1 ? "" : "s") + " left for review" : ""));
-  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length,
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length, collisions,
     shrank: shrink.length, absorbed, dropped, conflicts: conflictsLeft, overrides: report.overrides.length });
 }
 
@@ -1188,13 +1189,14 @@ async function apiContractCountImport(request, env, session) {
     env.DB.prepare("SELECT sc, completed FROM contract_count").all().catch(() => ({ results: [] })),
     fullContractMap(env).catch(() => ({})),
   ]);
-  const { matched, unmatched } = bridgeCounts(parsed, rosterRes.results || []);
+  const { matched, unmatched, collisions } = bridgeCounts(parsed, rosterRes.results || []);
   const { changes, same } = diffCounts(matched, countMapOf(curRes.results), derived);
   const report = {
     asOf, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
     matched: matched.length, unmatched: unmatched.length, changes, unchanged: same.length,
     duplicates: parsed.duplicates, unparsed: parsed.unparsed,
-    sampleUnmatched: unmatched.slice(0, 20).map((u) => u.name + " (" + (u.id || "no id") + ", " + u.tab + ")"),
+    collisions, // two file rows on one roster crew: neither imported (§6)
+    sampleUnmatched: unmatched.filter((u) => !u.collision).slice(0, 20).map((u) => u.name + " (" + (u.id || "no id") + ", " + u.tab + ")"),
   };
   if (b.dryRun) return json({ dryRun: true, ...report });
   const at = new Date().toISOString(), by = (session && session.email) || "?";
@@ -3871,6 +3873,7 @@ async function previewKeyman(){
   if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+r.error+'</div>';return;}
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
+  if(r.collisions&&r.collisions.length)h+='<div class=hint style="margin-top:8px;color:#B0342F"><b>'+r.collisions.length+' roster crew '+(r.collisions.length===1?'has':'have')+' two sheet rows</b> &mdash; NOT imported until the sheet says one thing:<br>'+r.collisions.map(function(c){return impEsc(c.sc)+': '+c.rows.map(function(x){return impEsc(x.last+', '+x.first)+(x.km?(' ('+impEsc(x.km)+')'):'');}).join(' / ');}).join('<br>')+'</div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
   // What this file does to the board Rita has been working on. Absorbed projections are the loop
   // closing (Miguel, 14 Sep); conflicts and overrides are hers to settle before Apply.
@@ -3963,6 +3966,7 @@ async function previewCount(){
       +r.duplicates.map(function(d){return impEsc(d.id)+': '+d.rows.map(function(x){return impEsc(x.name)+' = '+x.completed+' ('+impEsc(x.tab.toLowerCase())+' row '+x.row+')';}).join(' / ');}).join('<br>')+'</div>';
   if(r.unparsed&&r.unparsed.length)
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsed.length+' row'+(r.unparsed.length===1?'':'s')+' unreadable</b> (skipped):<br>'+r.unparsed.map(function(x){return impEsc(x.tab.toLowerCase())+' row '+x.row+' '+impEsc(x.name)+': \u201c'+impEsc(x.raw)+'\u201d';}).join('<br>')+'</div>';
+  if(r.collisions&&r.collisions.length)h+='<div class=hint style="margin-top:8px;color:#B0342F"><b>'+r.collisions.length+' roster crew '+(r.collisions.length===1?'has':'have')+' two file rows</b> &mdash; NOT imported until the file says one thing:<br>'+r.collisions.map(function(c){return impEsc(c.sc)+': '+c.rows.map(function(x){return impEsc(x.name)+' = '+x.completed+' ('+impEsc(String(x.tab).toLowerCase())+(x.id?(', '+impEsc(x.id)):'')+')';}).join(' / ');}).join('<br>')+'</div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.map(impEsc).join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
   h+='<button class="btn" style="margin-top:10px" onclick="applyCount()">Set the completed-contract count for '+r.matched+' crew</button>';
   $('#imp').innerHTML=h;

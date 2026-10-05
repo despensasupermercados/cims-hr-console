@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normDate, parseContractCounter, parseContractCounterFull, buildBridge, bridgeName, buildKeymanRows, shrinkReport, replacePlan } from "../src/keymanimport.js";
+import { normDate, parseContractCounter, parseContractCounterFull, buildBridge, bridgeName, buildKeymanRows, shrinkReport, replacePlan, firstNameAgrees } from "../src/keymanimport.js";
 
 // ---------------- EXISTING GOLDEN TESTS (unchanged) ----------------
 test("normDate handles ISO, datetime strings, M/D/YYYY, Date objects, and junk", () => {
@@ -164,4 +164,42 @@ test("replacePlan: a crew's DELETE and INSERTs are always in the SAME batch, in 
   assert.equal(p2.length, 1);
   assert.equal(p2[0].length, 8);
   assert.deepEqual(replacePlan([], [], 80), []);
+});
+
+// 5 Oct 2026 review (§6: flag, never pick): the surname-only step put "Garcia, Jose" on the roster's one
+// Garcia, "Maria"; two sheet rows resolving to one crew replaced that crew's contracts row for row.
+test("surname-only matches only when the first names agree; two roster crew on one full key resolve nobody", () => {
+  const b = buildBridge([
+    { agency_id: "SC-G", last_name: "Garcia", first_name: "Maria", ship_crew_id: "400001" },
+    { agency_id: "SC-R", last_name: "Reyes", first_name: "Mark", ship_crew_id: "400002" },
+    { agency_id: "SC-S1", last_name: "Santos", first_name: "Juan", ship_crew_id: null },
+    { agency_id: "SC-S2", last_name: "Santos", first_name: "Juan", ship_crew_id: null },
+  ]);
+  assert.equal(bridgeName({ last: "Garcia", first: "Jose", km: "512345" }, b), null, "a different first name on the only Garcia is NOT Maria");
+  assert.equal(bridgeName({ last: "Garcia", first: "Ma.", km: "" }, b), "SC-G", "the first word / prefix still agrees");
+  assert.equal(bridgeName({ last: "Garcia", first: "", km: "" }, b), "SC-G", "a blank first name cannot disagree");
+  assert.equal(bridgeName({ last: "Reyes", first: "Mark Anthony", km: "512999" }, b), "SC-R", "prefix: Mark Anthony is Mark (today's behaviour)");
+  assert.equal(bridgeName({ last: "Santos", first: "Juan", km: "" }, b), null, "two roster crew share the key: ambiguous, nobody");
+  assert.equal(firstNameAgrees("Almond Christian", "Almond"), true);
+  assert.equal(firstNameAgrees("Jose", "Maria"), false);
+});
+
+test("buildKeymanRows: two sheet rows on one crew are refused together and reported as a collision; a row with no cruise-line id reaches the name ladder", () => {
+  const roster = [{ agency_id: "SC-R", last_name: "Reyes", first_name: "Mark", ship_crew_id: "400002" }, { agency_id: "SC-N", last_name: "Newhire", first_name: "Nina", ship_crew_id: null }];
+  const parsed = [
+    { last: "Reyes", first: "Mark", km: "400002", ship: "Apex", status: "Onboard", contracts: [{ seq: 1, on: "2024-01-01", proj: "2024-07-01" }, { seq: 2, on: "2026-05-01", proj: "2026-11-01" }] },
+    { last: "Reyes", first: "Mark Anthony", km: "512999", ship: "Harmony", status: "Onboard", contracts: [{ seq: 1, on: "2025-01-01", proj: "2025-07-01" }] },
+    { last: "Newhire", first: "Nina", km: "", ship: "Icon", status: "Onboard", contracts: [{ seq: 1, on: "2026-09-01", proj: "2027-03-01" }] },
+  ];
+  const r = buildKeymanRows(parsed, roster);
+  assert.deepEqual(r.matched, ["SC-N"], "only the uncontested crew is imported");
+  assert.equal(r.rows.length, 1);
+  assert.equal(r.rows[0].km, null, "a blank id is stored as NULL, not ''");
+  assert.deepEqual(r.collisions.map((c) => [c.sc, c.rows.length]), [["SC-R", 2]]);
+  assert.equal(r.unmatched.filter((u) => u.collision === "SC-R").length, 2, "both rows are listed so Rita sees what collided");
+  // the parser no longer drops a row whose id cell is blank
+  const aoa = [["", "", "", "", "Newhire", "Nina", "2026-09-01", "2027-03-01", ""]];
+  const p = parseContractCounterFull(aoa);
+  assert.equal(p.crew.length, 1);
+  assert.equal(p.crew[0].km, "");
 });

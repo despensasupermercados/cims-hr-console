@@ -113,3 +113,34 @@ test("the diff says before -> after per crew and carries the date-derived number
   assert.deepEqual([o.before, o.after, o.derived], [1, 2, 1]);
   assert.equal(changes[0].after - (changes[0].before || 0) >= changes[changes.length - 1].after - (changes[changes.length - 1].before || 0), true, "biggest rises first");
 });
+
+// 5 Oct 2026 review: the count file's bridge is the Counter's bridge (one ladder, §6), collisions are
+// refused, and a repeated id is a defect only when the two rows DISAGREE.
+test("bridgeCounts: one ladder with the Counter — a surname with a different first name is unmatched, two rows on one crew are a collision", () => {
+  const roster = [
+    { agency_id: "SC-G", first_name: "Maria", last_name: "Garcia", ship_crew_id: "400001" },
+    { agency_id: "SC-J", first_name: "Juan Carlos", last_name: "Santos", ship_crew_id: null },
+    { agency_id: "SC-M", first_name: "Juan Miguel", last_name: "Santos", ship_crew_id: null },
+  ];
+  const parsed = parseCompletedContracts({
+    ACTIVE: [["CREW ID", "CREW NAME", "COMPLETED CONTRACTS", "POSITION"],
+      ["512345", "Garcia, Jose", "7 Contracts", "Printer Specialist"],
+      ["", "Santos, Juan Carlos", "5 Contracts", "Printer Specialist"],
+      ["400001", "Garcia, Maria", "1 Contract", "Printer Specialist"]],
+    INACTIVE: [["CREW ID", "CREW NAME", "COMPLETED CONTRACTS", "POSITION"],
+      ["PCN: 999", "Garcia, Ma.", "1 Contract", "Printer Specialist"]],
+  });
+  const { matched, unmatched, collisions } = bridgeCounts(parsed, roster);
+  assert.deepEqual(matched.map((m) => [m.name, m.sc]), [["Santos, Juan Carlos", "SC-J"]], "the full first name keys Juan Carlos, not Juan Miguel");
+  assert.ok(unmatched.some((u) => u.name === "Garcia, Jose" && !u.collision), "Jose is not Maria");
+  assert.deepEqual(collisions.map((c) => [c.sc, c.rows.map((r) => r.name)]), [["SC-G", ["Garcia, Maria", "Garcia, Ma."]]], "two rows on Maria: neither imported");
+});
+
+test("parseCompletedContracts: the same id in both tabs with the SAME count is one fact; a disagreeing repeat is still refused", () => {
+  const parsed = parseCompletedContracts({
+    ACTIVE: [["CREW ID", "CREW NAME", "COMPLETED CONTRACTS", "POSITION"], ["111", "Same, Sam", "3 Contracts", "PS"], ["222", "Diff, Dan", "2 Contracts", "PS"]],
+    INACTIVE: [["CREW ID", "CREW NAME", "COMPLETED CONTRACTS", "POSITION"], ["111", "Same, Sam", "3 Contracts", "PS"], ["222", "Diff, Dan", "4 Contracts", "PS"]],
+  });
+  assert.deepEqual(parsed.rows.map((r) => [r.id, r.completed, r.tab]), [["111", 3, "ACTIVE"]]);
+  assert.deepEqual(parsed.duplicates.map((d) => d.id), ["222"]);
+});

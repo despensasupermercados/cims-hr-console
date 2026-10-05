@@ -5,6 +5,7 @@ import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { htmlPage } from "./etag.js";
 import { fetchCurrentCounterLegs } from "./counter_legs.js";
+import { fetchRecordedSignoffs, legWithRecordedSignoff } from "./ship_leg_source.js";
 import { fetchBoardPortDays, fetchAzamaraTurnarounds } from "./port_days.js";
 import { docBadge } from "./keyman_deploy.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
@@ -26,13 +27,25 @@ export function addMonthsISO(d, n) {
 export async function reliefBoardData(env, today) {
   // ONE wave (CLAUDE.md §12). The itinerary is fetched for the card dates only — never the whole
   // 40k-row table (port_days.js, 2026-09-15). Azamara turnarounds come as their own small list.
-  const [cfgRow, pd, taRows, flagRes, legs] = await Promise.all([
+  const [cfgRow, pd, taRows, flagRes, rawLegs, recorded] = await Promise.all([
     env.DB.prepare("SELECT critical_days, due_days FROM relief_window_config WHERE key='default'").first(),
     fetchBoardPortDays(env),
     fetchAzamaraTurnarounds(env, today || new Date().toISOString().slice(0, 10)),
     env.DB.prepare("SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags").all(),
     fetchCurrentCounterLegs(env),
+    fetchRecordedSignoffs(env).catch(() => ({})),
   ]);
+  // THE SAME DEFINITION AS THE BOARD (CLAUDE.md §11, 5 Oct 2026 review): a printer leg Rita has recorded
+  // a sign-off for carries that date, and once it has passed the printer is gone — the banner used to
+  // keep saying "sign-off overdue · no sign-off recorded" on a seat the Keyman card had already released
+  // (Calayag on Navigator).
+  const _today = today || new Date().toISOString().slice(0, 10);
+  const legs = rawLegs.map((l) => {
+    const rec = recorded[(l.sc || "") + "|" + (l.on_date || "")];
+    if (!rec) return l;
+    const eff = legWithRecordedSignoff(l.off_date, true, rec, _today);
+    return { ...l, off_date: eff.off, is_current: eff.is_current ? 1 : 0 };
+  }).filter((l) => Number(l.is_current) === 1);
   const cfg = cfgRow || { critical_days: 14, due_days: 30 };
   const portDaysByShip = groupPortDays(pd);
   // Turnarounds per Azamara ship (crew-change ports), ascending — the sign-off projection candidates.

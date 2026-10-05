@@ -147,7 +147,9 @@ test("relief printers, the backup CSV, the roster export and the board all read 
   const worker = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const roster = readFileSync(new URL("../src/roster_export.js", import.meta.url), "utf8");
   const legsrc = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf8");
-  assert.match(relief, /fetchCurrentCounterLegs\(env\),\s*\n\s*\]\);/, "relief printers (read inside the board's one wave since 15 Sep 2026)");
+  // (5 Oct 2026) the recorded sign-offs ride the same wave: the banner folds them in like the board does
+  assert.match(relief, /fetchCurrentCounterLegs\(env\),\s*\n\s*fetchRecordedSignoffs\(env\)\.catch\(\(\) => \(\{\}\)\),\s*\n\s*\]\);/, "relief printers (read inside the board's one wave since 15 Sep 2026)");
+  assert.match(relief, /legWithRecordedSignoff\(l\.off_date, true, rec, _today\)/, "the printer leg carries Rita's recorded sign-off and goes once it has passed");
   assert.doesNotMatch(relief, /FROM ship_leg l LEFT JOIN crew c ON c\.id = l\.crew_id\s+WHERE l\.is_current = 1 AND l\.ours = 1/, "relief printers still read the snapshot");
   assert.match(worker, /await fetchCurrentCounterLegs\(env\)/, "backup CSV");
   assert.doesNotMatch(worker, /FROM ship_leg l LEFT JOIN crew c/, "backup CSV still reads the snapshot");
