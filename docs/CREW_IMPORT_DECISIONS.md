@@ -53,8 +53,12 @@ TDG's file lags Rita's real moves and is often wrong on ship placement — so it
   Every Apply keeps the file's row per crew (`registry_snapshot`: status + `vessel` exactly as the file said
   them, stamped with the run — a record of the file, not an allocation, so D1 still holds). The Keyman board
   DERIVES each open projection's verdict from it at read time (`src/registry_sync.js`, pure); a crew without
-  a snapshot row yet is read off `crew.status` (the file's, D6; unknown under a manual status edit) + the
-  newest open ship flag — never `crew.vessel_observed`, which the import does not write. Miguel, an hour
+  a snapshot row yet is read off the latest run's status audit row (the file's status even where Rita held
+  the change), else `crew.status` (D6; unknown under a manual status edit), + the newest open ship flag
+  dated by the file that raised it — never `crew.vessel_observed`, which the import does not write; a crew
+  under an open presence flag (absent from the latest file) gets no word. Rows the latest file does not
+  carry leave the snapshot. An open ship flag closes when a later file agrees with the registry (`agree`,
+  closed_file_agrees). Miguel, an hour
   after the first cut wrote the verdict at upload time: "still see no updates in the console" — the board
   must reflect the last upload the moment it is applied. **confirmed** (file: On board, same hull by the
   strict matcher): the card turns green, keeps Rita's dates (the registry carries none) and loses Deploy;

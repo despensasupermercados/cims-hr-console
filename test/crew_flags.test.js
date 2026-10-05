@@ -100,3 +100,17 @@ test("a flag Rita TOOK closes every open flag on that crew, whichever ship they 
   assert.equal(r.counts.closed_taken, 2);
   assert.equal(r.insert.length, 1, "the resolved=1 audit row is still written");
 });
+
+// 5 Oct 2026: an open flag raised by an OLDER file never closed when a later file came back into
+// agreement with the registry (step 2 only walks the new file's conflicts). The Keyman card's registry
+// fallback then read that stale flag as the latest file's word. `agree` closes it.
+test("reconcileShipFlags: an open flag closes when THIS file's vessel agrees with the registry for that crew", () => {
+  const open = [{ id: "f-old", agency_id: "SC-1", new_value: "Odyssey" }, { id: "f-keep", agency_id: "SC-2", new_value: "Apex" }];
+  const r = reconcileShipFlags({ open, incoming: [], boardShip: () => null, shipOf: (s) => s || null, agree: new Set(["SC-1"]) });
+  assert.deepEqual(r.close, [{ id: "f-old", why: "file_agrees" }]);
+  assert.equal(r.counts.closed_file_agrees, 1);
+  assert.equal(r.insert.length, 0);
+  // without `agree` nothing changes (every older caller)
+  const r2 = reconcileShipFlags({ open, incoming: [], boardShip: () => null, shipOf: (s) => s || null });
+  assert.equal(r2.close.length, 0);
+});

@@ -14,15 +14,19 @@ const TODAY = "2026-10-05";
 const shipOf = strictShipMatcher(VESSEL_REF);
 const P = (o) => ({ id: "as_" + o.sc, crew_name: o.sc + " name", planned_sign_off: "2027-04-01", ...o });
 
-test("the file has them ON BOARD the projected ship: confirmed — the loop closes", () => {
+test("the file has them ON BOARD the projected ship: confirmed — the loop closes; a NEXT contract on the same ship is still a plan", () => {
   const { items, counts } = reconcileProjections({
-    projections: [P({ sc: "SC-1", ship: "Jewel", sign_on: "2026-07-20" })],
+    projections: [
+      P({ sc: "SC-1", ship: "Jewel", sign_on: "2026-07-20" }),
+      P({ sc: "SC-1", ship: "Jewel", sign_on: "2027-01-15", id: "as_next" }), // Rita's January contract on the same hull
+    ],
     registry: [{ agency_id: "SC-1", status: "On board", vessel_observed: "MV JEWEL OF THE SEAS" }],
     today: TODAY, shipOf,
   });
-  assert.equal(items.length, 1);
-  assert.equal(items[0].verdict, "confirmed");
-  assert.equal(items[0].file.ship_canon, "Jewel", "the strict hull matcher reads TDG's long name");
+  const by = Object.fromEntries(items.map((i) => [i.id, i]));
+  assert.equal(by["as_SC-1"].verdict, "confirmed");
+  assert.equal(by["as_SC-1"].file.ship_canon, "Jewel", "the strict hull matcher reads TDG's long name");
+  assert.equal(by["as_next"].verdict, "pending", "the file speaks to the CURRENT contract: a future plan on the same ship keeps its Deploy button");
   assert.equal(counts.confirmed, 1);
 });
 
@@ -140,17 +144,26 @@ test("registryFromStore: a crew with no snapshot row is read off the raw crew ro
       { agency_id: "SC-0040153", status: "Earmarked", vessel_observed: "MV SYMPHONY OF THE SEAS" },     // Olid: registry still Symphony
       { agency_id: "SC-0046170", status: "On board", vessel_observed: null },                             // Bornea: registry ship blank, no flag
       { agency_id: "SC-0045531", status: "Earmarked", vessel_observed: "MV JEWEL OF THE SEAS" },        // De Torres: July ship on the row, no flag
+      { agency_id: "SC-H", status: "On board", vessel_observed: null },                                    // Rita HELD the file's Inactive: crew.status kept
+      { agency_id: "SC-M", status: "On board", vessel_observed: null, manual: true },                      // manual status edit: the file's status is unknown
+      { agency_id: "SC-G", status: "On board", vessel_observed: null },                                    // not in the latest file (open presence flag)
     ],
     openFlags: [
       { agency_id: "SC-0040153", new_value: "MV ODYSSEY OF THE SEAS", created_at: "2026-10-04T13:12:10.010Z" },
       { agency_id: "SC-0040153", new_value: "MV LIBERTY OF THE SEAS", created_at: "2026-09-01T00:00:00.000Z" }, // older flag loses
     ],
+    statusAudit: [{ agency_id: "SC-H", new_value: "Inactive" }],
+    absent: [{ agency_id: "SC-G" }],
     lastRun: "2026-10-04T13:12:10.010Z",
   });
   const by = Object.fromEntries(registry.map((r) => [r.agency_id, r]));
   assert.deepEqual(by["SC-0044872"], { agency_id: "SC-0044872", status: "Inactive", vessel_observed: null, run_at: "2026-10-04T13:12:10.010Z", source: "registry" });
   assert.equal(by["SC-0040153"].vessel_observed, "MV ODYSSEY OF THE SEAS", "the file's vessel lives in the newest open ship flag");
+  assert.equal(by["SC-0040153"].run_at, "2026-10-04T13:12:10.010Z", "dated by the file that raised the flag");
   assert.equal(by["SC-0046170"].vessel_observed, null);
+  assert.equal(by["SC-H"].status, "Inactive", "a HELD status change: the file's word is the audit row, not crew.status");
+  assert.equal(by["SC-M"].status, null, "a manual status edit: the file's status is unknown, never crew.status");
+  assert.equal(by["SC-G"], undefined, "a crew the latest file does not carry gets no row: silence is not a verdict");
   assert.equal(by["SC-0045531"].vessel_observed, null, "crew.vessel_observed is NOT the file's vessel (D1 never writes it): a stale July ship must not be named");
   const { items } = reconcileProjections({
     projections: [
@@ -182,4 +195,6 @@ test("registryFromStore: a snapshot row wins over the raw crew row, keeps its ow
   assert.deepEqual(by["SC-1"], { agency_id: "SC-1", status: "On board", vessel_observed: "MV JEWEL OF THE SEAS", run_at: "2026-10-11T09:00:00.000Z", source: "snapshot" });
   assert.equal(by["SC-9"].source, "snapshot");
   assert.equal(registryFromStore({}).length, 0);
+  // a snapshot row for a crew an open presence flag says the latest file does not carry is skipped too
+  assert.equal(registryFromStore({ snapshot: [{ agency_id: "SC-9", status: "On board", vessel: null, run_at: "2026-09-01" }], absent: [{ agency_id: "SC-9" }] }).length, 0);
 });

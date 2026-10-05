@@ -55,7 +55,9 @@ export function reconcileProjections({ projections, registry, today, shipOf } = 
       // On board with no readable vessel: TDG says aboard but not where — nothing to confirm or contradict.
       // On board on ANOTHER hull contradicts a card that says they are aboard HERE; it says nothing against
       // a FUTURE plan (a crew aboard Quantum today with a Utopia plan for January is exactly normal).
-      verdict = sameShip ? "confirmed" : fileShip ? (aboardByCard ? "elsewhere" : "pending") : "pending";
+      // On board on THIS hull confirms only a card that says they are aboard NOW: a NEXT contract Rita
+      // projected on the same ship for January is still a plan — the file speaks to the current contract.
+      verdict = sameShip ? (aboardByCard ? "confirmed" : "pending") : fileShip ? (aboardByCard ? "elsewhere" : "pending") : "pending";
     } else if (status === "Earmarked") {
       verdict = sameShip ? "earmarked" : fileShip ? (aboardByCard ? "ashore" : "elsewhere") : (aboardByCard ? "ashore" : "pending");
     } else if (status === "On Vacation" || status === "Inactive") {
@@ -97,11 +99,16 @@ export function projectionSummary(counts) {
 // vessel differs from the registry. From now on each apply also keeps a per-crew snapshot of the file's
 // row (registry_snapshot); until a crew has one, the raw crew row + the latest open ship flag stand in.
 //
-// snapshot  : registry_snapshot rows [{ agency_id, status, vessel, run_at }] (the column is `vessel`: it is the FILE's word, not an allocation)
-// crew      : RAW crew rows before derivation / override merge [{ agency_id, status, vessel_observed }]
-// openFlags : open ship flags [{ agency_id, new_value, created_at }]
-// lastRun   : when the last registry file was applied (import_run.run_at), for the fallback's date
-export function registryFromStore({ snapshot, crew, openFlags, lastRun } = {}) {
+// snapshot    : registry_snapshot rows [{ agency_id, status, vessel, run_at }] (the column is `vessel`: it is the FILE's word, not an allocation)
+// crew        : RAW crew rows before derivation / override merge [{ agency_id, status, vessel_observed, manual }]
+//               (`manual` = a crew_override.status is live, so crew.status is NOT the file's)
+// openFlags   : open ship flags [{ agency_id, new_value, created_at }]
+// statusAudit : the LATEST run's status audit rows [{ agency_id, new_value }] — written for every status
+//               change the file brought, accepted OR held (crew_apply D3/D6), so new_value is the file's
+//               word even when Rita held it and crew.status kept the old value
+// absent      : agency ids the latest file did NOT carry (open 'presence' flags) — silence is not a verdict
+// lastRun     : when the last registry file was applied (import_run.run_at), for the fallback's date
+export function registryFromStore({ snapshot, crew, openFlags, statusAudit, absent, lastRun } = {}) {
   const snap = {};
   for (const r of (snapshot || [])) if (r && r.agency_id) snap[r.agency_id] = r;
   const flag = {};
@@ -110,24 +117,36 @@ export function registryFromStore({ snapshot, crew, openFlags, lastRun } = {}) {
     const cur = flag[f.agency_id];
     if (!cur || String(f.created_at || "") > String(cur.created_at || "")) flag[f.agency_id] = f;
   }
+  const audit = {};
+  for (const a of (statusAudit || [])) if (a && a.agency_id && !(a.agency_id in audit)) audit[a.agency_id] = a;
+  const gone = new Set((absent || []).map((x) => (x && x.agency_id) || x).filter(Boolean));
   const out = [];
   const seen = new Set();
   for (const c of (crew || [])) {
     if (!c || !c.agency_id || seen.has(c.agency_id)) continue;
     seen.add(c.agency_id);
+    if (gone.has(c.agency_id)) continue;                 // the latest file does not carry them: no word
     const s = snap[c.agency_id];
     if (s) { out.push({ agency_id: c.agency_id, status: s.status || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, source: "snapshot" }); continue; }
-    // FALLBACK: the status is the file's (D6 writes it on every upload), but crew.vessel_observed is NOT
-    // the file's vessel — the import never writes it (D1), so it can be months stale (De Torres: 'MV
-    // JEWEL OF THE SEAS' from July while the file has him earmarked elsewhere). Only an OPEN ship flag
-    // carries the file's vessel; without one the ship is unknown — never confirm, never name a hull.
+    // FALLBACK, for a crew with no snapshot row yet. The status is the file's: the latest run's audit
+    // row where the file changed it (accepted or HELD — a held change leaves crew.status at the old
+    // value), else crew.status (D6 writes it on every upload), unknown under a manual status edit.
+    // crew.vessel_observed is NOT the file's vessel — the import never writes it (D1), so it can be
+    // months stale (De Torres: 'MV JEWEL OF THE SEAS' from July while the file has him earmarked
+    // elsewhere). Only an OPEN ship flag carries the file's vessel, and it is dated by the file that
+    // raised it (an older flag stays open when a later file comes back into agreement, see
+    // crew_flags.reconcileShipFlags `agree`); without one the ship is unknown — never confirm, never
+    // name a hull.
     const f = flag[c.agency_id];
+    const a = audit[c.agency_id];
     out.push({
-      agency_id: c.agency_id, status: c.status || null,
+      agency_id: c.agency_id,
+      status: a ? (a.new_value || null) : (c.manual ? null : (c.status || null)),
       vessel_observed: (f && f.new_value) || null,
-      run_at: lastRun || null, source: "registry",
+      run_at: (f && f.new_value && f.created_at) ? f.created_at : (lastRun || null),
+      source: "registry",
     });
   }
-  for (const id in snap) if (!seen.has(id)) out.push({ agency_id: id, status: snap[id].status || null, vessel_observed: snap[id].vessel || null, run_at: snap[id].run_at || null, source: "snapshot" });
+  for (const id in snap) if (!seen.has(id) && !gone.has(id)) out.push({ agency_id: id, status: snap[id].status || null, vessel_observed: snap[id].vessel || null, run_at: snap[id].run_at || null, source: "snapshot" });
   return out;
 }

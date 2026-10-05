@@ -139,11 +139,16 @@ export async function apiCrewImportApply(request, env, deps) {
     openProjections(env, deps),
   ]);
   const board_unavailable = !!(deps && deps.boardLegs) && legs == null;
-  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF });
-  const openInserted = flags.insert.filter(c => c.resolved === 0).length;
-  // Rita's projections against the file (registry_sync.js): the projections are read HERE, so only an
-  // open assignment this route found can be written; the file's word per crew is the one staged.
+  // Rita's projections against the file (registry_sync.js), for the response; the file's word per crew
+  // is the one staged (review.registry), kept below as the snapshot.
   const registry = Array.isArray(body.review && body.review.registry) ? body.review.registry : [];
+  // Crew whose vessel in this file AGREES with the registry: the file names a vessel and the plan raised
+  // no ship flag for them. Their older open flags close (crew_flags `agree`). A blank vessel in the file
+  // says nothing and closes nothing.
+  const flaggedNow = new Set(plan.conflicts.filter(c => c.field === "vessel_observed").map(c => c.agency_id));
+  const agree = new Set(registry.filter(r => r && r.agency_id && r.vessel_observed && !flaggedNow.has(r.agency_id)).map(r => String(r.agency_id)));
+  const flags = reconcileShipFlags({ open: openRes.results || [], incoming: plan.conflicts, boardShip: boardShipsFromLegs(legs || [], today, SHIP_OF), shipOf: SHIP_OF, agree });
+  const openInserted = flags.insert.filter(c => c.resolved === 0).length;
   const proj = reconcileProjections({ projections: projections || [], registry, today, shipOf: SHIP_OF });
 
   const importRunId = crypto.randomUUID();
@@ -201,10 +206,16 @@ export async function apiCrewImportApply(request, env, deps) {
   // green by itself; one it contradicts is flagged ON THE CARD; nothing is removed (§6: flag, never
   // silently fix). crew, Counter and override rows are untouched, and the Counter still absorbs the
   // card when it finally carries the leg.
+  let kept = 0;
   for (const r of registry) {
     if (!r || !r.agency_id) continue;
     stmts.push(env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, run_at, importRunId));
+    kept++;
   }
+  // A crew the latest file does NOT carry has no word in it: their old snapshot row goes, so the board
+  // never shows a previous file's verdict as current (silence is not a verdict). Only when this body
+  // actually carried the file's rows — an empty list (an old cached page) must not wipe the table.
+  if (kept) stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(importRunId));
 
   const results = await env.DB.batch(stmts);
   // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
@@ -232,6 +243,7 @@ export function applySummary(r) {
   if (f.closed_superseded) closed.push(n(f.closed_superseded, "superseded by this file", "superseded by this file"));
   if (f.closed_dismissed) closed.push(n(f.closed_dismissed, "dismissed", "dismissed"));
   if (f.closed_taken) closed.push(n(f.closed_taken, "settled by taking the file's ship", "settled by taking the file's ship"));
+  if (f.closed_file_agrees) closed.push(n(f.closed_file_agrees, "the file now agrees with the registry", "the file now agrees with the registry"));
   if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
   if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");

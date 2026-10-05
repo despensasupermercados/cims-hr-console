@@ -381,7 +381,7 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
   const b = src.slice(src.indexOf("async function rotationSections("), src.indexOf("const sections = Object.values(shipNames)"));
   // The file's word is READ, never a verdict column written at upload: the board reflects the last
   // upload the moment it is applied (Miguel, 5 Oct: "still see no updates in the console").
-  assert.match(b, /const rawReg = crewRows\.map\(\(c\) => \{ const o = ovMap\[c\.agency_id\]; const manual = !!\(o && o\.status != null && o\.status !== ""\); return \{ agency_id: c\.agency_id, status: manual \? null : c\.status, vessel_observed: c\.vessel_observed \}; \}\);/, "the RAW registry row is captured before the override merge and the schedule derivation; a manual status edit means the file's status is unknown");
+  assert.match(b, /const rawReg = crewRows\.map\(\(c\) => \{ const o = ovMap\[c\.agency_id\]; return \{ agency_id: c\.agency_id, status: c\.status, vessel_observed: c\.vessel_observed, manual: !!\(o && o\.status != null && o\.status !== ""\) \}; \}\);/, "the RAW registry row is captured before the override merge and the schedule derivation, flagged when a manual status edit is live");
   assert.ok(b.indexOf("const rawReg = crewRows.map(") < b.indexOf("for (const c of crewRows) if (ovVessel[c.agency_id])"), "captured BEFORE manual ships are merged in");
   assert.ok(b.indexOf("const rawReg = crewRows.map(") < b.indexOf("c.status = crewStatus("), "captured BEFORE status is derived");
   assert.match(b, /const registry = registryFromStore\(\{/);
@@ -392,7 +392,9 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
   const at = b.indexOf("= await Promise.all([");
   const wave = b.slice(at, b.indexOf("]);", at));
   assert.match(wave, /FROM registry_snapshot/);
-  assert.match(wave, /FROM sync_conflict WHERE field='vessel_observed' AND resolved=0/);
+  assert.match(wave, /FROM sync_conflict WHERE \(field='vessel_observed' AND resolved=0\) OR \(field='presence' AND resolved=0\) OR \(field='status' AND import_run_id=\(SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1\)\)/, "open ship flags, open presence flags and the latest run's status audit: one read");
+  assert.match(b, /statusAudit: sc\.filter\(\(r\) => r\.field === "status"\),/);
+  assert.match(b, /absent: sc\.filter\(\(r\) => r\.field === "presence"\),/);
   assert.match(wave, /SELECT MAX\(run_at\) AS run_at FROM import_run/);
   // the roster-loop card (an aboard projection the schedule already places) and the projection-loop card
   assert.match(b, /assignment_id: cardAsg\[c\.agency_id \+ "\|" \+ k\] \|\| null, registry: regOf\(cardAsg\[c\.agency_id \+ "\|" \+ k\]\), confirmed: regConfirmed\(cardAsg\[c\.agency_id \+ "\|" \+ k\]\),/);

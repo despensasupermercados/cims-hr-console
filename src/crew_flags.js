@@ -38,7 +38,12 @@ export function strictShipMatcher(vesselRef) {
 // incoming:  ALL conflicts the apply plan wants to write (any field, any resolved)
 // boardShip: (agency_id) -> canonical short ship the live board places the crew on today, or null
 // shipOf:    (raw vessel string) -> canonical short ship, or null when unknown
-export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf }) {
+// agree:     agency ids whose vessel in THIS file equals the registry's (no ship flag raised) — their
+//            open flags were raised by an OLDER file that has since come back into agreement, so they
+//            close (5 Oct 2026: nothing closed them before, and the Keyman card's registry fallback
+//            read the stale flag as the latest file's word)
+export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf, agree }) {
+  const agreed = agree instanceof Set ? agree : new Set(agree || []);
   // Equality key for "same ship": the strict hull name when known, else the normalised raw text
   // (so two identical unknown strings still dedupe; an unknown never equals a board ship).
   const canon = (v) => (v == null || v === "" ? null : (shipOf(v) || ("raw:" + normShip(v))));
@@ -47,13 +52,15 @@ export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf
   const openBySc = {};
   for (const o of open) (openBySc[o.agency_id] = openBySc[o.agency_id] || []).push(o);
   const closeRow = (o, why) => { if (closed.has(o.id)) return; closed.add(o.id); close.push({ id: o.id, why }); };
-  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, closed_taken: 0, skipped_board_matches: 0, skipped_duplicate: 0 };
+  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, closed_taken: 0, closed_file_agrees: 0, skipped_board_matches: 0, skipped_duplicate: 0 };
 
   // 1) Open flags the board already satisfies: the crew is on the ship the file named.
   for (const o of open) {
     const b = boardShip(o.agency_id);
     if (b && canon(o.new_value) === b) closeRow(o, "board_matches");
   }
+  // 1b) Open flags for a crew whose vessel in THIS file agrees with the registry: the disagreement is over.
+  for (const o of open) if (agreed.has(o.agency_id)) closeRow(o, "file_agrees");
   // 2) This import's flags.
   for (const c of incoming) {
     if (c.field !== "vessel_observed") { insert.push(c); continue; }

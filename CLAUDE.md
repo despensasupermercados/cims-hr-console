@@ -189,11 +189,16 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   uploads because that import never looked at the board. The verdict is DERIVED in `rotationSections`,
   like status — never a column written at upload: each apply keeps the file's row per crew
   (`registry_snapshot`: status + `vessel` as the file said them, stamped with the run; the column is
-  `vessel`, not an allocation — D1 holds), and a crew without a row yet is read off `crew.status` (the
-  file's, D6; unknown under a manual status edit) + the newest OPEN ship flag — never
-  `crew.vessel_observed`, which the import does not write and which can be months stale. Verdicts:
-  **confirmed** (file: On board, same hull by the strict matcher) draws GREEN, keeps Rita's dates (the
-  registry has none) and offers no Deploy; **elsewhere** (the card says aboard HERE, the file has them
+  `vessel`, not an allocation — D1 holds; rows the latest file does not carry are removed), and a crew
+  without a row yet is read off the latest run's status audit row (the file's status even where Rita HELD
+  it), else `crew.status` (D6; unknown under a manual status edit), + the newest OPEN ship flag dated by
+  the file that raised it — never `crew.vessel_observed`, which the import does not write and which can
+  be months stale; a crew under an open `presence` flag (absent from the latest file) gets no word at all.
+  An open ship flag now closes when a later file agrees with the registry (`reconcileShipFlags` `agree`).
+  Verdicts:
+  **confirmed** (file: On board, same hull by the strict matcher, and the card says aboard NOW — a next
+  contract projected on the same hull stays a plan) draws GREEN, keeps Rita's dates (the registry has
+  none) and offers no Deploy; **elsewhere** (the card says aboard HERE, the file has them
   aboard elsewhere — or TDG earmarks them elsewhere) and **ashore** (card aboard, file On Vacation /
   Inactive / Earmarked) stay yellow and print the file's word; **earmarked / pending** inform — a crew
   aboard one hull today with a FUTURE plan on another is normal, not a contradiction. Nothing is removed;

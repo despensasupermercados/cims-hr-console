@@ -1681,7 +1681,10 @@ async function rotationSections(env) {
     // the kept snapshot, the open ship flags (the file's vessel where it differs from the registry), and
     // when the last registry file was applied. Same wave, three small reads (§12).
     env.DB.prepare("SELECT agency_id, status, vessel, run_at FROM registry_snapshot").all().catch(() => ({ results: [] })),
-    env.DB.prepare("SELECT agency_id, new_value, created_at FROM sync_conflict WHERE field='vessel_observed' AND resolved=0").all().catch(() => ({ results: [] })),
+    // open ship flags (the file's vessel where it differs from the registry) · the LATEST run's status
+    // audit rows (the file's status even where Rita held the change) · open presence flags (crew the
+    // latest file does not carry) — one read, three fields
+    env.DB.prepare("SELECT agency_id, field, new_value, created_at FROM sync_conflict WHERE (field='vessel_observed' AND resolved=0) OR (field='presence' AND resolved=0) OR (field='status' AND import_run_id=(SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1))").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT MAX(run_at) AS run_at FROM import_run").all().catch(() => ({ results: [] })),
   ]);
   // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
@@ -1703,8 +1706,8 @@ async function rotationSections(env) {
   // The RAW registry row (status + vessel as the last import left them), captured before the override
   // merge and the schedule derivation below: it is the fallback word of the file for a crew with no
   // registry_snapshot row yet (registry_sync.registryFromStore).
-  // A crew with a MANUAL status edit has no file status on the row (D3 keeps the manual value): unknown.
-  const rawReg = crewRows.map((c) => { const o = ovMap[c.agency_id]; const manual = !!(o && o.status != null && o.status !== ""); return { agency_id: c.agency_id, status: manual ? null : c.status, vessel_observed: c.vessel_observed }; });
+  // `manual` = a crew_override.status is live, so crew.status is NOT the file's (D3 keeps the manual value).
+  const rawReg = crewRows.map((c) => { const o = ovMap[c.agency_id]; return { agency_id: c.agency_id, status: c.status, vessel_observed: c.vessel_observed, manual: !!(o && o.status != null && o.status !== "") }; });
   for (const c of crewRows) if (ovVessel[c.agency_id]) c.vessel_observed = ovVessel[c.agency_id]; // manual edits win
   const schedMap = scheduleBySc(HIST);
   for (const c of crewRows) c.status = crewStatus(c, ovMap[c.agency_id], schedMap[c.agency_id], today); // auto status (On board / On Vacation), retired/manual win
@@ -1821,8 +1824,12 @@ async function rotationSections(env) {
   const regByAsg = {};
   {
     const lastRun = ((runRes && runRes.results) || [])[0];
+    const sc = (flagRes && flagRes.results) || [];
     const registry = registryFromStore({
-      snapshot: (snapRes && snapRes.results) || [], crew: rawReg, openFlags: (flagRes && flagRes.results) || [],
+      snapshot: (snapRes && snapRes.results) || [], crew: rawReg,
+      openFlags: sc.filter((r) => r.field === "vessel_observed"),
+      statusAudit: sc.filter((r) => r.field === "status"),
+      absent: sc.filter((r) => r.field === "presence"),
       lastRun: (lastRun && lastRun.run_at) || null,
     });
     const regAt = {}; for (const r of registry) regAt[r.agency_id] = r;
