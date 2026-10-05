@@ -114,6 +114,10 @@ export function mapRowFull(row) {
     middle_name: pick(row, ["middle"]) || null,
     last_name: pick(row, ["last name", "lastname", "surname"]) || null,
     status: normalizeStatus(pick(row, ["status"])),
+    // The file's OWN status word (5 Oct 2026). normalizeStatus reads four words; anything else used to
+    // become null and vanish ("blank in source = don't clobber"), leaving crew.status at an older value
+    // with no trace. Kept for the board's copy of the file only — not in TRACK, never written to crew.
+    status_raw: pick(row, ["status"]) || null,
     rank_observed: pick(row, ["rank", "position", "rating"]) || null,
     vessel_observed: pick(row, ["vessel", "ship"]) || null,
     dob: date("dob"),

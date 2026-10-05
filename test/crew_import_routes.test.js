@@ -270,7 +270,7 @@ test("stage lists every open projection against the file, and carries the file's
   assert.equal(stage.review.projections.length, 1);
   assert.equal(stage.review.projections[0].verdict, "confirmed", "the file has SC-1 On board Celebrity Apex: the Apex card is confirmed");
   assert.equal(stage.review.projection_counts.confirmed, 1);
-  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex" }]);
+  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex", name: "Jomar Dela Cruz", status_raw: "On board" }]);
   assert.equal(env.DB._batched.length, 0, "stage still writes nothing");
 });
 
@@ -283,11 +283,12 @@ test("apply keeps the file's word per crew (registry_snapshot) — and still nev
   assert.equal(body.projections.counts.confirmed, 1);
   assert.match(body.summary, /1 projection confirmed aboard by the file/);
   const st = env.DB._batched;
-  const snap = st.filter(s => /INSERT INTO registry_snapshot \(agency_id, status, vessel, run_at, import_run_id\)/.test(s.sql));
+  const snap = st.filter(s => /INSERT INTO registry_snapshot \(agency_id, status, vessel, run_at, import_run_id, name, raw_status\)/.test(s.sql));
   assert.equal(snap.length, 1, "one row per crew the file carried");
   assert.equal(snap[0].args[0], "SC-1");
   assert.equal(snap[0].args[1], "On board");
   assert.equal(snap[0].args[2], "Celebrity Apex");
+  assert.deepEqual(snap[0].args.slice(5), ["Jomar Dela Cruz", "On board"], "the file's own name and status word are kept");
   assert.match(snap[0].sql, /ON CONFLICT\(agency_id\) DO UPDATE SET status=excluded\.status, vessel=excluded\.vessel, run_at=excluded\.run_at/, "the latest file is the latest word");
   assert.equal(st.some(s => /UPDATE assignment/.test(s.sql)), false, "no verdict is written on the card: the board derives it at read time");
   assert.equal(st.some(s => /vessel_observed=/.test(s.sql)), false, "D1 still holds: the registry never writes a ship");
@@ -379,4 +380,55 @@ test("stage: the same agency id twice in one file is reported and only the last 
   const stage2 = await (await apiCrewImportStage(req({ rows: rows2, file_hash: "h-rk" }), env2)).json();
   assert.equal(stage2.review.groups.rekeyed.length, 1);
   assert.deepEqual(stage2.review.registry.map(r => r.agency_id), ["SC-1"], "carried under the real agency id, not the id the file used");
+});
+
+// THE SAME FILE, DROPPED AGAIN, FILLS THE BOARD'S COPY (Miguel, 5 Oct 2026: "I dont think so u are
+// reading well the tdg file"). The 5 Oct upload ran before the console kept a copy of the file.
+function redropDB({ runs, held = 0, existing = EXISTING }) {
+  const batched = [];
+  const latest = [...runs].sort((a, b) => (a.run_at < b.run_at ? 1 : -1))[0];
+  const route = (sql, args) => {
+    if (/SELECT 1 AS x FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.some(r => r.file_hash === args[0]) ? { x: 1 } : null };
+    if (/SELECT id, run_at FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.find(r => r.file_hash === args[0]) || null };
+    if (/SELECT id FROM import_run ORDER BY run_at DESC/i.test(sql)) return { __first: latest ? { id: latest.id } : null };
+    if (/COUNT\(\*\) AS n FROM registry_snapshot WHERE import_run_id/i.test(sql)) return { __first: { n: held } };
+    if (/FROM crew_override/i.test(sql)) return { __all: { results: [] } };
+    if (/FROM crew\b/i.test(sql)) return { __all: { results: existing } };
+    return { __first: null, __all: { results: [] } };
+  };
+  const mk = (sql, args = []) => ({ sql, args, bind(...a) { return mk(sql, a); }, async first() { return route(sql, args).__first ?? null; }, async all() { return route(sql, args).__all ?? { results: [] }; } });
+  return { _batched: batched, prepare(sql) { return mk(sql); }, async batch(st) { batched.push(...st); return st.map(() => ({ success: true })); } };
+}
+const RUNS = [
+  { id: "run-oct4", file_hash: "h-oct4", run_at: "2026-10-04T13:12:10.010Z" },
+  { id: "run-oct5", file_hash: "h-oct5", run_at: "2026-10-05T18:54:18.694Z" },
+];
+const ensured = { ensureRegistrySnapshot: async () => {} };
+
+test("re-drop of the LATEST applied file keeps the board's copy under that run, and touches nothing else", async () => {
+  const env = { DB: redropDB({ runs: RUNS }) };
+  const body = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-oct5" }), env, ensured)).json();
+  assert.equal(body.ok, false);
+  assert.equal(body.error, "already_processed");
+  assert.equal(body.snapshot_saved, 1);
+  const st = env.DB._batched;
+  const snap = st.filter(s => /INSERT INTO registry_snapshot/.test(s.sql));
+  assert.equal(snap.length, 1);
+  assert.deepEqual(snap[0].args, ["SC-1", "On board", "Celebrity Apex", "2026-10-05T18:54:18.694Z", "run-oct5", "Jomar Dela Cruz", "On board"], "dated by the run that applied the file, not by the re-drop");
+  const del = st.find(s => /DELETE FROM registry_snapshot WHERE import_run_id IS NOT \?/.test(s.sql));
+  assert.equal(del.args[0], "run-oct5");
+  assert.equal(st.some(s => /INTO import_run|UPDATE crew|INSERT INTO crew|sync_conflict|crew_override/.test(s.sql)), false, "no crew row, flag, status or run is written again");
+});
+
+test("re-drop: an OLDER file, a file already copied, or no guard (tests, tools) keeps nothing", async () => {
+  for (const [db, hash, deps] of [
+    [redropDB({ runs: RUNS }), "h-oct4", ensured],             // an older file never overwrites the newer word
+    [redropDB({ runs: RUNS, held: 104 }), "h-oct5", ensured],  // the board already holds this file
+    [redropDB({ runs: RUNS }), "h-oct5", undefined],           // no ensure dep: the old refusal, unchanged
+  ]) {
+    const env = { DB: db };
+    const body = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: hash }), env, deps)).json();
+    assert.deepEqual(body, { ok: false, error: "already_processed" });
+    assert.equal(env.DB._batched.length, 0);
+  }
 });

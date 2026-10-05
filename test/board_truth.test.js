@@ -18,7 +18,7 @@ test("fileWordBySc: the file's status and hull per crew, canonicalised; an unkno
     { agency_id: "CAL", status: "On board", vessel_observed: null, vessel_unknown: true, run_at: "2026-10-05T18:54:18Z" },
     { agency_id: "ODD", status: "On board", vessel_observed: "MV NOWHERE", run_at: "2026-10-05T18:54:18Z" },
   ], { shipOf, keyOf, valid });
-  assert.deepEqual(f.SAN, { status: "On board", raw: "MV WONDER OF THE SEAS", ship: "Wonder", key: "wonder", known: true, at: "2026-10-05", vesselAt: "2026-09-26", hullUnknown: false, source: "registry" });
+  assert.deepEqual(f.SAN, { status: "On board", raw: "MV WONDER OF THE SEAS", ship: "Wonder", key: "wonder", known: true, at: "2026-10-05", vesselAt: "2026-09-26", hullUnknown: false, source: "registry", name: null, rawStatus: null, onRoster: true });
   assert.equal(f.CAL.ship, null); assert.equal(f.CAL.hullUnknown, true);
   assert.equal(f.ODD.known, false);
 });
@@ -101,4 +101,43 @@ test("boardIssues: a status held by Rita, an unknown ship, On board with no ship
   assert.equal(t.C.kind, "onboard_no_ship");
   assert.equal(t.D.text, "Your status edit: Earmarked · TDG file 2026-10-05: On Vacation");
   assert.deepEqual(boardIssues({}), []);
+});
+
+// Miguel, 5 Oct 2026: "I dont think so u are reading well the tdg file". The list printed hulls rebuilt
+// from change flags under the latest file's date (Gayda: "TDG file 2026-10-05: Inactive, Voyager" — Voyager
+// was named 22 Aug). Until the console keeps a copy of the file, no row may claim to be the file.
+test("boardIssues: a rebuilt hull carries the date it was named; with no file kept the empty-hull row says so", () => {
+  const rows = boardIssues({
+    today: TODAY, fileKept: false,
+    crew: [{ sc: "GAY", name: "Cherry Blair Gayda" }],
+    file: { GAY: W("Inactive", "Voyager", { vesselAt: "2026-08-22" }) },
+    cards: [{ sc: "GAY", name: "Cherry Blair Gayda", ship: "Jewel", key: "jewel", aboard: true, on: "2026-07-20", verdict: "ashore", at: "2026-10-05", fileStatus: "Inactive", fileShip: "Voyager" }],
+    sections: [{ ship: "Jewel", key: "jewel", seated: false, aboardCards: ["ashore"] }],
+  });
+  const t = Object.fromEntries(rows.map((r) => [r.kind, r.text]));
+  assert.equal(t.empty_hull, "Nobody on board in the TDG uploads the console kept · your card here is contradicted");
+  assert.equal(t.contradicted, "Your card: aboard Jewel since 2026-07-20 · TDG file 2026-10-05: Inactive, Voyager (ship named 2026-08-22)");
+  // a kept copy (no vesselAt) reads as the file, undated hull
+  const kept = boardIssues({ today: TODAY, crew: [], sections: [{ ship: "Xcel", key: "xcel", seated: false, aboardCards: [] }] });
+  assert.equal(kept[0].text, "Nobody on board per the TDG file");
+});
+
+test("boardIssues: a file row the roster does not carry is listed by the file's own name; an unreadable status word is listed, never dropped", () => {
+  const rows = boardIssues({
+    today: TODAY,
+    crew: [{ sc: "SC-1", name: "Mara Tangonan", shown: "On board" }],
+    file: {
+      "SC-1": W(null, "Summit", { rawStatus: "Signed Off" }),
+      "SC-9": W("On board", "Jewel", { name: "Jaramiz Tuazon", onRoster: false }),
+    },
+  });
+  const by = Object.fromEntries(rows.map((r) => [r.kind, r]));
+  assert.equal(by.file_only.name, "Jaramiz Tuazon");
+  assert.equal(by.file_only.ship, "Jewel");
+  assert.equal(by.file_only.text, "In the TDG file 2026-10-05 as SC-9 · not on the console roster · On board, Jewel");
+  assert.equal(by.status_unread.text, "TDG file 2026-10-05 status 'Signed Off' is not one the console reads · it still shows On board");
+  const hid = boardIssues({ today: TODAY, crew: [], file: { "SC-0046233": W("On board", "Serenade", { name: "Ariel Encina", onRoster: false, hidden: true }) } });
+  assert.equal(hid[0].text, "In the TDG file 2026-10-05 as SC-0046233 · hidden on the console · On board, Serenade", "a hidden crew is on the roster, just hidden");
+  // a row built without onRoster (every caller before 5 Oct) is on the roster
+  assert.equal(boardIssues({ today: TODAY, crew: [], file: { X: W("On board", "Jewel") } }).length, 0);
 });

@@ -114,3 +114,11 @@ test("normalizeDate text fallback rejects fragments and bare numbers", () => {
   assert.equal(normalizeDate("23 Sep 2034"), "2034-09-23");
   assert.equal(normalizeDate("September 23, 2034"), "2034-09-23");
 });
+
+test("a status word the console cannot read is kept as the file wrote it (status_raw), never diffed or written", () => {
+  const m = mapRow({ "CREW ID": "SC-1", "CREW STATUS": "Signed Off", "VESSEL NAME": "MV SUMMIT" });
+  assert.equal(m.status, null);
+  assert.equal(m.status_raw, "Signed Off");
+  const d = diffCrew([m], { "SC-1": { agency_id: "SC-1", status: "On board", vessel_observed: "MV SUMMIT" } });
+  assert.equal(d.change.length, 0, "status_raw is not a tracked field: nothing reaches crew");
+});
