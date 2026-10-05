@@ -48,6 +48,17 @@ TDG's file lags Rita's real moves and is often wrong on ship placement — so it
   the no-dated-leg fallback; the crew list, dashboard, compliance view, feedback board and scoring queue
   still DERIVE status from the live schedule, so D6 does not change what they show for a crew member who has
   a board leg — it fixes the email/fallback and the stored value, not the schedule-derived views.
+- **D8** (2026-10-05, Miguel, Jewel: "if the person is onboard .. and if rita has already a card in there ..
+  it should automatically compare with what the tdg file has and deploy it and remove the one in draft").
+  Every upload compares each OPEN Keyman projection with the file (`src/registry_sync.js`, pure) and writes
+  the verdict onto that assignment on Apply — never onto crew, the Counter or an override. **confirmed**
+  (file: On board, same hull by the strict matcher): the card turns green, keeps Rita's dates (the registry
+  carries none) and loses Deploy; the Counter absorbs it later as before. **elsewhere** (file: another hull)
+  and **ashore** (card aboard, file On Vacation / Inactive / earmarked elsewhere): flagged on the card,
+  nothing removed (§6). **earmarked** / **pending**: informational. A crew the file does not carry gets no
+  verdict. Shown in the review (read-only), counted in the apply sentence. The projections come to the
+  importer only through `deps.openProjections` (the worker's `fetchOpenAssignments`); D1 still holds — the
+  registry never writes a ship.
 
 ## E. UX principles ("Review & Apply")
 - Upload is a **proposal Rita ratifies** (Word tracked-changes model). Nothing saves until Apply.

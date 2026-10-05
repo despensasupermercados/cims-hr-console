@@ -213,7 +213,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs }); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections }); if (ci) return ci; }
         // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
         // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
         // human does. Inside the boundary and behind the session gate (§11). Inert until
@@ -1658,7 +1658,7 @@ async function apiRotation(env) { return json(await rotationSections(env)); }
 async function rotationSections(env) {
   // PERF (2026-07): ensures first (concurrently), then ALL independent reads in one concurrent
   // wave instead of 7 sequential Worker->D1 round trips. Same statements, same downstream logic.
-  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env)]);
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureProjectionRegistry(env)]);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
@@ -1798,6 +1798,21 @@ async function rotationSections(env) {
     cardSrc[h.sc + "|" + k2] = h.source === "assignment" ? "yellow" : "green";
     if (h.assignment_id) cardAsg[h.sc + "|" + k2] = h.assignment_id;
   }
+  // What the last AdvancedQuery upload said about each OPEN assignment (registry_sync.js, 5 Oct 2026),
+  // keyed by assignment id so BOTH card paths carry it: a projection the schedule already places
+  // (aboard — drawn by the roster loop, Gayda on Jewel) and one drawn by the projection loop below.
+  // A 'confirmed' verdict is the loop closing from the registry side: the card draws green, keeps
+  // Rita's dates until the Counter carries the leg, and offers no Deploy (TDG has them aboard).
+  const regByAsg = {};
+  for (const a of (openAsg || [])) {
+    if (!a || !a.id || !a.registry_verdict) continue;
+    regByAsg[a.id] = {
+      verdict: a.registry_verdict, status: a.registry_status || null, ship: a.registry_ship ? (shipOf(a.registry_ship) || a.registry_ship) : null,
+      at: String(a.registry_at || "").slice(0, 10) || null, confirmedAt: String(a.registry_confirmed_at || "").slice(0, 10) || null,
+    };
+  }
+  const regOf = (asgId) => (asgId && regByAsg[asgId]) || null;
+  const regConfirmed = (asgId) => !!(regOf(asgId) && regOf(asgId).verdict === "confirmed");
   // The board's own key for a ship, matching window.reliefKey in the page: the relief editor opens on it.
   const vkOf = (ship) => (brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship;
   // Seats the schedule has closed (a recorded sign-off has passed, nothing current replaces it on that
@@ -1851,7 +1866,7 @@ async function rotationSections(env) {
     // The pool is "active, no ship, no plan": a crew who already holds an open projection is drawn as a
     // yellow card on that ship, not offered again as unassigned (15 Sep 2026).
     if (!ship) { if (!plannedScs.has(c.agency_id)) pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, registry: regOf(cardAsg[c.agency_id + "|" + k]), confirmed: regConfirmed(cardAsg[c.agency_id + "|" + k]), vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1893,12 +1908,14 @@ async function rotationSections(env) {
       eccr: !!a.eccr, air: !!a.air, hotel: !!a.hotel,
       onConfirmed: !!a.on_date_conf, offConfirmed: !!a.off_date_conf,
       instructionsSent: a.instructions_sent_at || null, signoffLinkSent: a.signoff_link_sent_at || null,
+      registry: regOf(a.id), confirmed: regConfirmed(a.id), // the last AdvancedQuery verdict on this card (regByAsg above)
       docs: docsBy[a.sc] || null,
       jrWarn: (isJr(a.rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
       hasNote: !!(rm2.note && String(rm2.note).trim()),
     });
   }
-  for (const ship in projByShip) projByShip[ship].sort((a, b) => String(a.signOn || "9999") < String(b.signOn || "9999") ? -1 : 1);
+  // A card the registry has confirmed aboard sorts with the people aboard, ahead of the plans.
+  for (const ship in projByShip) projByShip[ship].sort((a, b) => (b.confirmed ? 1 : 0) - (a.confirmed ? 1 : 0) || (String(a.signOn || "9999") < String(b.signOn || "9999") ? -1 : 1));
   // Deployed and not yet back: one line per ship saying it was sent to TDG. THE LOOP CLOSES on its
   // own — the moment a Contract Counter carries that seafarer they are a green card again and the
   // line goes (Miguel, 14 Sep 2026). Until then Restore can put the projection back in one click.
@@ -1921,8 +1938,9 @@ async function rotationSections(env) {
     // Order (Miguel, 15 Sep 2026: "the yellow always go last, not in front of the people who are already
     // onboard"): every TDG card (green) before every plan card (yellow), current first inside each, then
     // by name. Before this, an aboard plan sorted among the greens alphabetically.
+    // A yellow card the registry has CONFIRMED aboard is someone already onboard: it sorts with the greens.
     const crew = (promByShip[ship] || []).slice().sort((a, b) =>
-      (a.state === "yellow" ? 1 : 0) - (b.state === "yellow" ? 1 : 0)
+      (a.state === "yellow" && !a.confirmed ? 1 : 0) - (b.state === "yellow" && !b.confirmed ? 1 : 0)
       || (b.current ? 1 : 0) - (a.current ? 1 : 0)
       || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const cur = new Set(crew.map(c => c.agency_id));
@@ -2087,6 +2105,17 @@ async function contractCountMap(env) {
   const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null };
   return m;
 }
+// What the last AdvancedQuery upload said about each of Rita's projections (registry_sync.js, 5 Oct
+// 2026): the verdict, the file's status + vessel for that crew, when, and the FIRST confirmation. Read
+// by fetchOpenAssignments for the card; written only by the registry import's apply. Five ALTERs
+// leave together, each a no-op once the column exists; memoized like every other guard (§12).
+const ensureProjectionRegistry = memoEnsure(async (env) => {
+  await Promise.all(["registry_verdict TEXT", "registry_status TEXT", "registry_ship TEXT", "registry_at TEXT", "registry_confirmed_at TEXT"]
+    .map((col) => env.DB.prepare("ALTER TABLE assignment ADD COLUMN " + col).run().catch(() => null)));
+});
+// The yellow-card feed handed to the registry importer (crew_import_routes.js): the ONE definition,
+// guard first so the verdict columns it selects and the importer writes both exist.
+async function openProjections(env) { await ensureProjectionRegistry(env); return fetchOpenAssignments(env); }
 const ensureContractEdit = memoEnsure(ensureContractEditImpl);
 async function ensureContractEditImpl(env) {
   // `on_key` = the Contract Counter SIGN-ON this edit belongs to. The (sc, seq) key is the crew's
@@ -2894,6 +2923,7 @@ nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .pc-seed{color:var(--mut);font-weight:600;border-bottom:1px dotted var(--line-2);cursor:help}
 body.rot-refreshing #view{opacity:.6;transition:opacity .15s}
 .rcard.plan.aboard{box-shadow:0 0 0 2px #C99A00 inset}
+.rcard.confirmed{background:#F6FBF4}
 .rcard.green{cursor:pointer}
 .rlab.plan{color:#9A6614;background:#FBF0DA}
 .rlab.tdg{color:var(--green-d);background:#EAF6E6}
@@ -4482,6 +4512,21 @@ function cardOverdue(x){
   if(!x||x.state==='yellow'||!x.signOff)return false;
   return x.signOff < new Date().toISOString().slice(0,10);
 }
+// The projection card's source line: what the last AdvancedQuery (TDG registry) upload said about it
+// (registry_sync.js, Miguel 5 Oct 2026). Before this every yellow card read "not in a TDG file yet"
+// forever — Gayda on Jewel through five registry uploads. The registry carries no dates, so a confirmed
+// card keeps Rita's dates until the Contract Counter carries the leg and absorbs it.
+function regNote(reg,confirmed){
+  if(!reg)return '<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
+  var at=reg.at?(' '+escHtml(reg.at)):'';
+  var st=escHtml(reg.status||'status not readable');
+  var sh=reg.ship?escHtml(reg.ship):'';
+  if(confirmed)return '<div class=srcnote><b style="color:var(--green-d)">Aboard per the TDG registry</b> (file of'+at+') &middot; your dates until the Counter carries them</div>';
+  if(reg.verdict==='elsewhere')return '<div class=srcnote><b style="color:var(--amber)">TDG registry'+at+': '+st+(sh?(' &middot; '+sh):'')+'</b> &middot; not this ship</div>';
+  if(reg.verdict==='ashore')return '<div class=srcnote><b style="color:var(--red)">TDG registry'+at+': '+st+(sh?(', '+sh):'')+'</b> &middot; not aboard here per the file</div>';
+  if(reg.verdict==='earmarked')return '<div class=srcnote>TDG registry'+at+': earmarked for this ship &middot; not aboard yet</div>';
+  return '<div class=srcnote>Your projection &middot; not in a TDG file yet (registry'+at+': '+st+')</div>';
+}
 // What each port colour MEANS (city_resolver.js). Colour with no key is noise; 'seed' was painted the
 // danger red, which read as an error on a card that was simply falling back to the ship's homeport.
 var CONF_T={derived:'from the itinerary for that date',provisional:'from an itinerary day within a day of it - not exact',seed:'the homeport of the ship - the itinerary has no port for that date',override:'set by hand'};
@@ -4493,7 +4538,11 @@ function rotCard(x){
   var ini=((nm[0]||'').charAt(0)+(nm[1]||'').charAt(0)).toUpperCase()||'?';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
   var aboard=plan&&(!!x.aboard||(!!x.signOn&&x.signOn<=new Date().toISOString().slice(0,10)));
-  var live=plan?aboard:!!x.current;
+  // What the last AdvancedQuery upload said about this projection (registry_sync.js). CONFIRMED = TDG's
+  // registry has them aboard this ship: the card is a fact now, not a draft — green, no Deploy.
+  var reg=plan?(x.registry||null):null;
+  var confirmed=plan&&!!x.confirmed;
+  var live=plan?(aboard||confirmed):!!x.current;
   var ovd=cardOverdue(x);
   var chip='';
   if((live||ovd)&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip='<span class="offchip'+cc+'">'+(dd<0?('OFF was '+(-dd)+'d ago'):('OFF in '+dd+'d'))+'</span>';}
@@ -4511,10 +4560,10 @@ function rotCard(x){
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
   // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
   if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
-  var lab=plan?('<span class="rlab plan">'+(aboard?'PLAN &middot; ABOARD':'PLAN')+'</span>'):'';
+  var lab=confirmed?'<span class="rlab tdg">ABOARD &middot; TDG REGISTRY</span>':plan?('<span class="rlab plan">'+(aboard?'PLAN &middot; ABOARD':'PLAN')+'</span>'):'';
   // Who set the dates on this card. Blank when nobody has touched the TDG values.
   var note='';
-  if(plan)note='<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
+  if(plan)note=regNote(reg,confirmed);
   else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
   else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
   // The ship's Junior PS rule, seeded in the vessel table since July and shown for the first time.
@@ -4526,15 +4575,16 @@ function rotCard(x){
   var acts='';
   if(plan&&x.assignment_id){
     var safeNm=String(x.name||'').replace(/"/g,'&quot;');
+    // A confirmed card has nothing to deploy: TDG already has them aboard. Remove stays (Rita may delete a card).
     acts='<div class=pacts>'
-      +'<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>'
+      +(confirmed?'':'<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>')
       +'<button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDelete(event,this)">Remove</button></div>';
   }
-  var cls='rcard '+(plan?('plan'+(aboard?' aboard':'')):('green'+(x.current?' cur':'')+(ovd?' overdue':'')));
+  var cls='rcard '+(confirmed?'green cur confirmed':plan?('plan'+(aboard?' aboard':'')):('green'+(x.current?' cur':'')+(ovd?' overdue':'')));
   // Every card drags. A yellow card MOVES (the assignment changes ship); a green or pool card dropped on
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
-  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
+  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the plan':plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
     +chip
     +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')

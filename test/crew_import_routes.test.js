@@ -256,3 +256,72 @@ test("apply with 'dismiss' or the default still emits NO ship write", async () =
     assert.equal(env.DB._batched.some(s => /vessel_observed=/.test(s.sql)), false, "no ship write for " + JSON.stringify(decisions));
   }
 });
+
+// THE LOOP CLOSES FROM THE REGISTRY TOO (Miguel, 5 Oct 2026, Jewel: "if the person is onboard .. and if
+// rita has already a card in there .. it should automatically compare with what the tdg file has").
+// The projections arrive through deps.openProjections (the worker's fetchOpenAssignments); the importer
+// never queries assignment itself (status_consistency.test.js).
+const APEX_PLAN = [{ id: "as_1", sc: "SC-1", crew_name: "Jomar Dela Cruz", ship: "Apex", sign_on: "2026-08-01", planned_sign_off: "2027-02-01" }];
+
+test("stage lists every open projection against the file, and carries the file's per-crew word to apply", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const deps = { openProjections: async () => APEX_PLAN };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj1" }), env, deps)).json();
+  assert.equal(stage.review.projections.length, 1);
+  assert.equal(stage.review.projections[0].verdict, "confirmed", "the file has SC-1 On board Celebrity Apex: the Apex card is confirmed");
+  assert.equal(stage.review.projection_counts.confirmed, 1);
+  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex" }]);
+  assert.equal(env.DB._batched.length, 0, "stage still writes nothing");
+});
+
+test("apply writes the verdict onto the projection it read itself — and still never a vessel_observed UPDATE", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const deps = { openProjections: async () => APEX_PLAN };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj2" }), env, deps)).json();
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj2", run_by: "Rita" }), env, deps)).json();
+  assert.equal(body.ok, true);
+  assert.equal(body.projections.counts.confirmed, 1);
+  assert.match(body.summary, /1 projection confirmed aboard by the file/);
+  const st = env.DB._batched;
+  const upd = st.filter(s => /UPDATE assignment SET registry_verdict=\?/.test(s.sql));
+  assert.equal(upd.length, 1);
+  assert.equal(upd[0].args[0], "confirmed");
+  assert.equal(upd[0].args[1], "On board");
+  assert.equal(upd[0].args[2], "Celebrity Apex");
+  assert.equal(upd[0].args[7], "as_1");
+  assert.match(upd[0].sql, /COALESCE\(registry_confirmed_at, \?\)/, "the FIRST confirmation is kept");
+  assert.match(upd[0].sql, /WHERE id=\? AND actual_sign_off IS NULL/, "only an open projection is ever touched");
+  assert.equal(st.some(s => /UPDATE crew SET vessel_observed/.test(s.sql)), false, "D1 still holds: the registry never writes a ship");
+  assert.equal(st.some(s => /keyman_contract3|contract_edit/.test(s.sql)), false, "no Counter row or edit is touched (§10b)");
+});
+
+test("apply: a contradicted card is marked, never removed; a crew the file does not carry gets no verdict", async () => {
+  const rows = [
+    { "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "Inactive", "VESSEL NAME": "" },
+  ];
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const plans = [...APEX_PLAN, { id: "as_2", sc: "SC-2", crew_name: "Nobody In File", ship: "Icon", sign_on: "2026-07-01", planned_sign_off: "2027-01-01" }];
+  const deps = { openProjections: async () => plans };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-pj3" }), env, deps)).json();
+  assert.deepEqual(stage.review.projections.map(p => [p.id, p.verdict]), [["as_1", "ashore"]], "Gayda's shape: aboard per the card, Inactive per the file");
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj3", run_by: "Rita" }), env, deps)).json();
+  const st = env.DB._batched;
+  const upd = st.filter(s => /UPDATE assignment SET registry_verdict=\?/.test(s.sql));
+  assert.equal(upd.length, 1);
+  assert.equal(upd[0].args[0], "ashore");
+  assert.equal(upd[0].args[7], "as_1");
+  assert.equal(st.some(s => /DELETE FROM assignment/.test(s.sql)), false, "flagged on the card, never removed (§6)");
+  assert.match(body.summary, /1 card aboard per your board but not per the file/);
+});
+
+test("apply: without the projection feed nothing is compared, and a review cannot name a card the feed did not return", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj4" }), env)).json();
+  assert.deepEqual(stage.review.projections, []);
+  // A tampered review listing a projection id: the apply reads the feed itself (here: none) and writes none.
+  stage.review.projections = [{ id: "as_evil", sc: "SC-1", verdict: "confirmed" }];
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj4", run_by: "Rita" }), env)).json();
+  assert.equal(body.ok, true);
+  assert.equal(env.DB._batched.some(s => /UPDATE assignment/.test(s.sql)), false);
+  assert.doesNotMatch(body.summary, /projection/);
+});

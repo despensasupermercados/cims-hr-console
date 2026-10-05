@@ -32,7 +32,8 @@ CREATE TABLE assignment (id TEXT PRIMARY KEY, contract_id TEXT NOT NULL, vessel_
   role TEXT, succeeds_assignment_id TEXT, on_port_seed TEXT, off_port_seed TEXT, override_on_city TEXT, override_off_city TEXT,
   eccr INTEGER NOT NULL DEFAULT 0, air INTEGER NOT NULL DEFAULT 0, hotel INTEGER NOT NULL DEFAULT 0,
   on_date_conf INTEGER NOT NULL DEFAULT 0, off_date_conf INTEGER NOT NULL DEFAULT 0,
-  instructions_sent_at TEXT, signoff_link_sent_at TEXT, review_invite_sent_at TEXT, created_at TEXT, updated_at TEXT);
+  instructions_sent_at TEXT, signoff_link_sent_at TEXT, review_invite_sent_at TEXT, created_at TEXT, updated_at TEXT,
+  registry_verdict TEXT, registry_status TEXT, registry_ship TEXT, registry_at TEXT, registry_confirmed_at TEXT); -- worker.js ensureProjectionRegistry (5 Oct 2026)
 CREATE TABLE ship_leg (id INTEGER PRIMARY KEY AUTOINCREMENT, brand TEXT NOT NULL, ship_short TEXT NOT NULL, vessel_id TEXT,
   sc TEXT, crew_id TEXT, ours INTEGER NOT NULL DEFAULT 1, on_date TEXT, off_date TEXT, embark TEXT, disembark TEXT,
   on_conf INTEGER NOT NULL DEFAULT 0, off_conf INTEGER NOT NULL DEFAULT 0, is_current INTEGER NOT NULL DEFAULT 0, source TEXT, updated_at TEXT);

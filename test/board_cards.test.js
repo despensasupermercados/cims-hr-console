@@ -261,15 +261,18 @@ test("inside a ship section every TDG (green) card precedes every plan (yellow) 
   const i = src.indexOf("const crew = (promByShip[ship] || []).slice().sort(");
   assert.ok(i > 0, "section sort not found");
   const sortSrc = src.slice(i, src.indexOf(";", i));
-  assert.match(sortSrc, /\(a\.state === "yellow" \? 1 : 0\) - \(b\.state === "yellow" \? 1 : 0\)\s*\|\| \(b\.current \? 1 : 0\) - \(a\.current \? 1 : 0\)/,
-    "state (green first) must be the FIRST sort key, current the second, name the third");
+  // (5 Oct 2026) a yellow card the registry has CONFIRMED aboard is one of the people already onboard —
+  // it sorts with the greens; the rule Miguel stated is about plans, and a confirmed card is no longer one.
+  assert.match(sortSrc, /\(a\.state === "yellow" && !a\.confirmed \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed \? 1 : 0\)\s*\|\| \(b\.current \? 1 : 0\) - \(a\.current \? 1 : 0\)/,
+    "state (green first, confirmed counts as green) must be the FIRST sort key, current the second, name the third");
   // Behavioural check of the same comparator on a sample.
   const cmp = new Function("a", "b", "return " + sortSrc.slice(sortSrc.indexOf("(a, b) =>") + "(a, b) =>".length).trim().replace(/\)$/, ""));
   const rows = [
     { name: "Alpha", state: "yellow", current: true }, { name: "Bravo", state: "green", current: false },
     { name: "Charlie", state: "green", current: true }, { name: "Delta", state: "yellow", current: false },
+    { name: "Echo", state: "yellow", current: true, confirmed: true },
   ].sort(cmp).map((x) => x.name);
-  assert.deepEqual(rows, ["Charlie", "Bravo", "Alpha", "Delta"]);
+  assert.deepEqual(rows, ["Charlie", "Echo", "Bravo", "Alpha", "Delta"], "Echo is confirmed aboard: among the greens, before the plans");
 });
 
 /* ---- 15 Sep 2026, Freedom: the UI of a ship section, read off the screenshot Miguel sent ----
@@ -335,4 +338,54 @@ test("a yellow card whose sign-on has passed reads ABOARD, whichever feed built 
   const src = readFileSync(SRC, "utf-8");
   assert.match(src, /aboard: !!\(\(enr\.signOn \|\| sEnr\.on\) && \(enr\.signOn \|\| sEnr\.on\) <= today\)/,
     "the crew feed must set aboard by the same rule as the projection feed");
+});
+
+// THE LOOP CLOSES FROM THE REGISTRY TOO (Miguel, 5 Oct 2026, Jewel). A projection the last AdvancedQuery
+// upload has ON BOARD its ship is a fact, not a draft: green, labelled, no Deploy. One it contradicts says
+// so on the card and stays yellow. Server side: rotationSections carries `registry` + `confirmed` on BOTH
+// card paths (the roster loop draws an aboard projection the schedule already places — Gayda on Jewel —
+// and the projection loop draws the rest) from the columns fetchOpenAssignments reads (registry_sync.js,
+// columns added by ensureProjectionRegistry).
+const CONFIRMED = { ...YELLOW, aboard: true, signOn: "2026-07-20", signOff: "2027-01-20", confirmed: true,
+  registry: { verdict: "confirmed", status: "On board", ship: "Jewel", at: "2026-10-04", confirmedAt: "2026-10-04" } };
+
+test("a projection the registry confirmed aboard draws green, says so, keeps Remove and drag, offers no Deploy", () => {
+  const h = ctx.rotCard(CONFIRMED);
+  assert.match(h, /class="rcard green cur confirmed"/, "green, not a plan card");
+  assert.match(h, /<span class="rlab tdg">ABOARD &middot; TDG REGISTRY<\/span>/);
+  assert.match(h, /Aboard per the TDG registry<\/b> \(file of 2026-10-04\) &middot; your dates until the Counter carries them/);
+  assert.doesNotMatch(h, /planDeploy/, "TDG already has them aboard: nothing to send Joy");
+  assert.match(h, /planDelete/, "Rita may still delete a card");
+  assert.match(h, /data-plan="1"/, "still an assignment: dragging it MOVES the plan");
+  assert.doesNotMatch(h, /not in a TDG file yet/);
+});
+
+test("a projection the registry contradicts stays yellow and prints the file's word on the card", () => {
+  const ashore = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-07-20", registry: { verdict: "ashore", status: "Inactive", ship: null, at: "2026-10-04" } });
+  assert.match(ashore, /class="rcard plan aboard"/);
+  assert.match(ashore, /TDG registry 2026-10-04: Inactive<\/b> &middot; not aboard here per the file/);
+  assert.match(ashore, /planDeploy/, "a contradicted plan is still Rita's to deploy or remove");
+  const elsewhere = ctx.rotCard({ ...YELLOW, registry: { verdict: "elsewhere", status: "On board", ship: "Odyssey", at: "2026-10-04" } });
+  assert.match(elsewhere, /TDG registry 2026-10-04: On board &middot; Odyssey<\/b> &middot; not this ship/);
+  const earmarked = ctx.rotCard({ ...YELLOW, registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-04" } });
+  assert.match(earmarked, /TDG registry 2026-10-04: earmarked for this ship/);
+  const pending = ctx.rotCard({ ...YELLOW, registry: { verdict: "pending", status: "On Vacation", ship: null, at: "2026-10-04" } });
+  assert.match(pending, /not in a TDG file yet \(registry 2026-10-04: On Vacation\)/);
+  assert.match(ctx.rotCard(YELLOW), /Your projection &middot; not in a TDG file yet<\/div>/, "no verdict yet: the old line, unchanged");
+});
+
+test("rotationSections hands the card the registry verdict off the open-assignment feed, and sorts confirmed cards first (static)", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const b = src.slice(src.indexOf("async function rotationSections("), src.indexOf("const sections = Object.values(shipNames)"));
+  assert.match(b, /const regByAsg = \{\};/);
+  assert.match(b, /if \(!a \|\| !a\.id \|\| !a\.registry_verdict\) continue;/);
+  // the roster-loop card (an aboard projection the schedule already places) and the projection-loop card
+  assert.match(b, /assignment_id: cardAsg\[c\.agency_id \+ "\|" \+ k\] \|\| null, registry: regOf\(cardAsg\[c\.agency_id \+ "\|" \+ k\]\), confirmed: regConfirmed\(cardAsg\[c\.agency_id \+ "\|" \+ k\]\),/);
+  assert.match(b, /registry: regOf\(a\.id\), confirmed: regConfirmed\(a\.id\),/);
+  assert.match(b, /projByShip\[ship\]\.sort\(\(a, b\) => \(b\.confirmed \? 1 : 0\) - \(a\.confirmed \? 1 : 0\)/);
+  const tail = src.slice(src.indexOf("const sections = Object.values(shipNames)"), src.indexOf("async function rotationSections(") + 60000);
+  assert.match(tail, /\(a\.state === "yellow" && !a\.confirmed \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed \? 1 : 0\)/, "a confirmed card sorts with the people aboard, not with the plans");
+  assert.match(b, /ensureProjectionRegistry\(env\)\]\);/, "the column guard runs in the ensure wave, before the read wave");
+  const S = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
+  assert.match(S, /a\.registry_verdict, a\.registry_status, a\.registry_ship, a\.registry_at, a\.registry_confirmed_at,/, "no new query: the columns ride the existing yellow-card feed (§12)");
 });
