@@ -82,3 +82,24 @@ test("deriveStatus: recently signed off -> On Vacation; inactive > 6 months -> a
   // a current assignment still wins over the retire rule
   assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }, { on: "2026-03-01", off: "2026-11-01" }], T, {}), "On board");
 });
+
+// Miguel, 5 Oct 2026: "we follow TDG file". A leg still CURRENT whose projected sign-off has passed with
+// nothing recorded is overdue, not gone (§11): the registry's word stands; with none, On board. Until
+// then it read as signed off → On Vacation, then auto-Retired after six months, while the board held the seat.
+test("deriveStatus: an overdue CURRENT leg takes the registry status, else On board — never On Vacation / Retired", () => {
+  const T = "2026-10-05";
+  const overdue = [{ on: "2026-01-10", off: "2026-07-10", is_current: true }];
+  assert.equal(deriveStatus(overdue, T, { imported: "On board" }), "On board");
+  assert.equal(deriveStatus(overdue, T, { imported: "On Vacation" }), "On Vacation", "TDG says they left: TDG's word");
+  assert.equal(deriveStatus(overdue, T, { imported: "Inactive" }), "Inactive");
+  assert.equal(deriveStatus(overdue, T, {}), "On board", "no registry word: the seat is held, they are aboard");
+  assert.equal(deriveStatus(overdue, T, { imported: "garbage" }), "On board", "only TDG's four words count");
+  const ancient = [{ on: "2025-01-10", off: "2025-07-10", is_current: true }];
+  assert.equal(deriveStatus(ancient, T, {}), "On board", "age does not retire an overdue seat; only a recorded sign-off or the next Counter ends it");
+  // The same dates WITHOUT is_current are a closed leg: the old rule stands.
+  assert.equal(deriveStatus([{ on: "2026-01-10", off: "2026-07-10" }], T, {}), "On Vacation");
+  assert.equal(deriveStatus([{ on: "2025-01-10", off: "2025-07-10" }], T, {}), "Retired");
+  // Retired still wins; a leg spanning today still wins.
+  assert.equal(deriveStatus(overdue, T, { retired: true, imported: "On board" }), "Retired");
+  assert.equal(deriveStatus([...overdue, { on: "2026-09-01", off: "2027-03-01", is_current: true }], T, { imported: "Inactive" }), "On board");
+});

@@ -73,19 +73,29 @@ export function liveState(legs, today) {
   return "scheduled";                                // only future assignment(s)
 }
 export const RETIRE_MONTHS = 6; // inactive (no assignment) longer than this -> auto-retired
+// The four words TDG's AdvancedQuery uses (crewimport.normalizeStatus); anything else is no word.
+export const REGISTRY_STATUSES = new Set(["On board", "On Vacation", "Earmarked", "Inactive"]);
 
 // Final status string. opts: { retired:bool, imported:string }.
 //   manual Retired tag wins -> Retired. On a ship now -> On board. Only future assignment(s) -> keep
 //   the registry value (e.g. Earmarked). Signed off: within RETIRE_MONTHS -> On Vacation (on holiday,
 //   contract ended); longer than that -> Retired (auto). No dated schedule -> keep the registry value.
 //   A manual status edit (handled by the caller) still wins, so Rita can pull someone back to Earmarked.
+//   OVERDUE (Miguel, 5 Oct 2026: "we follow TDG file"): a leg still CURRENT whose projected sign-off has
+//   passed with nothing recorded — the schedule does not know whether they left (the seat is held as
+//   overdue, §11), and TDG's weekly registry does: its status stands; with no registry word, On board.
+//   Until today this read as "signed off" → On Vacation, then Retired after six months, while the board
+//   held the seat: two screens, two answers.
 export function deriveStatus(legs, today, opts) {
   opts = opts || {};
   if (opts.retired) return "Retired";
   const L = (legs || []).filter(l => l && l.on)
-    .map(l => ({ on: l.on, off: l.off || null }))
+    .map(l => ({ on: l.on, off: l.off || null, cur: !!l.is_current }))
     .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
   for (const l of L) if (l.on <= today && (l.off ? today <= l.off : true)) return "On board";
+  if (L.some(l => l.cur && l.on <= today && l.off && l.off < today)) {
+    return REGISTRY_STATUSES.has(opts.imported) ? opts.imported : "On board";
+  }
   if (L.length && L.every(l => l.on > today)) return opts.imported || "Earmarked"; // only future
   const lastOff = L.reduce((m, l) => (l.off && l.off > m ? l.off : m), "");
   if (lastOff) return months(lastOff, today) > RETIRE_MONTHS ? "Retired" : "On Vacation";

@@ -211,7 +211,7 @@ export function renderDeployEmail(card, opts = {}) {
     noteBlock +
     '<tr><td style="padding:14px 24px 24px;border-top:1px solid ' + T.border + ';"><div style="font-family:' + FB + ';font-size:12px;color:' + T.mut + ';">Sent from the CIMS HR console' +
     (sender ? " by " + esc(sender) : "") + (when ? " on " + esc(when) : "") +
-    ". This deployment has been removed from our planning board and will reappear once it comes back in the Contract Counter.</div></td></tr>" +
+    ". This deployment stays on our planning board as sent until it comes back in the Contract Counter.</div></td></tr>" +
     "</table></td></tr></table></body></html>";
 }
 
@@ -241,7 +241,7 @@ export function renderDeployText(card, opts = {}) {
 // deps: { json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment,
 //         resolveCity, groupPortDays, TODAY }
 export function installKeymanDeploy(deps) {
-  const { json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, resolveCity, groupPortDays, TODAY } = deps;
+  const { json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, markDeployed, resolveCity, groupPortDays, TODAY } = deps;
 
   async function ensureDeployLog(env) {
     await env.DB.prepare(
@@ -250,6 +250,9 @@ export function installKeymanDeploy(deps) {
       " sign_on TEXT, sign_off TEXT, sent_at TEXT NOT NULL, sent_by TEXT, recipient TEXT, cc TEXT," +
       " email_id TEXT, payload TEXT, restored_at TEXT, restored_as TEXT )"
     ).run();
+    // The card STAYS on the ship once sent (Miguel, 5 Oct 2026); these two columns say so. The board's
+    // own guard (worker.js ensureRegistrySnapshot) adds them too, so the read never precedes a deploy.
+    await Promise.all(["deployed_at TEXT", "deploy_log_id TEXT"].map((c) => env.DB.prepare("ALTER TABLE assignment ADD COLUMN " + c).run().catch(() => null)));
   }
 
   // Who the deployment goes to. DEPLOY_TO, else the Update-TG recipient (the same Joy). Never a
@@ -266,7 +269,7 @@ export function installKeymanDeploy(deps) {
       `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.on_port_seed, a.off_port_seed,
               a.override_on_city, a.override_off_city, a.eccr, a.air, a.hotel,
               a.on_date_conf, a.off_date_conf, a.instructions_sent_at, a.signoff_link_sent_at,
-              a.review_invite_sent_at, a.succeeds_assignment_id, a.vessel_id,
+              a.review_invite_sent_at, a.succeeds_assignment_id, a.vessel_id, a.deployed_at,
               COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
               c.id AS crew_id, c.agency_id AS sc
          FROM assignment a
@@ -324,6 +327,8 @@ export function installKeymanDeploy(deps) {
       if (!to) return json({ error: "no_recipient", detail: "Set DEPLOY_TO (or TG_NOTIFY) on the Worker. The console will not guess who to send a crew deployment to." }, 500);
       const loaded = await loadCard(env, String(b.id));
       if (!loaded) return json({ error: "not_found" }, 404);
+      // Already sent: Joy is not told twice by accident. The screen asks, then sends with resend:true.
+      if (loaded.a.deployed_at && !b.resend) return json({ error: "already_sent", sentAt: String(loaded.a.deployed_at).slice(0, 10) }, 409);
       const card = loaded.card;
       if (b.note) card.note = String(b.note).slice(0, 2000);
       const cc = ccOf(env);
@@ -357,23 +362,26 @@ export function installKeymanDeploy(deps) {
         },
         comments: (comments && comments.results) || [],
       };
-      // THE EMAIL WENT. Whatever happens to the log write or the remove is reported as what it is —
-      // never as "Not sent" (which made a retry email Joy twice). The order stays: log, THEN remove, so a
-      // card never leaves the board without its line.
-      let logError = null, removed = null;
+      // THE EMAIL WENT. Whatever happens to the log write or the mark is reported as what it is —
+      // never as "Not sent" (which made a retry email Joy twice). The order stays: log, THEN mark.
+      // THE CARD STAYS (Miguel, 5 Oct 2026, after Jewel went blank on his first Deploy: "Yes, keep the
+      // card"): it is marked sent (deployed_at), keeps its seat, and leaves only when the Counter absorbs
+      // it or Rita removes it. Until 5 Oct the card was removed here and a one-line note stood in for it.
+      const sentAt = new Date().toISOString();
+      let logError = null, marked = null;
       try {
         await env.DB.prepare(
           "INSERT INTO deploy_log (id,assignment_id,sc,crew_name,ship,brand,sign_on,sign_off,sent_at,sent_by,recipient,cc,email_id,payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
         ).bind(logId, loaded.a.id, card.sc, card.name, card.ship, card.brand, card.sign_on, card.sign_off,
-               new Date().toISOString(), sentBy, to, cc.join(", "), (res && (res.id || res.messageId)) || null, JSON.stringify(stored)).run();
+               sentAt, sentBy, to, cc.join(", "), (res && (res.id || res.messageId)) || null, JSON.stringify(stored)).run();
       } catch (e) { logError = String((e && e.message) || e); }
       if (!logError) {
-        try { removed = await removeReliefAssignment(env, loaded.a.id); }
-        catch (e) { removed = { ok: false, error: String((e && e.message) || e) }; }
+        try { marked = await markDeployed(env, loaded.a.id, logId, sentAt); }
+        catch (e) { marked = { ok: false, error: String((e && e.message) || e) }; }
       }
-      await logActivity(env, sentBy, "keyman_deploy", (card.name || card.sc) + " -> " + (card.ship || "?") + " (" + to + ")" + (logError ? " · LOG FAILED: " + logError : "") + (removed && !removed.ok ? " · REMOVE FAILED: " + removed.error : "")).catch(() => null);
-      return json({ ok: true, sent: true, logId: logError ? null : logId, recipient: to, cc, logError,
-        removed: !!(removed && removed.ok), removeError: logError ? "log_failed_card_kept" : (removed && removed.ok ? null : (removed && removed.error) || null) });
+      const markError = logError ? "log_failed" : (marked && marked.ok === false ? (marked.error || "mark_failed") : null);
+      await logActivity(env, sentBy, "keyman_deploy", (card.name || card.sc) + " -> " + (card.ship || "?") + " (" + to + ")" + (b.resend ? " · resend" : "") + (logError ? " · LOG FAILED: " + logError : "") + (markError && !logError ? " · MARK FAILED: " + markError : "")).catch(() => null);
+      return json({ ok: true, sent: true, kept: true, logId: logError ? null : logId, sentAt: sentAt.slice(0, 10), recipient: to, cc, logError, markError });
     }
 
     if (p === "/api/keyman/deploy/restore" && request.method === "POST") {

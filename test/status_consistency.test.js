@@ -142,3 +142,18 @@ test("scheduleBySc and crewStatus live in ONE module, not copied per caller", ()
   assert.doesNotMatch(SRC, /^function (scheduleBySc|crewStatus)\(/m,
     "a second local copy is how two views start disagreeing");
 });
+
+test("scheduleBySc carries is_current through to deriveStatus (the overdue rule needs it; 5 Oct 2026)", async () => {
+  const { scheduleBySc, crewStatus } = await import("../src/crew_status.js");
+  const m = scheduleBySc([
+    { ours: true, sc: "SC-1", on: "2026-01-10", off: "2026-07-10", is_current: 1 },
+    { ours: true, sc: "SC-2", on: "2026-01-10", off: "2026-07-10", is_current: 0 },
+    { ours: false, sc: "SC-3", on: "2026-01-10", off: "2026-07-10", is_current: 1 },
+  ]);
+  assert.deepEqual(m["SC-1"], [{ on: "2026-01-10", off: "2026-07-10", is_current: true }]);
+  assert.deepEqual(m["SC-2"], [{ on: "2026-01-10", off: "2026-07-10", is_current: false }]);
+  assert.equal(m["SC-3"], undefined, "not ours: not on the schedule");
+  assert.equal(crewStatus({ status: "On board" }, {}, m["SC-1"], "2026-10-05"), "On board", "overdue seat: held");
+  assert.equal(crewStatus({ status: "On board" }, {}, m["SC-2"], "2026-10-05"), "On Vacation", "closed leg: signed off");
+  assert.equal(crewStatus({ status: "On board" }, { status: "Earmarked" }, m["SC-1"], "2026-10-05"), "Earmarked", "a manual edit still wins");
+});

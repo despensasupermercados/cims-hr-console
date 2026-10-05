@@ -54,7 +54,9 @@ import { apiRosterExport } from './roster_export.js';
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
-const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
+// markDeployed: the card STAYS on the ship once sent (Miguel, 5 Oct 2026) — stamped, not removed.
+const markDeployed = async (env, id, logId, at) => { const r = await env.DB.prepare("UPDATE assignment SET deployed_at=?, deploy_log_id=?, updated_at=? WHERE id=? AND actual_sign_off IS NULL").bind(at, logId, at, id).run(); return { ok: !r || !r.meta || r.meta.changes == null || r.meta.changes > 0 }; };
+const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, markDeployed, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
 const _tgUpdate = installTgUpdate({ json, htmlResponse, logActivity, sendViaMailer, shipOf: (v) => canonShipWith(v, SHIP_KEYS), brandFor: clientOf });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
@@ -1874,6 +1876,9 @@ async function rotationSections(env) {
     }
   }
   const regOf = (asgId) => (asgId && regByAsg[asgId]) || null;
+  // A deployed card STAYS on the ship, stamped (Miguel, 5 Oct 2026): the stamp rides both card paths.
+  const depAt = {}; for (const a of (openAsg || [])) if (a && a.id && a.deployed_at) depAt[a.id] = String(a.deployed_at).slice(0, 10);
+  const deployedAtOf = (asgId) => (asgId && depAt[asgId]) || null;
   const regConfirmed = (asgId) => !!(regOf(asgId) && regOf(asgId).verdict === "confirmed");
   // The board's own key for a ship, matching window.reliefKey in the page: the relief editor opens on it.
   const vkOf = (ship) => (brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship;
@@ -1928,7 +1933,7 @@ async function rotationSections(env) {
     // The pool is "active, no ship, no plan": a crew who already holds an open projection is drawn as a
     // yellow card on that ship, not offered again as unassigned (15 Sep 2026).
     if (!ship) { if (!plannedScs.has(c.agency_id)) pool.push(base); continue; }
-    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, registry: regOf(cardAsg[c.agency_id + "|" + k]), confirmed: regConfirmed(cardAsg[c.agency_id + "|" + k]), vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
+    const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: cardSrc[c.agency_id + "|" + k] || "green", assignment_id: cardAsg[c.agency_id + "|" + k] || null, registry: regOf(cardAsg[c.agency_id + "|" + k]), confirmed: regConfirmed(cardAsg[c.agency_id + "|" + k]), deployedAt: deployedAtOf(cardAsg[c.agency_id + "|" + k]), vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null }));
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1971,6 +1976,7 @@ async function rotationSections(env) {
       onConfirmed: !!a.on_date_conf, offConfirmed: !!a.off_date_conf,
       instructionsSent: a.instructions_sent_at || null, signoffLinkSent: a.signoff_link_sent_at || null,
       registry: regOf(a.id), confirmed: regConfirmed(a.id), // the last AdvancedQuery verdict on this card (regByAsg above)
+      deployedAt: deployedAtOf(a.id),
       docs: docsBy[a.sc] || null,
       jrWarn: (isJr(a.rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
       hasNote: !!(rm2.note && String(rm2.note).trim()),
@@ -1993,9 +1999,11 @@ async function rotationSections(env) {
   }
   const carriedByCounter = (sc, ship, signOn) => (counterOn[sc + "|" + normShip(ship)] || []).some((on) => { const g = daysBetween(on, signOn); return g != null && Math.abs(g) <= ABSORB_DAYS; });
   const depByShip = {};
+  const openIds = new Set((openAsg || []).map((a) => a && a.id).filter(Boolean));
   for (const d of ((depRes && depRes.results) || [])) {
     const cs = shipOf(d.ship) || d.ship;
     if (!cs) continue;
+    if (d.assignment_id && openIds.has(d.assignment_id)) continue; // the card is still on the ship and carries its own "sent" stamp (5 Oct 2026)
     if (carriedByCounter(d.sc, cs, d.sign_on)) continue;   // back from TDG: the loop closed
     (depByShip[cs] = depByShip[cs] || []).push({
       id: d.id, agency_id: d.sc, name: d.crew_name || d.sc, ship: cs,
@@ -2181,7 +2189,12 @@ async function contractCountMap(env) {
 // read by rotationSections to derive each projection's verdict at read time. Memoized like every
 // other guard (§12). A crew without a row yet is read off crew.status + the open ship flag instead.
 const ensureRegistrySnapshot = memoEnsure(async (env) => {
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT)").run();
+  await Promise.all([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT)").run(),
+    // A deployed card stays on the ship, stamped (Miguel, 5 Oct 2026); the board reads these columns.
+    env.DB.prepare("ALTER TABLE assignment ADD COLUMN deployed_at TEXT").run().catch(() => null),
+    env.DB.prepare("ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT").run().catch(() => null),
+  ]);
 });
 // The STRICT hull matcher for the registry comparison (crew_flags.js): "MV JEWEL OF THE SEAS" meets
 // "Jewel"; an unreadable vessel never confirms anything. Built once per isolate.
@@ -4534,7 +4547,7 @@ async function planDeploy(e,el){
   catch(_){ el.disabled=false; alert('Network error'); return; }
   el.disabled=false;
   if(!j||j.error){ alert('Could not prepare the deployment: '+((j&&j.error)||'error')); return; }
-  DPV={id:id};
+  DPV={id:id,sentAt:el.getAttribute('data-sent')||null};
   var c=j.card||{};
   var expired=(c.warnings||[]).filter(function(w){return w.status==='expired';});
   var warnHtml=expired.length?('<div class=dpvwarn><b>'+expired.length+' expired document'+(expired.length===1?'':'s')+'</b> &mdash; '+expired.map(function(w){return escHtml(w.text);}).join('; ')+'. This is a warning, not a block: TDG is told, and you can still send.</div>'):'';
@@ -4546,7 +4559,7 @@ async function planDeploy(e,el){
     +warnHtml
     +'<div class=dpvbody><iframe id=dpvframe title="Deployment email preview"></iframe></div>'
     +'<div class=dpvft><span class=to>'+toLine+'</span>'
-    +(j.recipient?'<button class="pbtn go" id=dpvsend onclick="dpvSend()">Send to TDG and clear the card</button>':'')
+    +(j.recipient?'<button class="pbtn go" id=dpvsend onclick="dpvSend()">Send to TDG</button>':'')
     +'</div></div>';
   o.onclick=dpvClose;
   document.body.appendChild(o);
@@ -4558,14 +4571,16 @@ async function dpvSend(){
   var b=document.getElementById('dpvsend');
   if(b){b.disabled=true;b.textContent='Sending…';}
   try{
-    var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id})})).json();
+    var resend=false;
+    if(DPV.sentAt){if(!confirm('This card was already sent to TDG on '+DPV.sentAt+'.\\n\\nSend it to Joy again?')){if(b){b.disabled=false;b.textContent='Send to TDG';}return;}resend=true;}
+    var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id,resend:resend})})).json();
     // ok means THE EMAIL WENT. A failure after that is said as what it is — never "Not sent", which made a
     // retry email Joy twice (5 Oct 2026).
     if(r&&r.ok){ dpvClose(); renderRotation();
-      if(r.logError){alert('Sent to TDG, but the console could not write its log ('+r.logError+'). The card stays on the board; do NOT send again - tell Miguel.');}
-      else if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
-    else { if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
-  }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Network error'); }
+      if(r.logError){alert('Sent to TDG, but the console could not write its log ('+r.logError+'). Do NOT send again - tell Miguel.');}
+      else if(r.markError){alert('Sent to TDG and logged, but the card could not be marked as sent ('+r.markError+'). Do NOT send again - tell Miguel.');} }
+    else { if(b){b.disabled=false;b.textContent='Send to TDG';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
+  }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG';} alert('Network error'); }
 }
 async function deployRestore(el){
   var lid=el.getAttribute('data-log');
@@ -4645,6 +4660,7 @@ function rotCard(x){
   if(x.hotel)tg+='<span class="rtag on">HOTEL</span>';
   if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';
   if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';
+  if(plan&&x.deployedAt)tg+='<span class="rtag on" title="Sent to TDG for action">SENT TO TDG '+escHtml(x.deployedAt)+'</span>';
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
   // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
   if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
@@ -4665,7 +4681,7 @@ function rotCard(x){
     var safeNm=String(x.name||'').replace(/"/g,'&quot;');
     // A confirmed card has nothing to deploy: TDG already has them aboard. Remove stays (Rita may delete a card).
     acts='<div class=pacts>'
-      +(confirmed?'':'<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>')
+      +(confirmed?'':(x.deployedAt?('<button class="pbtn" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" data-sent="'+escHtml(x.deployedAt)+'" onclick="planDeploy(event,this)" title="Already sent to TDG on '+escHtml(x.deployedAt)+' - click to send again">Sent '+escHtml(x.deployedAt)+'</button>'):('<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>')))
       +'<button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDelete(event,this)">Remove</button></div>';
   }
   var cls='rcard '+(confirmed?'green cur confirmed':plan?('plan'+(aboard?' aboard':'')):('green'+(x.current?' cur':'')+(ovd?' overdue':'')));
