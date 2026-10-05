@@ -45,7 +45,11 @@ function pageContext() {
 }
 
 const { ctx, errors } = pageContext();
-const GREEN = { state: "green", agency_id: "SC-1", seq: 1, vessel_key: "Royal Caribbean|Icon", name: "Ana Alpha", rank: "Printer Specialist", status: "On board", current: true, signOn: "2026-03-08", signOff: "2026-09-30", on_city: "Miami", on_conf: "derived", eccr: 1 };
+// The live green fixture signs off ~200 days from WHENEVER the suite runs: the real cardOverdue()
+// compares against today, and a literal date (2026-09-30 until 5 Oct 2026) turned this card overdue
+// the day it passed and failed two tests that have nothing to do with overdue seats.
+const GREEN_OFF = new Date(Date.now() + 200 * 86400000).toISOString().slice(0, 10);
+const GREEN = { state: "green", agency_id: "SC-1", seq: 1, vessel_key: "Royal Caribbean|Icon", name: "Ana Alpha", rank: "Printer Specialist", status: "On board", current: true, signOn: "2026-03-08", signOff: GREEN_OFF, on_city: "Miami", on_conf: "derived", eccr: 1 };
 const YELLOW = { state: "yellow", agency_id: "SC-9", assignment_id: "as_1", vessel_key: "Royal Caribbean|Icon", name: "Ben Bravo", rank: "Junior PS", status: "Earmarked", signOn: "2026-11-02", signOff: "2027-05-02", aboard: false, on_city: "Barcelona", on_conf: "derived" };
 
 test("the page's inline script runs top to bottom without throwing", () => {

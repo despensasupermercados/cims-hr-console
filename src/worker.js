@@ -15,7 +15,7 @@ import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections, releasedSeatKeys } from "./ship_leg_source.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
 import { htmlPage, etagFor } from "./etag.js";
@@ -1800,6 +1800,9 @@ async function rotationSections(env) {
   }
   // The board's own key for a ship, matching window.reliefKey in the page: the relief editor opens on it.
   const vkOf = (ship) => (brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship;
+  // Seats the schedule has closed (a recorded sign-off has passed, nothing current replaces it on that
+  // ship) — read off the SAME legs crewStatus() just used, so the card and the status beside it agree.
+  const released = releasedSeatKeys(HIST, today, (s) => normShip(shipOf(s) || s));
   const promByShip = {}, shoreside = [], pool = [];
   const plannedScs = new Set((openAsg || []).map((a) => a.sc).filter(Boolean));
   for (const c of crewRows) {
@@ -1818,6 +1821,25 @@ async function rotationSections(env) {
         ship = effShip; k = normShip(ship); base.shipCorrected = true;
         enr = (legBSC[k] || {})[c.agency_id] || {};
         sEnr = (schEnr[k] || {})[c.agency_id] || {};
+      }
+    }
+    // SEAT RELEASED (Miguel, 5 Oct 2026: Calayag still red on Navigator while "on holidays"): the registry
+    // still names this ship, but the schedule has already closed the leg — Rita's recorded sign-off has
+    // passed (ship_leg_source.applyRecordedSignoffs) and nothing current replaces it here. The status
+    // beside the card reads On Vacation off that same schedule; the seat must agree instead of staying
+    // red as "no sign-off recorded". A manual On board status still wins. The crew goes where the
+    // schedule puts them today, else to their projection (yellow, pendingProjections), else to the pool.
+    // A leg past its PROJECTED sign-off with no recorded one is untouched: overdue, not gone (§11).
+    if (ship && released.has(c.agency_id + "|" + k) && c.status !== "On board") {
+      const se = schedEff[c.agency_id];
+      const effShip = se && se.cur ? (shipOf(se.ship) || se.ship) : null;
+      if (effShip && normShip(effShip) !== k) {
+        ship = effShip; k = normShip(ship); base.shipCorrected = true;
+        enr = (legBSC[k] || {})[c.agency_id] || {};
+        sEnr = (schEnr[k] || {})[c.agency_id] || {};
+      } else {
+        if (!plannedScs.has(c.agency_id)) pool.push(base);
+        continue;
       }
     }
     // The pool is "active, no ship, no plan": a crew who already holds an open projection is drawn as a
