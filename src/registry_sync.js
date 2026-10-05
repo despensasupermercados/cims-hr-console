@@ -102,24 +102,34 @@ export function projectionSummary(counts) {
 // snapshot    : registry_snapshot rows [{ agency_id, status, vessel, run_at }] (the column is `vessel`: it is the FILE's word, not an allocation)
 // crew        : RAW crew rows before derivation / override merge [{ agency_id, status, vessel_observed, manual }]
 //               (`manual` = a crew_override.status is live, so crew.status is NOT the file's)
-// openFlags   : open ship flags [{ agency_id, new_value, created_at }]
+// openFlags   : open ship flags [{ agency_id, new_value, created_at }] (used when vesselFlags is absent)
+// vesselFlags : the NEWEST ship flag per crew, any state [{ agency_id, new_value, created_at, resolved }]
+// inForce     : Rita's cards aboard today, per crew { sc: [{ hull, on }] } — guards a stale hull
+// shipKey     : hull text -> comparable key (the board's normShip∘shipOf)
 // statusAudit : the LATEST run's status audit rows [{ agency_id, new_value }] — written for every status
 //               change the file brought, accepted OR held (crew_apply D3/D6), so new_value is the file's
 //               word even when Rita held it and crew.status kept the old value
 // absent      : agency ids the latest file did NOT carry (open 'presence' flags) — silence is not a verdict
 // lastRun     : when the last registry file was applied (import_run.run_at), for the fallback's date
-export function registryFromStore({ snapshot, crew, openFlags, statusAudit, absent, lastRun } = {}) {
+export function registryFromStore({ snapshot, crew, openFlags, vesselFlags, statusAudit, absent, lastRun, inForce, shipKey } = {}) {
   const snap = {};
   for (const r of (snapshot || [])) if (r && r.agency_id) snap[r.agency_id] = r;
+  // The file's last NAMED hull per crew: the newest ship flag of ANY state (vesselFlags), else the newest
+  // open one (openFlags, the pre-6-Oct input). An open flag is the file disagreeing with the registry; a
+  // flag closed automatically (resolved=2) was closed because the board already had the crew on that hull
+  // (board_matches) or a newer flag superseded it; one closed by a person (resolved=1) was taken into the
+  // registry or dismissed — in every case the FILE named that hull. On a tie an open flag wins.
   const flag = {};
-  for (const f of (openFlags || [])) {
-    if (!f || !f.agency_id) continue;
+  for (const f of (vesselFlags || openFlags || [])) {
+    if (!f || !f.agency_id || !f.new_value) continue;
     const cur = flag[f.agency_id];
-    if (!cur || String(f.created_at || "") > String(cur.created_at || "")) flag[f.agency_id] = f;
+    const fa = String(f.created_at || ""), ca = cur ? String(cur.created_at || "") : "";
+    if (!cur || fa > ca || (fa === ca && Number(f.resolved || 0) < Number(cur.resolved || 0))) flag[f.agency_id] = f;
   }
   const audit = {};
   for (const a of (statusAudit || [])) if (a && a.agency_id && !(a.agency_id in audit)) audit[a.agency_id] = a;
   const gone = new Set((absent || []).map((x) => (x && x.agency_id) || x).filter(Boolean));
+  const key = typeof shipKey === "function" ? shipKey : (v) => String(v == null ? "" : v).trim().toLowerCase();
   const out = [];
   const seen = new Set();
   for (const c of (crew || [])) {
@@ -127,32 +137,48 @@ export function registryFromStore({ snapshot, crew, openFlags, statusAudit, abse
     seen.add(c.agency_id);
     if (gone.has(c.agency_id)) continue;                 // the latest file does not carry them: no word
     const s = snap[c.agency_id];
-    if (s) { out.push({ agency_id: c.agency_id, status: s.status || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, source: "snapshot" }); continue; }
-    // FALLBACK, for a crew with no snapshot row yet. The status is the file's: the latest run's audit
+    if (s) { out.push({ agency_id: c.agency_id, status: s.status || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot" }); continue; }
+    // FALLBACK (BOOTSTRAP), for a crew with no snapshot row yet — every crew until the first registry
+    // upload after 5 Oct 2026 fills registry_snapshot. The STATUS is the file's: the latest run's audit
     // row where the file changed it (accepted or HELD — a held change leaves crew.status at the old
     // value), else crew.status (D6 writes it on every upload), unknown under a manual status edit.
-    // crew.vessel_observed is NOT the file's vessel — the import never writes it (D1), so it can be
-    // months stale (De Torres: 'MV JEWEL OF THE SEAS' from July while the file has him earmarked
-    // elsewhere). Only an OPEN ship flag carries the file's vessel; without one the ship is unknown —
-    // never confirm, never name a hull.
-    // THE DATE IS THE LATEST FILE'S (Miguel, 5 Oct 2026, "still appearing like this": Gayda's card read
-    // "TDG registry 2026-08-22: Inactive, Voyager" while Rita had applied the 5 Oct file an hour before).
-    // The crew is not absent, so the latest file carried them and its word on the STATUS is lastRun's.
-    // A flag is stamped when it was FIRST raised (a repeat of the same hull is skipped while one is open,
-    // crew_flags.reconcileShipFlags), so an older flag dates the hull, not the word: vessel_at carries it
-    // and the card prints "named <date>" beside the hull when it is older than the file.
+    // THE HULL (Miguel, 5 Oct 2026: "TDG is the one true source ... display what is in the TDG file"):
+    // the console never stored the file's vessel, but it can be read back. The import raises a ship flag
+    // whenever the file names a hull the registry does not hold, so the newest flag is the last hull the
+    // file named; with no flag ever, every file agreed with the registry column (crew.vessel_observed) —
+    // or left the vessel blank, which says nothing.
+    // THE IMPORT IS SILENT WHEN THE FILE AGREES WITH THE BOARD (crew_flags: skipped_board_matches): once
+    // Rita's card put a crew aboard hull A, a file naming A raises nothing. So an older hull is NOT the
+    // file's word against an in-force card on a DIFFERENT hull that started after it was named (Calang:
+    // flag Edge 22 Aug, card aboard Silhouette since 5 Sep) — the hull is then unknown until the next
+    // upload writes the snapshot, and the card stays a placeholder, neither confirmed nor contradicted.
+    // THE DATE IS THE LATEST FILE'S for the status (Gayda read "TDG registry 2026-08-22" an hour after the
+    // 5 Oct upload). A flag is stamped when it was FIRST raised, so vessel_at dates the hull, not the word.
     const f = flag[c.agency_id];
     const a = audit[c.agency_id];
-    const vesselAt = (f && f.new_value && f.created_at) ? f.created_at : null;
+    let hull = null, hullAt = null, from = null;
+    if (f) { hull = f.new_value; hullAt = f.created_at || null; from = "flag"; }
+    else if (c.vessel_observed) { hull = c.vessel_observed; hullAt = null; from = "registry"; }
+    let unknown = false;
+    const cards = (inForce && inForce[c.agency_id]) || [];
+    if (hull && cards.length) {
+      const k = key(hull);
+      const same = cards.some((x) => key(x.hull) === k);
+      const later = cards.some((x) => key(x.hull) !== k && (!hullAt || String(x.on || "") > String(hullAt).slice(0, 10)));
+      if (!same && later) { unknown = true; hull = null; }
+    }
+    const vesselAt = (hull && from === "flag") ? hullAt : null;
     out.push({
       agency_id: c.agency_id,
       status: a ? (a.new_value || null) : (c.manual ? null : (c.status || null)),
-      vessel_observed: (f && f.new_value) || null,
+      vessel_observed: hull || null,
       run_at: lastRun || vesselAt || null,
       vessel_at: vesselAt,
+      vessel_from: hull ? from : null,
+      vessel_unknown: unknown,
       source: "registry",
     });
   }
-  for (const id in snap) if (!seen.has(id) && !gone.has(id)) out.push({ agency_id: id, status: snap[id].status || null, vessel_observed: snap[id].vessel || null, run_at: snap[id].run_at || null, source: "snapshot" });
+  for (const id in snap) if (!seen.has(id) && !gone.has(id)) out.push({ agency_id: id, status: snap[id].status || null, vessel_observed: snap[id].vessel || null, run_at: snap[id].run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot" });
   return out;
 }

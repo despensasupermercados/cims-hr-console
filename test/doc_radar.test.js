@@ -159,16 +159,22 @@ test('buildDocRadarEmail: no suspect dates means no suspect note', () => {
 // about the same seafarer — and `deployable`, which drives urgency, was decided by it.
 const legsFor = (sc, on, off) => [{ ours: 1, sc, on, off }];
 
-test('fetchDocRadar: a crew the board shows aboard is On board, whatever the import said', async () => {
+// Miguel, 5 Oct 2026: "TDG is the one true source of knowledge". The file's status stands over a schedule
+// leg (the Counter is a July file; the AdvancedQuery is weekly). The board lists the disagreement.
+test('fetchDocRadar: the TDG file status stands over a schedule leg; the schedule decides only where the file has no word', async () => {
   const rows = [{ agency_id:'SC-1', first_name:'A', last_name:'B', status:'Earmarked', pp_exp:'2030-01-01', sirb_exp:'2030-01-01', med_exp:'2026-08-01', usv_exp:'2030-01-01', sch_exp:null }];
   const noBoard = await fetchDocRadar(stubEnv(rows), TODAY);
   assert.equal(noBoard.rows[0].status, 'Earmarked');
-  assert.equal(noBoard.rows[0].deployable, true, 'without a board we fall back to the registry value');
-
+  assert.equal(noBoard.rows[0].deployable, true);
   const withBoard = await fetchDocRadar(stubEnv(rows), TODAY, { boardLegs: async () => legsFor('SC-1', '2026-05-01', '2026-11-01') });
-  assert.equal(withBoard.rows[0].status, 'On board');
-  assert.equal(withBoard.rows[0].deployable, false, 'someone already aboard is not about to join a ship');
-  assert.equal(withBoard.counts.deployable, 0);
+  assert.equal(withBoard.rows[0].status, 'Earmarked', 'TDG says Earmarked: the Counter leg does not overrule the file');
+  const aboard = [{ ...rows[0], status: 'On board' }];
+  const r = await fetchDocRadar(stubEnv(aboard), TODAY, { boardLegs: async () => legsFor('SC-1', '2026-05-01', '2026-11-01') });
+  assert.equal(r.rows[0].status, 'On board');
+  assert.equal(r.rows[0].deployable, false, 'someone already aboard is not about to join a ship');
+  const gone = [{ ...rows[0], status: 'On board', tdg_absent: 1 }];
+  const g = await fetchDocRadar(stubEnv(gone), TODAY);
+  assert.equal(g.rows[0].status, 'Not in TDG file', 'a crew the latest file does not carry is said as such');
 });
 
 test('fetchDocRadar: a manual override status still wins over the board', async () => {

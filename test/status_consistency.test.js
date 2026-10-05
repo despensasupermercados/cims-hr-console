@@ -35,11 +35,13 @@ test("apiCrew, apiDashboard, apiCompliance and rotationSections all take the sch
   }
 });
 
-test("rotationSections treats a TBA (null) sign-off as still aboard, like apiCrew and deriveStatus", () => {
+test("rotationSections seats a crew from TDG's file, never from a schedule self-heal (5 Oct 2026)", () => {
   const b = body("async function rotationSections(");
-  assert.match(b, /const off = h\.off \|\| "9999"/, "a null off must not drop the leg from the self-heal placement");
-  assert.doesNotMatch(b, /\|\| !h\.off\) continue/, "the old `!h.off -> continue` skip is back");
-  assert.match(b, /h\.is_current\) histScs\.add/, "only CURRENT live legs may block the SHIP_HISTORY backfill");
+  assert.doesNotMatch(b, /schedEff|schedRows|SHIP_HISTORY\.filter/, "the self-heal placement (and its SHIP_HISTORY backfill) is gone: the seat is the file's");
+  assert.match(b, /if \(w && w\.status === "On board" && w\.known && !absentSince\[sc\]\) \{/, "a green seat needs the file On board a known hull, and the crew still in the file");
+  assert.match(b, /const off = completedOff\(HIST, sc, w\.key, today, keyOf\);/, "a contract the console KNOWS completed on that hull goes underneath");
+  // A TBA sign-off is still aboard: the live-leg test reads the Counter's current flag, not the date.
+  assert.match(b, /if \(h && h\.ours && h\.sc && h\.is_current && h\.on && h\.on <= today\) liveLeg\.add/);
 });
 
 // 2026-09-05: the feedback board + scoring queue gated on the RAW imported crew.status — a crew the
@@ -82,11 +84,10 @@ test("no route iterates the frozen constant directly: Score Card dates and the s
   }
 });
 
-test("self-heal placement prefers live board legs; the constant only backfills unknown crew", () => {
+test("no route places a crew off the frozen constant: rotationSections never touches SHIP_HISTORY", () => {
   const b = body("async function rotationSections(");
-  assert.match(b, /const schedRows = HIST\.concat\(SHIP_HISTORY\.filter\(/);
-  assert.match(b, /for \(const h of schedRows\)/);
   assert.doesNotMatch(b, /for \(const h of SHIP_HISTORY\)/, "rotationSections must not iterate the bare constant for placement");
+  assert.doesNotMatch(b, /SHIP_HISTORY\.(filter|map|concat)/, "nor read it at all: the seat is TDG's file");
 });
 
 // §11 + import decision D6 (2026-09-09). crew_override.status is a MANUAL PIN: crewStatus()
@@ -138,7 +139,7 @@ test("scheduleBySc and crewStatus live in ONE module, not copied per caller", ()
   assert.match(MOD, /export function scheduleBySc/);
   assert.match(MOD, /export function crewStatus/);
   // worker.js must import them rather than redeclare them (§3: deployed code equals tested code).
-  assert.match(SRC, /import \{ scheduleBySc, crewStatus \} from "\.\/crew_status\.js"/);
+  assert.match(SRC, /import \{ scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL \} from "\.\/crew_status\.js"/);
   assert.doesNotMatch(SRC, /^function (scheduleBySc|crewStatus)\(/m,
     "a second local copy is how two views start disagreeing");
 });
@@ -150,10 +151,46 @@ test("scheduleBySc carries is_current through to deriveStatus (the overdue rule 
     { ours: true, sc: "SC-2", on: "2026-01-10", off: "2026-07-10", is_current: 0 },
     { ours: false, sc: "SC-3", on: "2026-01-10", off: "2026-07-10", is_current: 1 },
   ]);
-  assert.deepEqual(m["SC-1"], [{ on: "2026-01-10", off: "2026-07-10", is_current: true }]);
-  assert.deepEqual(m["SC-2"], [{ on: "2026-01-10", off: "2026-07-10", is_current: false }]);
+  assert.deepEqual(m["SC-1"], [{ on: "2026-01-10", off: "2026-07-10", is_current: true, ship: null }]);
+  assert.deepEqual(m["SC-2"], [{ on: "2026-01-10", off: "2026-07-10", is_current: false, ship: null }]);
   assert.equal(m["SC-3"], undefined, "not ours: not on the schedule");
   assert.equal(crewStatus({ status: "On board" }, {}, m["SC-1"], "2026-10-05"), "On board", "overdue seat: held");
   assert.equal(crewStatus({ status: "On board" }, {}, m["SC-2"], "2026-10-05"), "On Vacation", "closed leg: signed off");
   assert.equal(crewStatus({ status: "On board" }, { status: "Earmarked" }, m["SC-1"], "2026-10-05"), "Earmarked", "a manual edit still wins");
+});
+
+// Miguel, 5 Oct 2026: "TDG is the one true source of knowledge". The file's status stands; the schedule
+// decides only where the file has no readable word; a crew the latest file dropped says so.
+test("crewStatus: retired > manual > not in the TDG file > the file's word (unless the console KNOWS the contract on that hull ended) > schedule", async () => {
+  const { crewStatus, knownCompleted, NOT_IN_FILE } = await import("../src/crew_status.js");
+  const T = "2026-10-05";
+  const aboardLeg = [{ on: "2026-05-01", off: "2026-11-01", is_current: true, ship: "Xcel" }];
+  assert.equal(crewStatus({ status: "Earmarked" }, {}, aboardLeg, T), "Earmarked", "Purnama: the Counter leg does not overrule TDG's Earmarked");
+  assert.equal(crewStatus({ status: "On board" }, {}, [], T), "On board", "Eresmas / Sapungan: aboard per TDG with no leg at all");
+  assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, {}, aboardLeg, T), NOT_IN_FILE, "Jaramiz: dropped from the file");
+  assert.equal(crewStatus({ status: "On board", tdg_absent: 0 }, {}, [], T), "On board");
+  assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, { status: "Earmarked" }, [], T), "Earmarked", "a manual edit still wins");
+  assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, { retired: 1 }, [], T), "Retired");
+  // Calayag: recorded sign-off 25 Sep on Navigator, the 5 Oct file still On board Navigator -> On Vacation
+  const calayag = [{ on: "2026-02-02", off: "2026-09-25", is_current: false, ship: "Navigator" }];
+  assert.equal(crewStatus({ status: "On board", tdg_ship: "MV NAVIGATOR OF THE SEAS" }, {}, calayag, T), "On Vacation");
+  // Santos: recorded off Quest 29 Jul, the file has him On board WONDER -> a new contract, On board
+  const santos = [{ on: "2026-01-06", off: "2026-07-29", is_current: false, ship: "Quest" }];
+  assert.equal(crewStatus({ status: "On board", tdg_ship: "MV WONDER OF THE SEAS" }, {}, santos, T), "On board");
+  // An overdue CURRENT leg is not a completion (§11): the file's word stands.
+  assert.equal(crewStatus({ status: "On board", tdg_ship: "Freedom" }, {}, [{ on: "2025-12-08", off: "2026-08-22", is_current: true, ship: "Freedom" }], T), "On board");
+  // No readable file word: the schedule decides, as before.
+  assert.equal(crewStatus({ status: null }, {}, aboardLeg, T), "On board");
+  assert.equal(knownCompleted([], T), false);
+  assert.equal(knownCompleted([{ on: "2025-01-01", off: "2025-07-01", is_current: false, ship: "Anthem" }], T, "Anthem"), false, "older than 180 days: a new contract the Counter does not carry");
+});
+
+test("every crew read that feeds crewStatus carries the not-in-TDG-file column, by one shared join (no extra round trip)", () => {
+  for (const fn of ["async function apiDataStatus(", "async function apiDashboard(", "async function apiCrew(", "async function apiCompliance(", "async function rotationSections(", "async function loadFeedbackState("]) {
+    const b = body(fn);
+    assert.match(b, /crewStatus\(/, fn + " derives status");
+    assert.match(b, /" \+ TDG_ABSENT_COL \+ " FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=/, fn + " must read tdg_absent / tdg_ship with the shared join");
+  }
+  const DR = readFileSync(new URL("../src/doc_radar.js", import.meta.url), "utf8");
+  assert.match(DR, /TDG_ABSENT_COL \+ " " \+\s*"FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=0"/, "the doc radar too");
 });
