@@ -230,6 +230,34 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   key as ENABLED, so deleting the line silently re-opens it. Pinned by `test/wrangler_config.test.js`;
   the other half (Settings > Build > Branch control) is dashboard-only — see `docs/BRANCH_CONTROL.md`.
 
+## 11b. Invariants from the 5 Oct 2026 correction pass (three reviews, 24 defects — don't regress these)
+- **An edit belongs to a CONTRACT, never to a position.** Every join from `keyman_contract3` to `contract_edit`
+  is by `on_key` (= the leg's sign-on), `seq` only for an edit older than the column — `counter_legs.js`,
+  `ship_leg_source.fetchRecordedSignoffs`, `counter_sync.editFor`. A seq join hands Rita's recorded sign-off to
+  whatever contract a multi-block Counter renumbers onto that seq. The recorded sign-off also obeys "the newer
+  write wins": a Counter stamped after the edit reopens the leg; `act_off` always counts.
+- **One identity ladder for both TDG files** (`keymanimport.buildBridge/bridgeName`, reused by `contract_count`):
+  cruise-line id, full name, first word, a unique surname only when the first names agree, swapped columns. Two
+  roster crew on one key resolve nobody; two file rows resolving to one crew are a COLLISION — neither imported,
+  both listed (§6). A blank cruise-line id reaches the ladder; a repeated id in the count file is a defect only
+  when the counts differ.
+- **The count file says its own date.** No as-of in the filename → `need_as_of`; a file older than the count
+  loaded → `older_than_loaded` unless the screen forced it; rows the new file does not carry are listed and
+  removed on apply (ACTIVE + INACTIVE is the whole population; §10c: no TDG row → the derived number). The
+  board's fallback Contracts number is `cumulativeContracts` WITH the baseline, like every other reader.
+- **Deploy reports what happened after the email.** The mail going is the truth (`ok, sent`); a log or remove
+  failure is `logError` / `removeError`, never "Not sent" (a retry emailed Joy twice). The payload carries the
+  workflow stamps and the card's comments; Restore claims the line first, re-inserts the comments, and refuses
+  while the original card is still on the board. The "sent to TDG" line closes ONLY on a Counter leg within
+  `ABSORB_DAYS` of the deployed sign-on — never on "any green card for that crew".
+- **A move is a create.** Changing an open projection's ship runs `unknown_ship` / `already_projected`; a blank
+  sign-on defaults to today (NOT NULL), clearing it is refused. A yellow card opens ITS projection (`aid`).
+- **The registry import survives its own file**: a repeated agency id (last row stands, reported), a row keyed
+  on the cruise-line id (carried under the real agency id), presence flags deduped while open and closed on
+  reappearance, an open ship flag closed when a later file agrees with the registry.
+- **A plan that starts after the file's current contract ends is the next contract**, not a conflict
+  (`counter_sync.diffCounter`). Dashboard birthdays and tiles use the derived status and visible crew.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

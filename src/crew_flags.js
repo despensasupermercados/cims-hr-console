@@ -42,8 +42,12 @@ export function strictShipMatcher(vesselRef) {
 //            open flags were raised by an OLDER file that has since come back into agreement, so they
 //            close (5 Oct 2026: nothing closed them before, and the Keyman card's registry fallback
 //            read the stale flag as the latest file's word)
-export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf, agree }) {
+// present:   agency ids THIS file carries — their open 'presence' flags (raised when an earlier file
+//            lacked them) close (5 Oct 2026: nothing closed one, and a crew who left for a week kept
+//            an "absent from the file" flag for ever; a repeated absence also stops re-raising it).
+export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf, agree, present }) {
   const agreed = agree instanceof Set ? agree : new Set(agree || []);
+  const here = present instanceof Set ? present : new Set(present || []);
   // Equality key for "same ship": the strict hull name when known, else the normalised raw text
   // (so two identical unknown strings still dedupe; an unknown never equals a board ship).
   const canon = (v) => (v == null || v === "" ? null : (shipOf(v) || ("raw:" + normShip(v))));
@@ -52,17 +56,22 @@ export function reconcileShipFlags({ open = [], incoming = [], boardShip, shipOf
   const openBySc = {};
   for (const o of open) (openBySc[o.agency_id] = openBySc[o.agency_id] || []).push(o);
   const closeRow = (o, why) => { if (closed.has(o.id)) return; closed.add(o.id); close.push({ id: o.id, why }); };
-  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, closed_taken: 0, closed_file_agrees: 0, skipped_board_matches: 0, skipped_duplicate: 0 };
+  const counts = { closed_board_matches: 0, closed_superseded: 0, closed_dismissed: 0, closed_taken: 0, closed_file_agrees: 0, closed_reappeared: 0, skipped_board_matches: 0, skipped_duplicate: 0, skipped_presence_duplicate: 0 };
+  const openShip = open.filter((o) => !o.field || o.field === "vessel_observed");
+  const openPresence = open.filter((o) => o.field === "presence");
 
   // 1) Open flags the board already satisfies: the crew is on the ship the file named.
-  for (const o of open) {
+  for (const o of openShip) {
     const b = boardShip(o.agency_id);
     if (b && canon(o.new_value) === b) closeRow(o, "board_matches");
   }
   // 1b) Open flags for a crew whose vessel in THIS file agrees with the registry: the disagreement is over.
-  for (const o of open) if (agreed.has(o.agency_id)) closeRow(o, "file_agrees");
+  for (const o of openShip) if (agreed.has(o.agency_id)) closeRow(o, "file_agrees");
+  // 1c) Open presence flags for a crew THIS file carries again.
+  for (const o of openPresence) if (here.has(o.agency_id)) closeRow(o, "reappeared");
   // 2) This import's flags.
   for (const c of incoming) {
+    if (c.field === "presence" && c.resolved === 0 && openPresence.some((o) => o.agency_id === c.agency_id && !closed.has(o.id))) { counts.skipped_presence_duplicate++; continue; }
     if (c.field !== "vessel_observed") { insert.push(c); continue; }
     const want = canon(c.new_value);
     const mine = openBySc[c.agency_id] || [];

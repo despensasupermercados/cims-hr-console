@@ -7,7 +7,7 @@ function fakeDB({ existing = [], overrides = [], dup = false, openFlags = [] } =
   const batched = [];
   function route(sql, args) {
     if (/FROM import_run WHERE file_hash/i.test(sql)) return { __first: dup ? { x: 1 } : null };
-    if (/FROM sync_conflict WHERE field='vessel_observed' AND resolved=0/i.test(sql)) return { __all: { results: openFlags } };
+    if (/FROM sync_conflict WHERE field IN \('vessel_observed','presence'\) AND resolved=0/i.test(sql)) return { __all: { results: openFlags } };
     if (/FROM crew_override/i.test(sql)) return { __all: { results: overrides } };
     if (/FROM crew\b/i.test(sql)) return { __all: { results: existing } };
     return { __first: null, __all: { results: [] } };
@@ -358,4 +358,25 @@ test("apply: a crew whose vessel in this file AGREES with the registry closes th
   const stage2 = await (await apiCrewImportStage(req({ rows: rows2, file_hash: "h-pj8" }), env2)).json();
   const body2 = await (await apiCrewImportApply(req({ review: stage2.review, decisions: {}, file_hash: "h-pj8", run_by: "Rita" }), env2)).json();
   assert.equal(body2.ship_flags.closed_file_agrees, 0);
+});
+
+test("stage: the same agency id twice in one file is reported and only the last row stands; a rekeyed row's registry word is carried under the real agency id", async () => {
+  const rows = [
+    { "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On Vacation", "VESSEL NAME": "Celebrity Edge" },
+    { "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Edge" },
+    { "CREW ID": "SC-NEW", "FIRST NAME": "Nina", "LAST NAME": "New", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Apex" },
+    { "CREW ID": "SC-NEW", "FIRST NAME": "Nina", "LAST NAME": "New", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Apex" },
+  ];
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-dup" }), env)).json();
+  assert.deepEqual(stage.review.duplicate_ids, ["SC-1", "SC-NEW"]);
+  assert.equal(stage.review.groups.new.length, 1, "one INSERT for the new crew, not two (UNIQUE used to fail the whole batch)");
+  assert.deepEqual(stage.review.registry.filter(r => r.agency_id === "SC-1").map(r => r.status), ["On board"], "the last row stands");
+  // rekeyed: the file keyed Jomar on his cruise-line id; the snapshot/verdict/flag rows must use SC-1
+  const existing = [{ ...EXISTING[0], ship_crew_id: "526444" }];
+  const rows2 = [{ "CREW ID": "526444", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Edge" }];
+  const env2 = { DB: fakeDB({ existing }) };
+  const stage2 = await (await apiCrewImportStage(req({ rows: rows2, file_hash: "h-rk" }), env2)).json();
+  assert.equal(stage2.review.groups.rekeyed.length, 1);
+  assert.deepEqual(stage2.review.registry.map(r => r.agency_id), ["SC-1"], "carried under the real agency id, not the id the file used");
 });

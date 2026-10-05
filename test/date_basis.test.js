@@ -60,9 +60,8 @@ test("UTC basis is used by exactly these functions", () => {
     // The deployment card therefore shares the console's UTC basis, which is the point of listing it.
     "(top level)",
     "apiAsk", "apiBillingMonth", "apiBonusCrew",
-    // 2026-09-24: TDG's completed-contract count is stamped with the file's as-of date; when the
-    // filename carries none, the import day — the console's UTC day, like every other import.
-    "apiContractCountImport",
+    // 2026-10-05: the count import no longer stamps the import day — a file with no as-of date is
+    // refused (the file says its own date), so it has no day basis of its own.
     "apiCrew",
     // 2026-09-15: a ship on the Add-crew form is a projection (same path and day basis as a drop).
     "apiCrewAdd",

@@ -240,3 +240,63 @@ test("restore puts the projection back from the log, once", async () => {
   const done = harness({ log: { id: "dep_1", payload, restored_at: "2026-09-14T10:00:00Z" } });
   assert.equal((await done.handle("/api/keyman/deploy/restore", req({ logId: "dep_1" }), done.env, null, S)).status, 409);
 });
+
+// 5 Oct 2026 review: a failure AFTER the email went was reported as "Not sent" (a retry emailed Joy
+// twice); the payload lacked the workflow stamps and the comments; Restore was read-then-write.
+test("send: a log failure after the email went is reported as sent + logError, and the card is NOT removed", async () => {
+  const { handle, env, calls } = harness({ DEPLOY_TO: "joy@tdg.example" });
+  const origPrepare = env.DB.prepare;
+  env.DB.prepare = (sql) => { const st = origPrepare(sql); if (/INSERT INTO deploy_log/.test(sql)) st.run = async () => { throw new Error("D1 timeout"); }; return st; };
+  const res = await handle("/api/keyman/deploy/send", req({ id: "as_1" }), env, null, S);
+  const r = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(r.ok, true, "the email went: that is the truth to report");
+  assert.equal(r.sent, true);
+  assert.match(r.logError, /D1 timeout/);
+  assert.equal(r.logId, null);
+  assert.equal(calls.sent.length, 1);
+  assert.equal(calls.removed.length, 0, "no log line, no removal: the card stays on the board");
+  assert.equal(r.removeError, "log_failed_card_kept");
+});
+
+test("send: the payload carries the workflow stamps, the vessel id and the card's comments; a remove failure is reported, never thrown", async () => {
+  const { handle, env, calls } = harness({ DEPLOY_TO: "joy@tdg.example", remove: { ok: false, error: "has_bonus_history" } });
+  const origPrepare = env.DB.prepare;
+  env.DB.prepare = (sql) => { const st = origPrepare(sql); if (/FROM relief_comment WHERE assignment_id/.test(sql)) st.all = async () => ({ results: [{ id: "rc1", vessel_key: "Royal Caribbean|Icon", body: "call Joy first", created_at: "2026-09-01T00:00:00Z" }] }); return st; };
+  const r = await (await handle("/api/keyman/deploy/send", req({ id: "as_1" }), env, null, S)).json();
+  assert.equal(r.ok, true);
+  assert.equal(r.removed, false);
+  assert.equal(r.removeError, "has_bonus_history");
+  const log = calls.writes.find((w) => /INSERT INTO deploy_log/.test(w.sql));
+  const stored = JSON.parse(log.args[13]);
+  assert.ok("instructions_sent_at" in stored.assignment && "signoff_link_sent_at" in stored.assignment && "review_invite_sent_at" in stored.assignment && "succeeds_assignment_id" in stored.assignment, "every column Restore needs");
+  assert.deepEqual(stored.comments.map((c) => c.body), ["call Joy first"]);
+});
+
+test("restore: claims the line first (a double click restores once), re-inserts the comments, and refuses while the card is still on the board", async () => {
+  const stored = { assignment: { crew_id: "c1", role: "reliever", vessel_name: "Icon", sign_on: "2026-11-02" }, comments: [{ id: "rc1", vessel_key: "Royal Caribbean|Icon", body: "call Joy first", created_at: "2026-09-01T00:00:00Z" }] };
+  // card still on the board: refuse
+  const h1 = harness({ DEPLOY_TO: "joy@tdg.example", log: { id: "dep_1", assignment_id: "as_1", payload: JSON.stringify(stored), restored_at: null, crew_name: "Ana Alpha", ship: "Icon" } });
+  const p1 = h1.env.DB.prepare; h1.env.DB.prepare = (sql) => { const st = p1(sql); if (/FROM assignment WHERE id=\? AND actual_sign_off IS NULL/.test(sql)) st.first = async () => ({ x: 1 }); return st; };
+  const r1 = await h1.handle("/api/keyman/deploy/restore", req({ logId: "dep_1" }), h1.env, null, S);
+  assert.equal(r1.status, 409);
+  assert.equal((await r1.json()).error, "card_still_on_board");
+  assert.equal(h1.calls.saved.length, 0);
+  // normal restore: claim, save, comments back
+  const h2 = harness({ DEPLOY_TO: "joy@tdg.example", log: { id: "dep_1", assignment_id: "as_1", payload: JSON.stringify(stored), restored_at: null, crew_name: "Ana Alpha", ship: "Icon" } });
+  const p2 = h2.env.DB.prepare; h2.env.DB.prepare = (sql) => { const st = p2(sql); if (/FROM assignment WHERE id=\? AND actual_sign_off IS NULL/.test(sql)) st.first = async () => null; return st; };
+  h2.env.DB.batch = async (sts) => { for (const s of sts) await s.run(); return sts.map(() => ({ success: true })); };
+  const r2 = await (await h2.handle("/api/keyman/deploy/restore", req({ logId: "dep_1" }), h2.env, null, S)).json();
+  assert.equal(r2.ok, true);
+  assert.equal(r2.comments, 1);
+  const w = h2.calls.writes.map((x) => x.sql);
+  assert.ok(w.some((s) => /UPDATE deploy_log SET restored_at=\? WHERE id=\? AND restored_at IS NULL/.test(s)), "the claim comes first");
+  assert.ok(w.findIndex((s) => /restored_at=\? WHERE id=\? AND restored_at IS NULL/.test(s)) < w.findIndex((s) => /INSERT OR IGNORE INTO relief_comment/.test(s)));
+  assert.equal(h2.calls.saved[0].vessel_name, "Icon");
+  // the claim lost (changes 0): already restored, nothing saved
+  const h3 = harness({ DEPLOY_TO: "joy@tdg.example", log: { id: "dep_1", assignment_id: null, payload: JSON.stringify(stored), restored_at: null, crew_name: "Ana Alpha", ship: "Icon" } });
+  const p3 = h3.env.DB.prepare; h3.env.DB.prepare = (sql) => { const st = p3(sql); if (/restored_at=\? WHERE id=\? AND restored_at IS NULL/.test(sql)) st.run = async () => ({ meta: { changes: 0 } }); return st; };
+  const r3 = await h3.handle("/api/keyman/deploy/restore", req({ logId: "dep_1" }), h3.env, null, S);
+  assert.equal(r3.status, 409);
+  assert.equal(h3.calls.saved.length, 0);
+});

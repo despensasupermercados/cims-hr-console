@@ -42,7 +42,7 @@ function fakeEnv(state = {}) {
       s.first = async () => null;
       s.all = async () => {
         if (S.startsWith("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew")) return { results: ROSTER };
-        if (S.startsWith("SELECT sc, completed FROM contract_count")) return { results: state.current || [] };
+        if (/^SELECT sc, completed(, as_of)? FROM contract_count/.test(S)) return { results: state.current || [] };
         return { results: [] }; // KC3_LEGS_SQL (the derived fallback) and anything else: empty
       };
       return s;
@@ -95,13 +95,35 @@ test("a file with one tab is refused before any read", async () => {
   assert.equal(dataWrites(writes).length, 0);
 });
 
-test("no as-of in the request: the import day is used, never an invented one", async () => {
-  const { env } = fakeEnv();
-  const r = await (await apiContractCountImport(req({ sheets: SHEETS, dryRun: true }), env, session)).json();
-  assert.match(r.asOf, /^\d{4}-\d{2}-\d{2}$/);
-  const bad = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "24 Sep 2026", dryRun: true }), env, session)).json();
-  assert.match(bad.asOf, /^\d{4}-\d{2}-\d{2}$/, "an unparseable as-of falls back rather than being stored as text");
+test("no as-of in the request: REFUSED — the file says its own date, the import day is never stamped instead", async () => {
+  const { env, writes } = fakeEnv();
+  const res = await apiContractCountImport(req({ sheets: SHEETS, dryRun: true }), env, session);
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "need_as_of");
+  const bad = await apiContractCountImport(req({ sheets: SHEETS, asOf: "24 Sep 2026", dryRun: true }), env, session);
+  assert.equal(bad.status, 400, "an unparseable as-of is refused too, never stored as text or replaced by today");
+  assert.equal(dataWrites(writes).length, 0);
 });
+
+test("an OLDER file than the count loaded is refused unless forced; rows the file no longer carries are listed and removed on apply", async () => {
+  const current = [{ sc: "SC-0040153", completed: 3, as_of: "2026-10-20" }, { sc: "SC-GONE", completed: 5, as_of: "2026-10-20" }];
+  const { env, writes } = fakeEnv({ current });
+  const dry = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24", dryRun: true }), env, session)).json();
+  assert.equal(dry.loadedAsOf, "2026-10-20");
+  assert.equal(dry.olderThanLoaded, true);
+  assert.deepEqual(dry.notInFile, [{ sc: "SC-GONE", completed: 5, as_of: "2026-10-20" }], "a crew with a TDG count today that this file does not carry");
+  const refused = await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24" }), env, session);
+  assert.equal(refused.status, 409);
+  assert.equal((await refused.json()).error, "older_than_loaded");
+  assert.equal(dataWrites(writes).length, 0, "nothing rolled back silently");
+  const forced = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24", force: true }), env, session)).json();
+  assert.equal(forced.ok, true);
+  assert.equal(forced.removed, 1);
+  const del = writes.find((w) => /DELETE FROM contract_count WHERE imported_at IS NOT \?/.test(w.sql));
+  assert.ok(del, "the row this apply did not write goes: the crew falls back to the derived count (§10c)");
+  assert.equal(del.args[0], dataWrites(writes)[0].args[6], "bound to THIS apply's stamp");
+});
+
 
 test("the board reads TDG's count and says its own age (static: the wave carries both reads)", () => {
   const src = readFileSync(SRC, "utf-8");
@@ -113,9 +135,13 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   const wave = body.slice(at, body.indexOf("]);", at));
   assert.match(wave, /FROM contract_count/, "TDG's count is read in the wave");
   assert.match(wave, /MAX\(imported_at\) AS stamp, COUNT\(\*\) AS rows, COUNT\(DISTINCT sc\) AS crew FROM keyman_contract3/, "the Counter's age is read in the wave");
-  // The imported count overrides the date-derived one, per crew, and the derived stays as the fallback.
-  assert.match(body, /for \(const sc in tdgCount\) contracts\[sc\] = tdgCount\[sc\];/);
-  assert.match(body, /contracts\[sc\] = fullContracts\(/, "derived remains the fallback for a crew the count file does not carry");
+  // The imported count overrides the date-derived one, per crew, and the derived stays as the fallback —
+  // through cumulativeContracts, with the seeded baseline, like every other reader (5 Oct 2026: the board
+  // dropped the baseline and showed "Contracts 0" for a crew the crew list showed at 3).
+  assert.match(body, /const cc = cumulativeContracts\(tdgCount\[sc\] != null \? tdgCount\[sc\] : null, applyOverride\(c, ovMap\[sc\]\)\.baseline_count, derivedBy\[sc\] \|\| 0\);/);
+  assert.match(body, /derivedBy\[sc\] = fullContracts\(/, "derived remains the fallback for a crew the count file does not carry");
+  assert.match(wave, /baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0/, "the baseline rides the existing crew read");
+  assert.match(wave, /retired, baseline_count, med_exp/, "and the manual baseline rides the override read (0 is a valid override)");
   // ...and the response says where its numbers come from.
   assert.match(body, /sources, inDock/);
   assert.match(body, /seed: KEYMAN_VERSION/, "a NULL stamp is named as the bundled seed, not left blank");

@@ -114,3 +114,15 @@ test("reconcileShipFlags: an open flag closes when THIS file's vessel agrees wit
   const r2 = reconcileShipFlags({ open, incoming: [], boardShip: () => null, shipOf: (s) => s || null });
   assert.equal(r2.close.length, 0);
 });
+
+// 5 Oct 2026: a presence flag ("absent from this file") was re-raised on every upload (7 open rows for
+// one crew in prod) and never closed when the crew came back.
+test("reconcileShipFlags: a presence flag closes when THIS file carries the crew again, and is not raised twice while open", () => {
+  const open = [{ id: "p1", agency_id: "SC-1", field: "presence", new_value: null }, { id: "p2", agency_id: "SC-2", field: "presence", new_value: null }, { id: "s1", agency_id: "SC-3", field: "vessel_observed", new_value: "Apex" }];
+  const incoming = [{ agency_id: "SC-2", field: "presence", old_value: null, new_value: null, resolved: 0 }, { agency_id: "SC-9", field: "presence", old_value: null, new_value: null, resolved: 0 }];
+  const r = reconcileShipFlags({ open, incoming, boardShip: () => null, shipOf: (s) => s || null, present: new Set(["SC-1", "SC-3"]) });
+  assert.deepEqual(r.close, [{ id: "p1", why: "reappeared" }], "SC-1 is back in the file; SC-3's SHIP flag is untouched by presence");
+  assert.deepEqual(r.insert.map((c) => c.agency_id), ["SC-9"], "SC-2 is still absent and already flagged: not raised again");
+  assert.equal(r.counts.closed_reappeared, 1);
+  assert.equal(r.counts.skipped_presence_duplicate, 1);
+});

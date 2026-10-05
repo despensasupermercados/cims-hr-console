@@ -213,12 +213,26 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
 // keeps holding their card and stays billed as current (rotationSections/apiBillingMonth bill a
 // current crew through today). We read these and fold them in at the READ layer, the same
 // precedence already used for in-force and ended assignments (3-5 Sep).
+//
+// THE EDIT BELONGS TO A CONTRACT, NOT A POSITION (5 Oct 2026 review): the join is by `on_key` (the leg's
+// sign-on) and falls back to `seq` only for an edit written before on_key existed — the same ladder as
+// counter_sync.editFor. Joining by seq alone would hand Rita's recorded sign-off to a 2023 contract the
+// moment a multi-block Counter renumbers the rows (every live edit sits on seq 1 today).
+// THE NEWER WRITE WINS (Miguel, 14 Sep 2026): a recorded sign-off closes the leg only when the edit is
+// newer than the Counter row (an unstamped row — every row today — is older than anything); a Counter
+// that arrived after the edit reopens the leg, exactly as the upload's dry-run promised ("overrides").
+// k.act_off is TDG's own actual sign-off and always counts.
 export async function fetchRecordedSignoffs(env) {
   const { results } = await env.DB.prepare(
-    `SELECT k.sc, k.sign_on, COALESCE(k.act_off, e.sign_off) AS recorded_off
+    `SELECT k.sc, k.sign_on,
+            CASE WHEN k.act_off IS NOT NULL THEN k.act_off
+                 WHEN e.sign_off IS NOT NULL AND (k.imported_at IS NULL OR (e.updated_at IS NOT NULL AND e.updated_at > k.imported_at)) THEN e.sign_off
+                 END AS recorded_off
        FROM keyman_contract3 k
-       LEFT JOIN contract_edit e ON e.sc = k.sc AND e.seq = k.seq
-      WHERE COALESCE(k.act_off, e.sign_off) IS NOT NULL`
+       LEFT JOIN contract_edit e ON e.sc = k.sc
+                                 AND ((e.on_key IS NOT NULL AND substr(e.on_key,1,10) = substr(k.sign_on,1,10))
+                                      OR (e.on_key IS NULL AND e.seq = k.seq))
+      WHERE k.act_off IS NOT NULL OR e.sign_off IS NOT NULL`
   ).all();
   const m = {};
   for (const r of results || []) if (r.recorded_off) m[(r.sc || "") + "|" + (r.sign_on || "")] = r.recorded_off;

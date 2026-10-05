@@ -5,6 +5,7 @@ import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { htmlPage } from "./etag.js";
 import { fetchCurrentCounterLegs } from "./counter_legs.js";
+import { fetchRecordedSignoffs, legWithRecordedSignoff } from "./ship_leg_source.js";
 import { fetchBoardPortDays, fetchAzamaraTurnarounds } from "./port_days.js";
 import { docBadge } from "./keyman_deploy.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
@@ -26,13 +27,25 @@ export function addMonthsISO(d, n) {
 export async function reliefBoardData(env, today) {
   // ONE wave (CLAUDE.md §12). The itinerary is fetched for the card dates only — never the whole
   // 40k-row table (port_days.js, 2026-09-15). Azamara turnarounds come as their own small list.
-  const [cfgRow, pd, taRows, flagRes, legs] = await Promise.all([
+  const [cfgRow, pd, taRows, flagRes, rawLegs, recorded] = await Promise.all([
     env.DB.prepare("SELECT critical_days, due_days FROM relief_window_config WHERE key='default'").first(),
     fetchBoardPortDays(env),
     fetchAzamaraTurnarounds(env, today || new Date().toISOString().slice(0, 10)),
     env.DB.prepare("SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags").all(),
     fetchCurrentCounterLegs(env),
+    fetchRecordedSignoffs(env).catch(() => ({})),
   ]);
+  // THE SAME DEFINITION AS THE BOARD (CLAUDE.md §11, 5 Oct 2026 review): a printer leg Rita has recorded
+  // a sign-off for carries that date, and once it has passed the printer is gone — the banner used to
+  // keep saying "sign-off overdue · no sign-off recorded" on a seat the Keyman card had already released
+  // (Calayag on Navigator).
+  const _today = today || new Date().toISOString().slice(0, 10);
+  const legs = rawLegs.map((l) => {
+    const rec = recorded[(l.sc || "") + "|" + (l.on_date || "")];
+    if (!rec) return l;
+    const eff = legWithRecordedSignoff(l.off_date, true, rec, _today);
+    return { ...l, off_date: eff.off, is_current: eff.is_current ? 1 : 0 };
+  }).filter((l) => Number(l.is_current) === 1);
   const cfg = cfgRow || { critical_days: 14, due_days: 30 };
   const portDaysByShip = groupPortDays(pd);
   // Turnarounds per Azamara ship (crew-change ports), ascending — the sign-off projection candidates.
@@ -142,6 +155,22 @@ export async function saveReliefAssignment(env, payload) {
   }
 
   if (payload.id) {
+    // sign_on is NOT NULL on the table: clearing it is refused with a reason, not a 500 (5 Oct 2026).
+    if ("sign_on" in cleaned && (cleaned.sign_on == null || cleaned.sign_on === "")) return { ok: false, error: "sign_on_required" };
+    // A MOVE (vessel_name changes) gets the create path's checks (5 Oct 2026 review): the target hull
+    // must exist, and the crew must not already hold an open projection there — a second card on the
+    // same ship is never drawn (pendingProjections collapses on sc|ship) and could not be removed.
+    if (cleaned.vessel_name) {
+      if (!cleaned.vessel_id) return { ok: false, error: "unknown_ship", ship: cleaned.vessel_name };
+      const dup = await env.DB.prepare(
+        `SELECT a2.id FROM assignment a
+           JOIN contract k ON k.id = a.contract_id
+           JOIN contract k2 ON k2.crew_id = k.crew_id
+           JOIN assignment a2 ON a2.contract_id = k2.id
+          WHERE a.id = ?1 AND a2.id <> ?1 AND a2.actual_sign_off IS NULL AND a2.vessel_id = ?2
+          LIMIT 1`).bind(payload.id, cleaned.vessel_id).first().catch(() => null);
+      if (dup) return { ok: false, error: "already_projected", id: dup.id };
+    }
     const sets = [], binds = [];
     for (const k of Object.keys(cleaned)) {
       if (ASSIGN_COLS.has(k)) { sets.push(k + "=?"); binds.push(cleaned[k]); }
@@ -169,7 +198,12 @@ export async function saveReliefAssignment(env, payload) {
     if (ASSIGN_COLS.has(k)) { cols.push(k); vals.push(cleaned[k]); }
   }
   if (!cols.includes("vessel_name")) { cols.push("vessel_name"); vals.push(cleaned.vessel_name || "?"); }
-  if (!cols.includes("sign_on")) { cols.push("sign_on"); vals.push(cleaned.sign_on || now.slice(0, 10)); }
+  // sign_on is NOT NULL on the table. The relief UI always sends the key (null when blank), so the
+  // default below only ever applied to a payload WITHOUT the key: a blank date threw a 500 instead
+  // (5 Oct 2026). A blank sign-on defaults to today either way.
+  const so = cols.indexOf("sign_on");
+  if (so < 0) { cols.push("sign_on"); vals.push(cleaned.sign_on || now.slice(0, 10)); }
+  else if (vals[so] == null || vals[so] === "") vals[so] = now.slice(0, 10);
   const ph = cols.map(() => "?").join(",");
   // Contract + assignment travel in ONE batch (one round trip, one transaction): the relief Save, a
   // drop on the board and Add crew all come through here, and the D1 primary is far from the Worker.

@@ -28,10 +28,12 @@ export function parseContractCounterFull(aoa) {
   const out = [], unparsed = [];
   for (const row of (aoa || [])) {
     if (!row) continue;
-    const km = row[3];
-    if (km == null || km === "") continue;
+    const km = row[3] == null ? "" : row[3];
     const last = String(row[4] == null ? "" : row[4]).trim();
     const first = String(row[5] == null ? "" : row[5]).trim();
+    // A row with NO cruise-line id (a new hire whose id is not issued yet) still reaches the name ladder
+    // and, failing that, the unmatched list — it used to vanish before anyone could count it (5 Oct 2026).
+    if (km === "" && !last) continue;
     if (!last || norm(last) === "lastname") continue; // header / blank row
     // Day-first is a property of the ROW: one cell with a first field > 12 decides every cell in it.
     const dmy = row.some(looksDMY);
@@ -61,16 +63,33 @@ export function parseContractCounter(aoa) { return parseContractCounterFull(aoa)
 //   full  : "last|first" -> SC agency id (fallback)
 //   byLast: last -> [SC agency id, ...] (fallback)
 export function buildBridge(roster) {
-  const full = {}, byLast = {}, byKm = {};
+  const full = {}, byLast = {}, byKm = {}, firstBySc = {}, ambiguous = new Set();
   for (const c of (roster || [])) {
     const km = normKm(c.ship_crew_id);
     if (km && c.agency_id) byKm[km] = c.agency_id; // authoritative bridge, when the persistent id is known
     const ln = norm(c.last_name), fn = norm(c.first_name);
     if (!c.agency_id || !ln) continue;
-    full[ln + "|" + fn] = c.agency_id;
+    // Two roster crew with the same full key ("Santos, Juan" / "Santos, Juan" under two ids) make the
+    // key AMBIGUOUS: it resolves nobody rather than whoever was listed last (§6: flag, never pick).
+    const key = ln + "|" + fn;
+    if (key in full && full[key] !== c.agency_id) ambiguous.add(key);
+    full[key] = c.agency_id;
+    firstBySc[c.agency_id] = String(c.first_name || "");
     (byLast[ln] = byLast[ln] || []).push(c.agency_id);
   }
-  return { full, byLast, byKm };
+  for (const key of ambiguous) delete full[key];
+  return { full, byLast, byKm, firstBySc };
+}
+
+// Do two first names belong to the same person? Equal, one the prefix of the other ("Mark" / "Mark
+// Anthony"), or the same first word. A blank on either side cannot disagree. The surname-only step
+// below used to put "Garcia, Jose" on the roster's only Garcia, "Maria" (5 Oct 2026 review).
+export function firstNameAgrees(a, b) {
+  const na = norm(a), nb = norm(b);
+  if (!na || !nb) return true;
+  if (na === nb || na.startsWith(nb) || nb.startsWith(na)) return true;
+  const a0 = norm(String(a).trim().split(/\s+/)[0]), b0 = norm(String(b).trim().split(/\s+/)[0]);
+  return !!a0 && a0 === b0;
 }
 
 // Match one parsed crew to an SC id.
@@ -83,25 +102,50 @@ export function bridgeName(pc, bridge) {
   const ln = norm(pc.last), fn = norm(pc.first);
   let sc = bridge.full[ln + "|" + fn];
   if (!sc) { const f0 = norm(String(pc.first).split(" ")[0]); sc = bridge.full[ln + "|" + f0]; }
-  if (!sc) { const arr = bridge.byLast[ln] || []; if (arr.length === 1) sc = arr[0]; }
+  // A unique surname matches only when the first names agree: "Garcia, Jose" is not the roster's one
+  // Garcia, "Maria" (§6). firstBySc is absent on a bridge built elsewhere: then the old rule holds.
+  if (!sc) {
+    const arr = bridge.byLast[ln] || [];
+    if (arr.length === 1 && (!bridge.firstBySc || firstNameAgrees(pc.first, bridge.firstBySc[arr[0]]))) sc = arr[0];
+  }
   if (!sc) { const sw = bridge.full[fn + "|" + ln]; if (sw) sc = sw; }
   return sc || null;
+}
+
+// Two file rows that resolve to the SAME crew: neither is imported — the second would silently replace
+// the first (INSERT OR REPLACE on (sc, seq); the count upsert in file order). Returns { kept, collisions }
+// where kept = the entries whose sc is unique and collisions = [{ sc, rows }]. entries: [{ sc, ...row }].
+export function splitCollisions(entries) {
+  const by = {};
+  for (const e of (entries || [])) if (e && e.sc) (by[e.sc] = by[e.sc] || []).push(e);
+  const collided = new Set(Object.keys(by).filter((sc) => by[sc].length > 1));
+  return {
+    kept: (entries || []).filter((e) => e && e.sc && !collided.has(e.sc)),
+    collisions: [...collided].sort().map((sc) => ({ sc, rows: by[sc] })),
+  };
 }
 
 // Build keyman_contract3-shaped rows for all matched crew. Ship = the crew's current ship (per-contract
 // ship isn't in the sheet). Returns { rows, matched:[sc], unmatched:[{last,first,km}] }.
 export function buildKeymanRows(parsed, roster) {
   const bridge = buildBridge(roster);
-  const rows = [], matched = new Set(), unmatched = [];
+  const rows = [], matched = new Set(), unmatched = [], resolved = [];
   for (const pc of (parsed || [])) {
     const sc = bridgeName(pc, bridge);
     if (!sc) { unmatched.push({ last: pc.last, first: pc.first, km: pc.km }); continue; }
+    resolved.push({ sc, pc });
+  }
+  // Two sheet rows on one crew: neither is imported (the second would replace the first's contracts
+  // row for row — the 2024 leg gone, the "current" leg someone else's). Flagged, never picked (§6).
+  const { kept, collisions } = splitCollisions(resolved);
+  for (const c of collisions) for (const e of c.rows) unmatched.push({ last: e.pc.last, first: e.pc.first, km: e.pc.km, collision: c.sc });
+  for (const { sc, pc } of kept) {
     matched.add(sc);
     for (const ct of pc.contracts) {
-      rows.push({ sc, km: pc.km, ship: pc.ship, st: pc.status, seq: ct.seq, sign_on: ct.on, proj_off: ct.proj || null, act_off: null });
+      rows.push({ sc, km: pc.km || null, ship: pc.ship, st: pc.status, seq: ct.seq, sign_on: ct.on, proj_off: ct.proj || null, act_off: null });
     }
   }
-  return { rows, matched: [...matched], unmatched };
+  return { rows, matched: [...matched], unmatched, collisions: collisions.map((c) => ({ sc: c.sc, rows: c.rows.map((e) => ({ last: e.pc.last, first: e.pc.first, km: e.pc.km })) })) };
 }
 
 // The 6 Jul 2026 lesson: a Counter shaped as ONE block per crew (a current-roster export) was applied

@@ -29,7 +29,7 @@ import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts 
 import { scheduleBySc, crewStatus } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
-import { diffCounter, indexEdits, editFor, resolveLeg } from "./counter_sync.js";
+import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
 import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./relief_api.js";
 import { fetchBoardPortDays } from "./port_days.js";
 import { createProjection } from "./projection.js";
@@ -1051,7 +1051,7 @@ async function apiKeymanImport(request, env, session) {
     env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, updated_at, on_key FROM contract_edit").all(),
   ]);
   const roster = rosterRes.results;
-  const { rows, matched, unmatched } = buildKeymanRows(parsed, roster);
+  const { rows, matched, unmatched, collisions } = buildKeymanRows(parsed, roster);
   // Per-crew row counts today: the total for the preview, and the per-crew shrink flag. A Counter
   // with FEWER contract blocks than the console holds (the 6 Jul 2026 current-roster upload) replaces
   // a crew's history with the file's rows — by design, but never again unannounced (CLAUDE.md §6).
@@ -1076,7 +1076,8 @@ async function apiKeymanImport(request, env, session) {
     return json({
       dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
       contracts: rows.length, currentRows, unparsedDates, shrink, ...report,
-      sampleUnmatched: unmatched.slice(0, 15).map(u => (u.last + ", " + u.first).trim())
+      collisions, // two sheet rows on one crew: neither imported (§6)
+      sampleUnmatched: unmatched.filter(u => !u.collision).slice(0, 15).map(u => (u.last + ", " + u.first).trim())
     });
   }
   // Apply: replace contracts for matched crew only. A crew's DELETE and INSERTs travel in the SAME
@@ -1124,7 +1125,7 @@ async function apiKeymanImport(request, env, session) {
     + (okAbsorbed ? ", " + okAbsorbed + " projection" + (okAbsorbed === 1 ? "" : "s") + " absorbed" : "")
     + (droppedOk.size ? ", " + droppedOk.size + " contradicted projection" + (droppedOk.size === 1 ? "" : "s") + " replaced by the file" : "")
     + (conflictsLeft.length ? ", " + conflictsLeft.length + " conflicting projection" + (conflictsLeft.length === 1 ? "" : "s") + " left for review" : ""));
-  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length,
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length, collisions,
     shrank: shrink.length, absorbed, dropped, conflicts: conflictsLeft, overrides: report.overrides.length });
 }
 
@@ -1182,29 +1183,45 @@ async function apiContractCountImport(request, env, session) {
   const parsed = parseCompletedContracts(b.sheets || {});
   if (parsed.error) return json({ error: parsed.error, have: parsed.have || [] }, 400);
   if (!parsed.rows.length) return json({ error: "no_rows" }, 400);
-  const asOf = /^\d{4}-\d{2}-\d{2}$/.test(String(b.asOf || "")) ? String(b.asOf) : TODAY();
+  // THE FILE SAYS ITS OWN DATE (5 Oct 2026 review): "as of <date>" is in TDG's filename. A file with no
+  // readable date is refused — the import day used to be stamped instead, and a renamed old workbook
+  // would have labelled September's count as today's.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.asOf || ""))) return json({ error: "need_as_of", detail: "The filename must carry TDG's 'as of <date>' (e.g. 'Completed Contract as of 24 September 2026.xlsx'). Keep TDG's filename." }, 400);
+  const asOf = String(b.asOf);
   const [rosterRes, curRes, derived] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT sc, completed FROM contract_count").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })),
     fullContractMap(env).catch(() => ({})),
   ]);
-  const { matched, unmatched } = bridgeCounts(parsed, rosterRes.results || []);
+  const { matched, unmatched, collisions } = bridgeCounts(parsed, rosterRes.results || []);
   const { changes, same } = diffCounts(matched, countMapOf(curRes.results), derived);
+  // An OLDER file than the one loaded would silently roll every count back; it is refused unless the
+  // apply says force (the screen asks). Rows the new file does not carry are listed and, on apply,
+  // removed: ACTIVE + INACTIVE is TDG's whole population, so a crew missing from it has no TDG count and
+  // falls back to the derived number (§10c) instead of keeping a stale "tdg" one.
+  const loadedAsOf = (curRes.results || []).reduce((m, r) => (r.as_of && r.as_of > m ? r.as_of : m), "") || null;
+  const olderThanLoaded = !!(loadedAsOf && asOf < loadedAsOf);
+  const inFile = new Set(matched.map((m) => m.sc));
+  const notInFile = (curRes.results || []).filter((r) => r.sc && !inFile.has(r.sc)).map((r) => ({ sc: r.sc, completed: r.completed, as_of: r.as_of || null }));
   const report = {
-    asOf, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
+    asOf, loadedAsOf, olderThanLoaded, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
     matched: matched.length, unmatched: unmatched.length, changes, unchanged: same.length,
     duplicates: parsed.duplicates, unparsed: parsed.unparsed,
-    sampleUnmatched: unmatched.slice(0, 20).map((u) => u.name + " (" + (u.id || "no id") + ", " + u.tab + ")"),
+    collisions, // two file rows on one roster crew: neither imported (§6)
+    notInFile,  // crew with a TDG count today that this file does not carry: their row goes on apply
+    sampleUnmatched: unmatched.filter((u) => !u.collision).slice(0, 20).map((u) => u.name + " (" + (u.id || "no id") + ", " + u.tab + ")"),
   };
   if (b.dryRun) return json({ dryRun: true, ...report });
+  if (olderThanLoaded && !b.force) return json({ error: "older_than_loaded", asOf, loadedAsOf, detail: "This file is dated " + asOf + "; the count loaded is as of " + loadedAsOf + ". Replace it anyway only on purpose." }, 409);
   const at = new Date().toISOString(), by = (session && session.email) || "?";
   const up = env.DB.prepare("INSERT INTO contract_count (sc, km, completed, position, tab, as_of, imported_at, imported_by) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(sc) DO UPDATE SET km=excluded.km, completed=excluded.completed, position=excluded.position, tab=excluded.tab, as_of=excluded.as_of, imported_at=excluded.imported_at, imported_by=excluded.imported_by");
   for (let i = 0; i < matched.length; i += 80) {
     await env.DB.batch(matched.slice(i, i + 80).map((m) => up.bind(m.sc, m.id || null, m.completed, m.position || null, m.tab, asOf, at, by)));
   }
-  await logData(env, "contract_count (TDG completed contracts as of " + asOf + ", by " + by + ")", matched.length, "applied");
-  await logActivity(env, by, "contract_count_import", asOf + " " + matched.length + " crew, " + changes.length + " changed");
-  return json({ ok: true, applied: matched.length, ...report });
+  if (notInFile.length) await env.DB.prepare("DELETE FROM contract_count WHERE imported_at IS NOT ?").bind(at).run(); // only the rows this apply did not write
+  await logData(env, "contract_count (TDG completed contracts as of " + asOf + ", by " + by + ")", matched.length, "applied" + (notInFile.length ? ", " + notInFile.length + " crew no longer in the file (count removed)" : "") + (olderThanLoaded ? ", OLDER than the " + loadedAsOf + " count it replaced (forced)" : ""));
+  await logActivity(env, by, "contract_count_import", asOf + " " + matched.length + " crew, " + changes.length + " changed" + (notInFile.length ? ", " + notInFile.length + " removed" : ""));
+  return json({ ok: true, applied: matched.length, removed: notInFile.length, ...report });
 }
 // {on,end,ship} shape that contracts.js (full-contract grouping) expects, from a keyman_contract3 row.
 function legShape(r) { return { on: r.sign_on, end: r.act_off || r.proj_off, ship: r.ship }; }
@@ -1328,13 +1345,14 @@ async function apiDashboard(env) {
   const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
   const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy, HIST] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").first(),
-    env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew").bind(in90).first(),
+    env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew WHERE redacted=0").bind(in90).first(),
     env.DB.prepare("SELECT agency_id, status, vessel_observed FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all(),
     // Bonus committed to date (money path — read only). Resilient like the old try/catch.
     env.DB.prepare("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome").first().catch(() => null),
     // Birthdays today (match MM-DD of dob).
-    env.DB.prepare("SELECT first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND status='On board' ORDER BY last_name").bind(md).all(),
+    // Birthdays today: every visible crew with the date; "aboard" is decided below by the DERIVED status (§11), not the raw column.
+    env.DB.prepare("SELECT agency_id, first_name, last_name, vessel_observed FROM crew WHERE dob IS NOT NULL AND substr(dob,6,5)=? AND redacted=0 ORDER BY last_name").bind(md).all(),
     env.DB.prepare("SELECT MAX(year) y FROM travel_expense").first(),
     env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=" + TY + " GROUP BY kind").all(),
     env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=" + TY + " GROUP BY month ORDER BY month").all(),
@@ -1350,16 +1368,17 @@ async function apiDashboard(env) {
   const cs = csRes.results;
   const csOv = {}; for (const o of ovRes.results) csOv[o.agency_id] = o;
   const csSched = scheduleBySc(HIST);
-  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0, [UNASSIGNED]: 0 };
+  const statusMap = {}, byClient = { "Royal Caribbean": 0, "Celebrity": 0, "Azamara": 0, "NCL": 0, [UNASSIGNED]: 0 }, statusBy = {};
   for (const c of cs) {
     const ov = csOv[c.agency_id], s = crewStatus(c, ov, csSched[c.agency_id], today);
+    statusBy[c.agency_id] = s;
     statusMap[s] = (statusMap[s] || 0) + 1;
     // Donut counts the same ACTIVE set as the tiles (exclude Retired/Inactive), by client/brand.
     if (s !== "Retired" && s !== "Inactive") byClient[clientOf((ov && ov.vessel_observed) || c.vessel_observed)] += 1;
   }
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
-  const birthdays = bdRes.results.map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: b.vessel_observed || "" }));
+  const birthdays = bdRes.results.filter(b => statusBy[b.agency_id] === "On board").map(b => ({ name: [b.first_name, b.last_name].filter(Boolean).join(" "), vessel: ((csOv[b.agency_id] || {}).vessel_observed) || b.vessel_observed || "" }));
   // Travel budget (latest year on file), split crew vs shoreside management.
   const ty = tyRow.y;
   const travel = { year: ty || null, all: 0, shoreside: 0, crew: 0, months: [], air: 0 };
@@ -1666,8 +1685,8 @@ async function rotationSections(env) {
   const AZ = ["journey", "onward", "quest", "pursuit"];
   const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes] = await Promise.all([
     boardLegs(env),
-    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
+    env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
     env.DB.prepare("SELECT agency_id, eccr, air, hotel, note FROM crew_ready").all(),
     env.DB.prepare("SELECT sc, seq, embark, disembark, sign_on, sign_off, ship, eccr, air, hotel, on_conf, off_conf, updated_at, on_key FROM contract_edit").all(),
     fetchBoardPortDays(env).then((rows) => ({ results: rows })), // card dates ±1 day only — never the whole 40k-row itinerary (port_days.js)
@@ -1754,8 +1773,20 @@ async function rotationSections(env) {
   const legBSC = {}; for (const ship in byShip) { const k = normShip(ship); legBSC[k] = legBSC[k] || {}; for (const card of byShip[ship]) legBSC[k][card.agency_id] = card; }
   // THE CONTRACTS NUMBER: TDG's stated count when it has been imported, the date-derived count only for
   // a crew the count file does not carry. Measured 24 Sep 2026: the derivation was low on 18 of 41.
-  const contracts = {}; for (const sc in byCrew) contracts[sc] = fullContracts(byCrew[sc].map(legShape)); // derived fallback (FULL contracts, not raw legs)
-  for (const sc in tdgCount) contracts[sc] = tdgCount[sc];
+  // THE SAME NUMBER AS EVERY OTHER READER (5 Oct 2026 review): cumulativeContracts — TDG's count when the
+  // file carries the crew, else the seeded baseline + FULL contracts derived from Counter dates. The
+  // board used to drop the baseline from its fallback ("Contracts 0" here, 3 on the crew list), and
+  // that 0 fed the Movements digest's "new hire".
+  const contracts = {}, contractsSource = {};
+  {
+    const derivedBy = {}; for (const sc in byCrew) derivedBy[sc] = fullContracts(byCrew[sc].map(legShape));
+    for (const c of crewRows) {
+      const sc = c.agency_id;
+      const cc = cumulativeContracts(tdgCount[sc] != null ? tdgCount[sc] : null, applyOverride(c, ovMap[sc]).baseline_count, derivedBy[sc] || 0);
+      contracts[sc] = cc.n; contractsSource[sc] = cc.source;
+    }
+    for (const sc in tdgCount) if (!(sc in contracts)) contracts[sc] = tdgCount[sc]; // a crew the roster hides but the file carries
+  }
   // Registry/keyman/schedule vessel string -> ONE canonical short ship name. Single source of truth
   // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
   // three data sources below so their sections key-align instead of fragmenting (Celebrity-prefixed
@@ -1950,13 +1981,22 @@ async function rotationSections(env) {
   // Deployed and not yet back: one line per ship saying it was sent to TDG. THE LOOP CLOSES on its
   // own — the moment a Contract Counter carries that seafarer they are a green card again and the
   // line goes (Miguel, 14 Sep 2026). Until then Restore can put the projection back in one click.
-  const greenOn = new Set();
-  for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "green") greenOn.add(c.agency_id + "|" + normShip(ship));
+  // THE LOOP CLOSES ON THE COUNTER, NOT ON ANY GREEN CARD (5 Oct 2026 review): the line used to vanish
+  // the moment ANY green card for that crew sat on that ship — a registry-only card, or the crew's
+  // CURRENT Counter leg when the deployed card was their NEXT contract on the same hull — and came back
+  // months later once that card went. Now: closed only by a Counter leg for that crew on that ship whose
+  // sign-on sits within ABSORB_DAYS of the deployed sign-on, the same test the Counter upload's absorb uses.
+  const counterOn = {};
+  for (const h of HIST) {
+    if (!h || !h.ours || !h.sc || !h.on || h.source !== "counter") continue;
+    (counterOn[h.sc + "|" + normShip(shipOf(h.ship) || h.ship || "")] = counterOn[h.sc + "|" + normShip(shipOf(h.ship) || h.ship || "")] || []).push(h.on);
+  }
+  const carriedByCounter = (sc, ship, signOn) => (counterOn[sc + "|" + normShip(ship)] || []).some((on) => { const g = daysBetween(on, signOn); return g != null && Math.abs(g) <= ABSORB_DAYS; });
   const depByShip = {};
   for (const d of ((depRes && depRes.results) || [])) {
     const cs = shipOf(d.ship) || d.ship;
     if (!cs) continue;
-    if (greenOn.has(d.sc + "|" + normShip(cs))) continue;   // back from TDG: the loop closed
+    if (carriedByCounter(d.sc, cs, d.sign_on)) continue;   // back from TDG: the loop closed
     (depByShip[cs] = depByShip[cs] || []).push({
       id: d.id, agency_id: d.sc, name: d.crew_name || d.sc, ship: cs,
       signOn: d.sign_on || null, signOff: d.sign_off || null,
@@ -2338,14 +2378,17 @@ async function apiContracts(env) {
 async function gatherStatement(env, id) {
   const crew = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first();
   if (!crew) return null;
-  await ensureKeyman(env);
-  const contracts = (await env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all()).results;
-  const dw = await env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first();
-  const baseline = await effectiveBaseline(env, id, crew.baseline_count);
-  const count = await crewCount(env, crew.id, baseline);
-  const outs = await env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all();
-  await ensureContractCount(env);
-  const tdgRow = await env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first().catch(() => null);
+  await Promise.all([ensureKeyman(env), ensureContractCount(env)]); // guards together (§12), both memoized
+  // The reads that only need the crew row travel together (§12: this chain was eight serial trips).
+  const [ctRes, dw, baseline, tdgRow, outs] = await Promise.all([
+    env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
+    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
+    effectiveBaseline(env, id, crew.baseline_count),
+    env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
+  ]);
+  const contracts = ctRes.results;
+  const count = await crewCount(env, crew.id, baseline); // needs the baseline: its own trip, after the wave
   const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
   const effFc = cc.n;
@@ -3769,7 +3812,9 @@ function parseCrewFile(f){
         // AdvancedQuery exports can have a blank/title row before the real headers, so don't assume
         // row 1 is the header. Read as a grid, find the row that has the CREW ID label, and build
         // objects from there. Without this the parser reads blank keys and the preview shows nothing.
-        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+        // raw:false + dateNF: a real Excel date cell leaves as 'yyyy-mm-dd' text. With raw:true it left as a Date
+        // at LOCAL midnight, which JSON sent as UTC — one day early for Rita (UTC+8). Same as the Counter path.
+        var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd',defval:''});
         var hi=-1;
         for(var i=0;i<Math.min(aoa.length,15);i++){ if((aoa[i]||[]).some(function(c){return /crew\\s*id/i.test(String(c));})){hi=i;break;} }
         if(hi<0)hi=0;
@@ -3871,6 +3916,7 @@ async function previewKeyman(){
   if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+r.error+'</div>';return;}
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
+  if(r.collisions&&r.collisions.length)h+='<div class=hint style="margin-top:8px;color:#B0342F"><b>'+r.collisions.length+' roster crew '+(r.collisions.length===1?'has':'have')+' two sheet rows</b> &mdash; NOT imported until the sheet says one thing:<br>'+r.collisions.map(function(c){return impEsc(c.sc)+': '+c.rows.map(function(x){return impEsc(x.last+', '+x.first)+(x.km?(' ('+impEsc(x.km)+')'):'');}).join(' / ');}).join('<br>')+'</div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
   // What this file does to the board Rita has been working on. Absorbed projections are the loop
   // closing (Miguel, 14 Sep); conflicts and overrides are hers to settle before Apply.
@@ -3924,7 +3970,7 @@ async function applyKeyman(){
     $('#imp').innerHTML='<div style="'+NOCHG+'">✓ Refreshed — '+r.applied+' contracts across '+r.crew+' crew.'+extra+' Rank &amp; contract counts now reflect this file. <a href="#" onclick="setShow(\\'overview\\');return false">View data overview</a></div>';KEYMANUP=null;}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+r.error):'')+'.</div>';
 }
-var COUNTUP=null,COUNTASOF=null;
+var COUNTUP=null,COUNTASOF=null,COUNTDRY=null;
 // "DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx": TDG's OWN count, both tabs sent.
 function parseCountFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
@@ -3949,10 +3995,14 @@ async function previewCount(){
   if(!COUNTUP){$('#imp').innerHTML='<div style="'+BADBOX+'">No tabs read.</div>';return;}
   $('#imp').textContent='Comparing TDG\u2019s count with the console\u2026';
   var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF,dryRun:true})})).json();
-  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+impEsc(r.error)+(r.have?(' (tabs: '+impEsc(r.have.join(', '))+')'):'')+'</div>';return;}
+  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">Could not analyse: '+impEsc(r.detail||r.error)+(r.have?(' (tabs: '+impEsc(r.have.join(', '))+')'):'')+'</div>';return;}
+  COUNTDRY=r;
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> &middot; ACTIVE '+r.tabs.ACTIVE+' &middot; INACTIVE '+r.tabs.INACTIVE
     +' &middot; <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> &middot; count as of <b>'+impEsc(r.asOf)+'</b>'
     +'<div class=csub style="margin-top:4px">TDG states the completed-contract count. This replaces the console\u2019s date-derived number for every matched crew; rank follows it.</div></div>';
+  // An OLDER file than the count loaded (5 Oct 2026): said in red, applied only on purpose (force).
+  if(r.olderThanLoaded)h+='<div style="'+BADBOX+'"><b>This file is older than the count loaded.</b> File: as of '+impEsc(r.asOf)+' &middot; loaded: as of '+impEsc(r.loadedAsOf)+'. Applying it rolls every count back to '+impEsc(r.asOf)+'.</div>';
+  if(r.notInFile&&r.notInFile.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.notInFile.length+' crew with a TDG count today '+(r.notInFile.length===1?'is':'are')+' not in this file</b> &mdash; their TDG count is removed on apply and rank falls back to the date-derived number:<br>'+r.notInFile.map(function(x){return impEsc(x.sc)+' ('+x.completed+', as of '+impEsc(x.as_of||'?')+')';}).join('<br>')+'</div>';
   if(r.changes&&r.changes.length){
     h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">'+r.changes.length+' crew whose count changes</b><br>'
       +r.changes.slice(0,40).map(function(x){return impEsc(x.name)+' ('+impEsc(x.tab.toLowerCase())+'): '+(x.before==null?'\u2014':x.before)+' &rarr; <b>'+x.after+'</b>'+(x.derived!=null&&x.derived!==x.after?' <span class=csub>(dates said '+x.derived+')</span>':'');}).join('<br>')
@@ -3963,15 +4013,18 @@ async function previewCount(){
       +r.duplicates.map(function(d){return impEsc(d.id)+': '+d.rows.map(function(x){return impEsc(x.name)+' = '+x.completed+' ('+impEsc(x.tab.toLowerCase())+' row '+x.row+')';}).join(' / ');}).join('<br>')+'</div>';
   if(r.unparsed&&r.unparsed.length)
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsed.length+' row'+(r.unparsed.length===1?'':'s')+' unreadable</b> (skipped):<br>'+r.unparsed.map(function(x){return impEsc(x.tab.toLowerCase())+' row '+x.row+' '+impEsc(x.name)+': \u201c'+impEsc(x.raw)+'\u201d';}).join('<br>')+'</div>';
+  if(r.collisions&&r.collisions.length)h+='<div class=hint style="margin-top:8px;color:#B0342F"><b>'+r.collisions.length+' roster crew '+(r.collisions.length===1?'has':'have')+' two file rows</b> &mdash; NOT imported until the file says one thing:<br>'+r.collisions.map(function(c){return impEsc(c.sc)+': '+c.rows.map(function(x){return impEsc(x.name)+' = '+x.completed+' ('+impEsc(String(x.tab).toLowerCase())+(x.id?(', '+impEsc(x.id)):'')+')';}).join(' / ');}).join('<br>')+'</div>';
   if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.map(impEsc).join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
   h+='<button class="btn" style="margin-top:10px" onclick="applyCount()">Set the completed-contract count for '+r.matched+' crew</button>';
   $('#imp').innerHTML=h;
 }
 async function applyCount(){
+  var force=false;
+  if(COUNTDRY&&COUNTDRY.olderThanLoaded){if(!confirm('This file (as of '+COUNTDRY.asOf+') is OLDER than the count loaded (as of '+COUNTDRY.loadedAsOf+').\\n\\nReplace the newer count with this older file?'))return;force=true;}
   $('#imp').textContent='Saving TDG\u2019s count\u2026';
-  var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF})})).json();
+  var r=await (await fetch('/api/contracts/count/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:COUNTUP,asOf:COUNTASOF,force:force})})).json();
   if(r.ok)$('#imp').innerHTML='<div style="'+NOCHG+'">\u2713 Saved \u2014 completed-contract count as of '+impEsc(r.asOf)+' for '+r.applied+' crew ('+(r.changes||[]).length+' changed). The Keyman board and rank now read it.</div>';
-  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+impEsc(r.error)):'')+'.</div>';
+  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.error?(': '+impEsc(r.detail||r.error)):'')+'.</div>';
 }
 var TRAVELUP=null;
 function parseTravelFile(f){
@@ -4456,7 +4509,7 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -4506,7 +4559,11 @@ async function dpvSend(){
   if(b){b.disabled=true;b.textContent='Sending…';}
   try{
     var r=await (await fetch('/api/keyman/deploy/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:DPV.id})})).json();
-    if(r&&r.ok){ dpvClose(); renderRotation(); if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
+    // ok means THE EMAIL WENT. A failure after that is said as what it is — never "Not sent", which made a
+    // retry email Joy twice (5 Oct 2026).
+    if(r&&r.ok){ dpvClose(); renderRotation();
+      if(r.logError){alert('Sent to TDG, but the console could not write its log ('+r.logError+'). The card stays on the board; do NOT send again - tell Miguel.');}
+      else if(r.removed===false){alert('Sent to TDG and logged, but the card could not be removed: '+(r.removeError||'error')+'. Remove it by hand when ready.');} }
     else { if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Not sent: '+((r&&(r.detail||r.error))||'error')); }
   }catch(_){ if(b){b.disabled=false;b.textContent='Send to TDG and clear the card';} alert('Network error'); }
 }
@@ -4540,6 +4597,7 @@ function niceCity(v){
 // Counter ends a leg (CLAUDE.md §11), so this seat is still held — by someone nobody has signed off.
 function cardOverdue(x){
   if(!x||x.state==='yellow'||!x.signOff)return false;
+  if(x.offConfirmed)return false; // a sign-off IS recorded (a manual status pin kept the seat): never say it is not
   return x.signOff < new Date().toISOString().slice(0,10);
 }
 // The projection card's source line: what the last AdvancedQuery (TDG registry) upload said about it
@@ -4658,9 +4716,10 @@ function monthsDays(a,b){
   if(!a||!b)return '';
   var d1=new Date(a),d2=new Date(b);
   if(isNaN(d1)||isNaN(d2)||d2<d1)return '';
-  var m=(d2.getFullYear()-d1.getFullYear())*12+(d2.getMonth()-d1.getMonth());
-  var d=d2.getDate()-d1.getDate();
-  if(d<0){m--;d+=new Date(d2.getFullYear(),d2.getMonth(),0).getDate();}
+  // ISO dates parse as UTC midnight: read UTC fields, or Santiago shows "6 mos 3 days" for exactly 6 months.
+  var m=(d2.getUTCFullYear()-d1.getUTCFullYear())*12+(d2.getUTCMonth()-d1.getUTCMonth());
+  var d=d2.getUTCDate()-d1.getUTCDate();
+  if(d<0){m--;d+=new Date(Date.UTC(d2.getUTCFullYear(),d2.getUTCMonth(),0)).getUTCDate();}
   if(m<0)return '';
   var parts=[];if(m)parts.push(m+' mo'+(m===1?'':'s'));if(d)parts.push(d+' day'+(d===1?'':'s'));
   return parts.join(' ')||'0 days';
@@ -4946,6 +5005,8 @@ function drawRotation(){
       // A green card or a pool card CREATES a projection on the target ship (yellow, dated, draggable).
       // The green stays where it is - one crew can hold two ships (Miguel, 14 Sep 2026). The old path
       // wrote crew_override.vessel_observed and produced an undated green card: retired 15 Sep 2026.
+      // Dropped back on its OWN section: a slipped drag, not a plan for a next contract here (5 Oct 2026).
+      if(DRAGEL&&DRAGEL.parentNode===z){DRAGID=null;DRAGEL=null;return;}
       if(fromPool&&DRAGEL&&DRAGEL.parentNode!==z){var el2=DRAGEL;el2.classList.add('landing');el2.style.opacity='.5';z.appendChild(el2);}
       createProjection(DRAGID,ship);
     };

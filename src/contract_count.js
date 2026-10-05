@@ -20,6 +20,7 @@
 // Pure: no IO. Everything here is unit-tested, and the importer route in worker.js is the only writer.
 
 import { tierContracts } from "./ledger.js";
+import { buildBridge, bridgeName, splitCollisions } from "./keymanimport.js";
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z]/g, "");
 export const normId = (v) => String(v == null ? "" : v).replace(/^\s*pcn\s*:?\s*/i, "").replace(/\.0$/, "").trim();
@@ -60,42 +61,45 @@ export function parseCompletedContracts(sheets) {
   if (!kA || !kI) return { error: "need_both_tabs", have: keys, rows: [], unparsed: [], duplicates: [] };
   const a = parseCountTab(sheets[kA], "ACTIVE"), b = parseCountTab(sheets[kI], "INACTIVE");
   const rows = a.rows.concat(b.rows);
-  // A crew id appearing twice is a defect in the FILE (Paygane, Erik: 517755 twice in INACTIVE, 2 and
-  // 4). CLAUDE.md §6: flag, never pick. Neither row is imported until the file says one thing.
+  // A crew id appearing twice WITH DIFFERENT COUNTS is a defect in the FILE (Paygane, Erik: 517755 twice
+  // in INACTIVE, 2 and 4). CLAUDE.md §6: flag, never pick. Neither row is imported until the file says
+  // one thing. The same id twice with the SAME count (listed in both tabs) is one fact: the first row stays.
   const seen = {}, duplicates = [];
   for (const r of rows) if (r.id) (seen[r.id] = seen[r.id] || []).push(r);
-  for (const id of Object.keys(seen)) if (seen[id].length > 1) duplicates.push({ id, rows: seen[id] });
-  const dupIds = new Set(duplicates.map((d) => d.id));
+  const dropId = new Set(), repeatIdx = new Set();
+  for (const id of Object.keys(seen)) {
+    if (seen[id].length < 2) continue;
+    const counts = new Set(seen[id].map((r) => r.completed));
+    if (counts.size > 1) { duplicates.push({ id, rows: seen[id] }); dropId.add(id); }
+    else for (const r of seen[id].slice(1)) repeatIdx.add(r);
+  }
   return {
-    rows: rows.filter((r) => !dupIds.has(r.id)),
+    rows: rows.filter((r) => !dropId.has(r.id) && !repeatIdx.has(r)),
     unparsed: a.unparsed.concat(b.unparsed),
     duplicates,
     tabs: { ACTIVE: a.rows.length, INACTIVE: b.rows.length },
   };
 }
 
-// Bridge each file row to an SC agency id. Order: the persistent cruise-line id (crew.ship_crew_id),
-// then exact "last|first-word", then a unique surname. Same ladder as keymanimport.bridgeName so the two
-// TDG files cannot disagree about who somebody is. Roster = [{agency_id, first_name, last_name, ship_crew_id}].
+// Bridge each file row to an SC agency id — THE SAME LADDER as the Contract Counter (keymanimport
+// buildBridge / bridgeName: cruise-line id, full name, first word, a unique surname whose first name
+// agrees, swapped columns), so the two TDG files cannot disagree about who somebody is. Until 5 Oct 2026
+// this was a second, narrower copy (first word only, no first-name check), and it keyed two roster crew
+// "Santos, Juan Carlos" / "Santos, Juan Miguel" on one key. Two file rows resolving to the SAME crew are
+// a collision: neither is imported, both are reported (§6). Roster = [{agency_id, first_name,
+// last_name, ship_crew_id}].
 export function bridgeCounts(parsed, roster) {
-  const byKm = {}, full = {}, byLast = {};
-  for (const c of (roster || [])) {
-    if (!c || !c.agency_id) continue;
-    const km = normId(c.ship_crew_id);
-    if (km) byKm[km] = c.agency_id;
-    const ln = norm(c.last_name), fn = norm(String(c.first_name || "").split(" ")[0]);
-    if (ln) { full[ln + "|" + fn] = c.agency_id; (byLast[ln] = byLast[ln] || []).push(c.agency_id); }
-  }
-  const matched = [], unmatched = [];
+  const bridge = buildBridge((roster || []).map((c) => ({ ...c, ship_crew_id: normId(c && c.ship_crew_id) || null })));
+  const unmatched = [], resolved = [];
   for (const r of (parsed && parsed.rows) || []) {
     const [lastRaw, firstRaw = ""] = String(r.name).split(",");
-    const ln = norm(lastRaw), fn = norm(firstRaw.trim().split(" ")[0]);
-    let sc = byKm[r.id] || full[ln + "|" + fn] || null;
-    if (!sc) { const arr = byLast[ln] || []; if (arr.length === 1) sc = arr[0]; }
+    const sc = bridgeName({ km: normId(r.id), last: lastRaw.trim(), first: firstRaw.trim() }, bridge);
     if (!sc) { unmatched.push(r); continue; }
-    matched.push({ ...r, sc });
+    resolved.push({ ...r, sc });
   }
-  return { matched, unmatched };
+  const { kept, collisions } = splitCollisions(resolved);
+  for (const c of collisions) for (const e of c.rows) unmatched.push({ ...e, collision: c.sc });
+  return { matched: kept, unmatched, collisions };
 }
 
 // The number the GRADE reads (psRank / psSalary — display and HR only, never a payout input).

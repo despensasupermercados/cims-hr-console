@@ -406,3 +406,26 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
   const S = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
   assert.doesNotMatch(S, /registry_verdict/, "the yellow-card feed carries no verdict column");
 });
+
+// 5 Oct 2026 review, three card rules.
+test("a green card with a RECORDED sign-off never says 'No sign-off recorded' (a manual status pin keeps the seat)", () => {
+  const past = "2026-01-01";
+  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /No sign-off recorded/);
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past, offConfirmed: true }), /No sign-off recorded/);
+  assert.equal(ctx.cardOverdue({ ...GREEN, signOff: past, offConfirmed: true }), false);
+});
+test("monthsDays reads UTC fields: exactly six months is '6 mos' in every time zone", () => {
+  assert.equal(ctx.monthsDays("2026-03-01", "2026-09-01"), "6 mos");
+  assert.equal(ctx.monthsDays("2025-11-15", "2026-08-28"), "9 mos 13 days");
+});
+test("the 'sent to TDG' line closes on a Counter leg within ABSORB_DAYS of the deployed sign-on, never on any green card; a drop on the card's own section is ignored (static)", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const b = src.slice(src.indexOf("async function rotationSections("), src.indexOf("const sections = Object.values(shipNames)"));
+  assert.match(b, /if \(!h \|\| !h\.ours \|\| !h\.sc \|\| !h\.on \|\| h\.source !== "counter"\) continue;/, "only Counter-sourced legs close a line");
+  assert.match(b, /const carriedByCounter = \(sc, ship, signOn\) => .*Math\.abs\(g\) <= ABSORB_DAYS/, "the same ±7-day test as the Counter upload's absorb");
+  assert.match(b, /if \(carriedByCounter\(d\.sc, cs, d\.sign_on\)\) continue;/);
+  assert.doesNotMatch(b, /greenOn\.has\(d\.sc/, "a registry-only or current-contract green card used to hide the line at once");
+  const drop = src.slice(src.indexOf("z.ondrop=function(e){"), src.indexOf("createProjection(DRAGID,ship);"));
+  assert.match(drop, /if\(DRAGEL&&DRAGEL\.parentNode===z\)\{DRAGID=null;DRAGEL=null;return;\}/, "a slipped drag back onto its own ship creates nothing");
+  assert.match(src, /\/relief\?open='\+encodeURIComponent\(vk\)\+\(aid\?\('&aid='\+encodeURIComponent\(aid\)\):''\)/, "the editor opens THIS card's projection");
+});

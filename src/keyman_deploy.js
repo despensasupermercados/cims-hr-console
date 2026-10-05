@@ -266,6 +266,7 @@ export function installKeymanDeploy(deps) {
       `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.on_port_seed, a.off_port_seed,
               a.override_on_city, a.override_off_city, a.eccr, a.air, a.hotel,
               a.on_date_conf, a.off_date_conf, a.instructions_sent_at, a.signoff_link_sent_at,
+              a.review_invite_sent_at, a.succeeds_assignment_id, a.vessel_id,
               COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
               c.id AS crew_id, c.agency_id AS sc
          FROM assignment a
@@ -336,44 +337,78 @@ export function installKeymanDeploy(deps) {
         critical: true,   // a crew movement instruction: a silent failure is a seafarer nobody books
       });
       if (!res || res.ok === false) return json({ error: "send_failed", detail: (res && res.error) || "mailer refused" }, 502);
-      // The email is out. Now, and only now, take the card off the board and record it.
+      // The email is out. Now, and only now, take the card off the board and record it. Everything
+      // Restore needs rides in the payload: the assignment row INCLUDING its workflow stamps and the
+      // card's comments (5 Oct 2026 review: Restore used to bring the card back without Rita's comments
+      // or the "instructions sent" stamp — removeReliefAssignment deletes the comments).
       const logId = "dep_" + crypto.randomUUID();
+      const comments = await env.DB.prepare("SELECT id, vessel_key, body, created_at FROM relief_comment WHERE assignment_id=? ORDER BY created_at").bind(loaded.a.id).all().catch(() => ({ results: [] }));
       const stored = {
         card,
         assignment: {   // everything Restore needs to put the card back exactly as it was
-          crew_id: loaded.a.crew_id, role: loaded.a.role || "reliever", vessel_name: loaded.a.ship,
+          crew_id: loaded.a.crew_id, role: loaded.a.role || "reliever", vessel_name: loaded.a.ship, vessel_id: loaded.a.vessel_id || null,
           sign_on: loaded.a.sign_on, planned_sign_off: loaded.a.planned_sign_off,
           on_port_seed: loaded.a.on_port_seed, off_port_seed: loaded.a.off_port_seed,
           override_on_city: loaded.a.override_on_city, override_off_city: loaded.a.override_off_city,
           eccr: loaded.a.eccr, air: loaded.a.air, hotel: loaded.a.hotel,
           on_date_conf: loaded.a.on_date_conf, off_date_conf: loaded.a.off_date_conf,
+          instructions_sent_at: loaded.a.instructions_sent_at || null, signoff_link_sent_at: loaded.a.signoff_link_sent_at || null,
+          review_invite_sent_at: loaded.a.review_invite_sent_at || null, succeeds_assignment_id: loaded.a.succeeds_assignment_id || null,
         },
+        comments: (comments && comments.results) || [],
       };
-      await env.DB.prepare(
-        "INSERT INTO deploy_log (id,assignment_id,sc,crew_name,ship,brand,sign_on,sign_off,sent_at,sent_by,recipient,cc,email_id,payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-      ).bind(logId, loaded.a.id, card.sc, card.name, card.ship, card.brand, card.sign_on, card.sign_off,
-             new Date().toISOString(), sentBy, to, cc.join(", "), (res && (res.id || res.messageId)) || null, JSON.stringify(stored)).run();
-      const removed = await removeReliefAssignment(env, loaded.a.id);
-      await logActivity(env, sentBy, "keyman_deploy", (card.name || card.sc) + " -> " + (card.ship || "?") + " (" + to + ")");
-      return json({ ok: true, logId, recipient: to, cc, removed: !!(removed && removed.ok), removeError: removed && removed.ok ? null : (removed && removed.error) || null });
+      // THE EMAIL WENT. Whatever happens to the log write or the remove is reported as what it is —
+      // never as "Not sent" (which made a retry email Joy twice). The order stays: log, THEN remove, so a
+      // card never leaves the board without its line.
+      let logError = null, removed = null;
+      try {
+        await env.DB.prepare(
+          "INSERT INTO deploy_log (id,assignment_id,sc,crew_name,ship,brand,sign_on,sign_off,sent_at,sent_by,recipient,cc,email_id,payload) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        ).bind(logId, loaded.a.id, card.sc, card.name, card.ship, card.brand, card.sign_on, card.sign_off,
+               new Date().toISOString(), sentBy, to, cc.join(", "), (res && (res.id || res.messageId)) || null, JSON.stringify(stored)).run();
+      } catch (e) { logError = String((e && e.message) || e); }
+      if (!logError) {
+        try { removed = await removeReliefAssignment(env, loaded.a.id); }
+        catch (e) { removed = { ok: false, error: String((e && e.message) || e) }; }
+      }
+      await logActivity(env, sentBy, "keyman_deploy", (card.name || card.sc) + " -> " + (card.ship || "?") + " (" + to + ")" + (logError ? " · LOG FAILED: " + logError : "") + (removed && !removed.ok ? " · REMOVE FAILED: " + removed.error : "")).catch(() => null);
+      return json({ ok: true, sent: true, logId: logError ? null : logId, recipient: to, cc, logError,
+        removed: !!(removed && removed.ok), removeError: logError ? "log_failed_card_kept" : (removed && removed.ok ? null : (removed && removed.error) || null) });
     }
 
     if (p === "/api/keyman/deploy/restore" && request.method === "POST") {
       await ensureDeployLog(env);
       const b = await request.json().catch(() => ({}));
       if (!b.logId) return json({ error: "logId_required" }, 400);
-      const r = await env.DB.prepare("SELECT id, payload, restored_at, crew_name, ship FROM deploy_log WHERE id=?").bind(String(b.logId)).first();
+      const r = await env.DB.prepare("SELECT id, assignment_id, payload, restored_at, crew_name, ship FROM deploy_log WHERE id=?").bind(String(b.logId)).first();
       if (!r) return json({ error: "not_found" }, 404);
       if (r.restored_at) return json({ error: "already_restored" }, 409);
       let stored = null;
       try { stored = JSON.parse(r.payload || "null"); } catch { stored = null; }
       if (!stored || !stored.assignment) return json({ error: "no_payload" }, 422);
-      const saved = await saveReliefAssignment(env, stored.assignment);
-      if (!saved || !saved.ok) return json({ error: "restore_failed", detail: (saved && saved.error) || "insert refused" }, 500);
-      await env.DB.prepare("UPDATE deploy_log SET restored_at=?, restored_as=? WHERE id=?")
-        .bind(new Date().toISOString(), saved.id, r.id).run();
+      // The card is still on the board (the remove after the email failed): nothing to restore, and a
+      // second copy would be a double booking.
+      if (r.assignment_id) {
+        const still = await env.DB.prepare("SELECT 1 x FROM assignment WHERE id=? AND actual_sign_off IS NULL").bind(r.assignment_id).first().catch(() => null);
+        if (still) return json({ error: "card_still_on_board" }, 409);
+      }
+      // CLAIM the line first (two tabs, a double click): only the claim that lands restores.
+      const claim = await env.DB.prepare("UPDATE deploy_log SET restored_at=? WHERE id=? AND restored_at IS NULL").bind(new Date().toISOString(), r.id).run();
+      if (claim && claim.meta && claim.meta.changes === 0) return json({ error: "already_restored" }, 409);
+      const saved = await saveReliefAssignment(env, stored.assignment).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+      if (!saved || !saved.ok) {
+        await env.DB.prepare("UPDATE deploy_log SET restored_at=NULL WHERE id=?").bind(r.id).run().catch(() => null); // give the line back
+        return json({ error: "restore_failed", detail: (saved && saved.error) || "insert refused" }, 500);
+      }
+      await env.DB.prepare("UPDATE deploy_log SET restored_as=? WHERE id=?").bind(saved.id, r.id).run();
+      // Rita's comments come back with the card (they were deleted with the old assignment id).
+      const cm = Array.isArray(stored.comments) ? stored.comments : [];
+      if (cm.length) {
+        await env.DB.batch(cm.map((c) => env.DB.prepare("INSERT OR IGNORE INTO relief_comment (id, assignment_id, vessel_key, body, created_at) VALUES (?,?,?,?,?)")
+          .bind(c.id || ("rc_" + crypto.randomUUID()), saved.id, c.vessel_key || null, String(c.body || ""), c.created_at || new Date().toISOString()))).catch(() => null);
+      }
       await logActivity(env, session && session.email, "keyman_deploy_restore", (r.crew_name || "?") + " -> " + (r.ship || "?"));
-      return json({ ok: true, id: saved.id });
+      return json({ ok: true, id: saved.id, comments: cm.length });
     }
     return null;
   };

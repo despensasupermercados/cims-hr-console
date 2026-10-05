@@ -104,8 +104,8 @@ const RB=(()=>{
    BOARD=b.board||[];CFG=b.config||CFG;CREW=(c&&c.crew)||[];$("today").textContent="· today "+(b.today||"");
   }catch(e){BOARD=[];}
   render();
-  var _op=new URLSearchParams(location.search).get("open");
-  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";var _m=document.getElementById("modal");if(_m)_m.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;})){open(_op,"reliever");if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefReady"},"*");}catch(e){}}}}
+  var _op=new URLSearchParams(location.search).get("open"),_aid=new URLSearchParams(location.search).get("aid");
+  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";var _m=document.getElementById("modal");if(_m)_m.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;})){open(_op,"reliever",_aid);if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefReady"},"*");}catch(e){}}}}
  }
  function order(){ if(manualOrder){const extra=BOARD.filter(r=>!manualOrder.includes(r.vessel_key));return manualOrder.map(k=>BOARD.find(r=>r.vessel_key===k)).filter(Boolean).concat(extra);} return BOARD; }
  function metrics(){
@@ -215,7 +215,9 @@ const RB=(()=>{
   const row=BOARD.find(r=>shipName(r.vessel_key)===s);const pr=row&&row.printer;
   cur.printerOff=(cur.role==="reliever"&&pr)?{city:pr.off_city,conf:pr.off_conf,date:pr.off_date}:null;
   buildDates(null,cur.role,false);}
- async function open(key,role){const row=BOARD.find(r=>r.vessel_key===key);const node=row?row[role]:null;const printer=row?row.printer:null;
+ async function open(key,role,aid){const row=BOARD.find(r=>r.vessel_key===key);
+  // Opened from a Keyman card: THAT card's projection (by assignment id), never the one the board picks as reliever (5 Oct 2026).
+  const node=(aid&&row&&row.relievers&&row.relievers.find(function(x){return x.id===aid;}))||(row?row[role]:null);const printer=row?row.printer:null;
   const ro=!!(node&&String(node.id||"").startsWith("leg:"));
   cur={key,role,id:node?node.id:null,isNew:!node,readonly:ro,crewName:node?node.crew_name:null,printerOff:(role==="reliever"&&printer)?{city:printer.off_city,conf:printer.off_conf,date:printer.off_date}:null,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
   $("mtitle").textContent=ro?(node.crew_name||"Keyman"):((node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract"));
