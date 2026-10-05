@@ -19,7 +19,9 @@ import { deriveStatus } from "./contracts.js";
 // constant (§11).
 export function scheduleBySc(legs) {
   const m = {};
-  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off }); }
+  // is_current rides along (5 Oct 2026): deriveStatus needs to tell a leg past its PROJECTED sign-off
+  // (still current: overdue, not gone) from one Rita closed with a recorded sign-off.
+  for (const h of (legs || [])) { if (!h.ours || !h.sc) continue; (m[h.sc] = m[h.sc] || []).push({ on: h.on, off: h.off, is_current: !!h.is_current }); }
   return m;
 }
 

@@ -85,7 +85,7 @@ test("the email carries every fact Joy needs, with the CIMS letterhead and no un
   assert.match(h, /NOT ON RECORD/);
   assert.match(h, /PENDING/);
   assert.match(h, /Visa interview booked 20 Sep\./);
-  assert.match(h, /removed from our planning board and will reappear once it comes back in the Contract Counter/);
+  assert.match(h, /stays on our planning board as sent until it comes back in the Contract Counter/);
   assert.match(h, /by rita\.berenyi@dg3\.com on 2026-09-14/);
   const nasty = renderDeployEmail(buildDeployCard({ assignment: { ...ASG, ship: '<script>x</script>' }, crew: CREW, today: TODAY }));
   assert.ok(!nasty.includes("<script>x</script>"), "card values must be escaped into the email");
@@ -110,7 +110,7 @@ test("the plain-text alternative says the same things", () => {
 /* ---- the routes ---- */
 
 function harness(over = {}) {
-  const calls = { sent: [], removed: [], saved: [], writes: [], activity: [] };
+  const calls = { sent: [], removed: [], marked: [], saved: [], writes: [], activity: [] };
   const rows = { assignment: over.assignment === undefined ? { ...ASG, crew_id: "crew_1", sc: CREW.agency_id } : over.assignment, log: over.log || null };
   const env = {
     DEPLOY_TO: over.DEPLOY_TO, TG_NOTIFY: over.TG_NOTIFY, DEPLOY_CC: over.DEPLOY_CC,
@@ -138,6 +138,7 @@ function harness(over = {}) {
     logActivity: async (e, who, what, detail) => calls.activity.push([what, detail]),
     sendViaMailer: async (e, envelope) => { calls.sent.push(envelope); return over.mailer || { ok: true, id: "msg_1" }; },
     removeReliefAssignment: async (e, id) => { calls.removed.push(id); return over.remove || { ok: true }; },
+    markDeployed: async (e, id, logId, at) => { calls.marked.push([id, logId, at]); if (over.mark) return over.mark; return { ok: true }; },
     saveReliefAssignment: async (e, payload) => { calls.saved.push(payload); return over.save || { ok: true, id: "as_new" }; },
     resolveCity: ({ seed }) => ({ city: seed || null, conf: "seed" }),
     groupPortDays: () => ({}),
@@ -162,7 +163,7 @@ test("preview renders the email without sending anything or touching the board",
   assert.match(r.subject, /Ana Alpha/);
   assert.match(r.html, /Hi Joy,/);
   assert.equal(r.card.warnings.length, 3);
-  assert.deepEqual([calls.sent.length, calls.removed.length, calls.writes.length], [0, 0, 0]);
+  assert.deepEqual([calls.sent.length, calls.removed.length, calls.marked.length, calls.writes.length], [0, 0, 0, 0]);
 });
 
 test("NO RECIPIENT: the send refuses, says how to fix it, and leaves the card alone", async () => {
@@ -172,10 +173,10 @@ test("NO RECIPIENT: the send refuses, says how to fix it, and leaves the card al
   assert.equal(res.status, 500);
   assert.equal(r.error, "no_recipient");
   assert.match(r.detail, /DEPLOY_TO/);
-  assert.deepEqual([calls.sent.length, calls.removed.length], [0, 0], "nothing sent, nothing removed");
+  assert.deepEqual([calls.sent.length, calls.removed.length, calls.marked.length], [0, 0, 0], "nothing sent, nothing touched");
 });
 
-test("send: mail first, and only then the card comes off the board and the log is written", async () => {
+test("send: mail first, then the log, then the card is MARKED sent — it stays on the ship (Miguel, 5 Oct 2026)", async () => {
   const { handle, env, calls } = harness({ DEPLOY_TO: "joy@tdg.example", note: "Bring the medical." });
   const r = await (await handle("/api/keyman/deploy/send", req({ id: "as_1" }), env, null, S)).json();
   assert.equal(r.ok, true);
@@ -188,9 +189,15 @@ test("send: mail first, and only then the card comes off the board and the log i
   assert.equal(env1.critical, true, "a crew movement instruction must not fail silently");
   assert.match(env1.html, /Bring the medical\./, "Rita's note rides along");
   assert.ok(env1.text && env1.text.length > 50, "a plain-text alternative is always attached");
-  assert.deepEqual(calls.removed, ["as_1"], "the projection is Rita's plan no more");
+  assert.deepEqual(calls.removed, [], "the card is never removed by a send");
+  assert.equal(calls.marked.length, 1, "the card is stamped sent");
+  assert.equal(calls.marked[0][0], "as_1");
+  assert.match(calls.marked[0][1], /^dep_/, "the stamp carries the log line it came from");
+  assert.equal(r.kept, true);
+  assert.equal(r.sentAt, calls.marked[0][2].slice(0, 10));
   const ins = calls.writes.find((w) => /^INSERT INTO deploy_log/.test(w.sql));
   assert.ok(ins, "every send is logged");
+  assert.equal(ins.args[0], calls.marked[0][1], "one id: the log line and the stamp agree");
   assert.equal(ins.args[2], "SC-0038401");
   assert.equal(ins.args[12], "msg_1", "the mailer's message id is kept");
   assert.match(String(ins.args[13]), /"assignment"/, "the log carries enough to put the card back");
@@ -203,7 +210,7 @@ test("a mailer failure leaves the card exactly where it was", async () => {
   const r = await res.json();
   assert.equal(res.status, 502);
   assert.equal(r.error, "send_failed");
-  assert.deepEqual(calls.removed, [], "the board must not lose a card for an email that never left");
+  assert.deepEqual(calls.marked, [], "a card is never stamped sent for an email that never left");
   assert.equal(calls.writes.filter((w) => /^INSERT INTO deploy_log/.test(w.sql)).length, 0);
 });
 
@@ -243,7 +250,7 @@ test("restore puts the projection back from the log, once", async () => {
 
 // 5 Oct 2026 review: a failure AFTER the email went was reported as "Not sent" (a retry emailed Joy
 // twice); the payload lacked the workflow stamps and the comments; Restore was read-then-write.
-test("send: a log failure after the email went is reported as sent + logError, and the card is NOT removed", async () => {
+test("send: a log failure after the email went is reported as sent + logError, and the card is NOT stamped", async () => {
   const { handle, env, calls } = harness({ DEPLOY_TO: "joy@tdg.example" });
   const origPrepare = env.DB.prepare;
   env.DB.prepare = (sql) => { const st = origPrepare(sql); if (/INSERT INTO deploy_log/.test(sql)) st.run = async () => { throw new Error("D1 timeout"); }; return st; };
@@ -255,22 +262,41 @@ test("send: a log failure after the email went is reported as sent + logError, a
   assert.match(r.logError, /D1 timeout/);
   assert.equal(r.logId, null);
   assert.equal(calls.sent.length, 1);
-  assert.equal(calls.removed.length, 0, "no log line, no removal: the card stays on the board");
-  assert.equal(r.removeError, "log_failed_card_kept");
+  assert.equal(calls.marked.length, 0, "no log line, no stamp: a stamp must point at a log line that exists");
+  assert.equal(r.markError, "log_failed");
+  assert.equal(r.kept, true);
 });
 
-test("send: the payload carries the workflow stamps, the vessel id and the card's comments; a remove failure is reported, never thrown", async () => {
-  const { handle, env, calls } = harness({ DEPLOY_TO: "joy@tdg.example", remove: { ok: false, error: "has_bonus_history" } });
+test("send: the payload carries the workflow stamps, the vessel id and the card's comments; a mark failure is reported, never thrown", async () => {
+  const { handle, env, calls } = harness({ DEPLOY_TO: "joy@tdg.example", mark: { ok: false, error: "no_such_row" } });
   const origPrepare = env.DB.prepare;
   env.DB.prepare = (sql) => { const st = origPrepare(sql); if (/FROM relief_comment WHERE assignment_id/.test(sql)) st.all = async () => ({ results: [{ id: "rc1", vessel_key: "Royal Caribbean|Icon", body: "call Joy first", created_at: "2026-09-01T00:00:00Z" }] }); return st; };
   const r = await (await handle("/api/keyman/deploy/send", req({ id: "as_1" }), env, null, S)).json();
   assert.equal(r.ok, true);
-  assert.equal(r.removed, false);
-  assert.equal(r.removeError, "has_bonus_history");
+  assert.equal(r.sent, true, "the email went: that is the truth to report");
+  assert.equal(r.markError, "no_such_row");
+  assert.equal(r.logError, null);
   const log = calls.writes.find((w) => /INSERT INTO deploy_log/.test(w.sql));
   const stored = JSON.parse(log.args[13]);
   assert.ok("instructions_sent_at" in stored.assignment && "signoff_link_sent_at" in stored.assignment && "review_invite_sent_at" in stored.assignment && "succeeds_assignment_id" in stored.assignment, "every column Restore needs");
   assert.deepEqual(stored.comments.map((c) => c.body), ["call Joy first"]);
+});
+
+test("send: a card already sent is refused with already_sent; resend:true sends again and re-stamps (Miguel: Joy is never emailed twice by accident)", async () => {
+  const sent = harness({ DEPLOY_TO: "joy@tdg.example", assignment: { ...ASG, crew_id: "crew_1", sc: CREW.agency_id, deployed_at: "2026-10-05T18:40:35Z", deploy_log_id: "dep_old" } });
+  const res = await sent.handle("/api/keyman/deploy/send", req({ id: "as_1" }), sent.env, null, S);
+  assert.equal(res.status, 409);
+  const r = await res.json();
+  assert.equal(r.error, "already_sent");
+  assert.equal(r.sentAt, "2026-10-05");
+  assert.deepEqual([sent.calls.sent.length, sent.calls.marked.length], [0, 0], "nothing left, nothing stamped");
+  const again = harness({ DEPLOY_TO: "joy@tdg.example", assignment: { ...ASG, crew_id: "crew_1", sc: CREW.agency_id, deployed_at: "2026-10-05T18:40:35Z", deploy_log_id: "dep_old" } });
+  const r2 = await (await again.handle("/api/keyman/deploy/send", req({ id: "as_1", resend: true }), again.env, null, S)).json();
+  assert.equal(r2.ok, true);
+  assert.equal(again.calls.sent.length, 1, "resend: Joy gets the email again");
+  assert.equal(again.calls.marked.length, 1, "and the stamp moves to the new log line");
+  assert.notEqual(again.calls.marked[0][1], "dep_old");
+  assert.match(again.calls.activity[0][1], /resend/, "the activity line says it was a resend");
 });
 
 test("restore: claims the line first (a double click restores once), re-inserts the comments, and refuses while the card is still on the board", async () => {

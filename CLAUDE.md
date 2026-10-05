@@ -124,6 +124,9 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   count's as-of date. Nobody inside the console could see either until 24 Sep; Rita found both from outside.
 - The two TDG contract files have different jobs and both live in the Brain in full: the DATES file
   (Contract Counter sheet, recIWAATss33kZKNZ) and the COUNT file (recM1e5dbyfvhfm5m). Never ask for either.
+- **DECIDED, Miguel 5 Oct 2026: the seeded baseline counts the contracts BEFORE the Counter's first one.**
+  So baseline + full contracts derived from Counter dates (the fallback for a crew the count file does not
+  carry) never double counts by definition. Do not re-raise.
 
 ## 11. Invariants from the Session-6 audit (don't regress these)
 - **Every API route must run under the error boundary.** The fetch handler wraps the whole dispatch in
@@ -176,12 +179,21 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   and shows every override in the dry-run diff BEFORE anyone clicks Apply.
 
 - **Deploy is the only outbound to TDG from the board** (`src/keyman_deploy.js`, 2026-09-14). It sends
-  Joy one email, THEN writes `deploy_log`, THEN removes the projection — in that order: a card must
-  never leave the board for an email that did not go, and the log is written before the card goes. Recipient is `DEPLOY_TO`, else `TG_NOTIFY`;
-  unset = refuse, never a default (the same rule as the TG loop). `DEPLOY_CC` defaults to Rita.
-  Expired documents are ALWAYS a warning on the card, the preview and the email, and NEVER a block.
-  The sent line clears itself when the next Contract Counter carries that seafarer — that is the loop
-  closing, and it is the only thing that closes it. Restore rebuilds the card from the log.
+  Joy one email, THEN writes `deploy_log`, THEN marks the card sent (`assignment.deployed_at`,
+  `deploy_log_id`) — in that order: nothing is stamped for an email that did not go, and the log is
+  written before the stamp. **The card STAYS on the ship** (Miguel, 5 Oct 2026, after his first Deploy
+  left Jewel blank: "Yes, keep the card"): it shows "SENT TO TDG <date>", its button reads "Sent <date>"
+  and a second send asks first (`already_sent` unless `resend`); it leaves only when the Counter absorbs
+  it or Rita removes it. Cards removed by the pre-5-Oct rule still show the one-line note with Restore.
+  Recipient is `DEPLOY_TO`, else `TG_NOTIFY`; unset = refuse, never a default (the same rule as the TG
+  loop). `DEPLOY_CC` defaults to Rita. Expired documents are ALWAYS a warning on the card, the preview
+  and the email, and NEVER a block. The sent note (legacy) clears itself when the next Contract Counter
+  carries that seafarer — that is the loop closing. Restore rebuilds a removed card from the log.
+- **An overdue Counter leg takes TDG's registry status** (Miguel, 5 Oct 2026: "we follow TDG file").
+  A leg still current whose projected sign-off has passed with nothing recorded is overdue, not gone
+  (the seat is held) — and its status is whatever the last AdvancedQuery said for that crew
+  (`contracts.deriveStatus`, `REGISTRY_STATUSES`), On board when the registry has no word. It used to
+  read as "signed off" → On Vacation, then Retired after six months, while the board held the seat.
 - **The Keyman card says what the last registry file said about every projection, at read time**
   (`src/registry_sync.js`, 2026-10-05; Miguel: "if the person is onboard .. and rita has already a card in
   there .. it should automatically compare with what the tdg file has", then an hour later "still see no

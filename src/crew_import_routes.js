@@ -69,6 +69,9 @@ export function crewImportPage() {
 }
 
 async function loadContext(env, deps) {
+  // The projection feed reads assignment.deployed_at (5 Oct 2026), a column the memoized guard adds;
+  // a dry run on a fresh isolate must not be the first reader of a column nobody has created yet.
+  if (deps && deps.ensureRegistrySnapshot) await deps.ensureRegistrySnapshot(env);
   // One wave (§12): the roster, the manual overrides and Rita's open projections travel together.
   const [ex, ov, projections] = await Promise.all([
     env.DB.prepare("SELECT * FROM crew").all(),
