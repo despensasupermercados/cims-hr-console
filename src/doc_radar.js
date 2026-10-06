@@ -16,7 +16,7 @@
  */
 
 import { isMoneyUser } from "./policy.js";
-import { scheduleBySc, crewStatus, isOffFleet } from "./crew_status.js";
+import { scheduleBySc, crewStatus, isOffFleet, TDG_ABSENT_JOIN, TDG_ABSENT_COL } from "./crew_status.js";
 import { mastRows } from "./cims-mast.js";
 
 // --- recipients (edit here; lives in code so it survives every deploy) -------
@@ -135,8 +135,8 @@ export async function fetchDocRadar(env, todayStr, deps = {}) {
   // PERF (§12): the reads are independent — one concurrent wave, never a chain.
   const [baseRes, ovRes, legs] = await Promise.all([
     env.DB.prepare(
-      "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp " +
-      "FROM crew WHERE redacted=0"
+      "SELECT agency_id, first_name, last_name, status, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp, " + TDG_ABSENT_COL + " " +
+      "FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0"
     ).all(),
     env.DB.prepare("SELECT agency_id, status, retired, pp_exp, sirb_exp, med_exp, usv_exp, sch_exp FROM crew_override")
       .all().catch(() => ({ results: [] })),
