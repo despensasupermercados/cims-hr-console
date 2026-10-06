@@ -3638,7 +3638,13 @@ function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
     return p;
   };
 })();
+// A REFRESH STAYS ON THE TAB (Miguel, 6 Oct 2026: "when I refresh the page .. goes back to dashboard ..
+// I want it when I refresh to stay where it is .. and go all the way up of the tab I am on"). The open tab
+// rides in the URL hash (replaceState: no extra Back entries); a reload opens that tab at its top.
+var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','billing','travel','fleet','reports','data','settings','ask'];
+function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
+  try{if(TABS.indexOf(tab)>=0&&location.hash!=='#'+tab)history.replaceState(null,'','#'+tab);}catch(_){}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
   var _b=$('#nav-'+(tab==='settings'?'data':tab));if(_b)_b.classList.add('on');
@@ -6318,6 +6324,7 @@ function mClose(){$('#modalRoot').innerHTML='';}
 // avoids the iPad double-toggle where a label-associated checkbox fires twice and lands back where it
 // started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
 function tgFlip(id){var c=document.getElementById(id);if(!c)return;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
-show('dashboard');
+try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
+show(tabFromHash());
 </script>
 <div id=modalRoot></div></body></html>`;
