@@ -3638,7 +3638,13 @@ function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
     return p;
   };
 })();
+// A REFRESH STAYS ON THE TAB (Miguel, 6 Oct 2026: "when I refresh the page .. goes back to dashboard ..
+// I want it when I refresh to stay where it is .. and go all the way up of the tab I am on"). The open tab
+// rides in the URL hash (replaceState: no extra Back entries); a reload opens that tab at its top.
+var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','billing','travel','fleet','reports','data','settings','ask'];
+function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
+  try{if(TABS.indexOf(tab)>=0&&location.hash!=='#'+tab)history.replaceState(null,'','#'+tab);}catch(_){}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
   var _b=$('#nav-'+(tab==='settings'?'data':tab));if(_b)_b.classList.add('on');
@@ -4295,6 +4301,8 @@ function cimsRender(){
     +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
   if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>The ship in the file goes on the crew card by default (TDG is the source). Choose Keep board to hold yours.</div>';
     g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"take","take","flag","Take TDG","Keep board"));});L+='</div>';}
+  if(g.unretire&&g.unretire.length){L+='<div class=isec><h3>&#9679; Retired tags TDG overrides</h3><div class=d>TDG has these crew active. The Retired tag and the manual status kept with it come off on Apply.</div>';
+    g.unretire.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Status","Retired"+(it.manual_status?(" / "+it.manual_status):""),it.new+(it.ship?(", "+it.ship):""),"")+impSeg("unretire:"+it.agency_id,"accept","accept","keep","Clear tag","Keep Retired"));});L+='</div>';}
   if(g.override_conflict.length||g.critical.length){L+='<div class=isec><h3>&#9679; Needs your decision</h3><div class=d>A field you set by hand, and status changes. Defaults to the TDG file; choose Keep to hold yours.</div>';
     g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept file (replaces my entry)","Keep mine"));});
     g.critical.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Keep"));});L+='</div>';}
@@ -6316,6 +6324,7 @@ function mClose(){$('#modalRoot').innerHTML='';}
 // avoids the iPad double-toggle where a label-associated checkbox fires twice and lands back where it
 // started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
 function tgFlip(id){var c=document.getElementById(id);if(!c)return;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
-show('dashboard');
+try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
+show(tabFromHash());
 </script>
 <div id=modalRoot></div></body></html>`;

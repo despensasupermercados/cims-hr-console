@@ -166,9 +166,13 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   file contradicts (`ashore` / `elsewhere`) is **off the board** — not deleted (§6), listed with a Remove button;
   a Counter leg that started on a hull where the file no longer has the crew On board (or they left the file) is
   **history**, ended on that file's date ("ended per TDG file") — a card is a placeholder and never history. The
-  list ("TDG overrides · to clean up") holds only what a person acts on: an empty hull, an overridden card or
-  Retired tag / status edit, TDG not caught up with a recorded sign-off, an active file row the roster lacks, an
-  unreadable status. NOT rows: a crew not in the file, a seat without dates, a stale Counter leg, an earmark.
+  list ("TDG overrides · to clean up") holds only what a person acts on: an empty hull, an overridden card, an
+  active file row the roster lacks, an unreadable status. NOT rows: a crew not in the file, a seat without dates,
+  a stale Counter leg, an earmark, a Retired tag / status edit the file overrides (every screen shows the file's
+  word and the import clears them), a recorded sign-off TDG has not caught up with (shown completed).
+  A crew tagged Retired whom the file has On board / Earmarked loses the tag and its manual status on Apply
+  (`unretireItems`, default Clear tag, audited; "Keep Retired" per row) — the tag still gates the roster export
+  and GSM reviews, so leaving it would keep an active seafarer out of both.
 - **Status is TDG's word, everywhere** (`crewStatus`, `src/crew_status.js`, 5 Oct 2026), consistently in
   apiCrew, apiDashboard, apiCompliance, rotationSections, the feedback board, the data page and the doc radar:
   0. (6 Oct 2026) the KEPT file (`registry_snapshot`, via the shared join as `tdg_status` / `tdg_raw`) saying On

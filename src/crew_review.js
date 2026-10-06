@@ -168,3 +168,17 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
     groups.cert.filter(c => c.earlier).length;
   return { groups, counts, attention };
 }
+
+// A RETIRED TAG TDG CONTRADICTS (Miguel, 6 Oct 2026, on "your Retired tag is overridden · remove it": the console
+// applies the file, it does not ask). A crew Rita tagged Retired whom the file has On board or Earmarked: the
+// tag (and the manual status kept with it) comes off on Apply, audited. registry = the staged per-crew word
+// (already under the real agency id); retired = { agency_id: crew_override row } for tagged crew.
+export function unretireItems(registry, retired) {
+  const out = [];
+  for (const r of (registry || [])) {
+    if (!r || !r.agency_id || !retired || !retired[r.agency_id]) continue;
+    if (r.status !== "On board" && r.status !== "Earmarked") continue;
+    out.push({ agency_id: String(r.agency_id), new: r.status, ship: r.vessel_observed || null, manual_status: retired[r.agency_id].status || null });
+  }
+  return out;
+}
