@@ -3186,6 +3186,16 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crfacet input{width:16px;height:16px;margin:0;accent-color:var(--navy);pointer-events:none;flex:0 0 auto}
 .crfacet .n{margin-left:auto;color:var(--mut);font-size:12.5px;font-variant-numeric:tabular-nums}
 .crfacet i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:7px}
+.crscroll{max-height:252px;overflow:auto;overscroll-behavior:contain}
+.crtotal{text-align:center;font-size:12.5px;color:var(--mut);padding-top:2px;font-variant-numeric:tabular-nums}
+.crtotal b{color:var(--navy);font-weight:700}
+.crpass{display:flex;flex-direction:column;gap:6px;min-width:260px}.crpass .crdates{white-space:normal;flex-wrap:wrap}.crpass .croff{margin-left:auto}
+.rrot .crbar{margin-top:2px}
+.crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
+.crbell:hover{background:#F3F6FA}
+.crbell.ok{color:var(--green-d)}
+.crbell.hot{color:var(--red);border-color:#F3C3C3}
+.crbadge{position:absolute;top:-7px;right:-7px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 0 2px #fff;font-variant-numeric:tabular-nums}
 .crrail select,.crrail input{width:100%;box-sizing:border-box;height:38px}
 .crhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .crhead .ttl{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy)}
@@ -4807,6 +4817,8 @@ function rotCard(x){
   var rows='';
   if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?niceCity(x.embark):tba),x.signOn);
   if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?niceCity(x.disembark):tba),x.signOff);
+  // The contract pass bar (6 Oct 2026): how far through the contract the seat is, same drawing as the Crew tab.
+  if(x.signOn&&x.signOff&&(live||ovd))rows+=contractPass(x.signOn,x.signOff).bar;
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
   if(x.air)tg+='<span class="rtag on">AIR</span>';
@@ -5583,7 +5595,7 @@ function paintDashCost(){
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
-var CF={q:'',status:[],comp:'',client:'',ship:'',sort:'az',rank:[]};
+var CF={q:'',status:[],comp:'',client:[],ship:[],sort:'az',rank:[]};
 function ageOf(dob){if(!dob)return'';var d=new Date(dob);if(isNaN(d))return'';var t=new Date(),a=t.getFullYear()-d.getFullYear();if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate()))a--;return a>0&&a<100?a:'';}
 function fmtPhone(p){if(!p)return{txt:'',bad:false};var raw=String(p).replace(/[^0-9+]/g,'');var ok=/^\\+?63\\d{10}$/.test(raw)||/^09\\d{9}$/.test(raw);return{txt:String(p).trim(),bad:!ok};}
 function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
@@ -5602,14 +5614,13 @@ function crewMatchesComp(c){
   return true;
 }
 async function renderCrew(){
-  CREW=[];CF.q='';CF.status=[];CF.comp='';CF.client='';CF.ship='';CF.sort='az';CF.rank=[];
+  CREW=[];CF.q='';CF.status=[];CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
   try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
-  var clients=Array.from(new Set(CREW.map(function(c){return c.client;}).filter(Boolean))).sort();
   $('#view').innerHTML=
-   '<div class=bar><h2>Crew</h2><span id=crewtotal class=csub style="margin-right:auto;margin-top:0"></span>'
+   '<div class=bar><h2 style="margin-right:auto">Crew</h2>'
    +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'crrail\\').classList.toggle(\\'open\\')">Filters</button>'
-   +'<button class="btn ghost" id=intelReviewBtn onclick="openIntelReview()">Review intel</button>'
+   +'<button class="crbell ok" id=intelReviewBtn title="Review intel" aria-label="Review intel" onclick="openIntelReview()">'+BELL_SVG+'</button>'
    +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
    +'<button class="btn ghost" onclick="hiddenCardsModal()">Hidden cards</button>'
    +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
@@ -5617,21 +5628,24 @@ async function renderCrew(){
    +'<div class=crwrap>'
    +'<aside class=crrail id=crrail>'
    +'<div><label class=crlbl for=q style="display:block;margin-bottom:6px">Search</label><input id=q type=search placeholder="Name, crew ID or passport" oninput="CF.q=this.value;paintCrew()"></div>'
+   +'<div id=crships></div>'
    +'<div id=crfacets></div>'
-   +'<div><label class=crlbl for=cClient style="display:block;margin-bottom:6px">Client</label><select id=cClient onchange="CF.client=this.value;CF.ship=\\'\\';crewShipOpts();paintCrew()"><option value="">All clients</option>'+clients.map(function(x){return '<option>'+x+'</option>';}).join('')+'</select></div>'
-   +'<div><label class=crlbl for=cShip style="display:block;margin-bottom:6px">Ship</label><select id=cShip onchange="CF.ship=this.value;paintCrew()"><option value="">All ships</option></select></div>'
+   +'<div id=crclients></div>'
    +'<div id=crrank></div>'
+   +'<div><label class=crlbl for=cSort style="display:block;margin-bottom:6px">Sort</label><select id=cSort onchange="CF.sort=this.value;paintCrew()"><option value="az">Name A–Z</option><option value="soon">Sign-off soonest</option><option value="tenure">Contracts (high→low)</option><option value="ship">Ship</option></select></div>'
    +'<button class="btn ghost" onclick="clearCrewFilters()">Clear filters</button>'
+   +'<div id=crewtotal class=crtotal></div>'
    +'</aside>'
    +'<section class=crmain>'
-   +'<div class=crhead><span class=ttl id=crewcount></span>'
-   +'<label class=csub for=cSort style="margin-left:auto;margin-top:0">Sort</label><select id=cSort onchange="CF.sort=this.value;paintCrew()" style="width:190px"><option value="az">Name A–Z</option><option value="soon">Sign-off soonest</option><option value="tenure">Contracts (high→low)</option><option value="ship">Ship</option></select></div>'
+   +'<div class=crhead><span class=ttl id=crewcount></span></div>'
    +'<div id=crewgrid style="display:flex;flex-direction:column;gap:10px"></div>'
    +'</section></div>';
-  crewShipOpts();paintCrew();intelReviewCount();
+  paintCrew();intelReviewCount();
 }
+var BELL_SVG='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
+// The bell (6 Oct 2026): green when nothing waits, red with the pending count when the intel queue has items.
 async function intelReviewCount(){
-  try{var r=await (await fetch('/api/intel/review')).json();var b=document.getElementById('intelReviewBtn');if(b)b.innerHTML='Review intel'+(r.count?(' <span class=vchip>'+r.count+'</span>'):'');}catch(e){}
+  try{var r=await (await fetch('/api/intel/review')).json();var b=document.getElementById('intelReviewBtn');if(b){var n=Number(r.count)||0;b.className='crbell '+(n?'hot':'ok');b.title=n?(n+' intel item'+(n===1?'':'s')+' to review'):'Review intel · nothing pending';b.innerHTML=BELL_SVG+(n?'<span class=crbadge>'+(n>99?'99+':n)+'</span>':'');}}catch(e){}
 }
 async function openIntelReview(){
   var w=document.createElement('div');w.id='intelmodal';w.className='modwrap';
@@ -5666,12 +5680,7 @@ async function intelDiscard(id){
   try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,discard:true})});}catch(e){}
   loadIntelReview();intelReviewCount();
 }
-function crewShipOpts(){
-  var sel=document.getElementById('cShip');if(!sel)return;
-  var ships=Array.from(new Set(CREW.filter(function(c){return !CF.client||c.client===CF.client;}).map(function(c){return c.vessel_observed;}).filter(Boolean))).sort();
-  sel.innerHTML='<option value="">All ships</option>'+ships.map(function(s){return '<option'+(s===CF.ship?' selected':'')+'>'+s+'</option>';}).join('');
-}
-function clearCrewFilters(){CF.q='';CF.status=[];CF.comp='';CF.client='';CF.ship='';CF.sort='az';CF.rank=[];renderCrew();}
+function clearCrewFilters(){CF.q='';CF.status=[];CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];renderCrew();}
 function docsModal(id){
   var c=null,i;for(i=0;i<CREW.length;i++){if(CREW[i].agency_id===id){c=CREW[i];break;}}
   if(!c)return;
@@ -5702,6 +5711,8 @@ function crewDocProblem(c){
 // The rail's counts are the whole roster's (what the nine tiles used to show), never the filtered list's.
 var CRST={'On board':['#EAF5E4','#3C7A2A','#3C7A2A'],'On Vacation':['#FBF2E0','#8A5A14','#B0741A'],'Earmarked':['#E6EFFB','#1E5FB0','#1E5FB0'],'Retired':['#EEF1F5','#4B5563','#6B7280'],'Inactive':['#E5E7EB','#374151','#374151']};
 function crStyle(st){return CRST[st]||['#EEF1F5','#4B5563','#6B7280'];}
+function shipKey(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'').replace(/^mv/,'').replace(/oftheseas$/,'');}
+function shipShort(v){var t=String(v==null?'':v).trim().replace(/^MV\\s+/i,'').replace(/\\s+OF THE SEAS$/i,'');return t===t.toUpperCase()?t.toLowerCase().replace(/\\b[a-z]/g,function(ch){return ch.toUpperCase();}):t;}
 function crewFacets(){
   var n=function(st){return CREW.filter(function(c){return c.status===st;}).length;};
   var act=CREW.filter(function(c){return c.status!=='Inactive'&&c.status!=='Retired';});
@@ -5723,7 +5734,21 @@ function crewFacets(){
   var ranks={};CREW.forEach(function(c){var t=rankTag(c.rank,c.baseline_count);ranks[t]=(ranks[t]||0)+1;});
   var r='<div class=crlbl style="padding:0 8px 6px">Rank</div>';
   Object.keys(ranks).sort().forEach(function(t){r+=f('rank',t,t==='PS'?'Printer Specialist':t==='Jr PS'?'Junior PS':t==='Sr PS'?'Senior PS':t,ranks[t],CF.rank.indexOf(t)>=0);});
-  return {facets:h,rank:r};
+  // Clients and ships are toggles too (Miguel, 6 Oct 2026: "pick 1 or multiple"). A client pick narrows the ship
+  // list to that client's hulls; a ship no longer listed drops out of the selection.
+  var clients={},ships={};
+  CREW.forEach(function(c){var k=c.client||'Unassigned';clients[k]=(clients[k]||0)+1;});
+  // Ships are keyed by shipKey (TDG writes "MV ANTHEM OF THE SEAS", Rita writes "Anthem": one toggle), shown short.
+  var shipNames={};
+  CREW.forEach(function(c){if(c.vessel_observed&&(!CF.client.length||CF.client.indexOf(c.client||'Unassigned')>=0)){var sk=shipKey(c.vessel_observed);ships[sk]=(ships[sk]||0)+1;shipNames[sk]=shipShort(c.vessel_observed);}});
+  CF.ship=CF.ship.filter(function(s){return ships[s];});
+  var cl='<div class=crlbl style="padding:0 8px 6px">Client</div>';
+  Object.keys(clients).sort(function(a,b){return (a==='Unassigned')-(b==='Unassigned')||a.localeCompare(b);}).forEach(function(k){cl+=f('client',k,k,clients[k],CF.client.indexOf(k)>=0,null,k==='Unassigned'?'color:var(--mut)':'');});
+  var sh='<div class=crlbl style="padding:0 8px 6px">Ship'+(CF.ship.length?' <span class=n style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--mut)">· '+CF.ship.length+' picked</span>':'')+'</div><div class=crscroll>';
+  Object.keys(ships).sort(function(a,b){return shipNames[a].localeCompare(shipNames[b]);}).forEach(function(k){sh+=f('ship',k,escHtml(shipNames[k]),ships[k],CF.ship.indexOf(k)>=0);});
+  sh+=(Object.keys(ships).length?'':'<div class=hint style="padding:4px 8px">No ship on the roster for this client.</div>')+'</div>';
+  crewFacets.names=shipNames;
+  return {facets:h,rank:r,clients:cl,ships:sh};
 }
 function crewFacetClick(e){
   var el=e.target.closest?e.target.closest('.crfacet'):null;if(!el)return;
@@ -5731,20 +5756,24 @@ function crewFacetClick(e){
   if(k==='st'){if(!key)CF.status=[];else{var i=CF.status.indexOf(key);if(i>=0)CF.status.splice(i,1);else CF.status.push(key);}}
   else if(k==='comp'){CF.comp=(CF.comp===key)?'':key;}
   else if(k==='rank'){var j=CF.rank.indexOf(key);if(j>=0)CF.rank.splice(j,1);else CF.rank.push(key);}
+  else if(k==='client'){var m=CF.client.indexOf(key);if(m>=0)CF.client.splice(m,1);else CF.client.push(key);}
+  else if(k==='ship'){var p=CF.ship.indexOf(key);if(p>=0)CF.ship.splice(p,1);else CF.ship.push(key);}
   paintCrew();
 }
 function paintCrew(){
   var fx=crewFacets();
-  var fe=document.getElementById('crfacets'),re=document.getElementById('crrank');
+  var fe=document.getElementById('crfacets'),re=document.getElementById('crrank'),ce=document.getElementById('crclients'),se=document.getElementById('crships');
   if(fe){fe.innerHTML=fx.facets;fe.onclick=crewFacetClick;}
   if(re){re.innerHTML=fx.rank;re.onclick=crewFacetClick;}
+  if(ce){ce.innerHTML=fx.clients;ce.onclick=crewFacetClick;}
+  if(se){se.innerHTML=fx.ships;se.onclick=crewFacetClick;}
   var q=CF.q.trim().toLowerCase();
   var list=CREW.filter(function(c){
     if(CF.status.length&&CF.status.indexOf(c.status)<0)return false;
     if(CF.comp&&!crewMatchesComp(c))return false;
     if(CF.rank.length&&CF.rank.indexOf(rankTag(c.rank,c.baseline_count))<0)return false;
-    if(CF.client&&c.client!==CF.client)return false;
-    if(CF.ship&&c.vessel_observed!==CF.ship)return false;
+    if(CF.client.length&&CF.client.indexOf(c.client||'Unassigned')<0)return false;
+    if(CF.ship.length&&CF.ship.indexOf(shipKey(c.vessel_observed))<0)return false;
     if(q){var hay=((c.first_name||'')+' '+(c.last_name||'')+' '+(c.agency_id||'')+' '+(c.pp_no||'')).toLowerCase();if(hay.indexOf(q)<0)return false;}
     return true;
   });
@@ -5754,8 +5783,8 @@ function paintCrew(){
     if(CF.sort==='soon'){var ax=a.active_off||'9999',bx=b.active_off||'9999';return ax<bx?-1:ax>bx?1:0;}
     return (a.last_name||'').localeCompare(b.last_name||'')||(a.first_name||'').localeCompare(b.first_name||'');
   });
-  var filt=[];if(CF.comp)filt.push({expired:'docs expired/missing',soon:'docs ≤90d',schengen:'Schengen expiring',valid:'documents valid'}[CF.comp]);if(CF.rank.length)filt.push(CF.rank.join(' + '));if(CF.client)filt.push(CF.client);if(CF.ship)filt.push(CF.ship);
-  var tot=document.getElementById('crewtotal');if(tot)tot.textContent=list.length+' of '+CREW.length+' crew';
+  var filt=[];if(CF.comp)filt.push({expired:'docs expired/missing',soon:'docs ≤90d',schengen:'Schengen expiring',valid:'documents valid'}[CF.comp]);if(CF.rank.length)filt.push(CF.rank.join(' + '));if(CF.client.length)filt.push(CF.client.join(' + '));if(CF.ship.length)filt.push(CF.ship.map(function(k){return (crewFacets.names||{})[k]||k;}).join(' + '));
+  var tot=document.getElementById('crewtotal');if(tot)tot.innerHTML='<b>'+list.length+'</b> of '+CREW.length+' crew shown';
   $('#crewcount').innerHTML=escHtml(CF.status.length?CF.status.join(' + '):'All crew')+' <span class=csub style="display:inline;font-size:13px">· '+list.length+(list.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
   $('#crewgrid').innerHTML=list.map(card).join('')||'<div class=muted>No matches.</div>';
   $('#crewgrid').onclick=function(ev){
@@ -5789,6 +5818,12 @@ async function openCrew(id){
     +'<button class="btn ghost rf" data-role="rolando">Rolando — Technical</button> '
     +'<button class="btn ghost rf" data-role="dexter">Dexter — Field</button>'
     +'<div id=fbout class=csub style="margin-top:8px"></div></div>';
+  // The current contract (the last leg with no recorded sign-off whose sign-on has passed, or one whose dates
+  // straddle today) drawn as the pass from the roster card — same ON → OFF line, same bar, same chip.
+  var todayS=new Date().toISOString().slice(0,10),cur=null;
+  (d.contracts||[]).forEach(function(x){var off=x.act||x.proj||null;if(x.on&&x.on<=todayS&&(!x.act||x.act>=todayS)&&(!off||off>=todayS||!x.act))cur=x;});
+  var curPass='';
+  if(cur){var cp=contractPass(cur.on,cur.act||cur.proj||null);curPass='<div class=crpass style="margin-top:10px">'+cp.html.replace('</div>',(cp.chip?cp.chip:'')+'</div>')+'</div>';}
   h+='<div class=stmt>';
   h+='<div class=printhead>DG3 CIMS — Crew Statement · '+name+' · '+new Date().toISOString().slice(0,10)+'</div>';
   h+='<div class="card" style="border-left:3px solid var(--navy);max-width:none">'
@@ -5796,6 +5831,7 @@ async function openCrew(id){
     +'<div class=csub>'+c.agency_id+' · '+(c.rank_override||c.rank_observed||'')+'</div>'
     +'<div class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</div>'
     +'<div class=vessel>'+(c.vessel_observed||'—')+'</div>'
+    +curPass
     +'<div class=csub style="margin-top:6px">'+[c.email,c.phone,c.province,(c.dob?('DOB '+c.dob):'')].filter(Boolean).join(' · ')+'</div>'
     +'<div class=cchips style="margin-top:8px">'+doc('Medical',c.med_exp)+doc("Seaman bk",c.sirb_exp)+doc('Passport',c.pp_exp)+doc('US visa',c.usv_exp)+doc('Schengen',c.sch_exp)+'</div>'
     +'</div>';
@@ -5825,8 +5861,8 @@ async function openCrew(id){
   const ct=d.contracts||[];
   h+='<div class=zlabel style="margin-top:16px">Contract history'+(d.daysWorked?(' · '+d.daysWorked.toLocaleString()+' sea-days'):'')+'</div>';
   if(!ct.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No Keyman contract history on file.</p>';
-  else h+='<table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Sign on</th><th>Sign off</th><th>Basis</th></tr></thead><tbody>'
-    +ct.map(function(x){var off=x.act||x.proj||'—';var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td>'+x.on+'</td><td>'+off+'</td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
+  else h+='<table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Contract</th><th>Basis</th></tr></thead><tbody>'
+    +ct.map(function(x){var off=x.act||x.proj||null;var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');var p=contractPass(x.on,off,{done:!!x.act});return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td><div class=crpass>'+p.html.replace('</div>',(p.chip?p.chip:'')+'</div>')+'</div></td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
   h+='<div class=zlabel style="margin-top:16px">Manager Feedback</div><div id=sbmcards><p class=muted style="text-align:left;padding:8px 2px">Loading…</p></div>';
   h+='</div>';
   $('#view').innerHTML=h;
@@ -5880,6 +5916,24 @@ async function emailStatement(){
     }
   }catch(e){ if(out){out.style.color='var(--red)';out.textContent='Could not send the statement.';} }
 }
+// The CONTRACT PASS: "ON <date> → OFF <date> · 203d · ~7mo" over a progress bar, and the chip people look for
+// (OFF in N d / OFF N d ago / ON in N d). One drawing for the roster card, the crew profile and the Keyman card.
+function contractPass(on,off,o){
+  o=o||{};if(!on)return {html:'',chip:'',bar:''};
+  var today=new Date().toISOString().slice(0,10),chip='',bar='';
+  if(off){
+    var dd=Math.round((new Date(off+'T00:00:00Z').getTime()-Date.now())/86400000);
+    var tot=Math.round((new Date(off+'T00:00:00Z').getTime()-new Date(on+'T00:00:00Z').getTime())/86400000);
+    var el=Math.round((Date.now()-new Date(on+'T00:00:00Z').getTime())/86400000);
+    var pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
+    if(on>today){var ds=Math.round((new Date(on+'T00:00:00Z').getTime()-Date.now())/86400000);chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';bar='<div class=crbar><i style="width:0;background:#5FB946"></i></div>';}
+    else if(dd<0||o.done){chip=o.done?'':'<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';bar='<div class=crbar><i style="width:100%;background:#B9C6D6"></i></div>';}
+    else{chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';bar='<div class=crbar><i style="width:'+pct+'%;background:#5FB946"></i></div>';}
+  }
+  var dur=off?durLabel(on,off):'';
+  var html='<div class=crdates><span><span class=k>ON</span> <b>'+on+'</b></span><span class=k>→</span><span><span class=k>OFF</span> <b>'+(off||'open')+'</b></span>'+(dur?'<span class=k>· '+dur+'</span>':'')+(o.tail||'')+'</div>'+bar;
+  return {html:html,chip:chip,bar:bar};
+}
 function card(c){
   var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
   var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
@@ -5890,21 +5944,10 @@ function card(c){
   var tel=ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'+(ph.bad?' <span class=vchip>⚠ verify</span>':'')):'';
   var contact=[c.province?escHtml(c.province):'',tel].filter(Boolean).join(' · ');
   // Contract line: ON → OFF · duration, a progress bar, and the one number people look up — when it ends.
-  var today=new Date().toISOString().slice(0,10);
   var ctr='';
   if(c.active_on){
-    var on=c.active_on,off=c.active_off||null,chip='',bar='';
-    if(off){
-      var dd=Math.round((new Date(off+'T00:00:00Z').getTime()-Date.now())/86400000);
-      var tot=Math.round((new Date(off+'T00:00:00Z').getTime()-new Date(on+'T00:00:00Z').getTime())/86400000);
-      var el=Math.round((Date.now()-new Date(on+'T00:00:00Z').getTime())/86400000);
-      var pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
-      if(on>today){var ds=Math.round((new Date(on+'T00:00:00Z').getTime()-Date.now())/86400000);chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';bar='<div class=crbar><i style="width:0;background:#5FB946"></i></div>';}
-      else if(dd<0){chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';bar='<div class=crbar><i style="width:100%;background:#B9C6D6"></i></div>';}
-      else{chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';bar='<div class=crbar><i style="width:'+pct+'%;background:#5FB946"></i></div>';}
-    }
-    var dur=off?durLabel(on,off):'';
-    ctr='<div class=crdates><span><span class=k>ON</span> <b>'+on+'</b></span><span class=k>→</span><span><span class=k>OFF</span> <b>'+(off||'open')+'</b></span>'+(dur?'<span class=k>· '+dur+'</span>':'')+'</div>'+bar;
+    var pass=contractPass(c.active_on,c.active_off||null),chip=pass.chip;
+    ctr=pass.html;
     var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span>'+chip+'</div>';
   }else{
     var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
