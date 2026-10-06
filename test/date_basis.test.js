@@ -60,6 +60,9 @@ test("UTC basis is used by exactly these functions", () => {
     // The deployment card therefore shares the console's UTC basis, which is the point of listing it.
     "(top level)",
     "apiAsk", "apiBillingMonth", "apiBonusCrew",
+    // 2026-10-06: the ledger card carries the same active contract span as the Crew card (activeSpanOf),
+    // so it reads the same day as apiCrew.
+    "apiContracts",
     // 2026-10-05: the count import no longer stamps the import day — a file with no as-of date is
     // refused (the file says its own date), so it has no day basis of its own.
     "apiCrew",
