@@ -495,7 +495,7 @@ test("the 'TDG says otherwise' list renders every row, escapes it, and jumps to 
     { kind: "empty_hull", sc: null, name: "Jewel", ship: "Jewel", text: "Nobody on board per the TDG file" },
     { kind: "contradicted", sc: "GAY", name: "Cherry <b>Gayda</b>", ship: "Jewel", text: "Your card: aboard Jewel since 2026-07-20 · TDG file 2026-10-05: Inactive, Voyager" },
   ]);
-  assert.match(h, /<span class=nm>TDG says otherwise<\/span><span class=meta>2 to settle &middot; the TDG file is the truth/);
+  assert.match(h, /<span class=nm>TDG overrides &middot; to clean up<\/span><span class=meta>2 &middot; the board shows the TDG file/);
   assert.match(h, /data-jump="Jewel" onclick="rotJump\(this\)"><b>Jewel<\/b><span class=istxt>Nobody on board per the TDG file<\/span>/, "a hull row names the hull once");
   assert.match(h, /<b>Cherry &lt;b&gt;Gayda&lt;\/b&gt;<\/b><span class=isship>Jewel<\/span><span class=istxt>Your card: aboard Jewel since 2026-07-20/);
   assert.equal(typeof ctx.rotJump, "function");

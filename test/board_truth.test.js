@@ -47,8 +47,8 @@ test("boardIssues: tonight's board, row by row", () => {
     },
     seats: { SAN: { key: "wonder", ship: "Wonder", dated: false } },
     cards: [
-      { sc: "GAY", name: "Cherry Blair Gayda", ship: "Jewel", key: "jewel", aboard: true, on: "2026-07-20", verdict: "ashore", at: "2026-10-05", fileStatus: "Inactive", fileShip: "Voyager" },
-      { sc: "OLI", name: "Jim Olid", ship: "Liberty", key: "liberty", aboard: false, on: "2026-10-31", verdict: "elsewhere", at: "2026-10-05", fileStatus: "Earmarked", fileShip: "Odyssey" },
+      { sc: "GAY", name: "Cherry Blair Gayda", ship: "Jewel", key: "jewel", aboard: true, on: "2026-07-20", verdict: "ashore", at: "2026-10-05", fileStatus: "Inactive", fileShip: "Voyager", overridden: true },
+      { sc: "OLI", name: "Jim Olid", ship: "Liberty", key: "liberty", aboard: false, on: "2026-10-31", verdict: "elsewhere", at: "2026-10-05", fileStatus: "Earmarked", fileShip: "Odyssey", overridden: true },
       { sc: "CAG", name: "Calang", ship: "Silhouette", key: "silhouette", aboard: true, on: "2026-09-05", verdict: "pending" },
     ],
     counter: [
@@ -65,29 +65,25 @@ test("boardIssues: tonight's board, row by row", () => {
     ],
   });
   const got = rows.map((r) => r.kind + ":" + (r.sc || r.ship));
+  // Miguel, 6 Oct 2026: "if a crew is added?? u added it.. if a crew is removed?? u remove .. if a crew
+  // finish his contract.. u move it as history". The board APPLIES the file; this list is only what a person
+  // must clean up: Rita's cards and tags the file overrides, and TDG not caught up with a recorded sign-off.
   assert.deepEqual(got, [
     "empty_hull:Jewel", "empty_hull:Xcel",
-    "dropped:JAR",
-    "contradicted:GAY", "contradicted:OLI",
-    "completed_still_aboard:CLY",
-    "counter:PUR",
+    "overridden:GAY", "overridden:OLI",
     "held:VAL",
-    "no_dates:SAN",
-    "earmarked_no_card:TAL", "earmarked_no_card:PUR",   // within a kind: by ship (Allure, Xcel)
+    "completed_still_aboard:CLY",
   ]);
   const t = Object.fromEntries(rows.map((r) => [r.kind + ":" + (r.sc || r.ship), r.text]));
-  assert.equal(t["empty_hull:Jewel"], "Nobody on board per the TDG file · your card here is contradicted");
-  assert.equal(t["dropped:JAR"], "Not in the TDG file since 2026-09-06 · last TDG word: On board, Explorer");
-  assert.equal(t["contradicted:GAY"], "Your card: aboard Jewel since 2026-07-20 · TDG file 2026-10-05: Inactive, Voyager");
-  assert.equal(t["completed_still_aboard:CLY"], "Your recorded sign-off 2026-09-25 · TDG file 2026-10-05 still: On board, Navigator");
-  assert.equal(t["counter:PUR"], "Contract Counter: Xcel 2026-04-26 → 2026-11-21 · TDG file 2026-10-05: Earmarked, Xcel");
-  assert.equal(t["held:VAL"], "Your status edit: Retired · TDG file: On board, Brilliance");
-  assert.equal(t["earmarked_no_card:TAL"], "TDG earmarks for Allure (named 2026-08-22) · no card on the board");
-  // What is NOT a row:
-  assert.ok(!got.some((g) => g.endsWith(":OSO")), "a Counter leg past its sign-off under a file that left the ship: completed, not wrong");
-  assert.ok(!got.some((g) => g.endsWith(":CAG") || g === "empty_hull:Silhouette"), "a card the bootstrap cannot judge yet is neither contradicted nor an empty hull");
-  assert.ok(!got.includes("empty_hull:Brilliance"), "the file has someone aboard whom Rita's edit keeps off: that is the held row, not an empty hull");
-  assert.ok(!got.includes("earmarked_no_card:OLI"), "Olid's contradicted card already says it");
+  assert.equal(t["empty_hull:Jewel"], "No printer on board per the TDG file");
+  assert.equal(t["overridden:GAY"], "TDG file 2026-10-05: Inactive, Voyager · your card aboard Jewel since 2026-07-20 is off the board · remove it");
+  assert.equal(t["overridden:OLI"], "TDG file 2026-10-05: Earmarked, Odyssey · your card Liberty from 2026-10-31 is off the board · remove it");
+  assert.equal(t["held:VAL"], "TDG file: On board, Brilliance · your Retired tag is overridden · remove it");
+  assert.equal(t["completed_still_aboard:CLY"], "TDG not updated yet · your recorded sign-off 2026-09-25 · TDG file 2026-10-05 still: On board, Navigator");
+  // Not rows any more: the board shows them, or they are not a disagreement with the file.
+  for (const k of ["dropped:JAR", "counter:PUR", "no_dates:SAN", "earmarked_no_card:TAL", "earmarked_no_card:PUR"]) assert.ok(!got.includes(k), k);
+  assert.ok(!got.some((g) => g.endsWith(":CAG") || g === "empty_hull:Silhouette"), "a card not yet judged is neither overridden nor an empty hull");
+  assert.ok(!got.includes("empty_hull:Brilliance"), "the file has someone aboard under Rita's tag: the held row, not an empty hull");
 });
 
 test("boardIssues: a status held by Rita, an unknown ship, On board with no ship, and an empty input", () => {
@@ -111,15 +107,15 @@ test("boardIssues: a rebuilt hull carries the date it was named; with no file ke
     today: TODAY, fileKept: false,
     crew: [{ sc: "GAY", name: "Cherry Blair Gayda" }],
     file: { GAY: W("Inactive", "Voyager", { vesselAt: "2026-08-22" }) },
-    cards: [{ sc: "GAY", name: "Cherry Blair Gayda", ship: "Jewel", key: "jewel", aboard: true, on: "2026-07-20", verdict: "ashore", at: "2026-10-05", fileStatus: "Inactive", fileShip: "Voyager" }],
-    sections: [{ ship: "Jewel", key: "jewel", seated: false, aboardCards: ["ashore"] }],
+    cards: [{ sc: "GAY", name: "Cherry Blair Gayda", ship: "Jewel", key: "jewel", aboard: true, on: "2026-07-20", verdict: "ashore", at: "2026-10-05", fileStatus: "Inactive", fileShip: "Voyager", overridden: true }],
+    sections: [{ ship: "Jewel", key: "jewel", seated: false, aboardCards: [] }],
   });
   const t = Object.fromEntries(rows.map((r) => [r.kind, r.text]));
-  assert.equal(t.empty_hull, "Nobody on board in the TDG uploads the console kept · your card here is contradicted");
-  assert.equal(t.contradicted, "Your card: aboard Jewel since 2026-07-20 · TDG file 2026-10-05: Inactive, Voyager (ship named 2026-08-22)");
+  assert.equal(t.empty_hull, "No printer on board in the TDG uploads the console kept");
+  assert.equal(t.overridden, "TDG file 2026-10-05: Inactive, Voyager (ship named 2026-08-22) · your card aboard Jewel since 2026-07-20 is off the board · remove it");
   // a kept copy (no vesselAt) reads as the file, undated hull
   const kept = boardIssues({ today: TODAY, crew: [], sections: [{ ship: "Xcel", key: "xcel", seated: false, aboardCards: [] }] });
-  assert.equal(kept[0].text, "Nobody on board per the TDG file");
+  assert.equal(kept[0].text, "No printer on board per the TDG file");
 });
 
 test("boardIssues: a file row the roster does not carry is listed by the file's own name; an unreadable status word is listed, never dropped", () => {
@@ -138,6 +134,9 @@ test("boardIssues: a file row the roster does not carry is listed by the file's 
   assert.equal(by.status_unread.text, "TDG file 2026-10-05 status 'Signed Off' is not one the console reads · it still shows On board");
   const hid = boardIssues({ today: TODAY, crew: [], file: { "SC-0046233": W("On board", "Serenade", { name: "Ariel Encina", onRoster: false, hidden: true }) } });
   assert.equal(hid[0].text, "In the TDG file 2026-10-05 as SC-0046233 · hidden on the console · On board, Serenade", "a hidden crew is on the roster, just hidden");
+  // an INACTIVE file row the roster lacks is not a row (nothing to show); a hidden crew shown by a confirmed card is not either
+  assert.equal(boardIssues({ crew: [], file: { Z: W("On Vacation", "Freedom", { name: "Allan Bulilan", onRoster: false }) } }).length, 0);
+  assert.equal(boardIssues({ crew: [], file: { "SC-0046233": W("On board", "Serenade", { onRoster: false, hidden: true }) }, cards: [{ sc: "SC-0046233", verdict: "confirmed" }] }).length, 0);
   // a row built without onRoster (every caller before 5 Oct) is on the roster
   assert.equal(boardIssues({ today: TODAY, crew: [], file: { X: W("On board", "Jewel") } }).length, 0);
 });

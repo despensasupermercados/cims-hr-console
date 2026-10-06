@@ -57,8 +57,13 @@ test("the board seats from the file and sends a known completion underneath (sta
   // The rule runs on HIST already in the wave (§12): no new D1 read for it.
   const at = b.indexOf("= await Promise.all([");
   assert.doesNotMatch(b.slice(at, b.indexOf("]);", at)), /completedOff|completedBy/);
-  // Contract completed = legs whose sign-off has passed; a running leg is never history.
-  const tail = src.slice(src.indexOf("const sections = Object.values(shipNames)"), src.indexOf("// WHAT IS WRONG (board_truth.boardIssues)"));
-  assert.match(tail, /\.filter\(h => h\.on && h\.off && h\.off !== h\.on && h\.off < today\)/);
+  // Contract completed = legs whose sign-off has passed, or (Miguel, 6 Oct 2026: "if a crew finish his
+  // contract.. u move it as history") a started leg whose crew the TDG file no longer has aboard this hull —
+  // ended on the date of that file. A plan (not started) is never history.
+  const tail = src.slice(src.indexOf("const sections = Object.values(shipNames)"), src.indexOf("// WHAT IS LEFT TO CLEAN UP (board_truth.boardIssues)"));
+  assert.match(tail, /\.filter\(h => h\.on && h\.off && h\.off !== h\.on && \(h\.off < today \|\| h\.byFile\)\)/);
+  assert.match(tail, /if \(!h\.ours \|\| !h\.sc \|\| !h\.on \|\| h\.on > today \|\| \(h\.off && h\.off < today\)\) return null;/, "only a started, still-running leg can be ended by the file");
+  assert.match(tail, /if \(h\.source === "assignment"\) return null;/, "a card is a placeholder: never history");
+  assert.match(tail, /if \(!w \|\| !w\.status \|\| \(w\.status === "On board" && w\.key === k\)\) return null;/, "On board this hull per the file: not ended");
   assert.match(tail, /x\.signOff >= today\) continue;/);
 });

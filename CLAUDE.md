@@ -160,8 +160,22 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   one the file does not name is a row in `issues`. Deploy on a card the file contradicts warns in red and asks
   once more (warn, never block). Pinned by `test/board_truth.test.js`, `test/released_seat.test.js`,
   `test/board_cards.test.js`, `test/registry_sync.test.js`.
+- **THE BOARD APPLIES THE FILE** (Miguel, 6 Oct 2026: "if a crew is added?? u added it.. if a crew is removed?? u
+  remove .. if a crew finish his contract.. u move it as history .. that the logic"). On top of the rules above:
+  TDG **Earmarked X** is drawn on X as "EARMARKED · TDG" (no card needed; drag it to plan dates); Rita's card the
+  file contradicts (`ashore` / `elsewhere`) is **off the board** — not deleted (§6), listed with a Remove button;
+  a Counter leg that started on a hull where the file no longer has the crew On board (or they left the file) is
+  **history**, ended on that file's date ("ended per TDG file") — a card is a placeholder and never history. The
+  list ("TDG overrides · to clean up") holds only what a person acts on: an empty hull, an overridden card or
+  Retired tag / status edit, TDG not caught up with a recorded sign-off, an active file row the roster lacks, an
+  unreadable status. NOT rows: a crew not in the file, a seat without dates, a stale Counter leg, an earmark.
 - **Status is TDG's word, everywhere** (`crewStatus`, `src/crew_status.js`, 5 Oct 2026), consistently in
   apiCrew, apiDashboard, apiCompliance, rotationSections, the feedback board, the data page and the doc radar:
+  0. (6 Oct 2026) the KEPT file (`registry_snapshot`, via the shared join as `tdg_status` / `tdg_raw`) saying On
+  board or Earmarked wins over everything below — Valdesco, tagged Retired, On board Brilliance per TDG. TDG's
+  "Reserved Crew" reads On Vacation (the vessel beside it is the last ship), "Not for Rehire" Inactive. The join
+  aliases the snapshot's columns in a subquery: a plain join made every reader's `SELECT agency_id, status`
+  ambiguous (pinned on real SQLite by `test/tdg_join_sql.test.js`);
   1. the manual `retired` flag; 2. a manual `crew_override.status` (listed on the board where it disagrees with
   the file); 3. not in the latest file (an open `presence` flag) → "Not in TDG file"; 4. the file's word
   (`crew.status`, written by every registry upload, D6) — except On board where the console KNOWS the contract
