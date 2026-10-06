@@ -64,6 +64,8 @@ test("the board seats from the file and sends a known completion underneath (sta
   assert.match(tail, /\.filter\(h => h\.on && h\.off && h\.off !== h\.on && \(h\.off < today \|\| h\.byFile\)\)/);
   assert.match(tail, /if \(!h\.ours \|\| !h\.sc \|\| !h\.on \|\| h\.on > today \|\| \(h\.off && h\.off < today\)\) return null;/, "only a started, still-running leg can be ended by the file");
   assert.match(tail, /if \(h\.source === "assignment"\) return null;/, "a card is a placeholder: never history");
-  assert.match(tail, /if \(!w \|\| !w\.status \|\| \(w\.status === "On board" && w\.key === k\)\) return null;/, "On board this hull per the file: not ended");
+  // 6 Oct 2026 review: an unreadable hull in the file (w.known false) never ends a running leg either — a typo in
+  // TDG's vessel cell is an unknown_ship row for Rita, not a contract completed on the board.
+  assert.match(tail, /if \(!w \|\| !w\.status \|\| \(w\.status === "On board" && \(w\.key === k \|\| !w\.known\)\)\) return null;/, "On board this hull per the file, or on a hull the console cannot read: not ended");
   assert.match(tail, /x\.signOff >= today\) continue;/);
 });

@@ -29,12 +29,15 @@ test("the PDF statement gathers its per-crew reads in one wave (§12), guards to
   assert.equal((b.match(/await /g) || []).length, 4, "crew row, guards, the wave, then crewCount (needs the baseline)");
 });
 
-test("the count import: no as-of is refused, an older file is refused unless forced, rows the file dropped are removed by THIS apply's stamp", () => {
+test("the count import: no as-of is refused, an older file is refused unless forced, rows the file dropped are removed BY NAME", () => {
   const b = fn("async function apiContractCountImport(", "\n}\n");
   assert.match(b, /return json\(\{ error: "need_as_of"/);
   assert.doesNotMatch(b, /: TODAY\(\)/, "the import day is never stamped as the file's date");
   assert.match(b, /if \(olderThanLoaded && !b\.force\) return json\(\{ error: "older_than_loaded"/);
-  assert.match(b, /DELETE FROM contract_count WHERE imported_at IS NOT \?"\)\.bind\(at\)/);
+  // 6 Oct 2026 review: by name, never "everything this apply did not write" — that wiped a crew the file carried
+  // under a duplicated id or a collision (held, not imported, §6).
+  assert.match(b, /DELETE FROM contract_count WHERE sc IN \(/);
+  assert.doesNotMatch(b, /imported_at IS NOT \?/);
   // the screen asks before forcing, and says which rows go
   assert.match(SRC, /if\(COUNTDRY&&COUNTDRY\.olderThanLoaded\)\{if\(!confirm\(/);
   assert.match(SRC, /r\.notInFile&&r\.notInFile\.length/);

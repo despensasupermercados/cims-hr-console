@@ -160,7 +160,11 @@ export async function saveReliefAssignment(env, payload) {
     // A MOVE (vessel_name changes) gets the create path's checks (5 Oct 2026 review): the target hull
     // must exist, and the crew must not already hold an open projection there — a second card on the
     // same ship is never drawn (pendingProjections collapses on sc|ship) and could not be removed.
-    if (cleaned.vessel_name) {
+    // ...and only on a move (6 Oct 2026 review): a date edit on a card that carries its ship — the form always
+    // sends it — must not be refused because the crew holds an older second card on the same hull.
+    const cur = cleaned.vessel_name ? await env.DB.prepare("SELECT vessel_id, vessel_name FROM assignment WHERE id=?").bind(payload.id).first().catch(() => null) : null;
+    const moved = !!cleaned.vessel_name && (!cur || (cleaned.vessel_id && cur.vessel_id ? cleaned.vessel_id !== cur.vessel_id : cleaned.vessel_name !== cur.vessel_name));
+    if (moved) {
       if (!cleaned.vessel_id) return { ok: false, error: "unknown_ship", ship: cleaned.vessel_name };
       const dup = await env.DB.prepare(
         `SELECT a2.id FROM assignment a

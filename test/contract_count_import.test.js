@@ -42,7 +42,7 @@ function fakeEnv(state = {}) {
       s.first = async () => null;
       s.all = async () => {
         if (S.startsWith("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew")) return { results: ROSTER };
-        if (/^SELECT sc, completed(, as_of)? FROM contract_count/.test(S)) return { results: state.current || [] };
+        if (/^SELECT sc, (km, )?completed(, as_of)? FROM contract_count/.test(S)) return { results: state.current || [] };
         return { results: [] }; // KC3_LEGS_SQL (the derived fallback) and anything else: empty
       };
       return s;
@@ -119,9 +119,28 @@ test("an OLDER file than the count loaded is refused unless forced; rows the fil
   const forced = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24", force: true }), env, session)).json();
   assert.equal(forced.ok, true);
   assert.equal(forced.removed, 1);
-  const del = writes.find((w) => /DELETE FROM contract_count WHERE imported_at IS NOT \?/.test(w.sql));
-  assert.ok(del, "the row this apply did not write goes: the crew falls back to the derived count (§10c)");
-  assert.equal(del.args[0], dataWrites(writes)[0].args[6], "bound to THIS apply's stamp");
+  // 6 Oct 2026 review: removal names the rows. "Everything this apply did not write" also wiped a crew the file
+  // DOES carry but could not import (a duplicated cruise-line id, a collision) — see the next test.
+  const del = writes.find((w) => /DELETE FROM contract_count WHERE sc IN \(\?\)/.test(w.sql));
+  assert.ok(del, "the row the file no longer carries goes: the crew falls back to the derived count (§10c)");
+  assert.deepEqual(del.args, ["SC-GONE"], "by name — only the crew listed as notInFile");
+  assert.equal(writes.some((w) => /imported_at IS NOT/.test(w.sql)), false);
+});
+
+test("a crew the file carries but could not import (duplicated id with differing counts, a collision) keeps the loaded count", async () => {
+  // Paygane 517755 is listed twice (2 and 4) in INACTIVE: flagged, never picked (§6) — and never wiped.
+  const current = [{ sc: "SC-0038385", km: "517755", completed: 3, as_of: "2026-09-01" }, { sc: "SC-GONE", km: "999", completed: 5, as_of: "2026-09-01" }];
+  const { env, writes } = fakeEnv({ current });
+  const dry = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24", dryRun: true }), env, session)).json();
+  assert.deepEqual(dry.notInFile.map((r) => r.sc), ["SC-GONE"], "Paygane is in the file (twice) — not 'not in file'");
+  assert.equal(dry.duplicates.length, 1);
+  const r = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24" }), env, session)).json();
+  assert.equal(r.ok, true);
+  assert.equal(r.removed, 1);
+  const dels = writes.filter((w) => /DELETE FROM contract_count/.test(w.sql));
+  assert.equal(dels.length, 1);
+  assert.deepEqual(dels[0].args, ["SC-GONE"]);
+  assert.equal(dataWrites(writes).some((w) => w.args[0] === "SC-0038385"), false, "the duplicated row is not imported either");
 });
 
 

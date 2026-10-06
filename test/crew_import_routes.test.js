@@ -401,7 +401,7 @@ function redropDB({ runs, held = 0, existing = EXISTING }) {
   const latest = [...runs].sort((a, b) => (a.run_at < b.run_at ? 1 : -1))[0];
   const route = (sql, args) => {
     if (/SELECT 1 AS x FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.some(r => r.file_hash === args[0]) ? { x: 1 } : null };
-    if (/SELECT id, run_at FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.find(r => r.file_hash === args[0]) || null };
+    if (/SELECT id, run_at(, rows_seen)? FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.find(r => r.file_hash === args[0]) || null };
     if (/SELECT id FROM import_run ORDER BY run_at DESC/i.test(sql)) return { __first: latest ? { id: latest.id } : null };
     if (/COUNT\(\*\) AS n FROM registry_snapshot WHERE import_run_id/i.test(sql)) return { __first: { n: held } };
     if (/FROM crew_override/i.test(sql)) return { __all: { results: [] } };
@@ -415,7 +415,9 @@ const RUNS = [
   { id: "run-oct4", file_hash: "h-oct4", run_at: "2026-10-04T13:12:10.010Z" },
   { id: "run-oct5", file_hash: "h-oct5", run_at: "2026-10-05T18:54:18.694Z" },
 ];
-const ensured = { ensureRegistrySnapshot: async () => {} };
+// canKeepCopy is what handleCrewImport sets for a money user (6 Oct 2026 review): the stage route is open to
+// every login and the hash is the browser's word, so only Miguel / Rita may fill the board's copy.
+const ensured = { ensureRegistrySnapshot: async () => {}, canKeepCopy: true };
 
 test("re-drop of the LATEST applied file keeps the board's copy under that run, and touches nothing else", async () => {
   const env = { DB: redropDB({ runs: RUNS }) };
@@ -437,6 +439,7 @@ test("re-drop: an OLDER file, a file already copied, or no guard (tests, tools) 
     [redropDB({ runs: RUNS }), "h-oct4", ensured],             // an older file never overwrites the newer word
     [redropDB({ runs: RUNS, held: 104 }), "h-oct5", ensured],  // the board already holds this file
     [redropDB({ runs: RUNS }), "h-oct5", undefined],           // no ensure dep: the old refusal, unchanged
+    [redropDB({ runs: RUNS }), "h-oct5", { ensureRegistrySnapshot: async () => {} }], // not a money user: nothing kept
   ]) {
     const env = { DB: db };
     const body = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: hash }), env, deps)).json();

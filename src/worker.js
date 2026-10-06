@@ -264,8 +264,8 @@ export default {
         if (p === "/api/intel/run" && request.method === "POST") { const n = await processIntelInbox(env, 25); return json({ ok: true, processed: n, engine: pickEngine(env) }); }
         if (p === "/api/movements/preview") return apiMovementsPreview(env, url);
         if (p === "/api/movements/send" && request.method === "POST") return apiMovementsSend(request, env, session);
-if (p === "/api/health/preview") return docRadarPreviewResponse(env, url, { boardLegs });
-if (p === "/api/health/send" && request.method === "POST") return docRadarSendResponse(request, env, session, { boardLegs });
+if (p === "/api/health/preview") { await ensureRegistrySnapshot(env); return docRadarPreviewResponse(env, url, { boardLegs }); }
+if (p === "/api/health/send" && request.method === "POST") { await ensureRegistrySnapshot(env); return docRadarSendResponse(request, env, session, { boardLegs }); }
         if (p === "/api/rotation/upcoming") return apiRotationUpcoming(env, url);
         if (p === "/api/ask" && request.method === "POST") return apiAsk(request, env, session);
         if (p === "/api/maria/feedback" && request.method === "POST") return apiMariaFeedback(request, env, session);
@@ -344,7 +344,7 @@ if (p === "/api/health/send" && request.method === "POST") return docRadarSendRe
   async scheduled(event, env, ctx) {
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
-if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendDocRadar(env, event, { boardLegs }));
+if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => maybeSendDocRadar(env, event, { boardLegs }))); // the radar's crew read joins registry_snapshot
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
@@ -1076,7 +1076,7 @@ async function apiKeymanImport(request, env, session) {
   };
   if (b.dryRun) {
     return json({
-      dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.length,
+      dryRun: true, crewInFile: parsed.length, matched: matched.length, unmatched: unmatched.filter(u => !u.collision).length, // collisions are listed apart
       contracts: rows.length, currentRows, unparsedDates, shrink, ...report,
       collisions, // two sheet rows on one crew: neither imported (§6)
       sampleUnmatched: unmatched.filter(u => !u.collision).slice(0, 15).map(u => (u.last + ", " + u.first).trim())
@@ -1127,7 +1127,7 @@ async function apiKeymanImport(request, env, session) {
     + (okAbsorbed ? ", " + okAbsorbed + " projection" + (okAbsorbed === 1 ? "" : "s") + " absorbed" : "")
     + (droppedOk.size ? ", " + droppedOk.size + " contradicted projection" + (droppedOk.size === 1 ? "" : "s") + " replaced by the file" : "")
     + (conflictsLeft.length ? ", " + conflictsLeft.length + " conflicting projection" + (conflictsLeft.length === 1 ? "" : "s") + " left for review" : ""));
-  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.length, collisions,
+  return json({ ok: true, applied: rows.length, crew: matched.length, unmatched: unmatched.filter(u => !u.collision).length, collisions,
     shrank: shrink.length, absorbed, dropped, conflicts: conflictsLeft, overrides: report.overrides.length });
 }
 
@@ -1150,7 +1150,7 @@ async function apiDataStatus(env) {
   // agree with the dashboard and crew list instead of re-reading a raw column.
   let gaps = null;
   try {
-    await ensureCrewExtras(env);
+    await Promise.all([ensureCrewExtras(env), ensureRegistrySnapshot(env)]); // the join below reads registry_snapshot
     const today = TODAY();
     const [baseRes, ovRes, HIST] = await Promise.all([
       env.DB.prepare("SELECT agency_id, status, vessel_observed, email, ship_crew_id, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
@@ -1192,7 +1192,7 @@ async function apiContractCountImport(request, env, session) {
   const asOf = String(b.asOf);
   const [rosterRes, curRes, derived] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, last_name, ship_crew_id FROM crew WHERE redacted=0").all(),
-    env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT sc, km, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })),
     fullContractMap(env).catch(() => ({})),
   ]);
   const { matched, unmatched, collisions } = bridgeCounts(parsed, rosterRes.results || []);
@@ -1204,10 +1204,15 @@ async function apiContractCountImport(request, env, session) {
   const loadedAsOf = (curRes.results || []).reduce((m, r) => (r.as_of && r.as_of > m ? r.as_of : m), "") || null;
   const olderThanLoaded = !!(loadedAsOf && asOf < loadedAsOf);
   const inFile = new Set(matched.map((m) => m.sc));
-  const notInFile = (curRes.results || []).filter((r) => r.sc && !inFile.has(r.sc)).map((r) => ({ sc: r.sc, completed: r.completed, as_of: r.as_of || null }));
+  // A crew the file DOES carry but this run could not import — a cruise-line id listed twice with different
+  // counts, or two rows resolving to one roster crew — is NOT "not in the file": their loaded count stays
+  // (§6: flag, never pick, and never wipe a TDG number because the file has a defect in that row).
+  const dupIds = new Set((parsed.duplicates || []).map((d) => String(d.id)));
+  const heldSc = new Set((collisions || []).map((c) => c.sc).filter(Boolean));
+  const notInFile = (curRes.results || []).filter((r) => r.sc && !inFile.has(r.sc) && !heldSc.has(r.sc) && !(r.km && dupIds.has(String(r.km)))).map((r) => ({ sc: r.sc, completed: r.completed, as_of: r.as_of || null }));
   const report = {
     asOf, loadedAsOf, olderThanLoaded, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
-    matched: matched.length, unmatched: unmatched.length, changes, unchanged: same.length,
+    matched: matched.length, unmatched: unmatched.filter((u) => !u.collision).length, changes, unchanged: same.length, // collisions are listed apart
     duplicates: parsed.duplicates, unparsed: parsed.unparsed,
     collisions, // two file rows on one roster crew: neither imported (§6)
     notInFile,  // crew with a TDG count today that this file does not carry: their row goes on apply
@@ -1220,7 +1225,11 @@ async function apiContractCountImport(request, env, session) {
   for (let i = 0; i < matched.length; i += 80) {
     await env.DB.batch(matched.slice(i, i + 80).map((m) => up.bind(m.sc, m.id || null, m.completed, m.position || null, m.tab, asOf, at, by)));
   }
-  if (notInFile.length) await env.DB.prepare("DELETE FROM contract_count WHERE imported_at IS NOT ?").bind(at).run(); // only the rows this apply did not write
+  // Removal names the rows (never "everything this apply did not write": that wiped the held crew above).
+  for (let i = 0; i < notInFile.length; i += 80) {
+    const chunk = notInFile.slice(i, i + 80);
+    await env.DB.prepare("DELETE FROM contract_count WHERE sc IN (" + chunk.map(() => "?").join(",") + ")").bind(...chunk.map((r) => r.sc)).run();
+  }
   await logData(env, "contract_count (TDG completed contracts as of " + asOf + ", by " + by + ")", matched.length, "applied" + (notInFile.length ? ", " + notInFile.length + " crew no longer in the file (count removed)" : "") + (olderThanLoaded ? ", OLDER than the " + loadedAsOf + " count it replaced (forced)" : ""));
   await logActivity(env, by, "contract_count_import", asOf + " " + matched.length + " crew, " + changes.length + " changed" + (notInFile.length ? ", " + notInFile.length + " removed" : ""));
   return json({ ok: true, applied: matched.length, removed: notInFile.length, ...report });
@@ -1341,7 +1350,7 @@ async function apiDashboard(env) {
   // remaining queries are independent, so they run in a single concurrent wave (Promise.all).
   // The travel queries keyed off "latest year" inline via (SELECT MAX(year)...) instead of
   // waiting for a separate MAX(year) result. Outputs are byte-identical to the sequential version.
-  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureTravel(env)]);
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureTravel(env), ensureRegistrySnapshot(env)]); // the crew read joins registry_snapshot
   const md = today.slice(5);
   const curY = +today.slice(0, 4), curM = +today.slice(5, 7);
   const TY = "(SELECT MAX(year) FROM travel_expense)"; // inline latest-year subquery (no extra round trip)
@@ -1376,7 +1385,7 @@ async function apiDashboard(env) {
     statusBy[c.agency_id] = s;
     statusMap[s] = (statusMap[s] || 0) + 1;
     // Donut counts the same ACTIVE set as the tiles (exclude Retired/Inactive), by client/brand.
-    if (s !== "Retired" && s !== "Inactive") byClient[clientOf((ov && ov.vessel_observed) || c.vessel_observed)] += 1;
+    if (s !== "Retired" && s !== "Inactive") byClient[clientOf(c.tdg_vessel || (ov && ov.vessel_observed) || c.vessel_observed)] += 1; // the kept file's hull first, as on the Crew tab
   }
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
@@ -1476,7 +1485,7 @@ function activeSpanOf(legs, HIST, sc, today) {
 async function apiCrew(env, url) {
   // PERF (2026-07): ensures + the four reads are independent — run them concurrently instead of
   // paying 6 sequential Worker->D1 round trips. Same statements, same outputs.
-  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureCrewGender(env), ensureContractCount(env)]);
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureCrewGender(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
   const today = TODAY();
   // ?hidden=1 returns the HIDDEN cards (redacted=1) for the "Hidden cards" restore list; default is
   // the live roster (redacted=0). Fixed 0/1 literal — no user string reaches the SQL.
@@ -1666,7 +1675,7 @@ async function apiCrewNotes(request, env, session, url) {
 async function apiCompliance(env, url) {
   const today = new Date().toISOString().slice(0, 10);
   const warn = parseInt(url.searchParams.get("days")) || 60;
-  await ensureCrewExtras(env);
+  await Promise.all([ensureCrewExtras(env), ensureRegistrySnapshot(env)]); // the crew read joins registry_snapshot
   // One concurrent wave (§12) — and the live board schedule (§11): this used to be three sequential
   // round trips ending in a bare scheduleBySc(), i.e. status from the frozen SHIP_HISTORY constant.
   const [rowsRes, ovRes, HIST] = await Promise.all([
@@ -1850,12 +1859,12 @@ async function rotationSections(env) {
   const jrRule = {};
   for (const v of ((vesRes && vesRes.results) || [])) if (v && v.name) jrRule[normShip(v.name)] = v.jr_ps_rule || null;
   const isJr = (rank) => /junior|jr/i.test(String(rank || ""));
-  const cardSrc = {}, cardAsg = {}, inForce = {}; // inForce: Rita's cards aboard today, per crew
+  const cardAsg = {}, inForce = {}; // inForce: Rita's cards aboard today, per crew
   for (const h of HIST) {
     if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue;
     if (h.on > today || (h.off || "9999") < today) continue;
     const k2 = normShip(shipOf(h.ship) || h.ship || "");
-    cardSrc[h.sc + "|" + k2] = h.source === "assignment" ? "yellow" : "green";
+
     if (h.assignment_id) cardAsg[h.sc + "|" + k2] = h.assignment_id;
     if (h.source === "assignment") (inForce[h.sc] = inForce[h.sc] || []).push({ hull: shipOf(h.ship) || h.ship, key: k2, on: h.on, off: h.off || null, embark: h.embark || null, disembark: h.disembark || null, asgId: h.assignment_id || null });
   }
@@ -1957,11 +1966,13 @@ async function rotationSections(env) {
     let seatKey = null;
     if (w && w.status === "On board" && w.known && !absentSince[sc]) {
       const off = completedOff(HIST, sc, w.key, today, keyOf);
-      if (off) completedBy[sc + "|" + w.key] = off;          // KNOWN completed: underneath, and a row in issues
+      if (off) completedBy[sc + "|" + w.key] = off;          // KNOWN completed: drawn underneath (6 Oct 2026: not a row)
       else {
         const k = w.key, live = liveLeg.has(sc + "|" + k);
         const enr = live ? ((legBSC[k] || {})[sc] || {}) : {}, sEnr = live ? ((schEnr[k] || {})[sc] || {}) : {};
-        const asg = cardAsg[sc + "|" + k] || null;
+        // The card on this hull per the loose key, unless the strict registry comparison already listed it as
+        // overridden (elsewhere / ashore): one judge, not two — absorbed here AND "remove it" in the list was both.
+        const asg0 = cardAsg[sc + "|" + k] || null, asg = (asg0 && !overriddenAsg.has(asg0)) ? asg0 : null;
         // Rita's card on the same hull is CONFIRMED by the file: drawn through the card's own path (state
         // yellow + confirmed renders green "ABOARD · TDG REGISTRY", Remove kept) — one card, not two.
         drawSeat(c, base, w.ship, k, enr, sEnr, { state: asg ? "yellow" : "green", asgId: asg, confirmed: !!asg, file: w });
@@ -2100,7 +2111,9 @@ async function rotationSections(env) {
       if (h.source === "assignment") return null;
       if (absentSince[h.sc]) return absentSince[h.sc];
       const w = fileOf[h.sc];
-      if (!w || !w.status || (w.status === "On board" && w.key === k)) return null;
+      // On board HERE keeps the leg; On board a hull the console cannot read keeps it too — a typo in TDG's
+      // vessel cell is an unknown_ship row for Rita, never a contract ended on the board.
+      if (!w || !w.status || (w.status === "On board" && (w.key === k || !w.known))) return null;
       return w.at || today;
     };
     const history = scheduleLegs
@@ -2753,7 +2766,7 @@ async function apiFeedbackScore(request, env, session) {
 // "On board" could sit on the feedback board as feedback-due. Maria's scoring_board tool used to
 // call both routes back to back and read all three tables twice; it now loads this once.
 async function loadFeedbackState(env) {
-  await Promise.all([ensureFb(env), ensureCrewExtras(env)]); // crew_override (status/retired) is read below
+  await Promise.all([ensureFb(env), ensureCrewExtras(env), ensureRegistrySnapshot(env)]); // crew_override (status/retired) is read below; the crew read joins registry_snapshot
   const today = TODAY();
   const [crewRes, ovRes, reqsRes, respRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
@@ -3125,7 +3138,7 @@ nav button{white-space:nowrap}
 .rcard.cur{box-shadow:0 0 0 2px var(--green) inset}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset}.ghostslot{border-style:dashed!important;display:flex;flex-direction:column;justify-content:center;color:var(--mut);cursor:pointer}.ghostslot.crit{border-color:var(--danger)!important;background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:var(--amber)!important;background:#fbeed6;color:#9a6410}
 .rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
 .rcard.plan{border:1px solid #E6CE6A!important;border-left:4px solid #E3B100!important;background:#FFF3B8;box-shadow:none}
-.rcard.overdue{box-shadow:0 0 0 2px var(--red) inset!important;background:#fffafa}
+
 .gapnote{font-size:11px;color:#9A6410;background:#FBF0DA;border-radius:7px;padding:5px 8px;margin-top:9px}
 .tdgissues .isbody{display:block;padding:0}.tdgissues .isbody.closed{display:none}
 .tdgissues .isrow{display:flex;gap:10px;align-items:baseline;padding:7px 10px;border-top:1px solid var(--line);font-size:12.5px;cursor:pointer}
@@ -3141,8 +3154,7 @@ nav button{white-space:nowrap}
 .pc-override{color:#1f5fa8}
 .pc-seed{color:var(--mut);font-weight:600;text-decoration:underline dotted var(--line-2);text-underline-offset:3px;cursor:help}
 body.rot-refreshing #view{opacity:.6;transition:opacity .15s}
-.rcard.plan.aboard{box-shadow:0 0 0 2px #C99A00 inset}
-.rcard.confirmed{background:#F6FBF4}
+
 .rcard.green{cursor:pointer}
 .rlab.plan{color:#9A6614;background:#FBF0DA}
 .rlab.tdg{color:var(--green-d);background:#EAF6E6}
@@ -4575,6 +4587,8 @@ function cimsRender(){
     g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+impEsc(f.vessel_observed||"&mdash;")+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
   if(g.departed.length){L+='<div class=isec><h3>&#128682; Absent from this file</h3><div class=d>Never auto-removed. Decide the status yourself.</div>';
     g.departed.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss",true));});L+='</div>';}
+  var ab=g.override_absorbed||[];
+  if(ab.length){L+='<details class=iminor><summary><span class=c>'+ab.length+'</span> manual entries already match the file &#8212; absorbed (the file shows from now onward)</summary>'+ab.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}
   if(g.minor.length){L+='<details class=iminor><summary><span class=c>'+g.minor.length+'</span> minor tidy-ups auto-applied (spelling, spacing)</summary>'+g.minor.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}
   L+='</div>';
   L+='<div id=impcart></div>';
@@ -4592,7 +4606,8 @@ function cimsCart(){
   var minor=g.minor.length;
   var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"take")==="flag")shipFlag++;});
   var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
-  var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
+  var absorbed=(g.override_absorbed||[]).length;
+  var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave+absorbed,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
   var rows="";
   function cli(icls,ic,name,sub,q,qcls){return '<div class=cli><span class="cic '+icls+'">'+ic+'</span><span class=nm>'+name+(sub?'<small>'+sub+'</small>':'')+'</span><span class="q '+qcls+'">'+q+'</span></div>';}
   var newSub="added to roster";
@@ -4601,6 +4616,7 @@ function cimsCart(){
   if((g.override_conflict.length+g.critical.length)&&fieldSave)rows+=cli("ci-green","&#9998;","Field updates","status, contact",fieldSave+" save","save");
   if(g.new.length)rows+=cli("ci-navy","&#65291;","New crew",newSub,newAdd+" save","save");
   if(g.minor.length)rows+=cli("ci-gray","&#9881;","Minor tidy-ups","spelling, spacing",minor+" save","save");
+  if(absorbed)rows+=cli("ci-gray","&#9998;","Manual entries absorbed","already match the file",absorbed+" clear","save");
   if(g.ship_flag.length)rows+=cli("ci-amber","&#9875;","Ship flag","kept on your board",shipFlag+" held","held");
   if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=cli("ci-red","&#9995;","Manual edit","kept as yours",(ovKeep+crKeep)+" held","held");
   if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
