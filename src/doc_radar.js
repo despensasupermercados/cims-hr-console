@@ -15,9 +15,9 @@
  * logged and swallowed so it can never break the shared cron.
  */
 
+import { mastRows } from "./cims-mast.js";
 import { isMoneyUser } from "./policy.js";
 import { scheduleBySc, crewStatus, isOffFleet, TDG_ABSENT_JOIN, TDG_ABSENT_COL } from "./crew_status.js";
-import { mastRows } from "./cims-mast.js";
 
 // --- recipients (edit here; lives in code so it survives every deploy) -------
 const TO = ["Rita Berenyi <Rita.Berenyi@dg3.com>"];
