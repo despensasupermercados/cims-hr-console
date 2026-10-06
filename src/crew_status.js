@@ -36,7 +36,7 @@ export const TDG_ABSENT_JOIN = "LEFT JOIN (SELECT DISTINCT agency_id AS ab_id FR
   // aliased in a subquery: the snapshot's own agency_id/status/vessel columns would make the readers'
   // unqualified `SELECT agency_id, status, ...` ambiguous (caught 6 Oct 2026 by the real-SQLite run).
   "LEFT JOIN (SELECT agency_id AS rs_id, status AS rs_status, vessel AS rs_vessel, raw_status AS rs_raw FROM registry_snapshot) rs ON rs.rs_id = crew.agency_id";
-export const TDG_ABSENT_COL = "(ab.ab_id IS NOT NULL) AS tdg_absent, COALESCE(rs.rs_vessel, vf.vf_ship, crew.vessel_observed) AS tdg_ship, rs.rs_status AS tdg_status, rs.rs_raw AS tdg_raw";
+export const TDG_ABSENT_COL = "(ab.ab_id IS NOT NULL) AS tdg_absent, COALESCE(rs.rs_vessel, vf.vf_ship, crew.vessel_observed) AS tdg_ship, rs.rs_vessel AS tdg_vessel, rs.rs_status AS tdg_status, rs.rs_raw AS tdg_raw";
 
 // The latest file's own status word for this crew, from the kept copy: null when the console holds no
 // copy for them (then crew.status, which every upload writes, D6, stands in).
