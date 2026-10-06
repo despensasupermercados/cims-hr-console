@@ -140,7 +140,8 @@ test("the board never prints a negative day count at the reader", () => {
   assert.match(banner.slice(0, banner.indexOf("\n")), /no sign-off recorded/,
     "say WHY the seat is unresolved: nobody recorded the sign-off");
   // the crew card carried the same defect ("OFF in -1d" on Anthem)
-  assert.match(SRC, /dd<0\?\('OFF was '\+\(-dd\)\+'d ago'\)/);
+  // Option C (6 Oct 2026): the card's chip reads "<N> d · PAST SIGN-OFF" once the date has gone — elapsed, not negative.
+  assert.match(SRC, /dd<0\?\('<span class="offchip crit"><b>'\+\(-dd\)\+' d<\/b><i>PAST SIGN-OFF<\/i><\/span>'\)/);
 });
 
 // 15 Sep 2026, Miguel, twice: "It's not yellow." The first time the card was missing; the second time it

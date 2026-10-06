@@ -3139,7 +3139,7 @@ nav button{white-space:nowrap}
 .pc-derived{color:#1f7a3d}
 .pc-provisional{color:#a8791a}
 .pc-override{color:#1f5fa8}
-.pc-seed{color:var(--mut);font-weight:600;border-bottom:1px dotted var(--line-2);cursor:help}
+.pc-seed{color:var(--mut);font-weight:600;text-decoration:underline dotted var(--line-2);text-underline-offset:3px;cursor:help}
 body.rot-refreshing #view{opacity:.6;transition:opacity .15s}
 .rcard.plan.aboard{box-shadow:0 0 0 2px #C99A00 inset}
 .rcard.confirmed{background:#F6FBF4}
@@ -3237,41 +3237,74 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .cptrack.due i{background:var(--red)}
 .cptrack.past i,.cptrack.done i{background:#B9C6D6}
 .rrot .cptrack{margin:6px 0 2px}
-/* Keyman cards (6 Oct 2026, Miguel: "messy .. not visually stately"). One card = one seat: who (name · rank · what
-   kind of card), the one number (OFF/ON in N d, top right), the route as a two-column pass (ON port+date | OFF
-   port+date, bar beneath), arranged items as small tags, one quiet note, actions right. Colour is a left rule. */
-.rcard{background:#fff;border:1px solid var(--line);border-left:4px solid #C9D2DE;border-radius:12px;padding:12px 14px 12px 13px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
-.rcard.green.cur{border-left-color:var(--green);box-shadow:0 1px 2px rgba(20,45,72,.04)}
+/* KEYMAN SEAT CARD = OPTION C "TIMELINE" (Miguel, 6 Oct 2026: "work on option C .. pixel perfect .. deploy").
+   One card = one seat on a 4px grid. Head lane 44px: name · rank · what kind of card | the ONE number (days to
+   sign-off, red and "PAST" once it has gone; a plan counts to its sign-on). The dates are a picture: ON port and
+   OFF port over a rail, dots centred on it, TODAY in its own 12px strip so it never touches a port, dates under.
+   Then tags, one quiet note, the buttons right. Colour lives in the rail and the number, never a tinted body. */
+.rcard{background:#fff;border:1px solid #DCE2EA;border-radius:12px;padding:14px 16px;box-shadow:none;display:flex;flex-direction:column;gap:10px}
+.rcard.green.cur{border-color:#CFE3D2;box-shadow:none}
 .rcard.green:not(.cur){background:#FBFCFE}
 .rcard.confirmed{background:#F7FBF5}
-.rcard.overdue{border-left-color:var(--red)!important;background:#FFF9F9;box-shadow:0 1px 2px rgba(20,45,72,.04)!important}
-.rcard.plan.aboard{box-shadow:none;border-left-color:#C99A00!important}
+.rcard.overdue{border-color:#F1C9C9!important;background:#FFFAFA;box-shadow:none!important}
+.rcard.plan{border:1px solid #E3B100!important}
+.rcard.plan.aboard{box-shadow:none;border-color:#C99A00!important}
 .rcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
-.rcard.plan:hover{border-color:#D9B93A!important}
-.rhead{display:flex;align-items:flex-start;gap:10px}
-.ravatar{width:34px;height:34px;font-size:12px;margin-top:1px}
-.rhcol{flex:1 1 auto;min-width:0}
-.rcard .rnm{font-size:14px;line-height:1.25;margin-bottom:3px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
-.rcard .rleg{font-size:12px}
-.rcard .offchip{position:static;flex:0 0 auto;margin-left:auto;margin-top:2px;font-size:10.5px;padding:3px 9px;white-space:nowrap}
+.rcard.plan:hover{border-color:#C99A00!important}
+.rhead{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center;min-height:44px}
+.rhcol{min-width:0}
+.rcard .rnm{font-size:16px;line-height:20px;margin-bottom:2px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;letter-spacing:-.01em}
+.rcard .rrank{font-size:10px;letter-spacing:.08em;line-height:14px;padding:0 6px;border:1px solid #C9D2DE;border-radius:4px;vertical-align:0}
+.rlab{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px;font-weight:800}
+.rcard .rleg{font-size:11.5px;line-height:16px;color:var(--mut)}
+.rcard .offchip{position:static;margin:0;padding:0;background:none;color:var(--navy);text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:64px;font-weight:700;letter-spacing:0}
+.rcard .offchip b{font-size:28px;line-height:28px;letter-spacing:-.03em;font-variant-numeric:tabular-nums;font-weight:700}
+.rcard .offchip i{font-style:normal;font-size:10px;line-height:12px;letter-spacing:.08em;font-weight:700;color:var(--mut)}
+.rcard .offchip.crit{background:none;color:#B42318}.rcard .offchip.due{background:none;color:#9a6410}
+.rcard .offchip.mut b{color:#B6C0CC;font-weight:400}
 .rcard.cur .rnm{padding-right:0}
-.rrot{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
-.rrot .rrow{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:7px;align-items:baseline;font-size:12.5px;line-height:1.3;min-width:0}
-.rrot .rlbl{grid-row:1/3;align-self:start;width:auto;font-size:9.5px;letter-spacing:.06em;color:var(--mut);padding-top:3px}
-.rrot .rcity{grid-column:2;font-weight:600;color:var(--deep);line-height:1.25}
+.rrot{margin:0;padding:0;border:0;display:block}
+.rrot .tl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);column-gap:16px}
+/* a port may take two lines above its dot ("Orlando (Port Canaveral), Florida") — an ellipsis hid the one word that matters */
+.rrot .rcity{font-size:14px;font-weight:600;line-height:17px;color:var(--deep);min-width:0;min-height:34px;display:flex;align-items:flex-end;overflow-wrap:anywhere}
+.rrot .rcity.off{text-align:right;justify-content:flex-end}
 .rrot .rcity .pc{font-weight:600}
-.rrot .rdate{grid-column:2;margin-left:0;font-size:11.5px;color:var(--mut);font-variant-numeric:tabular-nums}
-.rrot .cptrack{grid-column:1/-1;margin:6px 0 0}
-.rtags{margin-top:9px;gap:4px}
-.rtag{font-size:9.5px;padding:3px 7px;border-radius:6px}
-.srcnote,.jrnote,.gapnote{margin-top:9px;font-size:11px;line-height:1.4;border-radius:0;padding:1px 0 1px 9px;border-left:2px solid var(--line-2);background:none;color:var(--mut)}
-.jrnote,.gapnote{border-left-color:#E0A23B;color:#9A6410}
-.pacts{margin-top:10px;justify-content:flex-end;gap:6px}
-.pbtn{font-size:11px;padding:5px 11px;border-radius:8px}
-.shipbody{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:8px 14px 14px}
-.ghostslot{min-height:0;align-self:stretch;flex-direction:row;justify-content:center;gap:10px;padding:14px;border-width:1px!important;background:#FAFBFD}
-.ghostslot .gp{width:26px;height:26px;font-size:17px}.ghostslot .gt{font-size:12.5px}.ghostslot .gc{font-size:9.5px}
-.rbanner{margin:0 14px 12px;padding:5px 12px;font-size:11.5px;border-radius:8px}
+.rrot .rmut{color:#8795A8;font-weight:500}
+.rrot .rdate{margin:0;font-size:12px;line-height:16px;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rrot .rdate.off{text-align:right}
+.rrot .lane{grid-column:1/-1;position:relative;height:28px}
+.rrot .lane i{display:block;position:absolute;font-style:normal}
+.rrot .lane .rail{left:5px;right:5px;top:19px;height:2px;background:#DCE2EA;border-radius:1px}
+.rrot .lane .done{left:5px;top:19px;height:2px;background:var(--green);border-radius:1px}
+.rrot .lane .d{top:15px;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid var(--green);box-sizing:border-box}
+.rrot .lane .d.l{left:0}.rrot .lane .d.r{right:0}.rrot .lane .d.fill{background:var(--green)}
+.rrot .lane .now{top:13px;width:2px;height:14px;margin-left:-1px;background:var(--navy);border-radius:1px}
+.rrot .lane .now em{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:700;letter-spacing:.1em;line-height:12px;color:var(--navy);font-style:normal;white-space:nowrap}
+.rrot .lane .now.end em{left:auto;right:0;transform:none}
+.rrot .lane.late .rail{background:#F1C9C9}.rrot .lane.late .done{background:#B42318;right:5px}.rrot .lane.late .d{border-color:#B42318}.rrot .lane.late .d.fill{background:#B42318}.rrot .lane.late .now{background:#B42318}.rrot .lane.late .now em{color:#B42318}
+.rrot .lane.plan .rail{background:repeating-linear-gradient(90deg,#C9A227 0 6px,transparent 6px 12px)}.rrot .lane.plan .d{border-color:#C9A227}.rrot .lane.plan .d.fill{background:#C9A227}.rrot .lane.plan .done{background:#C9A227}
+.rtags{margin:0;gap:6px}
+.rtag{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px;border-color:transparent}
+.rtag.on{border-color:transparent}
+.srcnote,.jrnote,.gapnote{margin:0;font-size:12px;line-height:16px;border:0;padding:0;background:none;color:var(--mut)}
+.jrnote,.gapnote{color:#9A6410}
+.pacts{margin:0;justify-content:flex-end;gap:8px}
+.pbtn{font-size:13px;font-weight:600;letter-spacing:0;line-height:30px;height:32px;padding:0 14px;border-radius:8px}
+.shipbody{grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;padding:8px 14px 14px}
+.ghostslot{min-height:0;align-self:stretch;flex-direction:row;justify-content:center;gap:10px;padding:14px;border-width:1.5px!important;background:#fff;border-radius:12px}
+.ghostslot .gp{width:26px;height:26px;font-size:17px}.ghostslot .gt{font-size:13px}.ghostslot .gc{font-size:10px;letter-spacing:.06em}
+.rbanner{margin:0 14px 12px;padding:5px 12px;font-size:12px;border-radius:8px}
+/* phone: ports may take two lines under their dot instead of ellipsizing; the two buttons go full width, 44px */
+@media (max-width:660px){
+.rcard{padding:12px}
+.rhead{min-height:40px;column-gap:12px}
+.rcard .rnm{font-size:15px}
+.rcard .offchip b{font-size:24px;line-height:24px}
+.rrot .tl{column-gap:12px}
+.rrot .rcity{font-size:13px}
+.pacts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pbtn{height:44px;line-height:42px;font-size:14px;border-radius:10px;padding:0}
+}
 .histhd{border-top:1px solid var(--line)}
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
@@ -4977,8 +5010,6 @@ function rotCard(x){
   var plan=x.state==='yellow';
   var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
   var oc=function(ct,cfl){return '<b class="pc pc-'+(cfl||'na')+'" title="'+(CONF_T[cfl]||'')+'">'+niceCity(ct)+'</b>';};
-  var nm=(x.name||'').split(' ').filter(Boolean);
-  var ini=((nm[0]||'').charAt(0)+(nm[1]||'').charAt(0)).toUpperCase()||'?';
   var dur=monthsDays(x.signOn,x.signOff)||durLabel(x.signOn,x.signOff);
   var aboard=plan&&(!!x.aboard||(!!x.signOn&&x.signOn<=new Date().toISOString().slice(0,10)));
   // What the last AdvancedQuery upload said about this projection (registry_sync.js). CONFIRMED = TDG's
@@ -4987,16 +5018,29 @@ function rotCard(x){
   var confirmed=plan&&!!x.confirmed;
   var live=plan?(aboard||confirmed):!!x.current;
   var ovd=cardOverdue(x);
+  // THE ONE NUMBER (Option C, Miguel 6 Oct 2026): days to sign-off, big, top-right; past it, days SINCE, red,
+  // never a negative count. A plan counts down to its sign-on; TDG's earmark has no dates yet.
   var chip='';
-  if((live||ovd)&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip='<span class="offchip'+cc+'">'+(dd<0?('OFF was '+(-dd)+'d ago'):('OFF in '+dd+'d'))+'</span>';}
-  else if(plan&&x.signOn){var ds=Math.round((new Date(x.signOn+'T00:00:00Z').getTime()-Date.now())/86400000);if(ds>=0)chip='<span class=offchip>ON in '+ds+'d</span>';}
-  var rw=function(lbl,city,date){return '<div class=rrow><span class=rlbl>'+lbl+'</span><span class=rcity>'+city+'</span><span class=rdate>'+date+'</span></div>';};
+  var today=new Date().toISOString().slice(0,10);
+  if((live||ovd)&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip=dd<0?('<span class="offchip crit"><b>'+(-dd)+' d</b><i>PAST SIGN-OFF</i></span>'):('<span class="offchip'+cc+'"><b>'+dd+' d</b><i>TO SIGN-OFF</i></span>');}
+  else if(plan&&x.signOn){var ds=Math.round((new Date(x.signOn+'T00:00:00Z').getTime()-Date.now())/86400000);if(ds>=0)chip='<span class=offchip><b>'+ds+' d</b><i>TO SIGN-ON</i></span>';}
+  else if(x.tdgEarmark)chip='<span class="offchip mut"><b>&ndash;</b><i>NO DATES</i></span>';
+  // THE DATES AS A PICTURE: ON port and OFF port over a rail, a dot at each end, TODAY where the contract stands
+  // (its label in its own strip above the rail, right-anchored at the end so it never leaves the card). A plan
+  // is a dashed rail; overdue fills the rail red to the end. Dates stay ISO on the board (the sent rows,
+  // history and tests read them that way).
   var rows='';
-  // Dates stay ISO on the board (the sent rows, history and tests read them that way).
-  if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?niceCity(x.embark):tba),x.signOn);
-  if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?niceCity(x.disembark):tba),x.signOff);
-  // The contract pass bar (6 Oct 2026): how far through the contract the seat is, same drawing as the Crew tab.
-  if(x.signOn&&x.signOff&&(live||ovd))rows+=contractPass(x.signOn,x.signOff).bar;
+  if(x.signOn||x.signOff){
+    var onC=x.signOn?(x.on_city?oc(x.on_city,x.on_conf):(x.embark?niceCity(x.embark):tba)):'';
+    var offC=x.signOff?(x.off_city?oc(x.off_city,x.off_conf):(x.disembark?niceCity(x.disembark):tba)):(plan?'<span class=rmut>Sign-off to plan</span>':'');
+    var pct=null;
+    if(x.signOn&&x.signOff){var t0=Date.parse(x.signOn+'T00:00:00Z'),t1=Date.parse(x.signOff+'T00:00:00Z'),tn=Date.parse(today+'T00:00:00Z');if(t1>t0)pct=Math.max(0,Math.min(100,Math.round((tn-t0)/(t1-t0)*100)));}
+    var showNow=(live||ovd)&&pct!=null;
+    var lane='<div class="lane'+(ovd?' late':(plan&&!confirmed)?' plan':'')+'"><i class=rail></i>'+(showNow?'<i class=done style="width:'+pct+'%"></i>':'')
+      +(x.signOn?'<i class="d l'+((live||ovd)?' fill':'')+'"></i>':'')+(x.signOff?'<i class="d r'+(ovd?' fill':'')+'"></i>':'')
+      +(showNow?'<i class="now'+(pct>=92?' end':'')+'" style="left:'+pct+'%"><em>TODAY</em></i>':'')+'</div>';
+    rows='<div class=tl><span class="rcity on">'+onC+'</span><span class="rcity off">'+offC+'</span>'+lane+'<span class="rdate on">'+(x.signOn||'')+'</span><span class="rdate off">'+(x.signOff||'&mdash;')+'</span></div>';
+  }
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
   if(x.air)tg+='<span class="rtag on">AIR</span>';
@@ -5038,7 +5082,7 @@ function rotCard(x){
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
   return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the plan':plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
-    +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div>'+chip+'</div>'
+    +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div>'+chip+'</div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +gap
     +(tg?'<div class=rtags>'+tg+'</div>':'')
