@@ -6,8 +6,9 @@
 // Brand: CIMS / DG3 (docs/DATA_PAGE_REDESIGN_DECISIONS.md §F). Navy #1B3A5C primary, DG3 green
 // #5FB946 accent-chrome only, green-ink #3C7A2A for readable green text + Apply fill, Outfit
 // headings / DM Sans body. Layout + cart + auto-detect settled with Miguel over the 2026-07-14
-// session (R1–R5). Ship allocation is never written by the file on its own — a mismatch is a per-row
-// decision: Keep board (flag, default) / Take TDG (explicit registry write, 2026-09-15) / Dismiss.
+// session (R1–R5). Since 6 Oct 2026 (Miguel: "new data ?? goes stat right to the crew card") every TDG
+// value defaults onto the card — the ship too (Take TDG), and a manual entry the file disagrees with
+// (Accept file); Keep board / Keep mine / Dismiss remain per-row choices.
 //
 // IMPORTANT: this whole file is a single template literal. Do NOT use nested backticks or ${}.
 // All dynamic markup is built with string concatenation inside <script>; buttons use
@@ -284,11 +285,11 @@ function render(){
    h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div><div class="row"><span class="k">Registry says</span><span class="diff"><span class="new">'+esc((f.status||"status not readable")+(f.ship?(" · "+f.ship):""))+'</span>'+badge(l[0],l[1])+'</span></div></div>';});
   h+='</div>';}
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">The Keyman board shows the ship the file names (Miguel, 5 Oct 2026: TDG is the truth). Your placeholder cards stay until you move or remove them; every disagreement is listed under TDG says otherwise on the Keyman tab.</div>';
-  g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"flag",["flag","take","dismiss"],["Keep board","Take TDG","Dismiss"])+'</div>';});h+='</div>';}
+  g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"take",["flag","take","dismiss"],["Keep board","Take TDG","Dismiss"])+'</div>';});h+='</div>';}
  if(g.critical.length){h+='<div class="sec"><h2>&#9679; Status changes from TDG</h2><div class="d">Applied by default — the file drives status. Hold any you want left as-is. Crew you pinned by hand are protected and shown below.</div>';
   g.critical.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,"")+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
- if(g.override_conflict.length){h+='<div class="sec"><h2>&#9995; Fields you set by hand</h2><div class="d">Your manual entries. Kept unless you accept the file.</div>';
-  g.override_conflict.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,badge("&#9995; your manual entry","t-red"))+seg(it.agency_id+":"+it.field,"keep",["accept","keep"],["Accept file (replaces my entry)","Keep mine"])+'</div>';});h+='</div>';}
+ if(g.override_conflict.length){h+='<div class="sec"><h2>&#9995; Fields you set by hand</h2><div class="d">Your manual entries. The file replaces them by default (TDG is the source); choose Keep mine to hold one.</div>';
+  g.override_conflict.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,badge("&#9995; your manual entry","t-red"))+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept file (replaces my entry)","Keep mine"])+'</div>';});h+='</div>';}
  if(g.cert.length){h+='<div class="sec"><h2>&#9677; Certificate updates from TDG</h2><div class="d">Accepted by default — TDG maintains these. An expiry moving earlier is flagged.</div>';
   g.cert.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,it.earlier?badge("&#9888; moved earlier","t-amber"):badge("renewed","t-green"))+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
  if(g.new.length){h+='<div class="sec"><h2>&#65291; New crew</h2>';g.new.forEach(function(it){var f=it.fields||{};h+='<div class="card"><div class="who">'+esc((f.first_name||"")+" "+(f.last_name||""))+' <span class="id">'+esc(it.agency_id)+'</span></div><div class="row"><span class="k">Joining</span><span class="diff"><span class="new">'+esc(f.vessel_observed||"—")+'</span> · '+esc(f.rank_observed||f.status||"")+'</span></div>'+seg("new:"+it.agency_id,"add",["add","skip"],["Add","Skip"])+'</div>';});h+='</div>';}
@@ -301,11 +302,11 @@ function computeCart(){
  var g=STAGE.review.groups;
  function d(k,def){return DEC[k]||def;}
  var certAcc=0,certKeep=0;g.cert.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")certAcc++;else certKeep++;});
- var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")ovAcc++;else ovKeep++;});
+ var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")ovAcc++;else ovKeep++;});
  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")crAcc++;else crKeep++;});
  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
  var minor=g.minor.length;
- var shipFlag=0,shipTake=0;g.ship_flag.forEach(function(it){var v=d("ship:"+it.agency_id,"flag");if(v==="flag")shipFlag++;else if(v==="take")shipTake++;});
+ var shipFlag=0,shipTake=0;g.ship_flag.forEach(function(it){var v=d("ship:"+it.agency_id,"take");if(v==="flag")shipFlag++;else if(v==="take")shipTake++;});
  var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
  var fieldSave=ovAcc+crAcc;
  var willSave=certAcc+newAdd+minor+fieldSave+shipTake;

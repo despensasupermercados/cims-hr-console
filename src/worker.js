@@ -4293,11 +4293,11 @@ function cimsRender(){
     +'<span class="chip2 green">&#9677; <span class=n>'+c.cert+'</span> certificates</span>'
     +'<span class="chip2 navy">&#65291; <span class=n>'+c.new+'</span> new</span>'
     +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
-  if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>Your allocation stays. Flagged for the board unless you dismiss. The file never changes a ship.</div>';
-    g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"flag","flag","dismiss","Keep board","Dismiss"));});L+='</div>';}
-  if(g.override_conflict.length||g.critical.length){L+='<div class=isec><h3>&#9679; Needs your decision</h3><div class=d>A field you set by hand, and status changes. Defaults to keeping yours.</div>';
-    g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept file (replaces my entry)","Keep mine"));});
-    g.critical.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"keep","accept","keep","Accept","Keep"));});L+='</div>';}
+  if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>The ship in the file goes on the crew card by default (TDG is the source). Choose Keep board to hold yours.</div>';
+    g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"take","take","flag","Take TDG","Keep board"));});L+='</div>';}
+  if(g.override_conflict.length||g.critical.length){L+='<div class=isec><h3>&#9679; Needs your decision</h3><div class=d>A field you set by hand, and status changes. Defaults to the TDG file; choose Keep to hold yours.</div>';
+    g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept file (replaces my entry)","Keep mine"));});
+    g.critical.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Keep"));});L+='</div>';}
   if(g.cert.length){L+='<div class=isec><h3>&#9677; Certificate updates from TDG</h3><div class=d>Accepted by default &mdash; TDG maintains these. An expiry moving earlier is flagged.</div>';
     g.cert.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,it.earlier?impTag("&#9888; moved earlier","amber"):impTag("renewed","green"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold",true));});L+='</div>';}
   if(g.new.length){L+='<div class=isec><h3>&#65291; New crew</h3>';
@@ -4315,11 +4315,11 @@ function cimsRender(){
 function cimsCart(){
   var g=STAGE.review.groups;function d(k,def){return DEC[k]||def;}
   var certAcc=0;g.cert.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")certAcc++;});
-  var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")ovAcc++;else ovKeep++;});
-  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"keep")==="accept")crAcc++;else crKeep++;});
+  var ovAcc=0,ovKeep=0;g.override_conflict.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")ovAcc++;else ovKeep++;});
+  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")crAcc++;else crKeep++;});
   var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
   var minor=g.minor.length;
-  var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"flag")==="flag")shipFlag++;});
+  var shipFlag=0;g.ship_flag.forEach(function(it){if(d("ship:"+it.agency_id,"take")==="flag")shipFlag++;});
   var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
   var fieldSave=ovAcc+crAcc,willSave=certAcc+newAdd+minor+fieldSave,kept=shipFlag+ovKeep+crKeep,flags=shipFlag+depFlag;
   var rows="";

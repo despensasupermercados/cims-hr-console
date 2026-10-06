@@ -3,11 +3,13 @@
 // touch the roster. No DB, no side effects (same shape as compliance.js / override.js).
 //
 // Design decisions — session 2026-07-13 (see docs/CREW_IMPORT_DECISIONS.md):
-//   D1  Ship allocation is Rita's. The import NEVER writes vessel_observed; a change is a
-//       FLAG only (reconciled on the board), never an auto-write.
+//   D1  (6 Oct 2026, Miguel: "new data ?? goes stat right to the crew card") The file's ship defaults
+//       onto the card ("Take TDG", crew_apply shipTakes — the one fixed statement); Keep board / Dismiss
+//       stay per-row choices. Never through the field-update path (classifyField: write false).
 //   D2  Certificates default ACCEPT (TDG maintains them). An expiry moving EARLIER is flagged.
-//   D3  A change to a field with a LIVE crew_override defaults KEEP — never silently overwrites
-//       a manual correction (reinforces the override-wins rule in override.js / CLAUDE.md §11).
+//   D3  (6 Oct 2026) A change to a field with a LIVE crew_override defaults ACCEPT: TDG's value replaces
+//       the manual entry (and clears that override field); "Keep mine" holds it, audited either way.
+//   An EMPTY cell in a column the file carries clears the value on the card (crewimport CLEARABLE).
 //   D4  Crew present in the roster but absent from the file are FLAGGED, never auto-removed.
 //   D5  Selective friction: only ship / status / override / earlier-expiry demand attention;
 //       minor hygiene (province, etc.) auto-applies. An approval that fires on every trivial

@@ -15,6 +15,31 @@ function pick(row, patterns) {
   return "";
 }
 
+// The column exists in the file and this row's cell is EMPTY: TDG removed the value (Miguel, 6 Oct 2026:
+// "if it gets removed?? as in any information fro the crew ?? u pick it up and ensure you remove it from
+// the crew card"). A column the file does not carry at all says nothing. Same matching as pick().
+function blankCell(row, patterns) {
+  const keys = Object.keys(row || {});
+  for (const p of patterns) {
+    const np = norm(p);
+    const k = keys.find(h => norm(h).includes(np));
+    if (k != null) { const v = row[k]; return v == null || String(v).trim() === ""; }
+  }
+  return false;
+}
+// Fields an empty cell CLEARS on the crew card. Never the identity (agency id, first/last name) or the
+// status (a required field: an empty status cell is an unreadable row, not a removal).
+const CLEARABLE = {
+  middle_name: ["middle"], rank_observed: ["rank", "position", "rating"], vessel_observed: ["vessel", "ship"],
+  province: ["province"], phone: ["mobile", "phone", "cell", "contact no"], email: ["email", "e-mail"],
+  dob: ["date of birth", "birth", "dob"],
+  med_exp: ["medical expiration", "medical exp", "med expiration", "med exp"],
+  sirb_exp: ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"],
+  pp_exp: ["passport expiration", "passport exp"],
+  sch_exp: ["schengen visa expiration", "schengen expiration", "schengen exp"],
+  usv_exp: ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"],
+};
+
 // A real calendar date or null. Every branch below ends here, so an impossible date
 // (2034-23-09, 2027-02-30) can never be stored — the console read those as a MISSING document.
 function realDate(y, mo, da) {
@@ -136,6 +161,10 @@ export function mapRowFull(row) {
     // Specific "… expiration" patterns come first; loose ones stay as fallbacks for other formats.
     med_exp: date("med_exp"), sirb_exp: date("sirb_exp"), pp_exp: date("pp_exp"), sch_exp: date("sch_exp"), usv_exp: date("usv_exp"),
   };
+  // The fields this row EMPTIED (column present, cell blank). Carried on the row, never written as a field
+  // itself; diffCrew turns each into a clear of a value the card still holds.
+  const blank = Object.keys(CLEARABLE).filter((f) => out[f] == null && blankCell(row, CLEARABLE[f]));
+  if (blank.length) Object.defineProperty(out, "_blank", { value: blank, enumerable: false });
   return { row: out, unparsed };
 }
 export function mapRow(row) { const r = mapRowFull(row); return r ? r.row : null; }
@@ -227,7 +256,10 @@ export function diffCrew(incoming, existing) {
       rekeyed.push({ agency_id: exId, incoming_id: m.agency_id, ship_crew_id: normKm(m.ship_crew_id) || normKm(m.agency_id) });
     }
     const changed = TRACK.filter(f => {
-      const nv = m[f]; if (nv == null) return false;            // blank in source = don't clobber
+      const nv = m[f];
+      // An EMPTY cell clears a value the card still holds (6 Oct 2026: TDG removed it); a column the file
+      // does not carry, or a date no reading could parse (reported as unparsed), keeps the stored value.
+      if (nv == null) return !!(m._blank && m._blank.includes(f) && ex[f] != null && ex[f] !== "");
       return String(nv) !== String(ex[f] == null ? "" : ex[f]);
     });
     // Key every change on the EXISTING agency id — never the id the file happened to use.

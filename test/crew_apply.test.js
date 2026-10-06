@@ -19,12 +19,18 @@ function sampleReview() {
   };
 }
 
-test("D1 ship change is NEVER a crew update — only a sync_conflict", () => {
+// Miguel, 6 Oct 2026: "data about the crew .. new data ?? goes stat right to the crew card". The file's
+// ship now DEFAULTS onto the card (take) — through shipTakes only, never a crewUpdate; "Keep board" (flag)
+// is Rita's explicit per-row choice and leaves an open flag.
+test("D1 (6 Oct 2026): the file's ship defaults onto the card through shipTakes, never a crewUpdate", () => {
   const plan = buildApplyPlan(sampleReview(), {});
   assert.equal(plan.crewUpdates.some(u => u.field === "vessel_observed"), false);
+  assert.deepEqual(plan.shipTakes, [{ agency_id: "SC-1", value: "Celebrity Apex", expect: "Celebrity Edge" }]);
   const ship = plan.conflicts.find(c => c.field === "vessel_observed" && c.agency_id === "SC-1");
-  assert.ok(ship);
-  assert.equal(ship.resolved, 0);
+  assert.equal(ship.resolved, 1); assert.equal(ship.taken, true);
+  const kept = buildApplyPlan(sampleReview(), { "ship:SC-1": "flag" });
+  assert.deepEqual(kept.shipTakes, []);
+  assert.equal(kept.conflicts.find(c => c.field === "vessel_observed").resolved, 0, "Keep board: an open flag");
 });
 
 test("D1 belt-and-suspenders: an errantly-accepted ship write is dropped and counted", () => {
@@ -40,8 +46,11 @@ test("D2 certs default accept -> crew updates", () => {
   assert.ok(plan.crewUpdates.some(u => u.agency_id === "SC-4" && u.field === "med_exp"));
 });
 
-test("D3 override defaults KEEP: no base write, but an audit conflict is logged", () => {
-  const plan = buildApplyPlan(sampleReview(), {});
+test("D3 (6 Oct 2026): an override defaults ACCEPT (TDG replaces the manual entry); Keep mine writes nothing, still audited", () => {
+  const def = buildApplyPlan(sampleReview(), {});
+  assert.ok(def.crewUpdates.some(u => u.agency_id === "SC-1" && u.field === "phone" && u.value === "+63911"));
+  assert.deepEqual(def.overrideClears, [{ agency_id: "SC-1", field: "phone", expect: "+63900" }]);
+  const plan = buildApplyPlan(sampleReview(), { "SC-1:phone": "keep" });
   assert.equal(plan.crewUpdates.some(u => u.agency_id === "SC-1" && u.field === "phone"), false);
   const audit = plan.conflicts.find(c => c.agency_id === "SC-1" && c.field === "phone");
   assert.ok(audit && audit.resolved === 1);
@@ -71,7 +80,7 @@ test("the override column comes from OVR_COL, never from the client item (a forg
 });
 
 test("D3 override kept -> the override field is NOT cleared", () => {
-  const plan = buildApplyPlan(sampleReview(), {});
+  const plan = buildApplyPlan(sampleReview(), { "SC-1:phone": "keep" });
   assert.deepEqual(plan.overrideClears, []);
 });
 
@@ -127,8 +136,8 @@ test("new crew can be skipped", () => {
 test("importRun summary counts touched rows and open conflicts", () => {
   const plan = buildApplyPlan(sampleReview(), {}, { file_hash: "abc", run_by: "Rita" });
   assert.equal(plan.importRun.file_hash, "abc");
-  assert.equal(plan.importRun.rows_upserted, 4); // SC-2 status now auto-applies (D6)
-  assert.equal(plan.importRun.conflicts, 2);
+  assert.equal(plan.importRun.rows_upserted, 5); // SC-2 status (D6) + SC-1 phone and ship (6 Oct 2026: the file wins)
+  assert.equal(plan.importRun.conflicts, 1, "only the departed flag stays open");
 });
 
 // D1 amendment (2026-09-15, Keyman Board Redesign v5): the ship row is a real per-row decision.
@@ -142,12 +151,12 @@ test("ship flag 'take' -> shipTakes (its OWN list, never crewUpdates) + resolved
   assert.equal(plan.importRun.rows_upserted >= 1 && plan.importRun.conflicts, 1, "the departed flag is the only open conflict left");
 });
 
-test("ship flag 'dismiss' -> no shipTakes, audit row resolved but NOT taken; default 'flag' stays open", () => {
+test("ship flag 'dismiss' -> no shipTakes, audit row resolved but NOT taken; 'flag' (Keep board) stays open", () => {
   const dis = buildApplyPlan(sampleReview(), { "ship:SC-1": "dismiss" });
   assert.deepEqual(dis.shipTakes, []);
   const d = dis.conflicts.find(c => c.field === "vessel_observed");
   assert.equal(d.resolved, 1); assert.equal(d.taken, undefined);
-  const def = buildApplyPlan(sampleReview(), {});
+  const def = buildApplyPlan(sampleReview(), { "ship:SC-1": "flag" });
   assert.deepEqual(def.shipTakes, []);
   assert.equal(def.conflicts.find(c => c.field === "vessel_observed").resolved, 0);
 });
