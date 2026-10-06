@@ -3209,32 +3209,16 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crscroll{max-height:252px;overflow:auto;overscroll-behavior:contain}
 .crtotal{text-align:center;font-size:12.5px;color:var(--mut);padding-top:2px;font-variant-numeric:tabular-nums}
 .crtotal b{color:var(--navy);font-weight:700}
-/* The contract pass (6 Oct 2026): a boarding pass in the emails' language — navy, green, small caps over bold. */
-.cpwrap{container-type:inline-size;min-width:0}
-.cpass{display:flex;align-items:stretch;border:1px solid var(--line-2);border-radius:12px;background:linear-gradient(180deg,#FBFCFE,#F4F7FB);overflow:hidden;min-width:0}
-.cpmain{flex:1 1 auto;min-width:0;padding:10px 14px 9px;display:flex;flex-direction:column;gap:7px}
+.cpass{display:flex;flex-direction:column;gap:5px;min-width:0;max-width:440px}
 .cplbl,.cpdates{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.cplbl span{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#7A8BA0;white-space:nowrap}
-.cplbl .cpdur{letter-spacing:.02em;text-transform:none;font-weight:600;color:var(--navy);background:#E8EEF6;padding:1px 8px;border-radius:999px}
-.cpdates b{font-family:'Outfit';font-weight:700;font-size:15px;color:var(--navy);white-space:nowrap;font-variant-numeric:tabular-nums}
-.cptrack{position:relative;height:4px;border-radius:999px;background:repeating-linear-gradient(90deg,#C9D4E2 0 6px,transparent 6px 10px);margin:6px 7px}
-.cptrack::before,.cptrack::after{content:'';position:absolute;top:50%;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%);background:#fff;border:2px solid var(--green)}
-.cptrack::before{left:0}.cptrack::after{left:100%;border-color:#9AABBF}
+.cplbl span{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);white-space:nowrap}
+.cplbl .cpdur{letter-spacing:0;text-transform:none;font-size:11.5px;font-weight:500}
+.cpdates b{font-weight:600;font-size:13.5px;color:var(--deep);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cptrack{position:relative;height:5px;border-radius:999px;background:#E3E8EF;overflow:hidden}
 .cptrack i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--green)}
-.cptrack .cpship{position:absolute;top:50%;transform:translate(-50%,-58%);width:22px;height:22px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #fff,0 2px 6px rgba(20,45,72,.25);z-index:1}
-.cptrack.due i{background:#D9534F}.cptrack.due .cpship{background:var(--red)}.cptrack.due::after{border-color:var(--red)}
-.cptrack.soon .cpship{background:#1E5FB0}
-.cptrack.past i,.cptrack.done i{background:#9AABBF}.cptrack.past .cpship,.cptrack.done .cpship{background:#6B7C93}.cptrack.done::before,.cptrack.past::before{border-color:#9AABBF}
-.cptrack.open::after{border-style:dashed}
-.cpstub{flex:0 0 84px;position:relative;background:var(--navy);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8px 6px;border-left:2px dashed rgba(255,255,255,.35)}
-.cpstub::before,.cpstub::after{content:'';position:absolute;left:-8px;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid var(--line-2)}
-.cpstub::before{top:-8px}.cpstub::after{bottom:-8px}
-.cpstub span{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#A9BDD2;line-height:1.2}
-.cpstub b{font-family:'Outfit';font-weight:700;font-size:24px;line-height:1.1;color:#fff;font-variant-numeric:tabular-nums}
-.cpstub b.ck{color:#8FD07A}.cpstub b.open{color:#A9BDD2}
-.cpass.due .cpstub{background:#8E2A21}.cpass.soon .cpstub{background:#1E5FB0}.cpass.past .cpstub,.cpass.done .cpstub{background:#4B5B6E}
-.rrot .cptrack{margin:8px 7px 4px}
-@container (max-width:380px){.cpass .cpdur{display:none}.cpdates b{font-size:13.5px}.cpstub{flex-basis:70px}.cpstub b{font-size:20px}.cpmain{padding:9px 11px 8px}}
+.cptrack.due i{background:var(--red)}
+.cptrack.past i,.cptrack.done i{background:#B9C6D6}
+.rrot .cptrack{margin:6px 0 2px}
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
 .wrap.wide{max-width:1500px}
@@ -5990,32 +5974,24 @@ async function emailStatement(){
 function contractPass(on,off,o){
   o=o||{};if(!on)return {html:'',chip:'',bar:''};
   var DAY=86400000,now=Date.now(),t0=new Date(on+'T00:00:00Z').getTime(),today=new Date().toISOString().slice(0,10);
-  var chip='',pct=0,state='open',stub='';
+  var chip='',pct=0,state='open';
   var dur=off?durLabel(on,off).replace('d ·',' d ·').replace('mo',' mo'):'';
   if(off){
     var t1=new Date(off+'T00:00:00Z').getTime();
     var dd=Math.round((t1-now)/DAY),tot=Math.round((t1-t0)/DAY),el=Math.round((now-t0)/DAY);
     pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
-    if(on>today){var ds=Math.round((t0-now)/DAY);state='soon';pct=0;
-      chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';
-      stub='<span>Starts in</span><b>'+ds+'</b><span>'+(ds===1?'day':'days')+'</span>';}
-    else if(o.done){state='done';pct=100;stub='<span>Contract</span><b class=ck>&#10003;</b><span>completed</span>';}
-    else if(dd<0){state='past';pct=100;
-      chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';
-      stub='<span>Overdue</span><b>'+(-dd)+'</b><span>'+(-dd===1?'day':'days')+'</span>';}
-    else{state=dd<=14?'due':'live';
-      chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';
-      stub='<span>Day</span><b>'+Math.max(1,el)+'</b><span>of '+tot+'</span>';}
-  }else{stub='<span>Sign-off</span><b class=open>&mdash;</b><span>not set</span>';}
-  var ship='<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff" aria-hidden="true"><path d="M4 15h16l-2.2 4.2a1.5 1.5 0 0 1-1.3.8H7.5a1.5 1.5 0 0 1-1.3-.8zM6 13V9.5A1.5 1.5 0 0 1 7.5 8H11V5h2v3h3.5A1.5 1.5 0 0 1 18 9.5V13z"/></svg>';
-  var track='<div class="cptrack '+state+'"><i style="width:'+pct+'%"></i><span class=cpship style="left:'+pct+'%">'+ship+'</span></div>';
-  // A boarding pass (6 Oct 2026, Miguel: "embrace it .. give it more taste .. like the emails"): the email's
-  // small uppercase label over a big bold value, a route line with the ship where today is, and a navy stub.
-  var html='<div class=cpwrap><div class="cpass '+state+'"><div class=cpmain>'
-    +'<div class=cplbl><span>Sign-on</span>'+(dur?'<span class=cpdur>'+dur+'</span>':'<span></span>')+'<span>Sign-off</span></div>'
+    if(on>today){var ds=Math.round((t0-now)/DAY);state='soon';pct=0;chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';}
+    else if(o.done){state='done';pct=100;}
+    else if(dd<0){state='past';pct=100;chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';}
+    else{state=dd<=14?'due':'live';chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';}
+  }
+  var track='<div class="cptrack '+state+'"><i style="width:'+pct+'%"></i></div>';
+  // The contract line (6 Oct 2026): small labels over the dates and one thin bar. Kept quiet on purpose.
+  var html='<div class="cpass '+state+'">'
+    +'<div class=cplbl><span>Sign-on</span>'+(dur?'<span class=cpdur>'+dur+'</span>':'')+'<span>Sign-off</span></div>'
     +track
     +'<div class=cpdates><b>'+passDate(on)+'</b><b>'+(off?passDate(off):'Open')+'</b></div>'
-    +'</div><div class=cpstub>'+stub+'</div></div></div>';
+    +'</div>';
   return {html:html,chip:chip,bar:track};
 }
 function passDate(iso){var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso||'').split('-');if(p.length!==3||!m[parseInt(p[1],10)-1])return escHtml(iso||'');return parseInt(p[2],10)+' '+m[parseInt(p[1],10)-1]+' '+p[0];}
