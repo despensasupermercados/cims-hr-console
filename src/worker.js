@@ -3226,9 +3226,15 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rauto{display:flex;flex-wrap:wrap;gap:10px 4px;padding:0 8px}.rauto #sbmToggle{margin-left:12px}
 .cract{flex:0 0 172px;position:sticky;top:78px;display:flex;flex-direction:column;gap:10px}
 .cract .btn{width:100%;justify-content:center;margin:0}
+.crstat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 14px;display:flex;flex-direction:column}
+.crstat .r{display:flex;flex-direction:column;gap:2px;padding:10px 0;border-top:1px solid var(--line)}
+.crstat .r:first-child{border-top:0}
+.crstat .r span{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.crstat .r b{font-weight:700;font-size:18px;color:var(--navy);font-variant-numeric:tabular-nums;white-space:nowrap}
+.crstat .r a{font-size:12px;font-weight:600;color:var(--amber);text-decoration:none;margin-left:6px}
 .cract .crbell{width:100%;height:42px;gap:9px;font-weight:600;font-size:13.5px;justify-content:center}
 .crbell .lb{color:var(--deep)}
-@media(max-width:1240px){.cract{order:-1;flex:1 1 100%;flex-direction:row;flex-wrap:wrap;position:static;justify-content:flex-end}.cract .btn,.cract .crbell{width:auto}.cract .crbell{padding:0 14px}}
+@media(max-width:1240px){.cract{order:-1;flex:1 1 100%;flex-direction:row;flex-wrap:wrap;position:static;justify-content:flex-end}.cract .btn,.cract .crbell{width:auto}.cract .crstat,.cract .hint{flex:1 1 100%}.cract .crbell{padding:0 14px}}
 .crbell.ok{color:var(--green-d)}
 .crbell.hot{color:var(--red);border-color:#F3C3C3}
 .crbadge{position:absolute;top:-7px;right:-7px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 0 2px #fff;font-variant-numeric:tabular-nums}
@@ -6264,11 +6270,12 @@ async function renderContracts(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var d;try{d=await cachedJson('/api/contracts',renderContracts);}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderContracts()">Retry</button></div>';return;}
   CTL=d;CTLF={q:'',ship:[],client:[],rank:[],bz:[],sort:'az'};
-  $('#view').innerHTML='<div class=bar><h2 style="margin-right:auto">Contracts &amp; Bonus</h2>'
-   +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'ctrail\\').classList.toggle(\\'open\\')">Filters</button>'
-   +'<button class="btn ghost" onclick="openScoreWindow()">Contributor scoring →</button> <button class="btn green" onclick="addCrewModal()">+ New signer</button></div>'
-   +'<div class=tiles style="grid-template-columns:repeat(3,1fr);margin-bottom:12px">'+tile(d.totals.crew,'Crew')+tile(d.totals.baselineSet+' / '+d.totals.crew,'Baselines set',(d.totals.baselineSet<d.totals.crew?'amber':'green'))+tile('$'+Number(d.totals.paid||0).toLocaleString(),'Bonus paid to date','green')+'</div>'
-   +'<div class=hint style="margin:-4px 0 12px">Consecutive count drives the bonus ladder. Where a baseline is not yet confirmed, the next-bonus figure is withheld (shown as "baseline pending").</div>'
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
+  var pend=d.totals.crew-d.totals.baselineSet;
+  // Same layout as Crew (Miguel, 6 Oct 2026: "move this as in the picture"): the heading is the results line;
+  // the actions and the three totals stand in the column right of the cards, the totals as one quiet card.
+  $('#view').innerHTML='<div class=bar><h2 id=cthead style="margin-right:auto">Contracts &amp; Bonus</h2>'
+   +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'ctrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
    +'<div class=crwrap>'
    +'<aside class=crrail id=ctrail>'
    +'<div><label class=crlbl for=ctq style="display:block;margin-bottom:6px">Search</label><input id=ctq type=search placeholder="Name or crew ID" oninput="CTLF.q=this.value;paintContracts()"></div>'
@@ -6277,7 +6284,17 @@ async function renderContracts(){
    +'<button class="btn ghost" onclick="clearContractFilters()">Clear filters</button>'
    +'<div id=ctcount class=crtotal></div>'
    +'</aside>'
-   +'<section class=crmain><div class=crhead><span class=ttl id=cthead></span></div><div id=cttable style="display:flex;flex-direction:column;gap:10px"></div></section></div>';
+   +'<section class=crmain><div id=cttable style="display:flex;flex-direction:column;gap:10px"></div></section>'
+   +'<aside class=cract>'
+   +'<button class="btn green" onclick="addCrewModal()">+ New signer</button>'
+   +'<button class="btn ghost" onclick="openScoreWindow()">Contributor scoring →</button>'
+   +'<div class=crstat>'
+   +'<div class=r><span>Crew</span><b>'+d.totals.crew+'</b></div>'
+   +'<div class=r><span>Baselines set</span><b style="color:'+(pend?'var(--amber)':'var(--green-d)')+'">'+d.totals.baselineSet+' / '+d.totals.crew+(pend?' <a href="#" onclick="ctShowPending();return false">'+pend+' pending →</a>':'')+'</b></div>'
+   +'<div class=r><span>Bonus paid to date</span><b style="color:var(--green-d)">$'+Number(d.totals.paid||0).toLocaleString()+'</b></div>'
+   +'</div>'
+   +'<div class=hint style="font-size:12px;line-height:1.45;padding:0 2px">Consecutive count drives the bonus ladder. Where a baseline is not yet confirmed, the next-bonus figure is withheld (shown as "baseline pending").</div>'
+   +'</aside></div>';
   paintContracts();
 }
 // Where a completed-contract count came from (§10c): TDG's count file (with its as-of date) or the
@@ -6287,6 +6304,7 @@ function ctSrc(x){
   if(x.contracts_source==='tdg')return '<span class=csub style="display:inline">· TDG count'+(x.contracts_as_of?' as of '+fmtDate(x.contracts_as_of):'')+'</span>';
   return '<span class=csub style="display:inline;color:#b45309">· date-derived, count file not loaded</span>';
 }
+function ctShowPending(){CTLF.bz=['pending'];paintContracts();}
 function clearContractFilters(){CTLF={q:'',ship:[],client:[],rank:[],bz:[],sort:'az'};var q=document.getElementById('ctq');if(q)q.value='';var so=document.getElementById('cts');if(so)so.value='az';paintContracts();}
 // Rail counts are the whole ledger's, like the Crew tab. A client pick narrows the ship list.
 function contractFacets(){
@@ -6338,7 +6356,7 @@ function paintContracts(){
   rows.sort(function(a,b){if(CTLF.sort==='tenure')return b.contracts-a.contracts;if(CTLF.sort==='next')return b.nextRung-a.nextRung;if(CTLF.sort==='paid')return b.totalPay-a.totalPay;return a.name.localeCompare(b.name);});
   var filt=[];if(CTLF.rank.length)filt.push(CTLF.rank.join(' + '));if(CTLF.client.length)filt.push(CTLF.client.join(' + '));if(CTLF.ship.length)filt.push(CTLF.ship.map(function(k){return (contractFacets.names||{})[k]||k;}).join(' + '));if(CTLF.bz.length)filt.push(CTLF.bz.map(function(k){return {set:'baseline set',pending:'baseline pending',scored:'scored before',never:'never scored'}[k];}).join(' + '));
   var cnt=document.getElementById('ctcount');if(cnt)cnt.innerHTML='<b>'+rows.length+'</b> of '+CTL.rows.length+' crew shown';
-  var hd=document.getElementById('cthead');if(hd)hd.innerHTML='All crew <span class=csub style="display:inline;font-size:13px">· '+rows.length+(rows.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
+  var hd=document.getElementById('cthead');if(hd)hd.innerHTML='All crew <span class=csub style="display:inline;font-size:15px;font-weight:600;font-family:inherit">· '+rows.length+(rows.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
   $('#cttable').innerHTML=rows.map(ledgerCard).join('')||'<div class=muted>No matches.</div>';
   $('#cttable').onclick=function(ev){
     var b=ev.target.closest?ev.target.closest('button[data-act]'):null;if(!b)return;
