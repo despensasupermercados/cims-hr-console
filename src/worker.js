@@ -3244,46 +3244,65 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rauto{display:flex;flex-direction:column;gap:12px;padding:0 8px}.rauto>span{display:flex!important;justify-content:space-between;align-items:center;width:100%;margin-left:0!important;font-size:13.5px!important}
 .cract{flex:0 0 172px;position:sticky;top:78px;display:flex;flex-direction:column;gap:10px}
 .cract .btn{width:100%;justify-content:center;margin:0}
-/* Crew profile (6 Oct 2026): header card, a row of numbers, document tiles, one row per contract. */
-.pfhero{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px 22px;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px 28px;align-items:start}
-.pfid{display:flex;gap:16px;min-width:0}
-.pfname{font-family:'Outfit';font-weight:700;font-size:22px;color:var(--navy);line-height:1.2}
-.pfwho{font-size:13px;color:var(--mut);margin-top:3px;font-weight:600}
-.pfchips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
-.pfship{font-weight:700;font-size:15px;color:var(--deep);margin-top:12px}
-.pfcontact{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:13px;color:var(--mut);margin-top:10px}.pfcontact a{color:var(--mut)}.pfcontact .sep{color:#C3CCD8}
-.pfnow{border-left:1px solid var(--line);padding-left:24px;display:flex;flex-direction:column;gap:8px;min-width:0}
-.pflbl{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:10px}
-.pfnow .pflbl{margin-bottom:2px}
-.pfstats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:14px}
-.pfstats .tile{align-items:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:none;text-align:left;min-width:0}
-.pfstats .tile .n{font-size:26px;line-height:1.15}
-.pfstats .tile .l{margin-top:4px}
-.pfnote{font-size:12.5px;color:var(--mut);margin:8px 2px 0}.pfnote b{color:var(--navy)}
-.pfsec{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-top:14px}
-.pfdocs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
-.pfdoc{border-radius:10px;padding:10px 12px;border:1px solid var(--line);border-left:4px solid #B9C6D6;display:flex;flex-direction:column;gap:2px;min-width:0}
-.pfdoc .l{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}
-.pfdoc b{font-size:14.5px;color:var(--deep)}
-.pfdoc .d{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
-.pfdoc.ok{border-left-color:var(--green)}.pfdoc.ok b{color:var(--green-d)}
-.pfdoc.amber{border-left-color:#E0A23B;background:#FFFBF3}.pfdoc.amber b{color:var(--amber)}
-.pfdoc.red{border-left-color:var(--red);background:#FDF6F5}.pfdoc.red b{color:var(--red)}
-.pfdoc.na b{color:var(--mut);font-weight:600}
-.pfkv{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
-.pfkv>div{display:flex;flex-direction:column;gap:3px;min-width:0}
-.pfkv span{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
-.pfkv b{font-size:14px;color:var(--deep);font-weight:600}.pfkv small{font-size:12px;color:var(--mut)}
-.pfhist{display:flex;flex-direction:column}
-.pfrow{display:grid;grid-template-columns:minmax(150px,220px) minmax(0,1fr) auto;gap:18px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
-.pfrow:first-child{border-top:0;padding-top:2px}
-.pfrs{display:flex;flex-direction:column;gap:2px;min-width:0}.pfrs b{font-size:14px;color:var(--deep)}.pfrs span{font-size:12px;color:var(--mut)}
-.pfrp .cpass{max-width:none}
-.pffb{border-top:1px solid var(--line);padding:10px 0}.pffb:first-child{border-top:0;padding-top:0}
+.cract.rotact{flex:0 0 300px}
+#rotside{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+#rotside .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+#rotside .tile{padding:9px 8px}#rotside .tile .n{font-size:22px}#rotside .tile .l{font-size:10px}
+#rotside .shipsec{margin:0!important}#rotside .shiphdr{padding:12px 14px;flex-wrap:wrap;row-gap:3px}#rotside .shiphdr .nm{font-size:14px;flex:1 1 100%}#rotside .shiphdr .meta{font-size:11.5px;margin-left:0;flex:1 1 100%;display:flex;justify-content:space-between}
+#rotside .shipbody{padding:10px;grid-template-columns:1fr!important}
 .pfgl{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:8px 2px 0}
 .pfgl:first-child{margin-top:0}
 @media(max-width:1240px){.cract.pfact{order:2;justify-content:flex-start;margin-top:4px}.cract.pfact .pfgl{flex:1 1 100%;margin:8px 2px 0}.cract.pfact>div[id]{flex:1 1 100%}}
-@container (max-width:760px){.pfhero{grid-template-columns:1fr}.pfnow{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:14px}.pfstats{grid-template-columns:repeat(2,minmax(0,1fr))}.pfdocs{grid-template-columns:repeat(2,minmax(0,1fr))}.pfkv{grid-template-columns:repeat(2,minmax(0,1fr))}.pfrow{grid-template-columns:1fr;gap:8px}}
+/* Crew profile (6 Oct 2026, second pass): compact header, one strip of numbers, two columns, one-line empties. */
+.pfhero{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px 24px;align-items:start}
+.pfhero.solo{grid-template-columns:1fr}
+.pfid{display:flex;gap:14px;min-width:0}
+.pfnmrow{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.pfname{font-family:'Outfit';font-weight:700;font-size:21px;color:var(--navy);line-height:1.2}
+.pfwho{font-size:13px;color:var(--mut);font-weight:600}
+.pfchips{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px}
+.pfnone{font-size:12px;font-weight:600;color:var(--mut);background:#EEF1F5;border-radius:6px;padding:4px 8px}
+.pfship{font-weight:700;font-size:14.5px;color:var(--deep);margin-top:10px}
+.pfship .pfcl{font-weight:500;color:var(--mut);font-size:13px;margin-left:8px}
+.pfcontact{display:flex;flex-wrap:wrap;gap:3px 8px;font-size:12.5px;color:var(--mut);margin-top:6px}.pfcontact a{color:var(--mut)}.pfcontact .sep{color:#C3CCD8}
+.pfnow{border-left:1px solid var(--line);padding-left:22px;display:flex;flex-direction:column;gap:6px;min-width:0;align-self:center}
+.pflbl{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:10px}
+.pflbl span{font-weight:600;letter-spacing:0;text-transform:none;font-size:12.5px;color:#93A1B2}
+.pfnow .pflbl{margin-bottom:2px}
+.pfstats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:#fff;border:1px solid var(--line);border-radius:14px;margin-top:12px;overflow:hidden}
+.pfstats .tile{align-items:flex-start;text-align:left;background:none;border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:none;padding:12px 18px;min-width:0}
+.pfstats .tile:first-child{border-left:0}
+.pfstats .tile .n{font-size:24px;line-height:1.15}
+.pfstats .tile .l{margin-top:3px}
+.pfnote{font-size:12.5px;color:var(--mut);margin:7px 4px 0}.pfnote b{color:var(--navy)}
+.pfgrid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,1fr);gap:12px;margin-top:12px;align-items:start}
+.pfcol{display:flex;flex-direction:column;gap:12px;min-width:0}
+.pfsec{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 18px}
+.pfsec.one{padding:12px 18px}.pfsec.one .pflbl{margin-bottom:0}
+.pfdocs{display:flex;flex-direction:column}
+.pfdoc{display:grid;grid-template-columns:10px minmax(0,1fr) auto;column-gap:10px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line)}
+.pfdoc:first-child{border-top:0;padding-top:0}
+.pfdoc i{width:8px;height:8px;border-radius:50%;background:#B9C6D6;align-self:center;grid-row:1/3}
+.pfdoc .l{font-size:13px;font-weight:600;color:var(--deep)}
+.pfdoc b{font-size:13px;font-weight:700;text-align:right;color:var(--deep);white-space:nowrap}
+.pfdoc .d{grid-column:2;font-size:11.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+.pfdoc.ok i{background:var(--green)}.pfdoc.ok b{color:var(--green-d)}
+.pfdoc.amber i{background:#E0A23B}.pfdoc.amber b{color:var(--amber)}
+.pfdoc.red i{background:var(--red)}.pfdoc.red b{color:var(--red)}
+.pfdoc.na b{color:var(--mut);font-weight:600}
+.pfkv{display:flex;flex-direction:column}
+.pfkv>div{display:grid;grid-template-columns:110px minmax(0,1fr);column-gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+.pfkv>div:first-child{border-top:0;padding-top:0}
+.pfkv span{font-size:12px;color:var(--mut);font-weight:600;grid-row:1/3}
+.pfkv b{font-size:13px;color:var(--deep);font-weight:600}.pfkv small{grid-column:2;font-size:11.5px;color:var(--mut)}
+.pfv.ok{color:var(--green-d)}.pfv.amber{color:var(--amber)}.pfv.red{color:var(--red)}
+.pfhist{display:flex;flex-direction:column}
+.pfrow{display:grid;grid-template-columns:minmax(120px,170px) minmax(0,1fr);gap:16px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.pfrow:first-child{border-top:0;padding-top:0}
+.pfrs{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0}.pfrs b{font-size:14px;color:var(--deep)}.pfrs span{font-size:12px;color:var(--mut)}.pfrs .cchip{font-size:11px;padding:2px 7px}
+.pfrp .cpass{max-width:none}
+.pffb{border-top:1px solid var(--line);padding:10px 0}.pffb:first-child{border-top:0;padding-top:0}
+@container (max-width:820px){.pfhero{grid-template-columns:1fr}.pfnow{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:12px}.pfstats{grid-template-columns:repeat(2,minmax(0,1fr))}.pfstats .tile:nth-child(3){border-left:0}.pfstats .tile:nth-child(n+3){border-top:1px solid var(--line)}.pfgrid{grid-template-columns:1fr}.pfrow{grid-template-columns:1fr;gap:6px}}
 .crstat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 14px;display:flex;flex-direction:column}
 .crstat .r{display:flex;flex-direction:column;gap:2px;padding:10px 0;border-top:1px solid var(--line)}
 .crstat .r:first-child{border-top:0}
@@ -3292,7 +3311,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crstat .r a{font-size:12px;font-weight:600;color:var(--amber);text-decoration:none;margin-left:6px}
 .cract .crbell{width:100%;height:42px;gap:9px;font-weight:600;font-size:13.5px;justify-content:center}
 .crbell .lb{color:var(--deep)}
-@media(max-width:1240px){.cract{order:-1;flex:1 1 100%;flex-direction:row;flex-wrap:wrap;position:static;justify-content:flex-end}.cract .btn,.cract .crbell{width:auto}.cract .crstat,.cract .hint{flex:1 1 100%}.cract .crbell{padding:0 14px}}
+@media(max-width:1240px){.cract{order:-1;flex:1 1 100%;flex-direction:row;flex-wrap:wrap;position:static;justify-content:flex-end}.cract .btn,.cract .crbell{width:auto}.cract.rotact{flex:1 1 100%}.cract #rotside{flex:1 1 100%}.cract .crstat,.cract .hint{flex:1 1 100%}.cract .crbell{padding:0 14px}}
 .crbell.ok{color:var(--green-d)}
 .crbell.hot{color:var(--red);border-color:#F3C3C3}
 .crbadge{position:absolute;top:-7px;right:-7px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 0 2px #fff;font-variant-numeric:tabular-nums}
@@ -5208,7 +5227,7 @@ async function renderRotation(){
     +'<div class=bar style="margin-bottom:4px"><h2 id=rothead style="margin-right:auto">Keyman</h2><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
     +'<div class=hint style="margin:-2px 0 8px">Each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
     +rotSourcesLine()
-    +'<div class=crwrap style="margin-top:12px">'
+    +'<div class=crwrap id=rotwrap style="margin-top:12px">'
     +'<aside class=crrail id=rotrail>'
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Find ship</label><input id=rfind type=search placeholder="Ship name" oninput="ROT_FIND=this.value;drawRotation()"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
@@ -5218,12 +5237,13 @@ async function renderRotation(){
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'
     +'<section class=crmain><div id=rotbody></div></section>'
-    +'<aside class=cract>'
+    +'<aside class="cract rotact">'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button>'
     +'<button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
     +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
     +'<button class="btn" onclick="exportDaysExcel()" title="Days worked this month, per crew — a reference view, not an invoice">Bill this month (Excel)</button>'
+    +'<div id=rotside></div>'
     +'</aside></div>';
   drawRotation(); document.body.classList.remove('rot-refreshing');
   // PAGE CHROME, NOT BOARD DATA (16 Sep 2026, Starlink). Every render fired five requests: the board,
@@ -5344,6 +5364,9 @@ function drawRotation(){
   if(pool.length){var pclosed=!!ROT_CLOSED['__POOL__'];
     h+='<div class=shipsec style="margin-top:4px"><div class=shiphdr data-toggle="__POOL__" style="border-left-color:#9aa7b6"><span class=nm>Unassigned pool</span><span class=meta>active · no ship assigned · '+pool.length+' crew <span class="arw'+(pclosed?' closed':'')+'">▾</span></span></div>'
      +'<div class="shipbody shipdrop'+(pclosed?' closed':'')+'" data-ship="__POOL__">'+pool.map(rotCard).join('')+'</div></div>';}
+  // The counts, the TDG overrides list, the shoreside team and the pool stand in the right column
+  // (Miguel, 6 Oct 2026: "put all that in the right also .. otherwise it's lost space"); the ships keep the middle.
+  var side=h;h='';
   var secs=(b.sections||[]).slice();
   var allSecs=secs.length;
   if(ROT_BRANDS.length)secs=secs.filter(function(s){return ROT_BRANDS.indexOf(s.brand)>=0;});
@@ -5364,11 +5387,12 @@ function drawRotation(){
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   h+='<div class=zlabel style="margin-top:14px">Ships ('+secs.length+')</div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
+  var _sd=document.getElementById('rotside');if(_sd)_sd.innerHTML=side;else document.getElementById('rotbody').insertAdjacentHTML('afterbegin',side);
   rotRail(secs.length,allSecs);
-  document.querySelectorAll('#rotbody .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
-  document.querySelectorAll('#rotbody [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
-  document.querySelectorAll('#rotbody .rtoggle').forEach(function(el){el.onclick=function(e){e.stopPropagation();var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});};});
-  document.querySelectorAll('#rotbody .shipdrop').forEach(function(z){
+  document.querySelectorAll('#rotwrap .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
+  document.querySelectorAll('#rotwrap [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
+  document.querySelectorAll('#rotwrap .rtoggle').forEach(function(el){el.onclick=function(e){e.stopPropagation();var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});};});
+  document.querySelectorAll('#rotwrap .shipdrop').forEach(function(z){
     z.ondragover=function(e){e.preventDefault();z.classList.add('dragover');};
     z.ondragleave=function(){z.classList.remove('dragover');};
     z.ondrop=function(e){e.preventDefault();z.classList.remove('dragover');
@@ -5999,60 +6023,56 @@ async function openCrew(id){
   var h='<div class="bar noprint" style="margin-bottom:10px"><button class="btn ghost" onclick="renderCrew()">← Crew</button><span style="margin-left:auto"></span></div>';
   h+='<div class=crwrap><section class=crmain><div class=stmt>';
   h+='<div class=printhead>DG3 CIMS — Crew Statement · '+escHtml(name)+' · '+todayS+'</div>';
-  // 1. header card
-  h+='<div class=pfhero><div class=pfid><div class=crav style="width:60px;height:60px;font-size:18px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
-    +'<div class=pfname>'+escHtml(name)+'</div><div class=pfwho>'+escHtml(who)+'</div>'
-    +'<div class=pfchips><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status||'')+'</span>'+(rank?'<span class=crrank>'+escHtml(rankTag(rank,null).toUpperCase())+'</span>':'')+(cp&&cp.chip?cp.chip.replace('class=croff','class="croff inrow"'):'')+'</div>'
-    +'<div class=pfship>'+(c.vessel_observed?escHtml(c.vessel_observed):'<span style="color:var(--mut);font-weight:500">No ship assigned</span>')+'</div>'+(c.vessel_observed&&c.client?'<div class=crcust>'+escHtml(c.client)+'</div>':'')
+  // Second pass (Miguel, 6 Oct 2026: "you are wasting so much space .. appealing to the eye, easy to understand"):
+  // a compact header, one strip of numbers, then two columns — records left, documents + deployment right.
+  // An empty section is one line, never a card of white space.
+  h+='<div class="pfhero'+(cp?'':' solo')+'"><div class=pfid><div class=crav style="width:56px;height:56px;font-size:17px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+    +'<div class=pfnmrow><span class=pfname>'+escHtml(name)+'</span><span class=pfwho>'+escHtml(who)+'</span></div>'
+    +'<div class=pfchips><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status||'')+'</span>'+(rank?'<span class=crrank>'+escHtml(rankTag(rank,null).toUpperCase())+'</span>':'')+(cp&&cp.chip?cp.chip.replace('class=croff','class="croff inrow"'):'')+(cp?'':'<span class=pfnone>No active contract</span>')+'</div>'
+    +'<div class=pfship>'+(c.vessel_observed?escHtml(c.vessel_observed)+(c.client?'<span class=pfcl>'+escHtml(c.client)+'</span>':''):'<span style="color:var(--mut);font-weight:500">No ship assigned</span>')+'</div>'
     +(contact?'<div class=pfcontact>'+contact+'</div>':'')
     +'</div></div>'
-    +'<div class=pfnow>'+(cp?('<div class=pflbl>Current contract</div>'+cp.html):'<div class=pflbl>Current contract</div><div class=csub style="margin-top:0">No active contract on file</div>')+'</div></div>';
-  // 2. numbers
+    +(cp?('<div class=pfnow><div class=pflbl>Current contract</div>'+cp.html+'</div>'):'')+'</div>';
   if(bz&&!bz.error){
     // The two counts stay labelled apart (§10c): completed (grade, with its source) vs bonus count (consecutive).
     h+='<div class=pfstats>'+tile((bz.contracts!=null?bz.contracts:0),'Completed contracts')+tile((bz.count!=null?bz.count:0),'Bonus count (consecutive)')
       +tile('$'+(bz.nextRungIfClean!=null?Number(bz.nextRungIfClean).toLocaleString():'—'),'Next rung if clean','green')+tile(Number(d.daysWorked||0).toLocaleString(),'Sea-days')+'</div>'
       +'<div class=pfnote>Rank <b>'+escHtml(bz.rank||'—')+'</b> · '+(bz.contracts!=null?bz.contracts:0)+' completed contract(s) '+ctSrc(bz)+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
   }
-  // 3. documents: the state in words and colour, the date underneath
   var docT=function(label,dt,optional){
     var f=docFlag(dt),days=dt?Math.round((new Date(dt+'T00:00:00Z').getTime()-Date.now())/86400000):null,st;
     if(!dt)st=optional?['Not held','na']:['Missing','red'];
     else if(f==='expired')st=['Expired '+(-days)+' d ago','red'];
     else if(f==='90d')st=[days+' days left','amber'];
     else st=['Valid','ok'];
-    return '<div class="pfdoc '+st[1]+'"><span class=l>'+label+'</span><b>'+st[0]+'</b><span class=d>'+(dt?passDate(dt):'—')+'</span></div>';
+    return '<div class="pfdoc '+st[1]+'"><i></i><span class=l>'+label+'</span><b>'+st[0]+'</b><span class=d>'+(dt?passDate(dt):'—')+'</span></div>';
   };
-  h+='<div class=pfsec><div class=pflbl>Documents</div><div class=pfdocs>'+docT('Medical',c.med_exp)+docT('Seaman book',c.sirb_exp)+docT('Passport',c.pp_exp)+docT('US visa',c.usv_exp)+docT('Schengen',c.sch_exp,true)+'</div></div>';
-  // 4. deployment fit
-  var dp=d.deployment||{};
-  if(dp.matched){
-    var vlabel=dp.visa?(dp.visa.required+': '+(dp.visa.exp?passDate(dp.visa.exp):'missing')):'Region entry visa varies by nationality';
-    var vcls='';if(dp.visa){var vs2=dp.visa.status;vcls=vs2==='ok'?'ok':(vs2==='expiring'?'amber':'red');}
-    var dd=dp.nextDryDock;
-    h+='<div class=pfsec><div class=pflbl>Deployment fit</div><div class=pfkv>'
-      +'<div><span>Ship</span><b>'+escHtml(dp.vessel||'')+'</b><small>'+escHtml([(dp.brand||''),(dp.cls?dp.cls+' class':'')].filter(Boolean).join(' · '))+'</small></div>'
-      +'<div><span>Homeport</span><b>'+escHtml(dp.homeport||'—')+'</b><small>'+escHtml(dp.region||'')+'</small></div>'
-      +'<div><span>Entry visa</span><b><span class="cchip '+vcls+'" style="font-size:12.5px">'+escHtml(vlabel)+'</span></b></div>'
-      +'<div><span>Next dry dock</span><b>'+(dd?escHtml(passDate(dd.start)+(dd.end?(' → '+passDate(dd.end)):'')):'None scheduled')+'</b><small>'+(dd?escHtml([dd.loc,dd.note].filter(Boolean).join(' · ')):'')+'</small></div>'
-      +'</div></div>';
-  }
-  // 5. contracts, newest first
-  h+='<div class=pfsec><div class=pflbl>Contracts</div>';
-  if(!ct.length)h+='<div class=csub style="margin-top:0">No Keyman contract history on file.</div>';
-  else h+='<div class=pfhist>'+ct.slice().reverse().map(function(x){var off=x.act||x.proj||null;var basis=x.act?'<span class="cchip ok">Actual</span>':(x.proj?'<span class="cchip royal">Projected</span>':'<span class="cchip amber">Open</span>');var p=contractPass(x.on,off,{done:!!x.act});return '<div class=pfrow><div class=pfrs><b>'+escHtml(x.ship||'—')+'</b><span>Contract '+x.seq+'</span></div><div class=pfrp>'+p.html+'</div><div class=pfrb>'+basis+'</div></div>';}).join('')+'</div>';
-  h+='</div>';
-  // 6. bonus outcomes
+  var left='',right='';
+  // left: contracts, outcomes, feedback
+  if(!ct.length)left+='<div class="pfsec one"><div class=pflbl>Contracts <span>· none on file</span></div></div>';
+  else left+='<div class=pfsec><div class=pflbl>Contracts <span>· '+ct.length+'</span></div><div class=pfhist>'+ct.slice().reverse().map(function(x){var off=x.act||x.proj||null;var basis=x.act?'<span class="cchip ok">Actual</span>':(x.proj?'<span class="cchip royal">Projected</span>':'<span class="cchip amber">Open</span>');var p=contractPass(x.on,off,{done:!!x.act});return '<div class=pfrow><div class=pfrs><b>'+escHtml(x.ship||'—')+'</b><span>Contract '+x.seq+'</span>'+basis+'</div><div class=pfrp>'+p.html+'</div></div>';}).join('')+'</div></div>';
   if(bz&&!bz.error){
     var outs=bz.outcomes||[];
-    h+='<div class=pfsec><div class=pflbl>Bonus outcomes</div>';
-    if(outs.length) h+='<table class=tbl><thead><tr><th>Date</th><th>Ships</th><th>Score</th><th>Gate</th><th>Pay</th></tr></thead><tbody>'
-      +outs.map(function(o){var ships='';try{ships=JSON.parse(o.ships_json||'[]').join(', ');}catch(e){}return '<tr><td>'+(o.committed_at||'').slice(0,10)+'</td><td>'+ships+'</td><td>'+o.score_pct+'%</td><td>'+(o.gate||'—')+'</td><td>$'+(o.pay_usd||0).toLocaleString()+'</td></tr>';}).join('')+'</tbody></table>';
-    else h+='<div class=csub style="margin-top:0">None committed yet.</div>';
-    h+='</div>';
+    if(!outs.length)left+='<div class="pfsec one"><div class=pflbl>Bonus outcomes <span>· none committed yet</span></div></div>';
+    else left+='<div class=pfsec><div class=pflbl>Bonus outcomes <span>· '+outs.length+'</span></div><table class=tbl><thead><tr><th>Date</th><th>Ships</th><th>Score</th><th>Gate</th><th>Pay</th></tr></thead><tbody>'
+      +outs.map(function(o){var ships='';try{ships=JSON.parse(o.ships_json||'[]').join(', ');}catch(e){}return '<tr><td>'+(o.committed_at||'').slice(0,10)+'</td><td>'+ships+'</td><td>'+o.score_pct+'%</td><td>'+(o.gate||'—')+'</td><td>$'+(o.pay_usd||0).toLocaleString()+'</td></tr>';}).join('')+'</tbody></table></div>';
   }
-  // 7. manager feedback
-  h+='<div class=pfsec><div class=pflbl>Manager feedback</div><div id=sbmcards><div class=csub style="margin-top:0">Loading…</div></div></div>';
+  left+='<div class="pfsec" id=sbmsec><div class=pflbl>Manager feedback <span id=sbmnone></span></div><div id=sbmcards><div class=csub style="margin-top:0">Loading…</div></div></div>';
+  // right: documents, deployment
+  right+='<div class=pfsec><div class=pflbl>Documents</div><div class=pfdocs>'+docT('Medical',c.med_exp)+docT('Seaman book',c.sirb_exp)+docT('Passport',c.pp_exp)+docT('US visa',c.usv_exp)+docT('Schengen',c.sch_exp,true)+'</div></div>';
+  var dp=d.deployment||{};
+  if(dp.matched){
+    var vlabel=dp.visa?(dp.visa.required+' · '+(dp.visa.exp?passDate(dp.visa.exp):'missing')):'Varies by nationality';
+    var vcls='';if(dp.visa){var vs2=dp.visa.status;vcls=vs2==='ok'?'ok':(vs2==='expiring'?'amber':'red');}
+    var dd=dp.nextDryDock;
+    right+='<div class=pfsec><div class=pflbl>Deployment fit</div><div class=pfkv>'
+      +'<div><span>Ship</span><b>'+escHtml(dp.vessel||'')+'</b><small>'+escHtml([(dp.brand||''),(dp.cls?dp.cls+' class':'')].filter(Boolean).join(' · '))+'</small></div>'
+      +'<div><span>Homeport</span><b>'+escHtml(dp.homeport||'—')+'</b><small>'+escHtml(dp.region||'')+'</small></div>'
+      +'<div><span>Entry visa</span><b class="pfv '+vcls+'">'+escHtml(vlabel)+'</b></div>'
+      +'<div><span>Next dry dock</span><b>'+(dd?escHtml(passDate(dd.start)+(dd.end?(' → '+passDate(dd.end)):'')):'None scheduled')+'</b>'+(dd?'<small>'+escHtml([dd.loc,dd.note].filter(Boolean).join(' · '))+'</small>':'')+'</div>'
+      +'</div></div>';
+  }
+  h+='<div class=pfgrid><div class=pfcol>'+left+'</div><div class=pfcol>'+right+'</div></div>';
   h+='</div></section>';
   // actions
   h+='<aside class="cract pfact noprint">'
@@ -6083,7 +6103,8 @@ async function loadSbmCards(id){
   try{
     var r=await (await fetch('/api/sbm/crew?id='+encodeURIComponent(id))).json();
     var cards=(r&&r.cards)||[];
-    if(!cards.length){el.innerHTML='<p class=muted style="text-align:left;padding:8px 2px">No shipboard management reviews yet.</p>';return;}
+    if(!cards.length){var nn=document.getElementById('sbmnone');if(nn){nn.textContent='· none yet';el.innerHTML='';var sc=document.getElementById('sbmsec');if(sc)sc.classList.add('one');}else el.innerHTML='<p class=muted style="text-align:left;padding:8px 2px">No shipboard management reviews yet.</p>';return;}
+    var nn2=document.getElementById('sbmnone');if(nn2)nn2.textContent='· '+cards.length;
     el.innerHTML=cards.map(function(x){
       var qs=[['Smart with work',x.q_business],['Guests come first',x.q_guests],['Helps us grow',x.q_grow],['Acts with care',x.q_integrity],['Team player',x.q_teams],['High energy',x.q_energy],['Final thoughts',x.q_final]]
         .filter(function(pr){return pr[1];}).map(function(pr){return '<div style="margin-top:6px;font-size:13px"><span class=csub>'+pr[0]+':</span> “'+ev(pr[1])+'”</div>';}).join('');
