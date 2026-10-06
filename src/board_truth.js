@@ -68,97 +68,75 @@ export function completedOff(legs, sc, key, today, keyOf, maxDays = COMPLETION_D
   return age != null && age <= maxDays ? off : null;
 }
 
-const KIND_ORDER = ["empty_hull", "dropped", "file_only", "status_unread", "contradicted", "completed_still_aboard", "counter", "held", "no_dates", "unknown_ship", "onboard_no_ship", "earmarked_no_card"];
+const KIND_ORDER = ["empty_hull", "overridden", "held", "completed_still_aboard", "file_only", "status_unread", "unknown_ship", "onboard_no_ship"];
 
-// The "what is wrong" list. Every row: { kind, sc, name, ship, text }. Plain text: the page escapes it.
-//   crew        : [{ sc, name, manual, held, retired, absentSince, last: {status, ship} }]  visible, non-shore
-//                 manual = a crew_override.status; held = crew.status where it differs from the file's word;
-//                 fileRaw = { status, ship } the import still writes under a manual edit (crew.status + last hull)
+// WHAT IS LEFT TO CLEAN UP (Miguel, 6 Oct 2026: "look at how many issues we have now .. adapt the keyman
+// and the console to ensure it reflect the tdg import"). The board APPLIES the file — a green seat for On
+// board, a TDG earmark card for Earmarked, the file's status over a Retired tag or a status edit, a card the
+// file contradicts taken off the ship — so this list is no longer every difference: it is only what a person
+// must act on. Every row: { kind, sc, name, ship, text }. Plain text: the page escapes it.
+//   empty_hull            a ship with no printer on board per the file (an operational gap, not an error)
+//   overridden            Rita's card the file contradicts: off the board, still on record — remove it
+//   held                  Rita's Retired tag or status edit the file overrides (or still disagrees with)
+//   completed_still_aboard the console recorded the sign-off; TDG's file has not caught up
+//   file_only             an active row of the file the roster lacks (needs adding) / a hidden crew
+//   status_unread         a status word the console cannot read
+//   unknown_ship / onboard_no_ship   On board where the console cannot place the hull
+// Not rows any more (the board shows them, or they are not a disagreement with the file): a crew the file
+// does not carry (their status says "Not in TDG file"), a seat without dates (the Contract Counter is the
+// dates file; the sources line says how old it is), a Counter leg the file overrides, an earmark with no card.
+//   crew        : [{ sc, name, manual, retired, held, fileRaw, absentSince, shown }]  visible, non-shore
 //   file        : fileWordBySc
-//   seats       : { sc: { key, ship, dated } }        green seats drawn from the file
-//   cards       : [{ sc, name, ship, key, aboard, verdict, at, fileStatus, fileShip, on }] Rita's open placeholders
-//   counter     : [{ sc, ship, key, on, off }]        Counter legs current today (incl. overdue)
+//   cards       : [{ sc, name, ship, aboard, on, verdict, at, fileStatus, fileShip, overridden }] Rita's open cards
 //   completed   : { "sc|key": off }                   known completions (completedOff)
 //   sections    : [{ ship, key, seated, fileAboard, aboardCards }] every hull on the board
-//   fileKept    : the console holds a copy of the latest file (registry_snapshot). false = every ship here
-//                 was REBUILT from older uploads' change flags, so no row may claim to be "the file".
-export function boardIssues({ crew, file, seats, cards, counter, completed, sections, today, fileKept = true } = {}) {
+//   fileKept    : the console holds a copy of the latest file (registry_snapshot)
+export function boardIssues({ crew, file, cards, completed, sections, fileKept = true, confirmedSc: shownSc } = {}) {
   const rows = [];
-  const F = file || {}, S = seats || {}, C = completed || {};
+  const F = file || {}, C = completed || {};
   const name = {}; for (const c of (crew || [])) name[c.sc] = c.name || c.sc;
-  // A hull rebuilt from a change flag carries the date that flag was raised: "Inactive, Voyager" under
-  // the 5 Oct date read as if the 5 Oct file named Voyager; it was named on 22 Aug (Miguel, 5 Oct 2026:
-  // "I dont think so u are reading well the tdg file").
   const hull = (ship, w) => (ship ? ", " + ship + (w && w.vesselAt ? " (ship named " + w.vesselAt + ")" : "") : "");
   const word = (w) => (w ? (w.status || (w.rawStatus ? "'" + w.rawStatus + "'" : "status not readable")) + hull(w.ship, w) : "no word");
   const fileAt = (w) => (w && w.at ? " " + w.at : "");
-  // 1. A hull with nobody per the file. Not raised while a placeholder aboard is merely unconfirmed
-  //    (the bootstrap cannot read the file's hull for it yet) — only when every card aboard is contradicted.
+  const confirmedSc = shownSc instanceof Set ? shownSc : new Set((cards || []).filter((k) => k.verdict === "confirmed").map((k) => k.sc));
   for (const s of (sections || [])) {
-    if (s.seated || s.fileAboard) continue;   // fileAboard: the file has someone aboard whom Rita's edit keeps off
-    const aboard = (s.aboardCards || []);
-    if (aboard.length && aboard.some((v) => v !== "ashore" && v !== "elsewhere")) continue;
-    rows.push({ kind: "empty_hull", sc: null, name: s.ship, ship: s.ship, text: (fileKept ? "Nobody on board per the TDG file" : "Nobody on board in the TDG uploads the console kept") + (aboard.length ? " · your card here is contradicted" : "") });
+    if (s.seated || s.fileAboard) continue;
+    if ((s.aboardCards || []).some((v) => v !== "ashore" && v !== "elsewhere")) continue;
+    rows.push({ kind: "empty_hull", sc: null, name: s.ship, ship: s.ship, text: fileKept ? "No printer on board per the TDG file" : "No printer on board in the TDG uploads the console kept" });
   }
-  // 1b. A row of the file the roster does not carry (a new id, a re-registered seafarer): listed by the
-  //     name the FILE gives it. Matching it to a crew is a person's call (§6), never the console's.
-  for (const sc in F) {
-    const w = F[sc];
-    if (!w || w.onRoster !== false) continue;
-    rows.push({ kind: "file_only", sc, name: w.name || sc, ship: w.ship || null, text: "In the TDG file " + (w.at || "") + " as " + sc + (w.hidden ? " · hidden on the console" : " · not on the console roster") + " · " + word(w) });
+  for (const k of (cards || [])) {
+    if (!k.overridden) continue;
+    const w = F[k.sc];
+    rows.push({ kind: "overridden", sc: k.sc, aid: k.aid || null, name: k.name || name[k.sc] || k.sc, ship: k.ship, text: "TDG file" + (k.at ? " " + k.at : "") + ": " + (k.fileStatus || "status not readable") + hull(k.fileShip, w) + " · your card " + (k.aboard ? "aboard " + k.ship + " since " + k.on : k.ship + " from " + k.on) + " is off the board · remove it" });
   }
   for (const c of (crew || [])) {
-    // Rita's Retired tag or status edit against a file that still has them On board (Valdesco: tagged
-    // Retired in July, TDG's file On board Brilliance since 17 Sep). Reported, never resolved.
-    if ((c.retired || c.manual) && c.fileRaw && c.fileRaw.status === "On board" && !c.absentSince) {
-      rows.push({ kind: "held", sc: c.sc, name: c.name, ship: c.fileRaw.ship || null, text: "Your status edit: " + (c.retired ? "Retired" : c.manual) + " · TDG file: On board" + (c.fileRaw.ship ? ", " + c.fileRaw.ship : "") });
-      continue;
-    }
-    if (c.retired) continue;
     const w = F[c.sc];
-    // 2. Dropped from the file while the console still knows them.
-    if (c.absentSince) {
-      rows.push({ kind: "dropped", sc: c.sc, name: c.name, ship: (c.last && c.last.ship) || null, text: "Not in the TDG file since " + c.absentSince + (c.last && c.last.status ? " · last TDG word: " + c.last.status + (c.last.ship ? ", " + c.last.ship : "") : "") });
+    // Rita's Retired tag or status edit where the file has them ACTIVE: the file wins on every screen.
+    if ((c.retired || c.manual) && c.fileRaw && (c.fileRaw.status === "On board" || c.fileRaw.status === "Earmarked") && !c.absentSince) {
+      rows.push({ kind: "held", sc: c.sc, name: c.name, ship: c.fileRaw.ship || null, text: "TDG file: " + c.fileRaw.status + (c.fileRaw.ship ? ", " + c.fileRaw.ship : "") + " · your " + (c.retired ? "Retired tag" : "status edit '" + c.manual + "'") + " is overridden · remove it" });
       continue;
     }
-    if (!w) continue;
-    // 2b. A status word the console cannot read (it is none of On board / On Vacation / Earmarked /
-    //     Inactive): the import used to drop it silently and keep the older status.
-    if (!w.status && w.rawStatus) rows.push({ kind: "status_unread", sc: c.sc, name: c.name, ship: w.ship || null, text: "TDG file" + fileAt(w) + " status '" + w.rawStatus + "' is not one the console reads · it still shows " + (c.shown || "the older status") });
-    // 3. The file has them On board a hull the console knows they left.
+    if (c.retired || c.absentSince || !w) continue;
     if (w.status === "On board" && w.key && C[c.sc + "|" + w.key]) {
-      rows.push({ kind: "completed_still_aboard", sc: c.sc, name: c.name, ship: w.ship, text: "Your recorded sign-off " + C[c.sc + "|" + w.key] + " · TDG file" + fileAt(w) + " still: On board" + hull(w.ship, w) });
+      rows.push({ kind: "completed_still_aboard", sc: c.sc, name: c.name, ship: w.ship, text: "TDG not updated yet · your recorded sign-off " + C[c.sc + "|" + w.key] + " · TDG file" + fileAt(w) + " still: On board" + hull(w.ship, w) });
     }
-    // 4. A status edit or a held status change against the file.
-    if (c.manual && w.status && c.manual !== w.status && !(c.fileRaw && c.fileRaw.status === "On board")) rows.push({ kind: "held", sc: c.sc, name: c.name, ship: w.ship, text: "Your status edit: " + c.manual + " · TDG file" + fileAt(w) + ": " + word(w) });
+    // A status edit the file disagrees with, where the file is not active (the edit still shows): Rita's call.
+    if (c.manual && w.status && c.manual !== w.status) rows.push({ kind: "held", sc: c.sc, name: c.name, ship: w.ship, text: "Your status edit: " + c.manual + " · TDG file" + fileAt(w) + ": " + word(w) });
     else if (!c.manual && w.status && c.held && c.held !== w.status) rows.push({ kind: "held", sc: c.sc, name: c.name, ship: w.ship, text: "Status held at " + c.held + " · TDG file" + fileAt(w) + ": " + word(w) });
-    // 5. On board with no hull the console can place.
+    if (!w.status && w.rawStatus) rows.push({ kind: "status_unread", sc: c.sc, name: c.name, ship: w.ship || null, text: "TDG file" + fileAt(w) + " status '" + w.rawStatus + "' is not one the console reads · it still shows " + (c.shown || "the older status") });
     if (w.status === "On board" && !w.hullUnknown) {
       if (!w.raw) rows.push({ kind: "onboard_no_ship", sc: c.sc, name: c.name, ship: null, text: "TDG file" + fileAt(w) + ": On board, no ship named" });
       else if (!w.known) rows.push({ kind: "unknown_ship", sc: c.sc, name: c.name, ship: null, text: "TDG file" + fileAt(w) + " names '" + w.raw + "', not a ship the console knows" });
     }
-    // 6. TDG earmarks a hull and the board has no card for it.
-    if (w.status === "Earmarked" && w.known && !(cards || []).some((k) => k.sc === c.sc && (k.key === w.key || k.verdict === "elsewhere" || k.verdict === "ashore"))) {
-      rows.push({ kind: "earmarked_no_card", sc: c.sc, name: c.name, ship: w.ship, text: "TDG earmarks for " + w.ship + (w.vesselAt ? " (named " + w.vesselAt + ")" : "") + " · no card on the board" });
-    }
   }
-  // 7. Rita's placeholder the file contradicts.
-  for (const k of (cards || [])) {
-    if (k.verdict !== "ashore" && k.verdict !== "elsewhere") continue;
-    rows.push({ kind: "contradicted", sc: k.sc, name: k.name || name[k.sc] || k.sc, ship: k.ship, text: "Your card: " + (k.aboard ? "aboard " + k.ship + " since " + k.on : k.ship + " from " + k.on) + " · TDG file" + (k.at ? " " + k.at : "") + ": " + (k.fileStatus || "status not readable") + hull(k.fileShip, F[k.sc]) });
-  }
-  // 8. A seat with no dates anywhere.
-  for (const sc in S) if (!S[sc].dated) rows.push({ kind: "no_dates", sc, name: name[sc] || sc, ship: S[sc].ship, text: "TDG file: On board " + S[sc].ship + (F[sc] && F[sc].vesselAt ? " (ship named " + F[sc].vesselAt + ")" : "") + " · no contract dates yet (no Counter leg, no card)" });
-  // 9. The Contract Counter says mid-contract on a hull where the file has no seat for them. A Counter
-  //    leg whose projected sign-off has PASSED while the file no longer has them aboard is not wrong: the
-  //    file changed and the date is past — that contract completed (Miguel), and it sits underneath.
-  for (const l of (counter || [])) {
-    const w = F[l.sc];
-    if (!w || (S[l.sc] && S[l.sc].key === l.key) || C[l.sc + "|" + l.key]) continue;
-    if (w.hullUnknown) continue;
-    if (l.off && day(l.off) < today) continue;
-    const said = w.status === "On board" && w.ship ? "On board" + hull(w.ship, w).replace(/^,/, "") : word(w);
-    rows.push({ kind: "counter", sc: l.sc, name: name[l.sc] || l.sc, ship: l.ship, text: "Contract Counter: " + l.ship + " " + (l.on || "?") + " → " + (l.off || "TBA") + " · TDG file" + fileAt(w) + ": " + said });
+  // An ACTIVE row of the file the roster does not show: a crew to add (the next upload adds them now that
+  // every TDG status reads), or a hidden one with no card to show them by.
+  for (const sc in F) {
+    const w = F[sc];
+    if (!w || w.onRoster !== false) continue;
+    const active = w.status === "On board" || w.status === "Earmarked" || (!w.status && w.rawStatus);
+    if (!active || (w.hidden && confirmedSc.has(sc))) continue;
+    rows.push({ kind: "file_only", sc, name: w.name || sc, ship: w.ship || null, text: "In the TDG file " + (w.at || "") + " as " + sc + (w.hidden ? " · hidden on the console" : " · not on the console roster") + " · " + word(w) });
   }
   rows.sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || String(a.ship || "").localeCompare(String(b.ship || "")) || String(a.name || "").localeCompare(String(b.name || "")));
   return rows;

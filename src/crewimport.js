@@ -82,6 +82,12 @@ export function normalizeStatus(v) {
   if (s.includes("vac")) return "On Vacation";
   if (s.includes("earmark")) return "Earmarked";
   if (s.includes("inactive")) return "Inactive";
+  // TDG's other two words (6 Oct 2026, read off the first kept file): "Reserved Crew" is the reserve pool
+  // — the vessel beside it is the LAST ship (Aquitania: Constellation, his last Counter contract), not a
+  // target, so it is not Earmarked; "Not for Rehire" is out of the fleet. Unread, they used to vanish: a
+  // NEW crew with one was never added (Bulilan), an existing one kept an older status (Aquitania).
+  if (s.includes("reserv")) return "On Vacation";
+  if (s.includes("rehire")) return "Inactive";
   return null; // unknown -> caller decides (skip / keep existing)
 }
 

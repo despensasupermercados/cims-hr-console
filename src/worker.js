@@ -1889,6 +1889,11 @@ async function rotationSections(env) {
     }
   }
   const regOf = (asgId) => (asgId && regByAsg[asgId]) || null;
+  // TDG OVERRIDES A CARD IT CONTRADICTS (Miguel, 6 Oct 2026: "adapt the keyman and the console to ensure
+  // it reflect the tdg import"). A placeholder the file says is wrong — aboard here while the file has them
+  // ashore or aboard elsewhere, or a plan for a ship other than the one TDG earmarks — is NOT drawn on the
+  // ship: the file is. It is not deleted either (§6): it is listed once in `issues` for Rita to remove.
+  const overriddenAsg = new Set(Object.keys(regByAsg).filter((id) => regByAsg[id].verdict === "ashore" || regByAsg[id].verdict === "elsewhere"));
   // A deployed card STAYS on the ship, stamped (Miguel, 5 Oct 2026): the stamp rides both card paths.
   const depAt = {}; for (const a of (openAsg || [])) if (a && a.id && a.deployed_at) depAt[a.id] = String(a.deployed_at).slice(0, 10);
   const deployedAtOf = (asgId) => (asgId && depAt[asgId]) || null;
@@ -1904,7 +1909,17 @@ async function rotationSections(env) {
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
   const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null  })); };
-  const plannedScs = new Set((openAsg || []).map((a) => a.sc).filter(Boolean));
+  const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
+  // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
+  // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
+  // it instead (verdict earmarked). The crew leaves the unassigned pool.
+  const earmarkSc = new Set();
+  for (const c of crewRows) {
+    const sc = c.agency_id, w = fileOf[sc];
+    if (isShore(c) || !w || w.status !== "Earmarked" || !w.known || absentSince[sc]) continue;
+    if ((openAsg || []).some((a) => a.sc === sc && !overriddenAsg.has(a.id) && keyOf(a.ship) === w.key)) continue;
+    earmarkSc.add(sc);
+  }
   // THE BOARD IS THE FILE (Miguel, 5 Oct 2026; board_truth.js). Per crew:
   //   green  — the latest AdvancedQuery has them On board a hull the console knows, and the console does
   //            not KNOW that contract completed (completedOff: a recorded sign-off on that hull, nothing
@@ -1920,7 +1935,7 @@ async function rotationSections(env) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
     const rm = rmap[c.agency_id] || {}; base.eccr = !!rm.eccr; base.air = !!rm.air; base.hotel = !!rm.hotel; base.hasNote = !!(rm.note && String(rm.note).trim());
     if (isShore(c)) { shoreside.push(base); continue; }
-    const sc = c.agency_id, w = fileOf[sc] || null, cards = inForce[sc] || [];
+    const sc = c.agency_id, w = fileOf[sc] || null, cards = (inForce[sc] || []).filter((a) => !overriddenAsg.has(a.asgId || cardAsg[sc + "|" + a.key]));
     let seatKey = null;
     if (w && w.status === "On board" && w.known && !absentSince[sc]) {
       const off = completedOff(HIST, sc, w.key, today, keyOf);
@@ -1941,7 +1956,7 @@ async function rotationSections(env) {
       if (a.key === seatKey) continue;
       drawSeat(c, base, a.hull, a.key, {}, { on: a.on, off: a.off, embark: a.embark, disembark: a.disembark }, { state: "yellow", asgId: a.asgId || cardAsg[sc + "|" + a.key] || null, confirmed: false, file: w });
     }
-    if (!seatKey && !cards.length && c.status !== "Inactive" && !plannedScs.has(sc)) pool.push(base);
+    if (!seatKey && !cards.length && c.status !== "Inactive" && !plannedScs.has(sc) && !earmarkSc.has(sc)) pool.push(base);
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -1952,6 +1967,7 @@ async function rotationSections(env) {
   for (const k of Object.keys(histByShip)) if (!shipNames[k] && validShip.has(k)) shipNames[k] = histDisp[k];
   for (const a of (openAsg || [])) { const cs = shipOf(a.ship) || a.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // a ship with only a projection still gets a section
   for (const d of ((depRes && depRes.results) || [])) { const cs = shipOf(d.ship) || d.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and so does one with only a sent line
+  for (const sc of earmarkSc) { const cs = fileOf[sc].ship; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and one TDG earmarks someone for
   // Yellow cards that are not already standing on the board: a projection whose contract has not
   // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
   // renderer — the board no longer synthesises a second reliever list of its own.
@@ -1960,7 +1976,7 @@ async function rotationSections(env) {
   // canonicalised first and both are lower-cased — pendingProjections keys on exactly that.
   // A card the file confirmed was absorbed into its green seat above (by assignment id, so a NEXT contract
   // on the same hull is still drawn as a plan).
-  const canonAsg = (openAsg || []).filter((a) => !absorbed.has(a.id)).map((a) => ({ ...a, ship: shipOf(a.ship) || a.ship }));
+  const canonAsg = (openAsg || []).filter((a) => !absorbed.has(a.id) && !overriddenAsg.has(a.id)).map((a) => ({ ...a, ship: shipOf(a.ship) || a.ship }));
   const drawn = new Set();
   for (const ship in promByShip) for (const c of promByShip[ship]) if (c.state === "yellow") drawn.add(c.agency_id + "|" + String(ship).trim().toLowerCase());
   const projByShip = {};
@@ -1989,6 +2005,19 @@ async function rotationSections(env) {
       docs: docsBy[a.sc] || null,
       jrWarn: (isJr(a.rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
       hasNote: !!(rm2.note && String(rm2.note).trim()),
+    });
+  }
+  for (const sc of earmarkSc) {
+    const w = fileOf[sc], ship = w.ship, kk = normShip(ship), rm3 = rmap[sc] || {};
+    (projByShip[ship] = projByShip[ship] || []).push({
+      agency_id: sc, assignment_id: null, name: cmap[sc].name, rank: cmap[sc].rank || null,
+      ship, vessel_key: vkOf(ship), state: "yellow", role: "earmark", tdgEarmark: true,
+      status: cmap[sc].status || "Earmarked", contracts: contracts[sc] || 0,
+      signOn: null, signOff: null, aboard: false,
+      registry: { verdict: "earmarked", status: "Earmarked", ship, at: w.at || null, source: w.source || null, shipAt: null },
+      confirmed: false, deployedAt: null, docs: docsBy[sc] || null,
+      jrWarn: (isJr(cmap[sc].rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
+      hasNote: !!(rm3.note && String(rm3.note).trim()),
     });
   }
   // A card the registry has confirmed aboard sorts with the people aboard, ahead of the plans.
@@ -2041,40 +2070,50 @@ async function rotationSections(env) {
     // not history — it is a row in `issues` (the Counter says one thing, TDG's file another).
     const scheduleLegs = (histByShip[k] || []).filter(h => !(h.ours && cur.has(h.sc)));
     const schedScs = new Set(scheduleLegs.filter(h => h.ours && h.sc).map(h => h.sc));
+    // A CONTRACT TDG ENDED IS HISTORY (Miguel, 6 Oct 2026: "if a crew finish his contract .. u move it as
+    // history"): a leg that started here whose crew the file no longer has On board this hull — the file
+    // has a word for them and it is not this seat, or they left the file — ends on its sign-off if that has
+    // passed, else on the date of the file that ended it (byFile). Only legs already started: a plan is not
+    // history.
+    // Only a CONTRACT (a Counter leg) becomes history — Rita's card is a placeholder, and one the file
+    // overrides is a cleanup row, never a contract that happened. Not while the file has them On board here.
+    const endedByFile = (h) => {
+      if (!h.ours || !h.sc || !h.on || h.on > today || (h.off && h.off < today)) return null;
+      if (h.source === "assignment") return null;
+      if (absentSince[h.sc]) return absentSince[h.sc];
+      const w = fileOf[h.sc];
+      if (!w || !w.status || (w.status === "On board" && w.key === k)) return null;
+      return w.at || today;
+    };
     const history = scheduleLegs
-      .filter(h => h.on && h.off && h.off !== h.on && h.off < today)
-      .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off }));
+      .map(h => { const e = endedByFile(h); return e ? Object.assign({}, h, { off: e < (h.off || "9999") ? e : h.off, byFile: true }) : h; })
+      .filter(h => h.on && h.off && h.off !== h.on && (h.off < today || h.byFile))
+      .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off, byFile: !!h.byFile }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff || x.signOff >= today) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
     return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
-  // WHAT IS WRONG (board_truth.boardIssues): every disagreement between TDG's file and the console,
-  // displayed for Rita to settle — never resolved here.
+  // WHAT IS LEFT TO CLEAN UP (board_truth.boardIssues): the board applies the file; this lists only what a
+  // person must act on — never resolved here.
   const issues = (() => {
     const crew = [];
     for (const c of crewRows) {
       if (isShore(c)) continue;
       const sc = c.agency_id, o = ovMap[sc] || {}, raw = rawBy[sc] || {}, w = fileOf[sc];
       const manual = (o.status != null && o.status !== "") ? o.status : null;
-      let last = null;
-      if (absentSince[sc]) {
-        const f = lastShipFlag[sc];
-        const hull = f ? f.new_value : raw.vessel_observed;
-        last = { status: raw.status || null, ship: hull ? (shipOf(hull) || hull) : null };
-      }
       const fHull = lastShipFlag[sc] ? lastShipFlag[sc].new_value : raw.vessel_observed;
-      crew.push({ sc, name: cmap[sc].name, manual, retired: !!o.retired, absentSince: absentSince[sc] || null, last, shown: cmap[sc].status || null,
-        held: (!manual && w && w.status && raw.status && raw.status !== w.status) ? raw.status : null,
-        fileRaw: (manual || o.retired) ? { status: raw.status || null, ship: fHull ? (shipOf(fHull) || fHull) : null } : null });
+      // Under a Retired tag or a status edit: the file's own word (the kept copy), else the registry row.
+      const fileRaw = (manual || o.retired) ? (w && w.source === "snapshot" ? { status: w.status, ship: w.ship } : { status: raw.status || null, ship: fHull ? (shipOf(fHull) || fHull) : null }) : null;
+      crew.push({ sc, name: cmap[sc].name, manual, retired: !!o.retired, absentSince: absentSince[sc] || null, shown: cmap[sc].status || null,
+        // "held" = Rita held a status change at upload. With the file kept, every screen reads the file's word
+        // (crewStatus), so a stale registry row is not a disagreement any more.
+        held: (!manual && w && w.source !== "snapshot" && w.status && raw.status && raw.status !== w.status) ? raw.status : null, fileRaw });
     }
     const cards = (openAsg || []).map((a) => {
       const reg = regOf(a.id) || {}, ship = shipOf(a.ship) || a.ship;
-      return { sc: a.sc, name: a.crew_name || (cmap[a.sc] && cmap[a.sc].name) || a.sc, ship, key: keyOf(ship), aboard: !!(a.sign_on && a.sign_on <= today), on: a.sign_on || null, verdict: reg.verdict || null, at: reg.at || null, fileStatus: reg.status || null, fileShip: reg.ship || null };
+      return { sc: a.sc, name: a.crew_name || (cmap[a.sc] && cmap[a.sc].name) || a.sc, ship, key: keyOf(ship), aboard: !!(a.sign_on && a.sign_on <= today), on: a.sign_on || null, verdict: reg.verdict || null, at: reg.at || null, fileStatus: reg.status || null, fileShip: reg.ship || null, overridden: overriddenAsg.has(a.id), aid: a.id };
     }).filter((x) => x.sc && cmap[x.sc]);
-    const counter = [];
-    const shoreSc = new Set(crewRows.filter(isShore).map((c) => c.agency_id));
-    for (const h of HIST) if (h && h.ours && h.sc && cmap[h.sc] && !shoreSc.has(h.sc) && h.source === "counter" && h.is_current && h.on && h.on <= today) counter.push({ sc: h.sc, ship: shipOf(h.ship) || h.ship, key: keyOf(h.ship), on: h.on, off: h.off || null });
     const heldAboard = new Set(crew.filter((c) => c.fileRaw && c.fileRaw.status === "On board" && c.fileRaw.ship).map((c) => normShip(c.fileRaw.ship)));
     const secs = sections.map((x) => ({
       ship: x.ship, key: normShip(x.ship),
@@ -2083,7 +2122,9 @@ async function rotationSections(env) {
       aboardCards: x.crew.filter((c) => c.state === "yellow" && !c.confirmed).map((c) => (c.registry && c.registry.verdict) || "pending")
         .concat((x.projections || []).filter((p) => p.aboard).map((p) => (p.registry && p.registry.verdict) || "pending")),
     }));
-    return boardIssues({ crew, file: fileOf, seats, cards, counter, completed: completedBy, sections: secs, today, fileKept });
+    // Crew shown by a card the file confirms (a hidden crew too: Encina, Serenade) need no "hidden" row.
+    const confirmedSc = new Set((openAsg || []).filter((a) => a.sc && regOf(a.id) && regOf(a.id).verdict === "confirmed").map((a) => a.sc));
+    return boardIssues({ crew, file: fileOf, cards, completed: completedBy, sections: secs, fileKept, confirmedSc });
   })();
   const counts = {};
   ["On board", "On Vacation", "Earmarked", "Inactive", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
@@ -4726,10 +4767,12 @@ function rotCard(x){
   // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
   if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
   // Yellow is Rita's PLACEHOLDER (Miguel, 5 Oct 2026): it stands until TDG's file carries the person.
-  var lab=confirmed?'<span class="rlab tdg">ABOARD &middot; TDG REGISTRY</span>':plan?('<span class="rlab plan">'+(aboard?'PLACEHOLDER &middot; ABOARD':'PLACEHOLDER')+'</span>'):'';
+  // TDG's own earmark (6 Oct 2026): drawn from the file, no card behind it - drag it to plan them here.
+  var lab=x.tdgEarmark?'<span class="rlab tdg">EARMARKED &middot; TDG</span>':confirmed?'<span class="rlab tdg">ABOARD &middot; TDG REGISTRY</span>':plan?('<span class="rlab plan">'+(aboard?'PLACEHOLDER &middot; ABOARD':'PLACEHOLDER')+'</span>'):'';
   // Who set the dates on this card. Blank when nobody has touched the TDG values.
   var note='';
-  if(plan)note=regNote(reg,confirmed);
+  if(x.tdgEarmark)note='<div class=srcnote>TDG earmarks them for this ship'+(reg&&reg.at?(' &middot; file '+escHtml(reg.at)):'')+'. Drag here to plan the dates.</div>';
+  else if(plan)note=regNote(reg,confirmed);
   else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
   else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
   // The ship's Junior PS rule, seeded in the vessel table since July and shown for the first time.
@@ -4753,7 +4796,7 @@ function rotCard(x){
   // Every card drags. A yellow card MOVES (the assignment changes ship); a green or pool card dropped on
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
-  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+(plan?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the plan':plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
+  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the plan':plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
     +chip
     +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
@@ -4768,13 +4811,15 @@ function rotIssuesBlock(list){
     var tgt=i.ship?escHtml(i.ship):'';
     return '<div class=isrow data-jump="'+tgt+'" onclick="rotJump(this)"><b>'+escHtml(i.name||'')+'</b>'
       +(i.ship&&i.kind!=='empty_hull'?'<span class=isship>'+escHtml(i.ship)+'</span>':'')
-      +'<span class=istxt>'+escHtml(i.text||'')+'</span></div>';
+      +'<span class=istxt>'+escHtml(i.text||'')+'</span>'
+      // A card TDG overrides is off the board, so its Remove lives here (the same delete as on the card).
+      +(i.kind==='overridden'&&i.aid?('<button class="pbtn danger" style="margin-left:auto" data-aid="'+escHtml(i.aid)+'" data-nm="'+escHtml(i.name||'')+'" onclick="planDelete(event,this)">Remove</button>'):'')+'</div>';
   }).join('');
   // No copy of the file kept yet (Miguel, 5 Oct 2026: "I dont think so u are reading well the tdg file"):
   // the ships below are rebuilt from older uploads, and the page says so instead of calling it the file.
   var kept=!(ROT&&ROT.fileKept===false);
   var warn=kept?'':'<div class=isnote>The console has not kept a whole TDG file yet. Ships below are rebuilt from older uploads (each dated where it was named). Drop the latest AdvancedQuery on Import once, the same file is fine, and this list reads the file itself.</div>';
-  return '<div class="shipsec tdgissues" style="margin-top:4px"><div class=shiphdr data-toggle="__ISSUES__" style="border-left-color:#B0342F"><span class=nm>TDG says otherwise</span><span class=meta>'+list.length+' to settle &middot; the TDG file is the truth <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
+  return '<div class="shipsec tdgissues" style="margin-top:4px"><div class=shiphdr data-toggle="__ISSUES__" style="border-left-color:#B0342F"><span class=nm>TDG overrides &middot; to clean up</span><span class=meta>'+list.length+' &middot; the board shows the TDG file <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody isbody'+(closed?' closed':'')+'">'+warn+rows+'</div></div>';
 }
 function rotJump(el){
@@ -4830,7 +4875,8 @@ function histCard(h){
   var span=(h.on||'')+(h.off&&h.off!==h.on?(' → '+h.off):'');
   var dur=monthsDays(h.on,h.off);
   var durHtml=dur?('<div class=hdur>'+dur+'</div>'):'';
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
+  var byFile=h.byFile?'<div class=hdur title="The TDG file no longer has them on board this ship">ended per TDG file</div>':'';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
   return '<div class="hcard former"><div class=hnm><span>'+h.name+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
