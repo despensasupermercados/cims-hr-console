@@ -53,14 +53,22 @@ test("stage rejects an already-imported file hash", async () => {
   assert.equal(body.error, "already_processed");
 });
 
-test("apply NEVER emits a vessel_observed UPDATE and logs the ship as a conflict", async () => {
+// Miguel, 6 Oct 2026: "data about the crew .. new data ?? goes stat right to the crew card". The file's ship
+// is written by default — only through the fixed shipTakes statement; Keep board (flag) writes none.
+test("apply writes the file's ship onto the card by default (fixed statement), and Keep board writes none", async () => {
   const env = { DB: fakeDB({ existing: EXISTING }) };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h2" }), env)).json();
   const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h2", run_by: "Rita" }), env);
   const body = await res.json();
   assert.equal(body.ok, true);
+  assert.equal(body.ship_taken, 1);
   const sqls = env.DB._batched.map(s => s.sql);
-  assert.equal(sqls.some(s => /UPDATE crew SET vessel_observed/i.test(s)), false, "no ship write");
+  assert.equal(sqls.filter(s => /UPDATE crew SET vessel_observed/i.test(s)).length, 1);
+  assert.ok(sqls.every(s => !/UPDATE crew SET vessel_observed/i.test(s) || s === "UPDATE crew SET vessel_observed=?, updated_at=? WHERE agency_id=?"), "only the fixed take statement");
+  const env2 = { DB: fakeDB({ existing: EXISTING }) };
+  const stage2 = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h2b" }), env2)).json();
+  await apiCrewImportApply(req({ review: stage2.review, decisions: { "ship:SC-1": "flag" }, file_hash: "h2b", run_by: "Rita" }), env2);
+  assert.equal(env2.DB._batched.some(s => /UPDATE crew SET vessel_observed/i.test(s.sql)), false, "Keep board: no ship write");
   assert.ok(sqls.some(s => /INSERT INTO import_run/i.test(s)), "import_run logged");
   assert.ok(sqls.some(s => /INSERT INTO sync_conflict/i.test(s)), "ship flagged as conflict");
   assert.ok(sqls.some(s => /UPDATE crew SET med_exp/i.test(s)), "cert applied");
@@ -92,10 +100,14 @@ test("accepted override conflict clears ONLY that crew_override field (status) a
   assert.equal(st.filter(s => /UPDATE crew_override/i.test(s.sql)).length, 1, "nothing else on the override row is touched");
 });
 
-test("kept override conflict (the default) leaves crew_override untouched", async () => {
+test("kept override conflict (Keep mine) leaves crew_override untouched; the default now replaces it", async () => {
+  const envD = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
+  const stageD = await (await apiCrewImportStage(req({ rows: OVR_ROWS, file_hash: "h4d" }), envD)).json();
+  const def = await (await apiCrewImportApply(req({ review: stageD.review, decisions: {}, file_hash: "h4d", run_by: "Rita" }), envD)).json();
+  assert.equal(def.override_cleared, 1, "6 Oct 2026: TDG's value replaces the manual entry by default");
   const env = { DB: fakeDB({ existing: OVR_EXISTING, overrides: OVR }) };
   const stage = await (await apiCrewImportStage(req({ rows: OVR_ROWS, file_hash: "h4" }), env)).json();
-  const res = await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h4", run_by: "Rita" }), env);
+  const res = await apiCrewImportApply(req({ review: stage.review, decisions: { "SC-1:status": "keep" }, file_hash: "h4", run_by: "Rita" }), env);
   const body = await res.json();
   assert.equal(body.override_cleared, 0);
   assert.equal(env.DB._batched.some(s => /UPDATE crew_override/i.test(s.sql)), false);
@@ -169,7 +181,7 @@ test("apply: a ship flag the live board already satisfies is not inserted, and t
   const deps = { boardLegs: async () => [{ ours: true, sc: "SC-1", ship: "Apex", on: "2026-08-01", off: "2027-02-01" }] };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h11" }), env)).json();
   assert.equal(stage.review.counts.ship_flag, 1, "the review still shows the flag (registry says Edge, file says Apex)");
-  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h11", run_by: "Rita" }), env, deps)).json();
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: { "ship:SC-1": "flag" }, file_hash: "h11", run_by: "Rita" }), env, deps)).json();
   assert.equal(body.open_conflicts, 0, "nothing left open: the board has the crew on Apex already");
   assert.equal(body.ship_flags.closed_board_matches, 1);
   const st = env.DB._batched;
@@ -183,12 +195,12 @@ test("apply: a ship flag the live board already satisfies is not inserted, and t
 test("apply: without the live board (no deps) a repeated flag is still deduped, a new one still inserted", async () => {
   const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h12" }), env)).json();
-  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h12", run_by: "Rita" }), env)).json();
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: { "ship:SC-1": "flag" }, file_hash: "h12", run_by: "Rita" }), env)).json();
   assert.equal(body.open_conflicts, 0, "same crew, same ship already open -> no duplicate");
   assert.equal(env.DB._batched.some(s => /UPDATE sync_conflict/i.test(s.sql)), false);
   const env2 = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Quest" }] }) };
   const stage2 = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h13" }), env2)).json();
-  const body2 = await (await apiCrewImportApply(req({ review: stage2.review, decisions: {}, file_hash: "h13", run_by: "Rita" }), env2)).json();
+  const body2 = await (await apiCrewImportApply(req({ review: stage2.review, decisions: { "ship:SC-1": "flag" }, file_hash: "h13", run_by: "Rita" }), env2)).json();
   assert.equal(body2.open_conflicts, 1, "a different ship: inserted");
   assert.equal(body2.ship_flags.closed_superseded, 1, "and the older Quest flag is superseded");
 });
@@ -247,8 +259,8 @@ test("apply with 'take' on the ship row: UPDATE crew SET vessel_observed (fixed 
   assert.equal(flagRow.args[6], 1, "audit row written as resolved");
 });
 
-test("apply with 'dismiss' or the default still emits NO ship write", async () => {
-  for (const decisions of [{}, { "ship:SC-1": "dismiss" }]) {
+test("apply with 'dismiss' or 'Keep board' emits NO ship write", async () => {
+  for (const decisions of [{ "ship:SC-1": "flag" }, { "ship:SC-1": "dismiss" }]) {
     const env = { DB: fakeDB({ existing: EXISTING }) };
     const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-nt" }), env)).json();
     const body = await (await apiCrewImportApply(req({ review: stage.review, decisions, file_hash: "h-nt", run_by: "Rita" }), env)).json();
@@ -274,11 +286,11 @@ test("stage lists every open projection against the file, and carries the file's
   assert.equal(env.DB._batched.length, 0, "stage still writes nothing");
 });
 
-test("apply keeps the file's word per crew (registry_snapshot) — and still never a vessel_observed UPDATE", async () => {
+test("apply keeps the file's word per crew (registry_snapshot) — the snapshot itself is never a ship allocation", async () => {
   const env = { DB: fakeDB({ existing: EXISTING }) };
   const deps = { openProjections: async () => APEX_PLAN };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-pj2" }), env, deps)).json();
-  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pj2", run_by: "Rita" }), env, deps)).json();
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: { "ship:SC-1": "flag" }, file_hash: "h-pj2", run_by: "Rita" }), env, deps)).json();
   assert.equal(body.ok, true);
   assert.equal(body.projections.counts.confirmed, 1);
   assert.match(body.summary, /1 projection confirmed aboard by the file/);
@@ -431,4 +443,21 @@ test("re-drop: an OLDER file, a file already copied, or no guard (tests, tools) 
     assert.deepEqual(body, { ok: false, error: "already_processed" });
     assert.equal(env.DB._batched.length, 0);
   }
+});
+
+// Miguel, 6 Oct 2026: "if it gets removed?? as in any information fro the crew ?? u pick it up and ensure you
+// remove it from the crew card". An EMPTY cell in a column the file carries clears the card; a column the
+// file does not carry at all says nothing.
+test("an empty TDG cell clears the value on the crew card; a missing column clears nothing", async () => {
+  const existing = [{ agency_id: "SC-1", first_name: "Jomar", last_name: "Dela Cruz", status: "On board", vessel_observed: "Celebrity Edge", pp_exp: "2030-01-01", phone: "+63900", email: "j@x.com" }];
+  const rows = [{ "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Edge", "PASSPORT EXPIRATION DATE": "", "MOBILE": "" }];
+  const env = { DB: fakeDB({ existing }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-clr" }), env)).json();
+  await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-clr", run_by: "Rita" }), env);
+  const st = env.DB._batched;
+  const upd = (f) => st.find(s => new RegExp("^UPDATE crew SET " + f + "=\\?").test(s.sql));
+  assert.ok(upd("pp_exp") && upd("pp_exp").args[0] === null, "empty passport cell: cleared");
+  assert.ok(upd("phone") && upd("phone").args[0] === null, "empty mobile cell: cleared");
+  assert.equal(upd("email"), undefined, "no email column in this file: the stored email stays");
+  assert.equal(st.some(s => /UPDATE crew SET (first_name|last_name|status)=/.test(s.sql)), false, "identity and status are never cleared");
 });

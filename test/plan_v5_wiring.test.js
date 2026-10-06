@@ -71,7 +71,8 @@ test("both Hide confirms name the timecard roster export", () => {
 
 // A. AdvancedQuery review: the ship row is a three-way decision.
 test("the review UI offers Keep board / Take TDG / Dismiss on a ship flag, and seg renders N options", () => {
-  assert.match(UI, /seg\("ship:"\+it\.agency_id,"flag",\["flag","take","dismiss"\],\["Keep board","Take TDG","Dismiss"\]\)/);
+  // 6 Oct 2026: Take TDG is the default (the file's ship goes on the crew card); Keep board / Dismiss stay choices.
+  assert.match(UI, /seg\("ship:"\+it\.agency_id,"take",\["flag","take","dismiss"\],\["Keep board","Take TDG","Dismiss"\]\)/);
   assert.match(UI, /for\(var i=0;i<opts\.length;i\+\+\)h\+='<button class="'\+\(cur===opts\[i\]\?'on':''\)/, "seg must loop over options — the third button was silently dropped by the two-slot version");
   assert.match(UI, /shipTake/, "the cart counts takes as saves");
 });

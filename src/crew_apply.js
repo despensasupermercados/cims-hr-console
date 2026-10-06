@@ -54,10 +54,12 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
     conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: it.old, new_value: it.new, resolved: 1 });
   }
-  // override conflict — default keep (protect manual edit); always audit
+  // override conflict — default ACCEPT (Miguel, 6 Oct 2026: "data about the crew .. new data ?? goes stat
+  // right to the crew card"): TDG's value replaces the manual entry unless Rita keeps hers on this row.
+  // Always audited.
   for (const it of g.override_conflict || []) {
     const manual = it.override_value !== undefined ? it.override_value : it.old;
-    if (dec(key(it.agency_id, it.field), "keep") === "accept") {
+    if (dec(key(it.agency_id, it.field), "accept") === "accept") {
       crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
       // The override COLUMN (rank_observed -> rank_override) is derived HERE from OVR_COL, never read
       // from the client item: a forged override_field could otherwise NULL an unrelated manual field.
@@ -70,8 +72,10 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   // human decision; it is the ONLY way a ship value leaves this planner as a write. The audit row is
   // kept in every case (resolved=1 for take/dismiss) and carries `taken` so crew_flags can close every
   // older open flag on that crew: the ship is settled.
+  // Default TAKE (6 Oct 2026): the file's ship goes onto the crew card like every other TDG field; "Keep
+  // board" (flag) and "Dismiss" remain Rita's per-row choices.
   for (const it of g.ship_flag || []) {
-    const d = dec(`ship:${it.agency_id}`, "flag");
+    const d = dec(`ship:${it.agency_id}`, "take");
     const taken = d === "take";
     if (taken) shipTakes.push({ agency_id: it.agency_id, value: it.new ?? null, expect: it.old ?? null });
     conflicts.push({ agency_id: it.agency_id, field: "vessel_observed", old_value: it.old, new_value: it.new, resolved: d === "flag" ? 0 : 1, ...(taken ? { taken: true } : {}) });

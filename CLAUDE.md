@@ -194,6 +194,14 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
   type=checkbox style="pointer-events:none">`. Native label-wrapped checkboxes double-fire per tap
   (one flip cancels the other). Don't add a bare clickable checkbox.
+- **THE CREW CARD IS THE TDG ROW** (Miguel, 6 Oct 2026: "data about the crew .. new data ?? goes stat right to the
+  crew card .. if it gets removed?? .. ensure you remove it from the crew card"). The AdvancedQuery import
+  defaults every value onto the card: status (D6), certificates, the SHIP ("Take TDG", the fixed `shipTakes`
+  statement — never the field-update path), and a value under a manual entry (D3 now defaults Accept and clears
+  that override field). An EMPTY cell in a column the file carries clears the card (`CLEARABLE` in
+  `crewimport.js`; never agency id, first/last name or status); a column the file lacks clears nothing.
+  "Keep board" / "Keep mine" / "Hold" / "Dismiss" remain Rita's per-row choices in the review, and every change
+  is audited. Pinned by `test/crew_apply.test.js` and `test/crew_import_routes.test.js`.
 - **Manual reassignment + manual ports go to `crew_override`**, never the base `crew` row — AdvancedQuery
   imports COALESCE onto the base row and would clobber a manual edit. The card pipeline must carry BOTH
   `embark` and `disembark` (a dropped field = the port silently never shows).
