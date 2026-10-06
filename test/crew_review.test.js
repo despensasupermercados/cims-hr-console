@@ -113,3 +113,61 @@ test("attention counts ship + override + earlier-expiry", () => {
   const r = review();
   assert.equal(r.attention, 3);
 });
+
+// "FOLLOW THE TDG FILE ALWAYS" (Miguel, 6 Oct 2026). Measured that day: 30 of the 38 crew_override rows were
+// Retired snapshots from 7 Jul 2026 carrying the whole card (phone, passport, expiries), never reconciled
+// because the review only looked at live rows, yet still winning at read time; and 29 of 31 phone/email
+// overrides were already equal to the file — a second copy that outranks the next upload for nothing.
+import { reconcilableOverrideFields, sameValue } from "../src/crew_review.js";
+
+test("sameValue: a phone is its digits (0 and +63 are one number), an email is case-blind, the rest exact", () => {
+  assert.equal(sameValue("phone", "09943316597", "+63 994 331 6597"), true, "Valdesco, 6 Oct 2026");
+  assert.equal(sameValue("phone", "639953384915", "+63 995 338 4915"), true, "Alandy");
+  assert.equal(sameValue("phone", "+63 995 338 4915", "+63 995 338 4916"), false);
+  assert.equal(sameValue("phone", "", ""), false, "two blanks are not a match");
+  assert.equal(sameValue("email", "Jaybellc@gmail.com ", "jaybellc@gmail.com"), true);
+  assert.equal(sameValue("med_exp", "2026-07-30", "2026-07-30"), true);
+  assert.equal(sameValue("med_exp", "2026-07-30", "2026-07-31"), false);
+  assert.equal(sameValue("phone", null, "0917"), false);
+});
+
+test("a Retired tag no longer shields the row: every manual field but the tag's status is reconciled", () => {
+  const ov = { agency_id: "SC-R", retired: 1, status: "Inactive", phone: "09676423969", pp_no: "P5937592C", med_exp: "2026-07-30", baseline_count: 3, notes: "n", vessel_observed: "X" };
+  const r = reconcilableOverrideFields(ov);
+  assert.deepEqual([...r].sort(), ["med_exp", "phone", "pp_no"]);
+  assert.equal(liveOverrideFields(ov).size, 0, "the old live set still reads a retired row as unprotected (unchanged)");
+  const live = reconcilableOverrideFields({ agency_id: "SC-L", retired: 0, status: "Earmarked", phone: "0917" });
+  assert.ok(live.has("status") && live.has("phone"), "on a live row the manual status is reconciled like any field");
+});
+
+test("an override equal to the file is ABSORBED (no decision), one that differs on a retired crew is a conflict", () => {
+  const ex = {
+    "SC-A": { agency_id: "SC-A", first_name: "Joseph", last_name: "Alandy", status: "Inactive", phone: "+63 995 338 4915", email: "josephdandyal@gmail.com" },
+    "SC-V": { agency_id: "SC-V", first_name: "Jerome", last_name: "Valdesco", status: "On board", phone: "+63 994 331 6597" },
+    "SC-K": { agency_id: "SC-K", first_name: "King", last_name: "Manzano", status: "Inactive", phone: "0917", med_exp: "2026-03-04" },
+  };
+  const rows = [
+    { "CREW ID": "SC-A", "FIRST NAME": "Joseph", "LAST NAME": "Alandy", "CREW STATUS": "Inactive", "MOBILE NO.": "+63 995 338 4915", "EMAIL ADDRESS": "JosephDandyAl@gmail.com" },
+    { "CREW ID": "SC-V", "FIRST NAME": "Jerome", "LAST NAME": "Valdesco", "CREW STATUS": "On board", "MOBILE NO.": "+63 994 331 6597" },
+    { "CREW ID": "SC-K", "FIRST NAME": "King", "LAST NAME": "Manzano", "CREW STATUS": "Inactive", "MOBILE NO.": "0918", "MEDICAL EXPIRATION DATE": "2027-03-04" },
+  ];
+  const ov = {
+    "SC-A": { agency_id: "SC-A", retired: 1, status: "Inactive", phone: "639953384915", email: "josephdandyal@gmail.com" },
+    "SC-V": { agency_id: "SC-V", retired: 0, phone: "09943316597" },
+    "SC-K": { agency_id: "SC-K", retired: 1, status: "On Vacation", phone: "0917", med_exp: "2026-03-04" },
+  };
+  const { mapped } = mapRows(rows);
+  const inc = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
+  const r = buildReview(diffCrew(mapped, ex), ex, inc, ov);
+  const ab = r.groups.override_absorbed;
+  assert.deepEqual(ab.map(x => x.agency_id + ":" + x.field).sort(), ["SC-A:email", "SC-A:phone", "SC-V:phone"]);
+  const a = ab.find(x => x.agency_id === "SC-A" && x.field === "phone");
+  assert.equal(a.override_field, "phone"); assert.equal(a.override_value, "639953384915"); assert.equal(a.new, "+63 995 338 4915");
+  assert.equal(r.groups.override_conflict.some(x => x.agency_id === "SC-A" || x.agency_id === "SC-V"), false, "equal is not a conflict");
+  // retired crew, manual values the file contradicts: raised as conflicts (default accept), phone AND the expiry
+  const k = r.groups.override_conflict.filter(x => x.agency_id === "SC-K").map(x => x.field).sort();
+  assert.deepEqual(k, ["med_exp", "phone"]);
+  assert.equal(r.groups.override_conflict.some(x => x.agency_id === "SC-K" && x.field === "status"), false, "the status kept with the tag is exempt (unretireItems owns it)");
+  assert.equal(r.counts.override_absorbed, 3);
+  assert.equal(r.attention, 2, "absorbed rows need nobody; the two SC-K conflicts do");
+});

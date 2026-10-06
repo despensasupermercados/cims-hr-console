@@ -167,3 +167,24 @@ test("'take' only comes from the ship_flag tier — the same decision key on ano
   assert.deepEqual(plan.shipTakes, []);
   assert.equal(plan.crewUpdates.length, 0);
 });
+
+// "follow the tdg file always" (Miguel, 6 Oct 2026): an absorbed override clears the manual field (bound to the
+// value reviewed), updates the base only where it lagged, and is audited — no decision key is consulted.
+test("override_absorbed: clear + audit, base updated only when it lagged, no decision needed", () => {
+  const review = { groups: { override_absorbed: [
+    { agency_id: "SC-A", field: "phone", base: "+63 995 338 4915", new: "+63 995 338 4915", override_value: "639953384915" },
+    { agency_id: "SC-V", field: "phone", base: "0994", new: "+63 994 331 6597", override_value: "09943316597" },
+    { agency_id: "SC-R", field: "rank_observed", base: "Cook", new: "Cook", override_value: "Cook" },
+  ] } };
+  const plan = buildApplyPlan(review, { "SC-A:phone": "keep", "SC-V:phone": "keep" });
+  assert.deepEqual(plan.overrideClears, [
+    { agency_id: "SC-A", field: "phone", expect: "639953384915" },
+    { agency_id: "SC-V", field: "phone", expect: "09943316597" },
+    { agency_id: "SC-R", field: "rank_override", expect: "Cook" },
+  ]);
+  assert.deepEqual(plan.crewUpdates, [{ agency_id: "SC-V", field: "phone", value: "+63 994 331 6597" }], "only the lagging base row is written");
+  const audit = plan.conflicts.filter(c => c.absorbed);
+  assert.equal(audit.length, 3);
+  assert.ok(audit.every(c => c.resolved === 1));
+  assert.equal(audit[0].old_value, "639953384915"); assert.equal(audit[0].new_value, "+63 995 338 4915");
+});
