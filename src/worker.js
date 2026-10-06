@@ -3081,6 +3081,11 @@ nav button{background:transparent;border:0;color:#b9cce0;padding:8px 14px;border
 nav button.on,nav button:hover{background:rgba(255,255,255,.12);color:#fff}
 nav a.out{color:#9fb4cc;font-size:12.5px;text-decoration:none;padding:8px 10px}
 .burger{display:none;background:transparent;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer;margin-left:auto;padding:6px 8px}
+/* 901-1240px (6 Oct 2026): the full nav plus Ask Maria overflowed the page by ~40px at 1000-1100px. Tighter
+   buttons, no wrapped labels, the shortcut hint hidden — the nav stays one row and the page never scrolls sideways. */
+nav button{white-space:nowrap}
+@media(min-width:901px) and (max-width:1240px){header{gap:10px;padding:0 14px}nav{gap:0}nav button{padding:8px 8px;font-size:13px}nav a.out{padding:8px 6px}header .brand small{display:none}.mkbtn .mkk{display:none}}
+@media(min-width:901px) and (max-width:1010px){nav button{padding:8px 5px;font-size:12.5px}.mkbtn{padding:7px 9px}header .brand{font-size:14px}}
 @media(max-width:900px){
   .burger{display:block}
   header nav{display:none;position:absolute;top:56px;right:8px;margin-left:0;flex-direction:column;align-items:stretch;gap:2px;background:#16314F;padding:8px;border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.35);min-width:200px;z-index:60}
@@ -3248,11 +3253,21 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .crhead .ttl{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy)}
 .crcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px 18px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
+/* Three fixed columns (6 Oct 2026): identity | contract | actions. A flex row dropped the actions under the card
+   whenever the three bases did not fit (every card at 1280px). The grid shrinks all three; only a list narrower
+   than 660px (a phone) stacks them. */
+.crmain{container-type:inline-size}
+.crcard{display:grid;grid-template-columns:minmax(200px,300px) minmax(200px,1fr) minmax(190px,270px);align-items:start}
+.crcard>.crid,.crcard>.crmid,.crcard>.crright{min-width:0}
+.crew-card.crcard .tools{flex-wrap:wrap;justify-content:flex-end}
+@container (max-width:660px){.crcard{display:flex;flex-wrap:wrap}.crcard>.crid,.crcard>.crmid,.crcard>.crright{flex:1 1 100%}.crcard .crright{align-items:flex-start}.crcard .crbonus,.crcard .crtags,.crew-card.crcard .tools{justify-content:flex-start}}
 .crcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
 .crid{flex:0 1 330px;min-width:240px;display:flex;gap:12px}
-.crnmrow{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.crwho{font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap}
-.crid .crship{display:block;font-size:14px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crnmrow{display:flex;align-items:baseline;gap:4px 10px;flex-wrap:wrap}
+.crscid{font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}
+.crwho{font-size:12.5px;color:var(--mut);margin-top:2px}
+.crid .crship{display:block;font-size:13.5px;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crcust{font-size:12.5px;color:var(--mut);margin-top:1px}
 .crid .crsub{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .crid .crsub a{color:var(--mut)}
 .crid .crids{font-size:11.5px;color:#93A1B2;margin-top:6px}
@@ -6064,10 +6079,10 @@ function card(c){
   var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
   var stc=crStyle(c.status);
   var age=ageOf(c.dob);
-  // The identity column (Miguel, 6 Oct 2026): name with age · M/F beside it; then ship · customer, email, phone;
-  // the ids and province last and smaller. M/F is TDG's word only — blank until a file carries it.
+  // The identity column (Miguel, 6 Oct 2026): name with the SC id beside it; age · M/F under it; the ship, the
+  // customer under the ship; email; phone; passport and province last, smaller. M/F is TDG's word only.
   var who=[age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
-  var ids=[c.agency_id,c.pp_no||'',c.province||''].filter(Boolean).map(escHtml).join(' · ');
+  var ids=[c.pp_no||'',c.province||''].filter(Boolean).map(escHtml).join(' · ');
   var ph=fmtPhone(c.phone);
   var tel=ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'+(ph.bad?' <span class=vchip>⚠ verify</span>':'')):'';
   var mail=c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'';
@@ -6079,7 +6094,7 @@ function card(c){
   }else{var chip='';
     ctr='<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>';
   }
-  var shipLine='<div class=crship title="'+escHtml(c.vessel_observed||'')+'">'+(c.vessel_observed?escHtml(shipShort(c.vessel_observed))+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</div>';
+  var shipLine=c.vessel_observed?('<div class=crship title="'+escHtml(c.vessel_observed)+'">'+escHtml(c.vessel_observed)+'</div><div class=crcust>'+escHtml(c.client||'')+'</div>'):'<div class=crship style="font-weight:500;color:var(--mut)">No ship assigned</div>';
   // doc chips: only flag problems; else "Docs valid"
   var parts=[];
   function mk(exp,lbl){var f=docFlag(exp);if(f==='expired')parts.push('<span class="cchip red">'+lbl+' expired</span>');else if(f==='missing')parts.push('<span class="cchip red">'+lbl+' missing</span>');else if(f==='90d')parts.push('<span class="cchip amber">'+lbl+' ≤90d</span>');}
@@ -6097,7 +6112,8 @@ function card(c){
   var id=escHtml(c.agency_id);
   return '<div class="crew-card crcard" data-crew="'+id+'">'
    +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
-   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span>'+(who?'<span class=crwho>'+escHtml(who)+'</span>':'')+'</div>'
+   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span><span class=crscid>'+escHtml(c.agency_id)+'</span></div>'
+   +(who?'<div class=crwho>'+escHtml(who)+'</div>':'')
    +shipLine
    +(mail?'<div class=crsub>'+mail+'</div>':'')
    +(tel?'<div class=crsub>'+tel+'</div>':'')
@@ -6394,7 +6410,7 @@ function ledgerCard(r){
   var stc=crStyle(r.status);
   var id=escHtml(r.agency_id);
   var pass=r.active_on?contractPass(r.active_on,r.active_off||null):{html:'<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>',chip:''};
-  var shipLine='<div class=crship><span>'+(r.vessel?escHtml(r.vessel)+' <small>· '+escHtml(r.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
+  var shipLine=r.vessel?('<div class=crship title="'+escHtml(r.vessel)+'">'+escHtml(r.vessel)+'</div><div class=crcust>'+escHtml(r.client||'')+'</div>'):'<div class=crship style="font-weight:500;color:var(--mut)">No ship assigned</div>';
   var last=r.lastDate?('<span class="cchip ok">Last '+escHtml(r.lastDate)+' · '+(r.lastScore!=null?r.lastScore+'%':'—')+(r.lastGate?(' · '+escHtml(r.lastGate)):'')+' · $'+Number(r.lastPay||0).toLocaleString()+'</span>'):'<span class="cchip">No outcome yet</span>';
   var nb=r.baseline_set?('<span>Next bonus</span><b'+(!(r.nextRung>0)?' class=zero':'')+'>$'+Number(r.nextRung||0).toLocaleString()+'</b>'):'<span>Bonus</span><b class=zero style="font-size:14px">baseline pending</b>';
   var sal=(r.base_salary_usd!=null?'$'+Number(r.base_salary_usd).toLocaleString():'—');
@@ -6402,8 +6418,12 @@ function ledgerCard(r){
     inputs:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10l-6 6H6a2 2 0 0 1-2-2z"></path><path d="M14 21v-6h6"></path></svg>',
     score:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>'};
   return '<div class="crew-card crcard ledger" data-crew="'+id+'">'
-   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0"><div class=crnm>'+escHtml(r.name)+'</div><div class=crsub style="white-space:nowrap">'+id+'</div>'+(r.status?'<div class=crsub><span class=crchip style="height:22px;font-size:12px;background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(r.status)+'</span></div>':'')+'</div></div>'
-   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crrank>'+escHtml(String(r.rank||'—')).toUpperCase()+'</span><span class="pill cnt" title="Consecutive count — drives the ladder">Consecutive '+(r.count||0)+'</span><span class="pill cnt" title="Completed contracts — drives the grade">Contracts '+(r.contracts||0)+'</span>'+(pass.chip?pass.chip.replace('class=croff','class="croff inrow"'):'')+'</div>'+shipLine+pass.html
+   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+   +'<div class=crnmrow><span class=crnm>'+escHtml(r.name)+'</span><span class=crscid>'+id+'</span></div>'
+   +(r.status?'<div style="margin-top:5px"><span class=crchip style="height:22px;font-size:12px;background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(r.status)+'</span></div>':'')
+   +shipLine
+   +'</div></div>'
+   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crrank>'+escHtml(String(r.rank||'—')).toUpperCase()+'</span><span class="pill cnt" title="Consecutive count — drives the ladder">Consecutive '+(r.count||0)+'</span><span class="pill cnt" title="Completed contracts — drives the grade">Contracts '+(r.contracts||0)+'</span>'+(pass.chip?pass.chip.replace('class=croff','class="croff inrow"'):'')+'</div>'+pass.html
    +'<div class=crdates><span><span class=k>Salary</span> <b>'+sal+'</b></span><span class=k>·</span><span><span class=k>Paid to date</span> <b>$'+Number(r.totalPay||0).toLocaleString()+'</b></span></div>'
    +'<div class=csub style="margin-top:0">'+ctSrc(r).replace('· ','')+'</div></div>'
    +'<div class=crright><div class=tools>'
