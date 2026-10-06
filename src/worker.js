@@ -1508,8 +1508,10 @@ async function apiCrew(env, url) {
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
       status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
-      rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
-      client: clientOf(c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
+      // The ship is TDG's word (6 Oct 2026, "the crew card is the TDG row"): the kept copy of the latest file names
+      // it; the stored field (written only by an upload's Take TDG) is the fallback for a crew the file lacks.
+      rank: c.rank_override || c.rank_observed || null, vessel_observed: b.tdg_vessel || c.vessel_observed,
+      client: clientOf(b.tdg_vessel || c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
       gender: c.gender === "M" || c.gender === "F" ? c.gender : null, // TDG's word only, never inferred (6 Oct 2026)
       med_exp: c.med_exp, sirb_exp: c.sirb_exp, pp_exp: c.pp_exp, usv_exp: c.usv_exp, sch_exp: c.sch_exp,
       // contract_count = CUMULATIVE completed contracts: TDG's stated count (§10c) when the count file
@@ -1534,14 +1536,16 @@ async function apiCrewOne(env, url) {
   // by the same agency_id, so they fire as ONE wave after the (memoized) ensures. Same statements,
   // same output, same 404.
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
-  const [row, ov, ctRes, dw] = await Promise.all([
+  const [row, ov, ctRes, dw, rsRow] = await Promise.all([
     env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
+    env.DB.prepare("SELECT vessel FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
+  if (rsRow && rsRow.vessel) crew.vessel_observed = rsRow.vessel; // TDG's ship, as on the crew list (6 Oct 2026)
   const ct = ctRes.results;
   return json({ crew, contracts: ct, daysWorked: (dw && dw.days) || 0, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, TODAY()) });
 }
@@ -2457,7 +2461,7 @@ async function apiContracts(env) {
   // together (they must finish before the reads, since they create the tables), then every read at
   // once. Pinned by test/perf_invariants.test.js alongside the other hot routes.
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureContractCount(env)]);
-  const [baseRes, ovsRes, legCounts, outRes, TDG, legsRes, HIST] = await Promise.all([
+  const [baseRes, ovsRes, legCounts, outRes, TDG, legsRes, HIST, rsRes] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all(),
     fullContractMap(env), // sc -> FULL-contract count (drives rank + the number shown)
@@ -2465,8 +2469,10 @@ async function apiContracts(env) {
     contractCountMap(env), // TDG's stated completed-contract count (§10c)
     env.DB.prepare(KC3_LEGS_SQL).all(), // the active contract span for the ledger card (6 Oct 2026), same rule as the Crew tab
     boardLegs(env),
+    env.DB.prepare("SELECT agency_id, vessel FROM registry_snapshot").all().catch(() => ({ results: [] })), // the kept TDG file: its ship
   ]);
   const today = TODAY();
+  const fileShip = {}; for (const r of rsRes.results || []) if (r.vessel) fileShip[r.agency_id] = r.vessel;
   const byCrew = {}; for (const l of legsRes.results) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const base = baseRes.results;
   const ovm = {}; for (const o of ovsRes.results) ovm[o.agency_id] = o;
@@ -2476,7 +2482,7 @@ async function apiContracts(env) {
   }
   const rows = base.map(b => {
     const ov = ovm[b.agency_id] || {};
-    const vessel = ov.vessel_observed != null ? ov.vessel_observed : b.vessel_observed;
+    const vessel = fileShip[b.agency_id] || (ov.vessel_observed != null ? ov.vessel_observed : b.vessel_observed);
     const lo = lastOut[b.id];
     // Baseline + count + rank + next rung via the shared ledger helper (override-wins through the
     // SAME resolveBaseline as the commit/PDF path — no inline copy that could silently drift).
@@ -3257,7 +3263,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
    whenever the three bases did not fit (every card at 1280px). The grid shrinks all three; only a list narrower
    than 660px (a phone) stacks them. */
 .crmain{container-type:inline-size}
-.crcard{display:grid;grid-template-columns:minmax(200px,300px) minmax(200px,1fr) minmax(190px,270px);align-items:start}
+.crcard{display:grid;grid-template-columns:minmax(200px,300px) minmax(200px,1fr) minmax(190px,270px);align-items:stretch}
+.crcard>.crmid>.cpass{margin-top:auto;margin-bottom:6px}
 .crcard>.crid,.crcard>.crmid,.crcard>.crright{min-width:0}
 .crew-card.crcard .tools{flex-wrap:wrap;justify-content:flex-end}
 @container (max-width:660px){.crcard{display:flex;flex-wrap:wrap}.crcard>.crid,.crcard>.crmid,.crcard>.crright{flex:1 1 100%}.crcard .crright{align-items:flex-start}.crcard .crbonus,.crcard .crtags,.crew-card.crcard .tools{justify-content:flex-start}}
