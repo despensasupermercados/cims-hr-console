@@ -3124,7 +3124,7 @@ nav button{white-space:nowrap}
 .poolwrap{background:#fff;border:1px dashed var(--line-2);border-radius:13px;padding:12px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:8px;min-height:48px}
 .rcard.cur{box-shadow:0 0 0 2px var(--green) inset}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset}.ghostslot{border-style:dashed!important;display:flex;flex-direction:column;justify-content:center;color:var(--mut);cursor:pointer}.ghostslot.crit{border-color:var(--danger)!important;background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:var(--amber)!important;background:#fbeed6;color:#9a6410}
 .rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
-.rcard.plan{border:2px solid #E3B100!important;background:#FFF1A8;box-shadow:none}
+.rcard.plan{border:1px solid #E6CE6A!important;border-left:4px solid #E3B100!important;background:#FFF3B8;box-shadow:none}
 .rcard.overdue{box-shadow:0 0 0 2px var(--red) inset!important;background:#fffafa}
 .gapnote{font-size:11px;color:#9A6410;background:#FBF0DA;border-radius:7px;padding:5px 8px;margin-top:9px}
 .tdgissues .isbody{display:block;padding:0}.tdgissues .isbody.closed{display:none}
@@ -3237,6 +3237,42 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .cptrack.due i{background:var(--red)}
 .cptrack.past i,.cptrack.done i{background:#B9C6D6}
 .rrot .cptrack{margin:6px 0 2px}
+/* Keyman cards (6 Oct 2026, Miguel: "messy .. not visually stately"). One card = one seat: who (name · rank · what
+   kind of card), the one number (OFF/ON in N d, top right), the route as a two-column pass (ON port+date | OFF
+   port+date, bar beneath), arranged items as small tags, one quiet note, actions right. Colour is a left rule. */
+.rcard{background:#fff;border:1px solid var(--line);border-left:4px solid #C9D2DE;border-radius:12px;padding:12px 14px 12px 13px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
+.rcard.green.cur{border-left-color:var(--green);box-shadow:0 1px 2px rgba(20,45,72,.04)}
+.rcard.green:not(.cur){background:#FBFCFE}
+.rcard.confirmed{background:#F7FBF5}
+.rcard.overdue{border-left-color:var(--red)!important;background:#FFF9F9;box-shadow:0 1px 2px rgba(20,45,72,.04)!important}
+.rcard.plan.aboard{box-shadow:none;border-left-color:#C99A00!important}
+.rcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
+.rcard.plan:hover{border-color:#D9B93A!important}
+.rhead{display:flex;align-items:flex-start;gap:10px}
+.ravatar{width:34px;height:34px;font-size:12px;margin-top:1px}
+.rhcol{flex:1 1 auto;min-width:0}
+.rcard .rnm{font-size:14px;line-height:1.25;margin-bottom:3px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+.rcard .rleg{font-size:12px}
+.rcard .offchip{position:static;flex:0 0 auto;margin-left:auto;margin-top:2px;font-size:10.5px;padding:3px 9px;white-space:nowrap}
+.rcard.cur .rnm{padding-right:0}
+.rrot{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.rrot .rrow{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:7px;align-items:baseline;font-size:12.5px;line-height:1.3;min-width:0}
+.rrot .rlbl{grid-row:1/3;align-self:start;width:auto;font-size:9.5px;letter-spacing:.06em;color:var(--mut);padding-top:3px}
+.rrot .rcity{grid-column:2;font-weight:600;color:var(--deep);line-height:1.25}
+.rrot .rcity .pc{font-weight:600}
+.rrot .rdate{grid-column:2;margin-left:0;font-size:11.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+.rrot .cptrack{grid-column:1/-1;margin:6px 0 0}
+.rtags{margin-top:9px;gap:4px}
+.rtag{font-size:9.5px;padding:3px 7px;border-radius:6px}
+.srcnote,.jrnote,.gapnote{margin-top:9px;font-size:11px;line-height:1.4;border-radius:0;padding:1px 0 1px 9px;border-left:2px solid var(--line-2);background:none;color:var(--mut)}
+.jrnote,.gapnote{border-left-color:#E0A23B;color:#9A6410}
+.pacts{margin-top:10px;justify-content:flex-end;gap:6px}
+.pbtn{font-size:11px;padding:5px 11px;border-radius:8px}
+.shipbody{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:8px 14px 14px}
+.ghostslot{min-height:0;align-self:stretch;flex-direction:row;justify-content:center;gap:10px;padding:14px;border-width:1px!important;background:#FAFBFD}
+.ghostslot .gp{width:26px;height:26px;font-size:17px}.ghostslot .gt{font-size:12.5px}.ghostslot .gc{font-size:9.5px}
+.rbanner{margin:0 14px 12px;padding:5px 12px;font-size:11.5px;border-radius:8px}
+.histhd{border-top:1px solid var(--line)}
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
 .wrap.wide{max-width:1500px}
@@ -4956,6 +4992,7 @@ function rotCard(x){
   else if(plan&&x.signOn){var ds=Math.round((new Date(x.signOn+'T00:00:00Z').getTime()-Date.now())/86400000);if(ds>=0)chip='<span class=offchip>ON in '+ds+'d</span>';}
   var rw=function(lbl,city,date){return '<div class=rrow><span class=rlbl>'+lbl+'</span><span class=rcity>'+city+'</span><span class=rdate>'+date+'</span></div>';};
   var rows='';
+  // Dates stay ISO on the board (the sent rows, history and tests read them that way).
   if(x.signOn)rows+=rw('on',x.on_city?oc(x.on_city,x.on_conf):(x.embark?niceCity(x.embark):tba),x.signOn);
   if(x.signOff)rows+=rw('off',x.off_city?oc(x.off_city,x.off_conf):(x.disembark?niceCity(x.disembark):tba),x.signOff);
   // The contract pass bar (6 Oct 2026): how far through the contract the seat is, same drawing as the Crew tab.
@@ -5001,8 +5038,7 @@ function rotCard(x){
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
   return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the plan':plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
-    +chip
-    +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div></div>'
+    +'<div class=rhead><div class="ravatar'+(live?' cur':'')+'">'+ini+'</div><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div>'+chip+'</div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +gap
     +(tg?'<div class=rtags>'+tg+'</div>':'')
