@@ -131,15 +131,16 @@ test("the card names who set the dates, and says when TDG replaced an edit", () 
 
 test("a sign-off that has passed reads as elapsed on both states, never as a negative countdown", () => {
   const past = "2026-01-01";
-  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /OFF was \d+d ago/);
-  assert.match(ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2025-06-01", signOff: past }), /OFF was \d+d ago/);
-  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past }), /OFF in -/);
+  // Option C wording (6 Oct 2026): "<N> d · PAST SIGN-OFF" — elapsed days, never "-N".
+  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /<b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/);
+  assert.match(ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2025-06-01", signOff: past }), /<b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/);
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past }), /TO SIGN-OFF|-\d+ ?d/);
 });
 
 test("a future projection counts down to its sign-on, not to a sign-off it has not reached", () => {
   const h = ctx.rotCard({ ...YELLOW, signOn: "2099-01-01", signOff: "2099-07-01" });
-  assert.match(h, /ON in \d+d/);
-  assert.doesNotMatch(h, /OFF in/);
+  assert.match(h, /<b>\d+ d<\/b><i>TO SIGN-ON<\/i>/);
+  assert.doesNotMatch(h, /TO SIGN-OFF/);
 });
 
 test("the ship section draws both feeds through the ONE renderer and counts them apart", () => {
@@ -287,7 +288,9 @@ const OVERDUE = { ...GREEN, current: false, status: "On Vacation", signOn: "2025
 test("a seat whose sign-off has passed is marked ON THE CARD, whatever the derived status says", () => {
   const h = ctx.rotCard(OVERDUE);
   assert.match(h, /class="rcard green overdue"/, "the ring is on the card that needs attention");
-  assert.match(h, /class="offchip crit">OFF was \d+d ago</, "the countdown chip is not reserved for people the status calls current");
+  // Option C (6 Oct 2026): the chip is the ONE number — days since, red, "PAST SIGN-OFF"; still never a negative count.
+  assert.match(h, /class="offchip crit"><b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/, "the countdown chip is not reserved for people the status calls current");
+  assert.doesNotMatch(h, /-\d+ ?d/, "never a negative day count");
   assert.match(h, /No sign-off recorded\./, "say why the seat is still held");
   // the old rule: live = status === 'On board', so this exact card carried no chip and no ring at all
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: "2099-01-01" }), /overdue/, "a future sign-off is not overdue");
