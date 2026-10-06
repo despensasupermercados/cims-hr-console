@@ -518,3 +518,15 @@ test("a retired crew's manual phone equal to the file is absorbed on Apply: clea
   assert.ok(env.DB._batched.some(s => /INSERT INTO sync_conflict/.test(s.sql) && s.args[3] === "phone" && s.args[4] === "639953384915"), "audited");
   assert.equal(env.DB._batched.some(s => /SET retired=0/.test(s.sql)), false, "Inactive per the file: the Retired tag stays");
 });
+
+// The passport number reaches the card on Apply (6 Oct 2026): accept-by-default like a name, written to crew.pp_no.
+test("a passport number in the file is written to the crew row on Apply", async () => {
+  const existing = [{ agency_id: "SC-0046383", first_name: "A.J. Lorenzo", last_name: "Balena", status: "Earmarked", pp_no: null }];
+  const rows = [{ "CREW ID": "SC-0046383", "FIRST NAME": "A.J. Lorenzo", "LAST NAME": "Balena", "CREW STATUS": "Earmarked", "PASSPORT NO.": "P7637028A" }];
+  const env = { DB: fakeDB({ existing }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-pp" }), env)).json();
+  assert.ok(stage.review.groups.cert.some(x => x.agency_id === "SC-0046383" && x.field === "pp_no" && x.new === "P7637028A"));
+  await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-pp", run_by: "Rita" }), env);
+  const upd = env.DB._batched.find(s => /^UPDATE crew SET pp_no=/.test(s.sql));
+  assert.ok(upd && upd.args[0] === "P7637028A" && upd.args[2] === "SC-0046383");
+});

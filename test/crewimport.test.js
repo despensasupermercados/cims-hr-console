@@ -122,3 +122,19 @@ test("a status word the console cannot read is kept as the file wrote it (status
   const d = diffCrew([m], { "SC-1": { agency_id: "SC-1", status: "On board", vessel_observed: "MV SUMMIT" } });
   assert.equal(d.change.length, 0, "status_raw is not a tracked field: nothing reaches crew");
 });
+
+// "follow the tdg file always" (Miguel, 6 Oct 2026): the passport NUMBER comes from the file like the expiry.
+// Measured that day: 8 numbers in Rita's AdvancedQuery were blank on the console and one differed from a
+// seeded value, because only "PASSPORT EXPIRATION DATE" was ever read.
+import { mapRow as mapRowPP, diffCrew as diffCrewPP } from "../src/crewimport.js";
+test("the passport number is read from PASSPORT NO., tracked, and an empty cell clears it", () => {
+  const r = mapRowPP({ "CREW ID": "SC-0046383", "FIRST NAME": "A.J.", "LAST NAME": "Balena", "CREW STATUS": "Earmarked",
+    "PASSPORT NO.": "P7637028A", "PASSPORT DATE OF ISSUE": "01 Jan 2024", "PASSPORT\nEXPIRATION DATE": "21 Jun 2028" });
+  assert.equal(r.pp_no, "P7637028A", "the NO. column, not the expiry");
+  assert.equal(r.pp_exp, "2028-06-21");
+  const d = diffCrewPP([r], [{ agency_id: "SC-0046383", first_name: "A.J.", last_name: "Balena", status: "Earmarked", pp_no: null, pp_exp: "2028-06-21" }]);
+  assert.deepEqual(d.change, [{ agency_id: "SC-0046383", changed: ["pp_no"] }]);
+  const blank = mapRowPP({ "CREW ID": "SC-1", "FIRST NAME": "A", "LAST NAME": "B", "CREW STATUS": "On board", "PASSPORT NO.": "" });
+  const d2 = diffCrewPP([blank], [{ agency_id: "SC-1", first_name: "A", last_name: "B", status: "On board", pp_no: "OLD123" }]);
+  assert.deepEqual(d2.change, [{ agency_id: "SC-1", changed: ["pp_no"] }], "an empty cell in a column the file carries clears the card");
+});

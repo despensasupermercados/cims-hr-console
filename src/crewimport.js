@@ -32,7 +32,7 @@ function blankCell(row, patterns) {
 const CLEARABLE = {
   middle_name: ["middle"], rank_observed: ["rank", "position", "rating"], vessel_observed: ["vessel", "ship"],
   province: ["province"], phone: ["mobile", "phone", "cell", "contact no"], email: ["email", "e-mail"],
-  dob: ["date of birth", "birth", "dob"], gender: ["gender", "sex"],
+  dob: ["date of birth", "birth", "dob"], gender: ["gender", "sex"], pp_no: ["passport no", "passport number"],
   med_exp: ["medical expiration", "medical exp", "med expiration", "med exp"],
   sirb_exp: ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"],
   pp_exp: ["passport expiration", "passport exp"],
@@ -174,6 +174,10 @@ export function mapRowFull(row) {
     // Gender as the file states it (6 Oct 2026): M / F from a GENDER or SEX column. Anything else, or no
     // such column, is null (keep what the card holds). Never inferred from a name.
     gender: normGender(pickGender(row)),
+    // The passport NUMBER (6 Oct 2026, "follow the tdg file always"): the card prints it beside the SC id,
+    // yet until now only the expiry was read — 8 numbers in Rita's file never reached the console and one
+    // (358775) differed from a seeded value. "passport no" matches "PASSPORT NO." and not the expiry column.
+    pp_no: pick(row, ["passport no", "passport number"]) || null,
     // Match the EXPIRATION column specifically. The real AdvancedQuery layout has
     // "<DOC> NO", "<DOC> ISSUE/DATE OF ISSUE", "<DOC> EXPIRATION", "<DOC> PLACE" — and a
     // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.
@@ -200,7 +204,7 @@ export function mapRows(rows) {
 }
 
 const TRACK = ["first_name", "middle_name", "last_name", "status", "rank_observed",
-  "vessel_observed", "dob", "province", "phone", "email", "gender",
+  "vessel_observed", "dob", "province", "phone", "email", "gender", "pp_no",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp"];
 
 // --- identity ---------------------------------------------------------------
