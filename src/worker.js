@@ -3189,15 +3189,15 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crrail select,.crrail input{width:100%;box-sizing:border-box;height:38px}
 .crhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .crhead .ttl{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy)}
-.crcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px 22px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
+.crcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px 18px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
 .crcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
-.crid{flex:0 1 290px;min-width:230px;display:flex;gap:12px}
+.crid{flex:0 1 250px;min-width:210px;display:flex;gap:12px}
 .crav{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Outfit';font-weight:700;font-size:14px;flex:0 0 auto}
 .crnm{font-family:'Outfit';font-weight:700;font-size:17px;color:var(--navy);line-height:1.2}
 .crsub{font-size:12.5px;color:var(--mut);margin-top:3px}
 .crsub a{color:var(--mut)}
-.crmid{flex:1 1 280px;min-width:240px;display:flex;flex-direction:column;gap:9px}
-.crright{flex:0 1 300px;min-width:250px;display:flex;flex-direction:column;gap:9px;align-items:flex-end}
+.crmid{flex:1 1 240px;min-width:220px;display:flex;flex-direction:column;gap:9px}
+.crright{flex:0 1 270px;min-width:230px;display:flex;flex-direction:column;gap:9px;align-items:flex-end}
 .crchip{display:inline-flex;align-items:center;gap:7px;height:27px;padding:0 11px 0 9px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap}
 .crchip i{width:8px;height:8px;border-radius:50%;display:inline-block}
 .crrank{display:inline-flex;align-items:center;height:23px;padding:0 8px;border:1px solid var(--line-2);border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--navy);background:#fff}
