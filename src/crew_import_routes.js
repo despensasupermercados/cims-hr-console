@@ -65,12 +65,17 @@ function stagedRegistry(mapped, diff) {
 // applied the first time). An older file never overwrites a newer word. Returns the rows kept.
 async function keepCopyOfAppliedFile(env, deps, mapped, file_hash) {
   if (!deps || !deps.ensureRegistrySnapshot || !file_hash) return 0;
+  // The stage route is open to every login and the hash is the browser's word (6 Oct 2026 review): the
+  // snapshot is TDG's word to every screen, so only a money user may fill it, and only with a file that
+  // reads the same number of crew as the run it claims to be.
+  if (!deps.canKeepCopy) return 0;
   await deps.ensureRegistrySnapshot(env);
   const [run, latest] = await Promise.all([
-    env.DB.prepare("SELECT id, run_at FROM import_run WHERE file_hash=?").bind(file_hash).first(),
+    env.DB.prepare("SELECT id, run_at, rows_seen FROM import_run WHERE file_hash=?").bind(file_hash).first(),
     env.DB.prepare("SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1").first(),
   ]);
   if (!run || !latest || run.id !== latest.id) return 0;
+  if (run.rows_seen != null && Number(run.rows_seen) !== mapped.length) return 0;
   const held = await env.DB.prepare("SELECT COUNT(*) AS n FROM registry_snapshot WHERE import_run_id=?").bind(run.id).first();
   if (held && Number(held.n) > 0) return 0;
   const { existingByAgency } = await loadContext(env, null);
@@ -332,7 +337,7 @@ export function applySummary(r) {
 export async function handleCrewImport(request, url, env, session, deps) {
   const p = url.pathname;
   if (p === "/api/crew/import" && request.method === "GET") return crewImportPage();
-  if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env, deps);
+  if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env, { ...(deps || {}), canKeepCopy: isMoneyUser(session && session.email) });
   if (p === "/api/crew/import/apply" && request.method === "POST") {
     if (!isMoneyUser(session && session.email)) return J({ ok: false, error: "money_users_only" }, 403);
     return apiCrewImportApply(request, env, deps);

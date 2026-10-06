@@ -150,14 +150,17 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   KNOWN completion (`completedOff`) = a recorded sign-off on that hull, past, within 180 days, nothing current
   on it since; an overdue Counter leg (projected sign-off passed, nothing recorded) is NOT one (§11).
   **What is wrong** = `issues` on `/api/rotation` (`boardIssues`), drawn as "TDG says otherwise · N" on the
-  Keyman tab with a count: empty hull per the file, crew dropped from the file, a card the file contradicts,
-  a recorded completion the file still has aboard, the Counter mid-contract where the file has no seat, a
-  manual/Retired/held status against the file, a seat with no dates, an unknown or missing ship, an earmark
-  with no card. Rita settles every row; the console never resolves one (§6, 7 Sep rule).
+  Keyman tab with a count — since 6 Oct 2026 ONLY what a person acts on: empty hull per the file, a card the
+  file contradicts (overridden), an active file row the roster lacks (file_only), a status word the console
+  cannot read (status_unread), an unknown or missing ship (unknown_ship / onboard_no_ship). NOT rows (they
+  were until 6 Oct): a recorded completion the file still has aboard (drawn underneath), the Counter
+  mid-contract where the file has no seat (history, "ended per TDG file"), a crew dropped from the file, a
+  seat without dates, an earmark, a Retired tag the file overrides. Rita settles every row; the console never
+  resolves one (§6, 7 Sep rule).
   **Gone** (do not restore): the seat read off `crew.vessel_observed`, the schedule "self-heal" placement and
   its SHIP_HISTORY backfill, the released-seat detour, the second-hull (jumper) draw and its ALSO ON tag —
   each was the console deciding where a seafarer is. One crew may still hold Counter legs on two hulls: the
-  one the file does not name is a row in `issues`. Deploy on a card the file contradicts warns in red and asks
+  one the file does not name becomes history ("ended per TDG file"), not a row. Deploy on a card the file contradicts warns in red and asks
   once more (warn, never block). Pinned by `test/board_truth.test.js`, `test/released_seat.test.js`,
   `test/board_cards.test.js`, `test/registry_sync.test.js`.
 - **THE BOARD APPLIES THE FILE** (Miguel, 6 Oct 2026: "if a crew is added?? u added it.. if a crew is removed?? u

@@ -115,16 +115,27 @@ test("vpd-load still drops rows failing the brand/date whitelists", async () => 
 // 5 Oct 2026 review: a MOVE (vessel_name changes on an existing projection) had none of the create
 // path's checks, and a blank sign-on threw a 500 against the NOT NULL column.
 import { saveReliefAssignment } from "../src/relief_api.js";
-function moveEnv({ vesselId = "ves_icon", dup = null } = {}) {
+function moveEnv({ vesselId = "ves_icon", dup = null, cur = null } = {}) {
   const writes = [];
   const mk = (sql, args = []) => ({
     sql, args, bind: (...a) => mk(sql, a),
-    first: async () => (/FROM vessel WHERE name=/.test(sql) ? (vesselId ? { id: vesselId } : null) : /a2\.actual_sign_off IS NULL AND a2\.vessel_id/.test(sql) ? dup : null),
+    first: async () => (/FROM vessel WHERE name=/.test(sql) ? (vesselId ? { id: vesselId } : null) : /a2\.actual_sign_off IS NULL AND a2\.vessel_id/.test(sql) ? dup : /SELECT vessel_id, vessel_name FROM assignment WHERE id=/.test(sql) ? cur : null),
     all: async () => ({ results: [] }),
     run: async () => { writes.push({ sql, args }); return { success: true }; },
   });
   return { env: { DB: { prepare: (sql) => mk(sql), batch: async (sts) => { for (const s of sts) await s.run(); return sts.map(() => ({ success: true })); } } }, writes };
 }
+// 6 Oct 2026 review: the form always sends vessel_name, so a DATE edit on a card whose crew holds an older second
+// card on the same hull was refused as already_projected — the duplicate it "protected" was the one being fixed.
+test("a save that carries the card's own (unchanged) ship is not a move: no already_projected", async () => {
+  const d = moveEnv({ dup: { id: "as_other" }, cur: { vessel_id: "ves_icon", vessel_name: "Icon" } });
+  const r = await saveReliefAssignment(d.env, { id: "as_1", vessel_name: "Icon", planned_sign_off: "2027-01-01" });
+  assert.equal(r.ok, true);
+  assert.ok(d.writes.some((w) => /UPDATE assignment SET/.test(w.sql)), "the date edit is written");
+  const moved = moveEnv({ dup: { id: "as_other" }, cur: { vessel_id: "ves_edge", vessel_name: "Edge" } });
+  assert.deepEqual(await saveReliefAssignment(moved.env, { id: "as_1", vessel_name: "Icon" }), { ok: false, error: "already_projected", id: "as_other" }, "a real move still runs the check");
+});
+
 test("move: an unknown target hull is refused, a second open projection on the same hull is refused, a real move writes vessel_id too", async () => {
   const u = moveEnv({ vesselId: null });
   assert.deepEqual(await saveReliefAssignment(u.env, { id: "as_1", vessel_name: "Nowhere" }), { ok: false, error: "unknown_ship", ship: "Nowhere" });
