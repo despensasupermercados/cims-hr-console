@@ -3222,6 +3222,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
 .wrap.wide{max-width:1500px}
+.rmgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:0 4px}.rmgrid .chip{margin:0;text-align:center;justify-content:center;padding:5px 0}
+.rauto{display:flex;flex-wrap:wrap;gap:10px 4px;padding:0 8px}.rauto #sbmToggle{margin-left:12px}
 .cract{flex:0 0 172px;position:sticky;top:78px;display:flex;flex-direction:column;gap:10px}
 .cract .btn{width:100%;justify-content:center;margin:0}
 .cract .crbell{width:100%;height:42px;gap:9px;font-weight:600;font-size:13.5px;justify-content:center}
@@ -4714,7 +4716,7 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let ROT_CHROME=0,TG_LAST=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRAND='',ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
+let ROT_CHROME=0,TG_LAST=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRANDS=[],ROT_SHIPS=[],ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
 function dragStart(el,id){dragMoved=true;DRAGID=id;DRAGEL=el;setTimeout(function(){el.classList.add('dragging');},0);}
 function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('.shipdrop.dragover').forEach(function(z){z.classList.remove('dragover');});}
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
@@ -5108,9 +5110,8 @@ async function renderRotation(){
       if(document.getElementById('rotbody'))drawRotation();
     }catch(_){}
   });
-  ROT_F='';ROT_BRAND='';ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
-  var yrs={};(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});});
-  var yopts='<option value="">All years</option>'+Object.keys(yrs).sort().reverse().map(function(y){return '<option'+(ROT_YEAR===y?' selected':'')+'>'+y+'</option>';}).join('');
+  ROT_F='';ROT_BRANDS=[];ROT_SHIPS=[];ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   $('#view').innerHTML='<style>'
     +'.rcard{transition:transform .16s ease,box-shadow .16s ease,opacity .18s ease}'
     +'.rcard:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(20,45,72,.12)}'
@@ -5121,16 +5122,28 @@ async function renderRotation(){
     +'.shipdrop.dragover{background:rgba(95,185,70,.08);box-shadow:inset 0 0 0 2px var(--green);border-radius:10px}'
     +'.shipbody{transition:max-height .2s ease}'
     +'</style>'
-    +'<div class=zlabel>Keyman — each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
+    // Same layout as the Crew tab (Miguel, 6 Oct 2026: "this is the keyman tab .. u can use the same concept"):
+    // filters in a rail on the left, the board in the middle, the actions in a column on the right.
+    +'<div class=bar style="margin-bottom:4px"><h2 id=rothead style="margin-right:auto">Keyman</h2><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
+    +'<div class=hint style="margin:-2px 0 8px">Each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
     +rotSourcesLine()
-    +'<div class=bar style="margin-bottom:8px;flex-wrap:wrap"><input id=rfind placeholder="find ship…" oninput="ROT_FIND=this.value;drawRotation()" style="width:170px">'
-    +'<select id=ryear onchange="ROT_YEAR=this.value;drawRotation()">'+yopts+'</select>'
-    +'<select id=rbrand onchange="ROT_BRAND=this.value;drawRotation()"><option value="">All cruise lines</option><option value="Royal">Royal Caribbean</option><option value="Celebrity">Celebrity</option><option value="Azamara">Azamara</option></select>'
-    +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button><button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
+    +'<div class=crwrap style="margin-top:12px">'
+    +'<aside class=crrail id=rotrail>'
+    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Find ship</label><input id=rfind type=search placeholder="Ship name" oninput="ROT_FIND=this.value;drawRotation()"></div>'
+    +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
+    +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
+    +'<div id=rotcount class=crtotal></div>'
+    +'</aside>'
+    +'<section class=crmain><div id=rotbody></div></section>'
+    +'<aside class=cract>'
+    +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button>'
+    +'<button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
     +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
-    +'<button class="btn" style="margin-left:auto" onclick="exportDaysExcel()" title="Days worked this month, per crew — a reference view, not an invoice">Bill this month (Excel)</button><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div>'
-    +'<div id=rotchips style="margin-bottom:10px"></div><div id=rotbody></div>';
+    +'<button class="btn" onclick="exportDaysExcel()" title="Days worked this month, per crew — a reference view, not an invoice">Bill this month (Excel)</button>'
+    +'</aside></div>';
   drawRotation(); document.body.classList.remove('rot-refreshing');
   // PAGE CHROME, NOT BOARD DATA (16 Sep 2026, Starlink). Every render fired five requests: the board,
   // the relief board, and these three. A render happens after EVERY save and EVERY drag, so a card move
@@ -5177,10 +5190,40 @@ async function tgUpdateClick(){
   if(b){b.disabled=false;}
   tgLoadPending();
 }
+// The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
+var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
+function rotRail(shown,total){
+  var secs=(ROT&&ROT.sections)||[],brands={},ships={},names={},line={},yrs={};
+  secs.forEach(function(s){
+    brands[s.brand]=(brands[s.brand]||0)+1;
+    if(!ROT_BRANDS.length||ROT_BRANDS.indexOf(s.brand)>=0){ships[s.ship]=s.onboard||0;names[s.ship]=s.ship;line[s.ship]=ROT_LINE[s.brand]||s.brand||'Other';}
+    (s.crew||[]).forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});
+  });
+  ROT_SHIPS=ROT_SHIPS.filter(function(k){return ships[k]!=null;});
+  var put=function(id,html){var el=document.getElementById(id);if(el){el.innerHTML=html;el.onclick=rotFacetClick;}};
+  var b='<div class=crlbl style="padding:0 8px 6px">Cruise line</div>';
+  Object.keys(brands).sort(function(x,y){return (ROT_LINE[x]||x).localeCompare(ROT_LINE[y]||y);}).forEach(function(k){b+=facetRow('rb',k,escHtml(ROT_LINE[k]||k),brands[k],ROT_BRANDS.indexOf(k)>=0);});
+  put('rotbrands',b);
+  var sh='<div class=crlbl style="padding:0 8px 6px">Ship'+(ROT_SHIPS.length?' <span class=n style="font-weight:500;text-transform:none;letter-spacing:0;color:var(--mut)">· '+ROT_SHIPS.length+' picked</span>':'')+'</div><div class=crscroll>'+shipGroupRows(ships,names,line,ROT_SHIPS,facetRow)+'</div>';
+  put('rotships',sh);
+  var y='<div class=crlbl style="padding:0 8px 6px">Year</div>';
+  Object.keys(yrs).sort().reverse().forEach(function(k){y+=facetRow('yr',k,k,null,ROT_YEAR===k);});
+  put('rotyears',y);
+  var c=document.getElementById('rotcount');if(c)c.innerHTML='<b>'+shown+'</b> of '+total+' ships shown';
+  var hd=document.getElementById('rothead');if(hd)hd.innerHTML='Keyman <span class=csub style="display:inline;font-size:15px;font-weight:600;font-family:inherit">· '+shown+(shown===1?' ship':' ships')+'</span>';
+}
+function rotFacetClick(e){
+  var el=e.target.closest?e.target.closest('.crfacet'):null;if(!el)return;
+  var k=el.getAttribute('data-kind'),key=el.getAttribute('data-key');
+  if(k==='yr'){ROT_YEAR=(ROT_YEAR===key)?'':key;}
+  else{var arr=k==='rb'?ROT_BRANDS:k==='ship'||k==='rs'?ROT_SHIPS:null;if(!arr)return;var i=arr.indexOf(key);if(i>=0)arr.splice(i,1);else arr.push(key);}
+  drawRotation();
+}
+function clearRotFilters(){ROT_BRANDS=[];ROT_SHIPS=[];ROT_YEAR='';ROT_MONTHS=[];ROT_FIND='';ROT_F='';var f=document.getElementById('rfind');if(f)f.value='';drawRotation();}
 function rmonthChips(){
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var h='<span class="chip'+(ROT_MONTHS.length?'':' on')+'" data-m="all">All months</span> ';
-  for(var i=1;i<=12;i++)h+='<span class="chip'+(ROT_MONTHS.indexOf(i)>=0?' on':'')+'" data-m="'+i+'">'+mn[i-1]+'</span> ';
+  var h='';
+  for(var i=1;i<=12;i++)h+='<span class="chip'+(ROT_MONTHS.indexOf(i)>=0?' on':'')+'" data-m="'+i+'">'+mn[i-1]+'</span>';
   document.getElementById('rotchips').innerHTML=h;
   document.querySelectorAll('#rotchips .chip').forEach(function(el){el.onclick=function(){var m=el.getAttribute('data-m');if(m==='all'){ROT_MONTHS=[];}else{m=+m;var k=ROT_MONTHS.indexOf(m);if(k>=0)ROT_MONTHS.splice(k,1);else ROT_MONTHS.push(m);}rmonthChips();drawRotation();};});
 }
@@ -5221,7 +5264,9 @@ function drawRotation(){
     h+='<div class=shipsec style="margin-top:4px"><div class=shiphdr data-toggle="__POOL__" style="border-left-color:#9aa7b6"><span class=nm>Unassigned pool</span><span class=meta>active · no ship assigned · '+pool.length+' crew <span class="arw'+(pclosed?' closed':'')+'">▾</span></span></div>'
      +'<div class="shipbody shipdrop'+(pclosed?' closed':'')+'" data-ship="__POOL__">'+pool.map(rotCard).join('')+'</div></div>';}
   var secs=(b.sections||[]).slice();
-  if(ROT_BRAND)secs=secs.filter(function(s){return s.brand===ROT_BRAND;});
+  var allSecs=secs.length;
+  if(ROT_BRANDS.length)secs=secs.filter(function(s){return ROT_BRANDS.indexOf(s.brand)>=0;});
+  if(ROT_SHIPS.length)secs=secs.filter(function(s){return ROT_SHIPS.indexOf(s.ship)>=0;});
   if(ROT_FIND){var q=ROT_FIND.toLowerCase();secs=secs.filter(function(s){return s.ship.toLowerCase().indexOf(q)>=0;});}
   secs=secs.map(function(s){
     // Move retired crew's leg into the ship's history (same shape the server uses for past crew),
@@ -5238,6 +5283,7 @@ function drawRotation(){
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   h+='<div class=zlabel style="margin-top:14px">Ships ('+secs.length+')</div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
+  rotRail(secs.length,allSecs);
   document.querySelectorAll('#rotbody .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
   document.querySelectorAll('#rotbody [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
   document.querySelectorAll('#rotbody .rtoggle').forEach(function(el){el.onclick=function(e){e.stopPropagation();var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});};});
