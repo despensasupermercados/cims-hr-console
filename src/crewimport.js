@@ -40,6 +40,15 @@ const CLEARABLE = {
   usv_exp: ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"],
 };
 
+// The gender column: any header containing GENDER or SEX, or a header that is exactly "M/F" / "F/M" (an exact
+// match only: a bare "mf" substring could land on an unrelated column).
+const GENDER_EXACT = new Set(["mf", "fm"]);
+function pickGender(row) {
+  const v = pick(row, ["gender", "sex"]);
+  if (v !== "") return v;
+  const k = Object.keys(row || {}).find((h) => GENDER_EXACT.has(norm(h)));
+  return k != null && row[k] != null ? String(row[k]).trim() : "";
+}
 // "M" / "F" from the file's word (M, F, Male, Female, any case); anything else is null.
 export function normGender(v) {
   const s = String(v == null ? "" : v).trim().toUpperCase();
@@ -164,7 +173,7 @@ export function mapRowFull(row) {
     email: pick(row, ["email", "e-mail"]) || null,
     // Gender as the file states it (6 Oct 2026): M / F from a GENDER or SEX column. Anything else, or no
     // such column, is null (keep what the card holds). Never inferred from a name.
-    gender: normGender(pick(row, ["gender", "sex"])),
+    gender: normGender(pickGender(row)),
     // Match the EXPIRATION column specifically. The real AdvancedQuery layout has
     // "<DOC> NO", "<DOC> ISSUE/DATE OF ISSUE", "<DOC> EXPIRATION", "<DOC> PLACE" — and a
     // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.

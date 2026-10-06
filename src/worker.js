@@ -3265,7 +3265,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crid{flex:0 1 330px;min-width:240px;display:flex;gap:12px}
 .crnmrow{display:flex;align-items:baseline;gap:4px 10px;flex-wrap:wrap}
 .crscid{font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}
-.crwho{font-size:12.5px;color:var(--mut);margin-top:2px}
+.crwho{font-size:13px;font-weight:600;color:var(--deep);white-space:nowrap}
 .crid .crship{display:block;font-size:13.5px;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crcust{font-size:12.5px;color:var(--mut);margin-top:1px}
 .crid .crsub{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -6079,7 +6079,7 @@ function card(c){
   var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
   var stc=crStyle(c.status);
   var age=ageOf(c.dob);
-  // The identity column (Miguel, 6 Oct 2026): name with the SC id beside it; age · M/F under it; the ship, the
+  // The identity column (Miguel, 6 Oct 2026): name, then age · M/F and the SC id on the same row; the ship, the
   // customer under the ship; email; phone; passport and province last, smaller. M/F is TDG's word only.
   var who=[age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
   var ids=[c.pp_no||'',c.province||''].filter(Boolean).map(escHtml).join(' · ');
@@ -6112,8 +6112,7 @@ function card(c){
   var id=escHtml(c.agency_id);
   return '<div class="crew-card crcard" data-crew="'+id+'">'
    +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
-   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span><span class=crscid>'+escHtml(c.agency_id)+'</span></div>'
-   +(who?'<div class=crwho>'+escHtml(who)+'</div>':'')
+   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span>'+(who?'<span class=crwho>'+escHtml(who)+'</span>':'')+'<span class=crscid>'+escHtml(c.agency_id)+'</span></div>'
    +shipLine
    +(mail?'<div class=crsub>'+mail+'</div>':'')
    +(tel?'<div class=crsub>'+tel+'</div>':'')

@@ -15,6 +15,8 @@ test("a GENDER or SEX column is read; a file without one leaves gender unknown",
   const base = { "CREW ID": "SC-0000001", "LAST NAME": "Cruz", "FIRST NAME": "Ana", "CREW STATUS": "On board" };
   assert.equal(mapRow({ ...base, "GENDER": "F" }).gender, "F");
   assert.equal(mapRow({ ...base, "SEX": "Male" }).gender, "M");
+  assert.equal(mapRow({ ...base, "M/F": "f" }).gender, "F", "a header written M/F is read too");
+  assert.equal(mapRow({ ...base, "F/M": "M" }).gender, "M");
   assert.equal(mapRow(base).gender, null, "no column: unknown, never guessed from the first name");
 });
 
