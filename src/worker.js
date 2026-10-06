@@ -3193,7 +3193,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .notedot{position:absolute;bottom:11px;right:12px;width:9px;height:9px;border-radius:50%;background:#f5b301;box-shadow:0 0 0 2px #fff;cursor:pointer}
 /* CREW TAB (6 Oct 2026, Option A of the Crew redesign): a filter rail + one full-width card per crew. */
 .crwrap{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
-.crrail{flex:1 1 250px;max-width:280px;min-width:230px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-sizing:border-box;display:flex;flex-direction:column;gap:16px}
+.crrail{flex:1 1 250px;max-width:280px;min-width:230px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-sizing:border-box;display:flex;flex-direction:column;gap:0}
+.crrail>*{margin-top:22px}.crrail>*:first-child{margin-top:0}
+.crrail>div:not(:first-child):not(.crtotal):not(:empty){border-top:1px solid var(--line);padding-top:20px}
+.crrail>div:empty{display:none}
+.crrail>.btn{margin-top:22px}.crrail>.crtotal{margin-top:12px}
+.crlbl.crsep{display:block;border-top:1px solid var(--line);margin:18px 0 0;padding:20px 8px 6px !important}
 .crmain{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px}
 .crlbl{font-family:'Outfit';font-weight:600;font-size:12px;color:var(--navy);text-transform:uppercase;letter-spacing:.06em}
 .crfacet{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13.5px;color:var(--deep);user-select:none}
@@ -3204,8 +3209,32 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crscroll{max-height:252px;overflow:auto;overscroll-behavior:contain}
 .crtotal{text-align:center;font-size:12.5px;color:var(--mut);padding-top:2px;font-variant-numeric:tabular-nums}
 .crtotal b{color:var(--navy);font-weight:700}
-.crpass{display:flex;flex-direction:column;gap:6px;min-width:260px}.crpass .crdates{white-space:normal;flex-wrap:wrap}.crpass .croff{margin-left:auto}
-.rrot .crbar{margin-top:2px}
+/* The contract pass (6 Oct 2026): a boarding pass in the emails' language — navy, green, small caps over bold. */
+.cpwrap{container-type:inline-size;min-width:0}
+.cpass{display:flex;align-items:stretch;border:1px solid var(--line-2);border-radius:12px;background:linear-gradient(180deg,#FBFCFE,#F4F7FB);overflow:hidden;min-width:0}
+.cpmain{flex:1 1 auto;min-width:0;padding:10px 14px 9px;display:flex;flex-direction:column;gap:7px}
+.cplbl,.cpdates{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.cplbl span{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#7A8BA0;white-space:nowrap}
+.cplbl .cpdur{letter-spacing:.02em;text-transform:none;font-weight:600;color:var(--navy);background:#E8EEF6;padding:1px 8px;border-radius:999px}
+.cpdates b{font-family:'Outfit';font-weight:700;font-size:15px;color:var(--navy);white-space:nowrap;font-variant-numeric:tabular-nums}
+.cptrack{position:relative;height:4px;border-radius:999px;background:repeating-linear-gradient(90deg,#C9D4E2 0 6px,transparent 6px 10px);margin:6px 7px}
+.cptrack::before,.cptrack::after{content:'';position:absolute;top:50%;width:9px;height:9px;border-radius:50%;transform:translate(-50%,-50%);background:#fff;border:2px solid var(--green)}
+.cptrack::before{left:0}.cptrack::after{left:100%;border-color:#9AABBF}
+.cptrack i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--green)}
+.cptrack .cpship{position:absolute;top:50%;transform:translate(-50%,-58%);width:22px;height:22px;border-radius:50%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px #fff,0 2px 6px rgba(20,45,72,.25);z-index:1}
+.cptrack.due i{background:#D9534F}.cptrack.due .cpship{background:var(--red)}.cptrack.due::after{border-color:var(--red)}
+.cptrack.soon .cpship{background:#1E5FB0}
+.cptrack.past i,.cptrack.done i{background:#9AABBF}.cptrack.past .cpship,.cptrack.done .cpship{background:#6B7C93}.cptrack.done::before,.cptrack.past::before{border-color:#9AABBF}
+.cptrack.open::after{border-style:dashed}
+.cpstub{flex:0 0 84px;position:relative;background:var(--navy);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8px 6px;border-left:2px dashed rgba(255,255,255,.35)}
+.cpstub::before,.cpstub::after{content:'';position:absolute;left:-8px;width:14px;height:14px;border-radius:50%;background:#fff;border:1px solid var(--line-2)}
+.cpstub::before{top:-8px}.cpstub::after{bottom:-8px}
+.cpstub span{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#A9BDD2;line-height:1.2}
+.cpstub b{font-family:'Outfit';font-weight:700;font-size:24px;line-height:1.1;color:#fff;font-variant-numeric:tabular-nums}
+.cpstub b.ck{color:#8FD07A}.cpstub b.open{color:#A9BDD2}
+.cpass.due .cpstub{background:#8E2A21}.cpass.soon .cpstub{background:#1E5FB0}.cpass.past .cpstub,.cpass.done .cpstub{background:#4B5B6E}
+.rrot .cptrack{margin:8px 7px 4px}
+@container (max-width:380px){.cpass .cpdur{display:none}.cpdates b{font-size:13.5px}.cpstub{flex-basis:70px}.cpstub b{font-size:20px}.cpmain{padding:9px 11px 8px}}
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
 .crbell.ok{color:var(--green-d)}
@@ -3229,6 +3258,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crship{display:flex;align-items:center;gap:10px;font-size:14.5px;font-weight:600;color:var(--deep);flex-wrap:wrap}
 .crship small{color:var(--mut);font-weight:500;font-size:13px}
 .croff{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;font-weight:700;white-space:nowrap;margin-left:auto}
+.croff.inrow{margin-left:0;height:23px}
 .crdates{display:flex;align-items:center;gap:9px;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--deep)}
 .crdates .k{color:var(--mut)}
 .crbar{height:6px;border-radius:999px;background:#E3E8EF;overflow:hidden}.crbar i{display:block;height:100%}
@@ -5636,7 +5666,7 @@ async function renderCrew(){
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
   try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   $('#view').innerHTML=
-   '<div class=bar><h2 style="margin-right:auto">Crew</h2>'
+   '<div class=bar><h2 id=crewcount style="margin-right:auto">Crew</h2>'
    +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'crrail\\').classList.toggle(\\'open\\')">Filters</button>'
    +'<button class="crbell ok" id=intelReviewBtn title="Review intel" aria-label="Review intel" onclick="openIntelReview()">'+BELL_SVG+'</button>'
    +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
@@ -5655,7 +5685,6 @@ async function renderCrew(){
    +'<div id=crewtotal class=crtotal></div>'
    +'</aside>'
    +'<section class=crmain>'
-   +'<div class=crhead><span class=ttl id=crewcount></span></div>'
    +'<div id=crewgrid style="display:flex;flex-direction:column;gap:10px"></div>'
    +'</section></div>';
   paintCrew();intelReviewCount();
@@ -5739,7 +5768,7 @@ function shipGroupRows(ships,names,client,picked,f){
   var keys=Object.keys(ships).sort(function(a,b){return (client[a]||'').localeCompare(client[b]||'')||names[a].localeCompare(names[b]);});
   var groups={};keys.forEach(function(k){groups[client[k]]=1;});var many=Object.keys(groups).length>1;
   var h='',last=null;
-  keys.forEach(function(k){if(many&&client[k]!==last){last=client[k];h+='<div class=crsub style="padding:'+(h?'8px':'2px')+' 8px 2px;font-weight:600;color:var(--navy)">'+escHtml(last)+'</div>';}h+=f('ship',k,escHtml(names[k]),ships[k],picked.indexOf(k)>=0);});
+  keys.forEach(function(k){if(many&&client[k]!==last){last=client[k];h+='<div class=crsub style="padding:'+(h?'14px':'2px')+' 8px 4px;font-weight:600;color:var(--navy)">'+escHtml(last)+'</div>';}h+=f('ship',k,escHtml(names[k]),ships[k],picked.indexOf(k)>=0);});
   return h;
 }
 function crewFacets(){
@@ -5755,7 +5784,7 @@ function crewFacets(){
   h+=f('st','','All crew',CREW.length,!CF.status.length);
   fixed.forEach(function(st){h+=f('st',st,st==='On Vacation'?'On vacation':st,n(st),CF.status.indexOf(st)>=0,crStyle(st)[2]);});
   Array.from(new Set(CREW.map(function(c){return c.status;}))).filter(function(st){return st&&fixed.indexOf(st)<0;}).sort().forEach(function(st){h+=f('st',st,st,n(st),CF.status.indexOf(st)>=0,crStyle(st)[2]);});
-  h+='<div class=crlbl style="padding:12px 8px 6px">Documents</div>';
+  h+='<div class="crlbl crsep">Documents</div>';
   h+=f('comp','expired','Expired / missing',exp,CF.comp==='expired',null,'color:var(--red);font-weight:600');
   h+=f('comp','soon','Docs ≤ 90 days',soon,CF.comp==='soon',null,'color:var(--amber);font-weight:600');
   h+=f('comp','schengen','Schengen expiring',sch,CF.comp==='schengen',null,'color:var(--amber);font-weight:600');
@@ -5814,7 +5843,7 @@ function paintCrew(){
   });
   var filt=[];if(CF.comp)filt.push({expired:'docs expired/missing',soon:'docs ≤90d',schengen:'Schengen expiring',valid:'documents valid'}[CF.comp]);if(CF.rank.length)filt.push(CF.rank.join(' + '));if(CF.client.length)filt.push(CF.client.join(' + '));if(CF.ship.length)filt.push(CF.ship.map(function(k){return (crewFacets.names||{})[k]||k;}).join(' + '));
   var tot=document.getElementById('crewtotal');if(tot)tot.innerHTML='<b>'+list.length+'</b> of '+CREW.length+' crew shown';
-  $('#crewcount').innerHTML=escHtml(CF.status.length?CF.status.join(' + '):'All crew')+' <span class=csub style="display:inline;font-size:13px">· '+list.length+(list.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
+  $('#crewcount').innerHTML=escHtml(CF.status.length?CF.status.join(' + '):'All crew')+' <span class=csub style="display:inline;font-size:15px;font-weight:600;font-family:inherit">· '+list.length+(list.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
   $('#crewgrid').innerHTML=list.map(card).join('')||'<div class=muted>No matches.</div>';
   $('#crewgrid').onclick=function(ev){
     var b=ev.target.closest?ev.target.closest('.tools button'):null;
@@ -5852,7 +5881,7 @@ async function openCrew(id){
   var todayS=new Date().toISOString().slice(0,10),cur=null;
   (d.contracts||[]).forEach(function(x){var off=x.act||x.proj||null;if(x.on&&x.on<=todayS&&(!x.act||x.act>=todayS)&&(!off||off>=todayS||!x.act))cur=x;});
   var curPass='';
-  if(cur){var cp=contractPass(cur.on,cur.act||cur.proj||null);curPass='<div class=crpass style="margin-top:10px">'+cp.html.replace('</div>',(cp.chip?cp.chip:'')+'</div>')+'</div>';}
+  if(cur){var cp=contractPass(cur.on,cur.act||cur.proj||null);curPass='<div style="margin-top:12px;max-width:620px">'+cp.html+'</div>';}
   h+='<div class=stmt>';
   h+='<div class=printhead>DG3 CIMS — Crew Statement · '+name+' · '+new Date().toISOString().slice(0,10)+'</div>';
   h+='<div class="card" style="border-left:3px solid var(--navy);max-width:none">'
@@ -5891,7 +5920,7 @@ async function openCrew(id){
   h+='<div class=zlabel style="margin-top:16px">Contract history'+(d.daysWorked?(' · '+d.daysWorked.toLocaleString()+' sea-days'):'')+'</div>';
   if(!ct.length)h+='<p class=muted style="text-align:left;padding:8px 2px">No Keyman contract history on file.</p>';
   else h+='<table class=tbl><thead><tr><th>#</th><th>Ship</th><th>Contract</th><th>Basis</th></tr></thead><tbody>'
-    +ct.map(function(x){var off=x.act||x.proj||null;var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');var p=contractPass(x.on,off,{done:!!x.act});return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td><div class=crpass>'+p.html.replace('</div>',(p.chip?p.chip:'')+'</div>')+'</div></td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
+    +ct.map(function(x){var off=x.act||x.proj||null;var basis=x.act?'<span class="cchip ok">actual</span>':(x.proj?'<span class="cchip royal">projected</span>':'<span class="cchip amber">open</span>');var p=contractPass(x.on,off,{done:!!x.act});return '<tr><td>'+x.seq+'</td><td>'+(x.ship||'—')+'</td><td style="min-width:280px">'+p.html+'</td><td>'+basis+'</td></tr>';}).join('')+'</tbody></table>';
   h+='<div class=zlabel style="margin-top:16px">Manager Feedback</div><div id=sbmcards><p class=muted style="text-align:left;padding:8px 2px">Loading…</p></div>';
   h+='</div>';
   $('#view').innerHTML=h;
@@ -5949,20 +5978,36 @@ async function emailStatement(){
 // (OFF in N d / OFF N d ago / ON in N d). One drawing for the roster card, the crew profile and the Keyman card.
 function contractPass(on,off,o){
   o=o||{};if(!on)return {html:'',chip:'',bar:''};
-  var today=new Date().toISOString().slice(0,10),chip='',bar='';
+  var DAY=86400000,now=Date.now(),t0=new Date(on+'T00:00:00Z').getTime(),today=new Date().toISOString().slice(0,10);
+  var chip='',pct=0,state='open',stub='';
+  var dur=off?durLabel(on,off).replace('d ·',' d ·').replace('mo',' mo'):'';
   if(off){
-    var dd=Math.round((new Date(off+'T00:00:00Z').getTime()-Date.now())/86400000);
-    var tot=Math.round((new Date(off+'T00:00:00Z').getTime()-new Date(on+'T00:00:00Z').getTime())/86400000);
-    var el=Math.round((Date.now()-new Date(on+'T00:00:00Z').getTime())/86400000);
-    var pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
-    if(on>today){var ds=Math.round((new Date(on+'T00:00:00Z').getTime()-Date.now())/86400000);chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';bar='<div class=crbar><i style="width:0;background:#5FB946"></i></div>';}
-    else if(dd<0||o.done){chip=o.done?'':'<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';bar='<div class=crbar><i style="width:100%;background:#B9C6D6"></i></div>';}
-    else{chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';bar='<div class=crbar><i style="width:'+pct+'%;background:#5FB946"></i></div>';}
-  }
-  var dur=off?durLabel(on,off):'';
-  var html='<div class=crdates><span><span class=k>ON</span> <b>'+on+'</b></span><span class=k>→</span><span><span class=k>OFF</span> <b>'+(off||'open')+'</b></span>'+(dur?'<span class=k>· '+dur+'</span>':'')+(o.tail||'')+'</div>'+bar;
-  return {html:html,chip:chip,bar:bar};
+    var t1=new Date(off+'T00:00:00Z').getTime();
+    var dd=Math.round((t1-now)/DAY),tot=Math.round((t1-t0)/DAY),el=Math.round((now-t0)/DAY);
+    pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
+    if(on>today){var ds=Math.round((t0-now)/DAY);state='soon';pct=0;
+      chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';
+      stub='<span>Starts in</span><b>'+ds+'</b><span>'+(ds===1?'day':'days')+'</span>';}
+    else if(o.done){state='done';pct=100;stub='<span>Contract</span><b class=ck>&#10003;</b><span>completed</span>';}
+    else if(dd<0){state='past';pct=100;
+      chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';
+      stub='<span>Overdue</span><b>'+(-dd)+'</b><span>'+(-dd===1?'day':'days')+'</span>';}
+    else{state=dd<=14?'due':'live';
+      chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';
+      stub='<span>Day</span><b>'+Math.max(1,el)+'</b><span>of '+tot+'</span>';}
+  }else{stub='<span>Sign-off</span><b class=open>&mdash;</b><span>not set</span>';}
+  var ship='<svg viewBox="0 0 24 24" width="14" height="14" fill="#fff" aria-hidden="true"><path d="M4 15h16l-2.2 4.2a1.5 1.5 0 0 1-1.3.8H7.5a1.5 1.5 0 0 1-1.3-.8zM6 13V9.5A1.5 1.5 0 0 1 7.5 8H11V5h2v3h3.5A1.5 1.5 0 0 1 18 9.5V13z"/></svg>';
+  var track='<div class="cptrack '+state+'"><i style="width:'+pct+'%"></i><span class=cpship style="left:'+pct+'%">'+ship+'</span></div>';
+  // A boarding pass (6 Oct 2026, Miguel: "embrace it .. give it more taste .. like the emails"): the email's
+  // small uppercase label over a big bold value, a route line with the ship where today is, and a navy stub.
+  var html='<div class=cpwrap><div class="cpass '+state+'"><div class=cpmain>'
+    +'<div class=cplbl><span>Sign-on</span>'+(dur?'<span class=cpdur>'+dur+'</span>':'<span></span>')+'<span>Sign-off</span></div>'
+    +track
+    +'<div class=cpdates><b>'+passDate(on)+'</b><b>'+(off?passDate(off):'Open')+'</b></div>'
+    +'</div><div class=cpstub>'+stub+'</div></div></div>';
+  return {html:html,chip:chip,bar:track};
 }
+function passDate(iso){var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso||'').split('-');if(p.length!==3||!m[parseInt(p[1],10)-1])return escHtml(iso||'');return parseInt(p[2],10)+' '+m[parseInt(p[1],10)-1]+' '+p[0];}
 function card(c){
   var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
   var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
@@ -5977,8 +6022,8 @@ function card(c){
   if(c.active_on){
     var pass=contractPass(c.active_on,c.active_off||null),chip=pass.chip;
     ctr=pass.html;
-    var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span>'+chip+'</div>';
-  }else{
+    var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
+  }else{var chip='';
     var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
     ctr='<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>';
   }
@@ -5999,7 +6044,7 @@ function card(c){
   var id=escHtml(c.agency_id);
   return '<div class="crew-card crcard" data-crew="'+id+'">'
    +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0"><div class=crnm>'+escHtml(name)+'</div><div class=crsub style="white-space:nowrap">'+escHtml(sub)+'</div>'+(contact?'<div class=crsub>'+contact+'</div>':'')+'</div></div>'
-   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status)+'</span><span class=crrank>'+rankTag(c.rank,c.baseline_count).toUpperCase()+'</span></div>'+shipLine+ctr+'</div>'
+   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status)+'</span><span class=crrank>'+rankTag(c.rank,c.baseline_count).toUpperCase()+'</span>'+(chip?chip.replace('class=croff','class="croff inrow"'):'')+'</div>'+shipLine+ctr+'</div>'
    +'<div class=crright><div class=tools>'
    +'<button class="crbtn'+(worst?' '+worst:'')+'" data-act=docs data-crew="'+id+'" title="Documents">'+ico.docs+'Docs</button>'
    +'<button class=crbtn data-act=notes data-crew="'+id+'" title="Notes">'+ico.notes+'Notes'+(c.hasNote?'<span class=ndot title="Has notes"></span>':'')+'</button>'
@@ -6278,7 +6323,7 @@ function ledgerCard(r){
   var stc=crStyle(r.status);
   var id=escHtml(r.agency_id);
   var pass=r.active_on?contractPass(r.active_on,r.active_off||null):{html:'<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>',chip:''};
-  var shipLine='<div class=crship><span>'+(r.vessel?escHtml(r.vessel)+' <small>· '+escHtml(r.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span>'+pass.chip+'</div>';
+  var shipLine='<div class=crship><span>'+(r.vessel?escHtml(r.vessel)+' <small>· '+escHtml(r.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
   var last=r.lastDate?('<span class="cchip ok">Last '+escHtml(r.lastDate)+' · '+(r.lastScore!=null?r.lastScore+'%':'—')+(r.lastGate?(' · '+escHtml(r.lastGate)):'')+' · $'+Number(r.lastPay||0).toLocaleString()+'</span>'):'<span class="cchip">No outcome yet</span>';
   var nb=r.baseline_set?('<span>Next bonus</span><b'+(!(r.nextRung>0)?' class=zero':'')+'>$'+Number(r.nextRung||0).toLocaleString()+'</b>'):'<span>Bonus</span><b class=zero style="font-size:14px">baseline pending</b>';
   var sal=(r.base_salary_usd!=null?'$'+Number(r.base_salary_usd).toLocaleString():'—');
@@ -6287,7 +6332,7 @@ function ledgerCard(r){
     score:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>'};
   return '<div class="crew-card crcard ledger" data-crew="'+id+'">'
    +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0"><div class=crnm>'+escHtml(r.name)+'</div><div class=crsub style="white-space:nowrap">'+id+'</div>'+(r.status?'<div class=crsub><span class=crchip style="height:22px;font-size:12px;background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(r.status)+'</span></div>':'')+'</div></div>'
-   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crrank>'+escHtml(String(r.rank||'—')).toUpperCase()+'</span><span class="pill cnt" title="Consecutive count — drives the ladder">Consecutive '+(r.count||0)+'</span><span class="pill cnt" title="Completed contracts — drives the grade">Contracts '+(r.contracts||0)+'</span></div>'+shipLine+pass.html
+   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crrank>'+escHtml(String(r.rank||'—')).toUpperCase()+'</span><span class="pill cnt" title="Consecutive count — drives the ladder">Consecutive '+(r.count||0)+'</span><span class="pill cnt" title="Completed contracts — drives the grade">Contracts '+(r.contracts||0)+'</span>'+(pass.chip?pass.chip.replace('class=croff','class="croff inrow"'):'')+'</div>'+shipLine+pass.html
    +'<div class=crdates><span><span class=k>Salary</span> <b>'+sal+'</b></span><span class=k>·</span><span><span class=k>Paid to date</span> <b>$'+Number(r.totalPay||0).toLocaleString()+'</b></span></div>'
    +'<div class=csub style="margin-top:0">'+ctSrc(r).replace('· ','')+'</div></div>'
    +'<div class=crright><div class=tools>'
