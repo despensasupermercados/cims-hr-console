@@ -296,6 +296,8 @@ function render(){
   g.cert.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff(it.field,it.old,it.new,it.earlier?badge("&#9888; moved earlier","t-amber"):badge("renewed","t-green"))+seg(it.agency_id+":"+it.field,"accept",["accept","keep"],["Accept","Hold"],true)+'</div>';});h+='</div>';}
  if(g.new.length){h+='<div class="sec"><h2>&#65291; New crew</h2>';g.new.forEach(function(it){var f=it.fields||{};h+='<div class="card"><div class="who">'+esc((f.first_name||"")+" "+(f.last_name||""))+' <span class="id">'+esc(it.agency_id)+'</span></div><div class="row"><span class="k">Joining</span><span class="diff"><span class="new">'+esc(f.vessel_observed||"—")+'</span> · '+esc(f.rank_observed||f.status||"")+'</span></div>'+seg("new:"+it.agency_id,"add",["add","skip"],["Add","Skip"])+'</div>';});h+='</div>';}
  if(g.departed.length){h+='<div class="sec"><h2>&#128682; Absent from this file</h2><div class="d">Never auto-removed. Decide the status yourself.</div>';g.departed.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+seg("departed:"+it.agency_id,"flag",["flag","dismiss"],["Flag","Dismiss"],true)+'</div>';});h+='</div>';}
+ var ab=g.override_absorbed||[];
+ if(ab.length){h+='<div class="sec"><details class="minor"><summary><span class="c">'+ab.length+'</span> manual entries already match the file &#8212; absorbed (the file shows from now on)</summary>'+ab.map(function(it){return '<div class="d">'+esc(it.agency_id)+' &#183; '+esc(it.field)+' &#8594; '+esc(it.new)+'</div>';}).join("")+'</details></div>';}
  if(g.minor.length){h+='<div class="sec"><details class="minor"><summary><span class="c">'+g.minor.length+'</span> minor tidy-ups auto-applied (spelling, spacing)</summary>'+g.minor.map(function(it){return '<div class="d">'+esc(it.agency_id)+' · '+esc(it.field)+' &#8594; '+esc(it.new)+'</div>';}).join("")+'</details></div>';}
  $("app").innerHTML=h;renderCart();
 }
@@ -308,12 +310,13 @@ function computeCart(){
  var crAcc=0,crKeep=0;g.critical.forEach(function(it){if(d(it.agency_id+":"+it.field,"accept")==="accept")crAcc++;else crKeep++;});
  var newAdd=0;g.new.forEach(function(it){if(d("new:"+it.agency_id,"add")==="add")newAdd++;});
  var minor=g.minor.length;
+ var absorbed=(g.override_absorbed||[]).length;
  var shipFlag=0,shipTake=0;g.ship_flag.forEach(function(it){var v=d("ship:"+it.agency_id,"take");if(v==="flag")shipFlag++;else if(v==="take")shipTake++;});
  var depFlag=0;g.departed.forEach(function(it){if(d("departed:"+it.agency_id,"flag")==="flag")depFlag++;});
  var fieldSave=ovAcc+crAcc;
- var willSave=certAcc+newAdd+minor+fieldSave+shipTake;
+ var willSave=certAcc+newAdd+minor+fieldSave+shipTake+absorbed;
  var kept=shipFlag+ovKeep+crKeep;
- return{g:g,certAcc:certAcc,fieldSave:fieldSave,newAdd:newAdd,minor:minor,shipFlag:shipFlag,shipTake:shipTake,ovKeep:ovKeep+crKeep,depFlag:depFlag,willSave:willSave,kept:kept};
+ return{g:g,certAcc:certAcc,fieldSave:fieldSave,newAdd:newAdd,minor:minor,absorbed:absorbed,shipFlag:shipFlag,shipTake:shipTake,ovKeep:ovKeep+crKeep,depFlag:depFlag,willSave:willSave,kept:kept};
 }
 function renderCart(){
  var x=computeCart(),g=x.g,items="";
@@ -321,6 +324,7 @@ function renderCart(){
  if(g.override_conflict.length+g.critical.length && x.fieldSave)items+=cline("i-green","&#9998;","Field updates","status, contact",x.fieldSave+" save","save");
  if(g.new.length)items+=cline("i-navy","&#65291;","New crew","added to roster",x.newAdd+" save","save");
  if(g.minor.length)items+=cline("i-gray","&#9881;","Minor tidy-ups","spelling, spacing",x.minor+" save","save");
+ if(x.absorbed)items+=cline("i-gray","&#9998;","Manual entries absorbed","already match the file",x.absorbed+" clear","save");
  if(g.ship_flag.length&&x.shipTake)items+=cline("i-green","&#9875;","Ship from file","registry updated",x.shipTake+" save","save");
  if(g.ship_flag.length&&x.shipFlag)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
  var pc=STAGE.review.projection_counts||{};

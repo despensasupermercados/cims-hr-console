@@ -6215,7 +6215,7 @@ function card(c){
   // The identity column (Miguel, 6 Oct 2026): name, then age · M/F and the SC id on the same row; the ship, the
   // customer under the ship; email; phone; passport and province last, smaller. M/F is TDG's word only.
   var who=[age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
-  var ids=[c.pp_no||'',c.province||''].filter(Boolean).map(escHtml).join(' · ');
+  var ids=[c.agency_id||'',c.pp_no||'',c.province||''].filter(Boolean).map(escHtml).join(' · ');
   var ph=fmtPhone(c.phone);
   var tel=ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'+(ph.bad?' <span class=vchip>⚠ verify</span>':'')):'';
   var mail=c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'';
@@ -6245,7 +6245,7 @@ function card(c){
   var id=escHtml(c.agency_id);
   return '<div class="crew-card crcard" data-crew="'+id+'">'
    +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
-   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span>'+(who?'<span class=crwho>'+escHtml(who)+'</span>':'')+'<span class=crscid>'+escHtml(c.agency_id)+'</span></div>'
+   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span>'+(who?'<span class=crwho>'+escHtml(who)+'</span>':'')+'</div>'
    +shipLine
    +(mail?'<div class=crsub>'+mail+'</div>':'')
    +(tel?'<div class=crsub>'+tel+'</div>':'')

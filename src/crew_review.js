@@ -54,6 +54,41 @@ export function liveOverrideFields(ov) {
   return s;
 }
 
+// THE FILE RECONCILES EVERY MANUAL ENTRY (Miguel, 6 Oct 2026: "follow the tdg file always"). Unlike
+// liveOverrideFields, a Retired tag does not shield the row: the 30 "retired" snapshots of 7 Jul 2026
+// carried every card field (phone, passport, expiries) and kept winning at read time through four
+// uploads, because the review only ever looked at live rows. Exempt: the ship (D1, never written by
+// the import), money (baseline_count, §1), the note, and — on a tagged crew — the status kept with
+// the tag (that one comes off with the tag, unretireItems).
+const NEVER_RECONCILED = new Set(["vessel_observed", "baseline_count", "notes"]);
+export function reconcilableOverrideFields(ov) {
+  const s = new Set();
+  if (!ov) return s;
+  for (const k of OVR_FIELDS) {
+    if (NEVER_RECONCILED.has(k)) continue;
+    if (ov.retired && k === "status") continue;
+    if (ov[k] != null && ov[k] !== "") s.add(k);
+  }
+  return s;
+}
+
+// The same value as a person reads it: a phone is its digits — "09943316597" and "+63 994 331 6597"
+// are one Philippine number (0 ↔ +63) — an email is case-blind, everything else is exact. A manual
+// entry that says what the file says is ABSORBED (cleared on Apply, audited) rather than kept as a
+// second copy that silently outranks the next file.
+const phoneDigits = (v) => {
+  let d = String(v == null ? "" : v).replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("63")) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  return d;
+};
+export function sameValue(field, a, b) {
+  if (a == null || b == null) return false;
+  if (field === "phone") { const x = phoneDigits(a), y = phoneDigits(b); return x.length >= 7 && x === y; }
+  if (field === "email") return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+  return String(a).trim() === String(b).trim();
+}
+
 // Classify a single changed field. Returns { tier, write, defaultAccept?, defaultKeep?, auto?, earlier? }.
 export function classifyField(field, oldVal, newVal, liveOvr) {
   if (field === "vessel_observed") {
@@ -88,7 +123,7 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
 // Pure. Writes nothing.
 export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, overrideByAgency = {}) {
   const groups = {
-    ship_flag: [], override_conflict: [], critical: [], cert: [], minor: [],
+    ship_flag: [], override_conflict: [], override_absorbed: [], critical: [], cert: [], minor: [],
     new: [], departed: [], needs_status: [], rekeyed: [],
   };
 
@@ -108,10 +143,11 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
     // id the file used. `incoming_id` is only present when the two differ.
     const inc = incomingByAgency[ch.incoming_id ?? ch.agency_id] || {};
     const ov = overrideByAgency[ch.agency_id];
-    const liveOvr = liveOverrideFields(ov);
+    const liveOvr = reconcilableOverrideFields(ov);
     for (const field of ch.changed) {
       const c = classifyField(field, ex[field] ?? null, inc[field] ?? null, liveOvr);
       const item = { agency_id: ch.agency_id, field, old: ex[field] ?? null, new: inc[field] ?? null, ...c };
+      seen.add(ch.agency_id + ":" + field);
       if (c.tier === TIER.OVERRIDE) {
         // What Rita sees on the card, and what an accept replaces, is the MANUAL value — not the
         // base row the file is diffed against. Carry it so the card, the audit row and the clear
@@ -120,8 +156,9 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
         item.override_value = ov[item.override_field];
         item.base = item.old;
         item.old = item.override_value;
+        // The manual entry already says what the file says (the base row lagged): absorbed, no decision.
+        if (sameValue(field, item.new, item.override_value)) { groups.override_absorbed.push(item); continue; }
       }
-      seen.add(ch.agency_id + ":" + field);
       (c.auto ? groups.minor : groups[c.tier]).push(item);
     }
   }
@@ -133,15 +170,17 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
     const ex = existingByAgency[id];
     if (!ex) continue;
     const ov = overrideByAgency[id];
-    for (const col of liveOverrideFields(ov)) {
+    for (const col of reconcilableOverrideFields(ov)) {
       const field = importField(col); // the file's name for this field
       if (field === "vessel_observed" || seen.has(id + ":" + field)) continue;
       const nv = inc[field];
       if (nv == null || nv === "") continue;
-      if (String(nv) === String(ov[col])) continue;
       const c = classifyField(field, ex[field] ?? null, nv, new Set([col]));
-      groups[TIER.OVERRIDE].push({ agency_id: id, field, override_field: col, old: ov[col], base: ex[field] ?? null, new: nv, override_value: ov[col], ...c });
+      const item = { agency_id: id, field, override_field: col, old: ov[col], base: ex[field] ?? null, new: nv, override_value: ov[col], ...c };
       seen.add(id + ":" + field);
+      // Equal to the file (digits for a phone, case-blind for an email): absorbed — cleared on Apply, so the
+      // card is the TDG row and the next file is not outranked by a copy of this one.
+      (sameValue(field, nv, ov[col]) ? groups.override_absorbed : groups[TIER.OVERRIDE]).push(item);
     }
   }
 

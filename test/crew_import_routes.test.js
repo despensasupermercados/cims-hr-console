@@ -493,3 +493,28 @@ test("a Retired tag the file contradicts is cleared on Apply (tag + manual statu
   const stage3 = await (await apiCrewImportStage(req({ rows: [{ ...rows[0], "CREW STATUS": "Inactive" }], file_hash: "h-ur3" }), env3)).json();
   assert.deepEqual(stage3.review.groups.unretire, []);
 });
+
+// "follow the tdg file always" (Miguel, 6 Oct 2026), end to end: Alandy, tagged Retired since 7 Jul 2026 with
+// phone "639953384915" on the override while the file (and the base row) say "+63 995 338 4915". Before: the
+// retired row never reached the review, the override kept winning, the card showed the July digits. Now the
+// stage lists it as absorbed and the apply NULLs that one field, bound to the reviewed value, audited.
+test("a retired crew's manual phone equal to the file is absorbed on Apply: cleared, bound, audited", async () => {
+  const existing = [{ agency_id: "SC-0038241", first_name: "Joseph Dandy", last_name: "Alandy", status: "Inactive", phone: "+63 995 338 4915", vessel_observed: "MV CELEBRITY EQUINOX" }];
+  const rows = [{ "CREW ID": "SC-0038241", "FIRST NAME": "Joseph Dandy", "LAST NAME": "Alandy", "CREW STATUS": "Inactive", "VESSEL NAME": "MV CELEBRITY EQUINOX", "MOBILE NO.": "+63 995 338 4915" }];
+  const overrides = [{ agency_id: "SC-0038241", retired: 1, status: "Inactive", phone: "639953384915", pp_no: "P6755439B" }];
+  const env = { DB: fakeDB({ existing, overrides }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-ab" }), env)).json();
+  assert.equal(stage.review.counts.override_absorbed, 1);
+  assert.equal(stage.review.counts.override_conflict, 0);
+  assert.equal(stage.review.groups.override_absorbed[0].field, "phone");
+  assert.equal(env.DB._batched.length, 0, "stage writes nothing");
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-ab", run_by: "Rita" }), env)).json();
+  assert.equal(body.ok, true);
+  assert.equal(body.override_cleared, 1);
+  const clr = env.DB._batched.find(s => /^UPDATE crew_override SET phone=NULL/.test(s.sql));
+  assert.ok(clr, "the manual phone is cleared");
+  assert.deepEqual([clr.args[1], clr.args[2]], ["SC-0038241", "639953384915"], "bound to the value reviewed");
+  assert.equal(env.DB._batched.some(s => /^UPDATE crew SET phone=/.test(s.sql)), false, "the base already equals the file: not rewritten");
+  assert.ok(env.DB._batched.some(s => /INSERT INTO sync_conflict/.test(s.sql) && s.args[3] === "phone" && s.args[4] === "639953384915"), "audited");
+  assert.equal(env.DB._batched.some(s => /SET retired=0/.test(s.sql)), false, "Inactive per the file: the Retired tag stays");
+});

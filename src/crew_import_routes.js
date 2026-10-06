@@ -112,14 +112,16 @@ async function loadContext(env, deps) {
   // a dry run on a fresh isolate must not be the first reader of a column nobody has created yet.
   if (deps && deps.ensureRegistrySnapshot) await deps.ensureRegistrySnapshot(env);
   // One wave (§12): the roster, the manual overrides and Rita's open projections travel together.
+  // The tagged (Retired) rows travel WHOLE (6 Oct 2026): the file reconciles their manual fields like any
+  // other row (crew_review.reconcilableOverrideFields) — only the status kept with the tag is exempt.
   const [ex, ov, projections, rt] = await Promise.all([
     env.DB.prepare("SELECT * FROM crew").all(),
     env.DB.prepare("SELECT * FROM crew_override WHERE COALESCE(retired,0)=0").all(),
     openProjections(env, deps),
-    env.DB.prepare("SELECT agency_id, status FROM crew_override WHERE COALESCE(retired,0)=1").all(), // tagged Retired
+    env.DB.prepare("SELECT * FROM crew_override WHERE COALESCE(retired,0)=1").all(), // tagged Retired
   ]);
   const existingByAgency = Object.fromEntries((ex.results || []).map(r => [r.agency_id, r]));
-  const overrideByAgency = Object.fromEntries((ov.results || []).map(r => [r.agency_id, r]));
+  const overrideByAgency = Object.fromEntries((ov.results || []).concat((rt && rt.results) || []).map(r => [r.agency_id, r]));
   const retiredByAgency = Object.fromEntries(((rt && rt.results) || []).map(r => [r.agency_id, r]));
   return { existingByAgency, overrideByAgency, retiredByAgency, projections: projections || [] };
 }

@@ -67,6 +67,15 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     }
     conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: manual ?? null, new_value: it.new, resolved: 1 });
   }
+  // override absorbed (6 Oct 2026, "follow the tdg file always") — the manual entry equals the file's value:
+  // no decision, the override field is cleared (bound to the value reviewed) and the base row is brought to
+  // the file where it lagged. Audited like an accepted conflict (resolved=1), so the clear is on record.
+  for (const it of g.override_absorbed || []) {
+    const manual = it.override_value !== undefined ? it.override_value : it.old;
+    if (String(it.base ?? "") !== String(it.new ?? "")) crewUpdates.push({ agency_id: it.agency_id, field: it.field, value: it.new });
+    overrideClears.push({ agency_id: it.agency_id, field: OVR_COL[it.field] || it.field, expect: manual ?? null });
+    conflicts.push({ agency_id: it.agency_id, field: it.field, old_value: manual ?? null, new_value: it.new, resolved: 1, absorbed: true });
+  }
   // ship flag — default an open to-do (Keep board). "dismiss" closes it without a write. "take"
   // (2026-09-15) adopts the file's ship into the registry through shipTakes — an explicit, per-row,
   // human decision; it is the ONLY way a ship value leaves this planner as a write. The audit row is
