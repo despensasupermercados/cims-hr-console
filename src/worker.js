@@ -3176,6 +3176,49 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pill.next.zero{background:#f1f4f9;color:var(--mut)}
 .vchip{font-size:10px;font-weight:700;padding:2px 6px;border-radius:6px;background:#fff5e6;color:var(--amber);margin-left:5px}
 .notedot{position:absolute;bottom:11px;right:12px;width:9px;height:9px;border-radius:50%;background:#f5b301;box-shadow:0 0 0 2px #fff;cursor:pointer}
+/* CREW TAB (6 Oct 2026, Option A of the Crew redesign): a filter rail + one full-width card per crew. */
+.crwrap{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.crrail{flex:1 1 250px;max-width:280px;min-width:230px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-sizing:border-box;display:flex;flex-direction:column;gap:16px}
+.crmain{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.crlbl{font-family:'Outfit';font-weight:600;font-size:12px;color:var(--navy);text-transform:uppercase;letter-spacing:.06em}
+.crfacet{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13.5px;color:var(--deep);user-select:none}
+.crfacet:hover{background:#EEF2F7}
+.crfacet input{width:16px;height:16px;margin:0;accent-color:var(--navy);pointer-events:none;flex:0 0 auto}
+.crfacet .n{margin-left:auto;color:var(--mut);font-size:12.5px;font-variant-numeric:tabular-nums}
+.crfacet i{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:7px}
+.crrail select,.crrail input{width:100%;box-sizing:border-box;height:38px}
+.crhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.crhead .ttl{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy)}
+.crcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px 18px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
+.crcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
+.crid{flex:0 1 250px;min-width:210px;display:flex;gap:12px}
+.crav{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Outfit';font-weight:700;font-size:14px;flex:0 0 auto}
+.crnm{font-family:'Outfit';font-weight:700;font-size:17px;color:var(--navy);line-height:1.2}
+.crsub{font-size:12.5px;color:var(--mut);margin-top:3px}
+.crsub a{color:var(--mut)}
+.crmid{flex:1 1 240px;min-width:220px;display:flex;flex-direction:column;gap:9px}
+.crright{flex:0 1 270px;min-width:230px;display:flex;flex-direction:column;gap:9px;align-items:flex-end}
+.crchip{display:inline-flex;align-items:center;gap:7px;height:27px;padding:0 11px 0 9px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.crchip i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.crrank{display:inline-flex;align-items:center;height:23px;padding:0 8px;border:1px solid var(--line-2);border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.03em;color:var(--navy);background:#fff}
+.crship{display:flex;align-items:center;gap:10px;font-size:14.5px;font-weight:600;color:var(--deep);flex-wrap:wrap}
+.crship small{color:var(--mut);font-weight:500;font-size:13px}
+.croff{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:6px;font-size:11.5px;font-weight:700;white-space:nowrap;margin-left:auto}
+.crdates{display:flex;align-items:center;gap:9px;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--deep)}
+.crdates .k{color:var(--mut)}
+.crbar{height:6px;border-radius:999px;background:#E3E8EF;overflow:hidden}.crbar i{display:block;height:100%}
+.crew-card.crcard .tools{position:static;top:auto;right:auto;display:flex;gap:6px}
+.crew-card.crcard .tools .crbtn{width:auto;height:34px;padding:0 11px;border-radius:9px;border:1px solid var(--line);background:#fff;display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:#3A4A5E;font-weight:600;font-size:12.5px;position:relative;font-family:inherit;line-height:1}
+.crew-card.crcard .tools .crbtn:hover{background:#F4F6F9;border-color:#C9D2DE}
+.crew-card.crcard .tools .crbtn.red{color:var(--red);border-color:#EFC9C5;background:#FDF5F4}
+.crew-card.crcard .tools .crbtn.amber{color:var(--amber);border-color:#EAD9AE;background:#FDF8EC}
+.crbtn .ndot{width:9px;height:9px;border-radius:50%;background:#f5b301;position:absolute;top:-4px;right:-4px;box-shadow:0 0 0 2px #fff}
+.crbonus{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end;font-size:12.5px;color:var(--mut)}
+.crbonus b{font-family:'Outfit';font-weight:700;font-size:21px;color:var(--green-d)}.crbonus b.zero{color:#4B5563}
+.crtags{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
+.crtags .cchip{font-size:12px;padding:5px 9px;border-radius:7px}
+.crfbtn{display:none}
+@media(max-width:860px){.crfbtn{display:inline-flex}.crrail{display:none;max-width:none}.crrail.open{display:flex}.crright{align-items:flex-start}.crbonus,.crtags{justify-content:flex-start}}
 .notelog{margin-top:12px;display:flex;flex-direction:column;gap:8px;max-height:300px;overflow:auto}
 .noteitem{border-left:3px solid var(--royal);background:#f7f9fc;border-radius:0 8px 8px 0;padding:8px 11px}
 .notemeta{font-size:11px;color:var(--mut);font-weight:600;display:flex;align-items:center}
@@ -5540,7 +5583,7 @@ function paintDashCost(){
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
-var CF={q:'',status:'',comp:'',client:'',ship:'',sort:'az'};
+var CF={q:'',status:[],comp:'',client:'',ship:'',sort:'az',rank:[]};
 function ageOf(dob){if(!dob)return'';var d=new Date(dob);if(isNaN(d))return'';var t=new Date(),a=t.getFullYear()-d.getFullYear();if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate()))a--;return a>0&&a<100?a:'';}
 function fmtPhone(p){if(!p)return{txt:'',bad:false};var raw=String(p).replace(/[^0-9+]/g,'');var ok=/^\\+?63\\d{10}$/.test(raw)||/^09\\d{9}$/.test(raw);return{txt:String(p).trim(),bad:!ok};}
 function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
@@ -5549,31 +5592,42 @@ function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
 function rankTag(r,c){var s=String(r||'').toLowerCase();if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s===' ps'||s==='ps')return 'PS';return rankShort(c);}
 function docFlag(exp){if(!exp)return'missing';var days=(new Date(exp)-new Date())/86400000;if(days<0)return'expired';if(days<=90)return'90d';return'ok';}
 function crewMatchesComp(c){
-  if(c.status==='Inactive'||c.status==='Retired')return false;
   var f=CF.comp;
+  // "All documents valid" is the green tag on the card: no problem on any document, whoever they are.
+  if(f==='valid')return !crewDocProblem(c);
+  if(c.status==='Inactive'||c.status==='Retired')return false;
   if(f==='expired')return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){var g=docFlag(c[k]);return g==='expired'||g==='missing';});
   if(f==='soon')return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){return docFlag(c[k])==='90d';});
   if(f==='schengen'){if(!c.sch_exp)return false;var g=docFlag(c.sch_exp);return g==='expired'||g==='90d';}
   return true;
 }
 async function renderCrew(){
-  CREW=[];CF.q='';CF.status='';CF.comp='';CF.client='';CF.ship='';CF.sort='az';
+  CREW=[];CF.q='';CF.status=[];CF.comp='';CF.client='';CF.ship='';CF.sort='az';CF.rank=[];
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
   try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   var clients=Array.from(new Set(CREW.map(function(c){return c.client;}).filter(Boolean))).sort();
   $('#view').innerHTML=
-   '<div class=bar><h2>Crew</h2>'
-   +'<div class=search style="margin-left:auto"><input id=q placeholder="name, crew ID, or passport" oninput="CF.q=this.value;paintCrew()" style="width:230px"></div>'
-   +'<select id=cClient onchange="CF.client=this.value;CF.ship=\\'\\';crewShipOpts();paintCrew()"><option value="">All clients</option>'+clients.map(function(x){return '<option>'+x+'</option>';}).join('')+'</select>'
-   +'<select id=cShip onchange="CF.ship=this.value;paintCrew()"><option value="">All ships</option></select>'
-   +'<select id=cSort onchange="CF.sort=this.value;paintCrew()"><option value="az">Sort: name A–Z</option><option value="soon">Sort: sign-off soonest</option><option value="tenure">Sort: contracts (high→low)</option><option value="ship">Sort: ship</option></select>'
-   +'<button class="btn ghost" onclick="clearCrewFilters()">Clear</button>'
+   '<div class=bar><h2>Crew</h2><span id=crewtotal class=csub style="margin-right:auto;margin-top:0"></span>'
+   +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'crrail\\').classList.toggle(\\'open\\')">Filters</button>'
    +'<button class="btn ghost" id=intelReviewBtn onclick="openIntelReview()">Review intel</button>'
    +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
    +'<button class="btn ghost" onclick="hiddenCardsModal()">Hidden cards</button>'
    +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
-   +'</div><div class=tiles id=crewtiles></div>'
-   +'<div id=crewcount class=csub style="margin:8px 0 12px"></div><div id=crewgrid class=grid></div>';
+   +'</div>'
+   +'<div class=crwrap>'
+   +'<aside class=crrail id=crrail>'
+   +'<div><label class=crlbl for=q style="display:block;margin-bottom:6px">Search</label><input id=q type=search placeholder="Name, crew ID or passport" oninput="CF.q=this.value;paintCrew()"></div>'
+   +'<div id=crfacets></div>'
+   +'<div><label class=crlbl for=cClient style="display:block;margin-bottom:6px">Client</label><select id=cClient onchange="CF.client=this.value;CF.ship=\\'\\';crewShipOpts();paintCrew()"><option value="">All clients</option>'+clients.map(function(x){return '<option>'+x+'</option>';}).join('')+'</select></div>'
+   +'<div><label class=crlbl for=cShip style="display:block;margin-bottom:6px">Ship</label><select id=cShip onchange="CF.ship=this.value;paintCrew()"><option value="">All ships</option></select></div>'
+   +'<div id=crrank></div>'
+   +'<button class="btn ghost" onclick="clearCrewFilters()">Clear filters</button>'
+   +'</aside>'
+   +'<section class=crmain>'
+   +'<div class=crhead><span class=ttl id=crewcount></span>'
+   +'<label class=csub for=cSort style="margin-left:auto;margin-top:0">Sort</label><select id=cSort onchange="CF.sort=this.value;paintCrew()" style="width:190px"><option value="az">Name A–Z</option><option value="soon">Sign-off soonest</option><option value="tenure">Contracts (high→low)</option><option value="ship">Ship</option></select></div>'
+   +'<div id=crewgrid style="display:flex;flex-direction:column;gap:10px"></div>'
+   +'</section></div>';
   crewShipOpts();paintCrew();intelReviewCount();
 }
 async function intelReviewCount(){
@@ -5617,7 +5671,7 @@ function crewShipOpts(){
   var ships=Array.from(new Set(CREW.filter(function(c){return !CF.client||c.client===CF.client;}).map(function(c){return c.vessel_observed;}).filter(Boolean))).sort();
   sel.innerHTML='<option value="">All ships</option>'+ships.map(function(s){return '<option'+(s===CF.ship?' selected':'')+'>'+s+'</option>';}).join('');
 }
-function clearCrewFilters(){CF.q='';CF.status='';CF.comp='';CF.client='';CF.ship='';CF.sort='az';renderCrew();}
+function clearCrewFilters(){CF.q='';CF.status=[];CF.comp='';CF.client='';CF.ship='';CF.sort='az';CF.rank=[];renderCrew();}
 function docsModal(id){
   var c=null,i;for(i=0;i<CREW.length;i++){if(CREW[i].agency_id===id){c=CREW[i];break;}}
   if(!c)return;
@@ -5637,31 +5691,58 @@ async function exportDocsCSV(){
   var csv=rows.map(function(r){return r.map(function(x){x=String(x==null?'':x);return /[",\\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x;}).join(',');}).join('\\n');
   var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='compliance_'+(d.today||'')+'.csv';a.click();
 }
-function crewTiles(){
-  var on=CREW.filter(function(c){return c.status==='On board';}).length;
-  var vac=CREW.filter(function(c){return c.status==='On Vacation';}).length;
-  var ear=CREW.filter(function(c){return c.status==='Earmarked';}).length;
-  var ina=CREW.filter(function(c){return c.status==='Inactive';}).length;
-  var ret=CREW.filter(function(c){return c.status==='Retired';}).length;
-  var act=CREW.filter(function(c){return c.status!=='Inactive'&&c.status!=='Retired';}); // active = excludes retired & inactive; doc compliance only matters for sailing crew
+// A document problem on the card: the same test the tags use (the four core documents, plus Schengen
+// when the crew holds one). Drives the "All documents valid" filter and the colour of the Docs button.
+function crewDocProblem(c){
+  var worst='';
+  ['med_exp','sirb_exp','pp_exp','usv_exp'].forEach(function(k){var g=docFlag(c[k]);if(g==='expired'||g==='missing')worst='red';else if(g==='90d'&&worst!=='red')worst='amber';});
+  if(c.sch_exp){var sf=docFlag(c.sch_exp);if((sf==='expired'||sf==='90d')&&worst!=='red')worst='amber';}
+  return worst;
+}
+// The rail's counts are the whole roster's (what the nine tiles used to show), never the filtered list's.
+var CRST={'On board':['#EAF5E4','#3C7A2A','#3C7A2A'],'On Vacation':['#FBF2E0','#8A5A14','#B0741A'],'Earmarked':['#E6EFFB','#1E5FB0','#1E5FB0'],'Retired':['#EEF1F5','#4B5563','#6B7280'],'Inactive':['#E5E7EB','#374151','#374151']};
+function crStyle(st){return CRST[st]||['#EEF1F5','#4B5563','#6B7280'];}
+function crewFacets(){
+  var n=function(st){return CREW.filter(function(c){return c.status===st;}).length;};
+  var act=CREW.filter(function(c){return c.status!=='Inactive'&&c.status!=='Retired';});
   var exp=act.filter(function(c){return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){var g=docFlag(c[k]);return g==='expired'||g==='missing';});}).length;
   var soon=act.filter(function(c){return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){return docFlag(c[k])==='90d';});}).length;
   var sch=act.filter(function(c){return c.sch_exp&&['expired','90d'].indexOf(docFlag(c.sch_exp))>=0;}).length;
-  function t(n,l,cls,kind,key){var onx=(kind==='st'?CF.status:CF.comp)===key&&key!=='';return '<div class="tile '+(cls||'')+(onx?' on':'')+'" data-kind="'+kind+'" data-key="'+key+'" style="cursor:pointer"><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
-  return t(CREW.length,'All crew','','st','')+t(on,'On board','green','st','On board')+t(vac,'On vacation','amber','st','On Vacation')+t(ret,'Retired','gray','st','Retired')+t(ear,'Earmarked','royal','st','Earmarked')+t(ina,'Inactive','gray','st','Inactive')
-   +t(exp,'Docs expired/missing','red','comp','expired')+t(soon,'Docs ≤90 days','amber','comp','soon')+t(sch,'Schengen expiring','amber','comp','schengen');
+  var valid=CREW.filter(function(c){return !crewDocProblem(c);}).length;
+  var f=function(kind,key,label,count,on,dotc,cls){return '<div class="crfacet" data-kind="'+kind+'" data-key="'+escHtml(key)+'"><input type=checkbox'+(on?' checked':'')+'><span'+(cls?' style="'+cls+'"':'')+'>'+(dotc?'<i style="background:'+dotc+'"></i>':'')+label+'</span><span class=n>'+(count==null?'':count)+'</span></div>';};
+  var fixed=['On board','On Vacation','Earmarked','Retired','Inactive'];
+  var h='<div class=crlbl style="padding:0 8px 6px">Status</div>';
+  h+=f('st','','All crew',CREW.length,!CF.status.length);
+  fixed.forEach(function(st){h+=f('st',st,st==='On Vacation'?'On vacation':st,n(st),CF.status.indexOf(st)>=0,crStyle(st)[2]);});
+  Array.from(new Set(CREW.map(function(c){return c.status;}))).filter(function(st){return st&&fixed.indexOf(st)<0;}).sort().forEach(function(st){h+=f('st',st,st,n(st),CF.status.indexOf(st)>=0,crStyle(st)[2]);});
+  h+='<div class=crlbl style="padding:12px 8px 6px">Documents</div>';
+  h+=f('comp','expired','Expired / missing',exp,CF.comp==='expired',null,'color:var(--red);font-weight:600');
+  h+=f('comp','soon','Docs ≤ 90 days',soon,CF.comp==='soon',null,'color:var(--amber);font-weight:600');
+  h+=f('comp','schengen','Schengen expiring',sch,CF.comp==='schengen',null,'color:var(--amber);font-weight:600');
+  h+=f('comp','valid','All documents valid',valid,CF.comp==='valid',null,'color:var(--green-d);font-weight:600');
+  var ranks={};CREW.forEach(function(c){var t=rankTag(c.rank,c.baseline_count);ranks[t]=(ranks[t]||0)+1;});
+  var r='<div class=crlbl style="padding:0 8px 6px">Rank</div>';
+  Object.keys(ranks).sort().forEach(function(t){r+=f('rank',t,t==='PS'?'Printer Specialist':t==='Jr PS'?'Junior PS':t==='Sr PS'?'Senior PS':t,ranks[t],CF.rank.indexOf(t)>=0);});
+  return {facets:h,rank:r};
+}
+function crewFacetClick(e){
+  var el=e.target.closest?e.target.closest('.crfacet'):null;if(!el)return;
+  var k=el.getAttribute('data-kind'),key=el.getAttribute('data-key');
+  if(k==='st'){if(!key)CF.status=[];else{var i=CF.status.indexOf(key);if(i>=0)CF.status.splice(i,1);else CF.status.push(key);}}
+  else if(k==='comp'){CF.comp=(CF.comp===key)?'':key;}
+  else if(k==='rank'){var j=CF.rank.indexOf(key);if(j>=0)CF.rank.splice(j,1);else CF.rank.push(key);}
+  paintCrew();
 }
 function paintCrew(){
-  document.getElementById('crewtiles').innerHTML=crewTiles();
-  document.querySelectorAll('#crewtiles .tile[data-kind]').forEach(function(el){el.onclick=function(){
-    var k=el.getAttribute('data-kind'),key=el.getAttribute('data-key');
-    if(k==='st'){CF.status=(CF.status===key)?'':key;CF.comp='';}else{CF.comp=(CF.comp===key)?'':key;CF.status='';}
-    paintCrew();
-  };});
+  var fx=crewFacets();
+  var fe=document.getElementById('crfacets'),re=document.getElementById('crrank');
+  if(fe){fe.innerHTML=fx.facets;fe.onclick=crewFacetClick;}
+  if(re){re.innerHTML=fx.rank;re.onclick=crewFacetClick;}
   var q=CF.q.trim().toLowerCase();
   var list=CREW.filter(function(c){
-    if(CF.status&&c.status!==CF.status)return false;
+    if(CF.status.length&&CF.status.indexOf(c.status)<0)return false;
     if(CF.comp&&!crewMatchesComp(c))return false;
+    if(CF.rank.length&&CF.rank.indexOf(rankTag(c.rank,c.baseline_count))<0)return false;
     if(CF.client&&c.client!==CF.client)return false;
     if(CF.ship&&c.vessel_observed!==CF.ship)return false;
     if(q){var hay=((c.first_name||'')+' '+(c.last_name||'')+' '+(c.agency_id||'')+' '+(c.pp_no||'')).toLowerCase();if(hay.indexOf(q)<0)return false;}
@@ -5673,12 +5754,16 @@ function paintCrew(){
     if(CF.sort==='soon'){var ax=a.active_off||'9999',bx=b.active_off||'9999';return ax<bx?-1:ax>bx?1:0;}
     return (a.last_name||'').localeCompare(b.last_name||'')||(a.first_name||'').localeCompare(b.first_name||'');
   });
-  var filt=[];if(CF.status)filt.push(CF.status);if(CF.comp)filt.push({expired:'docs expired/missing',soon:'docs ≤90d',schengen:'Schengen expiring'}[CF.comp]);if(CF.client)filt.push(CF.client);if(CF.ship)filt.push(CF.ship);
-  $('#crewcount').textContent=list.length+' of '+CREW.length+' crew'+(filt.length?' · '+filt.join(' · '):'');
+  var filt=[];if(CF.comp)filt.push({expired:'docs expired/missing',soon:'docs ≤90d',schengen:'Schengen expiring',valid:'documents valid'}[CF.comp]);if(CF.rank.length)filt.push(CF.rank.join(' + '));if(CF.client)filt.push(CF.client);if(CF.ship)filt.push(CF.ship);
+  var tot=document.getElementById('crewtotal');if(tot)tot.textContent=list.length+' of '+CREW.length+' crew';
+  $('#crewcount').innerHTML=escHtml(CF.status.length?CF.status.join(' + '):'All crew')+' <span class=csub style="display:inline;font-size:13px">· '+list.length+(list.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
   $('#crewgrid').innerHTML=list.map(card).join('')||'<div class=muted>No matches.</div>';
-  document.querySelectorAll('#crewgrid .crew-card').forEach(function(el){
-    el.onclick=function(ev){if(ev.target.closest('.tools')||ev.target.closest('.notedot'))return;openCrew(el.getAttribute('data-crew'));};
-  });
+  $('#crewgrid').onclick=function(ev){
+    var b=ev.target.closest?ev.target.closest('.tools button'):null;
+    if(b){ev.stopPropagation();var id=b.getAttribute('data-crew'),act=b.getAttribute('data-act');if(act==='docs')docsModal(id);else if(act==='notes')notesModal(id);else if(act==='edit')editCrewModal(id);return;}
+    if(ev.target.closest&&ev.target.closest('a[href^="tel:"]'))return;
+    var el=ev.target.closest?ev.target.closest('.crew-card'):null;if(el)openCrew(el.getAttribute('data-crew'));
+  };
 }
 async function loadCrew(){return renderCrew();}
 function filterCrew(){paintCrew();}
@@ -5797,34 +5882,59 @@ async function emailStatement(){
 }
 function card(c){
   var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
-  var b=brandOf(c.vessel_observed);
+  var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
+  var stc=crStyle(c.status);
   var age=ageOf(c.dob);
   var sub=c.agency_id+(c.pp_no?(' · '+c.pp_no):'')+(age!==''?(' · '+age+' yrs'):'');
   var ph=fmtPhone(c.phone);
-  var contact=[c.province,ph.txt?(ph.txt+(ph.bad?' <span class=vchip>⚠ verify</span>':'')):''].filter(Boolean).join(' · ');
-  var span=c.active_on?('ON '+c.active_on+' → OFF '+(c.active_off||'open')+(c.active_off?(' · '+durLabel(c.active_on,c.active_off)):'')):'No active contract on file';
+  var tel=ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'+(ph.bad?' <span class=vchip>⚠ verify</span>':'')):'';
+  var contact=[c.province?escHtml(c.province):'',tel].filter(Boolean).join(' · ');
+  // Contract line: ON → OFF · duration, a progress bar, and the one number people look up — when it ends.
+  var today=new Date().toISOString().slice(0,10);
+  var ctr='';
+  if(c.active_on){
+    var on=c.active_on,off=c.active_off||null,chip='',bar='';
+    if(off){
+      var dd=Math.round((new Date(off+'T00:00:00Z').getTime()-Date.now())/86400000);
+      var tot=Math.round((new Date(off+'T00:00:00Z').getTime()-new Date(on+'T00:00:00Z').getTime())/86400000);
+      var el=Math.round((Date.now()-new Date(on+'T00:00:00Z').getTime())/86400000);
+      var pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
+      if(on>today){var ds=Math.round((new Date(on+'T00:00:00Z').getTime()-Date.now())/86400000);chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';bar='<div class=crbar><i style="width:0;background:#5FB946"></i></div>';}
+      else if(dd<0){chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';bar='<div class=crbar><i style="width:100%;background:#B9C6D6"></i></div>';}
+      else{chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';bar='<div class=crbar><i style="width:'+pct+'%;background:#5FB946"></i></div>';}
+    }
+    var dur=off?durLabel(on,off):'';
+    ctr='<div class=crdates><span><span class=k>ON</span> <b>'+on+'</b></span><span class=k>→</span><span><span class=k>OFF</span> <b>'+(off||'open')+'</b></span>'+(dur?'<span class=k>· '+dur+'</span>':'')+'</div>'+bar;
+    var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span>'+chip+'</div>';
+  }else{
+    var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
+    ctr='<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>';
+  }
   // doc chips: only flag problems; else "Docs valid"
   var parts=[];
   function mk(exp,lbl){var f=docFlag(exp);if(f==='expired')parts.push('<span class="cchip red">'+lbl+' expired</span>');else if(f==='missing')parts.push('<span class="cchip red">'+lbl+' missing</span>');else if(f==='90d')parts.push('<span class="cchip amber">'+lbl+' ≤90d</span>');}
   mk(c.med_exp,'Medical');mk(c.sirb_exp,'SIRB');mk(c.pp_exp,'Passport');mk(c.usv_exp,'US visa');
   if(c.sch_exp){var sf=docFlag(c.sch_exp);if(sf==='expired')parts.push('<span class="cchip amber">Schengen expired</span>');else if(sf==='90d')parts.push('<span class="cchip amber">Schengen ≤90d</span>');}
-  var comp=parts.length?'<div class=cchips>'+parts.join('')+'</div>':'<div class=cchips><span class="cchip ok">Docs valid</span></div>';
-  // bonus pill: only show a $ figure when a baseline is set (otherwise it would be a guess)
-  var bonusPill;
-  if(c.baseline_count!=null){var nv=ladderValue((c.baseline_count||0)+1);bonusPill='<span class="pill next'+(nv===0?' zero':'')+'">Next bonus: '+(nv===0?'$0 (builds to PS)':'$'+nv.toLocaleString())+'</span>';}
-  else bonusPill='<span class="pill next zero">Bonus: baseline pending</span>';
-  return '<div class="crew-card card b-'+b+'" data-crew="'+c.agency_id+'">'
-   +'<div class=tools><button title="Documents" style="color:var(--red);font-weight:800" onclick="docsModal(\\''+c.agency_id+'\\')">✚</button><button title="Notes" onclick="notesModal(\\''+c.agency_id+'\\')">🗒</button><button title="Edit" onclick="editCrewModal(\\''+c.agency_id+'\\')">✎</button></div>'
-   +'<div class=cname>'+name+'</div>'
-   +'<div class=csub>'+sub+'</div>'
-   +'<div class=crow><span class=statdot><i style="background:'+dot(c.status)+'"></i>'+c.status+'</span><span class="pill rank">'+rankTag(c.rank,c.baseline_count)+'</span></div>'
-   +'<div class=vessel>'+(c.vessel_observed||'—')+' <small style="color:var(--mut);font-weight:500">· '+(c.client||'')+'</small></div>'
-   +(contact?'<div class=cdates>'+contact+'</div>':'')
-   +'<div class=cdates>'+span+'</div>'
-   +'<div class=crow><span class="pill cnt">Contracts '+(c.contract_count||0)+'</span>'+bonusPill+'</div>'
+  var comp='<div class=crtags>'+(parts.length?parts.join(''):'<span class="cchip ok">Docs valid</span>')+'</div>';
+  var worst=crewDocProblem(c);
+  // bonus: only show a $ figure when a baseline is set (otherwise it would be a guess)
+  var bonus;
+  if(c.baseline_count!=null){var nv=ladderValue((c.baseline_count||0)+1);bonus='<span>Next bonus</span><b'+(nv===0?' class=zero':'')+'>$'+nv.toLocaleString()+'</b>'+(nv===0?'<span>builds to PS</span>':'');}
+  else bonus='<span>Bonus</span><b class=zero style="font-size:14px">baseline pending</b>';
+  var ico={docs:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5M9 13h6M9 17h6"></path></svg>',
+    notes:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10l-6 6H6a2 2 0 0 1-2-2z"></path><path d="M14 21v-6h6"></path></svg>',
+    edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>'};
+  var id=escHtml(c.agency_id);
+  return '<div class="crew-card crcard" data-crew="'+id+'">'
+   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0"><div class=crnm>'+escHtml(name)+'</div><div class=crsub style="white-space:nowrap">'+escHtml(sub)+'</div>'+(contact?'<div class=crsub>'+contact+'</div>':'')+'</div></div>'
+   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status)+'</span><span class=crrank>'+rankTag(c.rank,c.baseline_count).toUpperCase()+'</span></div>'+shipLine+ctr+'</div>'
+   +'<div class=crright><div class=tools>'
+   +'<button class="crbtn'+(worst?' '+worst:'')+'" data-act=docs data-crew="'+id+'" title="Documents">'+ico.docs+'Docs</button>'
+   +'<button class=crbtn data-act=notes data-crew="'+id+'" title="Notes">'+ico.notes+'Notes'+(c.hasNote?'<span class=ndot title="Has notes"></span>':'')+'</button>'
+   +'<button class=crbtn data-act=edit data-crew="'+id+'" title="Edit">'+ico.edit+'Edit</button></div>'
+   +'<div class=crbonus>'+bonus+'<span class="pill cnt">Contracts '+(c.contract_count||0)+'</span></div>'
    +comp
-   +(c.hasNote?'<span class=notedot title="View notes" onclick="notesModal(\\''+c.agency_id+'\\')"></span>':'')
-   +'</div>';
+   +'</div></div>';
 }
 var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brilliance","Constellation","Eclipse","Edge","Enchantment","Equinox","Explorer","Freedom","Grandeur","Harmony","Icon","Independence","Infinity","Jewel","Legend","Liberty","Mariner","Millennium","Navigator","Oasis","Odyssey","Ovation","Quantum","Radiance","Reflection","Rhapsody","Serenade","Silhouette","Spectrum","Star","Summit","Symphony","Utopia","Vision","Voyager","Wonder","Xcel","Azamara Journey","Azamara Onward","Azamara Pursuit","Azamara Quest"];
 function shipOptions(sel){return '<option value="">—</option>'+SHIP_LIST.map(function(s){var full='MV '+s.toUpperCase();var m=(sel&&(sel===full||sel===s||sel.toUpperCase().indexOf(s.toUpperCase())>=0));return '<option value="'+full+'"'+(m?' selected':'')+'>'+s+'</option>';}).join('');}
