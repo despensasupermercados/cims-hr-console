@@ -1458,6 +1458,18 @@ async function boardLegs(env) {
 // instead of keeping a second copy of it (§3, §11). Imported at the top of this file.
 // Returns the FULL enriched crew list (overrides merged, contract count, active span, client,
 // docs). Filtering/sorting is done client-side (≈100 crew) so the UI stays snappy and consistent.
+// The ACTIVE contract span shown on a card: the Counter leg that straddles today, else the last leg, else
+// the crew's in-force relief-board card (dates only). One rule for the Crew tab and the ledger (§3).
+function activeSpanOf(legs, HIST, sc, today) {
+  const ls = (legs || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
+  let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1] || null;
+  if (!act) {
+    let cur = null;
+    for (const h of HIST || []) { if (!h || !h.ours || h.sc !== sc || !h.is_current || !h.on) continue; if (!cur || (h.off || "9999") > (cur.off || "9999")) cur = { on: h.on, off: h.off || null }; }
+    if (cur) act = { sign_on: cur.on, proj_off: cur.off, act_off: null };
+  }
+  return { active_on: act ? act.sign_on : null, active_off: act ? (act.act_off || act.proj_off) : null };
+}
 async function apiCrew(env, url) {
   // PERF (2026-07): ensures + the four reads are independent — run them concurrently instead of
   // paying 6 sequential Worker->D1 round trips. Same statements, same outputs.
@@ -1485,13 +1497,10 @@ async function apiCrew(env, url) {
   const sched = scheduleBySc(HIST);
   // Crew aboard per the relief board only (no ship_leg row yet): their contract span comes from the
   // board leg. Dates only — the Contracts count still comes from ship_leg via fullContracts().
-  const histAct = {};
-  for (const h of HIST) { if (!h || !h.ours || !h.sc || !h.is_current || !h.on) continue; const cur = histAct[h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) histAct[h.sc] = { on: h.on, off: h.off || null }; }
   const crew = base.map(b => {
     const c = applyOverride(b, ovm[b.agency_id]);
     const ls = (byCrew[b.agency_id] || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
-    let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1]
-      || (histAct[b.agency_id] ? { sign_on: histAct[b.agency_id].on, proj_off: histAct[b.agency_id].off, act_off: null } : null);
+    const span = activeSpanOf(ls, HIST, b.agency_id, today);
     const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, c.baseline_count, fullContracts(ls.map(legShape)));
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
@@ -1507,7 +1516,7 @@ async function apiCrew(env, url) {
       contract_count: cc.n, contracts_source: cc.source, contracts_as_of: cc.source === "tdg" ? TDG[b.agency_id].as_of : null,
       tier: psRank(cc.n, true),
       base_salary_usd: psSalary(cc.n),
-      active_on: act ? act.sign_on : null, active_off: act ? (act.act_off || act.proj_off) : null,
+      active_on: span.active_on, active_off: span.active_off,
       hasNote: !!noteMap[c.agency_id] || !!(c.notes && String(c.notes).trim())
     };
   });
@@ -2442,13 +2451,17 @@ async function apiContracts(env) {
   // together (they must finish before the reads, since they create the tables), then every read at
   // once. Pinned by test/perf_invariants.test.js alongside the other hot routes.
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureContractCount(env)]);
-  const [baseRes, ovsRes, legCounts, outRes, TDG] = await Promise.all([
+  const [baseRes, ovsRes, legCounts, outRes, TDG, legsRes, HIST] = await Promise.all([
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, status, vessel_observed, baseline_count FROM crew WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, baseline_count FROM crew_override").all(),
     fullContractMap(env), // sc -> FULL-contract count (drives rank + the number shown)
     env.DB.prepare("SELECT crew_id, score_pct, gate, pay_usd, count_after, committed_at FROM bonus_outcome ORDER BY committed_at ASC").all(),
     contractCountMap(env), // TDG's stated completed-contract count (§10c)
+    env.DB.prepare(KC3_LEGS_SQL).all(), // the active contract span for the ledger card (6 Oct 2026), same rule as the Crew tab
+    boardLegs(env),
   ]);
+  const today = TODAY();
+  const byCrew = {}; for (const l of legsRes.results) (byCrew[l.sc] = byCrew[l.sc] || []).push(l);
   const base = baseRes.results;
   const ovm = {}; for (const o of ovsRes.results) ovm[o.agency_id] = o;
   const lastOut = {}, totPay = {};
@@ -2467,8 +2480,10 @@ async function apiContracts(env) {
     // L.count + the ladder.
     const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, L.baseline, legCounts[b.agency_id] || 0);
     const eff = cc.n;
+    const span = activeSpanOf(byCrew[b.agency_id], HIST, b.agency_id, today);
     return {
       agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
+      active_on: span.active_on, active_off: span.active_off,
       vessel: vessel || null, client: clientOf(vessel), contracts: eff, contracts_source: cc.source,
       count: L.count, baseline_set: L.baseline_set, rank: psRank(eff), base_salary_usd: psSalary(eff), nextRung: L.nextRung,
       lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
@@ -6262,7 +6277,8 @@ function ledgerCard(r){
   var ini=((nm[0]||'').charAt(0)+(nm[nm.length-1]||'').charAt(0)).toUpperCase()||'?';
   var stc=crStyle(r.status);
   var id=escHtml(r.agency_id);
-  var shipLine='<div class=crship><span>'+(r.vessel?escHtml(r.vessel)+' <small>· '+escHtml(r.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
+  var pass=r.active_on?contractPass(r.active_on,r.active_off||null):{html:'<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>',chip:''};
+  var shipLine='<div class=crship><span>'+(r.vessel?escHtml(r.vessel)+' <small>· '+escHtml(r.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span>'+pass.chip+'</div>';
   var last=r.lastDate?('<span class="cchip ok">Last '+escHtml(r.lastDate)+' · '+(r.lastScore!=null?r.lastScore+'%':'—')+(r.lastGate?(' · '+escHtml(r.lastGate)):'')+' · $'+Number(r.lastPay||0).toLocaleString()+'</span>'):'<span class="cchip">No outcome yet</span>';
   var nb=r.baseline_set?('<span>Next bonus</span><b'+(!(r.nextRung>0)?' class=zero':'')+'>$'+Number(r.nextRung||0).toLocaleString()+'</b>'):'<span>Bonus</span><b class=zero style="font-size:14px">baseline pending</b>';
   var sal=(r.base_salary_usd!=null?'$'+Number(r.base_salary_usd).toLocaleString():'—');
@@ -6271,7 +6287,7 @@ function ledgerCard(r){
     score:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>'};
   return '<div class="crew-card crcard ledger" data-crew="'+id+'">'
    +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0"><div class=crnm>'+escHtml(r.name)+'</div><div class=crsub style="white-space:nowrap">'+id+'</div>'+(r.status?'<div class=crsub><span class=crchip style="height:22px;font-size:12px;background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(r.status)+'</span></div>':'')+'</div></div>'
-   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crrank>'+escHtml(String(r.rank||'—')).toUpperCase()+'</span><span class="pill cnt" title="Consecutive count — drives the ladder">Consecutive '+(r.count||0)+'</span><span class="pill cnt" title="Completed contracts — drives the grade">Contracts '+(r.contracts||0)+'</span></div>'+shipLine
+   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crrank>'+escHtml(String(r.rank||'—')).toUpperCase()+'</span><span class="pill cnt" title="Consecutive count — drives the ladder">Consecutive '+(r.count||0)+'</span><span class="pill cnt" title="Completed contracts — drives the grade">Contracts '+(r.contracts||0)+'</span></div>'+shipLine+pass.html
    +'<div class=crdates><span><span class=k>Salary</span> <b>'+sal+'</b></span><span class=k>·</span><span><span class=k>Paid to date</span> <b>$'+Number(r.totalPay||0).toLocaleString()+'</b></span></div>'
    +'<div class=csub style="margin-top:0">'+ctSrc(r).replace('· ','')+'</div></div>'
    +'<div class=crright><div class=tools>'
