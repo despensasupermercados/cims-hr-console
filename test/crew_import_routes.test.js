@@ -461,3 +461,35 @@ test("an empty TDG cell clears the value on the crew card; a missing column clea
   assert.equal(upd("email"), undefined, "no email column in this file: the stored email stays");
   assert.equal(st.some(s => /UPDATE crew SET (first_name|last_name|status)=/.test(s.sql)), false, "identity and status are never cleared");
 });
+
+// Miguel, 6 Oct 2026, on "your Retired tag is overridden · remove it": the console applies TDG, it does not ask.
+// A crew tagged Retired whom the file has On board / Earmarked: the tag and its manual status come off on Apply.
+test("a Retired tag the file contradicts is cleared on Apply (tag + manual status), audited; Keep Retired leaves it", async () => {
+  const existing = [{ agency_id: "SC-0042899", first_name: "Jerome", last_name: "Valdesco", status: "On board", vessel_observed: null }];
+  const rows = [{ "CREW ID": "SC-0042899", "FIRST NAME": "Jerome", "LAST NAME": "Valdesco", "CREW STATUS": "On board", "VESSEL NAME": "MV BRILLIANCE OF THE SEAS" }];
+  const fdb = (extra) => {
+    const db = fakeDB({ existing });
+    const prep = db.prepare.bind(db);
+    db.prepare = (sql) => /COALESCE\(retired,0\)=1/.test(sql) && /^SELECT/.test(sql)
+      ? { bind() { return this; }, async all() { return { results: [{ agency_id: "SC-0042899", status: "On Vacation" }] }; }, async first() { return null; } }
+      : prep(sql);
+    return db;
+  };
+  const env = { DB: fdb() };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-ur" }), env)).json();
+  assert.deepEqual(stage.review.groups.unretire, [{ agency_id: "SC-0042899", new: "On board", ship: "MV BRILLIANCE OF THE SEAS", manual_status: "On Vacation" }]);
+  const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-ur", run_by: "Rita" }), env)).json();
+  assert.equal(body.unretired, 1);
+  assert.match(body.summary, /1 Retired tag cleared \(TDG has them active\)/);
+  const upd = env.DB._batched.find(s => /^UPDATE crew_override SET retired=0, status=NULL/.test(s.sql));
+  assert.ok(upd && upd.args[1] === "SC-0042899" && /COALESCE\(retired,0\)=1$/.test(upd.sql), "bound to still-tagged");
+  assert.ok(env.DB._batched.some(s => /INSERT INTO sync_conflict/.test(s.sql) && s.args[3] === "retired"), "audited");
+  const env2 = { DB: fdb() };
+  const stage2 = await (await apiCrewImportStage(req({ rows, file_hash: "h-ur2" }), env2)).json();
+  await apiCrewImportApply(req({ review: stage2.review, decisions: { "unretire:SC-0042899": "keep" }, file_hash: "h-ur2", run_by: "Rita" }), env2);
+  assert.equal(env2.DB._batched.some(s => /SET retired=0/.test(s.sql)), false, "Keep Retired: untouched");
+  // an Inactive / On Vacation word does not clear the tag
+  const env3 = { DB: fdb() };
+  const stage3 = await (await apiCrewImportStage(req({ rows: [{ ...rows[0], "CREW STATUS": "Inactive" }], file_hash: "h-ur3" }), env3)).json();
+  assert.deepEqual(stage3.review.groups.unretire, []);
+});

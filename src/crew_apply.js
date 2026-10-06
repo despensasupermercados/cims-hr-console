@@ -100,6 +100,13 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     if (dec(`new:${it.agency_id}`, "add") === "add")
       newCrew.push({ agency_id: it.agency_id, ...(it.fields || {}) });
   }
+  // A Retired tag the file contradicts — default CLEAR (6 Oct 2026: the console applies TDG). Audited.
+  const unretire = [];
+  for (const it of g.unretire || []) {
+    if (dec(`unretire:${it.agency_id}`, "accept") !== "accept") continue;
+    unretire.push({ agency_id: it.agency_id });
+    conflicts.push({ agency_id: it.agency_id, field: "retired", old_value: "Retired" + (it.manual_status ? " / " + it.manual_status : ""), new_value: it.new + (it.ship ? ", " + it.ship : "") + " per TDG", resolved: 1 });
+  }
   // departed — flag only, default flag
   for (const it of g.departed || []) {
     const dismissed = dec(`departed:${it.agency_id}`, "flag") === "dismiss";
@@ -110,7 +117,7 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   const safeUpdates = crewUpdates.filter(u => u.field !== "vessel_observed");
   const droppedShipWrites = crewUpdates.length - safeUpdates.length;
 
-  const touched = new Set(safeUpdates.map(u => u.agency_id).concat(newCrew.map(n => n.agency_id), shipTakes.map(t => t.agency_id)));
+  const touched = new Set(safeUpdates.map(u => u.agency_id).concat(newCrew.map(n => n.agency_id), shipTakes.map(t => t.agency_id), unretire.map(u => u.agency_id)));
   const importRun = {
     file_hash: meta.file_hash ?? null,
     filename: meta.filename ?? null,
@@ -121,5 +128,5 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
     run_at: meta.run_at ?? null,
   };
 
-  return { crewUpdates: safeUpdates, newCrew, conflicts, overrideClears, shipTakes, importRun, droppedShipWrites };
+  return { crewUpdates: safeUpdates, newCrew, conflicts, overrideClears, shipTakes, unretire, importRun, droppedShipWrites };
 }

@@ -68,34 +68,32 @@ test("boardIssues: tonight's board, row by row", () => {
   // Miguel, 6 Oct 2026: "if a crew is added?? u added it.. if a crew is removed?? u remove .. if a crew
   // finish his contract.. u move it as history". The board APPLIES the file; this list is only what a person
   // must clean up: Rita's cards and tags the file overrides, and TDG not caught up with a recorded sign-off.
+  // 6 Oct 2026, later ("what is this?? ... remove it"): Valdesco's Retired tag and Calayag's recorded sign-off
+  // are not rows — the board already shows the file's word / the completion, and the import clears the tag.
   assert.deepEqual(got, [
     "empty_hull:Jewel", "empty_hull:Xcel",
     "overridden:GAY", "overridden:OLI",
-    "held:VAL",
-    "completed_still_aboard:CLY",
   ]);
   const t = Object.fromEntries(rows.map((r) => [r.kind + ":" + (r.sc || r.ship), r.text]));
   assert.equal(t["empty_hull:Jewel"], "No printer on board per the TDG file");
   assert.equal(t["overridden:GAY"], "TDG file 2026-10-05: Inactive, Voyager · your card aboard Jewel since 2026-07-20 is off the board · remove it");
   assert.equal(t["overridden:OLI"], "TDG file 2026-10-05: Earmarked, Odyssey · your card Liberty from 2026-10-31 is off the board · remove it");
-  assert.equal(t["held:VAL"], "TDG file: On board, Brilliance · your Retired tag is overridden · remove it");
-  assert.equal(t["completed_still_aboard:CLY"], "TDG not updated yet · your recorded sign-off 2026-09-25 · TDG file 2026-10-05 still: On board, Navigator");
   // Not rows any more: the board shows them, or they are not a disagreement with the file.
-  for (const k of ["dropped:JAR", "counter:PUR", "no_dates:SAN", "earmarked_no_card:TAL", "earmarked_no_card:PUR"]) assert.ok(!got.includes(k), k);
+  for (const k of ["dropped:JAR", "counter:PUR", "no_dates:SAN", "earmarked_no_card:TAL", "earmarked_no_card:PUR", "held:VAL", "completed_still_aboard:CLY"]) assert.ok(!got.includes(k), k);
   assert.ok(!got.some((g) => g.endsWith(":CAG") || g === "empty_hull:Silhouette"), "a card not yet judged is neither overridden nor an empty hull");
-  assert.ok(!got.includes("empty_hull:Brilliance"), "the file has someone aboard under Rita's tag: the held row, not an empty hull");
+  assert.ok(!got.includes("empty_hull:Brilliance"), "the file has someone aboard under Rita's tag: not an empty hull");
 });
 
-test("boardIssues: a status held by Rita, an unknown ship, On board with no ship, and an empty input", () => {
+test("boardIssues: a held status or a status edit is not a row; an unknown ship and On board with no ship are; an empty input", () => {
   const rows = boardIssues({ today: TODAY,
     crew: [{ sc: "A", name: "A", held: "Earmarked" }, { sc: "B", name: "B" }, { sc: "C", name: "C" }, { sc: "D", name: "D", manual: "Earmarked" }],
     file: { A: W("On board", "Jewel"), B: W("On board", "Nowhere", { known: false }), C: W("On board", null), D: W("On Vacation", null) },
     seats: {}, cards: [], counter: [], completed: {}, sections: [] });
   const t = Object.fromEntries(rows.map((r) => [r.sc, r]));
-  assert.equal(t.A.text, "Status held at Earmarked · TDG file 2026-10-05: On board, Jewel");
+  assert.equal(t.A, undefined, "a held status is not a row: every screen reads the file's word");
   assert.equal(t.B.kind, "unknown_ship");
   assert.equal(t.C.kind, "onboard_no_ship");
-  assert.equal(t.D.text, "Your status edit: Earmarked · TDG file 2026-10-05: On Vacation");
+  assert.equal(t.D, undefined, "a status edit is not a row: the import replaces it (D3 defaults to the file)");
   assert.deepEqual(boardIssues({}), []);
 });
 

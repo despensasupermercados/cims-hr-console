@@ -12,7 +12,7 @@
 //   - idempotent by import_run.file_hash (re-dropping the same file is a no-op).
 
 import { mapRows, diffCrew } from "./crewimport.js";
-import { buildReview, OVR_COL } from "./crew_review.js";
+import { buildReview, OVR_COL, unretireItems } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
 import { htmlPage } from "./etag.js";
@@ -112,14 +112,16 @@ async function loadContext(env, deps) {
   // a dry run on a fresh isolate must not be the first reader of a column nobody has created yet.
   if (deps && deps.ensureRegistrySnapshot) await deps.ensureRegistrySnapshot(env);
   // One wave (§12): the roster, the manual overrides and Rita's open projections travel together.
-  const [ex, ov, projections] = await Promise.all([
+  const [ex, ov, projections, rt] = await Promise.all([
     env.DB.prepare("SELECT * FROM crew").all(),
     env.DB.prepare("SELECT * FROM crew_override WHERE COALESCE(retired,0)=0").all(),
     openProjections(env, deps),
+    env.DB.prepare("SELECT agency_id, status FROM crew_override WHERE COALESCE(retired,0)=1").all(), // tagged Retired
   ]);
   const existingByAgency = Object.fromEntries((ex.results || []).map(r => [r.agency_id, r]));
   const overrideByAgency = Object.fromEntries((ov.results || []).map(r => [r.agency_id, r]));
-  return { existingByAgency, overrideByAgency, projections: projections || [] };
+  const retiredByAgency = Object.fromEntries(((rt && rt.results) || []).map(r => [r.agency_id, r]));
+  return { existingByAgency, overrideByAgency, retiredByAgency, projections: projections || [] };
 }
 
 // POST /api/crew/import/stage — body { rows, file_hash, filename }. WRITES NOTHING — except the board's
@@ -143,7 +145,7 @@ export async function apiCrewImportStage(request, env, deps) {
     }
   }
   const incomingByAgency = Object.fromEntries(mapped.map(m => [m.agency_id, m]));
-  const { existingByAgency, overrideByAgency, projections } = await loadContext(env, deps);
+  const { existingByAgency, overrideByAgency, retiredByAgency, projections } = await loadContext(env, deps);
   const diff = diffCrew(mapped, existingByAgency);
   const review = buildReview(diff, existingByAgency, incomingByAgency, overrideByAgency);
   // THE BOARD AGAINST THE FILE (Miguel, 5 Oct 2026). Every open projection is compared with what the
@@ -157,6 +159,8 @@ export async function apiCrewImportStage(request, env, deps) {
   review.projections = proj.items;
   review.projection_counts = proj.counts;
   review.registry = registry;
+  review.groups.unretire = unretireItems(registry, retiredByAgency);
+  review.counts.unretire = review.groups.unretire.length;
   review.duplicate_ids = [...new Set(duplicateIds)];
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
@@ -239,6 +243,12 @@ export async function apiCrewImportApply(request, env, deps) {
   // Fixed statement, no column interpolation, fed ONLY by plan.shipTakes (which only the ship_flag tier
   // with decision "take" can populate). The manual override ship is cleared with it — else the override
   // keeps winning at read time and the take never reaches the card (the same lesson as D3).
+  // A Retired tag the file contradicts (TDG has them On board / Earmarked): the tag and the manual status kept
+  // with it come off — bound to "still tagged", so a tag someone cleared since the review is left alone.
+  for (const u of plan.unretire || []) {
+    stmts.push(env.DB.prepare("UPDATE crew_override SET retired=0, status=NULL, updated_at=? WHERE agency_id=? AND COALESCE(retired,0)=1")
+      .bind(run_at, u.agency_id));
+  }
   for (const t of plan.shipTakes || []) {
     stmts.push(env.DB.prepare("UPDATE crew SET vessel_observed=?, updated_at=? WHERE agency_id=?")
       .bind(t.value ?? null, run_at, t.agency_id));
@@ -282,7 +292,7 @@ export async function apiCrewImportApply(request, env, deps) {
     ok: true, import_run_id: importRunId,
     applied: plan.crewUpdates.length, added: plan.newCrew.length,
     override_cleared, override_skipped: clears.length - override_cleared,
-    ship_taken: (plan.shipTakes || []).length,
+    ship_taken: (plan.shipTakes || []).length, unretired: (plan.unretire || []).length,
     open_conflicts: openInserted, ship_flags: flags.counts, board_unavailable, droppedShipWrites: plan.droppedShipWrites,
     projections: { counts: proj.counts, items: proj.items.map(i => ({ id: i.id, sc: i.sc, crew_name: i.crew_name, ship: i.ship, verdict: i.verdict, file: i.file })) },
   };
@@ -305,6 +315,7 @@ export function applySummary(r) {
   if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
   if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");
+  if (r.unretired) parts.push(n(r.unretired, "Retired tag", "Retired tags") + " cleared (TDG has them active)");
   if (r.override_cleared) parts.push(n(r.override_cleared, "manual entry", "manual entries") + " replaced by the file" + (r.override_skipped ? " (" + n(r.override_skipped, "changed", "changed") + " since review, left alone)" : ""));
   const pj = r.projections && r.projections.counts ? projectionSummary(r.projections.counts) : "";
   if (pj) parts.push(pj);
