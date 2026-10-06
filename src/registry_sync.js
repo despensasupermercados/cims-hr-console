@@ -50,6 +50,12 @@ export function reconcileProjections({ projections, registry, today, shipOf } = 
     const cardShip = of(p.ship) || String(p.ship).trim();
     const sameShip = !!fileShip && norm(fileShip) === norm(cardShip);
     const aboardByCard = !!(day(p.sign_on) && today && day(p.sign_on) <= today);
+    // THE FILE CAN ONLY CONTRADICT WHAT IT COULD SEE (6 Oct 2026, Pintucan: card aboard Wonder from 6 Oct,
+    // the 5 Oct file still On Vacation — read as "TDG says otherwise" the morning he joined). A card says
+    // "aboard, and the file disagrees" only when its sign-on is BEFORE the file's date; joining on or after
+    // it, the file predates the sign-on and says nothing yet (pending until the next upload).
+    const fileDay = day(r.run_at) || today;
+    const seen = aboardByCard && !!fileDay && day(p.sign_on) < fileDay;
     let verdict;
     if (status === "On board") {
       // On board with no readable vessel: TDG says aboard but not where — nothing to confirm or contradict.
@@ -57,11 +63,11 @@ export function reconcileProjections({ projections, registry, today, shipOf } = 
       // a FUTURE plan (a crew aboard Quantum today with a Utopia plan for January is exactly normal).
       // On board on THIS hull confirms only a card that says they are aboard NOW: a NEXT contract Rita
       // projected on the same ship for January is still a plan — the file speaks to the current contract.
-      verdict = sameShip ? (aboardByCard ? "confirmed" : "pending") : fileShip ? (aboardByCard ? "elsewhere" : "pending") : "pending";
+      verdict = sameShip ? (aboardByCard ? "confirmed" : "pending") : fileShip ? (seen ? "elsewhere" : "pending") : "pending";
     } else if (status === "Earmarked") {
-      verdict = sameShip ? "earmarked" : fileShip ? (aboardByCard ? "ashore" : "elsewhere") : (aboardByCard ? "ashore" : "pending");
+      verdict = sameShip ? "earmarked" : fileShip ? (seen ? "ashore" : aboardByCard ? "pending" : "elsewhere") : (seen ? "ashore" : "pending");
     } else if (status === "On Vacation" || status === "Inactive") {
-      verdict = aboardByCard ? "ashore" : "pending";
+      verdict = seen ? "ashore" : "pending";
     } else {
       verdict = "pending";                               // status the file left blank or unreadable
     }

@@ -246,7 +246,9 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   none) and offers no Deploy; **elsewhere** (the card says aboard HERE, the file has them
   aboard elsewhere — or TDG earmarks them elsewhere) and **ashore** (card aboard, file On Vacation /
   Inactive / Earmarked) stay yellow and print the file's word; **earmarked / pending** inform — a crew
-  aboard one hull today with a FUTURE plan on another is normal, not a contradiction. Nothing is removed;
+  aboard one hull today with a FUTURE plan on another is normal, not a contradiction. The file can only
+  contradict what it could see: a card is "aboard, the file disagrees" only when its sign-on is BEFORE the
+  file's date (Pintucan, 6 Oct: joining the day after the file is pending, not ashore). Nothing is removed;
   the Counter still absorbs the card when it carries the leg; a crew the file does not carry gets no
   verdict. The three reads ride the board's wave (§12); the projections reach the importer only through
   `deps.openProjections` (= `fetchOpenAssignments`) for the review screen. Pinned by

@@ -249,3 +249,20 @@ test("registryFromStore bootstrap: newest flag of any state, else the registry c
   // with no vesselFlags the open flags still work (the pre-6-Oct input)
   assert.equal(registryFromStore({ crew: [{ agency_id: "X", status: "On board" }], openFlags: [{ agency_id: "X", new_value: "MV ICON OF THE SEAS", created_at: "2026-09-01" }] })[0].vessel_observed, "MV ICON OF THE SEAS");
 });
+
+// 6 Oct 2026, Pintucan: card aboard Wonder from 6 Oct; the 5 Oct file still has him On Vacation. The file
+// predates the sign-on, so it cannot contradict the card yet. A card that signed on BEFORE the file can be.
+test("reconcileProjections: a file older than the card's sign-on contradicts nothing; one written after it does", () => {
+  const reg = [{ agency_id: "PIN", status: "On Vacation", vessel_observed: "MV SERENADE OF THE SEAS", run_at: "2026-10-05T18:54:18.694Z" }];
+  const card = (on) => [{ id: "a1", sc: "PIN", ship: "Wonder", sign_on: on, planned_sign_off: "2027-04-09" }];
+  const v = (on, today) => reconcileProjections({ projections: card(on), registry: reg, today }).items[0].verdict;
+  assert.equal(v("2026-10-06", "2026-10-06"), "pending", "joined after the file: no word yet");
+  assert.equal(v("2026-10-05", "2026-10-06"), "pending", "joined the day the file ran: TDG may not have caught up");
+  assert.equal(v("2026-10-01", "2026-10-06"), "ashore", "aboard since before the file, the file says ashore");
+  // Earmarked elsewhere: the same rule for an aboard card; a future plan still reads as elsewhere
+  const em = [{ agency_id: "PIN", status: "Earmarked", vessel_observed: "MV CELEBRITY APEX", run_at: "2026-10-05T18:54:18.694Z" }];
+  const ve = (on) => reconcileProjections({ projections: card(on), registry: em, today: "2026-10-06" }).items[0].verdict;
+  assert.equal(ve("2026-10-06"), "pending");
+  assert.equal(ve("2026-09-01"), "ashore");
+  assert.equal(ve("2026-11-01"), "elsewhere");
+});
