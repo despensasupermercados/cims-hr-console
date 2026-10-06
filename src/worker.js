@@ -3237,6 +3237,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 @container (max-width:380px){.cpass .cpdur{display:none}.cpdates b{font-size:13.5px}.cpstub{flex-basis:70px}.cpstub b{font-size:20px}.cpmain{padding:9px 11px 8px}}
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
+.wrap.wide{max-width:1500px}
+.cract{flex:0 0 172px;position:sticky;top:78px;display:flex;flex-direction:column;gap:10px}
+.cract .btn{width:100%;justify-content:center;margin:0}
+.cract .crbell{width:100%;height:42px;gap:9px;font-weight:600;font-size:13.5px;justify-content:center}
+.crbell .lb{color:var(--deep)}
+@media(max-width:1240px){.cract{order:-1;flex:1 1 100%;flex-direction:row;flex-wrap:wrap;position:static;justify-content:flex-end}.cract .btn,.cract .crbell{width:auto}.cract .crbell{padding:0 14px}}
 .crbell.ok{color:var(--green-d)}
 .crbell.hot{color:var(--red);border-color:#F3C3C3}
 .crbadge{position:absolute;top:-7px;right:-7px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 0 2px #fff;font-variant-numeric:tabular-nums}
@@ -3745,6 +3751,7 @@ function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
 var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','billing','travel','fleet','reports','data','settings','ask'];
 function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.remove('wide');
   try{if(TABS.indexOf(tab)>=0&&location.hash!=='#'+tab)history.replaceState(null,'','#'+tab);}catch(_){}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
@@ -5662,16 +5669,13 @@ function crewMatchesComp(c){
   return true;
 }
 async function renderCrew(){
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   CREW=[];CF.q='';CF.status=[];CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
   try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   $('#view').innerHTML=
    '<div class=bar><h2 id=crewcount style="margin-right:auto">Crew</h2>'
    +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'crrail\\').classList.toggle(\\'open\\')">Filters</button>'
-   +'<button class="crbell ok" id=intelReviewBtn title="Review intel" aria-label="Review intel" onclick="openIntelReview()">'+BELL_SVG+'</button>'
-   +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
-   +'<button class="btn ghost" onclick="hiddenCardsModal()">Hidden cards</button>'
-   +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
    +'</div>'
    +'<div class=crwrap>'
    +'<aside class=crrail id=crrail>'
@@ -5686,13 +5690,20 @@ async function renderCrew(){
    +'</aside>'
    +'<section class=crmain>'
    +'<div id=crewgrid style="display:flex;flex-direction:column;gap:10px"></div>'
-   +'</section></div>';
+   +'</section>'
+   // The actions live in their own column right of the cards (Miguel, 6 Oct 2026: "move it where highlighted").
+   +'<aside class=cract>'
+   +'<button class="crbell ok" id=intelReviewBtn title="Review intel" aria-label="Review intel" onclick="openIntelReview()">'+BELL_SVG+'<span class=lb>Intel review</span></button>'
+   +'<button class="btn ghost" onclick="exportDocsCSV()">Docs CSV</button>'
+   +'<button class="btn ghost" onclick="hiddenCardsModal()">Hidden cards</button>'
+   +'<button class="btn green" onclick="addCrewModal()">+ Add crew</button>'
+   +'</aside></div>';
   paintCrew();intelReviewCount();
 }
 var BELL_SVG='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
 // The bell (6 Oct 2026): green when nothing waits, red with the pending count when the intel queue has items.
 async function intelReviewCount(){
-  try{var r=await (await fetch('/api/intel/review')).json();var b=document.getElementById('intelReviewBtn');if(b){var n=Number(r.count)||0;b.className='crbell '+(n?'hot':'ok');b.title=n?(n+' intel item'+(n===1?'':'s')+' to review'):'Review intel · nothing pending';b.innerHTML=BELL_SVG+(n?'<span class=crbadge>'+(n>99?'99+':n)+'</span>':'');}}catch(e){}
+  try{var r=await (await fetch('/api/intel/review')).json();var b=document.getElementById('intelReviewBtn');if(b){var n=Number(r.count)||0;b.className='crbell '+(n?'hot':'ok');b.title=n?(n+' intel item'+(n===1?'':'s')+' to review'):'Review intel · nothing pending';b.innerHTML=BELL_SVG+'<span class=lb>Intel review</span>'+(n?'<span class=crbadge>'+(n>99?'99+':n)+'</span>':'');}}catch(e){}
 }
 async function openIntelReview(){
   var w=document.createElement('div');w.id='intelmodal';w.className='modwrap';
