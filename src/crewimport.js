@@ -32,7 +32,7 @@ function blankCell(row, patterns) {
 const CLEARABLE = {
   middle_name: ["middle"], rank_observed: ["rank", "position", "rating"], vessel_observed: ["vessel", "ship"],
   province: ["province"], phone: ["mobile", "phone", "cell", "contact no"], email: ["email", "e-mail"],
-  dob: ["date of birth", "birth", "dob"],
+  dob: ["date of birth", "birth", "dob"], gender: ["gender", "sex"],
   med_exp: ["medical expiration", "medical exp", "med expiration", "med exp"],
   sirb_exp: ["sirb expiration", "seamans book expiration", "seafarer expiration", "seaman expiration"],
   pp_exp: ["passport expiration", "passport exp"],
@@ -40,6 +40,13 @@ const CLEARABLE = {
   usv_exp: ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"],
 };
 
+// "M" / "F" from the file's word (M, F, Male, Female, any case); anything else is null.
+export function normGender(v) {
+  const s = String(v == null ? "" : v).trim().toUpperCase();
+  if (s === "M" || s === "MALE") return "M";
+  if (s === "F" || s === "FEMALE") return "F";
+  return null;
+}
 // A real calendar date or null. Every branch below ends here, so an impossible date
 // (2034-23-09, 2027-02-30) can never be stored — the console read those as a MISSING document.
 function realDate(y, mo, da) {
@@ -155,6 +162,9 @@ export function mapRowFull(row) {
     province: pick(row, ["province"]) || null,
     phone: pick(row, ["mobile", "phone", "cell", "contact no"]) || null,
     email: pick(row, ["email", "e-mail"]) || null,
+    // Gender as the file states it (6 Oct 2026): M / F from a GENDER or SEX column. Anything else, or no
+    // such column, is null (keep what the card holds). Never inferred from a name.
+    gender: normGender(pick(row, ["gender", "sex"])),
     // Match the EXPIRATION column specifically. The real AdvancedQuery layout has
     // "<DOC> NO", "<DOC> ISSUE/DATE OF ISSUE", "<DOC> EXPIRATION", "<DOC> PLACE" — and a
     // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.
@@ -181,7 +191,7 @@ export function mapRows(rows) {
 }
 
 const TRACK = ["first_name", "middle_name", "last_name", "status", "rank_observed",
-  "vessel_observed", "dob", "province", "phone", "email",
+  "vessel_observed", "dob", "province", "phone", "email", "gender",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp"];
 
 // --- identity ---------------------------------------------------------------

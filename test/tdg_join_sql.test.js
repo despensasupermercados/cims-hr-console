@@ -12,7 +12,7 @@ const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8") 
 function db() {
   const d = new DatabaseSync(":memory:");
   d.exec(`CREATE TABLE crew (id TEXT, agency_id TEXT, first_name TEXT, middle_name TEXT, last_name TEXT, status TEXT, rank_observed TEXT, rank_override TEXT,
-    vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT,
+    vessel_observed TEXT, dob TEXT, province TEXT, phone TEXT, email TEXT, gender TEXT, pp_no TEXT, med_exp TEXT, sirb_exp TEXT, pp_exp TEXT, usv_exp TEXT, sch_exp TEXT,
     baseline_count INTEGER, ship_crew_id TEXT, redacted INTEGER DEFAULT 0);
     CREATE TABLE sync_conflict (id TEXT, import_run_id TEXT, agency_id TEXT, field TEXT, old_value TEXT, new_value TEXT, resolved INTEGER, created_at TEXT);
     CREATE TABLE registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT, name TEXT, raw_status TEXT);
