@@ -5809,7 +5809,8 @@ async function renderCrew(){
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
   try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   $('#view').innerHTML=
-   '<div class=bar><h2 id=crewcount style="margin-right:auto">Crew</h2>'
+   // No page heading (Miguel, 6 Oct 2026: "remove this .. All crew · 104 results"): the count lives at the foot of the rail.
+   '<div class=bar style="margin:0;justify-content:flex-end">'
    +'<button class="btn ghost crfbtn" onclick="document.getElementById(\\'crrail\\').classList.toggle(\\'open\\')">Filters</button>'
    +'</div>'
    +'<div class=crwrap>'
@@ -5989,7 +5990,7 @@ function paintCrew(){
   });
   var filt=[];if(CF.comp)filt.push({expired:'docs expired/missing',soon:'docs ≤90d',schengen:'Schengen expiring',valid:'documents valid'}[CF.comp]);if(CF.rank.length)filt.push(CF.rank.join(' + '));if(CF.client.length)filt.push(CF.client.join(' + '));if(CF.ship.length)filt.push(CF.ship.map(function(k){return (crewFacets.names||{})[k]||k;}).join(' + '));
   var tot=document.getElementById('crewtotal');if(tot)tot.innerHTML='<b>'+list.length+'</b> of '+CREW.length+' crew shown';
-  $('#crewcount').innerHTML=escHtml(CF.status.length?CF.status.join(' + '):'All crew')+' <span class=csub style="display:inline;font-size:15px;font-weight:600;font-family:inherit">· '+list.length+(list.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
+  var _cc=document.getElementById('crewcount');if(_cc)_cc.innerHTML=escHtml(CF.status.length?CF.status.join(' + '):'All crew')+' <span class=csub style="display:inline;font-size:15px;font-weight:600;font-family:inherit">· '+list.length+(list.length===1?' result':' results')+(filt.length?' · '+escHtml(filt.join(' · ')):'')+'</span>';
   $('#crewgrid').innerHTML=list.map(card).join('')||'<div class=muted>No matches.</div>';
   $('#crewgrid').onclick=function(ev){
     var b=ev.target.closest?ev.target.closest('.tools button'):null;
