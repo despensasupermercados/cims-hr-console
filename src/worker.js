@@ -1423,6 +1423,9 @@ async function apiDashboard(env) {
 // Manual edits live in crew_override and ALWAYS win over the imported base row.
 // applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
 const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
+// crew.gender (6 Oct 2026): M / F as TDG's file states it. Its own one-statement guard, so it rides in the
+// existing ensure wave of every reader that selects it (§12) without adding a statement to ensureCrewExtras.
+const ensureCrewGender = memoEnsure(async (env) => { await env.DB.prepare("ALTER TABLE crew ADD COLUMN gender TEXT").run().catch(() => null); });
 async function ensureCrewExtrasImpl(env) {
   // COLD START (15 Sep 2026, perf_log: /api/dashboard 1.5s, /api/rotation 2s at GRU against a PRG
   // primary): every statement here used to be its own ~220ms round trip, on every new isolate. Now
@@ -1473,14 +1476,14 @@ function activeSpanOf(legs, HIST, sc, today) {
 async function apiCrew(env, url) {
   // PERF (2026-07): ensures + the four reads are independent — run them concurrently instead of
   // paying 6 sequential Worker->D1 round trips. Same statements, same outputs.
-  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureContractCount(env)]);
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureCrewGender(env), ensureContractCount(env)]);
   const today = TODAY();
   // ?hidden=1 returns the HIDDEN cards (redacted=1) for the "Hidden cards" restore list; default is
   // the live roster (redacted=0). Fixed 0/1 literal — no user string reaches the SQL.
   const onlyHidden = !!(url && url.searchParams.get("hidden") === "1");
   const redFlag = onlyHidden ? "1" : "0";
   const [baseRes, ovsRes, legsRes, nlRes, HIST, TDG] = await Promise.all([
-    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=" + redFlag).all(),
+    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, gender, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
@@ -1507,6 +1510,7 @@ async function apiCrew(env, url) {
       status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
       rank: c.rank_override || c.rank_observed || null, vessel_observed: c.vessel_observed,
       client: clientOf(c.vessel_observed), dob: c.dob, province: c.province, phone: c.phone, email: c.email, pp_no: c.pp_no,
+      gender: c.gender === "M" || c.gender === "F" ? c.gender : null, // TDG's word only, never inferred (6 Oct 2026)
       med_exp: c.med_exp, sirb_exp: c.sirb_exp, pp_exp: c.pp_exp, usv_exp: c.usv_exp, sch_exp: c.sch_exp,
       // contract_count = CUMULATIVE completed contracts: TDG's stated count (§10c) when the count file
       // carries the crew, else seeded baseline + full legs derived from Counter dates. Drives the HR
@@ -2295,6 +2299,8 @@ const ensureRegistrySnapshot = memoEnsure(async (env) => {
     // A deployed card stays on the ship, stamped (Miguel, 5 Oct 2026); the board reads these columns.
     env.DB.prepare("ALTER TABLE assignment ADD COLUMN deployed_at TEXT").run().catch(() => null),
     env.DB.prepare("ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT").run().catch(() => null),
+    // The import may write crew.gender (6 Oct 2026); its guard is this one, so the column is made here too.
+    env.DB.prepare("ALTER TABLE crew ADD COLUMN gender TEXT").run().catch(() => null),
   ]);
 });
 // The STRICT hull matcher for the registry comparison (crew_flags.js): "MV JEWEL OF THE SEAS" meets
@@ -3243,7 +3249,13 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crhead .ttl{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--navy)}
 .crcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-wrap:wrap;gap:14px 18px;box-shadow:0 1px 2px rgba(20,45,72,.04)}
 .crcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
-.crid{flex:0 1 250px;min-width:210px;display:flex;gap:12px}
+.crid{flex:0 1 330px;min-width:240px;display:flex;gap:12px}
+.crnmrow{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.crwho{font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap}
+.crid .crship{display:block;font-size:14px;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crid .crsub{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crid .crsub a{color:var(--mut)}
+.crid .crids{font-size:11.5px;color:#93A1B2;margin-top:6px}
 .crav{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Outfit';font-weight:700;font-size:14px;flex:0 0 auto}
 .crnm{font-family:'Outfit';font-weight:700;font-size:17px;color:var(--navy);line-height:1.2}
 .crsub{font-size:12.5px;color:var(--mut);margin-top:3px}
@@ -6052,20 +6064,22 @@ function card(c){
   var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
   var stc=crStyle(c.status);
   var age=ageOf(c.dob);
-  var sub=c.agency_id+(c.pp_no?(' · '+c.pp_no):'')+(age!==''?(' · '+age+' yrs'):'');
+  // The identity column (Miguel, 6 Oct 2026): name with age · M/F beside it; then ship · customer, email, phone;
+  // the ids and province last and smaller. M/F is TDG's word only — blank until a file carries it.
+  var who=[age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
+  var ids=[c.agency_id,c.pp_no||'',c.province||''].filter(Boolean).map(escHtml).join(' · ');
   var ph=fmtPhone(c.phone);
   var tel=ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'+(ph.bad?' <span class=vchip>⚠ verify</span>':'')):'';
-  var contact=[c.province?escHtml(c.province):'',tel].filter(Boolean).join(' · ');
+  var mail=c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'';
   // Contract line: ON → OFF · duration, a progress bar, and the one number people look up — when it ends.
   var ctr='';
   if(c.active_on){
     var pass=contractPass(c.active_on,c.active_off||null),chip=pass.chip;
     ctr=pass.html;
-    var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
   }else{var chip='';
-    var shipLine='<div class=crship><span>'+(c.vessel_observed?escHtml(c.vessel_observed)+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</span></div>';
     ctr='<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>';
   }
+  var shipLine='<div class=crship title="'+escHtml(c.vessel_observed||'')+'">'+(c.vessel_observed?escHtml(shipShort(c.vessel_observed))+' <small>· '+escHtml(c.client||'')+'</small>':'<span style="font-weight:500;color:var(--mut)">No ship assigned</span>')+'</div>';
   // doc chips: only flag problems; else "Docs valid"
   var parts=[];
   function mk(exp,lbl){var f=docFlag(exp);if(f==='expired')parts.push('<span class="cchip red">'+lbl+' expired</span>');else if(f==='missing')parts.push('<span class="cchip red">'+lbl+' missing</span>');else if(f==='90d')parts.push('<span class="cchip amber">'+lbl+' ≤90d</span>');}
@@ -6082,8 +6096,14 @@ function card(c){
     edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>'};
   var id=escHtml(c.agency_id);
   return '<div class="crew-card crcard" data-crew="'+id+'">'
-   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0"><div class=crnm>'+escHtml(name)+'</div><div class=crsub style="white-space:nowrap">'+escHtml(sub)+'</div>'+(contact?'<div class=crsub>'+contact+'</div>':'')+'</div></div>'
-   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status)+'</span><span class=crrank>'+rankTag(c.rank,c.baseline_count).toUpperCase()+'</span>'+(chip?chip.replace('class=croff','class="croff inrow"'):'')+'</div>'+shipLine+ctr+'</div>'
+   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+   +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span>'+(who?'<span class=crwho>'+escHtml(who)+'</span>':'')+'</div>'
+   +shipLine
+   +(mail?'<div class=crsub>'+mail+'</div>':'')
+   +(tel?'<div class=crsub>'+tel+'</div>':'')
+   +(ids?'<div class="crsub crids">'+ids+'</div>':'')
+   +'</div></div>'
+   +'<div class=crmid><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status)+'</span><span class=crrank>'+rankTag(c.rank,c.baseline_count).toUpperCase()+'</span>'+(chip?chip.replace('class=croff','class="croff inrow"'):'')+'</div>'+ctr+'</div>'
    +'<div class=crright><div class=tools>'
    +'<button class="crbtn'+(worst?' '+worst:'')+'" data-act=docs data-crew="'+id+'" title="Documents">'+ico.docs+'Docs</button>'
    +'<button class=crbtn data-act=notes data-crew="'+id+'" title="Notes">'+ico.notes+'Notes'+(c.hasNote?'<span class=ndot title="Has notes"></span>':'')+'</button>'

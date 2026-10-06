@@ -85,7 +85,7 @@ async function keepCopyOfAppliedFile(env, deps, mapped, file_hash) {
 // Fields this route is allowed to UPDATE on crew. vessel_observed deliberately absent (D1).
 export const CREW_WRITABLE = new Set([
   "first_name", "middle_name", "last_name", "status", "rank_observed",
-  "dob", "province", "phone", "email",
+  "dob", "province", "phone", "email", "gender",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp",
 ]);
 
@@ -95,7 +95,7 @@ export const OVR_CLEARABLE = new Set(OVR_FIELDS.filter(f => CREW_WRITABLE.has(f)
 
 // Columns written when INSERTing a brand-new crew member (agency_code has a DB default).
 const INSERT_COLS = ["id", "agency_id", "first_name", "middle_name", "last_name", "status",
-  "rank_observed", "vessel_observed", "dob", "province", "phone", "email",
+  "rank_observed", "vessel_observed", "dob", "province", "phone", "email", "gender",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp", "created_at", "updated_at"];
 
 const J = (o, status = 200) =>

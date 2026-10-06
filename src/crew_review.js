@@ -38,7 +38,7 @@ export const TIER = {
 // Tracked cert fields (all are expiry dates in the AdvancedQuery import).
 const CERT_FIELDS = new Set(["med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp"]);
 // Low-stakes hygiene fields that auto-apply without asking.
-const MINOR_FIELDS = new Set(["province"]);
+const MINOR_FIELDS = new Set(["province", "gender"]);
 
 // ISO 'YYYY-MM-DD' compares correctly as a string; guard nulls / non-strings.
 function isEarlier(next, prev) {
