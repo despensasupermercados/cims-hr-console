@@ -3264,31 +3264,32 @@ nav button{white-space:nowrap}
 }
 .wrap{max-width:1180px;margin:0 auto;padding:22px}
 .shipsec{background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:0 2px 10px rgba(20,45,72,.06);overflow:hidden;margin-bottom:10px}
-.shiphdr{display:flex;align-items:center;padding:12px 14px;cursor:pointer;border-left:3px solid var(--royal)}
-.shiphdr .nm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:15px}
-.shiphdr .meta{margin-left:auto;color:var(--mut);font-size:12.5px;display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
-.shiphdr{flex-wrap:wrap;row-gap:2px}.shiphdr .nm{flex:1 1 auto}
-/* The board column is ~720px beside the side rail, so the line takes its own full-width row under the name (the
-   drawing had it inline; at 330px the dates collide). Names and the middle dates go when the row is narrow. */
-.stl{order:3;flex:1 1 100%;min-width:0;position:relative;margin:6px 0 0;padding-top:17px;padding-bottom:16px;container-type:inline-size}
-@container (max-width:460px){.stl .swho{display:none}.stl .std{display:none}.stl .std.first,.stl .std.last{display:block}.stl .snow em{display:none}}
-.stl .stlb{position:relative;background:#E1E6EE;border-radius:3px}
-.stl.none .stlb{height:6px;background:repeating-linear-gradient(135deg,#FBE7E6 0 4px,#F6D3D1 4px 6px)}.stl.none em{position:absolute;left:0;top:28px;font-style:normal;font-size:11px;color:#B42318;font-weight:700;white-space:nowrap}
-.stl .sg{position:absolute;height:6px;border-radius:3px;background:var(--green)}
-.stl .sg.proj{background:repeating-linear-gradient(90deg,var(--green) 0 6px,#B9E3AE 6px 9px)}
-.stl .sg.await{background:#A9DD9A}
-.stl .sg.earmark{background:#F3C64A}.stl .sg.earmark.proj{background:repeating-linear-gradient(90deg,#F3C64A 0 6px,#FAE4A3 6px 9px)}
-.stl .sg.tdg{background:#E6B325}.stl .sg.tdg.proj{background:repeating-linear-gradient(90deg,#E6B325 0 6px,#F3D98A 6px 9px)}
-.stl .sg.open{-webkit-mask-image:linear-gradient(90deg,#000 60%,transparent);mask-image:linear-gradient(90deg,#000 60%,transparent)}
-.stl .sgap{position:absolute;top:-2px;height:10px;background:#D92D20;border-radius:2px;min-width:3px}
-.stl .stk{position:absolute;top:-5px;width:2px;height:16px;background:var(--navy);margin-left:-1px}
-.stl .std{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;color:#4A5A6E;white-space:nowrap;font-variant-numeric:tabular-nums}
-.stl .std.first{transform:none}.stl .std.last{transform:translateX(-100%)}.stl .std.first.last{transform:none}
-.stl .std.soft{color:#9AA6B5}.stl .std small{display:block;font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;text-align:right}
-.stl .swho{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;font-weight:700;color:var(--navy);white-space:nowrap}
-.stl .snow{position:absolute;top:-9px;width:2px;height:24px;background:var(--navy);margin-left:-1px;z-index:2}.stl .snow em{position:absolute;top:-13px;left:50%;transform:translateX(-50%);font-style:normal;font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--navy);background:#fff;padding:0 3px;line-height:12px}
-@media (max-width:640px){.shiphdr .meta{flex:1 1 auto;justify-content:flex-end}.stl{margin-top:4px;padding-top:8px}.rrot .pu{white-space:normal;overflow:visible}}
+.shiphdr{display:flex;align-items:center;padding:14px 16px 12px;cursor:pointer;border-left:3px solid var(--royal)}
+.shiphdr .nm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:15px;letter-spacing:-.01em}
+.shiphdr .meta{margin-left:auto;color:#B6C0CC;font-size:11px;display:flex;align-items:center;flex:0 0 auto}
 .shiphdr .arw{display:inline-block;transition:transform .15s}.shiphdr .arw.closed{transform:rotate(-90deg)}
+.shiphdr{flex-wrap:wrap;row-gap:2px}.shiphdr .nm{flex:1 1 auto}
+/* THE SHIP'S TIMELINE (7 Oct 2026). Its own full-width row under the name: the board column is ~720px beside the side
+   rail, inline the line had 330px and the dates collided. Quiet by design (Miguel: "a little bit of a luxury feeling"):
+   a 3px line, hairline ticks, 10.5px type in two greys, soft fills; names and middle dates go when the row is narrow. */
+.stl{order:3;flex:1 1 100%;min-width:0;position:relative;margin:10px 0 0;padding-top:20px;padding-bottom:14px;container-type:inline-size}
+.stl .stlb{position:relative;background:#EDF1F5;border-radius:2px}
+.stl.none .stlb{height:3px;background:repeating-linear-gradient(90deg,#F3DCDA 0 6px,#FBF1F0 6px 12px)}.stl.none em{position:absolute;left:0;top:29px;font-style:normal;font-size:10.5px;color:#A77F7B;font-weight:500;white-space:nowrap;letter-spacing:.01em}
+.stl .sg{position:absolute;height:3px;border-radius:2px;background:#8CCB78}
+.stl .sg.proj{background:repeating-linear-gradient(90deg,#8CCB78 0 7px,#D6EDCF 7px 10px)}
+.stl .sg.await{background:#C3E6B9}
+.stl .sg.earmark{background:#EBCB6E}.stl .sg.earmark.proj{background:repeating-linear-gradient(90deg,#EBCB6E 0 7px,#F7E9BE 7px 10px)}
+.stl .sg.tdg{background:#D9B24C}.stl .sg.tdg.proj{background:repeating-linear-gradient(90deg,#D9B24C 0 7px,#EFDCA0 7px 10px)}
+.stl .sg.open{-webkit-mask-image:linear-gradient(90deg,#000 60%,transparent);mask-image:linear-gradient(90deg,#000 60%,transparent)}
+.stl .sgap{position:absolute;top:-1px;height:5px;background:#E9A39E;border-radius:2px;min-width:3px}
+.stl .stk{position:absolute;top:-4px;width:1px;height:11px;background:#B8C2CF}
+.stl .std{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;color:#7D8A99;white-space:nowrap;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.stl .std.first{transform:none}.stl .std.last{transform:translateX(-100%)}.stl .std.first.last{transform:none}
+.stl .std.soft{color:#AEB8C4}.stl .std small{display:block;font-size:8px;letter-spacing:.08em;text-transform:uppercase;text-align:right;color:#B8C2CF}
+.stl .swho{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;font-weight:600;color:#3F5068;white-space:nowrap;letter-spacing:.01em}
+.stl .snow{position:absolute;top:-6px;width:1px;height:15px;background:var(--navy);z-index:2}.stl .snow em{position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-style:normal;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--navy);background:#fff;padding:0 3px;line-height:12px}
+@container (max-width:460px){.stl .swho{display:none}.stl .std{display:none}.stl .std.first,.stl .std.last{display:block}.stl .snow em{display:none}}
+@media (max-width:640px){.stl{margin-top:6px;padding-top:10px}}
 .shipbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;padding:6px 14px 14px;align-items:start}
 .shipbody.closed{display:none}
 .rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:grab}
@@ -3455,13 +3456,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rrot .rcity.off{text-align:right;justify-content:flex-end}
 .rrot .rcity .pc{font-weight:600}
 .rrot .rmut{color:#8795A8;font-weight:500}
-.rrot .pbar{grid-column:1/-1;position:relative;height:8px;margin-top:10px;background:#E1E6EE;border-radius:4px;overflow:hidden}
-.rrot .pbar i{display:block;height:100%;background:var(--green);border-radius:4px}
-.rrot .pbar.late i{background:#B42318}
-.rrot .pbar.plan{background:repeating-linear-gradient(90deg,#EADFB8 0 6px,#F4EFDD 6px 12px)}
-.rrot .pu{font-size:11px;line-height:14px;color:var(--mut);margin-top:5px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rrot .pu b{color:var(--navy);font-weight:700}
-.rrot .pu.r{text-align:right}.rrot .pu.r.late,.rrot .pu.r.late b{color:#B42318}
+.rrot .pbar{grid-column:1/-1;position:relative;height:3px;margin-top:14px;background:#EDF1F5;border-radius:2px;overflow:hidden}
+.rrot .pbar i{display:block;height:100%;background:#8CCB78;border-radius:2px}
+.rrot .pbar.late i{background:#E0908B}
+.rrot .pbar.plan{background:repeating-linear-gradient(90deg,#EBCB6E 0 7px,#F7E9BE 7px 10px);opacity:.7}
+.rrot .rdate{margin:6px 0 0;font-size:11.5px;line-height:14px;color:#7D8A99;font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:.01em}
+.rrot .rdate.off{text-align:right}
 .rtags{margin:0;gap:6px}
 .rtag{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px;border-color:transparent}
 .rtag.on{border-color:transparent}
@@ -5076,7 +5076,7 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,os=offSpan(rb.printer.off_date),t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(os&&os.ago?os.t+' ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+(os?os.t:d+' days');fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+(os?os.t:d+' days');fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(os?os.t:(d!=null?d+' days':'TBA'))+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -5241,18 +5241,13 @@ function rotCard(x){
     var offC=x.signOff?(x.off_city?oc(x.off_city,x.off_conf):(x.disembark?niceCity(x.disembark):tba)):(plan?'<span class=rmut>Sign-off to plan</span>':'');
     var pct=null;
     if(x.signOn&&x.signOff){var t0=Date.parse(x.signOn+'T00:00:00Z'),t1=Date.parse(x.signOff+'T00:00:00Z'),tn=Date.parse(today+'T00:00:00Z');if(t1>t0)pct=Math.max(0,Math.min(100,Math.round((tn-t0)/(t1-t0)*100)));}
-    // Variant C (Miguel, 7 Oct 2026: "this should be progress bar"): a thin bar filled to today, with how long
-    // aboard on the left and how long to go (or how far past) on the right. The dates live on the ship's timeline.
-    var aboardNow=(live||ovd)&&x.signOn&&x.signOn<=today;
-    var uL=aboardNow?('<b>'+spanCompact(x.signOn,today)+'</b> aboard'):(plan&&x.signOn?('signs on <b>'+fmtDateS(x.signOn)+'</b>'):'');
-    var uR='';
-    if((live||ovd)&&x.signOff){uR=ovd?('<b>'+spanCompact(x.signOff,today)+'</b> past the '+(x.offSource==='projected'?'projected sign-off':'sign-off')):('<b>'+spanCompact(today,x.signOff)+'</b> to go');}
-    else if(live||ovd){uR='no sign-off yet';}
-    else if(plan){uR=x.signOff&&x.signOn?('<b>'+spanCompact(x.signOn,x.signOff)+'</b> planned'):'sign-off to plan';}
+    // The bar (Miguel, 7 Oct 2026: "this should be progress bar", then "this progress bar should be more gentle"):
+    // a thin soft line filled to today, the two calendar dates under it as before ("we had them very well done").
+    // How long aboard is on the status line, how long to go is the chip — neither is repeated here.
     var fill=ovd?'<i style="width:100%"></i>':(live&&pct!=null?('<i style="width:'+pct+'%"></i>'):'');
     rows='<div class=tl><span class="rcity on">'+onC+'</span><span class="rcity off">'+offC+'</span>'
       +'<div class="pbar'+(ovd?' late':(plan&&!confirmed&&!awaiting)?' plan':'')+'">'+fill+'</div>'
-      +'<span class="pu l">'+uL+'</span><span class="pu r'+(ovd?' late':'')+'">'+uR+'</span></div>';
+      +'<span class="rdate on">'+(x.signOn?fmtDateS(x.signOn):'')+'</span><span class="rdate off">'+(x.signOff?fmtDateS(x.signOff):'&mdash;')+'</span></div>';
   }
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
@@ -5355,24 +5350,13 @@ function rotShip(sec){
       +'<button class=pbtn data-log="'+escHtml(d.id)+'" onclick="deployRestore(this)" title="Put the earmark back on the board">Restore</button></div>';
   }).join('');
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Contract completed · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
-  // Counts that are TRUE (Miguel, 15 Sep 2026). The header read "1 onboard · 2 current" for a section
-  // holding one person at work and one whose sign-off passed 24 days ago: "current" counted CARDS, not
-  // people aboard. Say onboard and overdue, and nothing that needs a footnote.
-  var _ovd=(sec.crew||[]).filter(function(c){return cardOverdue(c);}).length;
-  var _bits=[sec.brand];
-  if(sec.onboard)_bits.push(sec.onboard+' onboard');
-  if(_ovd)_bits.push(_ovd+' overdue');
-  if(!sec.onboard&&!_ovd&&sec.crew.length)_bits.push(sec.crew.length+' contract card'+(sec.crew.length===1?'':'s'));
-  var _em=projs.length+sec.crew.filter(function(c){return c.state==='yellow'&&!c.confirmed&&!c.awaiting;}).length;
-  if(_em)_bits.push(_em+' earmarked');
-  if(sec.deployed&&sec.deployed.length)_bits.push(sec.deployed.length+' sent to TDG');
-  if(hist.length)_bits.push(hist.length+' completed');
-  var meta=_bits.join(' · ');
+  // The header is the ship's name and its timeline (Miguel, 7 Oct 2026: "we don't need to have this royal one on
+  // board"): the brand is the coloured edge, the counts are on the cards and the line. Only the chevron stays.
   // (15 Sep 2026) An inline second banner was built here and never inserted anywhere — reliefBanner() is
   // the one that renders. Removed with its five helper vars; dead code that formats crew data is a trap.
   var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;
   var _rslot=reliefSlot(_rb,projs);var _rbanner=reliefBanner(_rb);
-  return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
+  return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta><span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
 }
 // THE SHIP'S TIMELINE (Miguel, 7 Oct 2026: "a timeline from the sign-on of the active crew to the sign-off of the
@@ -5397,12 +5381,12 @@ function shipTimeline(sec){
   // lanes: a crew whose contract overlaps an earlier one goes a lane down
   var lanes=[];
   segs.forEach(function(x){var L=0;while(lanes[L]&&lanes[L].some(function(y){return x.on<y.end&&y.on<x.end;}))L++;(lanes[L]=lanes[L]||[]).push(x);x.lane=L;});
-  var nl=lanes.length,h='';
+  var nl=lanes.length,h='',hgt=3+(nl-1)*9,dy=hgt+6;
   segs.forEach(function(x){
     var l=pct(x.on),r=pct(x.end),w=Math.max(0.4,r-l);
     var t=escHtml(x.name)+' \u00b7 '+fmtDateS(x.on)+' \u2192 '+(x.off?fmtDateS(x.off):'no sign-off yet')+(x.proj?' (projected)':'');
-    h+='<i class="sg '+x.k+(x.proj?' proj':'')+(x.off?'':' open')+'" style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%;top:'+(x.lane*10)+'px" title="'+t+'"></i>';
-    h+='<b class=swho style="left:'+((l+r)/2).toFixed(2)+'%;top:'+(-15-x.lane*10)+'px">'+escHtml((x.name||'').split(' ').slice(-1)[0])+'</b>';
+    h+='<i class="sg '+x.k+(x.proj?' proj':'')+(x.off?'':' open')+'" style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%;top:'+(x.lane*9)+'px" title="'+t+'"></i>';
+    h+='<b class=swho style="left:'+((l+r)/2).toFixed(2)+'%;top:'+(-17-x.lane*9)+'px">'+escHtml((x.name||'').split(' ').slice(-1)[0])+'</b>';
   });
   // a gap between two contracts on the first lane is the ship uncovered
   var l0=segs.filter(function(x){return x.lane===0;});
@@ -5410,11 +5394,10 @@ function shipTimeline(sec){
   // ticks + dates: one per distinct boundary, a second row when two fall within 7% of each other
   var ticks=[];segs.forEach(function(x){if(ticks.indexOf(x.on)<0)ticks.push(x.on);if(x.off&&ticks.indexOf(x.off)<0)ticks.push(x.off);});ticks.sort();
   var prev=-99,row=0,rows=0;
-  ticks.forEach(function(t,i){var xp=pct(t);row=xp-prev<11?row+1:0;prev=xp;if(row>rows)rows=row;h+='<i class=stk style="left:'+xp.toFixed(2)+'%"></i><span class="std'+(i===0?' first':'')+(i===ticks.length-1?' last':'')+'" style="left:'+xp.toFixed(2)+'%;top:'+(12+row*13)+'px">'+fmtDateS(t)+'</span>';});
-  segs.forEach(function(x){if(!x.off)h+='<span class="std soft last" style="left:'+pct(x.end).toFixed(2)+'%;top:12px">'+fmtDateS(x.end)+'<small>projected</small></span>';});
+  ticks.forEach(function(t,i){var xp=pct(t);row=xp-prev<11?row+1:0;prev=xp;if(row>rows)rows=row;h+='<i class=stk style="left:'+xp.toFixed(2)+'%"></i><span class="std'+(i===0?' first':'')+(i===ticks.length-1?' last':'')+'" style="left:'+xp.toFixed(2)+'%;top:'+(dy+row*13)+'px">'+fmtDateS(t)+'</span>';});
+  segs.forEach(function(x){if(!x.off)h+='<span class="std soft last" style="left:'+pct(x.end).toFixed(2)+'%;top:'+dy+'px">'+fmtDateS(x.end)+'<small>projected</small></span>';});
   if(today>start&&today<end)h+='<i class=snow style="left:'+pct(today).toFixed(2)+'%"><em>TODAY</em></i>';
-  var hgt=6+(nl-1)*10;
-  return '<div class=stl style="padding-bottom:'+(16+rows*13+(segs.some(function(x){return !x.off;})?10:0))+'px"><div class=stlb style="height:'+hgt+'px">'+h+'</div></div>';
+  return '<div class=stl style="padding-bottom:'+(14+(nl-1)*9+rows*13+(segs.some(function(x){return !x.off;})?10:0))+'px"><div class=stlb style="height:'+hgt+'px">'+h+'</div></div>';
 }
 function monthsDaysParts(a,b){
   if(!a||!b)return null;
@@ -5542,26 +5525,8 @@ async function autoToggleClick(){var c=document.getElementById('autoToggleCb');v
 function ensureSbmToggle(){var a=document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
 async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
-// THE BOARD SAYS ITS OWN AGE (24 Sep 2026). Nobody inside the console could see that the Contract Counter
-// was the July file, or that the count had been flat since 6 July; Rita found both from the outside.
-function rotSourcesLine(){
-  var s=ROT&&ROT.sources;if(!s)return '';
-  var d=function(iso){if(!iso)return null;var a=Date.parse(iso.slice(0,10)+'T00:00:00Z');return isNaN(a)?null:Math.round((Date.now()-a)/86400000);};
-  var c=s.counter||{},n=s.count||{},rg=s.registry||{};
-  // THE FILE DATES THE BOARD (7 Oct 2026): the latest AdvancedQuery kept, and whether it carried embark dates. The
-  // Contract Counter is history only: named, never warned about.
-  var rAge=rg.at?d(rg.at):null;
-  var rTxt=rg.at?('TDG file '+rg.at+' ('+(rg.crew||0)+' crew'+(rg.dated?(', '+rg.dated+' with embark dates'):', no embark dates \u2014 seats undated until a file carries them')+')'):'<b>no TDG file kept yet</b> \u2014 upload the AdvancedQuery on Import';
-  var cTxt='Contract Counter (history) '+(c.stamp?('uploaded '+c.stamp):('bundled '+String(c.seed||'').slice(0,10)+' seed'));
-  var cWarn=!rg.at||(rAge!=null&&rAge>10);
-  var nTxt=n.as_of?('completed-contract count as of '+n.as_of+' ('+n.crew+' crew)'):'<b>completed-contract count not loaded</b> \u2014 rank is date-derived';
-  var nAge=n.as_of?d(n.as_of):null;
-  var nWarn=!n.as_of||(nAge!=null&&nAge>60);
-  return '<div class=csub style="margin:-2px 0 8px;padding:6px 10px;border-radius:8px;background:'+((cWarn||nWarn)?'#FBF0DA':'#EEF3F8')+';color:'+((cWarn||nWarn)?'#8A6620':'var(--muted)')+'">'
-    +rTxt+(rAge!=null?(' \u00b7 '+rAge+(rAge===1?' day':' days')+' ago'):'')
-    +' &nbsp;|&nbsp; '+nTxt+(nAge!=null?(' \u00b7 '+nAge+(nAge===1?' day':' days')+' ago'):'')
-    +' &nbsp;|&nbsp; '+cTxt+' \u00b7 '+c.crew+' crew, '+c.rows+' rows</div>';
-}
+// THE BOARD SAYS ITS OWN AGE (24 Sep 2026) through sources on /api/rotation. The page line that printed it above the
+// ships went on 7 Oct 2026 with the heading and the hint — Miguel: "remove this".
 async function renderRotation(){
   // Keep the board on screen while it refreshes (15 Sep 2026): blanking it to "Loading…" after every
   // save/drag made a 1s round trip read as "takes forever to save". First paint still says Loading.
@@ -5601,9 +5566,9 @@ async function renderRotation(){
     +'</style>'
     // Same layout as the Crew tab (Miguel, 6 Oct 2026: "this is the keyman tab .. u can use the same concept"):
     // filters in a rail on the left, the board in the middle, the actions in a column on the right.
-    +'<div class=bar style="margin-bottom:4px"><h2 id=rothead style="margin-right:auto">Keyman</h2><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
-    +'<div class=hint style="margin:-2px 0 8px">Each ship shows its full crew history (onboard first). Click a card for detail + comment; drag to reassign.</div>'
-    +rotSourcesLine()
+    // 7 Oct 2026 (Miguel: "remove this"): no heading, no hint, no sources line above the ships — the board starts with
+    // the first ship. The phone-only Filters button stays. /api/rotation still carries sources (§10c).
+    +'<div class=bar style="margin-bottom:4px;justify-content:flex-end"><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
     +'<div class=crwrap id=rotwrap style="margin-top:12px">'
     +'<aside class=crrail id=rotrail>'
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Find ship</label><input id=rfind type=search placeholder="Ship name" oninput="ROT_FIND=this.value;drawRotation()"></div>'
@@ -5688,7 +5653,6 @@ function rotRail(shown,total){
   Object.keys(yrs).sort().reverse().forEach(function(k){y+=facetRow('yr',k,k,null,ROT_YEAR===k);});
   put('rotyears',y);
   var c=document.getElementById('rotcount');if(c)c.innerHTML='<b>'+shown+'</b> of '+total+' ships shown';
-  var hd=document.getElementById('rothead');if(hd)hd.innerHTML='Keyman <span class=csub style="display:inline;font-size:15px;font-weight:600;font-family:inherit">· '+shown+(shown===1?' ship':' ships')+'</span>';
 }
 function rotFacetClick(e){
   var el=e.target.closest?e.target.closest('.crfacet'):null;if(!el)return;

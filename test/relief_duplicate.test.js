@@ -130,8 +130,10 @@ test("an overdue seat outranks every other state on the board", () => {
 test("the board never prints a negative day count at the reader", () => {
   const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
-  assert.match(slot.slice(0, slot.indexOf("\n")), /OFF WAS '\+\(-d\)\+'D AGO/,
+  // 7 Oct 2026: the slot speaks calendar months + days like the card chip ("OFF IN 1 MO 22 D", "OFF 5 D AGO").
+  assert.match(slot.slice(0, slot.indexOf("\n")), /os\.ago\?\('OFF '\+os\.t\.toUpperCase\(\)\+' AGO'\)/,
     "a past sign-off reads as elapsed, not as a countdown");
+  assert.doesNotMatch(slot.slice(0, slot.indexOf("\n")), /'OFF IN '\+d\+'D'|\(-d\)\+'D AGO/, "never the raw day count");
   const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
   // 15 Sep 2026: the banner sat under two cards saying "Sign-off overdue" with no name. On a ship with
   // more than one seafarer nothing on the page said WHOSE sign-off. It leads with the name now.

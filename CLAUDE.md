@@ -178,10 +178,15 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   yellow earmark, darker when TDG earmarks them too), a tick with the calendar date under every boundary, the name above,
   TODAY, a FUTURE gap between contracts red, two crew at once on two lanes, an open end faded to its projected date. Horizon
   = the active crew's sign-on → the last earmark's sign-off (Miguel's choice over a fixed 12-month window — every ship fills
-  the width, so coverage depth is read off the end date). The seat card lost its lane, dots and dates: a thin bar filled to
-  today, "<span> aboard" left, "<span> to go" / "<span> past the projected sign-off" (red) right; an earmark shows "signs on
-  <date>" and "<N> mo planned". Dates on the card and the history read "Sep 22, 2027" (`fmtDateS`), the chip reads calendar
-  months + days (`spanCompact`), never a bare day count. Pinned by `test/board_cards.test.js`. Mock-ups under `docs/mockups/`.
+  the width, so coverage depth is read off the end date). The header is the NAME, the LINE and a chevron — no brand, no
+  counts (Miguel, same evening: "we don't need to have this royal one on board ... it has to be a little bit of a luxury
+  feeling"): a 3px line, hairline ticks, 10.5px type in two greys, soft fills; the ghost slot and the relief banner say
+  "off in 1 mo 22 d", never "OFF IN 53D". The seat card lost its lane, dots and TODAY tick: a thin soft bar (4px) filled
+  to today (soft red when overdue, a dashed track for an earmark), the two calendar dates under it as before — Miguel, same
+  evening, when a first cut dropped them for an "aboard / to go" row: "you eliminated the dates ... we had them very, very
+  well done earlier ... this progress bar should be more gentle". How long aboard is the status line, how long to go is the
+  chip; neither is repeated under the bar. Dates on the card and the history read "Sep 22, 2027" (`fmtDateS`), the chip
+  reads calendar months + days (`spanCompact`), never a bare day count. Pinned by `test/board_cards.test.js`. Mock-ups under `docs/mockups/`.
 - The sources line names the FILE that dates the board first ("TDG file <date> · N crew, M with embark dates"); the
   Counter is "(history)", never warned about. Nothing here is money (§1) and nothing resolves a disagreement without
   Rita (§6).
@@ -203,9 +208,11 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   Card, ledger, PDF statement — carries `contracts_source` and the page prints it beside the rank. The
   CONSECUTIVE bonus count (`crewCount` / `contractLedgerRow`, resets on gates) drives the ladder and
   payout and NEVER reads the imported count — that is §1. Pinned by `test/contract_count_import.test.js`.
-- **The board says its own age** (`sources` on `/api/rotation`, `rotSourcesLine` on the page): when the
-  Counter was last uploaded (or that it never was — a NULL `imported_at` is the bundled seed), and the
-  count's as-of date. Nobody inside the console could see either until 24 Sep; Rita found both from outside.
+- **The board says its own age** (`sources` on `/api/rotation`): when the Counter was last uploaded (or that it
+  never was — a NULL `imported_at` is the bundled seed), the count's as-of date and the kept TDG file's date.
+  Nobody inside the console could see either until 24 Sep; Rita found both from outside. **The page line is
+  gone** (Miguel, 7 Oct 2026 evening: "remove this" — the "Keyman · 48 ships" heading, the hint and the sources
+  line above the ships); the API still carries `sources`, the Keyman tab starts with the first ship.
 - The two TDG contract files have different jobs and both live in the Brain in full: the DATES file
   (Contract Counter sheet, recIWAATss33kZKNZ) and the COUNT file (recM1e5dbyfvhfm5m). Never ask for either.
 - **DECIDED, Miguel 5 Oct 2026: the seeded baseline counts the contracts BEFORE the Counter's first one.**
