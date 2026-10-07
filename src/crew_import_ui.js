@@ -267,10 +267,11 @@ function render(){
  // Rita's Keyman projections against this file (registry_sync.js, Miguel 5 Oct 2026). Shown here,
  // written on Apply: a card the file has ON BOARD its ship turns green on the board by itself.
  var pj=STAGE.review.projections||[],pc=STAGE.review.projection_counts||{};
- var pjFlag=(pc.elsewhere||0)+(pc.ashore||0);
+ var em=STAGE.review.earmarks||[],emMiss=STAGE.review.earmarks_missing||[],tdgEm=STAGE.review.tdg_earmarks||[];
+ var pjFlag=em.length;
  $("work").style.display="grid";
  h+='<div class="chips">'+
-  (pj.length?('<span class="chip green">&#9873; <span class="n">'+(pc.confirmed||0)+'</span> projections confirmed</span>'+(pjFlag?('<span class="chip red">&#9873; <span class="n">'+pjFlag+'</span> projections not confirmed</span>'):'')):'')+
+  (pj.length?('<span class="chip green">&#9873; <span class="n">'+(pc.confirmed||0)+'</span> earmarks aboard per the file</span>'+(pjFlag?('<span class="chip red">&#9873; <span class="n">'+pjFlag+'</span> earmark discrepanc'+(pjFlag===1?'y':'ies')+'</span>'):'')):'')+
   '<span class="chip amber">&#9875; <span class="n">'+c.ship_flag+'</span> ship</span>'+
   '<span class="chip red">&#9679; <span class="n">'+c.override_conflict+'</span> needs you</span>'+
   '<span class="chip green">&#9677; <span class="n">'+c.cert+'</span> certificates</span>'+
@@ -279,11 +280,20 @@ function render(){
   ((c.rekeyed||0)?'<span class="chip red">&#9888; <span class="n">'+c.rekeyed+'</span> identity</span>':'')+'</div>';
  if((g.rekeyed||[]).length){h+='<div class="sec"><h2>&#9888; Identity \u2014 the file used the ship\u2019s crew id</h2><div class="d">These rows name a crew you already hold, keyed on the cruise line\u2019s numeric id instead of the agency id. They were MATCHED, not added, so no duplicate seafarer is created. Nothing here changes an agency id \u2014 get the export fixed at source.</div>';
   g.rekeyed.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Keyed in file as",it.agency_id,it.incoming_id,badge("cruise-line id "+esc(it.ship_crew_id||"?"),"t-amber"))+'</div>';});h+='</div>';}
- if(pj.length){h+='<div class="sec"><h2>&#9873; Your Keyman projections against this file</h2><div class="d">Applied on its own. A card the file has <b>On board</b> its ship is confirmed: it turns green on the Keyman board, keeps your dates until the Contract Counter carries the leg, and loses its Deploy button. A card the file contradicts is marked on the card for you to settle. Nothing is removed.</div>';
-  var PJL={confirmed:["confirmed aboard","t-green"],earmarked:["earmarked for this ship","t-green"],elsewhere:["file puts them on another ship","t-amber"],ashore:["aboard on your board, not per the file","t-red"],pending:["nothing to confirm yet",""]};
-  pj.forEach(function(it){var l=PJL[it.verdict]||[it.verdict,""];var f=it.file||{};
-   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div><div class="row"><span class="k">Registry says</span><span class="diff"><span class="new">'+esc((f.status||"status not readable")+(f.ship?(" · "+f.ship):""))+'</span>'+badge(l[0],l[1])+'</span></div></div>';});
+ // THE EARMARK LOOP (Miguel, 7 Oct 2026): every earmark the file disagrees with is Rita's decision, row by row.
+ // Accept = TDG wins (a different ship moves the card, Inactive removes it, a far embark absorbs it). Keep = the
+ // console stands and Joy gets one email per seafarer, Rita in copy, with the full record. The emails are listed
+ // here BEFORE Apply.
+ if(em.length){h+='<div class="sec"><h2>&#9873; Earmark discrepancies — the TDG file disagrees with your earmarks</h2><div class="d"><b>Accept</b>: the file wins (a different ship moves your earmark there with your dates; a different seafarer replaces yours; Inactive removes it; an embark far from your sign-on absorbs it). <b>Keep mine</b>: the earmark stands and Joy receives one email per seafarer, Rita in copy, with everything CIMS holds, so TDG is corrected before your next import.</div>';
+  var EK={hull:["different ship","t-amber"],other_person:["TDG earmarks someone else","t-amber"],inactive:["TDG: inactive","t-red"],not_aboard:["not aboard per TDG","t-red"],embark_date:["embark date differs","t-amber"]};
+  em.forEach(function(it){var l=EK[it.kind]||[it.kind,""];var f=it.file||{};
+   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),(f.status||"status not readable")+(f.ship?(" · "+f.ship):"")+(f.embarked_at?(" · embarked "+f.embarked_at):""),badge(l[0],l[1]))+seg("earmark:"+it.id,"accept",["accept","keep"],["Accept TDG","Keep mine (email Joy)"])+'</div>';});
   h+='</div>';}
+ if(tdgEm.length){h+='<div class="sec"><h2>&#9873; TDG earmarks without a card</h2><div class="d">TDG has these seafarers earmarked for a ship your board has no earmark for. Each gets a console earmark on Apply (sign-on = the current printer’s projected sign-off, + 7 months); adjust the dates on the card afterwards.</div>';
+  tdgEm.forEach(function(it){h+='<div class="card"><div class="who">'+esc((it.name||it.sc)+" · "+it.ship)+'</div>'+seg("tdgmark:"+it.sc,"add",["add","skip"],["Add earmark","Skip"],true)+'</div>';});h+='</div>';}
+ if(emMiss.length){h+='<div class="sec"><details class="minor" open><summary><span class="c">'+emMiss.length+'</span> deployed earmark'+(emMiss.length===1?'':'s')+' not in TDG yet</summary><div class="d">Sent to Joy, and this file does not carry them yet. Nothing is sent again from here; re-send from the card if it stays missing.</div>'+emMiss.map(function(it){return '<div class="d">'+esc((it.crew_name||it.sc)+' · '+it.ship+' · '+it.text)+'</div>';}).join("")+'</details></div>';}
+ var pjOk=pj.filter(function(it){return it.verdict==="confirmed"||it.verdict==="earmarked";});
+ if(pjOk.length){h+='<div class="sec"><details class="minor"><summary><span class="c">'+pjOk.length+'</span> earmark'+(pjOk.length===1?'':'s')+' the file agrees with</summary>'+pjOk.map(function(it){var f=it.file||{};return '<div class="d">'+esc((it.crew_name||it.sc)+' · '+it.ship+(it.sign_on?(' from '+it.sign_on):'')+' · TDG: '+(f.status||'')+(f.ship?(' · '+f.ship):''))+'</div>';}).join("")+'</details></div>';}
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">The Keyman board shows the ship the file names (Miguel, 5 Oct 2026: TDG is the truth). Your placeholder cards stay until you move or remove them; every disagreement is listed under TDG says otherwise on the Keyman tab.</div>';
   g.ship_flag.forEach(function(it){h+='<div class="card"><div class="who">'+esc(it.agency_id)+'</div>'+diff("Current ship",it.old,it.new,badge("agency reports","t-amber"))+seg("ship:"+it.agency_id,"take",["flag","take","dismiss"],["Keep board","Take TDG","Dismiss"])+'</div>';});h+='</div>';}
  if(g.unretire&&g.unretire.length){h+='<div class="sec"><h2>&#9679; Retired tags TDG overrides</h2><div class="d">TDG has these crew active. The Retired tag (and the manual status kept with it) comes off on Apply.</div>';
@@ -328,8 +338,12 @@ function renderCart(){
  if(g.ship_flag.length&&x.shipTake)items+=cline("i-green","&#9875;","Ship from file","registry updated",x.shipTake+" save","save");
  if(g.ship_flag.length&&x.shipFlag)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
  var pc=STAGE.review.projection_counts||{};
- if(pc.confirmed)items+=cline("i-green","&#9873;","Projections confirmed","turn green on the Keyman board",pc.confirmed+" auto","save");
- if((pc.elsewhere||0)+(pc.ashore||0))items+=cline("i-amber","&#9873;","Projections not confirmed","marked on the card",((pc.elsewhere||0)+(pc.ashore||0))+" flagged","held");
+ if(pc.confirmed)items+=cline("i-green","&#9873;","Earmarks aboard per the file","the file's row is the seat",pc.confirmed+" auto","save");
+ var emA=0,emK=0;(STAGE.review.earmarks||[]).forEach(function(it){if((DEC["earmark:"+it.id]||"accept")==="keep")emK++;else emA++;});
+ if(emA)items+=cline("i-amber","&#9873;","Earmarks corrected to TDG","moved, removed or absorbed",emA+" accept","save");
+ if(emK)items+=cline("i-red","&#9993;","Emails to Joy","one per earmark kept, Rita in copy",emK+" send","held");
+ var tdgAdd=0;(STAGE.review.tdg_earmarks||[]).forEach(function(it){if((DEC["tdgmark:"+it.sc]||"add")==="add")tdgAdd++;});
+ if(tdgAdd)items+=cline("i-navy","&#9873;","TDG earmarks given a card","sign-on = current printer's sign-off",tdgAdd+" add","save");
  if(g.override_conflict.length+g.critical.length && x.ovKeep)items+=cline("i-red","&#9995;","Your edits","kept as yours",x.ovKeep+" held","held");
  if(!items)items='<div class="li"><span class="nm" style="color:var(--slate);font-weight:400">Nothing to apply — all rows match.</span></div>';
  var flags=x.shipFlag+x.depFlag;
@@ -341,7 +355,7 @@ function renderCart(){
   '<div class="items">'+items+'</div>'+
   '<div class="totals"><div class="tl"><span>Will save to roster</span><span class="v save">'+x.willSave+'</span></div>'+
   '<div class="tl"><span>Kept as yours</span><span class="v keep">'+x.kept+'</span></div></div>'+
-  '<div class="foot"><button class="applyb" id="ap" data-act="apply"'+(x.willSave+flags?'':' disabled')+'>Apply <span class="k">'+x.willSave+'</span> updates &#8594;</button>'+
+  '<div class="foot"><button class="applyb" id="ap" data-act="apply"'+(x.willSave+flags+emA+emK+tdgAdd+(pc.confirmed||0)?'':' disabled')+'>Apply <span class="k">'+x.willSave+'</span> updates &#8594;</button>'+
   '<button class="discard" data-act="discard">Discard all</button>'+
   '<div class="lock">&#128274; NOTHING SAVED UNTIL YOU APPLY</div></div>';
  $("cart").innerHTML=h;

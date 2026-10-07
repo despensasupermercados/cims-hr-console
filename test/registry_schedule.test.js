@@ -155,11 +155,11 @@ const EXISTING = [{ agency_id: "SC-1", first_name: "Jomar", last_name: "Dela Cru
 const FILE = [{ "CREW ID": "SC-1", "FIRST NAME": "Jomar", "LAST NAME": "Dela Cruz", "CREW STATUS": "On board", "VESSEL NAME": "Celebrity Apex", "EMBARKEDDATE": "03 Aug 2026", "DEBARKEDDATE": "-" }];
 const CARD = (o = {}) => [{ id: "as_1", sc: "SC-1", crew_name: "Jomar Dela Cruz", ship: "Apex", sign_on: "2026-08-01", planned_sign_off: "2027-03-01", off_date_conf: 0, on_port_seed: "Rome", off_port_seed: null, ...o }];
 
-async function applyWith(cards, deps) {
+async function applyWith(cards, deps, decisions = {}) {
   const env = { DB: fakeDB({ existing: EXISTING }) };
   const d = { openProjections: async () => cards, ...deps };
   const stage = await (await apiCrewImportStage(req({ rows: FILE, file_hash: "h-ab" }), env, d)).json();
-  return { env, body: await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-ab", run_by: "Rita" }), env, d)).json() };
+  return { env, stage, body: await (await apiCrewImportApply(req({ review: stage.review, decisions, file_hash: "h-ab", run_by: "Rita" }), env, d)).json() };
 }
 
 test("a card the file confirms aboard with an embark within the absorb window is absorbed (removed) after the batch; a confirmed sign-off is kept first under the embark date", async () => {
@@ -170,18 +170,25 @@ test("a card the file confirms aboard with an embark within the absorb window is
   assert.deepEqual(removed, ["as_1"]);
   assert.deepEqual(kept, [], "a sign-off Rita never confirmed is the 7-month projection's to replace");
   assert.deepEqual(body.cards_absorbed, [{ id: "as_1", sc: "SC-1", crew_name: "Jomar Dela Cruz", ship: "Apex", sign_on: "2026-08-01", embarked_at: "2026-08-03", ok: true, error: null, sign_off_kept: false }]);
-  assert.match(body.summary, /1 card absorbed by the file \(the file's row is the seat now\)/);
+  assert.match(body.summary, /1 earmark absorbed by the file \(the file's row is the seat now\)/);
   const r2 = await applyWith(CARD({ off_date_conf: 1 }), deps);
   assert.deepEqual(kept, [{ sc: "SC-1", on_key: "2026-08-03", sign_off: "2027-03-01", embark: "Rome", disembark: null }], "OFF DATE confirmed on the card: hers for the contract, filed under the file's embark");
   assert.equal(r2.body.cards_absorbed[0].sign_off_kept, true);
 });
 
-test("a confirmed card whose sign-on is more than the window from the embark is left for Rita; no absorb dep (tests, tools) absorbs nothing; a failed removal is reported, never the import", async () => {
+// 7 Oct 2026 (the earmark loop): a confirmed card whose sign-on is more than the window from the embark is an
+// EARMARK DISCREPANCY (embark_date), decided by Rita: Accept (default) absorbs it; Keep leaves it and emails Joy.
+test("a confirmed card far from the embark is an embark_date discrepancy: accepted by default (absorbed), kept on Rita's word; no absorb dep absorbs nothing; a failed removal is reported, never the import", async () => {
   const removed = [];
   const deps = { absorbCard: async (env, id) => { removed.push(id); return { ok: true }; } };
   const far = await applyWith(CARD({ sign_on: "2026-06-01" }), deps);
   assert.equal(far.body.projections.counts.confirmed, 1);
-  assert.deepEqual(removed, []); assert.deepEqual(far.body.cards_absorbed, []);
+  assert.deepEqual(far.body.cards_absorbed, [], "not the silent absorb: the window rule still holds there");
+  assert.deepEqual(removed, ["as_1"], "Accept (the default) absorbs the card through the earmark decision");
+  assert.deepEqual(far.body.earmarks.accepted.map((x) => [x.kind, x.action, x.ok]), [["embark_date", "absorbed by the file's row", true]]);
+  const kept = await applyWith(CARD({ sign_on: "2026-06-01" }), deps, { "earmark:as_1": "keep" });
+  assert.deepEqual(kept.body.earmarks.accepted, []);
+  assert.deepEqual(kept.body.earmarks.kept.map((x) => [x.kind, x.emailed, x.error]), [["embark_date", false, "no_mailer"]], "kept, and without a mailer dep the email is reported as not sent");
   const none = await applyWith(CARD(), {});
   assert.deepEqual(none.body.cards_absorbed, []);
   assert.equal(none.env.DB._batched.some((s) => /registry_snapshot/.test(s.sql)), true, "the file is still kept");

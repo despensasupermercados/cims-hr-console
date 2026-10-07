@@ -61,7 +61,7 @@ test("the crew importer receives the ONE live schedule (boardLegs) from the work
   // openProjections (5 Oct 2026) is the same rule for the yellow cards: the worker's fetchOpenAssignments,
   // handed in, so the importer compares the file against the ONE projection feed and never its own query.
   // absorbCard / recordSignoff (7 Oct 2026): the relief board's own remover and the edit writer, handed in the same way.
-  assert.match(SRC, /handleCrewImport\(request, url, env, session, \{ boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit \}\)/, "worker must hand boardLegs (and the ONE projection feed) to the importer");
+  assert.match(SRC, /handleCrewImport\(request, url, env, session, \{ boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc \}\)/, "worker must hand boardLegs (and the ONE projection feed) to the importer");
   const routes = readFileSync(new URL("../src/crew_import_routes.js", import.meta.url), "utf-8");
   assert.doesNotMatch(routes, /FROM ship_leg|FROM assignment|SHIP_HISTORY/, "the importer must not read the schedule tables itself");
 });

@@ -238,6 +238,14 @@ export function renderDeployText(card, opts = {}) {
 /* ------------------------------------------------------------------ *
  * Routes + IO
  * ------------------------------------------------------------------ */
+// Who a crew-movement message goes to (Deploy, and since 7 Oct 2026 the earmark discrepancy notice):
+// DEPLOY_TO, else the Update-TG recipient (the same Joy). Never a default — a crew-movement instruction
+// sent to a guessed address is worse than not sending it. DEPLOY_CC defaults to Rita ("You can CC Rita.").
+export const deployRecipient = (env) => (env && (env.DEPLOY_TO || env.TG_NOTIFY)) || null;
+export const deployCc = (env) => {
+  const raw = env && env.DEPLOY_CC != null ? env.DEPLOY_CC : "Rita.Berenyi@dg3.com";
+  return String(raw).split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+};
 // deps: { json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment,
 //         resolveCity, groupPortDays, TODAY }
 export function installKeymanDeploy(deps) {
@@ -257,11 +265,7 @@ export function installKeymanDeploy(deps) {
 
   // Who the deployment goes to. DEPLOY_TO, else the Update-TG recipient (the same Joy). Never a
   // default: a crew-movement instruction sent to a guessed address is worse than not sending it.
-  const recipientOf = (env) => env.DEPLOY_TO || env.TG_NOTIFY || null;
-  const ccOf = (env) => {
-    const raw = env.DEPLOY_CC != null ? env.DEPLOY_CC : "Rita.Berenyi@dg3.com";  // Miguel: "You can CC Rita."
-    return String(raw).split(/[;,]/).map((s) => s.trim()).filter(Boolean);
-  };
+  const recipientOf = deployRecipient, ccOf = deployCc;
 
   // One wave: the projection, the seafarer behind it, that ship's itinerary and Rita's comment.
   async function loadCard(env, id) {
