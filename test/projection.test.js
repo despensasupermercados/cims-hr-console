@@ -45,9 +45,10 @@ test("node:sqlite is available, so everything below actually runs", () => {
   assert.ok(DatabaseSync, "node:sqlite unavailable — the projection path went unverified.");
 });
 
-test("dates: the current printer's sign-off if ahead, else today; +6 months, +5 on Azamara", () => {
+// Miguel, 7 Oct 2026: a contract is SEVEN months (Azamara five); six until then.
+test("dates: the current printer's sign-off if ahead, else today; +7 months, +5 on Azamara", () => {
   const a = defaultProjectionDates({ ship: "Adventure", legs: LEGS, today: TODAY, brand: "Royal Caribbean", addMonths: addMonthsISO });
-  assert.deepEqual(a, { signOn: "2026-11-29", signOff: "2027-05-29", follows: true });
+  assert.deepEqual(a, { signOn: "2026-11-29", signOff: "2027-06-29", follows: true });
   const q = defaultProjectionDates({ ship: "Quest", legs: LEGS, today: TODAY, brand: "Azamara", addMonths: addMonthsISO });
   assert.deepEqual(q, { signOn: "2026-09-15", signOff: "2027-02-15", follows: false }, "an overdue printer does not push the plan into the past");
   const none = defaultProjectionDates({ ship: "Edge", legs: LEGS, today: TODAY, brand: "Celebrity", addMonths: addMonthsISO });
@@ -58,10 +59,10 @@ test("a drop creates a reliever assignment (yellow card) with those dates, on th
   const d = db();
   const res = await createProjection(envFor(d), { agencyId: "SC-1", ship: "Adventure", today: TODAY }, deps());
   assert.equal(res.ok, true, JSON.stringify(res));
-  assert.equal(res.sign_on, "2026-11-29"); assert.equal(res.planned_sign_off, "2027-05-29"); assert.equal(res.follows, true);
+  assert.equal(res.sign_on, "2026-11-29"); assert.equal(res.planned_sign_off, "2027-06-29"); assert.equal(res.follows, true);
   const a = d.prepare("SELECT a.*, k.crew_id FROM assignment a JOIN contract k ON k.id=a.contract_id").get();
   assert.equal(a.crew_id, "c1"); assert.equal(a.vessel_id, "ves_adventure"); assert.equal(a.vessel_name, "Adventure");
-  assert.equal(a.role, "reliever"); assert.equal(a.sign_on, "2026-11-29"); assert.equal(a.planned_sign_off, "2027-05-29"); assert.equal(a.actual_sign_off, null);
+  assert.equal(a.role, "reliever"); assert.equal(a.sign_on, "2026-11-29"); assert.equal(a.planned_sign_off, "2027-06-29"); assert.equal(a.actual_sign_off, null);
 });
 
 test("refusals: unknown crew, hidden crew, unknown ship, the pool, and the same ship twice (two ships is fine)", async () => {

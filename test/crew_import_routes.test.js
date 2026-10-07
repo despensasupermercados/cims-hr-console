@@ -282,7 +282,7 @@ test("stage lists every open projection against the file, and carries the file's
   assert.equal(stage.review.projections.length, 1);
   assert.equal(stage.review.projections[0].verdict, "confirmed", "the file has SC-1 On board Celebrity Apex: the Apex card is confirmed");
   assert.equal(stage.review.projection_counts.confirmed, 1);
-  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex", name: "Jomar Dela Cruz", status_raw: "On board" }]);
+  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex", name: "Jomar Dela Cruz", status_raw: "On board", embarked_at: null, debarked_at: null }]);
   assert.equal(env.DB._batched.length, 0, "stage still writes nothing");
 });
 
@@ -295,12 +295,12 @@ test("apply keeps the file's word per crew (registry_snapshot) — the snapshot 
   assert.equal(body.projections.counts.confirmed, 1);
   assert.match(body.summary, /1 projection confirmed aboard by the file/);
   const st = env.DB._batched;
-  const snap = st.filter(s => /INSERT INTO registry_snapshot \(agency_id, status, vessel, run_at, import_run_id, name, raw_status\)/.test(s.sql));
+  const snap = st.filter(s => /INSERT INTO registry_snapshot \(agency_id, status, vessel, run_at, import_run_id, name, raw_status, embarked_at, debarked_at\)/.test(s.sql));
   assert.equal(snap.length, 1, "one row per crew the file carried");
   assert.equal(snap[0].args[0], "SC-1");
   assert.equal(snap[0].args[1], "On board");
   assert.equal(snap[0].args[2], "Celebrity Apex");
-  assert.deepEqual(snap[0].args.slice(5), ["Jomar Dela Cruz", "On board"], "the file's own name and status word are kept");
+  assert.deepEqual(snap[0].args.slice(5), ["Jomar Dela Cruz", "On board", null, null], "the file's own name and status word are kept, and its schedule columns (7 Oct 2026: none in this row)");
   assert.match(snap[0].sql, /ON CONFLICT\(agency_id\) DO UPDATE SET status=excluded\.status, vessel=excluded\.vessel, run_at=excluded\.run_at/, "the latest file is the latest word");
   assert.equal(st.some(s => /UPDATE assignment/.test(s.sql)), false, "no verdict is written on the card: the board derives it at read time");
   assert.equal(st.some(s => /vessel_observed=/.test(s.sql)), false, "D1 still holds: the registry never writes a ship");
@@ -428,7 +428,7 @@ test("re-drop of the LATEST applied file keeps the board's copy under that run, 
   const st = env.DB._batched;
   const snap = st.filter(s => /INSERT INTO registry_snapshot/.test(s.sql));
   assert.equal(snap.length, 1);
-  assert.deepEqual(snap[0].args, ["SC-1", "On board", "Celebrity Apex", "2026-10-05T18:54:18.694Z", "run-oct5", "Jomar Dela Cruz", "On board"], "dated by the run that applied the file, not by the re-drop");
+  assert.deepEqual(snap[0].args, ["SC-1", "On board", "Celebrity Apex", "2026-10-05T18:54:18.694Z", "run-oct5", "Jomar Dela Cruz", "On board", null, null], "dated by the run that applied the file, not by the re-drop");
   const del = st.find(s => /DELETE FROM registry_snapshot WHERE import_run_id IS NOT \?/.test(s.sql));
   assert.equal(del.args[0], "run-oct5");
   assert.equal(st.some(s => /INTO import_run|UPDATE crew|INSERT INTO crew|sync_conflict|crew_override/.test(s.sql)), false, "no crew row, flag, status or run is written again");

@@ -194,5 +194,5 @@ export function registryFromStore({ snapshot, crew, openFlags, vesselFlags, stat
 // One kept row of the file: status + vessel as written, the file's name for the row and its own status
 // word (raw_status: a word the console cannot read leaves status null but stays visible).
 function snapRow(id, s) {
-  return { agency_id: id, status: s.status || normalizeStatus(s.raw_status) || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot", name: s.name || null, raw_status: s.raw_status || null };
+  return { agency_id: id, status: s.status || normalizeStatus(s.raw_status) || null, vessel_observed: s.vessel || null, run_at: s.run_at || null, vessel_at: null, vessel_from: "snapshot", vessel_unknown: false, source: "snapshot", name: s.name || null, raw_status: s.raw_status || null, embarked_at: s.embarked_at || null, debarked_at: s.debarked_at || null };
 }

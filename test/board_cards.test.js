@@ -264,16 +264,18 @@ test("inside a ship section every TDG (green) card precedes every plan (yellow) 
   const sortSrc = src.slice(i, src.indexOf(";", i));
   // (5 Oct 2026) a yellow card the registry has CONFIRMED aboard is one of the people already onboard —
   // it sorts with the greens; the rule Miguel stated is about plans, and a confirmed card is no longer one.
-  assert.match(sortSrc, /\(a\.state === "yellow" && !a\.confirmed \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed \? 1 : 0\)\s*\|\| \(b\.current \? 1 : 0\) - \(a\.current \? 1 : 0\)/,
-    "state (green first, confirmed counts as green) must be the FIRST sort key, current the second, name the third");
+  // (7 Oct 2026) a card aboard that the file has not seen yet (awaiting) is the active seafarer: it sorts with them too.
+  assert.match(sortSrc, /\(a\.state === "yellow" && !a\.confirmed && !a\.awaiting \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed && !b\.awaiting \? 1 : 0\)\s*\|\| \(b\.current \? 1 : 0\) - \(a\.current \? 1 : 0\)/,
+    "state (green first, confirmed and awaiting count as green) must be the FIRST sort key, current the second, name the third");
   // Behavioural check of the same comparator on a sample.
   const cmp = new Function("a", "b", "return " + sortSrc.slice(sortSrc.indexOf("(a, b) =>") + "(a, b) =>".length).trim().replace(/\)$/, ""));
   const rows = [
     { name: "Alpha", state: "yellow", current: true }, { name: "Bravo", state: "green", current: false },
     { name: "Charlie", state: "green", current: true }, { name: "Delta", state: "yellow", current: false },
     { name: "Echo", state: "yellow", current: true, confirmed: true },
+    { name: "Foxtrot", state: "yellow", current: false, awaiting: true },
   ].sort(cmp).map((x) => x.name);
-  assert.deepEqual(rows, ["Charlie", "Echo", "Bravo", "Alpha", "Delta"], "Echo is confirmed aboard: among the greens, before the plans");
+  assert.deepEqual(rows, ["Charlie", "Echo", "Bravo", "Foxtrot", "Alpha", "Delta"], "Echo is confirmed aboard and Foxtrot awaits the file: among the greens, before the plans");
 });
 
 /* ---- 15 Sep 2026, Freedom: the UI of a ship section, read off the screenshot Miguel sent ----
@@ -291,7 +293,7 @@ test("a seat whose sign-off has passed is marked ON THE CARD, whatever the deriv
   // Option C (6 Oct 2026): the chip is the ONE number — days since, red, "PAST SIGN-OFF"; still never a negative count.
   assert.match(h, /class="offchip crit"><b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/, "the countdown chip is not reserved for people the status calls current");
   assert.doesNotMatch(h, /-\d+ ?d/, "never a negative day count");
-  assert.match(h, /No sign-off recorded\./, "say why the seat is still held");
+  assert.match(h, /Past the projected sign-off\./, "say why the seat is still held (7 Oct 2026: the sign-off is a projection until TDG, a card or Rita sets it)");
   // the old rule: live = status === 'On board', so this exact card carried no chip and no ring at all
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: "2099-01-01" }), /overdue/, "a future sign-off is not overdue");
   assert.doesNotMatch(ctx.rotCard({ ...YELLOW, signOff: "2020-01-01" }), /rcard plan overdue/, "a plan is Rita's to move, not an overdue seat");
@@ -303,7 +305,7 @@ test("a card with no contract dates says so instead of rendering an empty box", 
   // The unassigned pool and the shoreside team have no contract dates BY DEFINITION (no ship on the card).
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, ship: null, signOn: null, signOff: null }), /No contract dates/,
     "a pool or shoreside card is not a seat with a missing contract");
-  assert.match(h, /the TDG file has them aboard; the Contract Counter does not carry this contract/, "and where the seat came from: the file, not the Counter");
+  assert.match(h, /the TDG file has them aboard without an embark date/, "and where the seat came from: the file (7 Oct 2026: its embark date is the sign-on)");
   assert.doesNotMatch(h, /class=rrot/, "no empty date block");
   assert.doesNotMatch(ctx.rotCard(GREEN), /No contract dates/, "a dated card says nothing");
 });
@@ -406,9 +408,9 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
   // the roster-loop card (an aboard projection the schedule already places) and the projection-loop card
   assert.match(b, /state: x\.state, assignment_id: x\.asgId \|\| null, registry: regOf\(x\.asgId\), confirmed: !!x\.confirmed, deployedAt: deployedAtOf\(x\.asgId\),/, "the seat card carries the card it absorbed, or the placeholder it is");
   assert.match(b, /registry: regOf\(a\.id\), confirmed: regConfirmed\(a\.id\),/);
-  assert.match(b, /projByShip\[ship\]\.sort\(\(a, b\) => \(b\.confirmed \? 1 : 0\) - \(a\.confirmed \? 1 : 0\)/);
+  assert.match(b, /projByShip\[ship\]\.sort\(\(a, b\) => \(\(b\.confirmed \|\| b\.awaiting\) \? 1 : 0\) - \(\(a\.confirmed \|\| a\.awaiting\) \? 1 : 0\)/);
   const tail = src.slice(src.indexOf("const sections = Object.values(shipNames)"), src.indexOf("async function rotationSections(") + 60000);
-  assert.match(tail, /\(a\.state === "yellow" && !a\.confirmed \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed \? 1 : 0\)/, "a confirmed card sorts with the people aboard, not with the plans");
+  assert.match(tail, /\(a\.state === "yellow" && !a\.confirmed && !a\.awaiting \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed && !b\.awaiting \? 1 : 0\)/, "a confirmed or awaiting card sorts with the people aboard, not with the plans");
   assert.match(b, /ensureRegistrySnapshot\(env\)\]\);/, "the snapshot table guard runs in the ensure wave, before the read wave");
   const S = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
   assert.doesNotMatch(S, /registry_verdict/, "the yellow-card feed carries no verdict column");
@@ -417,8 +419,8 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
 // 5 Oct 2026 review, three card rules.
 test("a green card with a RECORDED sign-off never says 'No sign-off recorded' (a manual status pin keeps the seat)", () => {
   const past = "2026-01-01";
-  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /No sign-off recorded/);
-  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past, offConfirmed: true }), /No sign-off recorded/);
+  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /Past the projected sign-off/);
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past, offConfirmed: true }), /Past the projected sign-off/);
   assert.equal(ctx.cardOverdue({ ...GREEN, signOff: past, offConfirmed: true }), false);
 });
 test("monthsDays reads UTC fields: exactly six months is '6 mos' in every time zone", () => {
@@ -428,7 +430,8 @@ test("monthsDays reads UTC fields: exactly six months is '6 mos' in every time z
 test("the 'sent to TDG' line closes on a Counter leg within ABSORB_DAYS of the deployed sign-on, never on any green card; a drop on the card's own section is ignored (static)", () => {
   const src = readFileSync(SRC, "utf-8");
   const b = src.slice(src.indexOf("async function rotationSections("), src.indexOf("const sections = Object.values(shipNames)"));
-  assert.match(b, /if \(!h \|\| !h\.ours \|\| !h\.sc \|\| !h\.on \|\| h\.source !== "counter"\) continue;/, "only Counter-sourced legs close a line");
+  // (7 Oct 2026) the AdvancedQuery carries the dates now: a registry leg within the window closes the line too.
+  assert.match(b, /if \(!h \|\| !h\.ours \|\| !h\.sc \|\| !h\.on \|\| \(h\.source !== "counter" && h\.source !== "registry"\)\) continue;/, "only TDG-sourced legs (Counter or registry) close a line");
   assert.match(b, /const carriedByCounter = \(sc, ship, signOn\) => .*Math\.abs\(g\) <= ABSORB_DAYS/, "the same ±7-day test as the Counter upload's absorb");
   assert.match(b, /if \(carriedByCounter\(d\.sc, cs, d\.sign_on\)\) continue;/);
   assert.doesNotMatch(b, /greenOn\.has\(d\.sc/, "a registry-only or current-contract green card used to hide the line at once");

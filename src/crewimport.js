@@ -64,6 +64,9 @@ function realDate(y, mo, da) {
   return !isNaN(d) && d.toISOString().slice(0, 10) === iso ? iso : null;
 }
 
+// A lone dash is TDG's blank cell (the schedule columns), not a date to parse or report.
+const dash = (v) => (String(v == null ? "" : v).trim() === "-" ? "" : v);
+
 // Numeric a/b/YYYY (optionally followed by a time, as xlsx->csv exports add " 0:00").
 const AB_YEAR = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s.*)?$/;
 // Does this raw cell PROVE day-first order? Only a first field > 12 can.
@@ -137,6 +140,7 @@ export function normalizeStatus(v) {
 export function mapRowFull(row) {
   const agency_id = pick(row, ["crew id", "crewid", "agency id", "agencyid", "crew no", "crewno"]);
   if (!agency_id) return null;
+  // Every date cell: a lone "-" is TDG's blank (seen on the 7 Oct 2026 file in a passport expiry), not a typo to report.
   const raw = {
     dob: pick(row, ["date of birth", "birth", "dob"]),
     med_exp: pick(row, ["medical expiration", "medical exp", "med expiration", "med exp"]),
@@ -144,8 +148,14 @@ export function mapRowFull(row) {
     pp_exp: pick(row, ["passport expiration", "passport exp"]),
     sch_exp: pick(row, ["schengen visa expiration", "schengen expiration", "schengen exp"]),
     usv_exp: pick(row, ["us visa expiration", "usa visa expiration", "us visa exp", "c1d expiration", "c1/d expiration"]),
+    // THE SCHEDULE (7 Oct 2026): the file's EMBARKEDDATE / DEBARKEDDATE. "-" is TDG's blank (every On board row
+    // has "-" for the debark; an Earmarked row has "-" for both). Kept for the board's copy only (registry
+    // row, never a crew field): sign-on = embark; a debark is the contract's end, final.
+    embarked_at: (pick(row, ["embarkeddate", "embarked date", "embark date", "embarkation date", "sign on date", "sign-on date"])),
+    debarked_at: (pick(row, ["debarkeddate", "debarked date", "debark date", "disembarkation date", "sign off date", "sign-off date"])),
   };
   // Date order is a property of the ROW (one source pasted it), not of each cell.
+  for (const k of Object.keys(raw)) raw[k] = dash(raw[k]);
   const dmy = Object.values(raw).some(looksDMY);
   const dates = {}; for (const k of Object.keys(raw)) dates[k] = normalizeDate(raw[k], { dmy });
   const date = (k) => dates[k];
@@ -183,6 +193,7 @@ export function mapRowFull(row) {
     // loose substring ("medical"/"passport"/…) hits the NO column first, importing null.
     // Specific "… expiration" patterns come first; loose ones stay as fallbacks for other formats.
     med_exp: date("med_exp"), sirb_exp: date("sirb_exp"), pp_exp: date("pp_exp"), sch_exp: date("sch_exp"), usv_exp: date("usv_exp"),
+    embarked_at: date("embarked_at"), debarked_at: date("debarked_at"),
   };
   // The fields this row EMPTIED (column present, cell blank). Carried on the row, never written as a field
   // itself; diffCrew turns each into a clear of a value the card still holds.
