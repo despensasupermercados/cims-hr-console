@@ -20,6 +20,7 @@ import { OVR_FIELDS } from "./override.js";
 import { isMoneyUser } from "./policy.js";
 import { reconcileShipFlags, boardShipsFromLegs, strictShipMatcher, AUTO_CLOSED } from "./crew_flags.js";
 import { reconcileProjections, projectionSummary } from "./registry_sync.js";
+import { daysBetween, ABSORB_DAYS } from "./counter_sync.js";
 import { VESSEL_REF } from "./vessel_ref.js";
 
 const SHIP_OF = strictShipMatcher(VESSEL_REF); // built once per isolate, not per request
@@ -37,6 +38,7 @@ const openProjections = (env, deps) => (deps && deps.openProjections ? deps.open
 const registryOf = (mapped) => mapped.map((m) => ({
   agency_id: m.agency_id, status: m.status || null, vessel_observed: m.vessel_observed || null,
   name: [m.first_name, m.last_name].filter(Boolean).join(" ").trim() || null, status_raw: m.status_raw || null,
+  embarked_at: m.embarked_at || null, debarked_at: m.debarked_at || null, // the schedule (7 Oct 2026)
 }));
 // THE FILE'S WORD PER CREW, kept (registry_snapshot, 5 Oct 2026). One row per crew the file carried:
 // status + vessel exactly as the file said them, stamped with the run. The Keyman board derives each
@@ -45,10 +47,10 @@ const registryOf = (mapped) => mapped.map((m) => ({
 // and a crew without a snapshot row yet falls back to crew.status + the open ship flag. This is NOT a
 // ship allocation (D1): nothing here reaches crew.vessel_observed or the board's placement.
 const SNAPSHOT_SQL =
-  "INSERT INTO registry_snapshot (agency_id, status, vessel, run_at, import_run_id, name, raw_status) VALUES (?,?,?,?,?,?,?) " +
-  "ON CONFLICT(agency_id) DO UPDATE SET status=excluded.status, vessel=excluded.vessel, run_at=excluded.run_at, import_run_id=excluded.import_run_id, name=excluded.name, raw_status=excluded.raw_status";
+  "INSERT INTO registry_snapshot (agency_id, status, vessel, run_at, import_run_id, name, raw_status, embarked_at, debarked_at) VALUES (?,?,?,?,?,?,?,?,?) " +
+  "ON CONFLICT(agency_id) DO UPDATE SET status=excluded.status, vessel=excluded.vessel, run_at=excluded.run_at, import_run_id=excluded.import_run_id, name=excluded.name, raw_status=excluded.raw_status, embarked_at=excluded.embarked_at, debarked_at=excluded.debarked_at";
 const snapshotStmt = (env, r, runAt, runId) =>
-  env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, runAt, runId, r.name ?? null, r.status_raw ?? null);
+  env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, runAt, runId, r.name ?? null, r.status_raw ?? null, r.embarked_at ?? null, r.debarked_at ?? null);
 
 // The file's word per crew, from the parsed rows: the LAST row of a repeated agency id stands, and a row
 // the file keyed on the cruise-line id (D7 rekeyed) is carried under the crew's real agency id.
@@ -292,6 +294,31 @@ export async function apiCrewImportApply(request, env, deps) {
   if (kept) stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(importRunId));
 
   const results = await env.DB.batch(stmts);
+  // THE FILE ABSORBS THE CARD (Miguel, 7 Oct 2026: "when Rita uploads a new TDG file matching that seafarer,
+  // take the file's row and eliminate the green template"). A card the file CONFIRMS aboard — same crew, On
+  // board the same hull — whose sign-on sits within ABSORB_DAYS of the file's embark (or the file carries no
+  // embark) has done its job: the file's row is the seat now. A sign-off Rita CONFIRMED on the card is kept
+  // for that contract first (contract_edit under the embark date: "that date stands until she changes it");
+  // a card whose dates the file disagrees with by more than the window is left for Rita (reported confirmed,
+  // not absorbed). Nothing else about the card is copied — the file is the record. After the batch: a card
+  // removal that fails leaves the import applied and is reported, never the other way round.
+  const absorbed = [];
+  if (deps && deps.absorbCard) {
+    const fileBy = {}; for (const r of registry) if (r && r.agency_id) fileBy[String(r.agency_id)] = r;
+    for (const it of proj.items) {
+      if (it.verdict !== "confirmed") continue;
+      const a = (projections || []).find((x) => x && x.id === it.id); if (!a) continue;
+      const w = fileBy[String(it.sc)] || {};
+      const gap = w.embarked_at && it.sign_on ? daysBetween(w.embarked_at, it.sign_on) : null;
+      if (gap != null && Math.abs(gap) > ABSORB_DAYS) continue;
+      let kept = null;
+      if (a.off_date_conf && a.planned_sign_off && deps.recordSignoff) {
+        kept = await deps.recordSignoff(env, { sc: it.sc, on_key: w.embarked_at || it.sign_on, sign_off: a.planned_sign_off, embark: a.on_port_seed || null, disembark: a.off_port_seed || null }).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+      }
+      const r = await deps.absorbCard(env, it.id).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+      absorbed.push({ id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: it.ship, sign_on: it.sign_on, embarked_at: w.embarked_at || null, ok: !!(r && r.ok), error: r && r.ok ? null : (r && r.error) || "failed", sign_off_kept: !!(kept && kept.ok) });
+    }
+  }
   // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
   let override_cleared = 0;
   for (const i of clearIdx) { const m = results && results[i] && results[i].meta; if (!m || m.changes == null || m.changes > 0) override_cleared++; }
@@ -302,6 +329,7 @@ export async function apiCrewImportApply(request, env, deps) {
     ship_taken: (plan.shipTakes || []).length, unretired: (plan.unretire || []).length,
     open_conflicts: openInserted, ship_flags: flags.counts, board_unavailable, droppedShipWrites: plan.droppedShipWrites,
     projections: { counts: proj.counts, items: proj.items.map(i => ({ id: i.id, sc: i.sc, crew_name: i.crew_name, ship: i.ship, verdict: i.verdict, file: i.file })) },
+    cards_absorbed: absorbed,
   };
   res.summary = applySummary(res); // ONE sentence for both import screens (they used to each compose their own)
   return J(res);
@@ -326,6 +354,8 @@ export function applySummary(r) {
   if (r.override_cleared) parts.push(n(r.override_cleared, "manual entry", "manual entries") + " replaced by the file" + (r.override_skipped ? " (" + n(r.override_skipped, "changed", "changed") + " since review, left alone)" : ""));
   const pj = r.projections && r.projections.counts ? projectionSummary(r.projections.counts) : "";
   if (pj) parts.push(pj);
+  const ab = (r.cards_absorbed || []).filter((x) => x && x.ok).length;
+  if (ab) parts.push(n(ab, "card absorbed by the file (the file's row is the seat now)", "cards absorbed by the file (the file's rows are the seats now)"));
   parts.push("logged to import history");
   return parts.join(" · ") + ".";
 }

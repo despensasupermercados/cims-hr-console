@@ -47,6 +47,7 @@ export function fileWordBySc(registry, { shipOf, keyOf, valid } = {}) {
       source: r.source || null,
       name: r.name || null, rawStatus: r.raw_status || null, // the file's own words (kept copy only)
       onRoster: r.on_roster !== false,
+      embarkedAt: day(r.embarked_at) || null, debarkedAt: day(r.debarked_at) || null, // the file's schedule (7 Oct 2026)
     };
   }
   return out;

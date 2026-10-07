@@ -9,6 +9,10 @@
 // frozen SHIP_HISTORY code constant, fail-safe.
 
 import { fetchCounterLegs } from "./counter_legs.js";
+import { ABSORB_DAYS } from "./counter_sync.js";
+import { VESSEL_REF } from "./vessel_ref.js";
+import { buildShipKeys, canonShipWith, normShip, AZAMARA_SHORT } from "./shipname.js";
+import { normalizeStatus } from "./crewimport.js";
 
 const BRAND_SHORT = {
   "Royal Caribbean": "Royal",
@@ -259,14 +263,193 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 }
 
 
+// -----------------------------------------------------------------------------
+// THE SCHEDULE IS THE ADVANCEDQUERY (Miguel, 7 Oct 2026). The weekly TDG registry file now carries
+// EMBARKEDDATE and DEBARKEDDATE per seafarer (first file: 7 Oct 2026, 104 rows, every On board row
+// dated). The console keeps the file (registry_snapshot) and reads the schedule from it:
+//
+//   sign-on   = the file's embark date, full stop. The Contract Counter (keyman_contract3) is HISTORY
+//               only: it never seats, never dates a seat, never says overdue. A Counter contract the
+//               file carries (same crew, same hull, sign-on within ABSORB_DAYS) is dropped in favour
+//               of the file's dates; the rest of the Counter is served non-current.
+//   sign-off  = the first of these the console knows, in this order:
+//               tdg        TDG's own word: a DEBARKEDDATE on the row (final), the Counter's actual
+//                          sign-off for the same contract, or — the file's own cross-over — a SECOND
+//                          crew the same file has On board the same hull with a later embark (Wonder
+//                          and Navigator, 7 Oct 2026: both rows On board, the reliever already aboard).
+//               rita/card  whichever is NEWER: the sign-off Rita typed for this contract
+//                          (contract_edit, keyed on the embark date), or Rita's yellow card for a
+//                          RELIEVER on the same hull (its sign-on is the outgoing crew's sign-off —
+//                          "the cross-over"). Her later action wins; the card is ignored once a file
+//                          dated after its sign-on fails to have the reliever aboard.
+//               projected  embark + CONTRACT_MONTHS (7; Azamara 5) — "TDG does not say the sign-off
+//                          until very late", so every active seafarer gets a 7-month projection.
+//   the swap  = when the reliever's sign-on (file or card) has PASSED, the outgoing contract ends on
+//               that day (non-current → "Contract completed" underneath) and the reliever holds the
+//               seat: from the file row if the file has them, else from the card (drawn green,
+//               awaiting the next file, which absorbs the card when it carries them).
+//   overdue   = a PROJECTED sign-off that has passed is still current (the seat is held, drawn red);
+//               a tdg / rita / card sign-off that has passed ended the contract.
+//   ended     = a row On Vacation / Inactive / Reserved with embark + debark is the LAST contract,
+//               non-current, dated by TDG (the Score Card's default span, the scoring queue's
+//               "signed off recently").
+// Pure (legsFromRegistry, foldCounterHistory); the reads join the board's one wave (CLAUDE.md §12).
+// -----------------------------------------------------------------------------
+export const CONTRACT_MONTHS = 7;
+export const AZAMARA_CONTRACT_MONTHS = 5;
+const SHIP_KEYS = buildShipKeys(VESSEL_REF);
+const dayOf = (s) => (/^\d{4}-\d{2}-\d{2}/.test(String(s || "")) ? String(s).slice(0, 10) : null);
+const shipKey = (s) => normShip(canonShipWith(s, SHIP_KEYS) || s || "");
+function daysApart(a, b) {
+  const x = dayOf(a), y = dayOf(b);
+  if (!x || !y) return null;
+  return Math.round((Date.parse(y + "T00:00:00Z") - Date.parse(x + "T00:00:00Z")) / 86400000);
+}
+function plusMonths(d, n) {
+  const dt = new Date(d + "T00:00:00Z");
+  dt.setUTCMonth(dt.getUTCMonth() + n);
+  return dt.toISOString().slice(0, 10);
+}
 
-// Board legs from the database: current ship_leg rows + crew aboard per the relief board, with any
-// recorded sign-off folded into the snapshot legs. All reads fire together (one wave, CLAUDE.md §12).
+// The kept file, one row per crew, with the roster's name and id beside it.
+export async function fetchRegistryRows(env) {
+  const { results } = await env.DB.prepare(
+    `SELECT s.agency_id AS sc, s.status, s.raw_status, s.vessel, s.embarked_at, s.debarked_at, s.run_at,
+            c.id AS crew_id,
+            TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
+       FROM registry_snapshot s
+       LEFT JOIN crew c ON c.agency_id = s.agency_id`
+  ).all();
+  return results || [];
+}
+// Every Counter contract's key, so a legacy edit (no on_key) and TDG's own actual sign-off can be
+// matched to the file's contract by sign-on.
+export async function fetchCounterKeys(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT sc, seq, sign_on, act_off FROM keyman_contract3 WHERE sign_on IS NOT NULL"
+  ).all();
+  return results || [];
+}
+export async function fetchContractEdits(env) {
+  const { results } = await env.DB.prepare(
+    "SELECT sc, seq, on_key, sign_on, sign_off, embark, disembark, eccr, air, hotel, on_conf, off_conf, updated_at FROM contract_edit"
+  ).all();
+  return results || [];
+}
+export async function fetchVesselBrands(env) {
+  const { results } = await env.DB.prepare("SELECT name, brand FROM vessel").all();
+  return results || [];
+}
+
+// PURE. rows: fetchRegistryRows · edits: fetchContractEdits · counter: fetchCounterKeys · open: the open
+// assignments (fetchOpenAssignments, with created_at/updated_at) · vessels: [{name, brand}] · today.
+export function legsFromRegistry({ rows, edits, counter, open, vessels, today } = {}) {
+  const brandOf = {};
+  for (const v of (vessels || [])) if (v && v.name) brandOf[shipKey(v.name)] = BRAND_SHORT[v.brand] || v.brand || null;
+  const isAz = (k) => AZAMARA_SHORT.includes(k);
+  // Rita's edits for a crew: by contract key (on_key), and by Counter position for rows older than on_key.
+  const editsBy = {};
+  for (const e of (edits || [])) if (e && e.sc) (editsBy[e.sc] = editsBy[e.sc] || []).push(e);
+  const counterBy = {};
+  for (const k of (counter || [])) if (k && k.sc) (counterBy[k.sc] = counterBy[k.sc] || []).push(k);
+  const near = (a, b) => { const g = daysApart(a, b); return g != null && Math.abs(g) <= ABSORB_DAYS; };
+  // The edit that belongs to THIS contract: keyed on its embark date (within the absorb window — TDG
+  // books the real port day, the Counter the nearest turnaround), else a legacy seq-keyed edit whose
+  // Counter position carries the same sign-on. Never an edit that KNOWS it belongs to another contract.
+  const editFor = (sc, on) => {
+    const list = editsBy[sc] || [];
+    let best = null;
+    for (const e of list) if (e.on_key && near(e.on_key, on) && (!best || Math.abs(daysApart(e.on_key, on)) < Math.abs(daysApart(best.on_key, on)))) best = e;
+    if (best) return best;
+    for (const k of (counterBy[sc] || [])) if (near(k.sign_on, on)) { const e = list.find((x) => !x.on_key && x.seq != null && Number(x.seq) === Number(k.seq)); if (e) return e; }
+    return null;
+  };
+  const counterActOff = (sc, on) => { for (const k of (counterBy[sc] || [])) if (near(k.sign_on, on) && dayOf(k.act_off)) return dayOf(k.act_off); return null; };
+  const fileBy = {};
+  const current = [], ended = [];
+  for (const r of (rows || [])) {
+    if (!r || !r.sc) continue;
+    const status = r.status || normalizeStatus(r.raw_status) || null;
+    const ship = r.vessel ? (canonShipWith(r.vessel, SHIP_KEYS) || String(r.vessel).trim()) : null;
+    const key = ship ? normShip(ship) : null;
+    const on = dayOf(r.embarked_at), off = dayOf(r.debarked_at);
+    fileBy[r.sc] = { status, key, at: dayOf(r.run_at) };
+    if (!ship || !on) continue;
+    const base = { ship, name: r.crew_name || null, sc: r.sc, ours: true, on, brand: brandOf[key] || (isAz(key) ? "Azamara" : null), crew_id: r.crew_id || null, source: "registry", fileAt: dayOf(r.run_at) };
+    if (status === "On board") current.push({ ...base, key, tdgOff: off && off >= on ? off : null });
+    else if ((status === "On Vacation" || status === "Inactive") && off && off >= on) ended.push({ ...base, off, is_current: false, offSource: "tdg", offAt: dayOf(r.run_at) });
+  }
+  const out = [];
+  for (const L of current) {
+    const cand = [];
+    // 1. TDG's word, final: the row's own debark, the Counter's actual sign-off, or the file's cross-over.
+    if (L.tdgOff) cand.push({ off: L.tdgOff, source: "tdg", at: L.fileAt, final: true });
+    const act = counterActOff(L.sc, L.on);
+    if (!L.tdgOff && act && act >= L.on) cand.push({ off: act, source: "tdg", at: null, final: true });
+    const next = current.filter((o) => o.sc !== L.sc && o.key === L.key && o.on > L.on).map((o) => o.on).sort()[0];
+    if (next) cand.push({ off: next, source: "tdg", at: L.fileAt, final: true, reliever: current.find((o) => o.key === L.key && o.on === next) });
+    // 2. Rita: the sign-off she typed for this contract, or her reliever card on this hull — the newer wins.
+    const e = editFor(L.sc, L.on);
+    if (e && dayOf(e.sign_off) && dayOf(e.sign_off) >= L.on) cand.push({ off: dayOf(e.sign_off), source: "rita", at: String(e.updated_at || ""), conf: e.off_conf != null ? !!e.off_conf : false });
+    let card = null;
+    for (const a of (open || [])) {
+      if (!a || !a.sc || a.sc === L.sc || !a.ship || !dayOf(a.sign_on)) continue;
+      if (shipKey(a.ship) !== L.key || dayOf(a.sign_on) <= L.on) continue;
+      // A card whose sign-on has passed holds only while no later file contradicts it: a file dated after
+      // the sign-on that does not have the reliever On board this hull says the relief did not happen.
+      const w = fileBy[a.sc];
+      if (dayOf(a.sign_on) <= today && w && w.at && w.at >= dayOf(a.sign_on) && !(w.status === "On board" && w.key === L.key)) continue;
+      if (!card || dayOf(a.sign_on) < card.on) card = { on: dayOf(a.sign_on), at: String(a.updated_at || a.created_at || ""), id: a.id || null, sc: a.sc, name: a.crew_name || null };
+    }
+    if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id } });
+    let pick = cand.find((c) => c.final) || null;
+    if (pick) { const t = cand.filter((c) => c.final).sort((a, b) => (a.off < b.off ? -1 : 1)); pick = t[0]; }
+    if (!pick) {
+      const rc = cand.filter((c) => c.source === "rita" || c.source === "card");
+      if (rc.length === 1) pick = rc[0];
+      else if (rc.length === 2) pick = rc[0].at === rc[1].at ? rc.find((c) => c.source === "rita") : (rc[0].at > rc[1].at ? rc[0] : rc[1]);
+    }
+    if (!pick) pick = { off: plusMonths(L.on, isAz(L.key) ? AZAMARA_CONTRACT_MONTHS : CONTRACT_MONTHS), source: "projected", at: null };
+    const passed = pick.off < today;
+    const leg = { ship: L.ship, name: L.name, sc: L.sc, ours: true, on: L.on, off: pick.off, brand: L.brand, is_current: pick.source === "projected" ? true : !passed, crew_id: L.crew_id, source: "registry", offSource: pick.source, offAt: pick.at ? dayOf(pick.at) : null, fileAt: L.fileAt };
+    if (pick.reliever) leg.reliever = { sc: pick.reliever.sc, name: pick.reliever.name || null, cardId: pick.reliever.cardId || null };
+    if (pick.source === "rita" && pick.conf) leg.offConfirmed = true;
+    if (e) { if (e.embark) leg.embark = e.embark; if (e.disembark) leg.disembark = e.disembark; leg.edit = { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, onConfirmed: !!e.on_conf, seq: e.seq != null ? Number(e.seq) : null }; }
+    out.push(leg);
+  }
+  for (const E of ended) { const { key, ...leg } = E; out.push(leg); }
+  return out;
+}
+
+// PURE. The Counter is history once the file dates a crew: its legs go non-current, and a Counter
+// contract the file itself carries (same crew, same hull, sign-on within ABSORB_DAYS of the embark) is
+// dropped — the file's dates stand. A crew the file gives no dates for keeps their Counter legs as they
+// were (the seat still comes from the file; this is the fallback for an older file without the columns).
+export function foldCounterHistory(counterLegs, registryLegs) {
+  const reg = {};
+  for (const r of (registryLegs || [])) if (r && r.sc) (reg[r.sc] = reg[r.sc] || []).push(r);
+  const out = [];
+  for (const h of (counterLegs || [])) {
+    const rs = h && h.sc ? reg[h.sc] : null;
+    if (!rs || !rs.length) { out.push(h); continue; }
+    const k = shipKey(h.ship);
+    const dup = rs.some((r) => shipKey(r.ship) === k && (() => { const g = daysApart(r.on, h.on); return g != null && Math.abs(g) <= ABSORB_DAYS; })());
+    if (dup) continue;
+    out.push(h.is_current ? { ...h, is_current: false } : h);
+  }
+  return out;
+}
+
+// Board legs from the database — the file's schedule first (legsFromRegistry), the Counter folded in as
+// history, then crew aboard per the relief board. All reads fire together (one wave, CLAUDE.md §12).
 export async function boardLegsFromDb(env, today) {
-  const [legs, asg, ended, recMap] = await Promise.all([
+  const [legs, asg, ended, recMap, rows, edits, counter, open, vessels] = await Promise.all([
     legsFromCounter(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
+    fetchRegistryRows(env), fetchContractEdits(env), fetchCounterKeys(env), fetchOpenAssignments(env), fetchVesselBrands(env),
   ]);
-  return mergeBoardLegs(applyRecordedSignoffs(legs, recMap, today), asg, today, ended);
+  const registry = legsFromRegistry({ rows, edits, counter, open, vessels, today });
+  const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry);
+  return mergeBoardLegs(registry.concat(history), asg, today, ended);
 }
 
 // -----------------------------------------------------------------------------
@@ -284,7 +467,7 @@ export async function fetchOpenAssignments(env) {
             a.override_on_city, a.override_off_city, a.succeeds_assignment_id,
             a.eccr, a.air, a.hotel, a.on_date_conf, a.off_date_conf,
             a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
-            a.deployed_at, a.deploy_log_id,
+            a.deployed_at, a.deploy_log_id, a.created_at, a.updated_at,
             COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
             c.id AS crew_id, c.agency_id AS sc,
             COALESCE(NULLIF(o.rank_override,''), c.rank_override, c.rank_observed) AS rank,

@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   legsFromCounter, fetchCurrentAssignments, fetchRecentSignoffs, fetchRecordedSignoffs,
-  fetchOpenAssignments, boardLegsFromDb,
+  fetchOpenAssignments, boardLegsFromDb, fetchRegistryRows, fetchCounterKeys, fetchContractEdits, fetchVesselBrands,
 } from "../src/ship_leg_source.js";
 
 let DatabaseSync = null;
@@ -41,6 +41,7 @@ CREATE TABLE keyman_contract3 (sc TEXT NOT NULL, km TEXT, ship TEXT, st TEXT, se
 CREATE TABLE contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT,
   eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, on_key TEXT, PRIMARY KEY (sc, seq));
 CREATE TABLE app_config (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT, name TEXT, raw_status TEXT, embarked_at TEXT, debarked_at TEXT); -- the kept AdvancedQuery (7 Oct 2026: with its schedule columns)
 INSERT INTO app_config VALUES ('board_source','ship_leg','2026-07-07');
 INSERT INTO vessel (id,name,brand) VALUES ('ves_anthem','Anthem','Royal Caribbean'), ('ves_beyond','Beyond','Celebrity'), ('ves_quest','Quest','Azamara');
 INSERT INTO crew (id,agency_id,first_name,last_name,status,rank_observed) VALUES
@@ -84,6 +85,10 @@ test("every query in ship_leg_source.js executes against the production table sh
   await assert.doesNotReject(() => fetchRecentSignoffs(env, TODAY));
   await assert.doesNotReject(() => fetchRecordedSignoffs(env));
   await assert.doesNotReject(() => fetchOpenAssignments(env), "the yellow-card feed — this is the query PR #112 broke");
+  await assert.doesNotReject(() => fetchRegistryRows(env), "the kept file: the schedule since 7 Oct 2026");
+  await assert.doesNotReject(() => fetchCounterKeys(env));
+  await assert.doesNotReject(() => fetchContractEdits(env));
+  await assert.doesNotReject(() => fetchVesselBrands(env));
   await assert.doesNotReject(() => boardLegsFromDb(env, TODAY));
 });
 

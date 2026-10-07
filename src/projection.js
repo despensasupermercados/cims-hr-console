@@ -8,9 +8,10 @@
 //
 // Dates follow the relief modal's rule (relief_ui.js): sign-on = the day the ship's current printer
 // signs off (their projected / recorded sign-off, if still ahead), else today; sign-off = sign-on
-// + 6 months, + 5 on Azamara. Rita adjusts either on the card afterwards.
+// + 7 months (Miguel, 7 Oct 2026: a contract is seven months; six until then), + 5 on Azamara. Rita adjusts
+// either on the card afterwards.
 
-export function defaultProjectionDates({ ship, legs, today, brand, addMonths, months = 6, azamaraMonths = 5 }) {
+export function defaultProjectionDates({ ship, legs, today, brand, addMonths, months = 7, azamaraMonths = 5 }) {
   // Ship names meet case-insensitively: a Counter row's "navigator" is the vessel table's "Navigator".
   const key = (s) => String(s == null ? "" : s).trim().toLowerCase();
   const offs = (legs || [])

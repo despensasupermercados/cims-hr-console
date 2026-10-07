@@ -18,7 +18,7 @@ test("fileWordBySc: the file's status and hull per crew, canonicalised; an unkno
     { agency_id: "CAL", status: "On board", vessel_observed: null, vessel_unknown: true, run_at: "2026-10-05T18:54:18Z" },
     { agency_id: "ODD", status: "On board", vessel_observed: "MV NOWHERE", run_at: "2026-10-05T18:54:18Z" },
   ], { shipOf, keyOf, valid });
-  assert.deepEqual(f.SAN, { status: "On board", raw: "MV WONDER OF THE SEAS", ship: "Wonder", key: "wonder", known: true, at: "2026-10-05", vesselAt: "2026-09-26", hullUnknown: false, source: "registry", name: null, rawStatus: null, onRoster: true });
+  assert.deepEqual(f.SAN, { status: "On board", raw: "MV WONDER OF THE SEAS", ship: "Wonder", key: "wonder", known: true, at: "2026-10-05", vesselAt: "2026-09-26", hullUnknown: false, source: "registry", name: null, rawStatus: null, onRoster: true, embarkedAt: null, debarkedAt: null });
   assert.equal(f.CAL.ship, null); assert.equal(f.CAL.hullUnknown, true);
   assert.equal(f.ODD.known, false);
 });

@@ -97,10 +97,45 @@ because one session treated the console as a billing system; a second did it aga
 forever .. rita create projections .. and when she is sure .. cta is trigger to joy for action and
 the loop closes when u see it back in the keyman tab from the upload"*. Counter rows are never edited
 or removed by the console — only the NEXT Contract Counter replaces them. Past its projected sign-off
-is **overdue, not gone**. Dates are never hand-keyed; they come from the next Counter and we wait for
-it. So the board disagreeing with the live TDG file is the loop still OPEN, not an error to
-reconcile. Anyone with a login may upload the Counter; the dry-run lists every edit it would
-override. The agent never infers, reconciles or corrects a contract date — ever.
+is **overdue, not gone**. Dates are never hand-keyed by the agent; they come from TDG's files (since 7 Oct
+2026 the AdvancedQuery's embark/debark, §10d; the Counter is history) and we wait for them. So the board
+disagreeing with the live TDG file is the loop still OPEN, not an error to reconcile. Anyone with a login
+may upload the Counter; the dry-run lists every edit it would override. The agent never infers,
+reconciles or corrects a contract date — ever.
+
+## 10d. THE SCHEDULE IS THE ADVANCEDQUERY — Miguel, 7 Oct 2026 ("rework the entire keyman tab around what I just explained")
+Since 7 Oct 2026 the weekly AdvancedQuery carries **EMBARKEDDATE** and **DEBARKEDDATE** ("-" = blank). The
+registry import keeps them on the file's row (`registry_snapshot.embarked_at / debarked_at`, never a crew
+field) and the board's schedule is read from them (`ship_leg_source.legsFromRegistry`, pure, pinned by
+`test/registry_schedule.test.js`). The rules, in his words and in order:
+- **Sign-on = the embark date.** Full stop. The Contract Counter is **HISTORY ONLY**: it never seats, never
+  dates a seat, never says overdue; a Counter contract the file carries (same crew, same hull, sign-on within
+  `ABSORB_DAYS`) is dropped for the file's dates, the rest is served non-current (`foldCounterHistory`). A
+  crew the file gives no dates for (an older file, no embark) keeps their Counter legs as before.
+- **Sign-off**, the first the console knows: (1) **TDG's own word, final** — a DEBARKEDDATE on the row, the
+  Counter's actual sign-off for the same contract, or the file's own **cross-over** (a second crew On board
+  the same hull with a later embark: Wonder and Navigator on the first file); (2) **Rita's, the newer action
+  wins** — the sign-off she typed for this contract (`contract_edit`, keyed `on_key` = the embark date; a
+  legacy seq edit through the Counter position) or her **reliever card** on the same hull (its sign-on is the
+  outgoing crew's sign-off); (3) **projected: embark + 7 months, Azamara 5** ("TDG does not say the sign-off
+  until very late"). Every card says which (`offSource` tdg / rita / card / projected, `fileDatesNote`).
+- **The swap.** When the reliever's sign-on has PASSED (file row or card), the outgoing contract ends that
+  day — non-current, drawn "Contract completed" underneath with who relieved them — and the reliever holds
+  the seat: from the file row if the file has them, else from the card, drawn green **"ABOARD · AWAITING
+  TDG FILE"** (`awaiting`), Deploy and Remove kept. A card whose sign-on passed but that a file DATED AFTER
+  it does not have aboard (ashore / elsewhere) is contradicted: it ends nothing and is off the board (§11).
+- **The file absorbs the card** (registry apply, `cards_absorbed`): a card the file confirms aboard with an
+  embark within `ABSORB_DAYS` of its sign-on is removed after the batch; a sign-off Rita CONFIRMED on it
+  (OFF DATE) is kept first as hers for that contract (`recordSignoffEdit`). Wider than the window: the card
+  stays (confirmed, one card: the seat absorbs it visually, Rita removes it).
+- **Overdue** = a PROJECTED sign-off that passed: still current, red, "Past the projected sign-off". A tdg /
+  rita / card sign-off that passed ENDED the contract. A dated On Vacation / Inactive / Reserved row is the
+  last contract, ended by TDG (the Score Card's default span, the scoring queue's "signed off recently").
+- **An edit lands on its contract's row** (`contractEditSlot`): the row filed under the on_key, else the
+  requested slot when free or unkeyed, else the next free slot — a Counter contract's edit is never re-keyed.
+  The Edit modal sends `on_key` (the seat's embark) and shows the file's row and where the sign-off comes from.
+- Not touched by this: the relief board's printer legs, the backup CSV and the roster export still read the
+  Counter (`fetchCurrentCounterLegs`, `roster_export.js`) — open item, not a seat.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
@@ -192,10 +227,12 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   (`TDG_ABSENT_JOIN` / `TDG_ABSENT_COL`) — no extra round trip (§12). Until 5 Oct the schedule outranked the
   file: a July Counter leg kept a crew On board after TDG said otherwise. Pinned by
   `test/status_consistency.test.js`.
-  The ONE schedule is still `boardLegs(env)` = current legs from the **Contract Counter** (`keyman_contract3`,
-  `src/counter_legs.js`) + crew aboard per the relief board (in-force `assignment` rows); it dates the seats,
-  feeds the overdue rule, the relief printers, the roster export and the backup CSV. A Counter leg past its
-  projected sign-off is overdue, not gone: only Rita's recorded sign-off or the next Counter ends it. Never call
+  The ONE schedule is still `boardLegs(env)` = (since 7 Oct 2026, §10d) current legs from the **AdvancedQuery's
+  embark/debark** (`registry_snapshot`, `ship_leg_source.legsFromRegistry`) + the **Contract Counter** folded
+  in as history (`keyman_contract3`, `src/counter_legs.js`, current only for a crew the file does not date)
+  + crew aboard per the relief board (in-force `assignment` rows); it dates the seats and feeds the overdue
+  rule. (The relief printers, roster export and backup CSV still read the Counter — §10d open item.) A leg
+  past its PROJECTED sign-off is overdue, not gone: TDG's word, Rita's date or a reliever ends it. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant. The same schedule feeds the
   Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue (`apiScoreQueue`).
 - **Toggle checkboxes use the wrapper pattern:** `<span onclick="tgFlip(id)">` + the `<input
