@@ -91,10 +91,9 @@ test("the board does not draw a reliever who is already aboard", () => {
   const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
   assert.match(slot.slice(0, slot.indexOf("\n")), /if\(rb\.reliever&&rb\.reliever\.aboard\)return '';/,
     "an aboard reliever is already on the ship as a crew card — drawing the slot too is the duplicate");
-  const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
-  const bline = banner.slice(0, banner.indexOf("\n"));
-  assert.match(bline, /aboard since/, "say they were relieved, not that someone is still due");
-  assert.match(bline, /overlap/, "an overlap must not be announced as a gap");
+  // 7 Oct 2026 (Miguel: "I don't think it's necessary"): the handover banner under the cards is gone — the ship's
+  // timeline says who relieves whom and when. Nothing may announce a gap or a due reliever under the cards again.
+  assert.doesNotMatch(SRC, /function reliefBanner\(|_rbanner/);
 });
 
 // --- a sign-off that already passed is not a countdown ---------------------------------------
@@ -134,13 +133,8 @@ test("the board never prints a negative day count at the reader", () => {
   assert.match(slot.slice(0, slot.indexOf("\n")), /os\.ago\?\('OFF '\+os\.t\.toUpperCase\(\)\+' AGO'\)/,
     "a past sign-off reads as elapsed, not as a countdown");
   assert.doesNotMatch(slot.slice(0, slot.indexOf("\n")), /'OFF IN '\+d\+'D'|\(-d\)\+'D AGO/, "never the raw day count");
-  const banner = SRC.slice(SRC.lastIndexOf("function reliefBanner(rb){"));
-  // 15 Sep 2026: the banner sat under two cards saying "Sign-off overdue" with no name. On a ship with
-  // more than one seafarer nothing on the page said WHOSE sign-off. It leads with the name now.
-  assert.match(banner.slice(0, banner.indexOf("\n")), /var who=rb\.printer\.crew_name\?\(rb\.printer\.crew_name\+' \\u00b7 '\)/);
-  assert.match(banner.slice(0, banner.indexOf("\n")), /t=who\+'sign-off overdue/);
-  assert.match(banner.slice(0, banner.indexOf("\n")), /no sign-off recorded/,
-    "say WHY the seat is unresolved: nobody recorded the sign-off");
+  // (The banner that once said "sign-off overdue · N days ago" under the cards is gone since 7 Oct 2026; the card
+  // itself says "Past the projected sign-off" and the chip reads the elapsed span.)
   // the crew card carried the same defect ("OFF in -1d" on Anthem)
   // Option C (6 Oct 2026): the card's chip reads "<N> d · PAST SIGN-OFF" once the date has gone — elapsed, not negative.
   // 7 Oct 2026: the span is months + days off the calendar (spanCompact), read from the sign-off TO today when past.
