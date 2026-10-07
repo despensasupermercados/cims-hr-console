@@ -71,7 +71,7 @@ test("GREEN is a TDG card: drags to PLAN elsewhere, never moves; click opens the
   assert.doesNotMatch(h, /planDelete/, "a TDG card has no Remove: what is in the import stays");
   assert.doesNotMatch(h, /rlab plan/);
   assert.match(h, /Ana Alpha/);
-  assert.match(h, /2026-03-08/);
+  assert.match(h, /Mar 8, 2026/, "the sign-on is on the card, as a calendar date (7 Oct 2026)");
 });
 
 // 7 Oct 2026: one word — EARMARK (Miguel: "all the projections, people who are not on board but they're coming
@@ -146,6 +146,15 @@ test("a sign-off that has passed reads as elapsed on both states, never as a neg
   assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /<b>\d+ mo( \d+ d)?<\/b><i>PAST SIGN-OFF<\/i>/);
   assert.match(ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2025-06-01", signOff: past }), /<b>\d+ mo( \d+ d)?<\/b><i>PAST SIGN-OFF<\/i>/);
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past }), /TO SIGN-OFF|-\d+ ?d/);
+});
+
+test("the timeline and history dates read as calendar dates, never ISO (Miguel, 7 Oct 2026: 'Sept 22, 2027')", () => {
+  const h = ctx.rotCard({ ...GREEN, signOn: "2026-07-02", signOff: "2027-01-16" });
+  assert.match(h, /<span class="rdate on">Jul 2, 2026<\/span><span class="rdate off">Jan 16, 2027<\/span>/);
+  assert.doesNotMatch(h, /rdate on">2026-07-02|rdate off">2027-01-16/);
+  const hist = ctx.histCard({ name: "X", on: "2025-09-22", off: "2026-04-01" });
+  assert.match(hist, /Sep 22, 2025 → Apr 1, 2026/);
+  assert.doesNotMatch(hist, /2025-09-22/);
 });
 
 test("the chip reads months and days off the calendar, not a raw day count (Miguel, 7 Oct 2026: '3M 22 days')", () => {
