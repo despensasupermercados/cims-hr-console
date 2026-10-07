@@ -3421,7 +3421,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rlab{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px;font-weight:800}
 .rcard .rleg{font-size:11.5px;line-height:16px;color:var(--mut)}
 .rcard .offchip{position:static;margin:0;padding:0;background:none;color:var(--navy);text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:64px;font-weight:700;letter-spacing:0}
-.rcard .offchip b{font-size:28px;line-height:28px;letter-spacing:-.03em;font-variant-numeric:tabular-nums;font-weight:700}
+.rcard .offchip b{font-size:28px;line-height:28px;letter-spacing:-.03em;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.rcard .offchip.long b{font-size:22px;line-height:28px;letter-spacing:-.02em}
 .rcard .offchip i{font-style:normal;font-size:10px;line-height:12px;letter-spacing:.08em;font-weight:700;color:var(--mut)}
 .rcard .offchip.crit{background:none;color:#B42318}.rcard .offchip.due{background:none;color:#9a6410}
 .rcard .offchip.mut b{color:#B6C0CC;font-weight:400}
@@ -3463,7 +3464,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rcard{padding:12px}
 .rhead{min-height:40px;column-gap:12px}
 .rcard .rnm{font-size:15px}
-.rcard .offchip b{font-size:24px;line-height:24px}
+.rcard .offchip b{font-size:24px;line-height:24px}.rcard .offchip.long b{font-size:19px;line-height:24px}
 .rrot .tl{column-gap:12px}
 .rrot .rcity{font-size:13px}
 .pacts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -5211,8 +5212,10 @@ function rotCard(x){
   var today=new Date().toISOString().slice(0,10);
   // Whole days from TODAY's date, never from the clock: a sign-off dated today read "1 d PAST SIGN-OFF" by mid-morning.
   var tn0=Date.parse(today+'T00:00:00Z');
-  if((live||ovd)&&x.signOff){var dd=Math.round((Date.parse(x.signOff+'T00:00:00Z')-tn0)/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip=dd<0?('<span class="offchip crit"><b>'+(-dd)+' d</b><i>PAST SIGN-OFF</i></span>'):('<span class="offchip'+cc+'"><b>'+dd+' d</b><i>TO SIGN-OFF</i></span>');}
-  else if(plan&&x.signOn){var ds=Math.round((Date.parse(x.signOn+'T00:00:00Z')-tn0)/86400000);if(ds>=0)chip='<span class=offchip><b>'+ds+' d</b><i>TO SIGN-ON</i></span>';}
+  // The number is months + days read off the calendar (spanCompact), never a bare day count: "1 mo 22 d", not "53 d".
+  var lg=function(t){return /mo/.test(t)?' long':'';};
+  if((live||ovd)&&x.signOff){var dd=Math.round((Date.parse(x.signOff+'T00:00:00Z')-tn0)/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';var sp=dd<0?spanCompact(x.signOff,today):spanCompact(today,x.signOff);chip=dd<0?('<span class="offchip crit'+lg(sp)+'"><b>'+sp+'</b><i>PAST SIGN-OFF</i></span>'):('<span class="offchip'+cc+lg(sp)+'"><b>'+sp+'</b><i>TO SIGN-OFF</i></span>');}
+  else if(plan&&x.signOn){var ds=Math.round((Date.parse(x.signOn+'T00:00:00Z')-tn0)/86400000);if(ds>=0){var so=spanCompact(today,x.signOn);chip='<span class="offchip'+lg(so)+'"><b>'+so+'</b><i>TO SIGN-ON</i></span>';}}
   else if(x.tdgEarmark)chip='<span class="offchip mut"><b>&ndash;</b><i>NO DATES</i></span>';
   // THE DATES AS A PICTURE: ON port and OFF port over a rail, a dot at each end, TODAY where the contract stands
   // (its label in its own strip above the rail, right-anchored at the end so it never leaves the card). A plan
@@ -5351,17 +5354,28 @@ function rotShip(sec){
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
 }
-function monthsDays(a,b){
-  if(!a||!b)return '';
+function monthsDaysParts(a,b){
+  if(!a||!b)return null;
   var d1=new Date(a),d2=new Date(b);
-  if(isNaN(d1)||isNaN(d2)||d2<d1)return '';
+  if(isNaN(d1)||isNaN(d2)||d2<d1)return null;
   // ISO dates parse as UTC midnight: read UTC fields, or Santiago shows "6 mos 3 days" for exactly 6 months.
   var m=(d2.getUTCFullYear()-d1.getUTCFullYear())*12+(d2.getUTCMonth()-d1.getUTCMonth());
   var d=d2.getUTCDate()-d1.getUTCDate();
   if(d<0){m--;d+=new Date(Date.UTC(d2.getUTCFullYear(),d2.getUTCMonth(),0)).getUTCDate();}
-  if(m<0)return '';
-  var parts=[];if(m)parts.push(m+' mo'+(m===1?'':'s'));if(d)parts.push(d+' day'+(d===1?'':'s'));
+  if(m<0)return null;
+  return {m:m,d:d};
+}
+function monthsDays(a,b){
+  var p=monthsDaysParts(a,b);if(!p)return '';
+  var parts=[];if(p.m)parts.push(p.m+' mo'+(p.m===1?'':'s'));if(p.d)parts.push(p.d+' day'+(p.d===1?'':'s'));
   return parts.join(' ')||'0 days';
+}
+// The seat chip's ONE number (Miguel, 7 Oct 2026: "this should say 3M 22 days"): calendar months + days between two
+// dates, from the dates themselves — "22 d" under a month, "1 mo 22 d" / "3 mo" past it. Never a raw day count.
+function spanCompact(a,b){
+  var p=monthsDaysParts(a,b);if(!p)return '';
+  if(!p.m)return p.d+' d';
+  return p.m+' mo'+(p.d?(' '+p.d+' d'):'');
 }
 function histCard(h){
   var span=(h.on||'')+(h.off&&h.off!==h.on?(' → '+h.off):'');

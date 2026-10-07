@@ -141,15 +141,32 @@ test("the card names who set the dates, and says when TDG replaced an edit", () 
 
 test("a sign-off that has passed reads as elapsed on both states, never as a negative countdown", () => {
   const past = "2026-01-01";
-  // Option C wording (6 Oct 2026): "<N> d · PAST SIGN-OFF" — elapsed days, never "-N".
-  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /<b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/);
-  assert.match(ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2025-06-01", signOff: past }), /<b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/);
+  // Option C wording (6 Oct 2026): "<span> · PAST SIGN-OFF" — elapsed, never "-N". Since 7 Oct 2026 the span is
+  // calendar months + days ("9 mo 6 d"), never a bare day count once a month has passed.
+  assert.match(ctx.rotCard({ ...GREEN, signOff: past }), /<b>\d+ mo( \d+ d)?<\/b><i>PAST SIGN-OFF<\/i>/);
+  assert.match(ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2025-06-01", signOff: past }), /<b>\d+ mo( \d+ d)?<\/b><i>PAST SIGN-OFF<\/i>/);
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past }), /TO SIGN-OFF|-\d+ ?d/);
+});
+
+test("the chip reads months and days off the calendar, not a raw day count (Miguel, 7 Oct 2026: '3M 22 days')", () => {
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const t0 = new Date(iso(new Date()) + "T00:00:00Z");
+  const plus = (m, d) => { const x = new Date(t0); x.setUTCMonth(x.getUTCMonth() + m); x.setUTCDate(x.getUTCDate() + d); return iso(x); };
+  // under a month: days alone, the number stays big
+  assert.match(ctx.rotCard({ ...GREEN, signOff: plus(0, 22) }), /class="offchip due"><b>22 d<\/b><i>TO SIGN-OFF<\/i>/);
+  // past a month: "<M> mo <D> d", the chip carries the long class so the name keeps its room
+  assert.match(ctx.rotCard({ ...GREEN, signOff: plus(3, 22) }), /class="offchip long"><b>3 mo 22 d<\/b><i>TO SIGN-OFF<\/i>/);
+  assert.match(ctx.rotCard({ ...GREEN, signOff: plus(3, 0) }), /<b>3 mo<\/b><i>TO SIGN-OFF<\/i>/, "no '0 d' tail");
+  // a plan counts down to its sign-on the same way
+  assert.match(ctx.rotCard({ ...YELLOW, signOn: plus(2, 5), signOff: plus(9, 5) }), /<b>2 mo 5 d<\/b><i>TO SIGN-ON<\/i>/);
+  // elapsed reads the same, red
+  assert.match(ctx.rotCard({ ...GREEN, signOff: plus(-1, -3) }), /class="offchip crit long"><b>1 mo 3 d<\/b><i>PAST SIGN-OFF<\/i>/);
+  assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: plus(3, 22) }), /<b>\d{2,3} d<\/b>/, "never '113 d'");
 });
 
 test("a future projection counts down to its sign-on, not to a sign-off it has not reached", () => {
   const h = ctx.rotCard({ ...YELLOW, signOn: "2099-01-01", signOff: "2099-07-01" });
-  assert.match(h, /<b>\d+ d<\/b><i>TO SIGN-ON<\/i>/);
+  assert.match(h, /<b>\d+ mo( \d+ d)?<\/b><i>TO SIGN-ON<\/i>/);
   assert.doesNotMatch(h, /TO SIGN-OFF/);
 });
 
@@ -301,7 +318,7 @@ test("a seat whose sign-off has passed is marked ON THE CARD, whatever the deriv
   const h = ctx.rotCard(OVERDUE);
   assert.match(h, /class="rcard green overdue"/, "the ring is on the card that needs attention");
   // Option C (6 Oct 2026): the chip is the ONE number — days since, red, "PAST SIGN-OFF"; still never a negative count.
-  assert.match(h, /class="offchip crit"><b>\d+ d<\/b><i>PAST SIGN-OFF<\/i>/, "the countdown chip is not reserved for people the status calls current");
+  assert.match(h, /class="offchip crit long"><b>\d+ mo( \d+ d)?<\/b><i>PAST SIGN-OFF<\/i>/, "the countdown chip is not reserved for people the status calls current");
   assert.doesNotMatch(h, /-\d+ ?d/, "never a negative day count");
   assert.match(h, /Past the projected sign-off\./, "say why the seat is still held (7 Oct 2026: the sign-off is a projection until TDG, a card or Rita sets it)");
   // the old rule: live = status === 'On board', so this exact card carried no chip and no ring at all

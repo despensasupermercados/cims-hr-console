@@ -141,7 +141,10 @@ test("the board never prints a negative day count at the reader", () => {
     "say WHY the seat is unresolved: nobody recorded the sign-off");
   // the crew card carried the same defect ("OFF in -1d" on Anthem)
   // Option C (6 Oct 2026): the card's chip reads "<N> d · PAST SIGN-OFF" once the date has gone — elapsed, not negative.
-  assert.match(SRC, /dd<0\?\('<span class="offchip crit"><b>'\+\(-dd\)\+' d<\/b><i>PAST SIGN-OFF<\/i><\/span>'\)/);
+  // 7 Oct 2026: the span is months + days off the calendar (spanCompact), read from the sign-off TO today when past.
+  assert.match(SRC, /var sp=dd<0\?spanCompact\(x\.signOff,today\):spanCompact\(today,x\.signOff\)/);
+  assert.match(SRC, /dd<0\?\('<span class="offchip crit'\+lg\(sp\)\+'"><b>'\+sp\+'<\/b><i>PAST SIGN-OFF<\/i><\/span>'\)/);
+  assert.doesNotMatch(SRC, /<b>'\+dd\+' d<\/b>/, "never the raw day count");
 });
 
 // 15 Sep 2026, Miguel, twice: "It's not yellow." The first time the card was missing; the second time it
