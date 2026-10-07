@@ -246,5 +246,5 @@ test("static: rejecting a TDG earmark — the route, the table, the board skip w
   assert.match(W, /async function earmarkDismiss\(e,el\)\{/);
   assert.match(W, /fetch\('\/api\/rotation\/earmark\/dismiss'/);
   assert.match(W, /<div class=gt>Add earmark<\/div>/, "the ghost slot speaks the one word too");
-  assert.doesNotMatch(W.slice(W.indexOf("function rotSourcesLine(){"), W.indexOf("function rotSourcesLine(){") + 2500), /no upload since 14 Sep 2026/, "the Counter is history: no warning about its age");
+  assert.doesNotMatch(W, /no upload since 14 Sep 2026|function rotSourcesLine/, "the Counter is history: no warning about its age — and since 7 Oct 2026 no sources line on the page at all");
 });

@@ -164,12 +164,9 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   // ...and the response says where its numbers come from.
   assert.match(body, /sources, issues, fileKept, inDock/, "the response carries its sources and the TDG-says-otherwise list");
   assert.match(body, /seed: KEYMAN_VERSION/, "a NULL stamp is named as the bundled seed, not left blank");
-  // The page renders it above the ships.
-  assert.match(src, /function rotSourcesLine\(\)/);
-  assert.match(src, /\+rotSourcesLine\(\)/);
-  // 7 Oct 2026: the AdvancedQuery dates the board, so the line names the FILE first; the Counter is history, named, never warned about.
-  assert.match(src, /var rTxt=rg\.at\?\('TDG file '\+rg\.at/, "the file that dates the board comes first");
-  assert.match(src, /Contract Counter \(history\) /, "the Counter is history only (§10d)");
+  // 7 Oct 2026 (Miguel: "remove this"): the page no longer prints a sources line, a hint or a ship count above the
+  // ships — the API keeps `sources`, the Keyman board starts with the first ship.
+  assert.doesNotMatch(src, /rotSourcesLine|Each ship shows its full crew history|id=rothead/);
   assert.match(body, /registry: \{ at: _lastRun\.run_at/, "the response carries the kept file's date");
 });
 

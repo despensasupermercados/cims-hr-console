@@ -71,9 +71,7 @@ test("GREEN is a TDG card: drags to PLAN elsewhere, never moves; click opens the
   assert.doesNotMatch(h, /planDelete/, "a TDG card has no Remove: what is in the import stays");
   assert.doesNotMatch(h, /rlab plan/);
   assert.match(h, /Ana Alpha/);
-  // 7 Oct 2026 (Miguel): the dates moved to the ship's timeline; the card carries a progress bar with how long aboard
-  assert.match(h, /<span class="pu l"><b>[\d a-z]+<\/b> aboard<\/span>/, "the card says how long they have been aboard");
-  assert.doesNotMatch(h, /2026-03-08|Mar 8, 2026/, "the sign-on date is on the ship's timeline, not the card");
+  assert.match(h, /<span class="rdate on">Mar 8, 2026<\/span>/, "the sign-on is on the card, as a calendar date (7 Oct 2026: 'we had them very well done')");
 });
 
 // 7 Oct 2026: one word — EARMARK (Miguel: "all the projections, people who are not on board but they're coming
@@ -121,7 +119,7 @@ test("the ship section shows what was sent to TDG, with Restore, until the Count
   assert.match(sec, /sent to TDG on 2026-09-14/);
   assert.match(sec, /awaiting the Counter/);
   assert.match(sec, /data-log="dep_1"[^>]*onclick="deployRestore\(this\)"/);
-  assert.match(sec, /1 sent to TDG/);
+  assert.doesNotMatch(sec, /1 sent to TDG/, "7 Oct 2026: the header carries no counts — the sent row says it");
   const ab = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [{ ...sent, aboard: true }], history: [] });
   assert.match(ab, /aboard per your board, awaiting the Counter/);
   const none = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [], history: [] });
@@ -150,15 +148,14 @@ test("a sign-off that has passed reads as elapsed on both states, never as a neg
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, signOff: past }), /TO SIGN-OFF|-\d+ ?d/);
 });
 
-test("the seat card is a progress bar — aboard on the left, to go / past on the right — and the history reads calendar dates", () => {
-  const h = ctx.rotCard({ ...GREEN, signOn: "2026-07-02" });
-  assert.match(h, /<div class="pbar"><i style="width:\d+%"><\/i><\/div><span class="pu l"><b>[\d a-z]+<\/b> aboard<\/span><span class="pu r"><b>[\d a-z]+<\/b> to go<\/span>/);
-  assert.doesNotMatch(h, /class="lane|class=rdate|class="rdate|TODAY|2026-07-02/, "no lane, no dates, no TODAY tick on the card");
+test("the seat card is a thin progress bar with the two calendar dates under it — no lane, no dots, no TODAY tick", () => {
+  const h = ctx.rotCard({ ...GREEN, signOn: "2026-07-02", signOff: "2027-01-16" });
+  assert.match(h, /<div class="pbar"><i style="width:\d+%"><\/i><\/div><span class="rdate on">Jul 2, 2026<\/span><span class="rdate off">Jan 16, 2027<\/span>/);
+  assert.doesNotMatch(h, /class="lane|TODAY|2026-07-02|2027-01-16| aboard<| to go</, "no lane, no TODAY tick, no ISO date, no aboard / to-go row");
   const late = ctx.rotCard({ ...GREEN, signOff: "2026-01-01", offSource: "projected" });
-  assert.match(late, /<div class="pbar late"><i style="width:100%"><\/i><\/div>/, "overdue fills the bar red");
-  assert.match(late, /<span class="pu r late"><b>[\d a-z]+<\/b> past the projected sign-off<\/span>/);
+  assert.match(late, /<div class="pbar late"><i style="width:100%"><\/i><\/div><span class="rdate on">Mar 8, 2026<\/span><span class="rdate off">Jan 1, 2026<\/span>/, "overdue fills the bar");
   const plan = ctx.rotCard({ ...YELLOW, signOn: "2099-01-01", signOff: "2099-08-01" });
-  assert.match(plan, /<div class="pbar plan"><\/div><span class="pu l">signs on <b>Jan 1, 2099<\/b><\/span><span class="pu r"><b>7 mo<\/b> planned<\/span>/);
+  assert.match(plan, /<div class="pbar plan"><\/div><span class="rdate on">Jan 1, 2099<\/span><span class="rdate off">Aug 1, 2099<\/span>/, "an earmark: empty dashed track, its planned dates");
   const hist = ctx.histCard({ name: "X", on: "2025-09-22", off: "2026-04-01" });
   assert.match(hist, /Sep 22, 2025 → Apr 1, 2026/);
   assert.doesNotMatch(hist, /2025-09-22/);
@@ -180,7 +177,7 @@ test("the ship header carries Miguel's timeline: one segment per crew, ticks wit
   const empty = ctx.rotShip({ ship: "Jewel", brand: "Royal", onboard: 0, crew: [], projections: [], history: [], deployed: [] });
   assert.match(empty, /<div class="stl none">.*no crew aboard, nobody earmarked/, "an empty hull says so on the line");
   const two = ctx.rotShip({ ...sec, projections: [{ ...YELLOW, awaiting: true, aboard: true, signOn: "2026-10-01", signOff: "2027-05-01" }] });
-  assert.match(two, /<i class="sg await[^"]*" style="[^"]*top:10px"/, "two crew at once → the second takes the lane below");
+  assert.match(two, /<i class="sg await[^"]*" style="[^"]*top:9px"/, "two crew at once → the second takes the lane below");
 });
 
 test("the chip reads months and days off the calendar, not a raw day count (Miguel, 7 Oct 2026: '3M 22 days')", () => {
@@ -210,12 +207,14 @@ test("the ship section draws both feeds through the ONE renderer and counts them
   assert.equal((sec.match(/class="rcard /g) || []).length, 2, "one green, one yellow");
   // 15 Sep 2026: the header used to read "N current", counting CARDS — it called a seafarer whose
   // sign-off passed weeks ago "current" alongside the one actually at work. It now states what is true.
-  assert.match(sec, /1 onboard/);
-  assert.doesNotMatch(sec, /current/, "'current' counted cards, not people aboard");
-  assert.match(sec, /1 earmarked/);
+  // 7 Oct 2026 (Miguel: "we don't need to have this royal one on board"): the header is the name, the timeline and a
+  // chevron — no brand, no counts. What is true is on the cards and the line.
+  const hdr = sec.slice(0, sec.indexOf("<div class=\"shipbody"));
+  assert.match(hdr, /<span class=meta><span class="arw">▾<\/span><\/span><\/div>$/, "only the chevron after the timeline");
+  assert.doesNotMatch(hdr, /Royal|onboard|current|earmarked|overdue|completed/, "no counts, no brand word in the header");
   const ovd = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [{ ...GREEN, current: false, status: "On Vacation", signOff: "2020-01-01" }], projections: [], history: [] });
-  assert.match(ovd, /1 overdue/, "a green card past its sign-off is counted, and named, as overdue");
-  assert.doesNotMatch(ovd, /onboard/, "nobody is aboard that seat");
+  assert.match(ovd, /class="rcard green overdue"/, "a green card past its sign-off is drawn overdue on the card itself");
+  assert.doesNotMatch(ovd.slice(0, ovd.indexOf("<div class=\"shipbody")), /onboard|overdue/, "and the header stays quiet");
   const sec0 = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [], projections: [], history: [] });
   assert.doesNotMatch(sec0, /planned/, "no projections, no count");
   assert.match(sec0, /drag crew here/);
@@ -588,6 +587,6 @@ test("a card the file confirms renders once, green, with Remove; the ship lists 
   assert.doesNotMatch(h, /planDeploy/, "TDG already has them aboard: nothing to deploy");
   const sec = ctx.rotShip({ ship: "Navigator", brand: "Royal", onboard: 0, crew: [], projections: [], deployed: [], history: [{ name: "Andrea Calayag", sc: "SC-1", ours: true, on: "2026-02-02", off: "2026-09-25" }] });
   assert.match(sec, /Contract completed · 1/);
-  assert.match(sec, /1 completed/);
+  assert.doesNotMatch(sec, /1 completed</, "7 Oct 2026: no counts in the header; the history section carries its own");
   assert.doesNotMatch(sec, /Also served this ship/);
 });
