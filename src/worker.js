@@ -3266,7 +3266,28 @@ nav button{white-space:nowrap}
 .shipsec{background:#fff;border:1px solid var(--line);border-radius:13px;box-shadow:0 2px 10px rgba(20,45,72,.06);overflow:hidden;margin-bottom:10px}
 .shiphdr{display:flex;align-items:center;padding:12px 14px;cursor:pointer;border-left:3px solid var(--royal)}
 .shiphdr .nm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:15px}
-.shiphdr .meta{margin-left:auto;color:var(--mut);font-size:12.5px;display:flex;align-items:center;gap:8px}
+.shiphdr .meta{margin-left:auto;color:var(--mut);font-size:12.5px;display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
+.shiphdr{flex-wrap:wrap;row-gap:2px}.shiphdr .nm{flex:1 1 auto}
+/* The board column is ~720px beside the side rail, so the line takes its own full-width row under the name (the
+   drawing had it inline; at 330px the dates collide). Names and the middle dates go when the row is narrow. */
+.stl{order:3;flex:1 1 100%;min-width:0;position:relative;margin:6px 0 0;padding-top:17px;padding-bottom:16px;container-type:inline-size}
+@container (max-width:460px){.stl .swho{display:none}.stl .std{display:none}.stl .std.first,.stl .std.last{display:block}.stl .snow em{display:none}}
+.stl .stlb{position:relative;background:#E1E6EE;border-radius:3px}
+.stl.none .stlb{height:6px;background:repeating-linear-gradient(135deg,#FBE7E6 0 4px,#F6D3D1 4px 6px)}.stl.none em{position:absolute;left:0;top:28px;font-style:normal;font-size:11px;color:#B42318;font-weight:700;white-space:nowrap}
+.stl .sg{position:absolute;height:6px;border-radius:3px;background:var(--green)}
+.stl .sg.proj{background:repeating-linear-gradient(90deg,var(--green) 0 6px,#B9E3AE 6px 9px)}
+.stl .sg.await{background:#A9DD9A}
+.stl .sg.earmark{background:#F3C64A}.stl .sg.earmark.proj{background:repeating-linear-gradient(90deg,#F3C64A 0 6px,#FAE4A3 6px 9px)}
+.stl .sg.tdg{background:#E6B325}.stl .sg.tdg.proj{background:repeating-linear-gradient(90deg,#E6B325 0 6px,#F3D98A 6px 9px)}
+.stl .sg.open{-webkit-mask-image:linear-gradient(90deg,#000 60%,transparent);mask-image:linear-gradient(90deg,#000 60%,transparent)}
+.stl .sgap{position:absolute;top:-2px;height:10px;background:#D92D20;border-radius:2px;min-width:3px}
+.stl .stk{position:absolute;top:-5px;width:2px;height:16px;background:var(--navy);margin-left:-1px}
+.stl .std{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;color:#4A5A6E;white-space:nowrap;font-variant-numeric:tabular-nums}
+.stl .std.first{transform:none}.stl .std.last{transform:translateX(-100%)}.stl .std.first.last{transform:none}
+.stl .std.soft{color:#9AA6B5}.stl .std small{display:block;font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;text-align:right}
+.stl .swho{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;font-weight:700;color:var(--navy);white-space:nowrap}
+.stl .snow{position:absolute;top:-9px;width:2px;height:24px;background:var(--navy);margin-left:-1px;z-index:2}.stl .snow em{position:absolute;top:-13px;left:50%;transform:translateX(-50%);font-style:normal;font-size:9px;font-weight:800;letter-spacing:.1em;color:var(--navy);background:#fff;padding:0 3px;line-height:12px}
+@media (max-width:640px){.shiphdr .meta{flex:1 1 auto;justify-content:flex-end}.stl{margin-top:4px;padding-top:8px}.rrot .pu{white-space:normal;overflow:visible}}
 .shiphdr .arw{display:inline-block;transition:transform .15s}.shiphdr .arw.closed{transform:rotate(-90deg)}
 .shipbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;padding:6px 14px 14px;align-items:start}
 .shipbody.closed{display:none}
@@ -3434,20 +3455,13 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rrot .rcity.off{text-align:right;justify-content:flex-end}
 .rrot .rcity .pc{font-weight:600}
 .rrot .rmut{color:#8795A8;font-weight:500}
-.rrot .rdate{margin:0;font-size:12px;line-height:16px;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
-.rrot .rdate.off{text-align:right}
-.rrot .lane{grid-column:1/-1;position:relative;height:28px}
-.rrot .lane i{display:block;position:absolute;font-style:normal}
-.rrot .lane .rail{left:5px;right:5px;top:19px;height:2px;background:#DCE2EA;border-radius:1px}
-.rrot .lane .done{left:5px;top:19px;height:2px;background:var(--green);border-radius:1px}
-.rrot .lane .d{top:15px;width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid var(--green);box-sizing:border-box}
-.rrot .lane .d.l{left:0}.rrot .lane .d.r{right:0}.rrot .lane .d.fill{background:var(--green)}
-.rrot .lane .now{top:13px;width:2px;height:14px;margin-left:-1px;background:var(--navy);border-radius:1px}
-.rrot .lane .now em{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);font-size:9px;font-weight:700;letter-spacing:.1em;line-height:12px;color:var(--navy);font-style:normal;white-space:nowrap}
-.rrot .lane .now.end em{left:auto;right:0;transform:none}
-.rrot .lane .now.start em{left:0;transform:none}
-.rrot .lane.late .rail{background:#F1C9C9}.rrot .lane.late .done{background:#B42318;right:5px}.rrot .lane.late .d{border-color:#B42318}.rrot .lane.late .d.fill{background:#B42318}.rrot .lane.late .now{background:#B42318}.rrot .lane.late .now em{color:#B42318}
-.rrot .lane.plan .rail{background:repeating-linear-gradient(90deg,#C9A227 0 6px,transparent 6px 12px)}.rrot .lane.plan .d{border-color:#C9A227}.rrot .lane.plan .d.fill{background:#C9A227}.rrot .lane.plan .done{background:#C9A227}
+.rrot .pbar{grid-column:1/-1;position:relative;height:8px;margin-top:10px;background:#E1E6EE;border-radius:4px;overflow:hidden}
+.rrot .pbar i{display:block;height:100%;background:var(--green);border-radius:4px}
+.rrot .pbar.late i{background:#B42318}
+.rrot .pbar.plan{background:repeating-linear-gradient(90deg,#EADFB8 0 6px,#F4EFDD 6px 12px)}
+.rrot .pu{font-size:11px;line-height:14px;color:var(--mut);margin-top:5px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rrot .pu b{color:var(--navy);font-weight:700}
+.rrot .pu.r{text-align:right}.rrot .pu.r.late,.rrot .pu.r.late b{color:#B42318}
 .rtags{margin:0;gap:6px}
 .rtag{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px;border-color:transparent}
 .rtag.on{border-color:transparent}
@@ -5227,11 +5241,18 @@ function rotCard(x){
     var offC=x.signOff?(x.off_city?oc(x.off_city,x.off_conf):(x.disembark?niceCity(x.disembark):tba)):(plan?'<span class=rmut>Sign-off to plan</span>':'');
     var pct=null;
     if(x.signOn&&x.signOff){var t0=Date.parse(x.signOn+'T00:00:00Z'),t1=Date.parse(x.signOff+'T00:00:00Z'),tn=Date.parse(today+'T00:00:00Z');if(t1>t0)pct=Math.max(0,Math.min(100,Math.round((tn-t0)/(t1-t0)*100)));}
-    var showNow=(live||ovd)&&pct!=null;
-    var lane='<div class="lane'+(ovd?' late':(plan&&!confirmed&&!awaiting)?' plan':'')+'"><i class=rail></i>'+(showNow?'<i class=done style="width:'+pct+'%"></i>':'')
-      +(x.signOn?'<i class="d l'+((live||ovd)?' fill':'')+'"></i>':'')+(x.signOff?'<i class="d r'+(ovd?' fill':'')+'"></i>':'')
-      +(showNow?'<i class="now'+(pct>=92?' end':pct<=8?' start':'')+'" style="left:'+pct+'%"><em>TODAY</em></i>':'')+'</div>';
-    rows='<div class=tl><span class="rcity on">'+onC+'</span><span class="rcity off">'+offC+'</span>'+lane+'<span class="rdate on">'+(x.signOn?fmtDateS(x.signOn):'')+'</span><span class="rdate off">'+(x.signOff?fmtDateS(x.signOff):'&mdash;')+'</span></div>';
+    // Variant C (Miguel, 7 Oct 2026: "this should be progress bar"): a thin bar filled to today, with how long
+    // aboard on the left and how long to go (or how far past) on the right. The dates live on the ship's timeline.
+    var aboardNow=(live||ovd)&&x.signOn&&x.signOn<=today;
+    var uL=aboardNow?('<b>'+spanCompact(x.signOn,today)+'</b> aboard'):(plan&&x.signOn?('signs on <b>'+fmtDateS(x.signOn)+'</b>'):'');
+    var uR='';
+    if((live||ovd)&&x.signOff){uR=ovd?('<b>'+spanCompact(x.signOff,today)+'</b> past the '+(x.offSource==='projected'?'projected sign-off':'sign-off')):('<b>'+spanCompact(today,x.signOff)+'</b> to go');}
+    else if(live||ovd){uR='no sign-off yet';}
+    else if(plan){uR=x.signOff&&x.signOn?('<b>'+spanCompact(x.signOn,x.signOff)+'</b> planned'):'sign-off to plan';}
+    var fill=ovd?'<i style="width:100%"></i>':(live&&pct!=null?('<i style="width:'+pct+'%"></i>'):'');
+    rows='<div class=tl><span class="rcity on">'+onC+'</span><span class="rcity off">'+offC+'</span>'
+      +'<div class="pbar'+(ovd?' late':(plan&&!confirmed&&!awaiting)?' plan':'')+'">'+fill+'</div>'
+      +'<span class="pu l">'+uL+'</span><span class="pu r'+(ovd?' late':'')+'">'+uR+'</span></div>';
   }
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
@@ -5351,8 +5372,49 @@ function rotShip(sec){
   // the one that renders. Removed with its five helper vars; dead code that formats crew data is a trap.
   var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;
   var _rslot=reliefSlot(_rb,projs);var _rbanner=reliefBanner(_rb);
-  return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span><span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
+  return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta>'+meta+' <span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
+}
+// THE SHIP'S TIMELINE (Miguel, 7 Oct 2026: "a timeline from the sign-on of the active crew to the sign-off of the
+// last earmarked crew ... so visually we see how far the ship is covered"). One line in the ship header, one
+// segment per crew in the chain — green aboard (dashed when the sign-off is a projection), light green aboard
+// awaiting the TDG file, yellow earmark (darker when TDG earmarks them too) — a tick with the calendar date under
+// every boundary, the name above, TODAY marked, a gap between contracts red, two crew at once on two lanes.
+// Nothing here is computed on the server: it reads the cards the section already carries.
+function shipTimeline(sec){
+  var today=new Date().toISOString().slice(0,10);
+  var P=function(iso){return Date.parse(iso+'T00:00:00Z');};
+  var addM=function(iso,m){var x=new Date(P(iso));x.setUTCMonth(x.getUTCMonth()+m);return x.toISOString().slice(0,10);};
+  var segs=[];
+  (sec.crew||[]).forEach(function(c){if(!c.signOn||c.tdgEarmark)return;var k=c.awaiting?'await':(c.state==='yellow'&&!c.confirmed)?((c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark'):'seat';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:c.offSource==='projected'||(k!=='seat'&&!c.offConfirmed)});});
+  (sec.projections||[]).forEach(function(c){if(!c.signOn)return;var k=c.awaiting?'await':(c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:!c.offConfirmed});});
+  if(!segs.length)return '<div class="stl none"><div class=stlb></div><em>no crew aboard, nobody earmarked</em></div>';
+  segs.sort(function(a,b){return a.on<b.on?-1:a.on>b.on?1:0;});
+  var start=segs[0].on,end=start;
+  segs.forEach(function(x){x.end=x.off||addM(x.on,7);if(x.end>end)end=x.end;});
+  if(!(P(end)>P(start)))end=addM(start,7);
+  var pct=function(iso){return Math.max(0,Math.min(100,(P(iso)-P(start))/(P(end)-P(start))*100));};
+  // lanes: a crew whose contract overlaps an earlier one goes a lane down
+  var lanes=[];
+  segs.forEach(function(x){var L=0;while(lanes[L]&&lanes[L].some(function(y){return x.on<y.end&&y.on<x.end;}))L++;(lanes[L]=lanes[L]||[]).push(x);x.lane=L;});
+  var nl=lanes.length,h='';
+  segs.forEach(function(x){
+    var l=pct(x.on),r=pct(x.end),w=Math.max(0.4,r-l);
+    var t=escHtml(x.name)+' \u00b7 '+fmtDateS(x.on)+' \u2192 '+(x.off?fmtDateS(x.off):'no sign-off yet')+(x.proj?' (projected)':'');
+    h+='<i class="sg '+x.k+(x.proj?' proj':'')+(x.off?'':' open')+'" style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%;top:'+(x.lane*10)+'px" title="'+t+'"></i>';
+    h+='<b class=swho style="left:'+((l+r)/2).toFixed(2)+'%;top:'+(-15-x.lane*10)+'px">'+escHtml((x.name||'').split(' ').slice(-1)[0])+'</b>';
+  });
+  // a gap between two contracts on the first lane is the ship uncovered
+  var l0=segs.filter(function(x){return x.lane===0;});
+  for(var i=1;i<l0.length;i++){var a=l0[i-1],b=l0[i];if(a.off&&b.on>a.off)h+='<i class=sgap style="left:'+pct(a.off).toFixed(2)+'%;width:'+Math.max(0.4,pct(b.on)-pct(a.off)).toFixed(2)+'%" title="uncovered '+fmtDateS(a.off)+' \u2192 '+fmtDateS(b.on)+'"></i>';}
+  // ticks + dates: one per distinct boundary, a second row when two fall within 7% of each other
+  var ticks=[];segs.forEach(function(x){if(ticks.indexOf(x.on)<0)ticks.push(x.on);if(x.off&&ticks.indexOf(x.off)<0)ticks.push(x.off);});ticks.sort();
+  var prev=-99,row=0,rows=0;
+  ticks.forEach(function(t,i){var xp=pct(t);row=xp-prev<11?row+1:0;prev=xp;if(row>rows)rows=row;h+='<i class=stk style="left:'+xp.toFixed(2)+'%"></i><span class="std'+(i===0?' first':'')+(i===ticks.length-1?' last':'')+'" style="left:'+xp.toFixed(2)+'%;top:'+(12+row*13)+'px">'+fmtDateS(t)+'</span>';});
+  segs.forEach(function(x){if(!x.off)h+='<span class="std soft last" style="left:'+pct(x.end).toFixed(2)+'%;top:12px">'+fmtDateS(x.end)+'<small>projected</small></span>';});
+  if(today>start&&today<end)h+='<i class=snow style="left:'+pct(today).toFixed(2)+'%"><em>TODAY</em></i>';
+  var hgt=6+(nl-1)*10;
+  return '<div class=stl style="padding-bottom:'+(16+rows*13+(segs.some(function(x){return !x.off;})?10:0))+'px"><div class=stlb style="height:'+hgt+'px">'+h+'</div></div>';
 }
 function monthsDaysParts(a,b){
   if(!a||!b)return null;

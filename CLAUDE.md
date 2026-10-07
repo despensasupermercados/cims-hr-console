@@ -171,6 +171,17 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   by the next Apply while the file that showed it stands; a LATER file still carrying it brings it back (Joy did not
   correct TDG) — removes the card if any, and offers to tell Joy (mode `reject`, "CIMS does not plan this seafarer
   for this ship"). The console never changes TDG; Joy does.
+- **The ship's timeline + the card's progress bar** (Miguel, 7 Oct 2026, evening: "a timeline from the sign-on of the active
+  crew to the sign-off of the last earmarked crew ... so visually we see how far the ship is covered"; "this should be
+  progress bar", variant C). `shipTimeline(sec)` on the page draws one line per ship header, its own full-width row under the
+  name: one segment per crew in the chain (green aboard, dashed when the sign-off is projected; light green awaiting the file;
+  yellow earmark, darker when TDG earmarks them too), a tick with the calendar date under every boundary, the name above,
+  TODAY, a FUTURE gap between contracts red, two crew at once on two lanes, an open end faded to its projected date. Horizon
+  = the active crew's sign-on → the last earmark's sign-off (Miguel's choice over a fixed 12-month window — every ship fills
+  the width, so coverage depth is read off the end date). The seat card lost its lane, dots and dates: a thin bar filled to
+  today, "<span> aboard" left, "<span> to go" / "<span> past the projected sign-off" (red) right; an earmark shows "signs on
+  <date>" and "<N> mo planned". Dates on the card and the history read "Sep 22, 2027" (`fmtDateS`), the chip reads calendar
+  months + days (`spanCompact`), never a bare day count. Pinned by `test/board_cards.test.js`. Mock-ups under `docs/mockups/`.
 - The sources line names the FILE that dates the board first ("TDG file <date> · N crew, M with embark dates"); the
   Counter is "(history)", never warned about. Nothing here is money (§1) and nothing resolves a disagreement without
   Rita (§6).
