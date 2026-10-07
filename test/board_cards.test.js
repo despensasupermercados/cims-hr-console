@@ -67,7 +67,7 @@ test("GREEN is a TDG card: drags to PLAN elsewhere, never moves; click opens the
   assert.match(h, /class="rcard green cur"/);
   assert.match(h, /draggable="true"/, "a green card must drag: the drop creates a projection on the target ship");
   assert.match(h, /ondragstart="rcDrag\(event,this\)"/);
-  assert.match(h, /title="TDG contract - click to edit, drag to another ship to plan them there"/);
+  assert.match(h, /title="TDG contract - click to edit, drag to another ship to earmark them there"/);
   assert.doesNotMatch(h, /planDelete/, "a TDG card has no Remove: what is in the import stays");
   assert.doesNotMatch(h, /rlab plan/);
   assert.match(h, /Ana Alpha/);
@@ -96,14 +96,21 @@ test("a projection whose contract has started says ABOARD and keeps its solid ou
   assert.match(h, /EARMARK &middot; ABOARD/);
 });
 
-test("YELLOW carries the Deploy CTA; green never does", () => {
+// 7 Oct 2026 (Miguel: "this deploy CTA does not need it anymore .. the logic is not like that no more"): Joy is told
+// from the import review, row by row. No card carries a Deploy button; every earmark card carries Remove.
+test("no card carries the Deploy CTA any more; every earmark card carries Remove, TDG's own earmark included", () => {
   const h = ctx.rotCard(YELLOW);
-  assert.match(h, /onclick="planDeploy\(event,this\)"/);
-  assert.match(h, /class="pbtn go"[^>]*>Deploy</);
-  assert.doesNotMatch(ctx.rotCard(GREEN), /planDeploy/, "a TDG contract is not ours to deploy");
-  assert.equal(typeof ctx.planDeploy, "function");
-  assert.equal(typeof ctx.dpvSend, "function");
-  assert.equal(typeof ctx.deployRestore, "function");
+  assert.doesNotMatch(h, /planDeploy|>Deploy</);
+  assert.match(h, /class="pbtn danger" data-aid="as_1"[^>]*onclick="planDelete\(event,this\)">Remove</);
+  assert.doesNotMatch(ctx.rotCard(GREEN), /planDeploy|planDelete/, "a TDG contract is neither ours to deploy nor to remove");
+  // TDG's earmark drawn from the file (no assignment): Remove records the rejection and offers to tell Joy
+  const t = ctx.rotCard({ ...YELLOW, ship: "Icon", assignment_id: null, tdgEarmark: true, signOn: null, signOff: null, registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-06" } });
+  assert.match(t, /class="pbtn danger" data-crew="SC-9" data-ship="Icon"[^>]*data-at="2026-10-06" onclick="earmarkDismiss\(event,this\)">Remove</);
+  // a console card TDG ALSO earmarks: Remove goes through the dismissal too, or the next Apply re-creates it
+  const both = ctx.rotCard({ ...YELLOW, ship: "Icon", registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-06" } });
+  assert.match(both, /data-dis="1" data-ship="Icon" data-crew="SC-9"[^>]*onclick="planDelete\(event,this\)"/);
+  assert.equal(typeof ctx.earmarkDismiss, "function");
+  assert.equal(typeof ctx.deployRestore, "function", "legacy sent lines still restore");
 });
 
 test("the ship section shows what was sent to TDG, with Restore, until the Counter brings it back", () => {
@@ -123,7 +130,6 @@ test("a yellow card with no projection behind it offers no Remove", () => {
   // An aboard reliever drawn from the schedule may reach the card without an assignment id.
   const h = ctx.rotCard({ ...YELLOW, assignment_id: null });
   assert.doesNotMatch(h, /planDelete/);
-  assert.doesNotMatch(h, /planDeploy/, "nothing to deploy either");
   assert.doesNotMatch(h, /data-aid="null"/);
 });
 
@@ -179,8 +185,8 @@ test("expired documents are a warning on BOTH states, never a block", () => {
   const soon = ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "Within 90 days: US C1/D Visa", expiring: 1 } });
   assert.match(soon, /class="rtag warn"[^>]*>1 EXPIRING</);
   assert.doesNotMatch(ctx.rotCard(GREEN), /rtag bad|rtag warn/, "a clean seafarer carries no document chip");
-  // The Deploy button is still there: a warning never blocks the send.
-  assert.match(ctx.rotCard({ ...YELLOW, docs }), /planDeploy/);
+  // Remove is still there: a warning never blocks anything (7 Oct 2026: the Deploy button is gone from the card).
+  assert.match(ctx.rotCard({ ...YELLOW, docs }), /planDelete/);
 });
 
 test("a Junior PS on a restricted hull is flagged on the card, and the drop asks before it moves", () => {
@@ -373,7 +379,7 @@ test("a projection the registry contradicts stays yellow and prints the file's w
   const ashore = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-07-20", registry: { verdict: "ashore", status: "Inactive", ship: null, at: "2026-10-04" } });
   assert.match(ashore, /class="rcard plan aboard"/);
   assert.match(ashore, /TDG registry 2026-10-04: Inactive<\/b> &middot; not aboard here per the file/);
-  assert.match(ashore, /planDeploy/, "a contradicted plan is still Rita's to deploy or remove");
+  assert.match(ashore, /planDelete/, "a contradicted plan is still Rita's to remove (7 Oct 2026: nothing to deploy from the card)");
   const elsewhere = ctx.rotCard({ ...YELLOW, registry: { verdict: "elsewhere", status: "On board", ship: "Odyssey", at: "2026-10-04" } });
   assert.match(elsewhere, /TDG registry 2026-10-04: On board &middot; Odyssey<\/b> &middot; not this ship/);
   const earmarked = ctx.rotCard({ ...YELLOW, registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-04" } });
@@ -451,17 +457,15 @@ test("the 'sent to TDG' line closes on a Counter leg within ABSORB_DAYS of the d
 // Miguel, 5 Oct 2026 ("keep the card"): Deploy no longer removes the projection. The card stays on the
 // ship stamped SENT TO TDG; the Deploy button becomes "Sent <date>" and a second click asks before
 // emailing Joy again. The ship section's own "sent to TDG" line is for legacy sends whose card is gone.
-test("a deployed projection stays on the ship: SENT TO TDG tag, 'Sent <date>' button carrying the date for the resend confirm", () => {
+test("a told earmark stays on the ship: SENT TO TDG tag (7 Oct 2026: the stamp now comes from 'Tell Joy' in the import review)", () => {
   const h = ctx.rotCard({ ...YELLOW, deployedAt: "2026-10-05" });
   assert.match(h, /class="rtag on"[^>]*>SENT TO TDG 2026-10-05</);
-  assert.match(h, /class="pbtn" data-aid="as_1"[^>]*data-sent="2026-10-05"[^>]*onclick="planDeploy\(event,this\)"[^>]*>Sent 2026-10-05</);
-  assert.doesNotMatch(h, /class="pbtn go"[^>]*>Deploy</, "no second Deploy button beside the sent one");
+  assert.doesNotMatch(h, /planDeploy|>Deploy<|data-sent/, "no Deploy or re-send button on the card");
   assert.match(h, /rcard plan/, "still a yellow card: Rita's, draggable, removable");
   assert.match(h, /planDelete/, "Restore is not needed: the card never left");
   const fresh = ctx.rotCard(YELLOW);
-  assert.doesNotMatch(fresh, /SENT TO TDG|data-sent/, "an unsent card carries no stamp");
+  assert.doesNotMatch(fresh, /SENT TO TDG|data-sent/, "an untold card carries no stamp");
   assert.doesNotMatch(ctx.rotCard({ ...GREEN, deployedAt: "2026-10-05" }), /SENT TO TDG/, "the stamp is a plan's; a Counter card is TDG's own");
-  assert.doesNotMatch(ctx.rotCard({ ...YELLOW, deployedAt: "2026-10-05", confirmed: true }), /planDeploy/, "confirmed by the registry: nothing left to send");
 });
 
 test("the send dialog asks before a resend and posts resend:true; the server stamps the card instead of removing it", () => {
@@ -517,13 +521,11 @@ test("the 'TDG says otherwise' list renders every row, escapes it, and jumps to 
   assert.match(APP_HTML, /\(c\['Not in TDG file'\]\?rfTile\(c\['Not in TDG file'\],'Not in TDG file','red','Not in TDG file'\):''\)/, "a tile for crew the file dropped, when there are any");
 });
 
-test("a card TDG's file contradicts carries the contradiction to Deploy: red in the dialog, asked once more — never blocked", () => {
+test("a card TDG's file contradicts prints the file's word on the card and keeps Remove (7 Oct 2026: nothing to deploy, the review decides)", () => {
   const h = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-07-20", registry: { verdict: "ashore", status: "Inactive", ship: "Voyager", at: "2026-10-05" } });
-  assert.match(h, /data-contra="TDG file 2026-10-05: Inactive, Voyager" onclick="planDeploy\(event,this\)"/);
-  assert.doesNotMatch(ctx.rotCard({ ...YELLOW, registry: { verdict: "pending", status: "On board", at: "2026-10-05" } }), /data-contra/, "an unjudged card warns of nothing");
-  const dpv = APP_HTML.slice(APP_HTML.indexOf("async function dpvSend("), APP_HTML.indexOf("async function deployRestore("));
-  assert.match(dpv, /if\(DPV\.contra&&!confirm\(DPV\.contra\+/, "asked before sending");
-  assert.match(APP_HTML, /\(DPV\.contra\?\('<div class=dpvcontra><b>'\+escHtml\(DPV\.contra\)\+'<\/b> &mdash; the TDG file does not have this seafarer where this card says/);
+  assert.match(h, /TDG registry 2026-10-05: Inactive, Voyager<\/b> &middot; not aboard here per the file/);
+  assert.match(h, /planDelete/);
+  assert.doesNotMatch(h, /data-contra|planDeploy/);
 });
 
 test("a card the file confirms renders once, green, with Remove; the ship lists what completed underneath", () => {

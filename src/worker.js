@@ -19,7 +19,7 @@ import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { fileWordBySc, completedOff, boardIssues } from "./board_truth.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
-import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED } from "./shipname.js";
+import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED, normShip as normShipKey } from "./shipname.js";
 import { htmlPage, etagFor } from "./etag.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
 import { applyOverride, OVR_FIELDS } from "./override.js";
@@ -32,6 +32,7 @@ import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
 import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./relief_api.js";
 import { deployRecipient, deployCc } from "./keyman_deploy.js";
+import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID as EARMARK_TEMPLATE } from "./earmark.js";
 import { fetchBoardPortDays } from "./port_days.js";
 import { createProjection } from "./projection.js";
 import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
@@ -218,7 +219,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc }); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc, dismissed: dismissedEarmarks, markTold: (env, id) => markDeployed(env, id, null, new Date().toISOString()) }); if (ci) return ci; }
         // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
         // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
         // human does. Inside the boundary and behind the session gate (§11). Inert until
@@ -232,6 +233,7 @@ export default {
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
         if (p === "/api/rotation/note" && request.method === "POST") return apiNote(request, env, session);
         if (p === "/api/rotation/contract" && request.method === "POST") return apiContractEdit(request, env, session);
+        if (p === "/api/rotation/earmark/dismiss" && request.method === "POST") return apiEarmarkDismiss(request, env, session);
         if (p === "/api/fleet")      return apiFleet();
         if (p === "/api/datastatus") return apiDataStatus(env);
         if (p === "/api/autosend") return apiAutoSend(request, env, session);
@@ -1720,7 +1722,7 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes, hiddenRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes, hiddenRes, dismissRes] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
@@ -1747,15 +1749,19 @@ async function rotationSections(env) {
     // Crew hidden on the console (redacted=1): a file row under one of these ids is on the roster, just
     // hidden — said as such, never "not on the roster" (Encina, Serenade).
     env.DB.prepare("SELECT agency_id FROM crew WHERE redacted=1").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT sc, ship_key, dismissed_at FROM earmark_dismiss").all().catch(() => ({ results: [] })), // TDG earmarks Rita rejected (7 Oct 2026)
   ]);
   // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
   // file, or that the count had been flat since 6 July; Rita found it from the outside. A NULL stamp
   // means the rows are the bundled seed (KEYMAN_VERSION is the snapshot date), not an upload.
   const _age = (ageRes.results || [])[0] || {};
   const _cnt = cntRes.results || [];
+  const _lastRun = ((runRes && runRes.results) || [])[0] || {};
   const sources = {
     counter: { stamp: _age.stamp ? String(_age.stamp).slice(0, 10) : null, seed: KEYMAN_VERSION, rows: _age.rows || 0, crew: _age.crew || 0 },
     count: { as_of: _cnt.length ? _cnt.reduce((m, r) => (r.as_of && r.as_of > m ? r.as_of : m), "") || null : null, crew: _cnt.length },
+    // THE FILE THAT DATES THE BOARD (7 Oct 2026): the latest AdvancedQuery kept, and how many of its rows carry an embark.
+    registry: { at: _lastRun.run_at ? String(_lastRun.run_at).slice(0, 10) : null, crew: ((snapRes && snapRes.results) || []).length, dated: ((snapRes && snapRes.results) || []).filter((r) => r && r.embarked_at).length },
   };
   const tdgCount = countMapOf(_cnt);
   const shipHome = {}, shipBrand = {};
@@ -1969,10 +1975,16 @@ async function rotationSections(env) {
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
   // it instead (verdict earmarked). The crew leaves the unassigned pool.
+  // A TDG earmark Rita REJECTED (earmark_dismiss) stays off the board while the file that showed it stands: the
+  // dismissal is dated, and a file applied after it brings the earmark back.
+  const dismissedAt = {};
+  for (const d of ((dismissRes && dismissRes.results) || [])) if (d && d.sc && d.ship_key) dismissedAt[d.sc + "|" + d.ship_key] = String(d.dismissed_at || "").slice(0, 10);
+  const earmarkDismissed = (sc, key, at) => { const d = dismissedAt[sc + "|" + key]; return !!d && (!at || String(at).slice(0, 10) <= d); };
   const earmarkSc = new Set();
   for (const c of crewRows) {
     const sc = c.agency_id, w = fileOf[sc];
     if (isShore(c) || !w || w.status !== "Earmarked" || !w.known || absentSince[sc]) continue;
+    if (earmarkDismissed(sc, w.key, w.at)) continue;
     if ((openAsg || []).some((a) => a.sc === sc && !overriddenAsg.has(a.id) && keyOf(a.ship) === w.key)) continue;
     earmarkSc.add(sc);
   }
@@ -2372,6 +2384,9 @@ const ensureRegistrySnapshot = memoEnsure(async (env) => {
     // and TDG's final sign-off (ship_leg_source.legsFromRegistry).
     env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN embarked_at TEXT").run().catch(() => null),
     env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN debarked_at TEXT").run().catch(() => null),
+    // A TDG earmark Rita REJECTED from the board (7 Oct 2026): not drawn and not given a card while the file that
+    // showed it stands; a LATER file still carrying it brings it back (Joy did not correct TDG).
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS earmark_dismiss (sc TEXT NOT NULL, ship_key TEXT NOT NULL, dismissed_at TEXT NOT NULL, dismissed_by TEXT, notified INTEGER DEFAULT 0, PRIMARY KEY (sc, ship_key))").run().catch(() => null),
     // A deployed card stays on the ship, stamped (Miguel, 5 Oct 2026); the board reads these columns.
     env.DB.prepare("ALTER TABLE assignment ADD COLUMN deployed_at TEXT").run().catch(() => null),
     env.DB.prepare("ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT").run().catch(() => null),
@@ -2436,6 +2451,51 @@ async function apiContractEdit(request, env, session) {
       .bind("log_" + crypto.randomUUID(), (session && session.email) || null, "contract_edit", b.sc + " #" + b.seq, now),
   ]);
   return json({ ok: true });
+}
+// REJECT A TDG EARMARK (Miguel, 7 Oct 2026: "this and few other earmarked ppl .. don't allow me to delete"). The card
+// drawn from the file has no assignment behind it, so Remove could not act on it; a console card the file ALSO
+// earmarks would come straight back at the next Apply. Now: the (crew, hull) is recorded as dismissed — not drawn,
+// not re-created while the file that showed it stands (a later file still carrying it brings it back) — the card, if
+// any, is removed, and when asked Joy is told (mode reject: "CIMS does not plan this seafarer for this ship", Rita in
+// copy). Nothing in TDG is changed by the console; Joy changes TDG.
+async function apiEarmarkDismiss(request, env, session) {
+  const b = await request.json().catch(() => ({}));
+  const sc = String(b.agency_id || "").trim(), ship = String(b.ship || "").trim();
+  if (!sc || !ship) return json({ error: "bad_request" }, 400);
+  await ensureRegistrySnapshot(env);
+  const key = normShipKey(canonShipWith(ship, SHIP_KEYS) || ship);
+  const now = new Date().toISOString();
+  let removed = null, notice = null;
+  if (b.aid) removed = await removeReliefAssignment(env, String(b.aid)).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  await env.DB.prepare("INSERT INTO earmark_dismiss (sc, ship_key, dismissed_at, dismissed_by, notified) VALUES (?,?,?,?,0) ON CONFLICT(sc, ship_key) DO UPDATE SET dismissed_at=excluded.dismissed_at, dismissed_by=excluded.dismissed_by, notified=0")
+    .bind(sc, key, now, (session && session.email) || null).run();
+  if (b.notify) {
+    const to = deployRecipient(env);
+    if (!to) notice = { ok: false, error: "no_recipient" };
+    else {
+      try {
+        const record = await loadCrewRecord(env, sc);
+        const n = buildEarmarkNotice({ record, item: { sc, ship, kind: "rejected", file: { status: "Earmarked", ship, at: String(b.file_at || "").slice(0, 10) || null } }, today: TODAY(), mode: "reject" });
+        const toName = env.TG_NOTIFY_NAME || "Joy";
+        const res = await sendViaMailer(env, { templateId: EARMARK_TEMPLATE, to: [to], cc: deployCc(env), subject: earmarkSubject(n), html: renderEarmarkEmail(n, { toName, sender: (session && session.email) || null }), text: renderEarmarkText(n, { toName }), critical: true });
+        notice = res && res.ok !== false ? { ok: true, to } : { ok: false, error: (res && res.error) || "mailer refused" };
+        if (notice.ok) await env.DB.prepare("UPDATE earmark_dismiss SET notified=1 WHERE sc=? AND ship_key=?").bind(sc, key).run().catch(() => null);
+      } catch (e) { notice = { ok: false, error: String((e && e.message) || e) }; }
+    }
+  }
+  await logActivity(env, session && session.email, "earmark_dismiss", sc + " × " + ship + (b.aid ? " (card " + b.aid + " removed)" : "") + (notice ? (notice.ok ? " · Joy told" : " · Joy NOT told: " + notice.error) : "")).catch(() => null);
+  return json({ ok: true, removed, notice });
+}
+// The dismissed (crew|hull) pairs still in force for the registry import (deps.dismissed): a dismissal older than
+// the latest file has lapsed — a later file still carrying the earmark lists it again.
+async function dismissedEarmarks(env) {
+  await ensureRegistrySnapshot(env);
+  const [d, r] = await Promise.all([
+    env.DB.prepare("SELECT sc, ship_key, dismissed_at FROM earmark_dismiss").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT MAX(run_at) AS run_at FROM import_run").first().catch(() => null),
+  ]);
+  const last = r && r.run_at ? String(r.run_at).slice(0, 10) : null;
+  return ((d && d.results) || []).filter((x) => x && x.sc && x.ship_key && (!last || last <= String(x.dismissed_at || "").slice(0, 10))).map((x) => x.sc + "|" + x.ship_key);
 }
 // A TDG earmark the console has no card for becomes a console earmark (7 Oct 2026): the same card Rita would
 // have dragged there — sign-on = the hull's current printer's projected sign-off (else today), + 7 months.
@@ -5001,16 +5061,32 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add a reliever for this printer"><div class=gp>+</div><div class=gt>Add reliever</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(d!=null?(-d)+' days ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+d+' days';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+d+' days';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(d!=null?d+' days':'TBA')+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var chip=(d==null)?'NO OFF DATE':(d<0?('OFF WAS '+(-d)+'D AGO'):('OFF IN '+d+'D'));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
   var id=el.getAttribute('data-aid'),nm=el.getAttribute('data-nm')||'this earmark';
+  if(el.getAttribute('data-dis')){return earmarkDismiss(e,el);}
   if(!confirm('Remove '+nm+' from the board?\\n\\nThis deletes the earmark. TDG cards are never touched.'))return;
   el.disabled=true;
   try{
     var r=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json();
     if(r&&r.ok){renderRotation();}else{el.disabled=false;alert('Could not remove: '+((r&&r.error)||'error'));}
+  }catch(_){el.disabled=false;alert('Network error');}
+}
+// REJECT A TDG EARMARK (7 Oct 2026). TDG's file earmarks this seafarer for this ship; the console cannot change TDG.
+// Removing records the rejection (not drawn, not re-created while this file stands) and, if Rita says so, tells
+// Joy by email (Rita in copy) that CIMS does not plan this seafarer here, so TDG is corrected before the next file.
+async function earmarkDismiss(e,el){
+  e.stopPropagation();
+  var sc=el.getAttribute('data-crew'),ship=el.getAttribute('data-ship'),nm=el.getAttribute('data-nm')||'this seafarer',aid=el.getAttribute('data-aid')||null,at=el.getAttribute('data-at')||'';
+  if(!confirm('Remove TDG\\'s earmark of '+nm+' for '+ship+' from the board?\\n\\nTDG still has it'+(at?(' (file '+at+')'):'')+'. It stays off the board until a later TDG file still carries it.'))return;
+  var notify=confirm('Tell Joy by email that CIMS does not plan '+nm+' for '+ship+'? Rita is copied.\\n\\nOK = send the email now. Cancel = remove without telling anyone.');
+  el.disabled=true;
+  try{
+    var r=await (await fetch('/api/rotation/earmark/dismiss',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:sc,ship:ship,aid:aid,notify:notify,file_at:at})})).json();
+    if(r&&r.ok){if(notify&&r.notice&&!r.notice.ok)alert('Removed from the board, but Joy was NOT emailed: '+(r.notice.error||'error'));renderRotation();}
+    else{el.disabled=false;alert('Could not remove: '+((r&&r.error)||'error'));}
   }catch(_){el.disabled=false;alert('Network error');}
 }
 // DEPLOY — the CTA on a projection. Preview the exact email first: it names a real person to a
@@ -5183,22 +5259,25 @@ function rotCard(x){
   // is: TDG's file has them aboard this ship and no Contract Counter leg carries the contract yet.
   var gap=(!plan&&x.ship&&!x.signOn&&!x.signOff)?'<div class=gapnote>No contract dates yet &middot; the TDG file has them aboard without an embark date</div>':'';
   if(ovd)note='<div class=srcnote><b style="color:var(--red)">Past the projected sign-off.</b> The seat stays held until TDG, a reliever card or you record the sign-off.</div>'+note;
+  // THE DEPLOY BUTTON IS GONE (Miguel, 7 Oct 2026: "this deploy CTA does not need it anymore .. the logic is not like
+  // that no more"): Joy is told from the import review, row by row (Tell Joy on an earmark TDG does not have yet;
+  // Keep mine on a discrepancy). Every earmark card keeps Remove — TDG's own earmark too: removing it records the
+  // rejection so the next Apply does not bring it back, and offers to tell Joy (the card itself has no assignment).
   var acts='';
-  if(plan&&x.assignment_id){
-    var safeNm=String(x.name||'').replace(/"/g,'&quot;');
-    // TDG's file contradicts this card (ashore / elsewhere): the Deploy dialog says so in red and asks
-    // once more. A warning, never a block — the same posture as expired documents.
-    var contra=(reg&&(reg.verdict==='ashore'||reg.verdict==='elsewhere'))?(' data-contra="'+escHtml('TDG file'+(reg.at?(' '+reg.at):'')+': '+(reg.status||'status not readable')+(reg.ship?(', '+reg.ship):''))+'"'):'';
-    // A confirmed card has nothing to deploy: TDG already has them aboard. Remove stays (Rita may delete a card).
-    acts='<div class=pacts>'
-      +(confirmed?'':(x.deployedAt?('<button class="pbtn" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" data-sent="'+escHtml(x.deployedAt)+'"'+contra+' onclick="planDeploy(event,this)" title="Already sent to TDG on '+escHtml(x.deployedAt)+' - click to send again">Sent '+escHtml(x.deployedAt)+'</button>'):('<button class="pbtn go" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'"'+contra+' onclick="planDeploy(event,this)" title="Send this seafarer to TDG for action">Deploy</button>')))
-      +'<button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'" onclick="planDelete(event,this)">Remove</button></div>';
+  var safeNm=String(x.name||'').replace(/"/g,'&quot;');
+  if(x.tdgEarmark){
+    acts='<div class=pacts><button class="pbtn danger" data-crew="'+x.agency_id+'" data-ship="'+escHtml(x.ship||'')+'" data-nm="'+safeNm+'" data-at="'+escHtml((reg&&reg.at)||'')+'" onclick="earmarkDismiss(event,this)">Remove</button></div>';
+  }else if(plan&&x.assignment_id){
+    // A card TDG also earmarks (verdict earmarked): removing the console card alone would see it re-created at
+    // the next Apply, so Remove records the rejection too (data-dis), and asks whether to tell Joy.
+    var dis=(reg&&reg.verdict==='earmarked')?(' data-dis="1" data-ship="'+escHtml(x.ship||'')+'" data-crew="'+x.agency_id+'" data-at="'+escHtml(reg.at||'')+'"'):'';
+    acts='<div class=pacts><button class="pbtn danger" data-aid="'+x.assignment_id+'" data-nm="'+safeNm+'"'+dis+' onclick="planDelete(event,this)">Remove</button></div>';
   }
   var cls='rcard '+(confirmed?'green cur confirmed':awaiting?'green cur awaiting':plan?('plan'+(aboard?' aboard':'')):('green'+(x.current?' cur':'')+(ovd?' overdue':'')));
   // Every card drags. A yellow card MOVES (the assignment changes ship); a green or pool card dropped on
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
-  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the plan':plan?'Your projection - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to plan them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
+  return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the earmark':x.tdgEarmark?'TDG earmarks them here - drag to plan the dates, Remove to reject':plan?'Your earmark - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to earmark them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
     +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div>'+chip+'</div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +gap
@@ -5249,7 +5328,7 @@ function rotShip(sec){
   var sentRows=(sec.deployed||[]).map(function(d){
     return '<div class=sentrow><b>'+escHtml(d.name)+'</b> &middot; '+escHtml(d.signOn||'TBA')
       +' <span class=sentmeta>sent to TDG on '+escHtml(d.sentAt||'')+(d.aboard?' &middot; aboard per your board, awaiting the Counter':' &middot; awaiting the Counter')+'</span>'
-      +'<button class=pbtn data-log="'+escHtml(d.id)+'" onclick="deployRestore(this)" title="Put the projection back on the board">Restore</button></div>';
+      +'<button class=pbtn data-log="'+escHtml(d.id)+'" onclick="deployRestore(this)" title="Put the earmark back on the board">Restore</button></div>';
   }).join('');
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Contract completed · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
   // Counts that are TRUE (Miguel, 15 Sep 2026). The header read "1 onboard · 2 current" for a section
@@ -5389,18 +5468,20 @@ async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var
 function rotSourcesLine(){
   var s=ROT&&ROT.sources;if(!s)return '';
   var d=function(iso){if(!iso)return null;var a=Date.parse(iso.slice(0,10)+'T00:00:00Z');return isNaN(a)?null:Math.round((Date.now()-a)/86400000);};
-  var c=s.counter||{},n=s.count||{};
-  var cAge=c.stamp?d(c.stamp):d(String(c.seed||'').slice(0,10));
-  // A NULL stamp = no upload since stamping began (14 Sep 2026); the rows are the bundled seed. The 6 Jul
-  // upload happened — it just predates the stamp — so the line says "no stamped upload", not "never".
-  var cTxt=c.stamp?('Contract Counter uploaded '+c.stamp):('Contract Counter: <b>no upload since 14 Sep 2026</b> \u2014 rows are the bundled '+String(c.seed||'').slice(0,10)+' seed (July file)');
-  var cWarn=(cAge!=null&&cAge>45);
+  var c=s.counter||{},n=s.count||{},rg=s.registry||{};
+  // THE FILE DATES THE BOARD (7 Oct 2026): the latest AdvancedQuery kept, and whether it carried embark dates. The
+  // Contract Counter is history only: named, never warned about.
+  var rAge=rg.at?d(rg.at):null;
+  var rTxt=rg.at?('TDG file '+rg.at+' ('+(rg.crew||0)+' crew'+(rg.dated?(', '+rg.dated+' with embark dates'):', no embark dates \u2014 seats undated until a file carries them')+')'):'<b>no TDG file kept yet</b> \u2014 upload the AdvancedQuery on Import';
+  var cTxt='Contract Counter (history) '+(c.stamp?('uploaded '+c.stamp):('bundled '+String(c.seed||'').slice(0,10)+' seed'));
+  var cWarn=!rg.at||(rAge!=null&&rAge>10);
   var nTxt=n.as_of?('completed-contract count as of '+n.as_of+' ('+n.crew+' crew)'):'<b>completed-contract count not loaded</b> \u2014 rank is date-derived';
   var nAge=n.as_of?d(n.as_of):null;
   var nWarn=!n.as_of||(nAge!=null&&nAge>60);
   return '<div class=csub style="margin:-2px 0 8px;padding:6px 10px;border-radius:8px;background:'+((cWarn||nWarn)?'#FBF0DA':'#EEF3F8')+';color:'+((cWarn||nWarn)?'#8A6620':'var(--muted)')+'">'
-    +cTxt+(cAge!=null?(' \u00b7 '+cAge+(cAge===1?' day':' days')+' ago'):'')+' \u00b7 '+c.crew+' crew, '+c.rows+' contract rows'
-    +' &nbsp;|&nbsp; '+nTxt+(nAge!=null?(' \u00b7 '+nAge+(nAge===1?' day':' days')+' ago'):'')+'</div>';
+    +rTxt+(rAge!=null?(' \u00b7 '+rAge+(rAge===1?' day':' days')+' ago'):'')
+    +' &nbsp;|&nbsp; '+nTxt+(nAge!=null?(' \u00b7 '+nAge+(nAge===1?' day':' days')+' ago'):'')
+    +' &nbsp;|&nbsp; '+cTxt+' \u00b7 '+c.crew+' crew, '+c.rows+' rows</div>';
 }
 async function renderRotation(){
   // Keep the board on screen while it refreshes (15 Sep 2026): blanking it to "Loading…" after every
@@ -5686,7 +5767,7 @@ async function createProjection(id,ship){
 }
 async function removeProjection(aid){
   DRAGID=null; DRAGEL=null;
-  if(!confirm('Remove this projection from the board?\\n\\nThe TDG card, if any, is never touched.')){renderRotation();return;}
+  if(!confirm('Remove this earmark from the board?\\n\\nThe TDG card, if any, is never touched.')){renderRotation();return;}
   try{
     var r=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:aid})})).json();
     if(!r||!r.ok)alert('Could not remove: '+((r&&r.error)||'error'));

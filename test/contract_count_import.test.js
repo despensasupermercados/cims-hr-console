@@ -167,7 +167,10 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   // The page renders it above the ships.
   assert.match(src, /function rotSourcesLine\(\)/);
   assert.match(src, /\+rotSourcesLine\(\)/);
-  assert.match(src, /no upload since 14 Sep 2026/, "a NULL stamp is a missing STAMP, not a missing upload: the 6 Jul file predates stamping");
+  // 7 Oct 2026: the AdvancedQuery dates the board, so the line names the FILE first; the Counter is history, named, never warned about.
+  assert.match(src, /var rTxt=rg\.at\?\('TDG file '\+rg\.at/, "the file that dates the board comes first");
+  assert.match(src, /Contract Counter \(history\) /, "the Counter is history only (§10d)");
+  assert.match(body, /registry: \{ at: _lastRun\.run_at/, "the response carries the kept file's date");
 });
 
 test("every grade reader takes TDG's stated count first, in its own wave, and keeps the derived fallback (static)", () => {
