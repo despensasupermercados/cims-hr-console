@@ -5231,7 +5231,7 @@ function rotCard(x){
     var lane='<div class="lane'+(ovd?' late':(plan&&!confirmed&&!awaiting)?' plan':'')+'"><i class=rail></i>'+(showNow?'<i class=done style="width:'+pct+'%"></i>':'')
       +(x.signOn?'<i class="d l'+((live||ovd)?' fill':'')+'"></i>':'')+(x.signOff?'<i class="d r'+(ovd?' fill':'')+'"></i>':'')
       +(showNow?'<i class="now'+(pct>=92?' end':pct<=8?' start':'')+'" style="left:'+pct+'%"><em>TODAY</em></i>':'')+'</div>';
-    rows='<div class=tl><span class="rcity on">'+onC+'</span><span class="rcity off">'+offC+'</span>'+lane+'<span class="rdate on">'+(x.signOn||'')+'</span><span class="rdate off">'+(x.signOff||'&mdash;')+'</span></div>';
+    rows='<div class=tl><span class="rcity on">'+onC+'</span><span class="rcity off">'+offC+'</span>'+lane+'<span class="rdate on">'+(x.signOn?fmtDateS(x.signOn):'')+'</span><span class="rdate off">'+(x.signOff?fmtDateS(x.signOff):'&mdash;')+'</span></div>';
   }
   var tg='';
   if(x.eccr)tg+='<span class="rtag on">ECCR</span>';
@@ -5370,6 +5370,9 @@ function monthsDays(a,b){
   var parts=[];if(p.m)parts.push(p.m+' mo'+(p.m===1?'':'s'));if(p.d)parts.push(p.d+' day'+(p.d===1?'':'s'));
   return parts.join(' ')||'0 days';
 }
+// Dates on the seat card and its history read as a calendar date (Miguel, 7 Oct 2026: "the dates here should be
+// Sept 22, 2027"): short month, day, year — "Sep 22, 2027" — never the ISO string. fmtDate (full month) is the profile's.
+function fmtDateS(iso){if(!iso)return '';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).slice(0,10).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo||!parseInt(p[2],10))return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 // The seat chip's ONE number (Miguel, 7 Oct 2026: "this should say 3M 22 days"): calendar months + days between two
 // dates, from the dates themselves — "22 d" under a month, "1 mo 22 d" / "3 mo" past it. Never a raw day count.
 function spanCompact(a,b){
@@ -5378,7 +5381,7 @@ function spanCompact(a,b){
   return p.m+' mo'+(p.d?(' '+p.d+' d'):'');
 }
 function histCard(h){
-  var span=(h.on||'')+(h.off&&h.off!==h.on?(' → '+h.off):'');
+  var span=(h.on?fmtDateS(h.on):'')+(h.off&&h.off!==h.on?(' → '+fmtDateS(h.off)):'');
   var dur=monthsDays(h.on,h.off);
   var durHtml=dur?('<div class=hdur>'+dur+'</div>'):'';
   var byFile=h.byFile?'<div class=hdur title="The TDG file no longer has them on board this ship">ended per TDG file</div>':
