@@ -54,7 +54,7 @@ const YELLOW = { state: "yellow", agency_id: "SC-9", assignment_id: "as_1", vess
 
 test("the page's inline script runs top to bottom without throwing", () => {
   assert.deepEqual(errors, [], "a top-level error white-screens the console for every signed-in user");
-  for (const fn of ["rotCard", "rotShip", "reliefSlot", "reliefBanner", "openRelief", "planDelete", "rcDrag", "rcClickP"]) {
+  for (const fn of ["rotCard", "rotShip", "reliefSlot", "openRelief", "planDelete", "rcDrag", "rcClickP"]) {
     assert.equal(typeof ctx[fn], "function", fn + " is not defined on the page");
   }
 });
@@ -176,6 +176,14 @@ test("the ship header carries Miguel's timeline: one segment per crew, ticks wit
   assert.match(gap, /<i class=sgap /, "the ship uncovered between two contracts draws red");
   const empty = ctx.rotShip({ ship: "Jewel", brand: "Royal", onboard: 0, crew: [], projections: [], history: [], deployed: [] });
   assert.match(empty, /<div class="stl none">.*no crew aboard, nobody earmarked/, "an empty hull says so on the line");
+  // 7 Oct 2026 (Miguel: "here you have 3 people .. so you should have 3 in the timeline"): a TDG earmark with no dates is a
+  // named stub after the last dated contract, "no dates" under it; the dated part keeps its scale.
+  const und = ctx.rotShip({ ...sec, projections: [{ ...YELLOW, tdgEarmark: true, signOn: null, signOff: null, name: "Cy Talucod", registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon" } }] });
+  assert.match(und, /<i class="sg tdg und" style="left:92\.00%;width:8\.00%;top:0" title="Cy Talucod · TDG earmark · no dates yet"><\/i><b class=swho [^>]*>Talucod<\/b><span class="std soft" [^>]*>no dates<\/span>/);
+  assert.match(und, /<i class="sg seat" style="left:0\.00%;width:(8[5-9]|9[01])\.\d\d%/, "the dated contract is scaled into the first 91%");
+  const only = ctx.rotShip({ ...sec, crew: [], projections: [{ ...YELLOW, tdgEarmark: true, signOn: null, signOff: null, name: "Cy Talucod", registry: { verdict: "earmarked" } }] });
+  assert.match(only, /<i class="sg tdg und" style="left:0\.00%;width:99\.00%/, "an earmark alone spans the line");
+  assert.doesNotMatch(only, /snow/, "no TODAY without a dated contract");
   const two = ctx.rotShip({ ...sec, projections: [{ ...YELLOW, awaiting: true, aboard: true, signOn: "2026-10-01", signOff: "2027-05-01" }] });
   assert.match(two, /<i class="sg await[^"]*" style="[^"]*top:9px"/, "two crew at once → the second takes the lane below");
 });
@@ -248,9 +256,18 @@ test("a Junior PS on a restricted hull is flagged on the card, and the drop asks
   assert.match(sec, /data-jr="block"/, "the drop zone carries the rule, so the warning happens before anything is written");
 });
 
+test("the Junior PS rule is Royal Caribbean's only: a Celebrity or Azamara hull is open whatever the vessel row says", () => {
+  // Miguel, 7 Oct 2026 (Edge, a Celebrity hull, warned "Junior PS on a block ship"): "this only applies to a Royal
+  // Caribbean ship ... For Celebrity ... all apply the same way. For Azamara, it's exactly the same as Celebrity."
+  const src = readFileSync(SRC, "utf-8");
+  assert.match(src, /SELECT name, brand, jr_ps_rule FROM vessel/, "the brand rides the vessel read");
+  assert.match(src, /jrRule\[normShip\(v\.name\)\] = \/royal\/i\.test\(String\(v\.brand \|\| ""\)\) \? \(v\.jr_ps_rule \|\| null\) : "open";/,
+    "a non-Royal hull is open regardless of its jr_ps_rule word");
+});
+
 test("exactly one definition of each relief renderer survives — the shadowing is gone for good", () => {
   const src = readFileSync(SRC, "utf-8");
-  for (const fn of ["reliefSlot", "reliefBanner", "openRelief", "rotCard"]) {
+  for (const fn of ["reliefSlot", "openRelief", "rotCard"]) {
     const n = (src.match(new RegExp("function " + fn + "\\(", "g")) || []).length;
     assert.equal(n, 1, fn + " is defined " + n + " times; the last one silently wins and the others are dead weight");
   }

@@ -1731,7 +1731,7 @@ async function rotationSections(env) {
     fetchBoardPortDays(env).then((rows) => ({ results: rows })), // card dates ±1 day only — never the whole 40k-row itinerary (port_days.js)
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
-    env.DB.prepare("SELECT name, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT name, brand, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026)
     env.DB.prepare("SELECT MAX(imported_at) AS stamp, COUNT(*) AS rows, COUNT(DISTINCT sc) AS crew FROM keyman_contract3").all().catch(() => ({ results: [] })), // how old the Counter is
@@ -1891,8 +1891,12 @@ async function rotationSections(env) {
   }
   // The ship's Junior PS rule, seeded in `vessel` since July and read here for the first time.
   // WARN only (Miguel, 14 Sep 2026: "Warn on drop now; block once Rita re-confirms the four hulls").
+  // THE JUNIOR PS RULE IS ROYAL CARIBBEAN'S ONLY (Miguel, 7 Oct 2026: "we segmented the big ships because we can't have
+  // a junior in an Oasis class or an Icon class. For Celebrity ... it applies to anybody: junior, senior, or printer
+  // specialist, all apply the same way. For Azamara, it's exactly the same as Celebrity"). The vessel table still
+  // carries a block/conditional word on Celebrity hulls; it is read for Royal Caribbean and nothing else.
   const jrRule = {};
-  for (const v of ((vesRes && vesRes.results) || [])) if (v && v.name) jrRule[normShip(v.name)] = v.jr_ps_rule || null;
+  for (const v of ((vesRes && vesRes.results) || [])) if (v && v.name) jrRule[normShip(v.name)] = /royal/i.test(String(v.brand || "")) ? (v.jr_ps_rule || null) : "open";
   const isJr = (rank) => /junior|jr/i.test(String(rank || ""));
   const cardAsg = {}, inForce = {}; // inForce: Rita's cards aboard today, per crew
   for (const h of HIST) {
@@ -3280,6 +3284,7 @@ nav button{white-space:nowrap}
 .stl .sg.await{background:#C3E6B9}
 .stl .sg.earmark{background:#EBCB6E}.stl .sg.earmark.proj{background:repeating-linear-gradient(90deg,#EBCB6E 0 7px,#F7E9BE 7px 10px)}
 .stl .sg.tdg{background:#D9B24C}.stl .sg.tdg.proj{background:repeating-linear-gradient(90deg,#D9B24C 0 7px,#EFDCA0 7px 10px)}
+.stl .sg.und{background:repeating-linear-gradient(90deg,#D9B24C 0 3px,transparent 3px 7px);opacity:.75}
 .stl .sg.open{-webkit-mask-image:linear-gradient(90deg,#000 60%,transparent);mask-image:linear-gradient(90deg,#000 60%,transparent)}
 .stl .sgap{position:absolute;top:-1px;height:5px;background:#E9A39E;border-radius:2px;min-width:3px}
 .stl .stk{position:absolute;top:-4px;width:1px;height:11px;background:#B8C2CF}
@@ -5076,7 +5081,7 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}function reliefBanner(rb){if(!rb||!rb.printer)return '';var h=rb.handover||{},d=rb.days_to_off,os=offSpan(rb.printer.off_date),t,dot,bg,fg;var who=rb.printer.crew_name?(rb.printer.crew_name+' \u00b7 '):'';if(rb.reliever&&rb.reliever.aboard){t='Relieved \u00b7 '+rb.reliever.crew_name+' aboard since '+(rb.reliever.on_date||'TBA');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='overlap'){t=(h.days!=null?h.days+'-day overlap':'overlap')+' \u00b7 both aboard, seat covered';fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='clean'){t='Clean handover'+(rb.reliever.on_city?' · '+niceCity(rb.reliever.on_city):'')+(rb.reliever.on_date?' · '+rb.reliever.on_date:'');fg='#1f7a3d';dot='#1f7a3d';bg='#e3f5e8';}else if(rb.reliever&&h.kind==='gap'){t=who+(h.days!=null?h.days+'-day gap':'gap')+' before the reliever signs on';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.reliever&&h.kind==='port_mismatch'){t=who+'handover port differs';fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else if(rb.urgency==='overdue'){t=who+'sign-off overdue \u00b7 planned '+(rb.printer.off_date||'TBA')+' \u00b7 '+(os&&os.ago?os.t+' ago':'')+' \u00b7 no sign-off recorded';fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='critical'){t=who+'reliever needed · signs off in '+(os?os.t:d+' days');fg='#b0342f';dot='#b0342f';bg='#fbe7e6';}else if(d!=null&&rb.urgency==='due'){t=who+'reliever due · signs off in '+(os?os.t:d+' days');fg='#9a6410';dot='#c98a1e';bg='#fbeed6';}else{t=who+'signs off in '+(os?os.t:(d!=null?d+' days':'TBA'))+' · slot open';fg='#5a6472';dot='#9aa3b0';bg='#eef2f7';}return '<div class=rbanner style="background:'+bg+';color:'+fg+'"><span class=bdot style="background:'+dot+'"></span>'+t+'</div>';}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever&&rb.reliever.aboard)return '';if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -5352,12 +5357,11 @@ function rotShip(sec){
   var histBlock=hist.length?('<div class="histsec'+(closed?' closed':'')+'"><div class=histhd>Contract completed · '+hist.length+'</div><div class=histgrid>'+hist.map(histCard).join('')+'</div></div>'):'';
   // The header is the ship's name and its timeline (Miguel, 7 Oct 2026: "we don't need to have this royal one on
   // board"): the brand is the coloured edge, the counts are on the cards and the line. Only the chevron stays.
-  // (15 Sep 2026) An inline second banner was built here and never inserted anywhere — reliefBanner() is
-  // the one that renders. Removed with its five helper vars; dead code that formats crew data is a trap.
   var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;
-  var _rslot=reliefSlot(_rb,projs);var _rbanner=reliefBanner(_rb);
+  // The handover banner under the cards went on 7 Oct 2026 (Miguel: "I don't think it's necessary"): the line above says it.
+  var _rslot=reliefSlot(_rb,projs);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta><span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+_rbanner+histBlock+'</div>';
+    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+histBlock+'</div>';
 }
 // THE SHIP'S TIMELINE (Miguel, 7 Oct 2026: "a timeline from the sign-on of the active crew to the sign-off of the
 // last earmarked crew ... so visually we see how far the ship is covered"). One line in the ship header, one
@@ -5369,15 +5373,19 @@ function shipTimeline(sec){
   var today=new Date().toISOString().slice(0,10);
   var P=function(iso){return Date.parse(iso+'T00:00:00Z');};
   var addM=function(iso,m){var x=new Date(P(iso));x.setUTCMonth(x.getUTCMonth()+m);return x.toISOString().slice(0,10);};
-  var segs=[];
-  (sec.crew||[]).forEach(function(c){if(!c.signOn||c.tdgEarmark)return;var k=c.awaiting?'await':(c.state==='yellow'&&!c.confirmed)?((c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark'):'seat';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:c.offSource==='projected'||(k!=='seat'&&!c.offConfirmed)});});
-  (sec.projections||[]).forEach(function(c){if(!c.signOn)return;var k=c.awaiting?'await':(c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:!c.offConfirmed});});
-  if(!segs.length)return '<div class="stl none"><div class=stlb></div><em>no crew aboard, nobody earmarked</em></div>';
+  // Every card on the ship is on the line (Miguel, 7 Oct 2026: "here you have 3 people .. so you should have 3 in the
+  // timeline"): a TDG earmark carries no dates, so it is drawn as a short stub AFTER the last dated contract, named,
+  // "no dates" under it — the horizon does not stretch for it.
+  var segs=[],und=[];
+  (sec.crew||[]).forEach(function(c){if(c.tdgEarmark){und.push(c);return;}if(!c.signOn)return;var k=c.awaiting?'await':(c.state==='yellow'&&!c.confirmed)?((c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark'):'seat';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:c.offSource==='projected'||(k!=='seat'&&!c.offConfirmed)});});
+  (sec.projections||[]).forEach(function(c){if(!c.signOn){if(c.tdgEarmark)und.push(c);return;}var k=c.awaiting?'await':(c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:!c.offConfirmed});});
+  if(!segs.length&&!und.length)return '<div class="stl none"><div class=stlb></div><em>no crew aboard, nobody earmarked</em></div>';
   segs.sort(function(a,b){return a.on<b.on?-1:a.on>b.on?1:0;});
-  var start=segs[0].on,end=start;
+  var STUB=9,nu=Math.min(und.length,3),W=segs.length?100-nu*STUB:0;
+  var start=segs.length?segs[0].on:today,end=start;
   segs.forEach(function(x){x.end=x.off||addM(x.on,7);if(x.end>end)end=x.end;});
   if(!(P(end)>P(start)))end=addM(start,7);
-  var pct=function(iso){return Math.max(0,Math.min(100,(P(iso)-P(start))/(P(end)-P(start))*100));};
+  var pct=function(iso){return Math.max(0,Math.min(W,(P(iso)-P(start))/(P(end)-P(start))*W));};
   // lanes: a crew whose contract overlaps an earlier one goes a lane down
   var lanes=[];
   segs.forEach(function(x){var L=0;while(lanes[L]&&lanes[L].some(function(y){return x.on<y.end&&y.on<x.end;}))L++;(lanes[L]=lanes[L]||[]).push(x);x.lane=L;});
@@ -5396,7 +5404,8 @@ function shipTimeline(sec){
   var prev=-99,row=0,rows=0;
   ticks.forEach(function(t,i){var xp=pct(t);row=xp-prev<11?row+1:0;prev=xp;if(row>rows)rows=row;h+='<i class=stk style="left:'+xp.toFixed(2)+'%"></i><span class="std'+(i===0?' first':'')+(i===ticks.length-1?' last':'')+'" style="left:'+xp.toFixed(2)+'%;top:'+(dy+row*13)+'px">'+fmtDateS(t)+'</span>';});
   segs.forEach(function(x){if(!x.off)h+='<span class="std soft last" style="left:'+pct(x.end).toFixed(2)+'%;top:'+dy+'px">'+fmtDateS(x.end)+'<small>projected</small></span>';});
-  if(today>start&&today<end)h+='<i class=snow style="left:'+pct(today).toFixed(2)+'%"><em>TODAY</em></i>';
+  if(segs.length&&today>start&&today<end)h+='<i class=snow style="left:'+pct(today).toFixed(2)+'%"><em>TODAY</em></i>';
+  und.slice(0,3).forEach(function(c,i){var sw=segs.length?STUB:100/und.slice(0,3).length,l=W+i*sw+(segs.length||i?1:0),w=sw-1;h+='<i class="sg tdg und" style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%;top:0" title="'+escHtml(c.name)+' \u00b7 TDG earmark \u00b7 no dates yet"></i><b class=swho style="left:'+(l+w/2).toFixed(2)+'%;top:-17px">'+escHtml((c.name||'').split(' ').slice(-1)[0])+'</b><span class="std soft" style="left:'+(l+w/2).toFixed(2)+'%;top:'+dy+'px">no dates</span>';});
   return '<div class=stl style="padding-bottom:'+(14+(nl-1)*9+rows*13+(segs.some(function(x){return !x.off;})?10:0))+'px"><div class=stlb style="height:'+hgt+'px">'+h+'</div></div>';
 }
 function monthsDaysParts(a,b){

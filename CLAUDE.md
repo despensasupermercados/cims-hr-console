@@ -180,8 +180,11 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   = the active crew's sign-on → the last earmark's sign-off (Miguel's choice over a fixed 12-month window — every ship fills
   the width, so coverage depth is read off the end date). The header is the NAME, the LINE and a chevron — no brand, no
   counts (Miguel, same evening: "we don't need to have this royal one on board ... it has to be a little bit of a luxury
-  feeling"): a 3px line, hairline ticks, 10.5px type in two greys, soft fills; the ghost slot and the relief banner say
-  "off in 1 mo 22 d", never "OFF IN 53D". The seat card lost its lane, dots and TODAY tick: a thin soft bar (4px) filled
+  feeling"): a 3px line, hairline ticks, 10.5px type in two greys, soft fills; the ghost slot says
+  "OFF IN 1 MO 22 D", never "OFF IN 53D". **Every card on the ship is on the line** (Miguel: "here you have 3 people .. so
+  you should have 3 in the timeline"): a TDG earmark without dates is a short dashed stub AFTER the last dated contract,
+  named, "no dates" under it; the dated part keeps its scale. **The handover banner under the cards is gone** (Miguel,
+  same evening: "I don't think it's necessary" — "Clean handover · Miami · 2026-11-29"): the line says who relieves whom. The seat card lost its lane, dots and TODAY tick: a thin soft bar (4px) filled
   to today (soft red when overdue, a dashed track for an earmark), the two calendar dates under it as before — Miguel, same
   evening, when a first cut dropped them for an "aboard / to go" row: "you eliminated the dates ... we had them very, very
   well done earlier ... this progress bar should be more gentle". How long aboard is the status line, how long to go is the
@@ -190,6 +193,16 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
 - The sources line names the FILE that dates the board first ("TDG file <date> · N crew, M with embark dates"); the
   Counter is "(history)", never warned about. Nothing here is money (§1) and nothing resolves a disagreement without
   Rita (§6).
+
+## 10e. THE JUNIOR PS RULE IS ROYAL CARIBBEAN'S ONLY — Miguel, 7 Oct 2026
+"We segmented the big ships because we can't have a junior in an Oasis class or an Icon class. For Celebrity, because
+we only have almost the same class across the board, it applies to anybody: junior, senior, or printer specialist, all
+apply the same way. For Azamara, it's exactly the same as Celebrity. Although for Azamara we will always send people,
+most likely from Royal Caribbean for the most part; if it's a new hire to Azamara, it's because he comes with experience."
+So: the "Junior PS on a block ship" warning (`jrWarn`, `vessel.jr_ps_rule`) is read for Royal Caribbean hulls ONLY
+(`rotationSections`: a non-Royal brand is "open" whatever the row says). Royal: Oasis + Icon class `block`, Quantum class
+`conditional` (unchanged, not raised by him). The vessel rows for Celebrity (Edge/Solstice `block`, Millennium
+`conditional`) are historical and ignored; correcting them is a data change for Miguel to order. Also in the Brain.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
