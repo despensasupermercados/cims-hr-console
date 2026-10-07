@@ -17,13 +17,17 @@ const card = (o = {}) => ({ id: "as_1", sc: "SC-1", crew_name: "Edward Guazon", 
 const row = (o = {}) => ({ agency_id: "SC-1", status: "Earmarked", status_raw: "Earmarked", vessel_observed: "MV ALLURE OF THE SEAS", embarked_at: null, run_at: AT, ...o });
 const shipOf = (s) => { const m = String(s || "").toUpperCase().match(/ALLURE|LIBERTY|ICON|WONDER/); return m ? m[0][0] + m[0].slice(1).toLowerCase() : null; };
 
-test("no discrepancy when TDG earmarks the same hull, says On Vacation before the sign-on, or has no row; the file can only contradict what it could see", () => {
+// 7 Oct 2026 (the Deploy CTA retired): a FUTURE earmark TDG does not earmark is a not_in_tdg row — Tell Joy / Not
+// yet / Drop — never silently nothing. TDG earmarking the same hull closes it; an aboard card is the seat, not this.
+test("TDG earmarks the same hull: nothing to decide. A future earmark TDG has not got (on vacation, aboard elsewhere, no row) is a not_in_tdg row; an aboard card the file predates is nothing", () => {
   const ok = earmarkDiscrepancies({ projections: [card()], registry: [row()], today: TODAY, shipOf });
   assert.deepEqual(ok, { items: [], missing: [] });
-  assert.deepEqual(earmarkDiscrepancies({ projections: [card()], registry: [row({ status: "On Vacation", status_raw: "On Vacation", vessel_observed: "MV WONDER OF THE SEAS" })], today: TODAY, shipOf }).items, [], "on vacation before joining is normal");
-  assert.deepEqual(earmarkDiscrepancies({ projections: [card()], registry: [row({ status: "On board", status_raw: "On board", vessel_observed: "MV LIBERTY OF THE SEAS" })], today: TODAY, shipOf }).items, [], "aboard Liberty today with a plan for Allure is normal");
-  assert.deepEqual(earmarkDiscrepancies({ projections: [card()], registry: [], today: TODAY, shipOf }).items, [], "silence is not a verdict");
-  // an aboard card the file (dated BEFORE the sign-on) does not have aboard: pending, not contradicted
+  const vac = earmarkDiscrepancies({ projections: [card()], registry: [row({ status: "On Vacation", status_raw: "On Vacation", vessel_observed: "MV WONDER OF THE SEAS" })], today: TODAY, shipOf }).items;
+  assert.deepEqual(vac.map((i) => [i.kind, i.told_at, i.text]), [["not_in_tdg", null, "TDG file 2026-10-07: On Vacation, Wonder · no earmark for Allure yet"]]);
+  assert.deepEqual(earmarkDiscrepancies({ projections: [card()], registry: [row({ status: "On board", status_raw: "On board", vessel_observed: "MV LIBERTY OF THE SEAS" })], today: TODAY, shipOf }).items.map((i) => i.kind), ["not_in_tdg"], "aboard Liberty today with a plan for Allure: normal, and TDG has no earmark yet");
+  const none = earmarkDiscrepancies({ projections: [card()], registry: [], today: TODAY, shipOf }).items;
+  assert.deepEqual(none.map((i) => [i.kind, i.file.absent, i.text]), [["not_in_tdg", true, "TDG file 2026-10-07: not in the file · no earmark for Allure yet"]]);
+  // an aboard card the file (dated BEFORE the sign-on) does not have aboard: pending, not contradicted, not a plan
   assert.deepEqual(earmarkDiscrepancies({ projections: [card({ sign_on: "2026-10-06" })], registry: [row({ status: "On Vacation", status_raw: "On Vacation", vessel_observed: null, run_at: "2026-10-05T00:00:00Z" })], today: TODAY, shipOf }).items, []);
 });
 
@@ -46,15 +50,12 @@ test("the four discrepancies: a different hull (earmarked, or aboard elsewhere o
   assert.deepEqual(missing, []);
 });
 
-test("a deployed earmark a LATER file still lacks is reported (missing), never a discrepancy; a file older than the send says nothing; no row at all is reported too", () => {
+test("a told earmark TDG still lacks is a not_in_tdg row that says so (told_at); once TDG earmarks them the row is gone", () => {
   const sent = card({ deployed_at: "2026-10-01T10:00:00Z" });
   const later = earmarkDiscrepancies({ projections: [sent], registry: [row({ status: "On Vacation", status_raw: "On Vacation", vessel_observed: null })], today: TODAY, shipOf });
-  assert.deepEqual(later.items, []);
-  assert.deepEqual(later.missing.map((m) => [m.id, m.deployed_at, m.text]), [["as_1", "2026-10-01", "Sent to TDG 2026-10-01 · the 2026-10-07 file still has On Vacation"]]);
-  const older = earmarkDiscrepancies({ projections: [sent], registry: [row({ status: "On Vacation", status_raw: "On Vacation", vessel_observed: null, run_at: "2026-09-30T00:00:00Z" })], today: TODAY, shipOf });
-  assert.deepEqual(older.missing, [], "the file predates the send");
-  assert.deepEqual(earmarkDiscrepancies({ projections: [sent], registry: [row()], today: TODAY, shipOf }).missing, [], "TDG has the earmark: the loop closed");
-  assert.deepEqual(earmarkDiscrepancies({ projections: [sent], registry: [], today: TODAY, shipOf }).missing.map((m) => m.text), ["Sent to TDG 2026-10-01 · this file does not carry them"]);
+  assert.deepEqual(later.items.map((m) => [m.id, m.kind, m.told_at, m.text]), [["as_1", "not_in_tdg", "2026-10-01", "Told Joy 2026-10-01 · TDG file 2026-10-07: On Vacation · no earmark for Allure yet"]]);
+  assert.deepEqual(earmarkDiscrepancies({ projections: [sent], registry: [row()], today: TODAY, shipOf }).items, [], "TDG has the earmark: the loop closed");
+  assert.deepEqual(earmarkDiscrepancies({ projections: [sent], registry: [], today: TODAY, shipOf }).items.map((m) => m.told_at), ["2026-10-01"]);
 });
 
 test("tdgEarmarksWithoutCard: a file row Earmarked for a known hull with no open card for that crew on it", () => {
@@ -80,7 +81,15 @@ test("the notice to Joy: the record, the earmark against the file's word, every 
   assert.equal(TEMPLATE_ID, "hr.keyman.earmark_discrepancy.v1");
   assert.equal(deployRecipient({ DEPLOY_TO: "joy@x" }), "joy@x"); assert.equal(deployRecipient({ TG_NOTIFY: "tg@x" }), "tg@x"); assert.equal(deployRecipient({}), null, "never a guessed recipient");
   assert.deepEqual(deployCc({}), ["Rita.Berenyi@dg3.com"]); assert.deepEqual(deployCc({ DEPLOY_CC: "a@x; b@x" }), ["a@x", "b@x"]);
-  assert.equal(earmarkSummary({ accepted: 2, kept: 1, emails: 1, cards: 1, missing: 1 }), "2 earmarks corrected to the TDG file · 1 earmark kept as yours (1 discrepancy email to Joy, Rita in copy) · 1 TDG earmark given a card · 1 deployed earmark not in TDG yet");
+  assert.equal(earmarkSummary({ accepted: 2, kept: 1, emails: 1, cards: 1, told: 1, held: 2 }), "2 earmarks corrected to the TDG file · 1 earmark kept as yours (1 discrepancy email to Joy, Rita in copy) · 1 earmark sent to Joy to enter in TDG · 2 earmarks not in TDG yet, held · 1 TDG earmark given a card");
+  // the three modes of the notice
+  const add = buildEarmarkNotice({ record, item: { ...item, kind: "not_in_tdg", file: { status: "On Vacation", ship: null, at: "2026-10-07" } }, today: TODAY, mode: "add" });
+  assert.equal(earmarkSubject(add), "Earmark for TDG — Edward Guazon · Allure (2026-11-29)");
+  assert.match(renderEarmarkEmail(add), /Please enter this earmark in TDG/);
+  const rej = buildEarmarkNotice({ record, item: { sc: "SC-1", ship: "Allure", kind: "rejected", file: { status: "Earmarked", ship: "Allure", at: "2026-10-07" } }, today: TODAY, mode: "reject" });
+  assert.equal(earmarkSubject(rej), "Earmark not planned by CIMS — Edward Guazon · Allure (2026-11-29)");
+  assert.match(renderEarmarkEmail(rej), /CIMS does not plan this seafarer for this ship/); assert.match(renderEarmarkEmail(rej), /Please remove this earmark in TDG/);
+  assert.match(renderEarmarkText(rej), /CIMS: not planned for Allure/);
 });
 
 // --- the apply path -----------------------------------------------------------------------------
@@ -188,7 +197,7 @@ test("other_person: the file earmarks somebody else for the hull of Rita's FUTUR
   assert.deepEqual(items.map((i) => [i.id, i.kind, i.file.other]), [["as_1", "other_person", { sc: "SC-9", name: "Cyrus Talucod" }]]);
   assert.match(items[0].text, /earmarks Cyrus Talucod for Allure · your earmark there is Edward Guazon from 2026-11-29/);
   assert.deepEqual(tdgEarmarksWithoutCard({ projections: [card()], registry: reg, shipOf, exclude: ["SC-9|allure"] }), [], "decided by the other_person row");
-  assert.deepEqual(earmarkDiscrepancies({ projections: [card(), card({ id: "as_9", sc: "SC-9" })], registry: reg, today: TODAY, shipOf }).items, [], "both earmarked, both carded: no conflict");
+  assert.deepEqual(earmarkDiscrepancies({ projections: [card(), card({ id: "as_9", sc: "SC-9" })], registry: reg, today: TODAY, shipOf }).items.map((i) => [i.id, i.kind]), [["as_1", "not_in_tdg"]], "both carded: no conflict of persons; Guazon's earmark is simply not in TDG yet");
   assert.deepEqual(earmarkDiscrepancies({ projections: [card()], registry: [row(), row({ agency_id: "SC-9", name: "Cyrus Talucod" })], today: TODAY, shipOf }).items, [], "TDG earmarks Rita's crew too: two earmarks, no conflict");
   assert.deepEqual(earmarkDiscrepancies({ projections: [card({ sign_on: "2026-10-01" })], registry: [row({ status: "On board", status_raw: "On board" }), row({ agency_id: "SC-9" })], today: TODAY, shipOf }).items, [], "an aboard card is the seat, not a plan");
   // apply: Accept replaces, Keep emails
@@ -209,4 +218,33 @@ test("other_person: the file earmarks somebody else for the hull of Rita's FUTUR
   assert.deepEqual(removed, ["as_1"], "nothing more removed"); assert.equal(created.length, 1, "no card for Talucod when Rita keeps Guazon");
   assert.equal(mails.length, 1); assert.match(mails[0].html, /TDG earmarks a different seafarer for this ship/); assert.match(mails[0].html, /Cyrus Talucod/);
   assert.deepEqual(k.body.earmarks.kept.map((x) => x.emailed), [true]);
+});
+
+// 7 Oct 2026, the screenshot: "this and few other earmarked ppl .. don't allow me to delete". TDG's earmark card has no
+// assignment behind it; Remove now records the rejection, removes a console card if any, and offers to tell Joy.
+test("static: rejecting a TDG earmark — the route, the table, the board skip while the file stands, the lapse on a later file, the importer's exclude", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  assert.match(W, /if \(p === "\/api\/rotation\/earmark\/dismiss" && request\.method === "POST"\) return apiEarmarkDismiss\(request, env, session\);/, "inside the error boundary with the other rotation routes");
+  assert.match(W, /CREATE TABLE IF NOT EXISTS earmark_dismiss \(sc TEXT NOT NULL, ship_key TEXT NOT NULL, dismissed_at TEXT NOT NULL/, "created by the board's memoized guard (§12)");
+  const route = W.slice(W.indexOf("async function apiEarmarkDismiss("), W.indexOf("async function dismissedEarmarks("));
+  assert.match(route, /if \(b\.aid\) removed = await removeReliefAssignment\(env, String\(b\.aid\)\)/, "a console card TDG also earmarks goes with the rejection");
+  assert.match(route, /ON CONFLICT\(sc, ship_key\) DO UPDATE SET dismissed_at=excluded\.dismissed_at/, "rejecting again re-dates the rejection");
+  assert.match(route, /const to = deployRecipient\(env\);\s*if \(!to\) notice = \{ ok: false, error: "no_recipient" \};/, "never a guessed recipient");
+  assert.match(route, /mode: "reject"/);
+  assert.match(route, /critical: true/);
+  const rs = W.slice(W.indexOf("async function rotationSections("), W.indexOf("const sections = Object.values(shipNames)"));
+  assert.match(rs, /FROM earmark_dismiss/, "read in the board's wave");
+  assert.match(rs, /const earmarkDismissed = \(sc, key, at\) => \{ const d = dismissedAt\[sc \+ "\|" \+ key\]; return !!d && \(!at \|\| String\(at\)\.slice\(0, 10\) <= d\); \};/, "off the board only while the file that showed it is not newer than the rejection");
+  assert.match(rs, /if \(earmarkDismissed\(sc, w\.key, w\.at\)\) continue;/);
+  const lapse = W.slice(W.indexOf("async function dismissedEarmarks("), W.indexOf("// A TDG earmark the console has no card for becomes"));
+  assert.match(lapse, /\(!last \|\| last <= String\(x\.dismissed_at \|\| ""\)\.slice\(0, 10\)\)/, "a rejection older than the latest file has lapsed for the importer too");
+  assert.match(W, /dismissed: dismissedEarmarks, markTold:/, "handed to the importer");
+  // the page: Remove on every earmark card, no Deploy anywhere, the sources line names the file first
+  const page = W.slice(W.indexOf("function rotCard(x){"), W.indexOf("function rotIssuesBlock("));
+  assert.doesNotMatch(page, /planDeploy|>Deploy</);
+  assert.match(page, /onclick="earmarkDismiss\(event,this\)">Remove</);
+  assert.match(W, /async function earmarkDismiss\(e,el\)\{/);
+  assert.match(W, /fetch\('\/api\/rotation\/earmark\/dismiss'/);
+  assert.match(W, /<div class=gt>Add earmark<\/div>/, "the ghost slot speaks the one word too");
+  assert.doesNotMatch(W.slice(W.indexOf("function rotSourcesLine(){"), W.indexOf("function rotSourcesLine(){") + 2500), /no upload since 14 Sep 2026/, "the Counter is history: no warning about its age");
 });

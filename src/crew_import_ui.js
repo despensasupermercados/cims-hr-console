@@ -267,7 +267,8 @@ function render(){
  // Rita's Keyman projections against this file (registry_sync.js, Miguel 5 Oct 2026). Shown here,
  // written on Apply: a card the file has ON BOARD its ship turns green on the board by itself.
  var pj=STAGE.review.projections||[],pc=STAGE.review.projection_counts||{};
- var em=STAGE.review.earmarks||[],emMiss=STAGE.review.earmarks_missing||[],tdgEm=STAGE.review.tdg_earmarks||[];
+ var emAll=STAGE.review.earmarks||[],tdgEm=STAGE.review.tdg_earmarks||[];
+ var em=emAll.filter(function(it){return it.kind!=="not_in_tdg";}),emNew=emAll.filter(function(it){return it.kind==="not_in_tdg";});
  var pjFlag=em.length;
  $("work").style.display="grid";
  h+='<div class="chips">'+
@@ -289,9 +290,14 @@ function render(){
   em.forEach(function(it){var l=EK[it.kind]||[it.kind,""];var f=it.file||{};
    h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),(f.status||"status not readable")+(f.ship?(" · "+f.ship):"")+(f.embarked_at?(" · embarked "+f.embarked_at):""),badge(l[0],l[1]))+seg("earmark:"+it.id,"accept",["accept","keep"],["Accept TDG","Keep mine (email Joy)"])+'</div>';});
   h+='</div>';}
+ // NOT IN TDG YET (7 Oct 2026, the Deploy button retired): your earmarks the file does not carry. Tell Joy from
+ // here, hold until you are sure (default), or drop the earmark.
+ if(emNew.length){h+='<div class="sec"><h2>&#9873; Your earmarks TDG does not have yet</h2><div class="d"><b>Tell Joy</b> emails her the earmark with the full record, Rita in copy, so she enters it in TDG before your next import (the card is stamped SENT TO TDG). <b>Not yet</b> keeps it on your board and tells nobody. <b>Drop mine</b> removes it.</div>';
+  emNew.forEach(function(it){var f=it.file||{};
+   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+(it.told_at?badge("told Joy "+esc(it.told_at)+" · still not in TDG","t-amber"):"")+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),f.absent?"not in the file":((f.status||"status not readable")+(f.ship?(" · "+f.ship):"")),"")+seg("earmark:"+it.id,"hold",["tell","hold","drop"],["Tell Joy (email)","Not yet","Drop mine"])+'</div>';});
+  h+='</div>';}
  if(tdgEm.length){h+='<div class="sec"><h2>&#9873; TDG earmarks without a card</h2><div class="d">TDG has these seafarers earmarked for a ship your board has no earmark for. Each gets a console earmark on Apply (sign-on = the current printer’s projected sign-off, + 7 months); adjust the dates on the card afterwards.</div>';
   tdgEm.forEach(function(it){h+='<div class="card"><div class="who">'+esc((it.name||it.sc)+" · "+it.ship)+'</div>'+seg("tdgmark:"+it.sc,"add",["add","skip"],["Add earmark","Skip"],true)+'</div>';});h+='</div>';}
- if(emMiss.length){h+='<div class="sec"><details class="minor" open><summary><span class="c">'+emMiss.length+'</span> deployed earmark'+(emMiss.length===1?'':'s')+' not in TDG yet</summary><div class="d">Sent to Joy, and this file does not carry them yet. Nothing is sent again from here; re-send from the card if it stays missing.</div>'+emMiss.map(function(it){return '<div class="d">'+esc((it.crew_name||it.sc)+' · '+it.ship+' · '+it.text)+'</div>';}).join("")+'</details></div>';}
  var pjOk=pj.filter(function(it){return it.verdict==="confirmed"||it.verdict==="earmarked";});
  if(pjOk.length){h+='<div class="sec"><details class="minor"><summary><span class="c">'+pjOk.length+'</span> earmark'+(pjOk.length===1?'':'s')+' the file agrees with</summary>'+pjOk.map(function(it){var f=it.file||{};return '<div class="d">'+esc((it.crew_name||it.sc)+' · '+it.ship+(it.sign_on?(' from '+it.sign_on):'')+' · TDG: '+(f.status||'')+(f.ship?(' · '+f.ship):''))+'</div>';}).join("")+'</details></div>';}
  if(g.ship_flag.length){h+='<div class="sec"><h2>&#9875; Ship allocation — the file disagrees with your board</h2><div class="d">The Keyman board shows the ship the file names (Miguel, 5 Oct 2026: TDG is the truth). Your placeholder cards stay until you move or remove them; every disagreement is listed under TDG says otherwise on the Keyman tab.</div>';
@@ -339,9 +345,10 @@ function renderCart(){
  if(g.ship_flag.length&&x.shipFlag)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
  var pc=STAGE.review.projection_counts||{};
  if(pc.confirmed)items+=cline("i-green","&#9873;","Earmarks aboard per the file","the file's row is the seat",pc.confirmed+" auto","save");
- var emA=0,emK=0;(STAGE.review.earmarks||[]).forEach(function(it){if((DEC["earmark:"+it.id]||"accept")==="keep")emK++;else emA++;});
- if(emA)items+=cline("i-amber","&#9873;","Earmarks corrected to TDG","moved, removed or absorbed",emA+" accept","save");
- if(emK)items+=cline("i-red","&#9993;","Emails to Joy","one per earmark kept, Rita in copy",emK+" send","held");
+ var emA=0,emK=0,emT=0,emH=0,emD=0;(STAGE.review.earmarks||[]).forEach(function(it){var v=DEC["earmark:"+it.id];if(it.kind==="not_in_tdg"){if(v==="tell")emT++;else if(v==="drop")emD++;else emH++;}else if((v||"accept")==="keep")emK++;else emA++;});
+ if(emA+emD)items+=cline("i-amber","&#9873;","Earmarks corrected to TDG","moved, removed or absorbed",(emA+emD)+" accept","save");
+ if(emK+emT)items+=cline("i-red","&#9993;","Emails to Joy",(emK?emK+" kept":"")+(emK&&emT?" · ":"")+(emT?emT+" to enter in TDG":"")+" · Rita in copy",(emK+emT)+" send","held");
+ if(emH)items+=cline("i-gray","&#9873;","Earmarks not in TDG yet","held, nobody told",emH+" hold","held");
  var tdgAdd=0;(STAGE.review.tdg_earmarks||[]).forEach(function(it){if((DEC["tdgmark:"+it.sc]||"add")==="add")tdgAdd++;});
  if(tdgAdd)items+=cline("i-navy","&#9873;","TDG earmarks given a card","sign-on = current printer's sign-off",tdgAdd+" add","save");
  if(g.override_conflict.length+g.critical.length && x.ovKeep)items+=cline("i-red","&#9995;","Your edits","kept as yours",x.ovKeep+" held","held");
@@ -355,7 +362,7 @@ function renderCart(){
   '<div class="items">'+items+'</div>'+
   '<div class="totals"><div class="tl"><span>Will save to roster</span><span class="v save">'+x.willSave+'</span></div>'+
   '<div class="tl"><span>Kept as yours</span><span class="v keep">'+x.kept+'</span></div></div>'+
-  '<div class="foot"><button class="applyb" id="ap" data-act="apply"'+(x.willSave+flags+emA+emK+tdgAdd+(pc.confirmed||0)?'':' disabled')+'>Apply <span class="k">'+x.willSave+'</span> updates &#8594;</button>'+
+  '<div class="foot"><button class="applyb" id="ap" data-act="apply"'+(x.willSave+flags+emA+emK+emT+emD+tdgAdd+(pc.confirmed||0)?'':' disabled')+'>Apply <span class="k">'+x.willSave+'</span> updates &#8594;</button>'+
   '<button class="discard" data-act="discard">Discard all</button>'+
   '<div class="lock">&#128274; NOTHING SAVED UNTIL YOU APPLY</div></div>';
  $("cart").innerHTML=h;

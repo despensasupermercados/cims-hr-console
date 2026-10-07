@@ -139,7 +139,9 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
 
 **THE EARMARK LOOP** (Miguel, 7 Oct 2026, same day, `src/earmark.js`, pinned by `test/earmark.test.js`): "all the
 projections, people who are not on board but they're coming on board, we're going to call them earmarks". Rita's
-open card and TDG's "Earmarked" row are ONE thing from two sides; Deploy is the CTA that tells Joy. The board says
+open card and TDG's "Earmarked" row are ONE thing from two sides. **The Deploy button is gone** (Miguel, same evening:
+"this deploy CTA does not need it anymore .. the logic is not like that no more"): Joy is told from the IMPORT REVIEW,
+row by row — the console and TDG sync at Rita's upload, in both directions. The board says
 EARMARK (never "placeholder" / "projection"): `EARMARK` (console only), `EARMARK · SENT TO TDG`, `EARMARK · TDG`
 (the file earmarks them too). When the earmark's sign-on arrives it is the active seafarer: a GREEN-background
 card "ABOARD · AWAITING TDG FILE" (`.rcard.awaiting`); the next file that has them On board makes it the ordinary
@@ -149,6 +151,12 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   for the hull of Rita's future earmark, and not hers), `inactive` (Inactive / Not for Rehire), `not_aboard` (an aboard
   card a LATER file does not have aboard), `embark_date` (embark more than `ABSORB_DAYS` from the sign-on). TDG's
   Earmarked rows carry no dates, so a file can only disagree on the hull or the status until the crew embarks.
+- **`not_in_tdg`** (the Deploy CTA, moved into the review): a FUTURE earmark TDG neither earmarks nor seats on that
+  hull. Three choices, **Not yet** the default (a plan Rita is not sure of must reach nobody): **Tell Joy** emails the
+  earmark with the full record (mode `add`, "please enter this earmark in TDG") and stamps the card SENT TO TDG
+  (`deployed_at`, `markTold`); **Drop mine** removes it. A told earmark TDG still lacks comes back as the same row
+  saying "told Joy <date>". Consequence, stated to Miguel: Joy learns of a new earmark at Rita's next upload, not the
+  day Rita decides.
 - **Accept** (default — "follow the TDG file always"): hull → the card MOVES to TDG's ship, Rita's dates kept;
   other_person → Rita's card goes and TDG's seafarer gets the card; inactive / not_aboard → removed; embark_date →
   absorbed (the file's row is the seat). **Keep mine**: the card stands and Joy gets ONE email per seafarer
@@ -158,8 +166,13 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
 - A TDG earmark with no card for that crew becomes a console earmark on Apply (`createEarmarkCard` = the drag
   path: sign-on = the hull's current printer's projected sign-off else today, + 7 months; Rita adjusts). Skippable
   per row. A crew with a card elsewhere is a discrepancy row instead — one path acts, never two.
-- A deployed earmark a LATER file still lacks is REPORTED ("sent, not in TDG yet", on the card and in the review),
-  never re-sent on its own: Joy may be late. Nothing here is money (§1) and nothing resolves a disagreement without
+- **Every earmark card carries Remove, TDG's own included** (`apiEarmarkDismiss`, `earmark_dismiss`): removing a
+  TDG earmark (or a console card TDG also earmarks) records the (crew, hull) as REJECTED — not drawn, not re-created
+  by the next Apply while the file that showed it stands; a LATER file still carrying it brings it back (Joy did not
+  correct TDG) — removes the card if any, and offers to tell Joy (mode `reject`, "CIMS does not plan this seafarer
+  for this ship"). The console never changes TDG; Joy does.
+- The sources line names the FILE that dates the board first ("TDG file <date> · N crew, M with embark dates"); the
+  Counter is "(history)", never warned about. Nothing here is money (§1) and nothing resolves a disagreement without
   Rita (§6).
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
