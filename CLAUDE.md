@@ -184,7 +184,12 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   "OFF IN 1 MO 22 D", never "OFF IN 53D". **Every card on the ship is on the line** (Miguel: "here you have 3 people .. so
   you should have 3 in the timeline"): a TDG earmark without dates is a short dashed stub AFTER the last dated contract,
   named, "no dates" under it; the dated part keeps its scale. **The handover banner under the cards is gone** (Miguel,
-  same evening: "I don't think it's necessary" — "Clean handover · Miami · 2026-11-29"): the line says who relieves whom. The seat card lost its lane, dots and TODAY tick: a thin soft bar (4px) filled
+  same evening: "I don't think it's necessary" — "Clean handover · Miami · 2026-11-29"): the line says who relieves whom.
+  **One row per ship** (Miguel, same evening: "most likely ... three people assigned ... they should all be side by side ...
+  four is the maximum ... this side should be a little bit wider"): a ship's cards share ONE flex row at equal width
+  (`.shipbody.onerow`, never a 2+1 wrap); the Keyman filter rail is 200px and the action column 260px so the board is
+  ~900px at 1440 (it was 719: the ship-tile side rail had stretched the column to 385px); a card under 260px compacts its
+  type (container query); the pool and the shore list still wrap; phones stack. A card keeps its own height. The seat card lost its lane, dots and TODAY tick: a thin soft bar (4px) filled
   to today (soft red when overdue, a dashed track for an earmark), the two calendar dates under it as before — Miguel, same
   evening, when a first cut dropped them for an "aboard / to go" row: "you eliminated the dates ... we had them very, very
   well done earlier ... this progress bar should be more gentle". How long aboard is the status line, how long to go is the

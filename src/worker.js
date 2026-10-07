@@ -3295,7 +3295,9 @@ nav button{white-space:nowrap}
 .stl .snow{position:absolute;top:-6px;width:1px;height:15px;background:var(--navy);z-index:2}.stl .snow em{position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-style:normal;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--navy);background:#fff;padding:0 3px;line-height:12px}
 @container (max-width:460px){.stl .swho{display:none}.stl .std{display:none}.stl .std.first,.stl .std.last{display:block}.stl .snow em{display:none}}
 @media (max-width:640px){.stl{margin-top:6px;padding-top:10px}}
-.shipbody{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;padding:6px 14px 14px;align-items:start}
+.shipbody{display:flex;flex-wrap:wrap;gap:10px;padding:6px 14px 14px;align-items:start}
+.shipbody>.rcard{flex:1 1 300px;min-width:0}
+.shipbody.onerow{flex-wrap:nowrap}.shipbody.onerow>.rcard{flex:1 1 0}
 .shipbody.closed{display:none}
 .rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:grab}
 .rcard:active{cursor:grabbing}.rcard:hover{border-color:var(--navy)}
@@ -3474,7 +3476,15 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .jrnote,.gapnote{color:#9A6410}
 .pacts{margin:0;justify-content:flex-end;gap:8px}
 .pbtn{font-size:13px;font-weight:600;letter-spacing:0;line-height:30px;height:32px;padding:0 14px;border-radius:8px}
-.shipbody{grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;padding:8px 14px 14px}
+/* ONE ROW PER SHIP (Miguel, 7 Oct 2026: "the three or four people ... should all be side by side", "this side should be
+   a little bit wider"): every card on the hull shares the row at equal width, up to four or five; the board column is
+   wider (the filter rail is 200px on Keyman); a card narrower than 260px compacts its type. Phone stacks. */
+.shipbody{gap:12px;padding:8px 14px 14px}
+#rotwrap .crrail{flex:0 0 200px;min-width:200px;max-width:200px;padding:12px}
+#rotwrap .cract.rotact{flex:0 0 260px;max-width:260px}#rotwrap .cract.rotact #rotside{min-width:0}
+.rcard{container-type:inline-size}
+@container (max-width:260px){.rcard .rnm{font-size:14.5px;line-height:18px}.rcard .offchip b{font-size:22px;line-height:24px}.rcard .offchip.long b{font-size:18px}.rrot .rcity{font-size:12.5px;line-height:15px}.rrot .tl{column-gap:10px}.rcard .rleg{font-size:11px}}
+@media (max-width:640px){.shipbody.onerow{flex-direction:column;align-items:stretch}.shipbody.onerow>.rcard{flex:0 0 auto}}
 .ghostslot{min-height:0;align-self:stretch;flex-direction:row;justify-content:center;gap:10px;padding:14px;border-width:1.5px!important;background:#fff;border-radius:12px}
 .ghostslot .gp{width:26px;height:26px;font-size:17px}.ghostslot .gt{font-size:13px}.ghostslot .gc{font-size:10px;letter-spacing:.06em}
 .rbanner{margin:0 14px 12px;padding:5px 12px;font-size:12px;border-radius:8px}
@@ -3502,7 +3512,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 #rotside .tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
 #rotside .tile{padding:9px 8px}#rotside .tile .n{font-size:22px}#rotside .tile .l{font-size:10px}
 #rotside .shipsec{margin:0!important}#rotside .shiphdr{padding:12px 14px;flex-wrap:wrap;row-gap:3px}#rotside .shiphdr .nm{font-size:14px;flex:1 1 100%}#rotside .shiphdr .meta{font-size:11.5px;margin-left:0;flex:1 1 100%;display:flex;justify-content:space-between}
-#rotside .shipbody{padding:10px;grid-template-columns:1fr!important}
+#rotside .shipbody.onerow{padding:10px;flex-direction:column}#rotside .shipbody.onerow>.rcard{flex:0 0 auto}
 .pfgl{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:8px 2px 0}
 .pfgl:first-child{margin-top:0}
 @media(max-width:1240px){.cract.pfact{order:2;justify-content:flex-start;margin-top:4px}.cract.pfact .pfgl{flex:1 1 100%;margin:8px 2px 0}.cract.pfact>div[id]{flex:1 1 100%}}
@@ -5361,7 +5371,7 @@ function rotShip(sec){
   // The handover banner under the cards went on 7 Oct 2026 (Miguel: "I don't think it's necessary"): the line above says it.
   var _rslot=reliefSlot(_rb,projs);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta><span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+histBlock+'</div>';
+    +'<div class="shipbody shipdrop onerow'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+histBlock+'</div>';
 }
 // THE SHIP'S TIMELINE (Miguel, 7 Oct 2026: "a timeline from the sign-on of the active crew to the sign-off of the
 // last earmarked crew ... so visually we see how far the ship is covered"). One line in the ship header, one
