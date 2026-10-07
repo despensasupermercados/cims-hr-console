@@ -402,9 +402,12 @@ test("ports read the same whichever source they came from, and no source is pain
 
 test("cards size to their own content — the grid must not stretch a short card to a tall neighbour", () => {
   const src = readFileSync(SRC, "utf-8");
-  const m = src.match(/\.shipbody\{display:grid;[^}]*\}/);
-  assert.ok(m, ".shipbody grid rule not found");
+  // 7 Oct 2026: the ship body is a flex row (every card side by side, Miguel) — the rule stands: a card keeps its own height.
+  const m = src.match(/\.shipbody\{display:flex;[^}]*\}/);
+  assert.ok(m, ".shipbody flex rule not found");
   assert.match(m[0], /align-items:start/, "without this a crew with no dates renders as a tall empty box");
+  assert.match(src, /\.shipbody\.onerow\{flex-wrap:nowrap\}\.shipbody\.onerow>\.rcard\{flex:1 1 0\}/, "a ship's cards share ONE row at equal width");
+  assert.match(src, /class="shipbody shipdrop onerow/, "the ship section opts into the one row; the pool and the shore list still wrap");
   assert.match(src, /\.rtags\{[^}]*align-items:center/, "chips stretched to the tallest chip in the row");
 });
 
