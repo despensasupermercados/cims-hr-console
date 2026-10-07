@@ -74,7 +74,11 @@ test("UTC basis is used by exactly these functions", () => {
     // 2026-09-15: a drop creates a projection dated from the board's own day (TODAY, UTC) — the same
     // basis boardLegs/rotationSections use, so "sign-on = today" lands on the day the card shows.
     "apiRotationProject",
-    "boardLegs", "loadFeedbackState", "rotationSections",
+    "boardLegs",
+    // 2026-10-07: a TDG earmark with no card becomes a console card at the registry Apply — the same path and
+    // day basis as a drop (createProjection), so its default dates land on the board's day.
+    "createEarmarkCard",
+    "loadFeedbackState", "rotationSections",
   ], "a function changed its date basis to UTC (or stopped using it) — was that deliberate?");
 });
 

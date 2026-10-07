@@ -74,12 +74,16 @@ test("GREEN is a TDG card: drags to PLAN elsewhere, never moves; click opens the
   assert.match(h, /2026-03-08/);
 });
 
-test("YELLOW is Rita's placeholder: draggable, labelled PLACEHOLDER, removable (Miguel, 5 Oct 2026)", () => {
+// 7 Oct 2026: one word — EARMARK (Miguel: "all the projections, people who are not on board but they're coming
+// on board, we're going to call them earmarks").
+test("YELLOW is Rita's earmark: draggable, labelled EARMARK, removable (Miguel, 5 + 7 Oct 2026)", () => {
   const h = ctx.rotCard(YELLOW);
   assert.match(h, /class="rcard plan"/);
   assert.match(h, /draggable="true"/);
   assert.match(h, /ondragstart="rcDrag\(event,this\)"/);
-  assert.match(h, /<span class="rlab plan">PLACEHOLDER<\/span>/);
+  assert.match(h, /<span class="rlab plan">EARMARK<\/span>/);
+  assert.match(ctx.rotCard({ ...YELLOW, deployedAt: "2026-10-05" }), /<span class="rlab plan">EARMARK &middot; SENT TO TDG<\/span>/, "sent to Joy: the label says so");
+  assert.match(ctx.rotCard({ ...YELLOW, registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-04" } }), /<span class="rlab tdg">EARMARK &middot; TDG<\/span>/, "TDG earmarks them too: confirmed from TDG's side");
   assert.match(h, /data-aid="as_1"/);
   assert.match(h, /onclick="planDelete\(event,this\)"/);
   assert.match(h, /data-vk="Royal Caribbean\|Icon"/, "clicking a projection must open the relief editor for its ship");
@@ -89,7 +93,7 @@ test("YELLOW is Rita's placeholder: draggable, labelled PLACEHOLDER, removable (
 test("a projection whose contract has started says ABOARD and keeps its solid outline", () => {
   const h = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-08-01" });
   assert.match(h, /class="rcard plan aboard"/);
-  assert.match(h, /PLACEHOLDER &middot; ABOARD/);
+  assert.match(h, /EARMARK &middot; ABOARD/);
 });
 
 test("YELLOW carries the Deploy CTA; green never does", () => {
@@ -150,7 +154,7 @@ test("the ship section draws both feeds through the ONE renderer and counts them
   // sign-off passed weeks ago "current" alongside the one actually at work. It now states what is true.
   assert.match(sec, /1 onboard/);
   assert.doesNotMatch(sec, /current/, "'current' counted cards, not people aboard");
-  assert.match(sec, /1 planned/);
+  assert.match(sec, /1 earmarked/);
   const ovd = ctx.rotShip({ ship: "Icon", brand: "Royal", onboard: 0, crew: [{ ...GREEN, current: false, status: "On Vacation", signOff: "2020-01-01" }], projections: [], history: [] });
   assert.match(ovd, /1 overdue/, "a green card past its sign-off is counted, and named, as overdue");
   assert.doesNotMatch(ovd, /onboard/, "nobody is aboard that seat");
@@ -336,10 +340,10 @@ test("a yellow card whose sign-on has passed reads ABOARD, whichever feed built 
   // projection feed (which set `aboard`) or the crew feed (a Counter leg Rita's newer assignment
   // overrode, which did not). The renderer no longer trusts one feed to have set the flag.
   const started = ctx.rotCard({ ...YELLOW, aboard: undefined, signOn: "2020-01-02", signOff: "2099-01-01" });
-  assert.match(started, /PLACEHOLDER &middot; ABOARD/);
+  assert.match(started, /EARMARK &middot; ABOARD/);
   assert.match(started, /class="rcard plan aboard"/);
   assert.match(started, /class="offchip/, "someone aboard gets their sign-off countdown");
-  assert.match(ctx.rotCard({ ...YELLOW, aboard: undefined }), /class="rlab plan">PLACEHOLDER</, "a future sign-on is still just a placeholder");
+  assert.match(ctx.rotCard({ ...YELLOW, aboard: undefined }), /class="rlab plan">EARMARK</, "a future sign-on is still just an earmark");
   const src = readFileSync(SRC, "utf-8");
   assert.match(src, /aboard: !!\(\(enr\.signOn \|\| sEnr\.on\) && \(enr\.signOn \|\| sEnr\.on\) <= today\)/,
     "the crew feed must set aboard by the same rule as the projection feed");
@@ -373,12 +377,16 @@ test("a projection the registry contradicts stays yellow and prints the file's w
   const elsewhere = ctx.rotCard({ ...YELLOW, registry: { verdict: "elsewhere", status: "On board", ship: "Odyssey", at: "2026-10-04" } });
   assert.match(elsewhere, /TDG registry 2026-10-04: On board &middot; Odyssey<\/b> &middot; not this ship/);
   const earmarked = ctx.rotCard({ ...YELLOW, registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-04" } });
-  assert.match(earmarked, /TDG registry 2026-10-04: earmarked for this ship/);
+  assert.match(earmarked, /TDG earmarks them for this ship<\/b> \(file of 2026-10-04\) &middot; your earmark agrees/);
   const pending = ctx.rotCard({ ...YELLOW, registry: { verdict: "pending", status: "On Vacation", ship: null, at: "2026-10-04" } });
-  assert.match(pending, /Your projection &middot; TDG registry 2026-10-04: On Vacation<\/div>/);
+  assert.match(pending, /Your earmark &middot; TDG registry 2026-10-04: On Vacation<\/div>/);
   const unplaced = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-07-02", registry: { verdict: "pending", status: "On board", ship: null, at: "2026-10-04" } });
   assert.match(unplaced, /TDG registry 2026-10-04: On board \(ship not on file yet\)/, "Bornea's shape today: the file has him aboard but the registry row carries no ship");
-  assert.match(ctx.rotCard(YELLOW), /Your projection &middot; not in a TDG file yet<\/div>/, "no verdict yet: the old line, unchanged");
+  assert.match(ctx.rotCard(YELLOW), /Your earmark &middot; not in a TDG file yet<\/div>/, "no verdict yet: the old line, reworded");
+  // 7 Oct 2026: a deployed earmark a LATER file still lacks says so on the card (reported, never re-sent by itself)
+  const late = ctx.rotCard({ ...YELLOW, deployedAt: "2026-10-01", registry: { verdict: "pending", status: "On Vacation", ship: null, at: "2026-10-07" } });
+  assert.match(late, /Sent to TDG 2026-10-01<\/b> &middot; the 2026-10-07 file does not carry this earmark yet/);
+  assert.doesNotMatch(ctx.rotCard({ ...YELLOW, deployedAt: "2026-10-08", registry: { verdict: "pending", status: "On Vacation", ship: null, at: "2026-10-07" } }), /does not carry this earmark yet/, "a file OLDER than the send says nothing yet");
 });
 
 test("rotationSections DERIVES the registry verdict at read time from the stored file word, carries it on both card paths, and sorts confirmed cards first (static)", () => {

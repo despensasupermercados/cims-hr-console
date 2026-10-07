@@ -31,6 +31,7 @@ import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } 
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
 import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./relief_api.js";
+import { deployRecipient, deployCc } from "./keyman_deploy.js";
 import { fetchBoardPortDays } from "./port_days.js";
 import { createProjection } from "./projection.js";
 import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
@@ -217,7 +218,7 @@ export default {
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
-        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit }); if (ci) return ci; }
+        if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc }); if (ci) return ci; }
         // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
         // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
         // human does. Inside the boundary and behind the session gate (§11). Inert until
@@ -2436,6 +2437,11 @@ async function apiContractEdit(request, env, session) {
   ]);
   return json({ ok: true });
 }
+// A TDG earmark the console has no card for becomes a console earmark (7 Oct 2026): the same card Rita would
+// have dragged there — sign-on = the hull's current printer's projected sign-off (else today), + 7 months.
+async function createEarmarkCard(env, { agencyId, ship, today }) {
+  return createProjection(env, { agencyId, ship, today: today || TODAY() }, { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO });
+}
 // A sign-off Rita CONFIRMED on a card the file absorbs (7 Oct 2026) is hers for that contract: filed under the
 // file's embark date so the seat keeps it ("that date stands until she changes it"). Nothing else is copied.
 async function recordSignoffEdit(env, { sc, on_key, sign_off, embark, disembark }) {
@@ -3221,6 +3227,8 @@ nav button{white-space:nowrap}
 .rcard.cur{box-shadow:0 0 0 2px var(--green) inset}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset}.ghostslot{border-style:dashed!important;display:flex;flex-direction:column;justify-content:center;color:var(--mut);cursor:pointer}.ghostslot.crit{border-color:var(--danger)!important;background:#fbe7e6;color:var(--danger)}.ghostslot.due{border-color:var(--amber)!important;background:#fbeed6;color:#9a6410}
 .rcard .notedot{color:var(--amber);font-size:9px;vertical-align:middle}.rcard.rlvr{box-shadow:0 0 0 2px var(--navy) inset;background:#fff}
 .rcard.plan{border:1px solid #E6CE6A!important;border-left:4px solid #E3B100!important;background:#FFF3B8;box-shadow:none}
+.rcard.awaiting{border:1px solid #9CCFA3!important;border-left:4px solid #2F9E44!important;background:#E8F5EA;box-shadow:none}
+.rlab.live{color:var(--green-d);background:#CDEAD2}
 
 .gapnote{font-size:11px;color:#9A6410;background:#FBF0DA;border-radius:7px;padding:5px 8px;margin-top:9px}
 .tdgissues .isbody{display:block;padding:0}.tdgissues .isbody.closed{display:none}
@@ -4997,8 +5005,8 @@ function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
-  var id=el.getAttribute('data-aid'),nm=el.getAttribute('data-nm')||'this projection';
-  if(!confirm('Remove '+nm+' from the board?\\n\\nThis deletes the projection. TDG cards are never touched.'))return;
+  var id=el.getAttribute('data-aid'),nm=el.getAttribute('data-nm')||'this earmark';
+  if(!confirm('Remove '+nm+' from the board?\\n\\nThis deletes the earmark. TDG cards are never touched.'))return;
   el.disabled=true;
   try{
     var r=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})).json();
@@ -5093,15 +5101,15 @@ function cardOverdue(x){
 // forever — Gayda on Jewel through five registry uploads. The registry carries no dates, so a confirmed
 // card keeps Rita's dates until the Contract Counter carries the leg and absorbs it.
 function regNote(reg,confirmed){
-  if(!reg)return '<div class=srcnote>Your projection &middot; not in a TDG file yet</div>';
+  if(!reg)return '<div class=srcnote>Your earmark &middot; not in a TDG file yet</div>';
   var at=reg.at?(' '+escHtml(reg.at)):'';
   var st=escHtml(reg.status||'status not readable');
   var sh=reg.ship?(escHtml(reg.ship)+(reg.shipAt?(' (named '+escHtml(reg.shipAt)+')'):'')):'';
   if(confirmed)return '<div class=srcnote><b style="color:var(--green-d)">Aboard per the TDG registry</b> (file of'+at+') &middot; your dates until the Counter carries them</div>';
   if(reg.verdict==='elsewhere')return '<div class=srcnote><b style="color:var(--amber)">TDG registry'+at+': '+st+(sh?(' &middot; '+sh):'')+'</b> &middot; not this ship</div>';
   if(reg.verdict==='ashore')return '<div class=srcnote><b style="color:var(--red)">TDG registry'+at+': '+st+(sh?(', '+sh):'')+'</b> &middot; not aboard here per the file</div>';
-  if(reg.verdict==='earmarked')return '<div class=srcnote>TDG registry'+at+': earmarked for this ship &middot; not aboard yet</div>';
-  return '<div class=srcnote>Your projection &middot; TDG registry'+at+': '+st+(sh?(' &middot; '+sh):(reg.status==='On board'?' (ship not on file yet)':''))+'</div>';
+  if(reg.verdict==='earmarked')return '<div class=srcnote><b style="color:var(--green-d)">TDG earmarks them for this ship</b> (file of'+at+') &middot; your earmark agrees &middot; not aboard yet</div>';
+  return '<div class=srcnote>Your earmark &middot; TDG registry'+at+': '+st+(sh?(' &middot; '+sh):(reg.status==='On board'?' (ship not on file yet)':''))+'</div>';
 }
 // What each port colour MEANS (city_resolver.js). Colour with no key is noise; 'seed' was painted the
 // danger red, which read as an error on a card that was simply falling back to the ship's homeport.
@@ -5125,8 +5133,10 @@ function rotCard(x){
   // never a negative count. A plan counts down to its sign-on; TDG's earmark has no dates yet.
   var chip='';
   var today=new Date().toISOString().slice(0,10);
-  if((live||ovd)&&x.signOff){var dd=Math.round((new Date(x.signOff+'T00:00:00Z').getTime()-Date.now())/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip=dd<0?('<span class="offchip crit"><b>'+(-dd)+' d</b><i>PAST SIGN-OFF</i></span>'):('<span class="offchip'+cc+'"><b>'+dd+' d</b><i>TO SIGN-OFF</i></span>');}
-  else if(plan&&x.signOn){var ds=Math.round((new Date(x.signOn+'T00:00:00Z').getTime()-Date.now())/86400000);if(ds>=0)chip='<span class=offchip><b>'+ds+' d</b><i>TO SIGN-ON</i></span>';}
+  // Whole days from TODAY's date, never from the clock: a sign-off dated today read "1 d PAST SIGN-OFF" by mid-morning.
+  var tn0=Date.parse(today+'T00:00:00Z');
+  if((live||ovd)&&x.signOff){var dd=Math.round((Date.parse(x.signOff+'T00:00:00Z')-tn0)/86400000);var cc=dd<=14?' crit':dd<=30?' due':'';chip=dd<0?('<span class="offchip crit"><b>'+(-dd)+' d</b><i>PAST SIGN-OFF</i></span>'):('<span class="offchip'+cc+'"><b>'+dd+' d</b><i>TO SIGN-OFF</i></span>');}
+  else if(plan&&x.signOn){var ds=Math.round((Date.parse(x.signOn+'T00:00:00Z')-tn0)/86400000);if(ds>=0)chip='<span class=offchip><b>'+ds+' d</b><i>TO SIGN-ON</i></span>';}
   else if(x.tdgEarmark)chip='<span class="offchip mut"><b>&ndash;</b><i>NO DATES</i></span>';
   // THE DATES AS A PICTURE: ON port and OFF port over a rail, a dot at each end, TODAY where the contract stands
   // (its label in its own strip above the rail, right-anchored at the end so it never leaves the card). A plan
@@ -5154,13 +5164,16 @@ function rotCard(x){
   if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
   // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
   if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
-  // Yellow is Rita's PLACEHOLDER (Miguel, 5 Oct 2026): it stands until TDG's file carries the person.
+  // Yellow is Rita's EARMARK (Miguel, 5 + 7 Oct 2026): it stands until TDG's file carries the person.
   // TDG's own earmark (6 Oct 2026): drawn from the file, no card behind it - drag it to plan them here.
-  var lab=x.tdgEarmark?'<span class="rlab tdg">EARMARKED &middot; TDG</span>':confirmed?'<span class="rlab tdg">ABOARD &middot; TDG REGISTRY</span>':awaiting?'<span class="rlab plan">ABOARD &middot; AWAITING TDG FILE</span>':plan?('<span class="rlab plan">'+(aboard?'PLACEHOLDER &middot; ABOARD':'PLACEHOLDER')+'</span>'):'';
+  // ONE WORD (Miguel, 7 Oct 2026): everyone scheduled to come aboard is an EARMARK — Rita's card and TDG's
+  // "Earmarked" row are the same thing from two sides. The label says where the earmark stands: console only,
+  // SENT TO TDG, or confirmed by the file (EARMARK · TDG).
+  var lab=x.tdgEarmark?'<span class="rlab tdg">EARMARK &middot; TDG</span>':confirmed?'<span class="rlab tdg">ABOARD &middot; TDG REGISTRY</span>':awaiting?'<span class="rlab live">ABOARD &middot; AWAITING TDG FILE</span>':plan?('<span class="rlab '+((reg&&reg.verdict==='earmarked')?'tdg':'plan')+'">'+((reg&&reg.verdict==='earmarked')?'EARMARK &middot; TDG':aboard?'EARMARK &middot; ABOARD':x.deployedAt?'EARMARK &middot; SENT TO TDG':'EARMARK')+'</span>'):'';
   // Who set the dates on this card. Blank when nobody has touched the TDG values.
   var note='';
   if(x.tdgEarmark)note='<div class=srcnote>TDG earmarks them for this ship'+(reg&&reg.at?(' &middot; file '+escHtml(reg.at)):'')+'. Drag here to plan the dates.</div>';
-  else if(plan)note=regNote(reg,confirmed);
+  else if(plan){note=regNote(reg,confirmed);if(x.deployedAt&&reg&&reg.at&&reg.at>x.deployedAt&&reg.verdict!=='earmarked'&&!confirmed)note+='<div class=srcnote><b style="color:var(--amber)">Sent to TDG '+escHtml(x.deployedAt)+'</b> &middot; the '+escHtml(reg.at)+' file does not carry this earmark yet</div>';}
   else if(x.dateSource==='registry')note=fileDatesNote(x);
   else if(x.overridden)note='<div class=srcnote><b>TDG dates</b>'+(x.dateSourceAt?(' from the '+x.dateSourceAt+' file'):'')+' &middot; newer than your edit</div>';
   else if(x.dateSource==='rita')note='<div class=srcnote>Your dates'+(x.dateSourceAt?(', '+x.dateSourceAt):'')+' &middot; newer than the TDG file</div>';
@@ -5247,7 +5260,8 @@ function rotShip(sec){
   if(sec.onboard)_bits.push(sec.onboard+' onboard');
   if(_ovd)_bits.push(_ovd+' overdue');
   if(!sec.onboard&&!_ovd&&sec.crew.length)_bits.push(sec.crew.length+' contract card'+(sec.crew.length===1?'':'s'));
-  if(projs.length)_bits.push(projs.length+' planned');
+  var _em=projs.length+sec.crew.filter(function(c){return c.state==='yellow'&&!c.confirmed&&!c.awaiting;}).length;
+  if(_em)_bits.push(_em+' earmarked');
   if(sec.deployed&&sec.deployed.length)_bits.push(sec.deployed.length+' sent to TDG');
   if(hist.length)_bits.push(hist.length+' completed');
   var meta=_bits.join(' · ');

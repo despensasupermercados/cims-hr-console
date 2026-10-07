@@ -21,6 +21,7 @@ import { isMoneyUser } from "./policy.js";
 import { reconcileShipFlags, boardShipsFromLegs, strictShipMatcher, AUTO_CLOSED } from "./crew_flags.js";
 import { reconcileProjections, projectionSummary } from "./registry_sync.js";
 import { daysBetween, ABSORB_DAYS } from "./counter_sync.js";
+import { earmarkDiscrepancies, tdgEarmarksWithoutCard, earmarkSummary, loadEarmarkRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID as EARMARK_TEMPLATE } from "./earmark.js";
 import { VESSEL_REF } from "./vessel_ref.js";
 
 const SHIP_OF = strictShipMatcher(VESSEL_REF); // built once per isolate, not per request
@@ -167,6 +168,12 @@ export async function apiCrewImportStage(request, env, deps) {
   const proj = reconcileProjections({ projections, registry, today, shipOf: SHIP_OF });
   review.projections = proj.items;
   review.projection_counts = proj.counts;
+  // THE EARMARK LOOP (Miguel, 7 Oct 2026, earmark.js): what the file disagrees with on Rita's earmarks, row
+  // by row for a Keep / Accept decision; deployed earmarks the file still lacks; TDG earmarks with no card.
+  const em = earmarkDiscrepancies({ projections, registry, today, shipOf: SHIP_OF });
+  review.earmarks = em.items;
+  review.earmarks_missing = em.missing;
+  review.tdg_earmarks = tdgEarmarksWithoutCard({ projections, registry, shipOf: SHIP_OF, exclude: em.items.filter((i) => i.kind === "other_person" && i.file && i.file.other).map((i) => i.file.other.sc + "|" + String(i.ship).trim().toLowerCase()) });
   review.registry = registry;
   review.groups.unretire = unretireItems(registry, retiredByAgency);
   review.counts.unretire = review.groups.unretire.length;
@@ -319,6 +326,59 @@ export async function apiCrewImportApply(request, env, deps) {
       absorbed.push({ id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: it.ship, sign_on: it.sign_on, embarked_at: w.embarked_at || null, ok: !!(r && r.ok), error: r && r.ok ? null : (r && r.error) || "failed", sign_off_kept: !!(kept && kept.ok) });
     }
   }
+  // THE EARMARK LOOP (Miguel, 7 Oct 2026). Each discrepancy row Rita saw gets her decision: ACCEPT (default,
+  // "follow the TDG file always") — a different hull moves her card there with her dates, Inactive / not
+  // aboard removes it, a far embark absorbs it (the file's row is the seat); KEEP — the console stands and
+  // Joy gets one email per seafarer, Rita in copy, with everything CIMS holds, so TDG is corrected and the
+  // next export agrees. Only rows the stage itself listed are honoured (the body can never name a card).
+  // A TDG earmark with no card becomes a console card (sign-on = the hull's current printer's projected
+  // sign-off, + 7 months). Every outcome is reported as what happened; a failure never undoes the import.
+  const dec = body.decisions || {};
+  const earmarks = { accepted: [], kept: [], emails: [], cards: [], missing: Array.isArray(body.review && body.review.earmarks_missing) ? body.review.earmarks_missing : [] };
+  const staged = Array.isArray(body.review && body.review.earmarks) ? body.review.earmarks : [];
+  const liveIds = new Set((projections || []).map((x) => x && x.id).filter(Boolean));
+  const fail = (e) => ({ ok: false, error: String((e && e.message) || e) });
+  for (const it of staged) {
+    if (!it || !it.id || !liveIds.has(it.id)) continue;          // the card went since the review
+    const choice = dec["earmark:" + it.id] === "keep" ? "keep" : "accept";
+    if (choice === "accept") {
+      let r = { ok: false, error: "no_dep" }, action = null;
+      if (it.kind === "hull" && it.file && it.file.ship && deps && deps.moveCard) { action = "moved to " + it.file.ship; r = await deps.moveCard(env, { id: it.id, vessel_name: it.file.ship }).catch(fail); }
+      else if (it.kind === "other_person" && it.file && it.file.other && deps && deps.absorbCard && deps.createCard) {
+        // TDG's person takes the earmark: Rita's card goes, the file's seafarer gets the card (same hull, default dates).
+        action = "replaced by " + (it.file.other.name || it.file.other.sc);
+        r = await deps.absorbCard(env, it.id).catch(fail);
+        const c = r && r.ok ? await deps.createCard(env, { agencyId: it.file.other.sc, ship: it.ship, today }).catch(fail) : null;
+        earmarks.cards.push({ sc: it.file.other.sc, ship: it.ship, name: it.file.other.name || null, ok: !!(c && c.ok), id: (c && c.id) || null, sign_on: (c && c.sign_on) || null, error: c && c.ok ? null : (c && c.error) || (r && r.ok ? "failed" : "not created: the card could not be removed") });
+      }
+      else if ((it.kind === "inactive" || it.kind === "not_aboard" || it.kind === "embark_date") && deps && deps.absorbCard) { action = it.kind === "embark_date" ? "absorbed by the file's row" : "removed"; r = await deps.absorbCard(env, it.id).catch(fail); }
+      earmarks.accepted.push({ id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: it.ship, kind: it.kind, action, ok: !!(r && r.ok), error: r && r.ok ? null : (r && r.error) || "failed" });
+      continue;
+    }
+    const row = { id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: it.ship, kind: it.kind, emailed: false, error: null };
+    if (deps && deps.sendMail && deps.recipient) {
+      const to = deps.recipient(env);
+      if (!to) row.error = "no_recipient";
+      else {
+        try {
+          const record = await loadEarmarkRecord(env, it.id);
+          const notice = buildEarmarkNotice({ record, item: it, today });
+          const toName = (env && env.TG_NOTIFY_NAME) || "Joy";
+          const res = await deps.sendMail(env, { templateId: EARMARK_TEMPLATE, to: [to], cc: deps.cc ? deps.cc(env) : [], subject: earmarkSubject(notice),
+            html: renderEarmarkEmail(notice, { toName, sender: run_by }), text: renderEarmarkText(notice, { toName }), critical: true });
+          row.emailed = !!(res && res.ok !== false); if (!row.emailed) row.error = (res && res.error) || "mailer refused";
+          if (row.emailed) earmarks.emails.push({ id: it.id, sc: it.sc, to, subject: earmarkSubject(notice) });
+        } catch (e) { row.error = String((e && e.message) || e); }
+      }
+    } else row.error = "no_mailer";
+    earmarks.kept.push(row);
+  }
+  for (const t of (Array.isArray(body.review && body.review.tdg_earmarks) ? body.review.tdg_earmarks : [])) {
+    if (!t || !t.sc || !t.ship || !(deps && deps.createCard)) continue;
+    if (dec["tdgmark:" + t.sc] === "skip") continue;
+    const r = await deps.createCard(env, { agencyId: t.sc, ship: t.ship, today }).catch(fail);
+    earmarks.cards.push({ sc: t.sc, ship: t.ship, name: t.name || null, ok: !!(r && r.ok), id: (r && r.id) || null, sign_on: (r && r.sign_on) || null, error: r && r.ok ? null : (r && r.error) || "failed" });
+  }
   // A clear that matched 0 rows means the manual value moved since the review; count it as skipped.
   let override_cleared = 0;
   for (const i of clearIdx) { const m = results && results[i] && results[i].meta; if (!m || m.changes == null || m.changes > 0) override_cleared++; }
@@ -330,6 +390,7 @@ export async function apiCrewImportApply(request, env, deps) {
     open_conflicts: openInserted, ship_flags: flags.counts, board_unavailable, droppedShipWrites: plan.droppedShipWrites,
     projections: { counts: proj.counts, items: proj.items.map(i => ({ id: i.id, sc: i.sc, crew_name: i.crew_name, ship: i.ship, verdict: i.verdict, file: i.file })) },
     cards_absorbed: absorbed,
+    earmarks,
   };
   res.summary = applySummary(res); // ONE sentence for both import screens (they used to each compose their own)
   return J(res);
@@ -355,7 +416,10 @@ export function applySummary(r) {
   const pj = r.projections && r.projections.counts ? projectionSummary(r.projections.counts) : "";
   if (pj) parts.push(pj);
   const ab = (r.cards_absorbed || []).filter((x) => x && x.ok).length;
-  if (ab) parts.push(n(ab, "card absorbed by the file (the file's row is the seat now)", "cards absorbed by the file (the file's rows are the seats now)"));
+  if (ab) parts.push(n(ab, "earmark absorbed by the file (the file's row is the seat now)", "earmarks absorbed by the file (the file's rows are the seats now)"));
+  const em = r.earmarks || {};
+  const es = earmarkSummary({ accepted: (em.accepted || []).filter((x) => x.ok).length, kept: (em.kept || []).length, emails: (em.kept || []).filter((x) => x.emailed).length, cards: (em.cards || []).filter((x) => x.ok).length, missing: (em.missing || []).length });
+  if (es) parts.push(es);
   parts.push("logged to import history");
   return parts.join(" · ") + ".";
 }
