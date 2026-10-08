@@ -36,6 +36,7 @@ import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail,
 import { fetchBoardPortDays } from "./port_days.js";
 import { createProjection } from "./projection.js";
 import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
+import { attachNextAssignments } from "./next_assignment.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
@@ -2220,6 +2221,7 @@ async function rotationSections(env) {
   const counts = {};
   ["On board", "On Vacation", "Reserved", "Earmarked", "Inactive", "Not for Rehire", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length; counts.issues = issues.length;
+  attachNextAssignments(sections, today); // the seat card's "Next" line (8 Oct 2026), read off the cards above
   return { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
 }
 // Days worked THIS MONTH per crew currently active in Keyman. A REFERENCE read, not an invoice
@@ -3494,6 +3496,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rcard{container-type:inline-size}
 @container (max-width:260px){.rcard .rnm{font-size:14.5px;line-height:18px}.rcard .offchip b{font-size:22px;line-height:24px}.rcard .offchip.long b{font-size:18px}.rrot .rcity{font-size:12.5px;line-height:15px}.rrot .tl{column-gap:10px}.rcard .rleg{font-size:11px}}
 @media (max-width:640px){.shipbody.onerow{flex-direction:column;align-items:stretch}.shipbody.onerow>.rcard{flex:0 0 auto}}
+.rnext{margin-top:3px;font-size:12px;color:var(--mut);line-height:1.35}.rnext .nxk{font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--navy);background:#eef3fb;border-radius:5px;padding:1px 6px;margin-right:2px}.rnext b{color:var(--navy);font-weight:700}.rnext .nxgap{color:var(--green-d,#3E7F2E);font-weight:600;white-space:nowrap}.rnext .nxgap.bad{color:var(--red,#B0342F)}
 .ghostslot{min-height:0;align-self:stretch;flex-direction:row;justify-content:center;gap:10px;padding:14px;border-width:1.5px!important;background:#fff;border-radius:12px}
 .ghostslot .gp{width:26px;height:26px;font-size:17px}.ghostslot .gt{font-size:13px}.ghostslot .gc{font-size:10px;letter-spacing:.06em}
 .rbanner{margin:0 14px 12px;padding:5px 12px;font-size:12px;border-radius:8px}
@@ -5273,6 +5276,12 @@ function regNote(reg,confirmed){
 // What each port colour MEANS (city_resolver.js). Colour with no key is noise; 'seed' was painted the
 // danger red, which read as an error on a card that was simply falling back to the ship's homeport.
 var CONF_T={derived:'from the itinerary for that date',provisional:'from an itinerary day within a day of it - not exact',seed:'the homeport of the ship - the itinerary has no port for that date',override:'set by hand'};
+// THE NEXT ASSIGNMENT (Miguel, 8 Oct 2026): under the status line of a seafarer aboard, the same crew's next earmark
+// (attachNextAssignments on the server) and the time ashore between the two contracts, in months and days.
+function nextLine(x){var n=x&&x.next;if(!n)return '';
+  var when=n.signOn?fmtDateS(n.signOn):(n.tdg?'TDG earmark, dates to plan':'dates to plan');
+  var g='';if(n.gapDays!=null&&x.signOff&&n.signOn){if(n.gapDays>0)g='<span class=nxgap>'+spanCompact(x.signOff,n.signOn)+' ashore</span>';else if(n.gapDays===0)g='<span class=nxgap>back to back</span>';else g='<span class="nxgap bad">overlaps '+spanCompact(n.signOn,x.signOff)+'</span>';}
+  return '<div class=rnext><span class=nxk>Next</span> <b>'+escHtml(n.ship||'')+'</b> &middot; '+when+(g?(' &middot; '+g):'')+'</div>';}
 function rotCard(x){
   var plan=x.state==='yellow';
   var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
@@ -5324,9 +5333,11 @@ function rotCard(x){
   if(x.onConfirmed)tg+='<span class="rtag on">ON DATE</span>';
   if(x.offConfirmed)tg+='<span class="rtag on">OFF DATE</span>';
   if(plan&&x.deployedAt)tg+='<span class="rtag on" title="Sent to TDG for action">SENT TO TDG '+escHtml(x.deployedAt)+'</span>';
-  if(x.nextShip)tg+='<span class="rtag">NEXT: '+x.nextShip+'</span>';
-  // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Same chip on both states.
-  if(x.docs)tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';
+  // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Each EXPIRED document by name, red (Miguel,
+  // 8 Oct 2026: "tag in red all the items that are expired"); missing / expiring stay one summary chip.
+  if(x.docs){var _di=x.docs.items;
+    if(_di&&_di.length){_di.forEach(function(d){tg+='<span class="rtag bad" title="'+escHtml(d.doc+' expired'+(d.exp?(' '+fmtDateS(d.exp)):''))+'">'+escHtml(String(d.doc).toUpperCase())+'</span>';});if(x.docs.rest)tg+='<span class="rtag '+(x.docs.rest.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.rest.title)+'">'+escHtml(x.docs.rest.label)+'</span>';}
+    else tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';}
   // Yellow is Rita's EARMARK (Miguel, 5 + 7 Oct 2026): it stands until TDG's file carries the person.
   // TDG's own earmark (6 Oct 2026): drawn from the file, no card behind it - drag it to plan them here.
   // ONE WORD (Miguel, 7 Oct 2026): everyone scheduled to come aboard is an EARMARK — Rita's card and TDG's
@@ -5366,7 +5377,7 @@ function rotCard(x){
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
   return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the earmark':x.tdgEarmark?'TDG earmarks them here - drag to plan the dates, Remove to reject':plan?'Your earmark - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to earmark them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
-    +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div></div>'+chip+'</div>'
+    +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div>'+nextLine(x)+'</div>'+chip+'</div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +gap
     +(tg?'<div class=rtags>'+tg+'</div>':'')

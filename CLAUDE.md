@@ -229,6 +229,15 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   well done earlier ... this progress bar should be more gentle". How long aboard is the status line, how long to go is the
   chip; neither is repeated under the bar. Dates on the card and the history read "Sep 22, 2027" (`fmtDateS`), the chip
   reads calendar months + days (`spanCompact`), never a bare day count. Pinned by `test/board_cards.test.js`. Mock-ups under `docs/mockups/`.
+- **The seat card's NEXT line and the expired documents by name** (Miguel, 8 Oct 2026, on Harmony: "if the same crew
+  member is earmarked for a future vessel, I want you to display it there ... how many months and days of vacation or
+  space between the contracts"; "instead of saying 1 expired ... tag in red all the items that are expired"). Under the
+  status line of a seafarer aboard: "NEXT <ship> · <sign-on> · N mo D d ashore" (`attachNextAssignments`,
+  `src/next_assignment.js`, pure, run at the end of `rotationSections`: the same crew's earliest earmark still to come,
+  Rita's card or TDG's Earmarked row, any hull, never the card itself); "back to back" at 0 days, red "overlaps …" when
+  the next sign-on is before this sign-off, "TDG earmark, dates to plan" without dates. The status line's "7 mos" is
+  the contract's length (sign-on → sign-off), unchanged. Documents: one red tag per EXPIRED document by name
+  (`docBadge().items`), the missing / expiring summary stays one chip (`rest`). Pinned by `test/next_assignment.test.js`.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
