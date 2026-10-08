@@ -4,8 +4,7 @@ import { groupPortDays } from "./city_resolver.js";
 import { buildReliefBoard, validateWrite } from "./relief_board.js";
 import { RELIEF_HTML } from "./relief_ui.js";
 import { htmlPage } from "./etag.js";
-import { fetchCurrentCounterLegs } from "./counter_legs.js";
-import { fetchRecordedSignoffs, legWithRecordedSignoff } from "./ship_leg_source.js";
+import { boardLegsFromDb, fetchVesselBrands } from "./ship_leg_source.js";
 import { fetchBoardPortDays, fetchAzamaraTurnarounds } from "./port_days.js";
 import { docBadge } from "./keyman_deploy.js";
 import { DEPLOY_HTML } from "./relief_deploy.js";
@@ -24,28 +23,44 @@ export function addMonthsISO(d, n) {
   return dt.toISOString().slice(0, 10);
 }
 
+// THE PRINTER IS WHO THE KEYMAN BOARD SEATS (8 Oct 2026, Miguel on Anthem: "dont have the option to create
+// earmark"). The relief printers read the Contract Counter until today, so a seafarer the TDG file has aboard
+// but the Counter does not carry (Caag, Anthem, embarked 7 Sep) had no printer here — no "Add earmark" slot on
+// the board. Now: the board's ONE schedule (boardLegsFromDb: the AdvancedQuery's embark/debark first, the
+// Counter only for a crew the file does not date), current legs only, Rita's relief cards left out (they are
+// the relievers below), in the Counter's row shape so nothing downstream changes. Newest sign-on first, so a
+// hull with two crew aboard (TDG still lists the outgoing one) offers the earmark after the newer one.
+// PURE. legs: boardLegsFromDb · vessels: [{ name, brand }] (full brand names, the relief board's key).
+export function printerLegsFromBoard(legs, vessels) {
+  const brandOf = {};
+  for (const v of (vessels || [])) if (v && v.name) brandOf[String(v.name).trim().toLowerCase()] = v.brand || null;
+  const FULL = { Royal: "Royal Caribbean" };
+  return (legs || [])
+    .filter((l) => l && l.ours && l.is_current && l.source !== "assignment" && l.ship && l.on)
+    .map((l) => ({
+      brand: brandOf[String(l.ship).trim().toLowerCase()] || FULL[l.brand] || l.brand || "?",
+      ship_short: String(l.ship).trim(), sc: l.sc || null, crew_id: l.crew_id || null, crew_name: l.name || null,
+      on_date: l.on, off_date: l.off || null, embark: l.embark || null, disembark: l.disembark || null,
+      ours: 1, is_current: 1, source: l.source || null,
+    }))
+    .sort((a, b) => String(b.on_date).localeCompare(String(a.on_date)));
+}
+
 export async function reliefBoardData(env, today) {
   // ONE wave (CLAUDE.md §12). The itinerary is fetched for the card dates only — never the whole
   // 40k-row table (port_days.js, 2026-09-15). Azamara turnarounds come as their own small list.
-  const [cfgRow, pd, taRows, flagRes, rawLegs, recorded] = await Promise.all([
+  const [cfgRow, pd, taRows, flagRes, boardRows, vessels] = await Promise.all([
     env.DB.prepare("SELECT critical_days, due_days FROM relief_window_config WHERE key='default'").first(),
     fetchBoardPortDays(env),
     fetchAzamaraTurnarounds(env, today || new Date().toISOString().slice(0, 10)),
     env.DB.prepare("SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags").all(),
-    fetchCurrentCounterLegs(env),
-    fetchRecordedSignoffs(env).catch(() => ({})),
+    boardLegsFromDb(env, today || new Date().toISOString().slice(0, 10)),
+    fetchVesselBrands(env),
   ]);
-  // THE SAME DEFINITION AS THE BOARD (CLAUDE.md §11, 5 Oct 2026 review): a printer leg Rita has recorded
-  // a sign-off for carries that date, and once it has passed the printer is gone — the banner used to
-  // keep saying "sign-off overdue · no sign-off recorded" on a seat the Keyman card had already released
-  // (Calayag on Navigator).
-  const _today = today || new Date().toISOString().slice(0, 10);
-  const legs = rawLegs.map((l) => {
-    const rec = recorded[(l.sc || "") + "|" + (l.on_date || "")];
-    if (!rec) return l;
-    const eff = legWithRecordedSignoff(l.off_date, true, rec, _today);
-    return { ...l, off_date: eff.off, is_current: eff.is_current ? 1 : 0 };
-  }).filter((l) => Number(l.is_current) === 1);
+  // THE SAME DEFINITION AS THE BOARD (CLAUDE.md §11): boardLegsFromDb has already applied Rita's recorded
+  // sign-offs and TDG's held rule (§10d) — applying a recorded sign-off a second time here would drop a crew
+  // the file still has On board past it, and with them the ship's "Add earmark" slot.
+  const legs = printerLegsFromBoard(boardRows, vessels);
   const cfg = cfgRow || { critical_days: 14, due_days: 30 };
   const portDaysByShip = groupPortDays(pd);
   // Turnarounds per Azamara ship (crew-change ports), ascending — the sign-off projection candidates.
@@ -55,8 +70,8 @@ export async function reliefBoardData(env, today) {
   const flagsByKey = {};
   for (const f of (flagRes.results || [])) flagsByKey[f.vessel_key] = f;
 
-  // Printers = current legs from the Contract Counter (counter_legs.js, the ONE definition;
-  // until 2026-09-14 this read the frozen ship_leg snapshot).
+  // Printers = the board's current seats (printerLegsFromBoard, 8 Oct 2026; the Contract Counter from
+  // 2026-09-14, the frozen ship_leg snapshot before that).
   const printers = legs.map((l) => {
     const vk = l.brand + "|" + l.ship_short;
     const f = flagsByKey[vk];

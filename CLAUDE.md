@@ -143,8 +143,14 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
 - **An edit lands on its contract's row** (`contractEditSlot`): the row filed under the on_key, else the
   requested slot when free or unkeyed, else the next free slot — a Counter contract's edit is never re-keyed.
   The Edit modal sends `on_key` (the seat's embark) and shows the file's row and where the sign-off comes from.
-- Not touched by this: the relief board's printer legs, the backup CSV and the roster export still read the
-  Counter (`fetchCurrentCounterLegs`, `roster_export.js`) — open item, not a seat.
+- **The relief board's printer is the board's seat** (Miguel, 8 Oct 2026, Anthem: "dont have the option to create
+  earmark"): `reliefBoardData` reads `boardLegsFromDb` (current legs, Rita's relief cards out, newest sign-on first,
+  `printerLegsFromBoard`) instead of the Counter alone. Caag (Anthem, embarked 7 Sep per the file, absent from the
+  Counter) had no printer, so the board drew no "Add earmark" slot: 21 hulls on 8 Oct data (25 → 46 with a slot, none
+  lost). Recorded sign-offs and the held rule are applied once, in the board schedule. A ship whose last earmark has
+  joined keeps an "Add earmark" slot for the NEXT one (`data-aid="new"`, the relief panel opens a new reliever who
+  relieves the one aboard). Pinned by `test/relief_printers.test.js`. Still on the Counter: the backup CSV and the
+  roster export (`fetchCurrentCounterLegs`, `roster_export.js`) — open item.
 
 **THE EARMARK LOOP** (Miguel, 7 Oct 2026, same day, `src/earmark.js`, pinned by `test/earmark.test.js`): "all the
 projections, people who are not on board but they're coming on board, we're going to call them earmarks". Rita's
@@ -370,7 +376,7 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   embark/debark** (`registry_snapshot`, `ship_leg_source.legsFromRegistry`) + the **Contract Counter** folded
   in as history (`keyman_contract3`, `src/counter_legs.js`, current only for a crew the file does not date)
   + crew aboard per the relief board (in-force `assignment` rows); it dates the seats and feeds the overdue
-  rule. (The relief printers, roster export and backup CSV still read the Counter — §10d open item.) A leg
+  rule. (The roster export and backup CSV still read the Counter — §10d open item; the relief printers read this schedule since 8 Oct 2026.) A leg
   past its PROJECTED sign-off is overdue, not gone: TDG's word, Rita's date or a reliever ends it. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant. The same schedule feeds the
   Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue (`apiScoreQueue`).
