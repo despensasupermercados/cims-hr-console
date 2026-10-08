@@ -236,9 +236,15 @@ crew. **Inactive** = has sailed with us, no ship, NOT part of the rotation until
   pool cards (as it hid Retired) but NEVER an earmark for its status (`pfilt`): a plan on an Inactive crew is Rita's
   to settle. On 8 Oct 2026 data: the 30 tagged crew moved Retired → Inactive, nothing else changed (104 crew compared).
   `OFF_FLEET` keeps "Retired" only so an old stored value still reads off the fleet.
-- Still read by `normalizeStatus` as before, and OPEN for Miguel: TDG's "Reserved Crew" reads On Vacation (3 crew), "Not
-  for Rehire" reads Inactive (1 crew, reversible by his own definition of Inactive). Proposed, not ordered: show both
-  as their own words.
+- **Reserved and Not for Rehire are their own words** (Miguel, 8 Oct 2026: "yes"). `normalizeStatus` returns
+  "Reserved" (TDG's "Reserved Crew") and "Not for Rehire". Reserved reads like On Vacation everywhere (`ASHORE` /
+  `isAshore`: the unassigned pool, deployable on the doc radar, ashore for the earmark and registry verdicts, a dated
+  row is the last contract ended by TDG); Not for Rehire reads like Inactive (`OFF_FLEET` / `isOffFleet`: hidden
+  from the board and the pool, out of compliance, data gaps and GSM reviews) and, being TDG's word, beats Rita's older
+  manual Inactive tag (Sison). `fileStatusOf` reads the file's RAW word first, so a snapshot kept before 8 Oct shows
+  the right word without a re-upload. Facets, tiles (shown when the count is above 0), colours, the Edit modal's
+  status list and Maria carry both. On 8 Oct data: De Leon (DG3 shoreside) → Reserved, Sison → Not for Rehire,
+  nothing else changed.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
@@ -329,7 +335,7 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   apiCrew, apiDashboard, apiCompliance, rotationSections, the feedback board, the data page and the doc radar:
   0. (6 Oct 2026) the KEPT file (`registry_snapshot`, via the shared join as `tdg_status` / `tdg_raw`) saying On
   board or Earmarked wins over everything below — Valdesco, tagged Retired, On board Brilliance per TDG. TDG's
-  "Reserved Crew" reads On Vacation (the vessel beside it is the last ship), "Not for Rehire" Inactive. The join
+  "Reserved Crew" reads Reserved (the vessel beside it is the last ship), "Not for Rehire" Not for Rehire (§10f). The join
   aliases the snapshot's columns in a subquery: a plain join made every reader's `SELECT agency_id, status`
   ambiguous (pinned on real SQLite by `test/tdg_join_sql.test.js`);
   1. the manual `retired` flag; 2. a manual `crew_override.status` (listed on the board where it disagrees with

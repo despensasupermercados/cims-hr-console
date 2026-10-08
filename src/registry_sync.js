@@ -67,7 +67,7 @@ export function reconcileProjections({ projections, registry, today, shipOf } = 
       verdict = sameShip ? (aboardByCard ? "confirmed" : "pending") : fileShip ? (seen ? "elsewhere" : "pending") : "pending";
     } else if (status === "Earmarked") {
       verdict = sameShip ? "earmarked" : fileShip ? (seen ? "ashore" : aboardByCard ? "pending" : "elsewhere") : (seen ? "ashore" : "pending");
-    } else if (status === "On Vacation" || status === "Inactive") {
+    } else if (status === "On Vacation" || status === "Inactive" || status === "Reserved" || status === "Not for Rehire") {
       verdict = seen ? "ashore" : "pending";
     } else {
       verdict = "pending";                               // status the file left blank or unreadable

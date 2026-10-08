@@ -16,7 +16,7 @@
 // gap impossible to miss, so it reaches the next import instead of sitting unseen.
 
 /** Statuses that mean the crew is off the fleet, so a missing field is not an action item. */
-const OFF_FLEET = new Set(["Retired", "Inactive"]);
+const OFF_FLEET = new Set(["Retired", "Inactive", "Not for Rehire"]);
 
 const has = (v) => v != null && String(v).trim() !== "";
 

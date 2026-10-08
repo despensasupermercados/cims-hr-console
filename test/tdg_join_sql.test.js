@@ -32,12 +32,17 @@ test("every crew read that joins the TDG file runs on real SQLite (no ambiguous 
   }
 });
 
-test("the kept file's word reaches crewStatus: active beats a Retired tag; Reserved Crew reads On Vacation", () => {
+test("the kept file's word reaches crewStatus: active beats a Retired tag; Reserved Crew reads Reserved (8 Oct 2026)", () => {
   const rows = db().prepare("SELECT agency_id, status, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0 ORDER BY agency_id").all();
   const by = Object.fromEntries(rows.map((r) => [r.agency_id, r]));
   assert.equal(by["SC-1"].tdg_ship, "MV BRILLIANCE OF THE SEAS");
   assert.equal(crewStatus(by["SC-1"], { retired: 1 }, [], "2026-10-06"), "On board", "TDG has him aboard: the tag is overridden");
-  assert.equal(crewStatus(by["SC-2"], {}, [], "2026-10-06"), "On Vacation", "TDG's 'Reserved Crew' is the reserve pool");
+  assert.equal(crewStatus(by["SC-2"], {}, [], "2026-10-06"), "Reserved", "TDG's 'Reserved Crew' is its own word since 8 Oct 2026 (it read On Vacation)");
+  // A snapshot kept before 8 Oct stored the normalized word; the raw word still says which it is.
+  assert.equal(crewStatus({ status: "On Vacation", tdg_status: "On Vacation", tdg_raw: "Reserved Crew" }, {}, [], "2026-10-08"), "Reserved");
+  assert.equal(crewStatus({ status: "Inactive", tdg_status: "Inactive", tdg_raw: "Not for Rehire" }, {}, [], "2026-10-08"), "Not for Rehire");
+  assert.equal(crewStatus({ status: "Inactive", tdg_status: "Inactive", tdg_raw: "Not for Rehire" }, { retired: 1, status: "Inactive" }, [], "2026-10-08"), "Not for Rehire", "TDG's Not for Rehire beats Rita's older Inactive tag (Sison)");
+  assert.equal(crewStatus({ status: "Inactive", tdg_status: "Inactive", tdg_raw: "Not for Rehire", tdg_absent: 1 }, {}, [], "2026-10-08"), "Not in TDG file", "a crew the latest file dropped is not read off an old row");
   assert.equal(crewStatus({ status: "Inactive" }, { retired: 1 }, [], "2026-10-06"), "Inactive", "no kept word: the tag stands (Inactive since 8 Oct 2026)");
   assert.equal(crewStatus({ status: "On board", tdg_status: "On Vacation" }, { status: "On board" }, [], "2026-10-06"), "On board", "an inactive file word does not beat a status edit");
 });

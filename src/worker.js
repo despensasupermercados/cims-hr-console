@@ -26,7 +26,7 @@ import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts, completedSince } from "./contract_count.js";
-import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL } from "./crew_status.js";
+import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
@@ -1384,7 +1384,7 @@ async function apiDashboard(env) {
     statusBy[c.agency_id] = s;
     statusMap[s] = (statusMap[s] || 0) + 1;
     // Donut counts the same ACTIVE set as the tiles (exclude Inactive), by client/brand.
-    if (s !== "Inactive") byClient[clientOf(c.tdg_vessel || (ov && ov.vessel_observed) || c.vessel_observed)] += 1; // the kept file's hull first, as on the Crew tab
+    if (!isOffFleet(s)) byClient[clientOf(c.tdg_vessel || (ov && ov.vessel_observed) || c.vessel_observed)] += 1; // the kept file's hull first, as on the Crew tab
   }
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
@@ -1416,6 +1416,8 @@ async function apiDashboard(env) {
       on_vacation: statusMap["On Vacation"] || 0,
       earmarked: statusMap["Earmarked"] || 0,
       inactive: statusMap["Inactive"] || 0,
+      reserved: statusMap["Reserved"] || 0,             // TDG "Reserved Crew": like On Vacation, may or may not return (8 Oct 2026)
+      not_for_rehire: statusMap["Not for Rehire"] || 0,
       not_in_file: statusMap[NOT_IN_FILE] || 0,   // dropped from the latest TDG file (5 Oct 2026)
       vessels, byClient
     },
@@ -1697,7 +1699,7 @@ async function apiCompliance(env, url) {
   for (const c of rows) {
     const ov = ovm[c.agency_id];
     const st = crewStatus(c, ov, sched[c.agency_id], today);
-    if (st === "Retired" || st === "Inactive") continue;
+    if (isOffFleet(st)) continue;
     const merged = applyOverride(c, ov); merged.status = st;
     active.push(merged);
   }
@@ -2032,7 +2034,7 @@ async function rotationSections(env) {
       if (a.key === seatKey) continue;
       drawSeat(c, base, a.hull, a.key, {}, { on: a.on, off: a.off, embark: a.embark, disembark: a.disembark }, { state: "yellow", asgId: a.asgId || cardAsg[sc + "|" + a.key] || null, confirmed: false, file: w });
     }
-    if (!seatKey && !cards.length && c.status !== "Inactive" && !plannedScs.has(sc) && !earmarkSc.has(sc)) pool.push(base);
+    if (!seatKey && !cards.length && !isOffFleet(c.status) && !plannedScs.has(sc) && !earmarkSc.has(sc)) pool.push(base);
   }
   const histByShip = {}, histDisp = {};
   for (const h of HIST) { if (!h.ours) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); histDisp[k] = cs; (histByShip[k] = histByShip[k] || []).push(h); }
@@ -2216,7 +2218,7 @@ async function rotationSections(env) {
     return boardIssues({ crew, file: fileOf, cards, completed: completedBy, sections: secs, fileKept, confirmedSc });
   })();
   const counts = {};
-  ["On board", "On Vacation", "Earmarked", "Inactive", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
+  ["On board", "On Vacation", "Reserved", "Earmarked", "Inactive", "Not for Rehire", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length; counts.issues = issues.length;
   return { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
 }
@@ -3210,7 +3212,7 @@ async function processIntelInbox(env, limit) {
 async function apiFeedbackBoard(env, state) {
   // Same state, same status rule and same schedule as the scoring queue (loadFeedbackState).
   const { today, crewRows, fbRoles, statusOf, legNow, shipOf } = state || await loadFeedbackState(env);
-  const DUE = { "On Vacation": 0, "On board": 1 }; // On Vacation first (feedback due now)
+  const DUE = { "On Vacation": 0, "Reserved": 0, "On board": 1 }; // ashore first (feedback due now); Reserved is ashore too
   const rows = [];
   for (const c of crewRows) {
     const status = statusOf(c);
@@ -4048,7 +4050,7 @@ document.addEventListener('click',function(e){
   });
   rows.forEach(function(r){tb.appendChild(r);});
 });
-function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6'}[st]||'#9aa7b6';}
+function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Reserved':'#C9A46A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6','Not for Rehire':'#9B4D4D'}[st]||'#9aa7b6';}
 function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
 // TAB SWITCHES (16 Sep 2026). Miguel: "when I change tabs still slower". Every tab refetched from
@@ -5683,9 +5685,11 @@ function drawRotation(){
   // untouched, so the monthly billing export still counts every day a crew actually worked. Their
   // past contracts are re-added to the ship's history list below so nothing disappears from view.
   var pfilt=function(arr){return (arr||[]).filter(function(x){return (!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
-  var sfilt=function(arr){return pfilt(arr).filter(function(x){return x.status!=='Inactive'&&x.status!=='Retired';});};
+  var sfilt=function(arr){return pfilt(arr).filter(function(x){return x.status!=='Inactive'&&x.status!=='Retired'&&x.status!=='Not for Rehire';});};
   var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
+    +(c['Reserved']?rfTile(c['Reserved'],'Reserved','amber','Reserved'):'')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')
+    +(c['Not for Rehire']?rfTile(c['Not for Rehire'],'Not for Rehire','gray','Not for Rehire'):'')
     +(c['Not in TDG file']?rfTile(c['Not in TDG file'],'Not in TDG file','red','Not in TDG file'):'')
     +rfTile(c.vessels,'Vessels — show all','','')+'</div>';
   // WHAT IS WRONG (Miguel, 5 Oct 2026: "display what is in the TDG file, and ... what is wrong"). Every
@@ -5711,7 +5715,7 @@ function drawRotation(){
     // Move an Inactive crew's leg into the ship's history (same shape the server uses for past crew),
     // so the tag hides the card but keeps the service record visible under the ship.
     var hist=(s.history||[]).slice();
-    (s.crew||[]).forEach(function(x){if((x.status==='Inactive'||x.status==='Retired')&&x.signOn&&x.signOff&&x.signOn!==x.signOff)hist.push({name:x.name,sc:x.agency_id,ours:true,on:x.signOn,off:x.signOff});});
+    (s.crew||[]).forEach(function(x){if((x.status==='Inactive'||x.status==='Retired'||x.status==='Not for Rehire')&&x.signOn&&x.signOff&&x.signOn!==x.signOff)hist.push({name:x.name,sc:x.agency_id,ours:true,on:x.signOn,off:x.signOff});});
     hist.sort(function(a,b){return (a.off||'')<(b.off||'')?1:-1;});
     // Carry EVERY field the ship renderer reads. Until 15 Sep 2026 this rebuilt the section with
     // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
@@ -6061,6 +6065,7 @@ async function renderDashboard(){
   var d;try{d=await cachedJson('/api/dashboard',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
   DASH=d;var w=d.workforce,c=d.compliance,bd=d.birthdays||[],bz=d.bonus||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'}];
+  if(w.reserved)statusSegs.push({label:'Reserved',value:w.reserved,color:'#C9A46A'});
   if(w.not_in_file)statusSegs.push({label:'Not in TDG file',value:w.not_in_file,color:'#B0342F'});
   var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'},{label:'Unassigned',value:bc['Unassigned']||0,color:'#9AA7B6'}].filter(function(s){return s.label!=='Unassigned'||s.value>0;});
   var compBars=[{label:'Medical',value:c.med_exp_90,color:'#BC3B2C'},{label:'Seaman bk',value:c.sirb_exp_90,color:'#B0741A'},{label:'Passport',value:c.pp_exp_90,color:'#B0741A'},{label:'US visa',value:c.usv_exp_90,color:'#B0741A'},{label:'Schengen',value:c.sch_exp_90,color:'#7A5AA8'}];
@@ -6133,7 +6138,7 @@ function crewMatchesComp(c){
   var f=CF.comp;
   // "All documents valid" is the green tag on the card: no problem on any document, whoever they are.
   if(f==='valid')return !crewDocProblem(c);
-  if(c.status==='Inactive'||c.status==='Retired')return false;
+  if(c.status==='Inactive'||c.status==='Retired'||c.status==='Not for Rehire')return false;
   if(f==='expired')return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){var g=docFlag(c[k]);return g==='expired'||g==='missing';});
   if(f==='soon')return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){return docFlag(c[k])==='90d';});
   if(f==='schengen'){if(!c.sch_exp)return false;var g=docFlag(c.sch_exp);return g==='expired'||g==='90d';}
@@ -6239,7 +6244,7 @@ function crewDocProblem(c){
   return worst;
 }
 // The rail's counts are the whole roster's (what the nine tiles used to show), never the filtered list's.
-var CRST={'On board':['#EAF5E4','#3C7A2A','#3C7A2A'],'On Vacation':['#FBF2E0','#8A5A14','#B0741A'],'Earmarked':['#E6EFFB','#1E5FB0','#1E5FB0'],'Inactive':['#E5E7EB','#374151','#374151']};
+var CRST={'On board':['#EAF5E4','#3C7A2A','#3C7A2A'],'On Vacation':['#FBF2E0','#8A5A14','#B0741A'],'Earmarked':['#E6EFFB','#1E5FB0','#1E5FB0'],'Inactive':['#E5E7EB','#374151','#374151'],'Reserved':['#F6EFE3','#7A5A2A','#C9A46A'],'Not for Rehire':['#F5E9E9','#7F1D1D','#9B4D4D']};
 function crStyle(st){return CRST[st]||['#EEF1F5','#4B5563','#6B7280'];}
 function shipKey(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'').replace(/^mv/,'').replace(/oftheseas$/,'');}
 function shipShort(v){var t=String(v==null?'':v).trim().replace(/^MV\\s+/i,'').replace(/\\s+OF THE SEAS$/i,'');return t===t.toUpperCase()?t.toLowerCase().replace(/\\b[a-z]/g,function(ch){return ch.toUpperCase();}):t;}
@@ -6256,13 +6261,13 @@ function shipGroupRows(ships,names,client,picked,f){
 }
 function crewFacets(){
   var n=function(st){return CREW.filter(function(c){return c.status===st;}).length;};
-  var act=CREW.filter(function(c){return c.status!=='Inactive'&&c.status!=='Retired';});
+  var act=CREW.filter(function(c){return c.status!=='Inactive'&&c.status!=='Retired'&&c.status!=='Not for Rehire';});
   var exp=act.filter(function(c){return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){var g=docFlag(c[k]);return g==='expired'||g==='missing';});}).length;
   var soon=act.filter(function(c){return ['med_exp','sirb_exp','pp_exp','usv_exp'].some(function(k){return docFlag(c[k])==='90d';});}).length;
   var sch=act.filter(function(c){return c.sch_exp&&['expired','90d'].indexOf(docFlag(c.sch_exp))>=0;}).length;
   var valid=CREW.filter(function(c){return !crewDocProblem(c);}).length;
   var f=facetRow;
-  var fixed=['On board','On Vacation','Earmarked','Inactive'];
+  var fixed=['On board','On Vacation','Reserved','Earmarked','Inactive','Not for Rehire'];
   var h='<div class=crlbl style="padding:0 8px 6px">Status</div>';
   h+=f('st','','All crew',CREW.length,!CF.status.length);
   fixed.forEach(function(st){h+=f('st',st,st==='On Vacation'?'On vacation':st,n(st),CF.status.indexOf(st)>=0,crStyle(st)[2]);});
@@ -6564,7 +6569,7 @@ var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brillianc
 function shipOptions(sel){return '<option value="">—</option>'+SHIP_LIST.map(function(s){var full='MV '+s.toUpperCase();var m=(sel&&(sel===full||sel===s||sel.toUpperCase().indexOf(s.toUpperCase())>=0));return '<option value="'+full+'"'+(m?' selected':'')+'>'+s+'</option>';}).join('');}
 // "" = Auto (let the app derive status from the schedule). A named pick becomes a manual override that
 // wins (e.g. Rita pulling an auto-retired crew back to Earmarked).
-function statusOptions(sel){var auto='<option value=""'+(!sel?' selected':'')+'>Auto (from schedule)</option>';return auto+['On board','On Vacation','Earmarked','Inactive'].map(function(s){return '<option'+(s===sel?' selected':'')+'>'+s+'</option>';}).join('');}
+function statusOptions(sel){var auto='<option value=""'+(!sel?' selected':'')+'>Auto (from schedule)</option>';return auto+['On board','On Vacation','Reserved','Earmarked','Inactive','Not for Rehire'].map(function(s){return '<option'+(s===sel?' selected':'')+'>'+s+'</option>';}).join('');}
 function crewById(id){return CREW.filter(function(c){return c.agency_id===id;})[0];}
 // One non-blocking line at the bottom of the screen; gone after five seconds.
 function uiToast(msg){var t=document.createElement('div');t.className='uitoast';t.textContent=msg;t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);max-width:92vw;background:var(--navy);color:#fff;padding:10px 16px;border-radius:10px;font-size:13px;z-index:99999;box-shadow:0 6px 20px rgba(0,0,0,.25)';document.body.appendChild(t);setTimeout(function(){t.remove();},5000);}

@@ -140,7 +140,7 @@ test("scheduleBySc and crewStatus live in ONE module, not copied per caller", ()
   assert.match(MOD, /export function scheduleBySc/);
   assert.match(MOD, /export function crewStatus/);
   // worker.js must import them rather than redeclare them (§3: deployed code equals tested code).
-  assert.match(SRC, /import \{ scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL \} from "\.\/crew_status\.js"/);
+  assert.match(SRC, /import \{ scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet \} from "\.\/crew_status\.js"/);
   assert.doesNotMatch(SRC, /^function (scheduleBySc|crewStatus)\(/m,
     "a second local copy is how two views start disagreeing");
 });
@@ -194,4 +194,19 @@ test("every crew read that feeds crewStatus carries the not-in-TDG-file column, 
   }
   const DR = readFileSync(new URL("../src/doc_radar.js", import.meta.url), "utf8");
   assert.match(DR, /TDG_ABSENT_COL \+ " " \+\s*"FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=0"/, "the doc radar too");
+});
+
+// Miguel, 8 Oct 2026 ("yes"): TDG's Reserved Crew and Not for Rehire are words of their own. Reserved is ashore like
+// On Vacation (in the pool, documents tracked); Not for Rehire is off the fleet like Inactive (hidden from the board,
+// out of the compliance and review lists).
+test("Reserved and Not for Rehire: their own words, read like On Vacation and Inactive", async () => {
+  const { normalizeStatus } = await import("../src/crewimport.js");
+  const { isOffFleet, isAshore } = await import("../src/crew_status.js");
+  assert.equal(normalizeStatus("Reserved Crew"), "Reserved");
+  assert.equal(normalizeStatus("Not for Rehire"), "Not for Rehire");
+  assert.equal(normalizeStatus("On Vacation"), "On Vacation");
+  assert.equal(isOffFleet("Not for Rehire"), true); assert.equal(isOffFleet("Reserved"), false);
+  assert.equal(isAshore("Reserved"), true); assert.equal(isAshore("On Vacation"), true); assert.equal(isAshore("Inactive"), false);
+  assert.match(SRC, /if \(!seatKey && !cards\.length && !isOffFleet\(c\.status\) && /, "the unassigned pool keeps Reserved, drops Not for Rehire");
+  assert.match(SRC, /var fixed=\['On board','On Vacation','Reserved','Earmarked','Inactive','Not for Rehire'\];/, "the Crew tab facets");
 });

@@ -384,7 +384,7 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today } 
     if (!ship || !on) continue;
     const base = { ship, name: r.crew_name || null, sc: r.sc, ours: true, on, brand: brandOf[key] || (isAz(key) ? "Azamara" : null), crew_id: r.crew_id || null, source: "registry", fileAt: dayOf(r.run_at) };
     if (status === "On board") current.push({ ...base, key, tdgOff: off && off >= on ? off : null });
-    else if ((status === "On Vacation" || status === "Inactive") && off && off >= on) ended.push({ ...base, off, is_current: false, offSource: "tdg", offAt: dayOf(r.run_at) });
+    else if ((status === "On Vacation" || status === "Inactive" || status === "Reserved" || status === "Not for Rehire") && off && off >= on) ended.push({ ...base, off, is_current: false, offSource: "tdg", offAt: dayOf(r.run_at) });
   }
   const out = [];
   for (const L of current) {
