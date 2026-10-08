@@ -51,7 +51,6 @@ import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
-import { installTgUpdate } from "./tg_update.js";
 import { apiRosterExport } from './roster_export.js';
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
@@ -59,7 +58,6 @@ const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256
 // markDeployed: the card STAYS on the ship once sent (Miguel, 5 Oct 2026) — stamped, not removed.
 const markDeployed = async (env, id, logId, at) => { const r = await env.DB.prepare("UPDATE assignment SET deployed_at=?, deploy_log_id=?, updated_at=? WHERE id=? AND actual_sign_off IS NULL").bind(at, logId, at, id).run(); return { ok: !r || !r.meta || r.meta.changes == null || r.meta.changes > 0 }; };
 const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, markDeployed, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
-const _tgUpdate = installTgUpdate({ json, htmlResponse, logActivity, sendViaMailer, shipOf: (v) => canonShipWith(v, SHIP_KEYS), brandFor: clientOf });
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
 // crew cards. Same install pattern as auto-send. NO money code here -- the
@@ -220,11 +218,8 @@ export default {
         if (p === "/api/rotation")   return apiRotation(env);
         if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc, dismissed: dismissedEarmarks, markTold: (env, id) => markDeployed(env, id, null, new Date().toISOString()) }); if (ci) return ci; }
-        // "Update TG" — the return leg of the AdvancedQuery loop. Reads what changed in CIMS since
-        // the last send and mails Joy a per-ship digest; CIMS never writes to AdvancedQuery, a
-        // human does. Inside the boundary and behind the session gate (§11). Inert until
-        // TG_NOTIFY is set: /api/tg/send refuses rather than guessing a recipient.
-        if (session) { const tg = await _tgUpdate(p, request, env, url, session); if (tg) return tg; }
+        // "Update TG" (17 Aug 2026 per-ship digest to Joy) was removed on 8 Oct 2026 (Miguel: "remove it"): it never sent
+        // (TG_NOTIFY unset), and the import review now tells Joy row by row (§10d). The tg_update_run table is left as is.
         // Deploy: the CTA on a projection. Sends Joy the seafarer, takes the card off the board and
         // logs it so it can be put back. Inside the boundary and behind the session gate (§11).
         if (session) { const kd = await _kmDeploy(p, request, env, url, session); if (kd) return kd; }
@@ -5085,7 +5080,7 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let ROT_CHROME=0,TG_LAST=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRANDS=[],ROT_SHIPS=[],ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
+let ROT_CHROME=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRANDS=[],ROT_SHIPS=[],ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
 function dragStart(el,id){dragMoved=true;DRAGID=id;DRAGEL=el;setTimeout(function(){el.classList.add('dragging');},0);}
 function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('.shipdrop.dragover').forEach(function(z){z.classList.remove('dragover');});}
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
@@ -5604,7 +5599,6 @@ async function renderRotation(){
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button>'
     +'<button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
-    +'<button class="btn ghost" id=tgBtn onclick="tgUpdateClick()" title="Email TG a per-ship digest of everything changed here since the last send. AdvancedQuery stays the source of truth — a human updates it.">Update TG<span id=tgBadge style="display:none;margin-left:6px;background:var(--navy);color:#fff;border-radius:9px;padding:1px 6px;font-size:11px"></span></button>'
     +'<button class="btn" onclick="exportDaysExcel()" title="Days worked this month, per crew — a reference view, not an invoice">Bill this month (Excel)</button>'
     +'<div id=rotside></div>'
     +'</aside></div>';
@@ -5612,47 +5606,8 @@ async function renderRotation(){
   // PAGE CHROME, NOT BOARD DATA (16 Sep 2026, Starlink). Every render fired five requests: the board,
   // the relief board, and these three. A render happens after EVERY save and EVERY drag, so a card move
   // cost three extra satellite round trips for things a card move cannot change — the two toggles only
-  // move when the user clicks them, and each click already updates its own state. The TG badge does
-  // change on a save, but it is informational, so it refreshes at most every 30 seconds.
+  // move when the user clicks them, and each click already updates its own state.
   if(!ROT_CHROME){ROT_CHROME=1;loadAutoToggle();loadSbmToggle();}
-  if(Date.now()-TG_LAST>30000){TG_LAST=Date.now();tgLoadPending();}
-}
-// "Update TG" — the return leg of the AdvancedQuery loop. The badge is how many changes are
-// waiting; the click always opens the rendered email first, because sign-off is on the email and
-// never on a description (cims-email-standard §5). Nothing is sent until that tab is open and the
-// confirm is accepted.
-async function tgLoadPending(){
-  var b=$('#tgBtn'); if(!b)return;
-  try{
-    var j=await (await fetch('/api/tg/pending',{cache:'no-store'})).json();
-    window.TG_PENDING=j||null;
-    var n=(j&&j.counts&&j.counts.items)||0, bd=$('#tgBadge');
-    if(bd){ bd.textContent=n; bd.style.display=n?'inline-block':'none'; }
-    b.title=!j||!j.ok ? 'Update TG — could not read pending changes'
-      : !n ? 'Nothing has changed since the last update to TG'
-      : (j.recipient?('Email TG '+n+' change'+(n===1?'':'s')+' across '+((j.counts&&j.counts.ships)||0)+' ship(s)')
-                    :(n+' change'+(n===1?'':'s')+' waiting — no TG recipient configured yet'));
-  }catch(e){}
-}
-async function tgUpdateClick(){
-  await tgLoadPending();
-  var j=window.TG_PENDING;
-  if(!j||!j.ok){ alert('Could not read what has changed since the last update.'); return; }
-  var n=(j.counts&&j.counts.items)||0;
-  if(!n){ alert('Nothing has changed since the last update to TG.'); return; }
-  if(!j.recipient){ alert(n+' change'+(n===1?'':'s')+' are waiting, but no TG recipient is configured yet.\\n\\nSet TG_NOTIFY on the Worker and this button will send to that address.'); return; }
-  window.open('/api/tg/preview','_blank');
-  if(!confirm('Send this digest to '+j.recipient+'?\\n\\n'+n+' change'+(n===1?'':'s')+' across '+((j.counts&&j.counts.ships)||0)+' ship(s).\\n\\nThe preview has opened in a new tab — read it before you confirm.')) return;
-  var b=$('#tgBtn'); if(b){b.disabled=true;}
-  try{
-    var r=await fetch('/api/tg/send',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    var out=await r.json();
-    if(out&&out.sent) alert('Sent to '+out.to+'.');
-    else if(out&&out.empty) alert('Nothing has changed since the last update to TG.');
-    else alert('Not sent: '+((out&&out.error)||'unknown error')+'\\n\\nNothing was recorded, so these changes stay in the next digest.');
-  }catch(e){ alert('Not sent: network error. Nothing was recorded.'); }
-  if(b){b.disabled=false;}
-  tgLoadPending();
 }
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
 var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
@@ -5748,7 +5703,7 @@ function drawRotation(){
   });
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   // 8 Oct 2026 (Miguel: "remove this"): no "Ships (48)" label above the hulls; the side rail's tile already counts vessels.
-  h+='<div style="margin-top:14px"></div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
+  h+=(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
   var _sd=document.getElementById('rotside');if(_sd)_sd.innerHTML=side;else document.getElementById('rotbody').insertAdjacentHTML('afterbegin',side);
   rotRail(secs.length,allSecs);

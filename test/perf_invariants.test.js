@@ -241,8 +241,8 @@ test("a save refreshes the board, not the page chrome around it", () => {
   const fn = body("async function renderRotation(");
   assert.match(fn, /if\(!ROT_CHROME\)\{ROT_CHROME=1;loadAutoToggle\(\);loadSbmToggle\(\);\}/,
     "the two toggles cannot change because a card moved; they used to be re-fetched on every render");
-  assert.match(fn, /if\(Date\.now\(\)-TG_LAST>30000\)\{TG_LAST=Date\.now\(\);tgLoadPending\(\);\}/,
-    "the TG badge is informational: at most once every 30s, not on every drag");
+  // 8 Oct 2026: the TG badge went with "Update TG" — nothing else may re-fetch page chrome on a render.
+  assert.doesNotMatch(fn, /tgLoadPending|TG_LAST|\/api\/tg\//, "Update TG is gone; no chrome request rides a render");
   // the click handlers still refresh their own state, so a toggle is never stale after the user acts
   assert.match(SRC, /async function autoToggleClick\(/);
   assert.match(SRC, /async function sbmToggleClick\(/);

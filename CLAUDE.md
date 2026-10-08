@@ -195,6 +195,10 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   well done earlier ... this progress bar should be more gentle". How long aboard is the status line, how long to go is the
   chip; neither is repeated under the bar. Dates on the card and the history read "Sep 22, 2027" (`fmtDateS`), the chip
   reads calendar months + days (`spanCompact`), never a bare day count. Pinned by `test/board_cards.test.js`. Mock-ups under `docs/mockups/`.
+- **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
+  sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
+  row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
+  The `tg_update_run` table stays (no schema change). `TG_NOTIFY` survives only as Deploy's fallback recipient.
 - The sources line names the FILE that dates the board first ("TDG file <date> · N crew, M with embark dates"); the
   Counter is "(history)", never warned about. Nothing here is money (§1) and nothing resolves a disagreement without
   Rita (§6).
@@ -205,9 +209,10 @@ we only have almost the same class across the board, it applies to anybody: juni
 apply the same way. For Azamara, it's exactly the same as Celebrity. Although for Azamara we will always send people,
 most likely from Royal Caribbean for the most part; if it's a new hire to Azamara, it's because he comes with experience."
 So: the "Junior PS on a block ship" warning (`jrWarn`, `vessel.jr_ps_rule`) is read for Royal Caribbean hulls ONLY
-(`rotationSections`: a non-Royal brand is "open" whatever the row says). Royal: Oasis + Icon class `block`, Quantum class
-`conditional` (unchanged, not raised by him). The vessel rows for Celebrity (Edge/Solstice `block`, Millennium
-`conditional`) are historical and ignored; correcting them is a data change for Miguel to order. Also in the Brain.
+(`rotationSections`: a non-Royal brand is "open" whatever the row says). Royal: Oasis + Icon class `block`; **Quantum class
+`open`** (Miguel, 8 Oct 2026: "Quantum is ok for Jrs"). **Data cleaned the same day on his order** ("the celebrity ..
+clean them up"): every Celebrity row and the five Royal Quantum rows set to `open` in D1, so the table and the board
+agree; only the nine Royal Oasis/Icon hulls carry `block` (14 Celebrity + 5 Quantum rows changed, 19 in all). The brand gate in code stays as the guard. Also in the Brain.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
