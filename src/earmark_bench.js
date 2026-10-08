@@ -16,6 +16,15 @@
 export const BENCH_MIN_DAYS = 42;   // 6 weeks
 export const BENCH_MAX_MONTHS = 6;  // the cut-off: longer at home is somebody who chose a long vacation
 export const BENCH_TOP = 9;
+// THE BRAND RULE (Miguel, 8 Oct 2026, same day: "if we are looking within the Royal environment, you only display people
+// who have done Royal Caribbean ships. If I'm looking at a Celebrity ship, you only display people who have done
+// Celebrity ships, and the same applies for Azamara ... I don't want to have somebody from Celebrity, like Dan Belhida,
+// on an Allure"). A crew's brands are the brands of every contract the board knows (current, history, the file's last
+// hull). Azamara also takes Royal crew (§10e, 7 Oct: "for Azamara we will always send people, most likely from Royal
+// Caribbean"). A crew with NO contract on record (a brand-new hire) has no brand to match and passes — except on a
+// block hull, below.
+export const BRAND_ACCEPTS = { Royal: ["Royal"], Celebrity: ["Celebrity"], Azamara: ["Azamara", "Royal"] };
+export const shortBrand = (b) => (/royal/i.test(String(b || "")) ? "Royal" : /celebrity/i.test(String(b || "")) ? "Celebrity" : /azamara/i.test(String(b || "")) ? "Azamara" : null);
 
 const ACTIVE = new Set(["On board", "On Vacation", "Reserved"]);
 const day = (s) => (/^\d{4}-\d{2}-\d{2}/.test(String(s || "")) ? String(s).slice(0, 10) : null);
@@ -36,8 +45,11 @@ const DOCS = [["Medical", "med_exp", true], ["Seaman's Book", "sirb_exp", true],
 // legs  : the ONE schedule (boardLegs) — { sc, ship, on, off, is_current, ours }
 // snapshot : registry_snapshot rows { agency_id, vessel, debarked_at }
 // open  : open assignments { sc, sign_on } · tdgEarmarked: Set of sc · shipOf: raw hull -> canonical name
-export function benchPool({ crew, legs, snapshot, open, tdgEarmarked, today, shipOf } = {}) {
+// brandOf: ship name -> brand (the vessel table); contractsOf: sc -> completed contracts (the grade count, §10c).
+export function benchPool({ crew, legs, snapshot, open, tdgEarmarked, today, shipOf, brandOf, contractsOf } = {}) {
   const of = typeof shipOf === "function" ? shipOf : (s) => s || null;
+  const bOf = typeof brandOf === "function" ? brandOf : () => null;
+  const cOf = typeof contractsOf === "function" ? contractsOf : () => null;
   const legsBy = {};
   for (const l of (legs || [])) if (l && l.ours && l.sc) (legsBy[l.sc] = legsBy[l.sc] || []).push(l);
   const snapBy = {};
@@ -63,7 +75,12 @@ export function benchPool({ crew, legs, snapshot, open, tdgEarmarked, today, shi
       lastShip = (s && s.vessel ? of(s.vessel) || s.vessel : null) || (ended[0] ? ended[0].ship : null);
       if (!homeFrom) continue;
     }
-    out.push({ sc: c.sc, name: c.name, rank: c.rank || null, status: c.status, aboardShip, lastShip, homeFrom, docs: c.docs || {} });
+    const brands = new Set();
+    for (const l of L) { const b = shortBrand(l.brand) || shortBrand(bOf(l.ship)); if (b) brands.add(b); }
+    if (lastShip) { const b = shortBrand(bOf(lastShip)); if (b) brands.add(b); }
+    const contracts = cOf(c.sc);
+    out.push({ sc: c.sc, name: c.name, rank: c.rank || null, status: c.status, aboardShip, lastShip, homeFrom, docs: c.docs || {},
+      brands: [...brands], contracts: contracts == null ? null : Number(contracts), newHire: !L.length && (contracts == null || Number(contracts) === 0) });
   }
   return out;
 }
@@ -82,20 +99,31 @@ export function benchDocIssues(docs, signOn, signOff) {
 }
 
 // pool: benchPool · ship: the hull being planned · reliefDate / signOff: the earmark's dates (defaultProjectionDates)
-// Returns { ready: in the window, most rested first; outside: ashore crew outside it (shown faded in the panel) }.
-export function rankBench(pool, { ship, reliefDate, signOff } = {}) {
+// brand: the hull's brand (Royal / Celebrity / Azamara) · block: the hull is a Royal Oasis / Icon class hull
+// (`vessel.jr_ps_rule` = block, §10e): no Junior PS and NO NEW HIRE there (Miguel, 8 Oct 2026: "you cannot have a new
+// hire on an Oasis or Icon class, but you can have a new hire on all the rest").
+// Returns { ready: in the window, most rested first; outside: ashore crew outside it (shown faded in the panel);
+//           rules: the words the box prints so Rita knows who is NOT listed }.
+export function rankBench(pool, { ship, reliefDate, signOff, brand, block } = {}) {
   const ready = [], outside = [];
-  if (!reliefDate) return { ready, outside };
+  const b = shortBrand(brand);
+  const accepts = b ? BRAND_ACCEPTS[b] : null;
+  const rules = [];
+  if (accepts) rules.push(accepts.length > 1 ? accepts.join(" or ") + " crew" : accepts[0] + " crew only");
+  if (block) rules.push("no Junior PS, no new hire");
+  if (!reliefDate) return { ready, outside, rules };
   for (const p of (pool || [])) {
     if (p.aboardShip && key(p.aboardShip) === key(ship)) continue;      // aboard this ship: the outgoing seat, not a relief
+    if (accepts && p.brands && p.brands.length && !p.brands.some((x) => accepts.includes(x))) continue; // the brand rule
+    if (block && (p.newHire || /junior/i.test(String(p.rank || "")))) continue;                       // the Oasis / Icon rule
     const days = daysBetween(p.homeFrom, reliefDate);
     if (days == null) continue;
     const row = { sc: p.sc, name: p.name, rank: p.rank, aboardShip: p.aboardShip, lastShip: p.lastShip, homeFrom: p.homeFrom, days,
-      docs: benchDocIssues(p.docs, reliefDate, signOff) };
+      brands: p.brands || [], newHire: !!p.newHire, docs: benchDocIssues(p.docs, reliefDate, signOff) };
     if (days >= BENCH_MIN_DAYS && addMonths(p.homeFrom, BENCH_MAX_MONTHS) >= reliefDate) ready.push(row);
     else if (!p.aboardShip && days > 0) outside.push(row);
   }
   const by = (a, b) => b.days - a.days || String(a.name).localeCompare(String(b.name));
   ready.sort(by); outside.sort(by);
-  return { ready, outside };
+  return { ready, outside, rules };
 }

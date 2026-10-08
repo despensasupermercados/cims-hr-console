@@ -235,15 +235,23 @@ test("a ship with ONLY a projection still renders the card, not the empty hint",
 });
 
 test("expired documents are a warning on BOTH states, never a block", () => {
-  const docs = { worst: "expired", label: "2 EXPIRED", title: "Expired: Passport, Seaman's Book", expired: 2, missing: 0, expiring: 0 };
+  // 8 Oct 2026 (Miguel: "the tags all should be same size .. instead of 1 expiring .. name it and have it in yellow"): every
+  // document is its own chip of the ONE chip class — expired red by name, expiring amber by name with its month, the
+  // missing ones a muted count. A legacy docs object without items still draws its summary in the worst colour.
+  const docs = { worst: "expired", label: "2 EXPIRED", title: "Expired: Passport, Seaman's Book", expired: 2, missing: 0, expiring: 0,
+    items: [{ doc: "Passport", exp: "2026-01-01", required: true }, { doc: "Seaman's Book", exp: "2026-02-01", required: true }], expiringItems: [], rest: null };
   for (const card of [{ ...GREEN, docs }, { ...YELLOW, docs }]) {
     const h = ctx.rotCard(card);
-    assert.match(h, /class="rtag bad"[^>]*>2 EXPIRED</);
-    assert.match(h, /title="Expired: Passport, Seaman&quot;?.?s Book"|title="Expired: Passport, Seaman's Book"/);
+    assert.match(h, /class="rtag bad" title="Passport expired Jan 1, 2026">PASSPORT</);
+    assert.match(h, /class="rtag bad" title="Seaman's Book expired Feb 1, 2026">SEAMAN'S BOOK</);
+    assert.doesNotMatch(h, /2 EXPIRED/, "named, never counted");
   }
-  const soon = ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "Within 90 days: US C1/D Visa", expiring: 1 } });
-  assert.match(soon, /class="rtag warn"[^>]*>1 EXPIRING</);
-  assert.doesNotMatch(ctx.rotCard(GREEN), /rtag bad|rtag warn/, "a clean seafarer carries no document chip");
+  const soon = ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "Within 90 days: US C1/D Visa", expiring: 1, items: [], expiringItems: [{ doc: "US C1/D Visa", exp: "2026-12-13", days: 66, required: true }], rest: null } });
+  assert.match(soon, /class="rtag due" title="US C1\/D Visa expires Dec 13, 2026 \(in 66 days\)">US C1\/D VISA &middot; DEC 13</);
+  const miss = ctx.rotCard({ ...YELLOW, docs: { worst: "missing", label: "4 MISSING", title: "No expiry on record: Medical, Seaman's Book, Passport, US C1/D Visa", missing: 4, items: [], expiringItems: [], rest: { worst: "missing", label: "4 MISSING", title: "No expiry on record: Medical, Seaman's Book, Passport, US C1/D Visa" } } });
+  assert.match(miss, /class="rtag mis"[^>]*>4 MISSING</);
+  assert.match(ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "x", expiring: 1 } }), /class="rtag due"[^>]*>1 EXPIRING</, "legacy shape: the summary in the worst colour");
+  assert.doesNotMatch(ctx.rotCard(GREEN), /rtag bad|rtag due|rtag mis/, "a clean seafarer carries no document chip");
   // Remove is still there: a warning never blocks anything (7 Oct 2026: the Deploy button is gone from the card).
   assert.match(ctx.rotCard({ ...YELLOW, docs }), /planDelete/);
 });

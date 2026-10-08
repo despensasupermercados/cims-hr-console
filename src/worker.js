@@ -2232,12 +2232,16 @@ async function rotationSections(env) {
     for (const f of ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"]) docs[f] = (o[f] != null && o[f] !== "") ? o[f] : c[f];
     return { sc: c.agency_id, name: cmap[c.agency_id].name, rank: cmap[c.agency_id].rank, status: c.status, docs };
   });
-  const benchP = benchPool({ crew: benchCrew, legs: HIST, snapshot: (snapRes && snapRes.results) || [], open: openAsg, today, shipOf });
+  // Brand per hull (the vessel table) and the completed-contract count per crew feed the brand rule and the
+  // Oasis / Icon no-new-hire rule (Miguel, 8 Oct 2026). jrRule[k] === "block" marks the Royal Oasis / Icon hulls (§10e).
+  const benchP = benchPool({ crew: benchCrew, legs: HIST, snapshot: (snapRes && snapRes.results) || [], open: openAsg, today, shipOf,
+    brandOf: (ship) => brandFor(ship), contractsOf: (sc) => (contracts[sc] == null ? null : contracts[sc]) });
+  const benchArgs = (sec) => ({ ship: sec.ship, brand: sec.brand, block: sec.brand === "Royal" && jrRule[normShip(sec.ship)] === "block" });
   for (const sec of sections) {
     if (!sec.crew || !sec.crew.length) continue;
     const d = defaultProjectionDates({ ship: sec.ship, legs: HIST, today, brand: sec.brand, addMonths: addMonthsISO });
-    const r = rankBench(benchP, { ship: sec.ship, reliefDate: d.signOn, signOff: d.signOff });
-    sec.bench = { date: d.signOn, signOff: d.signOff, rows: r.ready.slice(0, BENCH_TOP), total: r.ready.length };
+    const r = rankBench(benchP, { ...benchArgs(sec), reliefDate: d.signOn, signOff: d.signOff });
+    sec.bench = { date: d.signOn, signOff: d.signOff, rows: r.ready.slice(0, BENCH_TOP), total: r.ready.length, rules: r.rules };
   }
   const out = { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
   Object.defineProperty(out, "benchPool", { value: benchP, enumerable: false }); // for /api/rotation/bench; never serialized
@@ -2582,8 +2586,8 @@ async function apiRotationBench(url, env) {
   const r = await rotationSections(env);
   const sec = (r.sections || []).find((x) => String(x.ship).toLowerCase() === ship.toLowerCase());
   if (!sec || !sec.bench) return json({ ok: false, error: "no_seat", ship }, 404);
-  const out = rankBench(r.benchPool || [], { ship: sec.ship, reliefDate: sec.bench.date, signOff: sec.bench.signOff });
-  return json({ ok: true, ship: sec.ship, date: sec.bench.date, signOff: sec.bench.signOff, ready: out.ready, outside: out.outside });
+  const out = rankBench(r.benchPool || [], { ship: sec.ship, brand: sec.brand, block: !!(sec.bench.rules || []).some((x) => /new hire/.test(x)), reliefDate: sec.bench.date, signOff: sec.bench.signOff });
+  return json({ ok: true, ship: sec.ship, date: sec.bench.date, signOff: sec.bench.signOff, ready: out.ready, outside: out.outside, rules: out.rules });
 }
 function apiFleet() {
   const today = TODAY();
@@ -3387,7 +3391,7 @@ body.rot-refreshing #view{opacity:.6;transition:opacity .15s}
 .srcnote{font-size:10.5px;color:var(--mut);margin-top:6px}
 .srcnote b{color:#9A6614}
 .rtag.bad{background:#FBE7E6;border-color:#f0cfcc;color:#B0342F}
-.rtag.warn{background:#FBF0DA;border-color:#eddcb6;color:#9A6410}
+.rtag.warn,.rtag.due{background:#FBF0DA;border-color:#eddcb6;color:#9A6410}.rtag.mis{background:#F1F3F7;border-color:#dfe4ec;color:#5C6B80}
 .jrnote{margin-top:6px;font-size:10.5px;color:#9A6410;background:#FBF0DA;border-radius:6px;padding:4px 8px}
 .sentrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 14px 10px;padding:8px 12px;border-radius:9px;background:#F3F6FA;border-left:3px solid var(--navy);font-size:12.5px;color:var(--body)}
 .sentrow b{color:var(--ink)}
@@ -3528,16 +3532,18 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 @media (max-width:640px){.shipbody.onerow{flex-direction:column;align-items:stretch}.shipbody.onerow>.rcard{flex:0 0 auto}}
 .ebench{background:#FFFAE8!important;border:1px solid #F3E7BF!important;border-radius:14px;padding:0!important;display:flex;flex-direction:column;overflow:hidden;box-shadow:none!important;min-width:0}
 .ebench .ebhd{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 14px 7px;font-size:12px;color:#7A6A3A}.ebench .ebhd b{color:var(--navy);font-weight:700}
-.ebench .ebmore{border:0;background:transparent;color:#8A7A4A;font:600 11.5px 'DM Sans',sans-serif;padding:4px 7px;border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;transition:background .15s,color .15s}.ebench .ebmore:hover{background:rgba(255,236,170,.7);color:var(--navy)}
-.ebench .ebrow{display:flex;align-items:center;gap:10px;border:0;border-top:1px solid #F3E9C6;background:transparent;padding:6px 14px;cursor:pointer;text-align:left;font-family:'DM Sans',sans-serif;color:var(--navy);transition:background .18s;width:100%}
+.ebench .ebmore{border:0;background:var(--navy);color:#fff;font:700 11.5px 'DM Sans',sans-serif;padding:6px 12px 6px 10px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;box-shadow:0 2px 8px -3px rgba(16,38,64,.45);transition:background .15s,transform .15s,box-shadow .15s}.ebench .ebmore:hover{background:#1E5FB4;transform:translateY(-1px);box-shadow:0 6px 14px -6px rgba(16,38,64,.55)}.ebench .ebmore:active{transform:none}
+.ebench .ebrules{color:#8A7A4A}
+.ebench .ebrow{position:relative;display:flex;align-items:center;gap:10px;border:0;border-top:1px solid #F3E9C6;background:transparent;padding:5px 14px;cursor:pointer;text-align:left;font-family:'DM Sans',sans-serif;color:var(--navy);transition:background .18s;width:100%}.ebench .ebsubs{display:none}
 .ebench .ebrow:hover{background:rgba(255,236,170,.55)}.ebench .ebrow:active{background:rgba(255,226,140,.6)}.ebench .ebrow:focus-visible{outline:2px solid #C9A227;outline-offset:-2px}.ebench .ebrow.busy{opacity:.55;cursor:progress}
 .ebench .ebw{flex:1 1 0;min-width:0}.ebench .ebn{display:flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ebench .ebs{display:block;font-size:10.5px;color:#8A7F63;margin-top:1px;padding-left:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ebench .ebs em{font-style:normal;color:#B4483C}
 .ebdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#A9CC92;flex:none}.ebdot.ab{background:#9DB4D0}
 .ebench .ebt{flex:0 0 78px;text-align:right;font-size:11px;font-weight:600;color:#4E6B3A}.ebench .ebt i{display:block;height:3px;border-radius:2px;background:#F1E6C4;margin-top:4px;overflow:hidden}.ebench .ebt i b{display:block;height:100%;background:#A9CC92;border-radius:2px}
-.ebench .ebgo{flex:none;font-size:10.5px;font-weight:700;color:#fff;background:var(--navy);border-radius:11px;padding:3px 9px;opacity:0;transform:translateX(-4px);transition:opacity .18s,transform .18s}.ebench .ebrow:hover .ebgo,.ebench .ebrow:focus-visible .ebgo{opacity:1;transform:none}
+.ebench .ebgo{position:absolute;right:12px;top:50%;font-size:10.5px;font-weight:700;color:#fff;background:var(--navy);border-radius:11px;padding:4px 10px;opacity:0;transform:translate(6px,-50%);transition:opacity .18s,transform .18s;pointer-events:none}.ebench .ebrow:hover .ebgo,.ebench .ebrow:focus-visible .ebgo{opacity:1;transform:translate(0,-50%)}.ebench .ebrow:hover .ebt,.ebench .ebrow:focus-visible .ebt{opacity:0}.ebench .ebt{transition:opacity .15s}
+@container (max-width:360px){.ebench .ebhd{padding:10px 12px 6px}.ebench .ebsub{display:none}.ebench .ebsubs{display:inline}.ebench .ebrow{padding:5px 12px;gap:8px;align-items:flex-start}.ebench .ebn{white-space:normal;font-size:12px;line-height:1.25}.ebench .ebs{white-space:normal;font-size:10px}.ebench .ebt{flex-basis:58px;font-size:10.5px;padding-top:1px}.ebench .ebgo{display:none}.ebench .ebrow:hover .ebt{opacity:1}.ebench .ebft{padding:7px 12px 9px}}
 .ebench .ebft{margin-top:auto;border-top:1px solid #F3E9C6;padding:7px 14px 9px;font-size:10.5px;color:#A8996C;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.ebench .eblg{display:flex;align-items:center;gap:4px}.ebench .eblg .ebdot.ab{margin-left:6px}
-@media (max-width:640px){.ebench .ebt{flex-basis:64px}.ebench .ebgo{display:none}.ebench .ebn{white-space:normal}.ebench .ebs{white-space:normal}.ebench .ebrow{align-items:flex-start}.ebench .ebt{padding-top:2px}}
+@media (max-width:640px){.ebench .ebgo{display:none}.ebench .ebrow:hover .ebt{opacity:1}}
 .ebtoast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:12px;padding:11px 14px 11px 16px;display:flex;align-items:center;gap:14px;font-size:13px;box-shadow:0 12px 30px -12px rgba(16,38,64,.55);z-index:99998;animation:ebin .25s ease-out;transition:opacity .35s,transform .35s;max-width:calc(100vw - 32px)}
 .ebtoast.out{opacity:0;transform:translateX(-50%) translateY(8px)}.ebtoast b{font-weight:700}.ebtoast button{border:0;background:rgba(255,255,255,.14);color:#fff;font:700 12.5px 'DM Sans',sans-serif;border-radius:8px;padding:6px 11px;cursor:pointer}.ebtoast button:hover{background:rgba(255,255,255,.26)}
 @keyframes ebin{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%)}}
@@ -5198,18 +5204,20 @@ function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):
 var EB_DOC={'Medical':'medical',"Seaman's Book":'seaman&#8217;s book','Passport':'passport','US visa':'US visa','Schengen':'Schengen'};
 function fmtMD(iso){var s=fmtDateS(iso);var i=s.indexOf(',');return i>0?s.slice(0,i):s;}
 function benchBox(rb,sec){var b=sec&&sec.bench;if(!b||!b.rows||!b.rows.length)return null;
-  var more=b.total>b.rows.length?((b.total-b.rows.length)+' more'):'All crew';
-  var h='<div class="rcard ebench" data-vk="'+rb.vessel_key+'"><div class=ebhd><span><b>Next for '+escHtml(sec.ship)+'</b> &middot; most rested by '+fmtMD(b.date)+'</span>'
+  var more='All crew'+(b.total?(' &middot; '+b.total):'');
+  var h='<div class="rcard ebench" data-vk="'+rb.vessel_key+'"><div class=ebhd><span><b>Next for '+escHtml(sec.ship)+'</b><span class=ebsub> &middot; most rested by '+fmtMD(b.date)+'</span><span class=ebsubs> &middot; by '+fmtMD(b.date)+'</span></span>'
    +'<button type=button class=ebmore data-vk="'+rb.vessel_key+'" data-aid="new" onclick="event.stopPropagation();openRelief(this)" title="Everyone available, and search"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"></path></svg>'+more+'</button></div>';
   b.rows.forEach(function(r){
     var pct=Math.max(4,Math.min(100,Math.round((r.days-42)/140*100)));
     var from=r.aboardShip?('Off '+escHtml(r.aboardShip)+' '+fmtMD(r.homeFrom)):('Home since '+fmtMD(r.homeFrom)+(r.lastShip?(' &middot; '+escHtml(r.lastShip)):''));
-    var warn=(r.docs||[]).map(function(d){var w=EB_DOC[d.doc]||escHtml(d.doc);return d.when==='missing'?(w+' missing'):(w+' '+fmtMD(d.exp));}).join(', ');
+    var _miss=(r.docs||[]).filter(function(d){return d.when==='missing';}),_dated=(r.docs||[]).filter(function(d){return d.when!=='missing';});
+    var warn=_dated.map(function(d){return (EB_DOC[d.doc]||escHtml(d.doc))+' '+fmtMD(d.exp);}).concat(_miss.length>=2?[_miss.length+' documents missing']:_miss.map(function(d){return (EB_DOC[d.doc]||escHtml(d.doc))+' missing';})).join(', ');
     h+='<button type=button class=ebrow data-sc="'+escHtml(r.sc)+'" data-ship="'+escHtml(sec.ship)+'" data-nm="'+escHtml(r.name)+'" onclick="benchPick(event,this)" title="Earmark '+escHtml(r.name)+' for '+escHtml(sec.ship)+': '+fmtDateS(b.date)+' to '+fmtDateS(b.signOff)+'">'
       +'<span class=ebw><span class=ebn><i class="ebdot'+(r.aboardShip?' ab':'')+'"></i>'+escHtml(r.name)+'</span><span class=ebs>'+from+(warn?('<em> &middot; '+warn+'</em>'):'')+'</span></span>'
       +'<span class=ebt><span>'+spanCompact(r.homeFrom,b.date)+'</span><i><b style="width:'+pct+'%"></b></i></span><span class=ebgo>Earmark</span></button>';
   });
-  return h+'<div class=ebft><span>One tap: '+fmtMD(b.date)+' &rarr; '+fmtDateS(b.signOff)+'</span><span class=eblg><i class=ebdot></i>home <i class="ebdot ab"></i>home by then</span></div></div>';}
+  var rules=(b.rules||[]).length?('<span class=ebrules>'+escHtml((b.rules||[]).join(' &middot; ').replace(/&middot;/g,'·'))+'</span>'):'';
+  return h+'<div class=ebft><span>One tap: '+fmtMD(b.date)+' &rarr; '+fmtDateS(b.signOff)+(rules?(' &middot; '+rules):'')+'</span><span class=eblg><i class=ebdot></i>home <i class="ebdot ab"></i>home by then</span></div></div>';}
 async function benchPick(e,el){e.stopPropagation();if(el.disabled)return;el.disabled=true;el.classList.add('busy');
   var sc=el.getAttribute('data-sc'),ship=el.getAttribute('data-ship'),nm=el.getAttribute('data-nm');
   try{var r=await (await fetch('/api/rotation/project',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:sc,ship:ship})})).json();
@@ -5408,9 +5416,13 @@ function rotCard(x){
   if(plan&&x.deployedAt)tg+='<span class="rtag on" title="Sent to TDG for action">SENT TO TDG '+escHtml(x.deployedAt)+'</span>';
   // Documents: always a warning, never a block (Miguel, 14 Sep 2026). Each EXPIRED document by name, red (Miguel,
   // 8 Oct 2026: "tag in red all the items that are expired"); missing / expiring stay one summary chip.
-  if(x.docs){var _di=x.docs.items;
-    if(_di&&_di.length){_di.forEach(function(d){tg+='<span class="rtag bad" title="'+escHtml(d.doc+' expired'+(d.exp?(' '+fmtDateS(d.exp)):''))+'">'+escHtml(String(d.doc).toUpperCase())+'</span>';});if(x.docs.rest)tg+='<span class="rtag '+(x.docs.rest.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.rest.title)+'">'+escHtml(x.docs.rest.label)+'</span>';}
-    else tg+='<span class="rtag '+(x.docs.worst==='expiring'?'warn':'bad')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';}
+  // Every chip is the SAME chip (Miguel, 8 Oct 2026: "the tags all should be same size"): expired red by name, expiring
+  // amber by name with its month ("MEDICAL · FEB 6"), the missing ones one muted count. Never the page's .warn box class.
+  if(x.docs){var _di=x.docs.items||[],_dx=x.docs.expiringItems||[];
+    _di.forEach(function(d){tg+='<span class="rtag bad" title="'+escHtml(d.doc+' expired'+(d.exp?(' '+fmtDateS(d.exp)):''))+'">'+escHtml(String(d.doc).toUpperCase())+'</span>';});
+    _dx.forEach(function(d){tg+='<span class="rtag due" title="'+escHtml(d.doc+' expires '+(d.exp?fmtDateS(d.exp):'')+(d.days!=null?(' (in '+d.days+' days)'):''))+'">'+escHtml(String(d.doc).toUpperCase())+(d.exp?(' &middot; '+escHtml(fmtMD(d.exp).toUpperCase())):'')+'</span>';});
+    if(x.docs.rest)tg+='<span class="rtag mis" title="'+escHtml(x.docs.rest.title)+'">'+escHtml(x.docs.rest.label)+'</span>';
+    if(!_di.length&&!_dx.length&&!x.docs.rest)tg+='<span class="rtag '+(x.docs.worst==='expired'?'bad':x.docs.worst==='expiring'?'due':'mis')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';}
   // Yellow is Rita's EARMARK (Miguel, 5 + 7 Oct 2026): it stands until TDG's file carries the person.
   // TDG's own earmark (6 Oct 2026): drawn from the file, no card behind it - drag it to plan them here.
   // ONE WORD (Miguel, 7 Oct 2026): everyone scheduled to come aboard is an EARMARK — Rita's card and TDG's
@@ -5465,7 +5477,7 @@ function fileDatesNote(x){
   else if(x.offSource==='tdg')off=(x.reliever&&x.reliever.name)?('<b>Sign-off</b> '+escHtml(x.reliever.name)+' embarked per the TDG file'):'<b>Sign-off</b> TDG file (final)';
   else if(x.offSource==='rita')off='<b>Sign-off</b> yours'+(x.offAt?(', '+escHtml(x.offAt)):'');
   else if(x.offSource==='card')off='<b>Sign-off</b> '+((x.reliever&&x.reliever.name)?escHtml(x.reliever.name)+"'s":'the reliever')+' card sign-on';
-  else if(x.offSource==='projected')off='<b>Sign-off</b> projected, 7 months (Azamara 5) &middot; TDG or you can set it';
+  else if(x.offSource==='projected')off='<b>Sign-off</b> projected, '+(x.brand==='Azamara'?'5':'7')+' months after embark &middot; TDG or you can set it';
   return '<div class=srcnote>'+on+(off?(' &middot; '+off):'')+'</div>';
 }
 function rotIssuesBlock(list){
@@ -5495,7 +5507,7 @@ function rotShip(sec){
   var col=BRANDCOL[sec.brand]||'#1E6FD0',closed=!!ROT_CLOSED[sec.ship];
   var hist=sec.history||[];
   var projs=sec.projections||[];
-  var cards=sec.crew.map(rotCard).join('')+projs.map(rotCard).join('');
+  var cards=sec.crew.map(function(c){c.brand=sec.brand;return rotCard(c);}).join('')+projs.map(function(c){c.brand=sec.brand;return rotCard(c);}).join('');
   var body=cards||'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
   // Sent to TDG and not yet back in a Contract Counter. The line clears itself when they return.
   var sentRows=(sec.deployed||[]).map(function(d){
@@ -5575,6 +5587,7 @@ function monthsDays(a,b){
 }
 // Dates on the seat card and its history read as a calendar date (Miguel, 7 Oct 2026: "the dates here should be
 // Sept 22, 2027"): short month, day, year — "Sep 22, 2027" — never the ISO string. fmtDate (full month) is the profile's.
+function niceShip(s){s=String(s||'').replace(/^\\s*M\\/?V\\s+/i,'').toLowerCase();return s.replace(/\\b[a-z]/g,function(c){return c.toUpperCase();});}
 function fmtDateS(iso){if(!iso)return '';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).slice(0,10).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo||!parseInt(p[2],10))return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 // The seat chip's ONE number (Miguel, 7 Oct 2026: "this should say 3M 22 days"): calendar months + days between two
 // dates, from the dates themselves — "22 d" under a month, "1 mo 22 d" / "3 mo" past it. Never a raw day count.
@@ -5596,7 +5609,7 @@ function histCard(h){
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
 function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
-function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){return Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name;}).sort(function(a,b){return a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0;});var start=0,f=false;if(date){for(var i=0;i<ta.length;i++){if(ta[i].berth_date>=date){start=i;f=true;break;}}}if(!f)start=Math.max(0,ta.length-6);var win=ta.slice(start,start+6);var opts='',matched=false;for(var j=0;j<win.length;j++){var p=win[j],v=String(p.port_name).replace(/"/g,'');var isSel=date&&p.berth_date===date;if(isSel)matched=true;opts+='<option value="'+v+'" data-d="'+p.berth_date+'"'+(isSel?' selected':'')+'>'+p.port_name+' · '+p.berth_date+'</option>';}if(current&&!matched){opts='<option value="'+String(current).replace(/"/g,'')+'" selected>'+current+'</option>'+opts;}return opts||'<option value="">— no ports —</option>';}function pickPort(sel){var m={eEmb:'eOn',eDis:'eOff'};var o=sel.options[sel.selectedIndex];var dd=o?o.getAttribute('data-d'):null;var el=document.getElementById(m[sel.id]);if(dd&&el)el.value=dd;}async function editContractModal(id,seq){
+function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){return Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name;}).sort(function(a,b){return a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0;});var start=0,f=false;if(date){for(var i=0;i<ta.length;i++){if(ta[i].berth_date>=date){start=i;f=true;break;}}}if(!f)start=Math.max(0,ta.length-6);var win=ta.slice(start,start+6);var opts='',matched=false;for(var j=0;j<win.length;j++){var p=win[j],v=String(p.port_name).replace(/"/g,'');var isSel=date&&p.berth_date===date;if(isSel)matched=true;opts+='<option value="'+v+'" data-d="'+p.berth_date+'"'+(isSel?' selected':'')+'>'+niceCity(p.port_name)+' · '+fmtDateS(p.berth_date)+'</option>';}if(current&&!matched){opts='<option value="'+String(current).replace(/"/g,'')+'" selected>'+niceCity(current)+'</option>'+opts;}return opts||'<option value="">— no ports —</option>';}function pickPort(sel){var m={eEmb:'eOn',eDis:'eOff'};var o=sel.options[sel.selectedIndex];var dd=o?o.getAttribute('data-d'):null;var el=document.getElementById(m[sel.id]);if(dd&&el)el.value=dd;}async function editContractModal(id,seq){
   var e=null;(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.agency_id===id&&x.seq===seq)e=x;});});
   if(!e)return;
   var d={};try{d=await (await fetch('/api/rotation/crew?id='+encodeURIComponent(id))).json();}catch(_){}var P=[];try{P=(((await (await fetch('/api/relief/ports?ship='+encodeURIComponent(e.ship||''))).json())||{}).ports)||[];}catch(_){}
@@ -5609,17 +5622,31 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
   // tint green when on; consistent field labels + heights; comment gets real room; history scrolls;
   // footer separated with the danger action de-emphasized as a quiet red text button.
   var ck=function(i,lab,on){return '<span class=ckchip onclick="tgFlip(\\''+i+'\\')"><input type=checkbox id="'+i+'"'+(on?' checked':'')+' style="pointer-events:none"><span>'+lab+'</span></span>';};
-  var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||'—';return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on||'—')+'</td><td>'+off+'</td></tr>';}).join('');
+  var legs=(d.legs||[]).map(function(l){var off=l.act_off||l.proj_off||null;return '<tr><td>'+l.seq+'</td><td>'+(l.ship||'—')+'</td><td>'+(l.sign_on?fmtDateS(l.sign_on):'—')+'</td><td>'+(off?fmtDateS(off)+(l.act_off?'':' <span class=csub>projected</span>'):'—')+'</td></tr>';}).join('');
   // THE FILE'S CONTRACT (7 Oct 2026): what the AdvancedQuery says, and where the sign-off shown comes from.
   var F=d.file||null,fc=F&&F.current;
-  var fileLine=F?('<div class=csub style="margin-top:12px;line-height:1.5"><b>TDG file'+(F.at?(' '+escHtml(F.at)):'')+':</b> '+escHtml(F.status||F.raw_status||'no status')+(F.ship?(' &middot; '+escHtml(F.ship)):'')+(F.embarked_at?(' &middot; embarked '+escHtml(F.embarked_at)):' &middot; no embark date')+(F.debarked_at?(' &middot; debarked '+escHtml(F.debarked_at)):'')
-    +(fc?('<br>Sign-off shown: <b>'+escHtml(fc.sign_off||'—')+'</b> &middot; '+escHtml(fc.off_from||'')+(fc.reliever&&fc.reliever.name?(' ('+escHtml(fc.reliever.name)+')'):'')):'')+'</div>'):'';
+  // THE FILE'S WORD AS A STRIP (8 Oct 2026 pixel pass): the file's date is the label, the row reads like the card
+  // ("Celebrity Apex · embarked Oct 7, 2026"), and the sign-off line says in plain words where the date comes from —
+  // never "(Azamara 5)" on a Celebrity hull.
+  var _brand=(function(){var b=null;(ROT.sections||[]).forEach(function(s){if(s.ship===e.ship)b=s.brand;});return b;})();
+  var offWord=function(w){w=String(w||'');if(/^projected/i.test(w))return 'projected · '+(_brand==='Azamara'?'5':'7')+' months after embark · until TDG or you set it';return w;};
+  var fileLine=F?('<div class=ecfile><div class=ecfrow><span class=ecfk>TDG file'+(F.at?(' '+escHtml(F.at)):'')+'</span><span class=ecfv>'+escHtml(F.status||F.raw_status||'no status')+(F.ship?(' &middot; '+escHtml(niceShip(F.ship))):'')+(F.embarked_at?(' &middot; embarked '+escHtml(fmtDateS(F.embarked_at))):' &middot; no embark date')+(F.debarked_at?(' &middot; debarked '+escHtml(fmtDateS(F.debarked_at))):'')+'</span></div>'
+    +(fc?('<div class=ecfrow><span class=ecfk>Sign-off shown</span><span class=ecfv><b>'+escHtml(fc.sign_off?fmtDateS(fc.sign_off):'—')+'</b> &middot; '+escHtml(offWord(fc.off_from))+(fc.reliever&&fc.reliever.name?(' ('+escHtml(fc.reliever.name)+')'):'')+'</span></div>'):'')+'</div>'):'';
   var fld=function(lab,inp){return '<div><label>'+lab+'</label>'+inp+'</div>';};
   var h='<div class=modcard><style>'
    +'#rotmodal .modcard{max-width:720px;padding:24px 26px 22px}'
-   +'#rotmodal .ecgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-top:16px}'
-   +'#rotmodal .ecgrid label{display:block;font:600 11.5px "DM Sans";letter-spacing:.03em;color:var(--mut);margin:0 0 6px}'
-   +'#rotmodal .ecgrid select,#rotmodal .ecgrid input{width:100%;height:42px;padding:0 12px;font-size:13.5px;color:var(--navy);box-sizing:border-box}'
+   +'#rotmodal .cname{font-size:18px;line-height:1.25}#rotmodal .modhd .csub{margin-top:4px}'
+   +'#rotmodal .ecfile{margin-top:14px;background:#F3F6FB;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;gap:5px}'
+   +'#rotmodal .ecfrow{display:flex;gap:10px;align-items:baseline;font-size:12.5px;line-height:1.45;color:var(--navy)}'
+   +'#rotmodal .ecfk{flex:0 0 118px;font:700 10px "DM Sans";letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding-top:2px}'
+   +'#rotmodal .ecfv{flex:1 1 0;min-width:0;color:#374151}#rotmodal .ecfv b{color:var(--navy)}'
+   +'#rotmodal .ecgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-top:18px}'
+   +'#rotmodal .ecgrid>div{display:flex;flex-direction:column;justify-content:flex-end;min-width:0}'
+   +'#rotmodal .ecgrid label{display:block;font:600 11.5px "DM Sans";letter-spacing:.03em;color:var(--mut);margin:0 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+   +'#rotmodal .ecgrid select,#rotmodal .ecgrid input{width:100%;height:42px;padding:0 12px;font-size:13.5px;color:var(--navy);box-sizing:border-box;border-radius:10px}'
+   +'#rotmodal select:focus,#rotmodal input:focus,#rotmodal textarea:focus{outline:2px solid #1E5FB4;outline-offset:1px;border-color:#1E5FB4}'
+   +'#rotmodal .echist td,#rotmodal .echist th{white-space:nowrap}'
+   +'#rotmodal .ecfoot .btn{height:40px;padding:0 18px;font-size:13.5px}#rotmodal .ecfoot .btn.green{min-width:112px}#rotmodal .echide{height:40px;padding:0 12px}'
    +'#rotmodal .ckrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 2px}'
    +'#rotmodal .ckchip{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:999px;padding:7px 14px 7px 8px;cursor:pointer;font:700 11.5px "DM Sans";letter-spacing:.05em;color:var(--mut);background:#fff;transition:border-color .15s,background .15s,color .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}'
    +'#rotmodal .ckchip:hover{border-color:var(--navy);color:var(--navy)}'
@@ -5640,8 +5667,8 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'<div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+'<span class=ecpill>contract #'+seq+'</span></div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
    +fileLine+'<input type=hidden id=eKey value="'+escHtml(e.onKey||'')+'">'
    +'<div class=ecgrid>'
-   +fld('Embark city · from itinerary','<select id=eEmb onchange="pickPort(this)">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
-   +fld('Disembark city · from itinerary','<select id=eDis onchange="pickPort(this)">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
+   +fld('Embark port · itinerary','<select id=eEmb onchange="pickPort(this)">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
+   +fld('Disembark port · itinerary','<select id=eDis onchange="pickPort(this)">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
    +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'">')
    +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'">')
    +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip>'+shipOpts+'</select>')+'</div>'
