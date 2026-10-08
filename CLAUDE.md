@@ -257,6 +257,15 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   Card, ledger, PDF statement — carries `contracts_source` and the page prints it beside the rank. The
   CONSECUTIVE bonus count (`crewCount` / `contractLedgerRow`, resets on gates) drives the ladder and
   payout and NEVER reads the imported count — that is §1. Pinned by `test/contract_count_import.test.js`.
+- **The count keeps counting** (Miguel, 8 Oct 2026: "so u can keep counting as seafarer keep finishing their contract
+  from that moment forward .. is an addition to the number"). TDG's number is fixed at the file's as-of date; a
+  contract TDG ENDS after that date adds one (`completedSince`: the crew's row in the last AdvancedQuery carries a
+  DEBARKEDDATE after the as-of date and not in the future). Every grade reader passes it as `cumulativeContracts(...,
+  added)` and reports `contracts_added`; the page prints "TDG count as of <date> + N finished since". The next count
+  file restates the number. Limit, stated: the snapshot keeps one row per crew, so a crew who finishes AND re-embarks
+  before the next count file carries only the newer row. The derived fallback never takes the addition. The
+  CONSECUTIVE bonus count is untouched (§1). The page reads the as-of date from TDG's filename with the month short
+  or spelled in full ("as_of_08_October_2026" was refused as dateless until 8 Oct 2026).
 - **The board says its own age** (`sources` on `/api/rotation`): when the Counter was last uploaded (or that it
   never was — a NULL `imported_at` is the bundled seed), the count's as-of date and the kept TDG file's date.
   Nobody inside the console could see either until 24 Sep; Rita found both from outside. **The page line is

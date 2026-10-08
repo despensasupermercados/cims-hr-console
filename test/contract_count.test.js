@@ -5,14 +5,30 @@
 // crew (Espenilla Zandro: TDG 7, derived 0). Rank sits on this number. The count is an import.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCountTab, parseCompletedContracts, bridgeCounts, diffCounts, normId, cumulativeContracts } from "../src/contract_count.js";
+import { parseCountTab, parseCompletedContracts, bridgeCounts, diffCounts, normId, cumulativeContracts, completedSince } from "../src/contract_count.js";
 
 test("the grade count: TDG's stated number when the file carries the crew, else baseline + derived, and it says which", () => {
-  assert.deepEqual(cumulativeContracts(7, 0, 0), { n: 7, source: "tdg" }, "Espenilla: TDG 7, derived 0 -> 7 (Senior)");
-  assert.deepEqual(cumulativeContracts(0, 3, 2), { n: 0, source: "tdg" }, "'Ongoing' is a stated 0, not a missing value — the file wins");
-  assert.deepEqual(cumulativeContracts(null, 3, 2), { n: 5, source: "derived" }, "not in the file: the pre-24-Sep rule, seeded baseline + full legs");
-  assert.deepEqual(cumulativeContracts(undefined, null, 0), { n: 0, source: "derived" }, "baseline pending, no legs -> 0, Junior");
-  assert.deepEqual(cumulativeContracts("7", 1, 1), { n: 2, source: "derived" }, "a string is not a count — only a real number from the table is trusted");
+  assert.deepEqual(cumulativeContracts(7, 0, 0), { n: 7, source: "tdg", added: 0 }, "Espenilla: TDG 7, derived 0 -> 7 (Senior)");
+  assert.deepEqual(cumulativeContracts(0, 3, 2), { n: 0, source: "tdg", added: 0 }, "'Ongoing' is a stated 0, not a missing value — the file wins");
+  assert.deepEqual(cumulativeContracts(null, 3, 2), { n: 5, source: "derived", added: 0 }, "not in the file: the pre-24-Sep rule, seeded baseline + full legs");
+  assert.deepEqual(cumulativeContracts(undefined, null, 0), { n: 0, source: "derived", added: 0 }, "baseline pending, no legs -> 0, Junior");
+  assert.deepEqual(cumulativeContracts("7", 1, 1), { n: 2, source: "derived", added: 0 }, "a string is not a count — only a real number from the table is trusted");
+});
+
+// Miguel, 8 Oct 2026: "so u can keep counting as seafarer keep finishing their contract from that moment forward ..
+// is an addition to the number". TDG's count is fixed at its as-of date; a contract TDG ends after it adds one.
+test("the count keeps counting: TDG's number + contracts TDG ended after the count file's as-of date", () => {
+  assert.deepEqual(cumulativeContracts(4, 0, 0, 1), { n: 5, source: "tdg", added: 1 }, "4 as of the file, one finished since -> 5");
+  assert.deepEqual(cumulativeContracts(null, 2, 1, 1), { n: 3, source: "derived", added: 0 }, "the derived fallback never takes the addition (its legs already count it)");
+  const T = "2026-11-20";
+  assert.equal(completedSince("2026-10-08", { debarked_at: "2026-11-15", embarked_at: "2026-04-10" }, T), 1, "debarked after the as-of date: one contract finished since");
+  assert.equal(completedSince("2026-10-08", { debarked_at: "2026-10-08" }, T), 0, "debarked ON the as-of date: already inside TDG's count");
+  assert.equal(completedSince("2026-10-08", { debarked_at: "2026-09-12" }, T), 0, "debarked before: already counted");
+  assert.equal(completedSince("2026-10-08", { debarked_at: "2026-12-01" }, T), 0, "a debark in the future has not happened");
+  assert.equal(completedSince("2026-10-08", { debarked_at: null }, T), 0, "On board, no debark: nothing finished");
+  assert.equal(completedSince(null, { debarked_at: "2026-11-15" }, T), 0, "no count file date: nothing to add to");
+  assert.equal(completedSince("2026-10-08", "2026-11-15", T), 1, "a bare debark date reads the same");
+  assert.equal(completedSince("2026-10-08", { debarked_at: "2026-11-15", embarked_at: "2026-11-20" }, T), 0, "an embark after the debark is not a finished contract");
 });
 
 const HEAD = ["CREW ID", "CREW NAME", "COMPLETED CONTRACTS", "POSITION"];
