@@ -4558,7 +4558,9 @@ var COUNTUP=null,COUNTASOF=null,COUNTDRY=null;
 function parseCountFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
   // The month is spelled in full on TDG's newer files ("as_of_08_October_2026"): read its first three letters.
-  var m=/as[_ ]of[_ ](\d{1,2})[_ ]([A-Za-z]{3})[A-Za-z]*[_ ](\d{4})/i.exec(String(f.name||''));
+  // Double backslashes: this is page code inside a template literal, where a single one is dropped (the live page
+  // read d{1,2} — a literal 'd' — until 8 Oct 2026).
+  var m=/as[_ ]of[_ ](\\d{1,2})[_ ]([A-Za-z]{3})[A-Za-z]*[_ ](\\d{4})/i.exec(String(f.name||''));
   var MO={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
   COUNTASOF=(m&&MO[m[2].toLowerCase()])?(m[3]+'-'+MO[m[2].toLowerCase()]+'-'+('0'+m[1]).slice(-2)):null;
   loadSheetJS(function(){
