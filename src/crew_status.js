@@ -75,7 +75,7 @@ export function scheduleBySc(legs) {
 }
 
 // Effective status (Miguel, 5 Oct 2026: "TDG is the one true source of knowledge"):
-//   1. the manual 'Retired' tag; 2. a manual status edit (Rita's — the board lists it where it disagrees
+//   1. the manual Inactive tag (crew_override.retired; it read 'Retired' until 8 Oct 2026); 2. a manual status edit (Rita's — the board lists it where it disagrees
 //   with the file); 3. not in the latest TDG file -> NOT_IN_FILE; 4. THE FILE'S WORD (crew.status, which the
 //   registry import writes every upload, D6) — except On board where the console KNOWS the contract ended
 //   (a recorded sign-off, nothing aboard since): On Vacation, and the board lists the disagreement;
@@ -95,7 +95,7 @@ export function crewStatus(base, ov, schedLegs, today) {
     if (kept === "On board" && knownCompleted(schedLegs, today, base.tdg_ship || null)) return "On Vacation";
     return kept;
   }
-  if (ov.retired) return "Retired";
+  if (ov.retired) return "Inactive"; // the manual tag; "Retired" until 8 Oct 2026 (Inactive replaces Retired)
   if (ov.status != null && ov.status !== "") return ov.status;
   if (absent) return NOT_IN_FILE;
   const file = kept || (base && base.status);
@@ -108,5 +108,5 @@ export function crewStatus(base, ov, schedLegs, today) {
 
 // Crew who have left the fleet. An expired document on someone who is gone is not an action item,
 // and reporting it buries the people who are still sailing.
-export const OFF_FLEET = new Set(["Retired", "Inactive"]);
+export const OFF_FLEET = new Set(["Retired", "Inactive"]); // "Retired" is no longer produced (8 Oct 2026); kept so an old value still reads off the fleet
 export function isOffFleet(status) { return OFF_FLEET.has(String(status || "")); }

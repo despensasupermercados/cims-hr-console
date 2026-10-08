@@ -38,6 +38,6 @@ test("the kept file's word reaches crewStatus: active beats a Retired tag; Reser
   assert.equal(by["SC-1"].tdg_ship, "MV BRILLIANCE OF THE SEAS");
   assert.equal(crewStatus(by["SC-1"], { retired: 1 }, [], "2026-10-06"), "On board", "TDG has him aboard: the tag is overridden");
   assert.equal(crewStatus(by["SC-2"], {}, [], "2026-10-06"), "On Vacation", "TDG's 'Reserved Crew' is the reserve pool");
-  assert.equal(crewStatus({ status: "Inactive" }, { retired: 1 }, [], "2026-10-06"), "Retired", "no kept word: the tag stands");
+  assert.equal(crewStatus({ status: "Inactive" }, { retired: 1 }, [], "2026-10-06"), "Inactive", "no kept word: the tag stands (Inactive since 8 Oct 2026)");
   assert.equal(crewStatus({ status: "On board", tdg_status: "On Vacation" }, { status: "On board" }, [], "2026-10-06"), "On board", "an inactive file word does not beat a status edit");
 });

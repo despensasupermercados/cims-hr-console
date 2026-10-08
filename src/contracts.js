@@ -61,7 +61,7 @@ export function fullContracts(legs, gapDays = GAP_DAYS) { return contractCounts(
 /* ---- Status auto-tagging (derived from the live schedule assignments) ----
    On a ship right now (an assignment spans today) -> on board. Signed off, with a past assignment and
    no current one -> on holiday (the contract ended). Only future assignments / none -> fall back to the
-   imported registry status. A manual "Retired" tag always wins. Schedule legs are {on, off}. */
+   imported registry status. A manual Inactive tag (the old "Retired" tag) always wins. Schedule legs are {on, off}. */
 export function liveState(legs, today) {
   const L = (legs || []).filter(l => l && l.on)
     .map(l => ({ on: l.on, off: l.off || null }))
@@ -72,14 +72,18 @@ export function liveState(legs, today) {
   if (lastOff && lastOff < today) return "holiday"; // signed off -> contract ended
   return "scheduled";                                // only future assignment(s)
 }
-export const RETIRE_MONTHS = 6; // inactive (no assignment) longer than this -> auto-retired
+export const RETIRE_MONTHS = 6; // no assignment longer than this -> Inactive (it read "Retired" until 8 Oct 2026)
 // The four words TDG's AdvancedQuery uses (crewimport.normalizeStatus); anything else is no word.
 export const REGISTRY_STATUSES = new Set(["On board", "On Vacation", "Earmarked", "Inactive"]);
 
 // Final status string. opts: { retired:bool, imported:string }.
-//   manual Retired tag wins -> Retired. On a ship now -> On board. Only future assignment(s) -> keep
+//   INACTIVE REPLACES RETIRED (Miguel, 8 Oct 2026: "inactive replace retired"): the console has no Retired
+//   status any more. The manual tag (crew_override.retired, kept as the column) reads Inactive, and so does
+//   the long-ashore rule. Inactive = has sailed with us, no ship, out of the rotation until someone decides
+//   otherwise.
+//   manual tag wins -> Inactive. On a ship now -> On board. Only future assignment(s) -> keep
 //   the registry value (e.g. Earmarked). Signed off: within RETIRE_MONTHS -> On Vacation (on holiday,
-//   contract ended); longer than that -> Retired (auto). No dated schedule -> keep the registry value.
+//   contract ended); longer than that -> Inactive (auto). No dated schedule -> keep the registry value.
 //   A manual status edit (handled by the caller) still wins, so Rita can pull someone back to Earmarked.
 //   OVERDUE (Miguel, 5 Oct 2026: "we follow TDG file"): a leg still CURRENT whose projected sign-off has
 //   passed with nothing recorded — the schedule does not know whether they left (the seat is held as
@@ -88,7 +92,7 @@ export const REGISTRY_STATUSES = new Set(["On board", "On Vacation", "Earmarked"
 //   held the seat: two screens, two answers.
 export function deriveStatus(legs, today, opts) {
   opts = opts || {};
-  if (opts.retired) return "Retired";
+  if (opts.retired) return "Inactive";
   const L = (legs || []).filter(l => l && l.on)
     .map(l => ({ on: l.on, off: l.off || null, cur: !!l.is_current }))
     .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
@@ -98,6 +102,6 @@ export function deriveStatus(legs, today, opts) {
   }
   if (L.length && L.every(l => l.on > today)) return opts.imported || "Earmarked"; // only future
   const lastOff = L.reduce((m, l) => (l.off && l.off > m ? l.off : m), "");
-  if (lastOff) return months(lastOff, today) > RETIRE_MONTHS ? "Retired" : "On Vacation";
+  if (lastOff) return months(lastOff, today) > RETIRE_MONTHS ? "Inactive" : "On Vacation";
   return opts.imported || "Earmarked"; // no dated schedule -> registry value
 }

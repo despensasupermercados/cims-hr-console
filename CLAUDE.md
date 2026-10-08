@@ -214,6 +214,23 @@ So: the "Junior PS on a block ship" warning (`jrWarn`, `vessel.jr_ps_rule`) is r
 clean them up"): every Celebrity row and the five Royal Quantum rows set to `open` in D1, so the table and the board
 agree; only the nine Royal Oasis/Icon hulls carry `block` (14 Celebrity + 5 Quantum rows changed, 19 in all). The brand gate in code stays as the guard. Also in the Brain.
 
+## 10f. THE CREW TYPES, AND INACTIVE REPLACES RETIRED — Miguel, 8 Oct 2026
+His glossary, verbatim intent: **On board** (active) = aboard a ship. **On Vacation** (on holidays) = has sailed with
+us, between contracts, no ship assigned. **Earmarked** = a ship assigned for a future contract, new hire or returning
+crew. **Inactive** = has sailed with us, no ship, NOT part of the rotation until someone decides otherwise (reversible).
+**Reserved Crew** = like On Vacation, they may or may not return. In the Brain (recwdSbjidOPholWK).
+- **"inactive replace retired"**: the console has no Retired status. `crewStatus` / `deriveStatus` return Inactive for
+  the manual tag (`crew_override.retired`, kept as the column, no schema change) and for the long-ashore rule
+  (`RETIRE_MONTHS`). The page says Inactive everywhere: the Crew tab facet, the dashboard tile, the Edit modal's tag
+  ("Inactive (manual — out of the rotation until you clear it)"), the import review ("Inactive tags TDG overrides",
+  "Keep Inactive"), Maria (`include_inactive`; `include_retired` still accepted). The board hides Inactive seat and
+  pool cards (as it hid Retired) but NEVER an earmark for its status (`pfilt`): a plan on an Inactive crew is Rita's
+  to settle. On 8 Oct 2026 data: the 30 tagged crew moved Retired → Inactive, nothing else changed (104 crew compared).
+  `OFF_FLEET` keeps "Retired" only so an old stored value still reads off the fleet.
+- Still read by `normalizeStatus` as before, and OPEN for Miguel: TDG's "Reserved Crew" reads On Vacation (3 crew), "Not
+  for Rehire" reads Inactive (1 crew, reversible by his own definition of Inactive). Proposed, not ordered: show both
+  as their own words.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

@@ -483,7 +483,7 @@ test("a Retired tag the file contradicts is cleared on Apply (tag + manual statu
   assert.deepEqual(stage.review.groups.unretire, [{ agency_id: "SC-0042899", new: "On board", ship: "MV BRILLIANCE OF THE SEAS", manual_status: "On Vacation" }]);
   const body = await (await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-ur", run_by: "Rita" }), env)).json();
   assert.equal(body.unretired, 1);
-  assert.match(body.summary, /1 Retired tag cleared \(TDG has them active\)/);
+  assert.match(body.summary, /1 Inactive tag cleared \(TDG has them active\)/);
   const upd = env.DB._batched.find(s => /^UPDATE crew_override SET retired=0, status=NULL/.test(s.sql));
   assert.ok(upd && upd.args[1] === "SC-0042899" && /COALESCE\(retired,0\)=1$/.test(upd.sql), "bound to still-tagged");
   assert.ok(env.DB._batched.some(s => /INSERT INTO sync_conflict/.test(s.sql) && s.args[3] === "retired"), "audited");

@@ -329,7 +329,11 @@ test("drawRotation hands the ship renderer its projections, deployed lines and J
   for (const k of ["projections:", "deployed:", "jrPsRule:", "crew:", "history:"]) {
     assert.ok(map[0].includes(k), "the rebuilt section lost `" + k + "` — rotShip reads it, so it silently rendered nothing (this hid 26 yellow cards)");
   }
-  assert.match(map[0], /projections:sfilt\(s\.projections\)/, "the status/month filter applies to projections like it does to crew");
+  assert.match(map[0], /projections:pfilt\(s\.projections\)/, "the status/month filter applies to projections like it does to crew");
+  // Inactive replaces Retired (Miguel, 8 Oct 2026): the seat/pool filter hides Inactive crew; an earmark is never
+  // hidden for its status (pfilt has no status test) — a plan on an Inactive crew is Rita's to settle.
+  assert.match(src, /var sfilt=function\(arr\)\{return pfilt\(arr\)\.filter\(function\(x\)\{return x\.status!=='Inactive'/);
+  assert.match(src, /var pfilt=function\(arr\)\{return \(arr\|\|\[\]\)\.filter\(function\(x\)\{return \(!ROT_F\|\|x\.status===ROT_F\)&&legInFilter\(x\);\}\);\};/);
   assert.match(body, /s\.crew\.length>0\|\|s\.projections\.length>0/, "a ship with only projections must survive the status filter");
 });
 

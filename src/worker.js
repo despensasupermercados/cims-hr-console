@@ -615,23 +615,24 @@ async function mariaExecTool(env, name, input) {
   if (name === "compliance_expiring") { const d = Number(input.days) || 90; return await J(await apiCompliance(env, new URL(base + "/api/compliance?days=" + d))); }
   if (name === "find_crew") {
     const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    const wantRetired = input.include_retired === true;
-    const isRetired = (c) => !!c.retired || String(c.status || "").toLowerCase() === "retired";
+    // Inactive replaces Retired (8 Oct 2026): "former crew" = the manual tag or the status Inactive.
+    const wantRetired = input.include_inactive === true || input.include_retired === true;
+    const isRetired = (c) => !!c.retired || /^(retired|inactive)$/i.test(String(c.status || ""));
     const rows = (all.crew || []).filter(c => wantRetired || !isRetired(c)).map(c => ({ c, name: fullName(c) }));
     const ranked = rankCrewMatches(rows, String(input.name || ""), 6);
     const exact = ranked.length > 0 && ranked[0].exact;
     const picks = ranked.filter(r => r.exact || r.score >= 0.5);
     const fields = (c) => ({ agency_id: c.agency_id, name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client, contract_count: c.contract_count, baseline_set: c.baseline_count != null, dob: c.dob, passport_no: c.pp_no, province: c.province, phone: c.phone, email: c.email, last_contract_sign_on_historical: c.active_on, last_contract_sign_off_historical: c.active_off, medical_exp: c.med_exp, seamans_book_exp: c.sirb_exp, passport_exp: c.pp_exp, us_visa_exp: c.usv_exp, schengen_exp: c.sch_exp });
-    return { query: input.name, scope: (input.include_retired === true) ? "all crew incl. retired" : "active crew only (retired excluded)", exact_match: !!exact, matches: (picks.length ? picks : ranked.slice(0, 3)).map(r => Object.assign(fields(r.item.c), { match_confidence: Math.round(r.score * 100) / 100 })) };
+    return { query: input.name, scope: wantRetired ? "all crew incl. inactive" : "active crew only (inactive excluded)", exact_match: !!exact, matches: (picks.length ? picks : ranked.slice(0, 3)).map(r => Object.assign(fields(r.item.c), { match_confidence: Math.round(r.score * 100) / 100 })) };
   }
   if (name === "list_crew") {
     const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    const wantRetired = input.include_retired === true || String(input.status || "").toLowerCase() === "retired";
-    const isRetired = (c) => !!c.retired || String(c.status || "").toLowerCase() === "retired";
+    const wantRetired = input.include_inactive === true || input.include_retired === true || /^(retired|inactive)$/i.test(String(input.status || ""));
+    const isRetired = (c) => !!c.retired || /^(retired|inactive)$/i.test(String(c.status || ""));
     let rows = (all.crew || []).filter(c => wantRetired || !isRetired(c));
     if (input.status) rows = rows.filter(c => String(c.status || "").toLowerCase() === String(input.status).toLowerCase());
     if (input.ship) rows = rows.filter(c => String(c.vessel_observed || "").toLowerCase().includes(String(input.ship).toLowerCase()));
-    return { scope: (input.include_retired === true || String(input.status || "").toLowerCase() === "retired") ? "all crew" : "active crew only", count: rows.length, crew: rows.slice(0, 60).map(c => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client })) };
+    return { scope: wantRetired ? "all crew" : "active crew only", count: rows.length, crew: rows.slice(0, 60).map(c => ({ name: fullName(c), status: c.status, rank: c.rank, vessel: c.vessel_observed, client: c.client })) };
   }
   const resolveCrewId = async (inp) => {
     if (inp.agency_id) return String(inp.agency_id);
@@ -1382,8 +1383,8 @@ async function apiDashboard(env) {
     const ov = csOv[c.agency_id], s = crewStatus(c, ov, csSched[c.agency_id], today);
     statusBy[c.agency_id] = s;
     statusMap[s] = (statusMap[s] || 0) + 1;
-    // Donut counts the same ACTIVE set as the tiles (exclude Retired/Inactive), by client/brand.
-    if (s !== "Retired" && s !== "Inactive") byClient[clientOf(c.tdg_vessel || (ov && ov.vessel_observed) || c.vessel_observed)] += 1; // the kept file's hull first, as on the Crew tab
+    // Donut counts the same ACTIVE set as the tiles (exclude Inactive), by client/brand.
+    if (s !== "Inactive") byClient[clientOf(c.tdg_vessel || (ov && ov.vessel_observed) || c.vessel_observed)] += 1; // the kept file's hull first, as on the Crew tab
   }
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
@@ -1415,7 +1416,6 @@ async function apiDashboard(env) {
       on_vacation: statusMap["On Vacation"] || 0,
       earmarked: statusMap["Earmarked"] || 0,
       inactive: statusMap["Inactive"] || 0,
-      retired: statusMap["Retired"] || 0,
       not_in_file: statusMap[NOT_IN_FILE] || 0,   // dropped from the latest TDG file (5 Oct 2026)
       vessels, byClient
     },
@@ -4755,8 +4755,8 @@ function cimsRender(){
     +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
   if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>The ship in the file goes on the crew card by default (TDG is the source). Choose Keep board to hold yours.</div>';
     g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"take","take","flag","Take TDG","Keep board"));});L+='</div>';}
-  if(g.unretire&&g.unretire.length){L+='<div class=isec><h3>&#9679; Retired tags TDG overrides</h3><div class=d>TDG has these crew active. The Retired tag and the manual status kept with it come off on Apply.</div>';
-    g.unretire.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Status","Retired"+(it.manual_status?(" / "+it.manual_status):""),it.new+(it.ship?(", "+it.ship):""),"")+impSeg("unretire:"+it.agency_id,"accept","accept","keep","Clear tag","Keep Retired"));});L+='</div>';}
+  if(g.unretire&&g.unretire.length){L+='<div class=isec><h3>&#9679; Inactive tags TDG overrides</h3><div class=d>TDG has these crew active. The Inactive tag and the manual status kept with it come off on Apply.</div>';
+    g.unretire.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Status","Inactive tag"+(it.manual_status?(" / "+it.manual_status):""),it.new+(it.ship?(", "+it.ship):""),"")+impSeg("unretire:"+it.agency_id,"accept","accept","keep","Clear tag","Keep Inactive"));});L+='</div>';}
   if(g.override_conflict.length||g.critical.length){L+='<div class=isec><h3>&#9679; Needs your decision</h3><div class=d>A field you set by hand, and status changes. Defaults to the TDG file; choose Keep to hold yours.</div>';
     g.override_conflict.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,impTag("&#9995; your manual entry","red"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept file (replaces my entry)","Keep mine"));});
     g.critical.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,"")+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Keep"));});L+='</div>';}
@@ -5661,11 +5661,13 @@ function legInFilter(x){
 function drawRotation(){
   var b=ROT,c=b.counts;
   if(document.getElementById('rotchips'))rmonthChips();
-  // Retired crew auto-clean (Miguel 2026-07-23): retired cards leave the ACTIVE roster/pool display —
-  // retire once on the Crew tab, the board reflects it. DISPLAY-ONLY: ROT (rotationSections) is
+  // Inactive crew auto-clean (Miguel 2026-07-23, Retired then; Inactive replaces Retired 8 Oct 2026): their
+  // seat and pool cards leave the board — out of the rotation. An EARMARK is never hidden for its status: a plan
+  // on an Inactive crew is Rita's to settle (the import review lists it), not the page's to drop. DISPLAY-ONLY: ROT (rotationSections) is
   // untouched, so the monthly billing export still counts every day a crew actually worked. Their
   // past contracts are re-added to the ship's history list below so nothing disappears from view.
-  var sfilt=function(arr){return (arr||[]).filter(function(x){return x.status!=='Retired'&&(!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
+  var pfilt=function(arr){return (arr||[]).filter(function(x){return (!ROT_F||x.status===ROT_F)&&legInFilter(x);});};
+  var sfilt=function(arr){return pfilt(arr).filter(function(x){return x.status!=='Inactive'&&x.status!=='Retired';});};
   var h='<div class=tiles>'+rfTile(c['On board'],'On board','green','On board')+rfTile(c['On Vacation'],'On vacation','amber','On Vacation')
     +rfTile(c['Earmarked'],'Earmarked','royal','Earmarked')+rfTile(c['Inactive'],'Inactive','gray','Inactive')
     +(c['Not in TDG file']?rfTile(c['Not in TDG file'],'Not in TDG file','red','Not in TDG file'):'')
@@ -5690,16 +5692,16 @@ function drawRotation(){
   if(ROT_SHIPS.length)secs=secs.filter(function(s){return ROT_SHIPS.indexOf(s.ship)>=0;});
   if(ROT_FIND){var q=ROT_FIND.toLowerCase();secs=secs.filter(function(s){return s.ship.toLowerCase().indexOf(q)>=0;});}
   secs=secs.map(function(s){
-    // Move retired crew's leg into the ship's history (same shape the server uses for past crew),
-    // so retiring hides the card but keeps the service record visible under the ship.
+    // Move an Inactive crew's leg into the ship's history (same shape the server uses for past crew),
+    // so the tag hides the card but keeps the service record visible under the ship.
     var hist=(s.history||[]).slice();
-    (s.crew||[]).forEach(function(x){if(x.status==='Retired'&&x.signOn&&x.signOff&&x.signOn!==x.signOff)hist.push({name:x.name,sc:x.agency_id,ours:true,on:x.signOn,off:x.signOff});});
+    (s.crew||[]).forEach(function(x){if((x.status==='Inactive'||x.status==='Retired')&&x.signOn&&x.signOff&&x.signOn!==x.signOff)hist.push({name:x.name,sc:x.agency_id,ours:true,on:x.signOn,off:x.signOff});});
     hist.sort(function(a,b){return (a.off||'')<(b.off||'')?1:-1;});
     // Carry EVERY field the ship renderer reads. Until 15 Sep 2026 this rebuilt the section with
     // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
     // (sec.deployed) and the Junior PS rule (sec.jrPsRule) were silently dropped on the way to the page:
     // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
-    return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:sfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
+    return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
   });
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   // 8 Oct 2026 (Miguel: "remove this"): no "Ships (48)" label above the hulls; the side rail's tile already counts vessels.
@@ -6055,7 +6057,7 @@ async function renderDashboard(){
    +'<div class="panel center"><h3>By client</h3>'+donutSVG(clientSegs)+legendH(clientSegs)+'</div>'
    +'<div class=panel><h3>At a glance</h3><div class=tiles style="grid-template-columns:1fr 1fr">'
      +tile(w.total,'Total crew','','crew')+tile(w.vessels,'Vessels','','fleet')
-     +tile(w.retired||0,'Retired','gray','crew')+tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
+     +tile(w.inactive||0,'Inactive','gray','crew')+tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
    +'</div></div></div>';
   // ZONE 2 — COMPLIANCE
   h+='<div class=zlabel>Compliance — documents expiring within 90 days</div><div class=dzone>'
@@ -6221,7 +6223,7 @@ function crewDocProblem(c){
   return worst;
 }
 // The rail's counts are the whole roster's (what the nine tiles used to show), never the filtered list's.
-var CRST={'On board':['#EAF5E4','#3C7A2A','#3C7A2A'],'On Vacation':['#FBF2E0','#8A5A14','#B0741A'],'Earmarked':['#E6EFFB','#1E5FB0','#1E5FB0'],'Retired':['#EEF1F5','#4B5563','#6B7280'],'Inactive':['#E5E7EB','#374151','#374151']};
+var CRST={'On board':['#EAF5E4','#3C7A2A','#3C7A2A'],'On Vacation':['#FBF2E0','#8A5A14','#B0741A'],'Earmarked':['#E6EFFB','#1E5FB0','#1E5FB0'],'Inactive':['#E5E7EB','#374151','#374151']};
 function crStyle(st){return CRST[st]||['#EEF1F5','#4B5563','#6B7280'];}
 function shipKey(v){return String(v==null?'':v).toLowerCase().replace(/[^a-z0-9]/g,'').replace(/^mv/,'').replace(/oftheseas$/,'');}
 function shipShort(v){var t=String(v==null?'':v).trim().replace(/^MV\\s+/i,'').replace(/\\s+OF THE SEAS$/i,'');return t===t.toUpperCase()?t.toLowerCase().replace(/\\b[a-z]/g,function(ch){return ch.toUpperCase();}):t;}
@@ -6244,7 +6246,7 @@ function crewFacets(){
   var sch=act.filter(function(c){return c.sch_exp&&['expired','90d'].indexOf(docFlag(c.sch_exp))>=0;}).length;
   var valid=CREW.filter(function(c){return !crewDocProblem(c);}).length;
   var f=facetRow;
-  var fixed=['On board','On Vacation','Earmarked','Retired','Inactive'];
+  var fixed=['On board','On Vacation','Earmarked','Inactive'];
   var h='<div class=crlbl style="padding:0 8px 6px">Status</div>';
   h+=f('st','','All crew',CREW.length,!CF.status.length);
   fixed.forEach(function(st){h+=f('st',st,st==='On Vacation'?'On vacation':st,n(st),CF.status.indexOf(st)>=0,crStyle(st)[2]);});
@@ -6590,7 +6592,7 @@ async function editCrewModal(id){
    +fg('Passport','<input id=ePp type=date value="'+iv(c.pp_exp)+'">')+fg('US visa','<input id=eUsv type=date value="'+iv(c.usv_exp)+'">')
    +fg('Schengen (Europe only)','<input id=eSch type=date value="'+iv(c.sch_exp)+'">')
    +'</div>'
-   +'<span class=ck style="margin-top:8px;font-weight:600;cursor:pointer;display:flex" onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"> Retired (manual — keeps this crew off the auto On board / On Vacation tagging)</span>'
+   +'<span class=ck style="margin-top:8px;font-weight:600;cursor:pointer;display:flex" onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"> Inactive (manual — out of the rotation until you clear it)</span>'
    +'<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><button class="btn ghost" style="color:var(--red)" onclick="hideCrew(\\''+id+'\\')" title="Remove this card from all rosters (reversible)">Hide card</button><span><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></span></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
 }
