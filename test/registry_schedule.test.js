@@ -49,7 +49,7 @@ test("no leg without a hull the console knows or an embark date; Earmarked and d
   assert.equal(legs.find((l) => l.sc === "I").ship, "NOWHERE", "an unknown hull keeps the file's name (the board's valid-ship guard decides)");
 });
 
-test("TDG's own word is final: a debark on the row, the Counter's actual sign-off, or the file's cross-over (Wonder, 7 Oct 2026: two On board, the reliever embarked 2 Oct)", () => {
+test("TDG's own word is final: a debark on the row or the Counter's actual sign-off; the file's cross-over dates the sign-off but the crew TDG still lists On board stays current (Wonder: two On board, the reliever embarked 2 Oct; Miguel 8 Oct 2026: \"we follow what tdg has\")", () => {
   const legs = legsFromRegistry({ rows: [
     row("OLD", "On board", "MV WONDER OF THE SEAS", "2026-03-22", null),
     row("NEW", "On board", "MV WONDER OF THE SEAS", "2026-10-02", null),
@@ -61,7 +61,9 @@ test("TDG's own word is final: a debark on the row, the Counter's actual sign-of
      edits: [{ sc: "OLD", seq: 1, on_key: "2026-03-22", sign_off: "2026-12-01", updated_at: "2026-10-06T00:00:00Z" }],
      vessels: VES, today: TODAY });
   const L = by(legs);
-  assert.deepEqual({ off: L["OLD|Wonder"].off, src: L["OLD|Wonder"].offSource, cur: L["OLD|Wonder"].is_current, rel: L["OLD|Wonder"].reliever.sc }, { off: "2026-10-02", src: "tdg", cur: false, rel: "NEW" }, "the outgoing contract ended the day the reliever embarked — Rita's later typed date does not reopen a fact of the file");
+  assert.deepEqual({ off: L["OLD|Wonder"].off, src: L["OLD|Wonder"].offSource, cur: L["OLD|Wonder"].is_current, rel: L["OLD|Wonder"].reliever.sc }, { off: "2026-10-02", src: "tdg", cur: true, rel: "NEW" }, "the reliever's embark dates the sign-off; TDG's file still lists the outgoing crew On board, so the contract stays current (held)");
+  assert.equal(L["OLD|Wonder"].heldByFile, true, "drawn red: past the sign-off, TDG still has them aboard");
+  assert.equal(L["OLD|Wonder"].offConfirmed, undefined, "never a recorded sign-off while TDG lists them On board");
   assert.equal(L["NEW|Wonder"].is_current, true); assert.equal(L["NEW|Wonder"].off, "2027-05-02");
   assert.equal(L["NAV1|Navigator"].off, "2026-10-02", "a trailing space in the vessel cell still meets the hull");
   assert.deepEqual({ off: L["DEB|Apex"].off, src: L["DEB|Apex"].offSource, cur: L["DEB|Apex"].is_current, conf: L["DEB|Apex"].offConfirmed }, { off: "2026-11-20", src: "tdg", cur: true, conf: undefined });
@@ -82,7 +84,11 @@ test("Rita's typed sign-off stands for its contract (keyed on the embark; a lega
   const L = by(legs);
   assert.deepEqual({ off: L["R1|Apex"].off, src: L["R1|Apex"].offSource, at: L["R1|Apex"].offAt, conf: L["R1|Apex"].offConfirmed, emb: L["R1|Apex"].embark, dis: L["R1|Apex"].disembark, eccr: L["R1|Apex"].edit.eccr, seq: L["R1|Apex"].edit.seq, cur: L["R1|Apex"].is_current },
     { off: "2026-11-30", src: "rita", at: "2026-09-01", conf: true, emb: "Miami", dis: "Rome", eccr: true, seq: 7, cur: true });
-  assert.deepEqual({ off: L["R2|Wonder"].off, src: L["R2|Wonder"].offSource, cur: L["R2|Wonder"].is_current }, { off: "2026-09-30", src: "rita", cur: false }, "a recorded sign-off that passed ended the contract");
+  assert.deepEqual({ off: L["R2|Wonder"].off, src: L["R2|Wonder"].offSource, cur: L["R2|Wonder"].is_current }, { off: "2026-09-30", src: "rita", cur: true }, "Rita's sign-off passed but the 7 Oct file still lists them On board: TDG wins, the contract is held (8 Oct 2026)");
+  assert.equal(L["R2|Wonder"].heldByFile, true);
+  const Lold = by(legsFromRegistry({ rows: [row("R2", "On board", "MV WONDER OF THE SEAS", "2026-06-05", null, { run_at: "2026-09-25T08:00:00.000Z" })],
+    edits: [{ sc: "R2", seq: 1, on_key: "2026-06-05", sign_off: "2026-09-30", updated_at: "2026-09-26T00:00:00Z" }], vessels: VES, today: TODAY }));
+  assert.deepEqual({ cur: Lold["R2|Wonder"].is_current, held: Lold["R2|Wonder"].heldByFile }, { cur: false, held: undefined }, "a sign-off AFTER the file's date (the file could not see it) still ends the contract");
   assert.deepEqual({ off: L["R3|Quest"].off, src: L["R3|Quest"].offSource }, { off: "2026-12-29", src: "projected" });
 });
 
@@ -106,7 +112,9 @@ test("the cross-over: Rita's reliever card on the same hull sets the outgoing si
   assert.deepEqual({ off: L["X1|Apex"].off, src: L["X1|Apex"].offSource, rel: L["X1|Apex"].reliever }, { off: "2026-11-15", src: "card", rel: { sc: "REL1", name: "Reliever One", cardId: "as_a" } }, "the card (1 Oct) is newer than the typed date (15 Sep): the card wins");
   const L2 = by(legsFromRegistry({ rows, open, edits: [{ ...edits[0], updated_at: "2026-10-05T00:00:00Z" }], vessels: VES, today: TODAY }));
   assert.deepEqual({ off: L2["X1|Apex"].off, src: L2["X1|Apex"].offSource }, { off: "2026-11-01", src: "rita" }, "typed after the card: Rita's date wins");
-  assert.deepEqual({ off: L["X2|Wonder"].off, src: L["X2|Wonder"].offSource, cur: L["X2|Wonder"].is_current }, { off: "2026-10-02", src: "card", cur: false }, "the reliever's sign-on has passed: the outgoing contract ended that day (the swap)");
+  assert.deepEqual({ off: L["X2|Wonder"].off, src: L["X2|Wonder"].offSource, cur: L["X2|Wonder"].is_current }, { off: "2026-10-02", src: "card", cur: true }, "the reliever's sign-on passed BEFORE the 7 Oct file, which still lists the outgoing crew On board: held, no swap (8 Oct 2026)");
+  const Lsw = by(legsFromRegistry({ rows: rows.map((r) => ({ ...r, run_at: "2026-09-30T08:00:00.000Z" })), open, edits, vessels: VES, today: TODAY }));
+  assert.deepEqual({ cur: Lsw["X2|Wonder"].is_current, src: Lsw["X2|Wonder"].offSource }, { cur: false, src: "card" }, "a reliever sign-on after the file's date: the swap stands until the next file");
   assert.deepEqual({ off: L["X3|Quest"].off, src: L["X3|Quest"].offSource }, { off: "2026-12-29", src: "projected" }, "the crew's own next card is not their reliever");
   assert.deepEqual({ off: L["X4|Navigator"].off, src: L["X4|Navigator"].offSource, cur: L["X4|Navigator"].is_current }, { off: "2027-01-01", src: "projected", cur: true }, "a card the 7 Oct file contradicts (REL4 On Vacation, sign-on 25 Sep) does not end the seat");
   const L3 = by(legsFromRegistry({ rows: rows.filter((r) => r.sc !== "REL4"), open, vessels: VES, today: TODAY }));
@@ -221,6 +229,11 @@ test("rotationSections dates a seat from the file's leg (regEnr) before the Coun
   assert.match(b, /if \(!h \|\| h\.source !== "registry" \|\| !h\.is_current \|\| !h\.sc\) continue;/);
   assert.match(b, /for \(const h of HIST\) \{ if \(!h\.ours \|\| !h\.sc \|\| !h\.is_current\) continue; const cs = shipOf\(h\.ship\)/, "a non-current leg never dates a live seat");
   assert.match(b, /offSource: enr\.offSource \|\| null, offAt: enr\.offAt \|\| null, reliever: enr\.reliever \|\| null,/, "the card says where its sign-off comes from");
+  // HELD (8 Oct 2026): the seat carries heldByFile; it is never a recorded sign-off; the card reads red with TDG's word.
+  assert.match(b, /offSource: enr\.offSource \|\| null, offAt: enr\.offAt \|\| null, reliever: enr\.reliever \|\| null, heldByFile: !!enr\.heldByFile,/);
+  assert.match(b, /offConfirmed: !h\.heldByFile && \(h\.offSource === "tdg" \|\| !!h\.offConfirmed\), heldByFile: !!h\.heldByFile,/);
+  assert.match(WORKER, /if\(x\.heldByFile\)return true; \/\/ TDG's file still has them On board/, "cardOverdue: held is red before any recorded-sign-off check");
+  assert.match(WORKER, /TDG still has them On board<\/b>, past the sign-off/);
   assert.match(WORKER, /for \(const h of HIST \|\| \[\]\) if \(h && h\.ours && h\.sc === sc && h\.source === "registry" && h\.is_current && h\.on\) return \{ sign_on: h\.on, proj_off: h\.off \|\| null, act_off: null, source: "registry" \};/, "the Crew tab's active span is the file's leg first");
   assert.match(WORKER, /boardLegs\(env\), \/\/ the ONE schedule: the file's current leg for this crew/, "the Edit modal API reads the same schedule");
   assert.match(WORKER, /function fileDatesNote\(x\)\{/);

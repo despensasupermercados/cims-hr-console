@@ -1863,7 +1863,8 @@ async function rotationSections(env) {
       seq, hasEdit: !!h.edit, ship: cs, onKey: h.on, signOn: h.on, signOff: h.off || null,
       dateSource: "registry", dateSourceAt: h.fileAt || null, overridden: false,
       offSource: h.offSource || null, offAt: h.offAt || null, reliever: h.reliever || null,
-      offConfirmed: h.offSource === "tdg" || !!h.offConfirmed, onConfirmed: !!ed.onConfirmed,
+      // heldByFile (8 Oct 2026): the sign-off passed and TDG's file still has them On board — never "recorded".
+      offConfirmed: !h.heldByFile && (h.offSource === "tdg" || !!h.offConfirmed), heldByFile: !!h.heldByFile, onConfirmed: !!ed.onConfirmed,
       embark: h.embark || null, disembark: h.disembark || null, eccr: !!ed.eccr, air: !!ed.air, hotel: !!ed.hotel,
     };
   }
@@ -1969,7 +1970,7 @@ async function rotationSections(env) {
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
-  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null  })); };
+  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null  })); };
   const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
@@ -2141,6 +2142,9 @@ async function rotationSections(env) {
     const crew = (promByShip[ship] || []).slice().sort((a, b) =>
       (a.state === "yellow" && !a.confirmed && !a.awaiting ? 1 : 0) - (b.state === "yellow" && !b.confirmed && !b.awaiting ? 1 : 0)
       || (b.current ? 1 : 0) - (a.current ? 1 : 0)
+      // Then by sign-on (8 Oct 2026): two crew aboard one hull (a handover TDG has not closed) read left to
+      // right like the ship's timeline — the outgoing crew first.
+      || String(a.signOn || "9999").localeCompare(String(b.signOn || "9999"))
       || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const cur = new Set(crew.map(c => c.agency_id));
     // Also-served = ACTUAL per-contract legs from the SCHEDULE (ship_history): one entry per contract
@@ -5196,6 +5200,7 @@ function niceCity(v){
 // Counter ends a leg (CLAUDE.md §11), so this seat is still held — by someone nobody has signed off.
 function cardOverdue(x){
   if(!x||x.state==='yellow'||!x.signOff)return false;
+  if(x.heldByFile)return true; // TDG's file still has them On board past this sign-off (8 Oct 2026): red, seat kept
   if(x.offConfirmed)return false; // a sign-off IS recorded (a manual status pin kept the seat): never say it is not
   return x.signOff < new Date().toISOString().slice(0,10);
 }
@@ -5289,7 +5294,8 @@ function rotCard(x){
   // A card with no dates used to render as an empty box stretched to its neighbour's height. Say what it
   // is: TDG's file has them aboard this ship and no Contract Counter leg carries the contract yet.
   var gap=(!plan&&x.ship&&!x.signOn&&!x.signOff)?'<div class=gapnote>No contract dates yet &middot; the TDG file has them aboard without an embark date</div>':'';
-  if(ovd)note='<div class=srcnote><b style="color:var(--red)">Past the projected sign-off.</b> The seat stays held until TDG, a reliever card or you record the sign-off.</div>'+note;
+  if(ovd&&x.heldByFile)note='<div class=srcnote><b style="color:var(--red)">TDG still has them On board</b>, past the sign-off'+((x.reliever&&x.reliever.name)?(' ('+escHtml(x.reliever.name)+' embarked '+escHtml(fmtDateS(x.signOff))+')'):'')+'. The seat stays until the TDG file signs them off.</div>'+note;
+  else if(ovd)note='<div class=srcnote><b style="color:var(--red)">Past the projected sign-off.</b> The seat stays held until TDG, a reliever card or you record the sign-off.</div>'+note;
   // THE DEPLOY BUTTON IS GONE (Miguel, 7 Oct 2026: "this deploy CTA does not need it anymore .. the logic is not like
   // that no more"): Joy is told from the import review, row by row (Tell Joy on an earmark TDG does not have yet;
   // Keep mine on a discrepancy). Every earmark card keeps Remove — TDG's own earmark too: removing it records the
@@ -5320,7 +5326,8 @@ function rotCard(x){
 function fileDatesNote(x){
   var on='<b>Sign-on</b> TDG file'+(x.dateSourceAt?(' '+escHtml(x.dateSourceAt)):'');
   var off='';
-  if(x.offSource==='tdg')off=(x.reliever&&x.reliever.name)?('<b>Sign-off</b> '+escHtml(x.reliever.name)+' embarked per the TDG file'):'<b>Sign-off</b> TDG file (final)';
+  if(x.heldByFile)off=''; // the red line above already says whose embark dated it and that TDG still has them aboard
+  else if(x.offSource==='tdg')off=(x.reliever&&x.reliever.name)?('<b>Sign-off</b> '+escHtml(x.reliever.name)+' embarked per the TDG file'):'<b>Sign-off</b> TDG file (final)';
   else if(x.offSource==='rita')off='<b>Sign-off</b> yours'+(x.offAt?(', '+escHtml(x.offAt)):'');
   else if(x.offSource==='card')off='<b>Sign-off</b> '+((x.reliever&&x.reliever.name)?escHtml(x.reliever.name)+"'s":'the reliever')+' card sign-on';
   else if(x.offSource==='projected')off='<b>Sign-off</b> projected, 7 months (Azamara 5) &middot; TDG or you can set it';

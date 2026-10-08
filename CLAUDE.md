@@ -124,6 +124,15 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
   the seat: from the file row if the file has them, else from the card, drawn green **"ABOARD · AWAITING
   TDG FILE"** (`awaiting`), Deploy and Remove kept. A card whose sign-on passed but that a file DATED AFTER
   it does not have aboard (ashore / elsewhere) is contradicted: it ends nothing and is off the board (§11).
+- **HELD: TDG's On board wins** (Miguel, 8 Oct 2026: "we follow what tdg has in the software", on Belhida / Reyes /
+  Villacortes — relievers aboard since 2 and 7 Oct, TDG still listing them On board). The file's cross-over DATES the
+  outgoing sign-off but is no longer final. Any sign-off that is not TDG's final word (cross-over, Rita's typed date,
+  a reliever card) that has passed while the latest file — dated ON or AFTER it — still has the crew On board that
+  hull with no DEBARKEDDATE keeps the contract CURRENT (`heldByFile`): status On board, the card red "TDG still has
+  them On board, past the sign-off (X embarked <date>)", never a recorded sign-off. Only TDG ends it (debark date,
+  Counter actual sign-off, or a file that no longer has them On board). A sign-off AFTER the file's date (the file
+  could not see it) still swaps as below. Two crew aboard one hull sit side by side, ordered by sign-on like the
+  timeline. Pinned by `test/registry_schedule.test.js`. This replaces the swap/cross-over-ends rule of 7 Oct.
 - **The file absorbs the card** (registry apply, `cards_absorbed`): a card the file confirms aboard with an
   embark within `ABSORB_DAYS` of its sign-on is removed after the batch; a sign-off Rita CONFIRMED on it
   (OFF DATE) is kept first as hers for that contract (`recordSignoffEdit`). Wider than the window: the card
