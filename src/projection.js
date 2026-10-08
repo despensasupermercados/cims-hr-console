@@ -11,7 +11,10 @@
 // + 7 months (Miguel, 7 Oct 2026: a contract is seven months; six until then), + 5 on Azamara. Rita adjusts
 // either on the card afterwards.
 
-export function defaultProjectionDates({ ship, legs, today, brand, addMonths, months = 7, azamaraMonths = 5 }) {
+// turnarounds: that ship's turnaround days (8 Oct 2026): the projected sign-off lands on the nearest one (turnaround.js).
+import { snapToTurnaround } from "./turnaround.js";
+
+export function defaultProjectionDates({ ship, legs, today, brand, addMonths, months = 7, azamaraMonths = 5, turnarounds }) {
   // Ship names meet case-insensitively: a Counter row's "navigator" is the vessel table's "Navigator".
   const key = (s) => String(s == null ? "" : s).trim().toLowerCase();
   const offs = (legs || [])
@@ -20,10 +23,12 @@ export function defaultProjectionDates({ ship, legs, today, brand, addMonths, mo
     .sort();
   const signOn = offs[0] || today;
   const n = /azamara/i.test(String(brand || "")) ? azamaraMonths : months;
-  return { signOn, signOff: addMonths(signOn, n), follows: !!offs[0] };
+  const raw = addMonths(signOn, n);
+  const sn = snapToTurnaround(raw, turnarounds || []);
+  return { signOn, signOff: sn.date || raw, follows: !!offs[0], offPort: sn.port || null, offSnapped: sn.snapped ? sn.delta : 0 };
 }
 
-// deps: { boardLegs(env), save(env, payload) -> {ok,id}, addMonths(iso, n) }
+// deps: { boardLegs(env), save(env, payload) -> {ok,id}, addMonths(iso, n), turnarounds?(env, ship, around) -> rows }
 export async function createProjection(env, { agencyId, ship, today }, deps) {
   const { boardLegs, save, addMonths } = deps;
   agencyId = String(agencyId || "").trim(); ship = String(ship || "").trim();
@@ -44,10 +49,13 @@ export async function createProjection(env, { agencyId, ship, today }, deps) {
   if (!cr) return { ok: false, error: "not_found" };
   if (!ves) return { ok: false, error: "unknown_ship" };
   if (dup) return { ok: false, error: "already_projected", id: dup.id }; // one crew, two ships is fine; the same ship twice is a slip
-  const d = defaultProjectionDates({ ship: ves.name, legs, today, brand: ves.brand, addMonths });
+  const d0 = defaultProjectionDates({ ship: ves.name, legs, today, brand: ves.brand, addMonths });
+  // The ship's turnaround days around the raw sign-off (one small read), so the card ends on a crew-change day.
+  const ta = deps.turnarounds ? await deps.turnarounds(env, ves.name, d0.signOff).catch(() => []) : [];
+  const d = defaultProjectionDates({ ship: ves.name, legs, today, brand: ves.brand, addMonths, turnarounds: ta });
   const res = await save(env, {
     crew_id: cr.id, role: "reliever", vessel_id: ves.id, vessel_name: ves.name,
-    sign_on: d.signOn, planned_sign_off: d.signOff,
+    sign_on: d.signOn, planned_sign_off: d.signOff, ...(d.offPort ? { off_port_seed: d.offPort } : {}),
   });
-  return res && res.ok ? { ...res, sign_on: d.signOn, planned_sign_off: d.signOff, follows: d.follows } : res;
+  return res && res.ok ? { ...res, sign_on: d.signOn, planned_sign_off: d.signOff, follows: d.follows, off_port: d.offPort || null, off_snapped: d.offSnapped || 0 } : res;
 }

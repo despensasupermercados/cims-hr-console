@@ -48,9 +48,9 @@ test("node:sqlite is available, so everything below actually runs", () => {
 // Miguel, 7 Oct 2026: a contract is SEVEN months (Azamara five); six until then.
 test("dates: the current printer's sign-off if ahead, else today; +7 months, +5 on Azamara", () => {
   const a = defaultProjectionDates({ ship: "Adventure", legs: LEGS, today: TODAY, brand: "Royal Caribbean", addMonths: addMonthsISO });
-  assert.deepEqual(a, { signOn: "2026-11-29", signOff: "2027-06-29", follows: true });
+  assert.deepEqual(a, { signOn: "2026-11-29", signOff: "2027-06-29", follows: true, offPort: null, offSnapped: 0 }); // no itinerary rows passed: the raw date (turnaround.test.js has the snap)
   const q = defaultProjectionDates({ ship: "Quest", legs: LEGS, today: TODAY, brand: "Azamara", addMonths: addMonthsISO });
-  assert.deepEqual(q, { signOn: "2026-09-15", signOff: "2027-02-15", follows: false }, "an overdue printer does not push the plan into the past");
+  assert.deepEqual(q, { signOn: "2026-09-15", signOff: "2027-02-15", follows: false, offPort: null, offSnapped: 0 }, "an overdue printer does not push the plan into the past");
   const none = defaultProjectionDates({ ship: "Edge", legs: LEGS, today: TODAY, brand: "Celebrity", addMonths: addMonthsISO });
   assert.equal(none.signOn, TODAY);
 });

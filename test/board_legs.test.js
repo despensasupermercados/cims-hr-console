@@ -185,13 +185,13 @@ test("an ended assignment becomes a NON-current leg with off = actual sign-off; 
 
 // (7 Oct 2026) five more reads join the same wave: the kept AdvancedQuery (the schedule), Rita's edits, the
 // Counter keys, the open cards and the vessel brands — still ONE round trip (registry_schedule.test.js has the rules).
-test("boardLegsFromDb fires all nine reads concurrently and merges (the file's schedule first, the Counter folded in)", async () => {
+test("boardLegsFromDb fires all ten reads concurrently and merges (the file's schedule first, the Counter folded in)", async () => {
   const { env, calls } = stubEnv({
     legs: [{ brand: "Royal Caribbean", ship_short: "Harmony", sc: "SC-1", crew_id: "c1", on_date: "2026-02-01", off_date: "2026-09-01", ours: 1, is_current: 1, crew_name: "A B", source: "counter" }],
     assignments: [asg()],
   });
   const out = await boardLegsFromDb(env, "2026-09-04");
-  assert.equal(calls.length, 9);
+  assert.equal(calls.length, 10); // + the fleet's turnaround days (8 Oct 2026)
   assert.ok(calls.some((c) => /FROM keyman_contract3 k/.test(c.sql)), "the Counter is still read (history, and the fallback for a crew the file does not date)");
   assert.ok(calls.some((c) => /FROM registry_snapshot s/.test(c.sql)), "the kept file is the schedule");
   assert.equal(out.length, 2);
