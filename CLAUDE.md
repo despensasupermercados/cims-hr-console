@@ -137,6 +137,20 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
   embark within `ABSORB_DAYS` of its sign-on is removed after the batch; a sign-off Rita CONFIRMED on it
   (OFF DATE) is kept first as hers for that contract (`recordSignoffEdit`). Wider than the window: the card
   stays (confirmed, one card: the seat absorbs it visually, Rita removes it).
+- **A PROJECTED sign-off lands on a turnaround day** (Miguel, 8 Oct 2026, Alonzo's Allure card ending Jun 29, 2027 in
+  Willemstad: "Curaçao is not a turnaround port ... look at the 7 months, I also want you to look at the turnaround
+  port, not the middle of the voyage. Even if you are a couple of days shorter or a couple of days over, it's okay
+  because it's a projected day ... Always look for the turnaround days"). `src/turnaround.js` (pure): the raw embark + 7
+  months (Azamara 5) moves to the NEAREST turnaround day of the hull's itinerary (`vessel_port_day.is_turnaround`,
+  `fetchTurnarounds`: one bounded query in the board's wave, −45 days to +15 months, ~3,800 rows, never the whole
+  table), a tie to the later day, nothing within ±14 days → the raw date stands (`offSnapped` = days moved, the
+  turnaround port as the disembark port). Applied in ONE place per path: the board's seat (`legsFromRegistry`,
+  `turnarounds` map riding on `boardLegs` non-enumerably for the bench) and every projection route
+  (`defaultProjectionDates` + `createProjection` with `deps.turnarounds` = `fetchShipTurnarounds`: the drag, the one-tap
+  bench, the TDG-earmark card; `off_port_seed` = the turnaround port). TDG's debark, Rita's typed sign-off and a reliever
+  card's sign-on are never moved. The card says "projected, 7 months after embark on the turnaround". Pinned by
+  `test/turnaround.test.js`. The 13 open cards dated before this rule still end mid-voyage: re-snapping them is Miguel's
+  call, never silent.
 - **Overdue** = a PROJECTED sign-off that passed: still current, red, "Past the projected sign-off". A tdg /
   rita / card sign-off that passed ENDED the contract. A dated On Vacation / Inactive / Reserved row is the
   last contract, ended by TDG (the Score Card's default span, the scoring queue's "signed off recently").

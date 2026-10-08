@@ -33,7 +33,7 @@ import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS 
 import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./relief_api.js";
 import { deployRecipient, deployCc } from "./keyman_deploy.js";
 import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID as EARMARK_TEMPLATE } from "./earmark.js";
-import { fetchBoardPortDays } from "./port_days.js";
+import { fetchShipTurnarounds, fetchBoardPortDays } from "./port_days.js";
 import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
@@ -1630,7 +1630,7 @@ async function apiCrewAdd(request, env, session, ctx) {
   const ship = canonShipWith(planShip, SHIP_KEYS) || planShip;
   const placePlan = async () => {
     const r = await createProjection(env, { agencyId: id, ship, today: TODAY() },
-      { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO })
+      { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds })
       .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
     if (r && r.ok) await logActivity(env, session && session.email, "projection_create", id + " -> " + ship + " on " + r.sign_on + " (" + r.id + ", from Add crew)");
     else await logActivity(env, session && session.email, "projection_failed", id + " -> " + ship + ": " + ((r && r.error) || "error") + " (from Add crew)");
@@ -1868,7 +1868,7 @@ async function rotationSections(env) {
     (regEnr[k] = regEnr[k] || {})[h.sc] = {
       seq, hasEdit: !!h.edit, ship: cs, onKey: h.on, signOn: h.on, signOff: h.off || null,
       dateSource: "registry", dateSourceAt: h.fileAt || null, overridden: false,
-      offSource: h.offSource || null, offAt: h.offAt || null, reliever: h.reliever || null,
+      offSource: h.offSource || null, offAt: h.offAt || null, reliever: h.reliever || null, offSnapped: h.offSnapped || 0,
       // heldByFile (8 Oct 2026): the sign-off passed and TDG's file still has them On board — never "recorded".
       offConfirmed: !h.heldByFile && (h.offSource === "tdg" || !!h.offConfirmed), heldByFile: !!h.heldByFile, onConfirmed: !!ed.onConfirmed,
       embark: h.embark || null, disembark: h.disembark || null, eccr: !!ed.eccr, air: !!ed.air, hotel: !!ed.hotel,
@@ -2239,7 +2239,7 @@ async function rotationSections(env) {
   const benchArgs = (sec) => ({ ship: sec.ship, brand: sec.brand, block: sec.brand === "Royal" && jrRule[normShip(sec.ship)] === "block" });
   for (const sec of sections) {
     if (!sec.crew || !sec.crew.length) continue;
-    const d = defaultProjectionDates({ ship: sec.ship, legs: HIST, today, brand: sec.brand, addMonths: addMonthsISO });
+    const d = defaultProjectionDates({ ship: sec.ship, legs: HIST, today, brand: sec.brand, addMonths: addMonthsISO, turnarounds: (HIST.turnarounds || {})[String(sec.ship).trim().toLowerCase()] || [] });
     const r = rankBench(benchP, { ...benchArgs(sec), reliefDate: d.signOn, signOff: d.signOff });
     sec.bench = { date: d.signOn, signOff: d.signOff, rows: r.ready.slice(0, BENCH_TOP), total: r.ready.length, rules: r.rules };
   }
@@ -2536,7 +2536,7 @@ async function dismissedEarmarks(env) {
 // A TDG earmark the console has no card for becomes a console earmark (7 Oct 2026): the same card Rita would
 // have dragged there — sign-on = the hull's current printer's projected sign-off (else today), + 7 months.
 async function createEarmarkCard(env, { agencyId, ship, today }) {
-  return createProjection(env, { agencyId, ship, today: today || TODAY() }, { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO });
+  return createProjection(env, { agencyId, ship, today: today || TODAY() }, { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds });
 }
 // A sign-off Rita CONFIRMED on a card the file absorbs (7 Oct 2026) is hers for that contract: filed under the
 // file's embark date so the seat keeps it ("that date stands until she changes it"). Nothing else is copied.
@@ -2569,7 +2569,7 @@ async function apiReady(request, env, session) {
 async function apiRotationProject(request, env, session, ctx) {
   const b = await request.json().catch(() => ({}));
   const res = await createProjection(env, { agencyId: b.agency_id, ship: b.ship, today: TODAY() },
-    { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO });
+    { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds });
   if (res && res.ok) {
     // The audit row rides behind the response (one round trip the drag no longer waits for).
     const log = logActivity(env, session && session.email, "projection_create", String(b.agency_id) + " -> " + String(b.ship) + " on " + res.sign_on + " (" + res.id + ")");
@@ -5477,7 +5477,7 @@ function fileDatesNote(x){
   else if(x.offSource==='tdg')off=(x.reliever&&x.reliever.name)?('<b>Sign-off</b> '+escHtml(x.reliever.name)+' embarked per the TDG file'):'<b>Sign-off</b> TDG file (final)';
   else if(x.offSource==='rita')off='<b>Sign-off</b> yours'+(x.offAt?(', '+escHtml(x.offAt)):'');
   else if(x.offSource==='card')off='<b>Sign-off</b> '+((x.reliever&&x.reliever.name)?escHtml(x.reliever.name)+"'s":'the reliever')+' card sign-on';
-  else if(x.offSource==='projected')off='<b>Sign-off</b> projected, '+(x.brand==='Azamara'?'5':'7')+' months after embark &middot; TDG or you can set it';
+  else if(x.offSource==='projected')off='<b>Sign-off</b> projected, '+(x.brand==='Azamara'?'5':'7')+' months after embark'+(x.offSnapped?' on the turnaround':'')+' &middot; TDG or you can set it';
   return '<div class=srcnote>'+on+(off?(' &middot; '+off):'')+'</div>';
 }
 function rotIssuesBlock(list){

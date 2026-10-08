@@ -46,6 +46,29 @@ export const AZAMARA_TURNAROUNDS_SQL =
       AND berth_date >= date(?1, '-1 day')
     ORDER BY ship_short, berth_date`;
 
+// THE FLEET'S TURNAROUND DAYS (8 Oct 2026, turnaround.js): a projected sign-off lands on one. Bounded to the
+// window a projection can fall in (an embark ≤ today + 7 months, a plan up to 15 months out): ~3,800 rows for
+// 51 hulls, one query in the board's wave — never the whole table (§11).
+export const TURNAROUNDS_SQL =
+  `SELECT brand, ship_short, berth_date, port_name FROM vessel_port_day
+    WHERE is_turnaround = 1 AND is_sea = 0 AND port_name IS NOT NULL
+      AND berth_date BETWEEN date(?1, '-45 days') AND date(?1, '+15 months')
+    ORDER BY ship_short, berth_date`;
+export async function fetchTurnarounds(env, today) {
+  const { results } = await env.DB.prepare(TURNAROUNDS_SQL).bind(today).all();
+  return results || [];
+}
+// One ship's turnaround days around a date (±MAX_SNAP_DAYS): the one-tap / drag projection snaps its sign-off.
+export const SHIP_TURNAROUNDS_SQL =
+  `SELECT brand, ship_short, berth_date, port_name FROM vessel_port_day
+    WHERE ship_short = ?1 AND is_turnaround = 1 AND is_sea = 0 AND port_name IS NOT NULL
+      AND berth_date BETWEEN date(?2, '-14 days') AND date(?2, '+14 days')
+    ORDER BY berth_date`;
+export async function fetchShipTurnarounds(env, ship, around) {
+  const { results } = await env.DB.prepare(SHIP_TURNAROUNDS_SQL).bind(String(ship), String(around)).all();
+  return results || [];
+}
+
 // One flat, de-duplicated list in the shape groupPortDays()/resolveCity() expect.
 export async function fetchBoardPortDays(env) {
   const [a, b, c] = await Promise.all([
