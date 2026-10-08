@@ -238,6 +238,24 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   the next sign-on is before this sign-off, "TDG earmark, dates to plan" without dates. The status line's "7 mos" is
   the contract's length (sign-on → sign-off), unchanged. Documents: one red tag per EXPIRED document by name
   (`docBadge().items`), the missing / expiring summary stays one chip (`rest`). Pinned by `test/next_assignment.test.js`.
+- **WHO CAN TAKE THE SEAT — the earmark bench** (Miguel, 8 Oct 2026, on Vision's empty slot: "give Rita ... available
+  options ... everybody who has been home already for a minimum of 6 weeks, but with a cutoff of 6 months ... a total of
+  9 names ... if Rita picks one ... the whole thing ... should pick up all the information"; mock-up B "polished, real
+  list" approved with "go"). `src/earmark_bench.js`, pure: `benchPool` once per board read (active crew — On board / On
+  Vacation / Reserved — with no earmark to come and a DATED time home: ashore from TDG's DEBARKEDDATE else the last
+  schedule sign-off; aboard another ship from the board's own sign-off for that contract), `rankBench` per ship.
+  **Both measured on the earmark's start date**, never today (today the list is empty for every ship: Ramos home 3 days,
+  Alonzo 26): the date `defaultProjectionDates` gives the ship (the printer's sign-off), so the list and the one-tap
+  earmark agree. Window: home ≥ 42 days and ≤ 6 months on that day; the ship's own printer never; the top 9 ride on
+  `sec.bench` (no extra round trip, §12), `GET /api/rotation/bench?ship=` serves everyone (`ready` + `outside`: ashore
+  beyond 6 months, faded in the panel, never on the board). The slot draws a soft-yellow box (`benchBox`, `.ebench`):
+  name, where they are ("Home since 12 Sep · Symphony" / "Off Apex 7 Oct"), time home by the date with a thin bar, the
+  documents that will not carry the contract in red (expired by sign-on, expiring before sign-off, required and missing).
+  **One tap earmarks** through `/api/rotation/project` (the drag's route: sign-on = the printer's sign-off, +7 months /
+  Azamara 5) and shows an Undo toast (`/api/relief/remove`). "+ N more" opens the relief panel on a NEW reliever, which
+  lists everyone (`#mbench`, Most rested / Everyone available, `RB.pick` on a row) above the search; the picker rows
+  carry `agency_id` for that. No candidate → the plain "Add earmark" slot as before. `drawRotation` carries `bench` on
+  the section clone (the 15 Sep 2026 field-drop trap). Pinned by `test/earmark_bench.test.js`.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.

@@ -34,7 +34,8 @@ import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./re
 import { deployRecipient, deployCc } from "./keyman_deploy.js";
 import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID as EARMARK_TEMPLATE } from "./earmark.js";
 import { fetchBoardPortDays } from "./port_days.js";
-import { createProjection } from "./projection.js";
+import { createProjection, defaultProjectionDates } from "./projection.js";
+import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
 import { classifyWindow } from "./scorequeue.js";
@@ -225,6 +226,7 @@ export default {
         // logs it so it can be put back. Inside the boundary and behind the session gate (§11).
         if (session) { const kd = await _kmDeploy(p, request, env, url, session); if (kd) return kd; }
         if (p === "/api/rotation/project" && request.method === "POST") return apiRotationProject(request, env, session, ctx);
+        if (p === "/api/rotation/bench" && request.method === "GET") return apiRotationBench(url, env);
         if (p === "/api/rotation/ready" && request.method === "POST") return apiReady(request, env, session);
         if (p === "/api/rotation/crew") return apiRotationCrew(env, url);
         if (p === "/api/rotation/note" && request.method === "POST") return apiNote(request, env, session);
@@ -2222,7 +2224,24 @@ async function rotationSections(env) {
   ["On board", "On Vacation", "Reserved", "Earmarked", "Inactive", "Not for Rehire", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length; counts.issues = issues.length;
   attachNextAssignments(sections, today); // the seat card's "Next" line (8 Oct 2026), read off the cards above
-  return { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
+  // WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, earmark_bench.js): per ship with a crew aboard, the seafarers home 6 weeks
+  // to 6 months on the day the next earmark would start (the date the one-click earmark uses), most rested first.
+  // Read off what this function already holds — no extra round trip (§12).
+  const benchCrew = crewRows.filter((c) => !isShore(c)).map((c) => {
+    const o = ovMap[c.agency_id] || {}, docs = {};
+    for (const f of ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"]) docs[f] = (o[f] != null && o[f] !== "") ? o[f] : c[f];
+    return { sc: c.agency_id, name: cmap[c.agency_id].name, rank: cmap[c.agency_id].rank, status: c.status, docs };
+  });
+  const benchP = benchPool({ crew: benchCrew, legs: HIST, snapshot: (snapRes && snapRes.results) || [], open: openAsg, today, shipOf });
+  for (const sec of sections) {
+    if (!sec.crew || !sec.crew.length) continue;
+    const d = defaultProjectionDates({ ship: sec.ship, legs: HIST, today, brand: sec.brand, addMonths: addMonthsISO });
+    const r = rankBench(benchP, { ship: sec.ship, reliefDate: d.signOn, signOff: d.signOff });
+    sec.bench = { date: d.signOn, signOff: d.signOff, rows: r.ready.slice(0, BENCH_TOP), total: r.ready.length };
+  }
+  const out = { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
+  Object.defineProperty(out, "benchPool", { value: benchP, enumerable: false }); // for /api/rotation/bench; never serialized
+  return out;
 }
 // Days worked THIS MONTH per crew currently active in Keyman. A REFERENCE read, not an invoice
 // source (Miguel, 14 Sep 2026: "this is not a billing platform .. remember that"). Uses the live
@@ -2554,6 +2573,17 @@ async function apiRotationProject(request, env, session, ctx) {
   }
   const status = res && res.ok ? 200 : (res && (res.error === "not_found" || res.error === "unknown_ship") ? 404 : 400);
   return json(res, status);
+}
+// GET /api/rotation/bench?ship=Vision — everyone who can take the next earmark on that ship (earmark_bench.js, 8 Oct
+// 2026): the board's top 9 are the first nine of `ready`; `outside` is the ashore crew outside the 6-week to 6-month
+// window, shown faded in the relief panel. Same pool and same relief date as the board read.
+async function apiRotationBench(url, env) {
+  const ship = String(url.searchParams.get("ship") || "").trim();
+  const r = await rotationSections(env);
+  const sec = (r.sections || []).find((x) => String(x.ship).toLowerCase() === ship.toLowerCase());
+  if (!sec || !sec.bench) return json({ ok: false, error: "no_seat", ship }, 404);
+  const out = rankBench(r.benchPool || [], { ship: sec.ship, reliefDate: sec.bench.date, signOff: sec.bench.signOff });
+  return json({ ok: true, ship: sec.ship, date: sec.bench.date, signOff: sec.bench.signOff, ready: out.ready, outside: out.outside });
 }
 function apiFleet() {
   const today = TODAY();
@@ -3496,6 +3526,21 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .rcard{container-type:inline-size}
 @container (max-width:260px){.rcard .rnm{font-size:14.5px;line-height:18px}.rcard .offchip b{font-size:22px;line-height:24px}.rcard .offchip.long b{font-size:18px}.rrot .rcity{font-size:12.5px;line-height:15px}.rrot .tl{column-gap:10px}.rcard .rleg{font-size:11px}}
 @media (max-width:640px){.shipbody.onerow{flex-direction:column;align-items:stretch}.shipbody.onerow>.rcard{flex:0 0 auto}}
+.ebench{background:#FFFAE8!important;border:1px solid #F3E7BF!important;border-radius:14px;padding:0!important;display:flex;flex-direction:column;overflow:hidden;box-shadow:none!important;min-width:0}
+.ebench .ebhd{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:11px 14px 7px;font-size:12px;color:#7A6A3A}.ebench .ebhd b{color:var(--navy);font-weight:700}
+.ebench .ebmore{border:0;background:transparent;color:#8A7A4A;font:600 11.5px 'DM Sans',sans-serif;padding:4px 7px;border-radius:7px;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;transition:background .15s,color .15s}.ebench .ebmore:hover{background:rgba(255,236,170,.7);color:var(--navy)}
+.ebench .ebrow{display:flex;align-items:center;gap:10px;border:0;border-top:1px solid #F3E9C6;background:transparent;padding:6px 14px;cursor:pointer;text-align:left;font-family:'DM Sans',sans-serif;color:var(--navy);transition:background .18s;width:100%}
+.ebench .ebrow:hover{background:rgba(255,236,170,.55)}.ebench .ebrow:active{background:rgba(255,226,140,.6)}.ebench .ebrow:focus-visible{outline:2px solid #C9A227;outline-offset:-2px}.ebench .ebrow.busy{opacity:.55;cursor:progress}
+.ebench .ebw{flex:1 1 0;min-width:0}.ebench .ebn{display:flex;align-items:center;gap:6px;font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ebench .ebs{display:block;font-size:10.5px;color:#8A7F63;margin-top:1px;padding-left:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ebench .ebs em{font-style:normal;color:#B4483C}
+.ebdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:#A9CC92;flex:none}.ebdot.ab{background:#9DB4D0}
+.ebench .ebt{flex:0 0 78px;text-align:right;font-size:11px;font-weight:600;color:#4E6B3A}.ebench .ebt i{display:block;height:3px;border-radius:2px;background:#F1E6C4;margin-top:4px;overflow:hidden}.ebench .ebt i b{display:block;height:100%;background:#A9CC92;border-radius:2px}
+.ebench .ebgo{flex:none;font-size:10.5px;font-weight:700;color:#fff;background:var(--navy);border-radius:11px;padding:3px 9px;opacity:0;transform:translateX(-4px);transition:opacity .18s,transform .18s}.ebench .ebrow:hover .ebgo,.ebench .ebrow:focus-visible .ebgo{opacity:1;transform:none}
+.ebench .ebft{margin-top:auto;border-top:1px solid #F3E9C6;padding:7px 14px 9px;font-size:10.5px;color:#A8996C;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}.ebench .eblg{display:flex;align-items:center;gap:4px}.ebench .eblg .ebdot.ab{margin-left:6px}
+@media (max-width:640px){.ebench .ebt{flex-basis:64px}.ebench .ebgo{display:none}.ebench .ebn{white-space:normal}.ebench .ebs{white-space:normal}.ebench .ebrow{align-items:flex-start}.ebench .ebt{padding-top:2px}}
+.ebtoast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--navy);color:#fff;border-radius:12px;padding:11px 14px 11px 16px;display:flex;align-items:center;gap:14px;font-size:13px;box-shadow:0 12px 30px -12px rgba(16,38,64,.55);z-index:99998;animation:ebin .25s ease-out;transition:opacity .35s,transform .35s;max-width:calc(100vw - 32px)}
+.ebtoast.out{opacity:0;transform:translateX(-50%) translateY(8px)}.ebtoast b{font-weight:700}.ebtoast button{border:0;background:rgba(255,255,255,.14);color:#fff;font:700 12.5px 'DM Sans',sans-serif;border-radius:8px;padding:6px 11px;cursor:pointer}.ebtoast button:hover{background:rgba(255,255,255,.26)}
+@keyframes ebin{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%)}}
 .rnext{margin-top:3px;font-size:12px;color:var(--mut);line-height:1.35}.rnext .nxk{font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--navy);background:#eef3fb;border-radius:5px;padding:1px 6px;margin-right:2px}.rnext b{color:var(--navy);font-weight:700}.rnext .nxgap{color:var(--green-d,#3E7F2E);font-weight:600;white-space:nowrap}.rnext .nxgap.bad{color:var(--red,#B0342F)}
 .ghostslot{min-height:0;align-self:stretch;flex-direction:row;justify-content:center;gap:10px;padding:14px;border-width:1.5px!important;background:#fff;border-radius:12px}
 .ghostslot .gp{width:26px;height:26px;font-size:17px}.ghostslot .gt{font-size:13px}.ghostslot .gc{font-size:10px;letter-spacing:.06em}
@@ -5146,7 +5191,35 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}function reliefSlot(rb,projs){if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}// WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, mock-up B "polished, real list" chosen): the empty earmark slot lists the
+// nine most rested seafarers for this ship (sec.bench, earmark_bench.js on the server) on a soft yellow card. One tap
+// earmarks them through the same route as a drag (sign-on = the printer's sign-off, +7 months / Azamara 5), with Undo.
+// "+ N more" opens the relief panel, which lists everyone available and keeps the search.
+var EB_DOC={'Medical':'medical',"Seaman's Book":'seaman&#8217;s book','Passport':'passport','US visa':'US visa','Schengen':'Schengen'};
+function fmtMD(iso){var s=fmtDateS(iso);var i=s.indexOf(',');return i>0?s.slice(0,i):s;}
+function benchBox(rb,sec){var b=sec&&sec.bench;if(!b||!b.rows||!b.rows.length)return null;
+  var more=b.total>b.rows.length?((b.total-b.rows.length)+' more'):'All crew';
+  var h='<div class="rcard ebench" data-vk="'+rb.vessel_key+'"><div class=ebhd><span><b>Next for '+escHtml(sec.ship)+'</b> &middot; most rested by '+fmtMD(b.date)+'</span>'
+   +'<button type=button class=ebmore data-vk="'+rb.vessel_key+'" data-aid="new" onclick="event.stopPropagation();openRelief(this)" title="Everyone available, and search"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"></path></svg>'+more+'</button></div>';
+  b.rows.forEach(function(r){
+    var pct=Math.max(4,Math.min(100,Math.round((r.days-42)/140*100)));
+    var from=r.aboardShip?('Off '+escHtml(r.aboardShip)+' '+fmtMD(r.homeFrom)):('Home since '+fmtMD(r.homeFrom)+(r.lastShip?(' &middot; '+escHtml(r.lastShip)):''));
+    var warn=(r.docs||[]).map(function(d){var w=EB_DOC[d.doc]||escHtml(d.doc);return d.when==='missing'?(w+' missing'):(w+' '+fmtMD(d.exp));}).join(', ');
+    h+='<button type=button class=ebrow data-sc="'+escHtml(r.sc)+'" data-ship="'+escHtml(sec.ship)+'" data-nm="'+escHtml(r.name)+'" onclick="benchPick(event,this)" title="Earmark '+escHtml(r.name)+' for '+escHtml(sec.ship)+': '+fmtDateS(b.date)+' to '+fmtDateS(b.signOff)+'">'
+      +'<span class=ebw><span class=ebn><i class="ebdot'+(r.aboardShip?' ab':'')+'"></i>'+escHtml(r.name)+'</span><span class=ebs>'+from+(warn?('<em> &middot; '+warn+'</em>'):'')+'</span></span>'
+      +'<span class=ebt><span>'+spanCompact(r.homeFrom,b.date)+'</span><i><b style="width:'+pct+'%"></b></i></span><span class=ebgo>Earmark</span></button>';
+  });
+  return h+'<div class=ebft><span>One tap: '+fmtMD(b.date)+' &rarr; '+fmtDateS(b.signOff)+'</span><span class=eblg><i class=ebdot></i>home <i class="ebdot ab"></i>home by then</span></div></div>';}
+async function benchPick(e,el){e.stopPropagation();if(el.disabled)return;el.disabled=true;el.classList.add('busy');
+  var sc=el.getAttribute('data-sc'),ship=el.getAttribute('data-ship'),nm=el.getAttribute('data-nm');
+  try{var r=await (await fetch('/api/rotation/project',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:sc,ship:ship})})).json();
+    if(r&&r.ok){benchToast(nm,ship,r);renderRotation();}else{el.disabled=false;el.classList.remove('busy');alert('Could not earmark: '+((r&&r.error)||'error'));}
+  }catch(_){el.disabled=false;el.classList.remove('busy');alert('Network error');}}
+function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.parentNode)t.parentNode.removeChild(t);t=document.createElement('div');t.id='ebtoast';t.className='ebtoast';
+  t.innerHTML='<span>Earmarked <b>'+escHtml(nm)+'</b> for '+escHtml(ship)+' &middot; '+fmtMD(r.sign_on)+' &rarr; '+fmtDateS(r.planned_sign_off)+'</span><button type=button>Undo</button>';
+  var u=t.querySelector('button');u.onclick=async function(){u.disabled=true;try{var x=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id})})).json();if(x&&x.ok){if(t.parentNode)t.parentNode.removeChild(t);renderRotation();}else{u.disabled=false;alert('Could not undo: '+((x&&x.error)||'error'));}}catch(_){u.disabled=false;}};
+  document.body.appendChild(t);setTimeout(function(){t.classList.add('out');setTimeout(function(){if(t.parentNode)t.parentNode.removeChild(t);},400);},9000);}
+function reliefSlot(rb,projs,sec){if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -5435,7 +5508,7 @@ function rotShip(sec){
   // board"): the brand is the coloured edge, the counts are on the cards and the line. Only the chevron stays.
   var _rb=window.RELIEF?window.RELIEF[window.reliefKey(sec.brand,sec.ship)]:null;
   // The handover banner under the cards went on 7 Oct 2026 (Miguel: "I don't think it's necessary"): the line above says it.
-  var _rslot=reliefSlot(_rb,projs);
+  var _rslot=reliefSlot(_rb,projs,sec);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta><span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
     +'<div class="shipbody shipdrop onerow'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+histBlock+'</div>';
 }
@@ -5772,7 +5845,7 @@ function drawRotation(){
     // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
     // (sec.deployed) and the Junior PS rule (sec.jrPsRule) were silently dropped on the way to the page:
     // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
-    return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
+    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
   });
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   // 8 Oct 2026 (Miguel: "remove this"): no "Ships (48)" label above the hulls; the side rail's tile already counts vessels.

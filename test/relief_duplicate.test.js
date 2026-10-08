@@ -88,7 +88,7 @@ test("the reliever query reads IN-FORCE assignments only", () => {
 test("the board does not draw a reliever who is already aboard", () => {
   const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   // The LAST definition of each is the one the browser runs.
-  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs,sec){"));
   // 8 Oct 2026 (Miguel: "dont have the option to create earmark"): the aboard reliever is still never drawn again —
   // the slot there is an EMPTY "Add earmark" for the next one (data-aid="new"), not their card.
   const line = slot.slice(0, slot.indexOf("\n"));
@@ -132,7 +132,7 @@ test("an overdue seat outranks every other state on the board", () => {
 
 test("the board never prints a negative day count at the reader", () => {
   const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs,sec){"));
   // 7 Oct 2026: the slot speaks calendar months + days like the card chip ("OFF IN 1 MO 22 D", "OFF 5 D AGO").
   assert.match(slot.slice(0, slot.indexOf("\n")), /os\.ago\?\('OFF '\+os\.t\.toUpperCase\(\)\+' AGO'\)/,
     "a past sign-off reads as elapsed, not as a countdown");
@@ -159,9 +159,9 @@ test("a plan card is unmistakably yellow, and the reliever slot does not repeat 
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16));
   assert.ok(r >= 240 && g >= 220 && b <= 190, `plan background #${m[1]} is not a yellow a person would call yellow (r${r} g${g} b${b})`);
   assert.doesNotMatch(m[0], /dashed/, "a solid border: the dashed one read as a placeholder, not a card");
-  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
+  const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs,sec){"));
   const line = slot.slice(0, slot.indexOf("\n"));
   assert.match(line, /projs\.some\(function\(p\)\{return \(p\.assignment_id&&p\.assignment_id===rb\.reliever\.id\)/,
     "a reliever already drawn as a plan card (same assignment) must not be drawn again as a RELIEVER card");
-  assert.match(SRC, /var _rslot=reliefSlot\(_rb,projs\);/, "rotShip must hand the section's projections to the slot");
+  assert.match(SRC, /var _rslot=reliefSlot\(_rb,projs,sec\);/, "rotShip must hand the section's projections (and the section, for the bench) to the slot");
 });

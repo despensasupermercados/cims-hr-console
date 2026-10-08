@@ -49,6 +49,7 @@ test("static: the card draws the Next line under the status and one red tag per 
   assert.match(W, /function nextLine\(x\)\{var n=x&&x\.next;/);
   assert.match(W, /' ashore<\/span>'/); assert.match(W, /overlaps '\+spanCompact\(n\.signOn,x\.signOff\)/);
   assert.match(W, /_di\.forEach\(function\(d\)\{tg\+='<span class="rtag bad"/);
-  assert.match(W, /attachNextAssignments\(sections, today\);\s*\/\/[^\n]*\n\s*return \{ sections, pool/);
+  // 8 Oct 2026 (the earmark bench): the bench is built after the Next line, both before the board is returned.
+  assert.match(W, /attachNextAssignments\(sections, today\);[\s\S]{0,2000}?const out = \{ sections, pool/);
   assert.doesNotMatch(W, /x\.nextShip/, "the old NEXT tag (never filled by the server) is gone");
 });

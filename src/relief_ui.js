@@ -48,6 +48,12 @@ select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(
 .tog.on{border-color:var(--text-success);color:var(--text-success);background:var(--bg-success)}
 .sw{width:24px;height:14px;border-radius:20px;background:var(--border-strong);position:relative}.sw.on{background:var(--text-success)}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:var(--surface-2);transition:left .12s}.sw.on::after{left:12px}
+.mb{margin:8px 0 10px}.mb .mbt{display:flex;gap:4px;background:var(--surface-2);border-radius:10px;padding:3px;margin-bottom:8px}.mb .mbt button{flex:1 1 0;border:0;border-radius:8px;padding:7px;font:600 12px inherit;font-family:inherit;cursor:pointer;background:transparent;color:var(--text-primary)}.mb .mbt button.on{background:var(--surface-1);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.mb .mbl{border:.5px solid var(--border);border-radius:var(--radius);overflow:auto;max-height:300px}.mb .mbr{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:.5px solid var(--border);transition:background .14s}.mb .mbr:last-child{border-bottom:0}.mb .mbr:hover{background:var(--surface-2)}.mb .mbr.out{opacity:.72}
+.mb .mbn{flex:1 1 0;min-width:0}.mb .mbn b{display:block;font-size:13px;font-weight:600}.mb .mbn span{display:block;font-size:11px;color:var(--text-muted)}.mb .mbn em{font-style:normal;color:var(--text-danger)}
+.mb .mbh{flex:0 0 84px;text-align:right;font-size:11px;font-weight:600;color:var(--text-success)}.mb .mbh.out{color:var(--text-warning)}.mb .mbh i{display:block;height:3px;border-radius:2px;background:var(--surface-2);margin-top:4px;overflow:hidden}.mb .mbh i b{display:block;height:100%;background:var(--text-success);opacity:.55;border-radius:2px}.mb .mbh.out i b{background:var(--text-warning)}
+.mb .mbp{border:.5px solid var(--border);background:var(--surface-1);color:var(--text-primary);border-radius:8px;padding:6px 10px;font:600 12px inherit;font-family:inherit;cursor:pointer;transition:background .15s,color .15s}.mb .mbp:hover{background:var(--text-primary);color:var(--surface-1)}
+.mb .mbe{padding:10px;font-size:12px;color:var(--text-muted)}
 .drop{border:.5px solid var(--border);border-radius:var(--radius);margin-top:4px;max-height:150px;overflow:auto;background:var(--surface-2);display:none}
 .opt{padding:8px 12px;font-size:14px;cursor:pointer}.opt:hover{background:var(--surface-1)}
 .empty{color:var(--text-muted);font-size:14px;padding:30px 0;text-align:center}
@@ -73,6 +79,7 @@ select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(
         <div style="display:flex;gap:10px;align-items:center"><span style="font-size:11px;color:var(--text-muted)"><i class="ti ti-command"></i> Esc</span><span class="x" onclick="RB.close()"><i class="ti ti-x"></i> Close</span></div></div>
       <div style="padding:6px 16px 16px">
         <div id="mbanner" style="display:none"></div>
+        <div id="mbench" style="display:none"></div>
         <div class="lbl">Crew member<span id="mreq" style="color:var(--text-danger);text-transform:none;letter-spacing:0"> — pick a seafarer to save this card</span></div>
         <input type="text" id="mcrew" placeholder="Search crew…" autocomplete="off" oninput="RB.filter()" onfocus="RB.filter()">
         <div id="mdrop" class="drop"></div>
@@ -229,6 +236,9 @@ const RB=(()=>{
   var _rm=$("mremove");if(_rm)_rm.style.display=(node&&!ro&&role==="reliever")?"inline-block":"none";
   const banner=$("mbanner");
   if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div><button class="match" onclick="RB.matchHandover()"><i class="ti ti-wand"></i> Match handover</button>';}else banner.style.display="none";
+  // WHO CAN TAKE THE SEAT (8 Oct 2026, earmark_bench.js): a new reliever opens with everyone available for this ship,
+  // most rested on the earmark's start date first; the search below stays for anyone else.
+  if(!node&&role==="reliever"&&printer)loadBench(shipName(key));else{var _mb=$("mbench");if(_mb){_mb.style.display="none";_mb.innerHTML="";}}
   if(node){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+(node.crew_name||"—")+'</b>';cur.crew_id=null;}
   else{$("mcrew").style.display="block";$("mcrew").value="";$("mpicked").style.display="none";}
   const ships=[...new Set(BOARD.map(r=>shipName(r.vessel_key)))];$("mship").innerHTML=ships.map(s=>'<option'+(s===shipName(key)?" selected":"")+'>'+s+'</option>').join("")||'<option>'+shipName(key)+'</option>';
@@ -255,8 +265,20 @@ const RB=(()=>{
  function tog(k){if(cur.readonly)return;cur.tags[k]=!cur.tags[k];togs();}
  // Picker rows carry status · current ship · open projections · document standing (plan v5, phase 5).
  function pickMeta(c){var m=[c.status||"",c.vessel?("on "+c.vessel):"",c.planned?("planned: "+c.planned):""].filter(Boolean).join(" · ");var d=c.docs?('<span style="color:'+(c.docs.worst==="expiring"?"var(--text-warning)":"var(--text-danger)")+';font-weight:600">'+(m?" · ":"")+c.docs.label+'</span>'):"";return (m||d)?('<div style="font-size:11px;color:var(--text-muted);margin-top:1px">'+m+d+'</div>'):"";}
+ let BENCH=null,BTAB="ready";
+ const spanMD=(a,b)=>{if(!a||!b)return"";let y0=+a.slice(0,4),m0=+a.slice(5,7),d0=+a.slice(8,10),y1=+b.slice(0,4),m1=+b.slice(5,7),d1=+b.slice(8,10);let m=(y1-y0)*12+(m1-m0);let d=d1-d0;if(d<0){m--;d+=new Date(Date.UTC(y1,m1-1,0)).getUTCDate();}return (m?m+" mo ":"")+(d||!m?d+" d":"").trim();};
+ async function loadBench(ship){const box=$("mbench");if(!box)return;box.style.display="block";box.innerHTML='<div class="mb"><div class="mbe">Finding who can take the seat…</div></div>';
+  try{BENCH=await fetch("/api/rotation/bench?ship="+encodeURIComponent(ship)).then(r=>r.json());}catch(e){BENCH={ok:false};}
+  if(!BENCH||!BENCH.ok){box.innerHTML='<div class="mb"><div class="mbe">No list for this ship yet — search below.</div></div>';return;}
+  BTAB="ready";drawBench();}
+ function benchTab(t){BTAB=t;drawBench();}
+ function drawBench(){const box=$("mbench");if(!box||!BENCH||!BENCH.ok)return;const B=BENCH;const all=(B.ready||[]).map(r=>Object.assign({},r,{out:false})).concat(BTAB==="all"?(B.outside||[]).map(r=>Object.assign({},r,{out:true})):[]);
+  const docs=r=>(r.docs||[]).map(d=>d.doc+(d.when==="missing"?" missing":" "+fmtDate(d.exp))).join(", ");
+  const rows=all.map(r=>{const c=CREW.find(x=>x.agency_id===r.sc);const pct=Math.max(4,Math.min(100,Math.round((r.days-42)/140*100)));const from=r.aboardShip?("Off "+r.aboardShip+" "+fmtDate(r.homeFrom)):("Home since "+fmtDate(r.homeFrom)+(r.lastShip?" · "+r.lastShip:""));const w=docs(r);
+   return '<div class="mbr'+(r.out?" out":"")+'"><div class="mbn"><b>'+(r.name||r.sc)+'</b><span>'+from+(r.out?" · over 6 months home":"")+(w?'<em> · '+w+'</em>':"")+'</span></div><div class="mbh'+(r.out?" out":"")+'">'+spanMD(r.homeFrom,B.date)+'<i><b style="width:'+pct+'%"></b></i></div>'+(c?'<button type="button" class="mbp" onclick="RB.pick(\\''+c.id+'\\',\\''+(r.name||"").replace(/'/g,"")+'\\')">Earmark</button>':'')+'</div>';}).join("");
+  box.innerHTML='<div class="mb"><div class="mbt"><button type="button" class="'+(BTAB==="ready"?"on":"")+'" onclick="RB.benchTab(\\'ready\\')">Most rested · '+(B.ready||[]).length+'</button><button type="button" class="'+(BTAB==="all"?"on":"")+'" onclick="RB.benchTab(\\'all\\')">Everyone available · '+((B.ready||[]).length+(B.outside||[]).length)+'</button></div><div class="mbl">'+(rows||'<div class="mbe">Nobody is home 6 weeks to 6 months by '+fmtDate(B.date)+' — search below.</div>')+'</div><div class="mbe" style="padding:6px 2px 0">Earmark runs '+fmtDate(B.date)+' → '+fmtDate(B.signOff)+' · the bar is time home on that day, 6 weeks to 6 months.</div></div>';}
  function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+(c.name||c.id)+pickMeta(c)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
- function pick(id,name){var c=CREW.find(function(x){return x.id===id;});if(c&&c.planned&&!confirm(name+" already has a projection on "+c.planned+".\\n\\nPlan them here as well?"))return;cur.crew_id=id;if($("mreq"))$("mreq").style.display="none";$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>'+(c?pickMeta(c):"");}
+ function pick(id,name){var c=CREW.find(function(x){return x.id===id;});if(c&&c.planned&&!confirm(name+" already has a projection on "+c.planned+".\\n\\nPlan them here as well?"))return;cur.crew_id=id;if($("mreq"))$("mreq").style.display="none";var _mb=$("mbench");if(_mb){_mb.style.display="none";}$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>'+(c?pickMeta(c):"");}
  function close(){$("modal").classList.remove("show");if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefClose",changed:_CHG},"*");}catch(e){}}}
  function azTouch(){cur.azTouched=true;}
  async function save(){
@@ -282,6 +304,6 @@ const RB=(()=>{
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
  document.getElementById("modal").addEventListener("click",close);
  load();
- return {open,close,save,azTouch,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff,derive,matchHandover,mark,addComment,remove};
+ return {open,close,save,azTouch,filter,pick,tog,resetSort,cds,cde,rs,re,sov,sl,sd,shipChange,onSel,custom,rebuildOff,derive,matchHandover,mark,addComment,remove,benchTab};
 })();
 </script></body></html>`;
