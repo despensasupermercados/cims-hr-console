@@ -25,7 +25,7 @@ const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, k
 import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
-import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts } from "./contract_count.js";
+import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts, completedSince } from "./contract_count.js";
 import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL } from "./crew_status.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
@@ -1517,7 +1517,7 @@ async function apiCrew(env, url) {
     const c = applyOverride(b, ovm[b.agency_id]);
     const ls = (byCrew[b.agency_id] || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
     const span = activeSpanOf(ls, HIST, b.agency_id, today);
-    const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, c.baseline_count, fullContracts(ls.map(legShape)));
+    const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, c.baseline_count, fullContracts(ls.map(legShape)), TDG[b.agency_id] ? TDG[b.agency_id].added : 0);
     return {
       agency_id: c.agency_id, first_name: c.first_name, middle_name: c.middle_name, last_name: c.last_name,
       status: crewStatus(b, ovm[b.agency_id], sched[b.agency_id], today), retired: !!(ovm[b.agency_id] || {}).retired,
@@ -1532,7 +1532,7 @@ async function apiCrew(env, url) {
       // grade below. tier/base_salary_usd are display/HR only, never a payout input. baseline NULL =
       // 'baseline pending' -> the derived fallback still computes from legs alone (0 -> Junior).
       baseline_count: c.baseline_count,
-      contract_count: cc.n, contracts_source: cc.source, contracts_as_of: cc.source === "tdg" ? TDG[b.agency_id].as_of : null,
+      contract_count: cc.n, contracts_source: cc.source, contracts_as_of: cc.source === "tdg" ? TDG[b.agency_id].as_of : null, contracts_added: cc.added,
       tier: psRank(cc.n, true),
       base_salary_usd: psSalary(cc.n),
       active_on: span.active_on, active_off: span.active_off,
@@ -1728,7 +1728,7 @@ async function rotationSections(env) {
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
     env.DB.prepare("SELECT name, brand, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
-    env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026)
+    env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026) + the file's debark (completedSince)
     env.DB.prepare("SELECT MAX(imported_at) AS stamp, COUNT(*) AS rows, COUNT(DISTINCT sc) AS crew FROM keyman_contract3").all().catch(() => ({ results: [] })), // how old the Counter is
     // The last AdvancedQuery's word per crew, for the projection verdict (registry_sync.js, 5 Oct 2026):
     // the kept snapshot, the open ship flags (the file's vessel where it differs from the registry), and
@@ -1759,6 +1759,7 @@ async function rotationSections(env) {
     registry: { at: _lastRun.run_at ? String(_lastRun.run_at).slice(0, 10) : null, crew: ((snapRes && snapRes.results) || []).length, dated: ((snapRes && snapRes.results) || []).filter((r) => r && r.embarked_at).length },
   };
   const tdgCount = countMapOf(_cnt);
+  const tdgAdded = {}; for (const r of _cnt) if (r && r.sc) tdgAdded[r.sc] = completedSince(r.as_of, r.tdg_off, today); // finished since the count file (8 Oct 2026)
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
@@ -1827,10 +1828,10 @@ async function rotationSections(env) {
     const derivedBy = {}; for (const sc in byCrew) derivedBy[sc] = fullContracts(byCrew[sc].map(legShape));
     for (const c of crewRows) {
       const sc = c.agency_id;
-      const cc = cumulativeContracts(tdgCount[sc] != null ? tdgCount[sc] : null, applyOverride(c, ovMap[sc]).baseline_count, derivedBy[sc] || 0);
+      const cc = cumulativeContracts(tdgCount[sc] != null ? tdgCount[sc] : null, applyOverride(c, ovMap[sc]).baseline_count, derivedBy[sc] || 0, tdgAdded[sc] || 0);
       contracts[sc] = cc.n; contractsSource[sc] = cc.source;
     }
-    for (const sc in tdgCount) if (!(sc in contracts)) contracts[sc] = tdgCount[sc]; // a crew the roster hides but the file carries
+    for (const sc in tdgCount) if (!(sc in contracts)) contracts[sc] = tdgCount[sc] + (tdgAdded[sc] || 0); // a crew the roster hides but the file carries
   }
   // Registry/keyman/schedule vessel string -> ONE canonical short ship name. Single source of truth
   // in src/shipname.js (longest VESSEL_REF match -> Azamara short name -> prettified). Applied to ALL
@@ -2366,11 +2367,16 @@ async function ensureContractCountImpl(env) {
 }
 // sc -> TDG's completed-contract count, or an empty map when nothing has been imported yet.
 function countMapOf(rows) { const m = {}; for (const r of (rows || [])) if (r && r.sc) m[r.sc] = r.completed; return m; }
-// sc -> { completed, as_of } from the last count import; {} until one has been applied. Read inside a
+// TDG's count per crew + the debark of the crew's row in the last AdvancedQuery (one join, no extra trip):
+// a debark after the count's as-of date is a contract finished since (completedSince, 8 Oct 2026).
+const CC_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc";
+const CC_ONE_WITH_OFF_SQL = "SELECT c.completed, c.as_of, r.debarked_at AS tdg_off FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc WHERE c.sc=?";
+// sc -> { completed, as_of, added } from the last count import; {} until one has been applied. Read inside a
 // route's existing wave (§12), never as its own round trip.
 async function contractCountMap(env) {
-  const r = await env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all().catch(() => ({ results: [] }));
-  const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null };
+  const r = await env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] }));
+  const today = new Date().toISOString().slice(0, 10);
+  const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null, added: completedSince(x.as_of, x.tdg_off, today) };
   return m;
 }
 // The file's row per crew from the last AdvancedQuery upload (registry_sync.js, 5 Oct 2026): status +
@@ -2581,7 +2587,7 @@ async function apiBonusCrew(env, url) {
     effectiveBaseline(env, cr.agency_id, cr.baseline_count),
     env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all(),
     env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all(),
-    env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(cr.agency_id).first().catch(() => null), // TDG's stated count (§10c)
+    env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(cr.agency_id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(cr.agency_id).first()).catch(() => null), // TDG's stated count (§10c) + the file's debark
   ]);
   const count = await crewCount(env, cr.id, baseline);
   // Default sign-on/off for the Score Card (manually editable there). Prefer the live SCHEDULE
@@ -2614,9 +2620,9 @@ async function apiBonusCrew(env, url) {
   const legN = fullContracts(legRows.map(legShape));
   // cumulative completed -> grade/pay (never resets): TDG's stated count, else baseline + derived legs.
   // `count` (the consecutive bonus count: ledger + ladder) is untouched by this — that is money (§1).
-  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN);
+  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN, tdgRow ? completedSince(tdgRow.as_of, tdgRow.tdg_off, new Date().toISOString().slice(0, 10)) : 0);
   const effN = cc.n;
-  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -2656,13 +2662,13 @@ async function apiContracts(env) {
     // Grade/pay ride the CUMULATIVE count (TDG's stated count, else seeded baseline + full legs), not
     // the consecutive `count`, so a bonus reset never demotes anyone. Display only — payout still uses
     // L.count + the ladder.
-    const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, L.baseline, legCounts[b.agency_id] || 0);
+    const cc = cumulativeContracts(TDG[b.agency_id] ? TDG[b.agency_id].completed : null, L.baseline, legCounts[b.agency_id] || 0, TDG[b.agency_id] ? TDG[b.agency_id].added : 0);
     const eff = cc.n;
     const span = activeSpanOf(byCrew[b.agency_id], HIST, b.agency_id, today);
     return {
       agency_id: b.agency_id, name: [b.first_name, b.last_name].filter(Boolean).join(" "), status: b.status,
       active_on: span.active_on, active_off: span.active_off,
-      vessel: vessel || null, client: clientOf(vessel), contracts: eff, contracts_source: cc.source,
+      vessel: vessel || null, client: clientOf(vessel), contracts: eff, contracts_source: cc.source, contracts_added: cc.added,
       count: L.count, baseline_set: L.baseline_set, rank: psRank(eff), base_salary_usd: psSalary(eff), nextRung: L.nextRung,
       lastDate: lo ? (lo.committed_at || "").slice(0, 10) : null, lastScore: lo ? lo.score_pct : null,
       lastGate: lo ? lo.gate : null, lastPay: lo ? lo.pay_usd : null, totalPay: totPay[b.id] || 0
@@ -2682,15 +2688,15 @@ async function gatherStatement(env, id) {
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
     effectiveBaseline(env, id, crew.baseline_count),
-    env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
   ]);
   const contracts = ctRes.results;
   const count = await crewCount(env, crew.id, baseline); // needs the baseline: its own trip, after the wave
   const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
-  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
+  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc, tdgRow ? completedSince(tdgRow.as_of, tdgRow.tdg_off, new Date().toISOString().slice(0, 10)) : 0); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
   const effFc = cc.n;
-  const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
+  const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
@@ -4551,7 +4557,8 @@ var COUNTUP=null,COUNTASOF=null,COUNTDRY=null;
 // "DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx": TDG's OWN count, both tabs sent.
 function parseCountFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
-  var m=/as[_ ]of[_ ](\d{1,2})[_ ]([A-Za-z]{3})[_ ](\d{4})/i.exec(String(f.name||''));
+  // The month is spelled in full on TDG's newer files ("as_of_08_October_2026"): read its first three letters.
+  var m=/as[_ ]of[_ ](\d{1,2})[_ ]([A-Za-z]{3})[A-Za-z]*[_ ](\d{4})/i.exec(String(f.name||''));
   var MO={jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
   COUNTASOF=(m&&MO[m[2].toLowerCase()])?(m[3]+'-'+MO[m[2].toLowerCase()]+'-'+('0'+m[1]).slice(-2)):null;
   loadSheetJS(function(){
@@ -6760,7 +6767,7 @@ async function renderContracts(){
 // console's own date-derived fallback. Shown beside every rank so the reader knows which they are seeing.
 function ctSrc(x){
   if(!x)return '';
-  if(x.contracts_source==='tdg')return '<span class=csub style="display:inline">· TDG count'+(x.contracts_as_of?' as of '+fmtDate(x.contracts_as_of):'')+'</span>';
+  if(x.contracts_source==='tdg')return '<span class=csub style="display:inline">· TDG count'+(x.contracts_as_of?' as of '+fmtDate(x.contracts_as_of):'')+(x.contracts_added?(' + '+x.contracts_added+' finished since'):'')+'</span>';
   return '<span class=csub style="display:inline;color:#b45309">· date-derived, count file not loaded</span>';
 }
 function ctShowPending(){CTLF.bz=['pending'];paintContracts();}

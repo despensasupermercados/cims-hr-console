@@ -157,7 +157,8 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   // The imported count overrides the date-derived one, per crew, and the derived stays as the fallback —
   // through cumulativeContracts, with the seeded baseline, like every other reader (5 Oct 2026: the board
   // dropped the baseline and showed "Contracts 0" for a crew the crew list showed at 3).
-  assert.match(body, /const cc = cumulativeContracts\(tdgCount\[sc\] != null \? tdgCount\[sc\] : null, applyOverride\(c, ovMap\[sc\]\)\.baseline_count, derivedBy\[sc\] \|\| 0\);/);
+  assert.match(body, /const cc = cumulativeContracts\(tdgCount\[sc\] != null \? tdgCount\[sc\] : null, applyOverride\(c, ovMap\[sc\]\)\.baseline_count, derivedBy\[sc\] \|\| 0, tdgAdded\[sc\] \|\| 0\);/);
+  assert.match(body, /tdgAdded\[r\.sc\] = completedSince\(r\.as_of, r\.tdg_off, today\)/, "contracts finished since the count file ride on top (8 Oct 2026)");
   assert.match(body, /derivedBy\[sc\] = fullContracts\(/, "derived remains the fallback for a crew the count file does not carry");
   assert.match(wave, /baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " \+ TDG_ABSENT_COL \+ " FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=0/, "the baseline rides the existing crew read");
   assert.match(wave, /retired, baseline_count, med_exp/, "and the manual baseline rides the override read (0 is a valid override)");
@@ -183,14 +184,15 @@ test("every grade reader takes TDG's stated count first, in its own wave, and ke
   const bonus = fn("async function apiBonusCrew(");
   const bonusWave2 = bonus.slice(bonus.indexOf("const [baseline, outs, legRowsRes, tdgRow]"));
   assert.match(bonusWave2.slice(0, bonusWave2.indexOf("]);")), /FROM contract_count WHERE sc=\?/, "Score Card: the count is read in the second wave");
-  assert.match(bonus, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, legN\)/);
+  assert.match(bonus, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, legN, tdgRow \? completedSince\(tdgRow\.as_of, tdgRow\.tdg_off, /);
   assert.match(bonus, /fullContracts\(legRows\.map\(legShape\)\)/, "the derived number is still computed — it is the fallback");
   const ledger = fn("async function apiContracts(");
   assert.match(wave(ledger), /contractCountMap\(env\)/, "ledger: the count is read in the wave");
   assert.match(ledger, /cumulativeContracts\(TDG\[b\.agency_id\]/);
   const stmt = fn("async function gatherStatement(", 3000);
   assert.match(stmt, /FROM contract_count WHERE sc=\?/);
-  assert.match(stmt, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, fc\)/);
+  assert.match(stmt, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, fc, tdgRow \? completedSince\(tdgRow\.as_of, tdgRow\.tdg_off, /);
+  assert.match(stmt, /CC_ONE_WITH_OFF_SQL/, "the statement reads the count with the file's debark, one query");
   // Every one of them says where its number came from.
   for (const [n, body] of [["crew", crew], ["bonus", bonus], ["ledger", ledger], ["statement", stmt]]) assert.match(body, /contracts_source: cc\.source/, n + " reports contracts_source");
   // The consecutive bonus count (money, §1) is not what changed: crewCount / contractLedgerRow still feed `count`.
@@ -208,4 +210,16 @@ test("the page labels the two counts apart: completed (grade) vs bonus count (co
   assert.match(src, /d\.rank\+' \('\+d\.contracts\+' completed '\+ctSrc\(d\)\+'\) · Bonus count <b>'\+d\.count/);
   assert.match(src, /function ctSrc\(x\)/);
   assert.match(src, /date-derived, count file not loaded/, "a missing count file is said, in amber, not hidden");
+});
+
+// TDG's newer count files spell the month in full ("..._as_of_08_October_2026.xlsx"); the page read only
+// "08 Oct 2026" and refused the 8 Oct file as having no date (need_as_of).
+test("the count file's as-of date is read from TDG's filename with the month short or spelled in full", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  const m = /var m=\/(as\[_ \]of[^\n]*?)\/i\.exec\(String\(f\.name/.exec(W);
+  assert.ok(m, "the page's as-of regex");
+  const re = new RegExp(m[1].replace(/\\\\/g, "\\"), "i");
+  for (const [name, mon] of [["DG3_Printer_Specialist_Completed_Contract_as_of_08_October_2026.xlsx", "Oct"], ["DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx", "Sep"], ["as of 5 September 2026.xlsx", "Sep"]]) {
+    const x = re.exec(name); assert.ok(x, name); assert.equal(x[2].slice(0, 3), mon);
+  }
 });

@@ -106,9 +106,31 @@ export function bridgeCounts(parsed, roster) {
 // TDG's stated count when the file carries the crew; otherwise the pre-24-Sep rule, seeded baseline +
 // full contracts derived from Counter dates, so a crew the file does not name keeps the number they
 // had. `source` says which, so every screen can say where its number came from.
-export function cumulativeContracts(stated, baseline, derived) {
-  if (typeof stated === "number" && Number.isFinite(stated)) return { n: stated, source: "tdg" };
-  return { n: tierContracts(baseline, derived), source: "derived" };
+// `added` (Miguel, 8 Oct 2026: "so u can keep counting as seafarer keep finishing their contract from that
+// moment forward .. is an addition to the number"): contracts TDG has ended SINCE the count file's as-of
+// date (completedSince) ride on top of TDG's number until the next count file restates it.
+export function cumulativeContracts(stated, baseline, derived, added = 0) {
+  const plus = Number.isFinite(Number(added)) && Number(added) > 0 ? Number(added) : 0;
+  if (typeof stated === "number" && Number.isFinite(stated)) return { n: stated + plus, source: "tdg", added: plus };
+  return { n: tierContracts(baseline, derived), source: "derived", added: 0 };
+}
+
+// Contracts TDG has ENDED since the count file's as-of date, from the crew's row in the last AdvancedQuery
+// (registry_snapshot): a DEBARKEDDATE after the as-of date and not in the future is one contract the count
+// file could not have counted yet. 0 or 1 — the snapshot holds the crew's latest row only, so a crew who
+// finishes a contract AND starts the next before a new count file arrives carries the debark of the newer
+// row (the next count file restates the number either way). A debark on or before the as-of date is
+// already inside TDG's count. Pure. row = { debarked_at, embarked_at } (or a bare debark date string).
+export function completedSince(asOf, row, today) {
+  const off = row && typeof row === "object" ? row.debarked_at || row.tdg_off : row;
+  const on = row && typeof row === "object" ? row.embarked_at || null : null;
+  const d = (v) => (v ? String(v).slice(0, 10) : null);
+  const o = d(off), a = d(asOf), t = d(today), e = d(on);
+  if (!o || !a || !/^\d{4}-\d{2}-\d{2}$/.test(o)) return 0;
+  if (o <= a) return 0;
+  if (t && o > t) return 0;
+  if (e && e > o) return 0;
+  return 1;
 }
 
 // What an apply would change. current = { sc: completed today } (from contract_count), derived =
