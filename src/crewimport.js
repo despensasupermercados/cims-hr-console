@@ -130,8 +130,10 @@ export function normalizeStatus(v) {
   // — the vessel beside it is the LAST ship (Aquitania: Constellation, his last Counter contract), not a
   // target, so it is not Earmarked; "Not for Rehire" is out of the fleet. Unread, they used to vanish: a
   // NEW crew with one was never added (Bulilan), an existing one kept an older status (Aquitania).
-  if (s.includes("reserv")) return "On Vacation";
-  if (s.includes("rehire")) return "Inactive";
+  // 8 Oct 2026 (Miguel: "yes" — show both as their own words): Reserved Crew is like On Vacation but they may or
+  // may not return; Not for Rehire is out of the rotation like Inactive, but not by a choice someone can reverse.
+  if (s.includes("reserv")) return "Reserved";
+  if (s.includes("rehire")) return "Not for Rehire";
   return null; // unknown -> caller decides (skip / keep existing)
 }
 

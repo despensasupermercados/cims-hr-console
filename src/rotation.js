@@ -2,7 +2,7 @@
 // Uses the data already in D1 (status, vessel_observed). Authoritative vessel is
 // via assignment once contracts exist; this is the observed-state board.
 
-const STATUS_ORDER = ["On board", "On Vacation", "Earmarked", "Inactive"];
+const STATUS_ORDER = ["On board", "On Vacation", "Reserved", "Earmarked", "Inactive", "Not for Rehire"];
 
 export function buildRotationBoard(rows) {
   const byStatus = {};

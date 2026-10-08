@@ -42,7 +42,9 @@ export const TDG_ABSENT_COL = "(ab.ab_id IS NOT NULL) AS tdg_absent, COALESCE(rs
 // copy for them (then crew.status, which every upload writes, D6, stands in).
 export function fileStatusOf(base) {
   if (!base) return null;
-  return base.tdg_status || normalizeStatus(base.tdg_raw) || null;
+  // The file's own word first (8 Oct 2026): a snapshot kept before Reserved / Not for Rehire were words of their
+  // own stores them as On Vacation / Inactive; the raw word says which they are.
+  return normalizeStatus(base.tdg_raw) || base.tdg_status || null;
 }
 
 // The console KNOWS the contract ended: nothing on the schedule spans today, no current leg is overdue,
@@ -91,6 +93,8 @@ export function crewStatus(base, ov, schedLegs, today) {
   ov = ov || {};
   const absent = !!(base && (base.tdg_absent === true || Number(base.tdg_absent) > 0));
   const kept = fileStatusOf(base);
+  // Not for Rehire (8 Oct 2026) is TDG's word too, and stricter than a manual Inactive tag: it wins over the tag.
+  if (!absent && kept === "Not for Rehire") return kept;
   if (!absent && (kept === "On board" || kept === "Earmarked")) {
     if (kept === "On board" && knownCompleted(schedLegs, today, base.tdg_ship || null)) return "On Vacation";
     return kept;
@@ -98,7 +102,7 @@ export function crewStatus(base, ov, schedLegs, today) {
   if (ov.retired) return "Inactive"; // the manual tag; "Retired" until 8 Oct 2026 (Inactive replaces Retired)
   if (ov.status != null && ov.status !== "") return ov.status;
   if (absent) return NOT_IN_FILE;
-  const file = kept || (base && base.status);
+  const file = kept || normalizeStatus(base && base.tdg_raw) || (base && base.status);
   if (REGISTRY_STATUSES.has(file)) {
     if (file === "On board" && knownCompleted(schedLegs, today, base.tdg_ship || null)) return "On Vacation";
     return file;
@@ -108,5 +112,9 @@ export function crewStatus(base, ov, schedLegs, today) {
 
 // Crew who have left the fleet. An expired document on someone who is gone is not an action item,
 // and reporting it buries the people who are still sailing.
-export const OFF_FLEET = new Set(["Retired", "Inactive"]); // "Retired" is no longer produced (8 Oct 2026); kept so an old value still reads off the fleet
+export const OFF_FLEET = new Set(["Retired", "Inactive", "Not for Rehire"]); // "Retired" is no longer produced (8 Oct 2026); kept so an old value still reads off the fleet
 export function isOffFleet(status) { return OFF_FLEET.has(String(status || "")); }
+// Ashore between contracts: On Vacation, and Reserved (8 Oct 2026: "like on vacation .. they might or might not
+// return"). Every rule that reads On Vacation reads Reserved the same way; only the word on the screen differs.
+export const ASHORE = new Set(["On Vacation", "Reserved"]);
+export function isAshore(status) { return ASHORE.has(String(status || "")); }

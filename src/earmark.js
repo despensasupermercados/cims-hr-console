@@ -71,7 +71,7 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf } = 
     // says nothing yet about an aboard card.
     const seen = aboard && !!fileAt && signOn < fileAt;
     let kind = null, text = null;
-    if (status === "Inactive") {
+    if (status === "Inactive" || status === "Not for Rehire") {
       kind = "inactive"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": " + ((r && r.status_raw) || "Inactive") + " · your earmark for " + cardShip + (signOn ? " from " + signOn : "");
     } else if (status === "Earmarked" && fileShip && !sameShip) {
       kind = "hull"; text = "TDG file" + (fileAt ? " " + fileAt : "") + " earmarks them for " + fileShip + " · your earmark is for " + cardShip + (signOn ? " from " + signOn : "");
@@ -79,7 +79,7 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf } = 
       kind = "hull"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": On board " + fileShip + " · your card has them aboard " + cardShip + " since " + signOn;
     } else if (status === "On board" && sameShip && embark && signOn && Math.abs(daysBetween(embark, signOn)) > ABSORB_DAYS) {
       kind = "embark_date"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": embarked " + cardShip + " on " + embark + " · your earmark says " + signOn;
-    } else if ((status === "On Vacation" || (status === "Earmarked" && !fileShip)) && seen) {
+    } else if ((status === "On Vacation" || status === "Reserved" || (status === "Earmarked" && !fileShip)) && seen) {
       kind = "not_aboard"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": " + ((r && r.status_raw) || status) + " · your card has them aboard " + cardShip + " since " + signOn;
     }
     if (kind) { items.push({ ...base, kind, file, text }); continue; }

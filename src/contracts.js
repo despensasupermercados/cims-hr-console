@@ -73,8 +73,9 @@ export function liveState(legs, today) {
   return "scheduled";                                // only future assignment(s)
 }
 export const RETIRE_MONTHS = 6; // no assignment longer than this -> Inactive (it read "Retired" until 8 Oct 2026)
-// The four words TDG's AdvancedQuery uses (crewimport.normalizeStatus); anything else is no word.
-export const REGISTRY_STATUSES = new Set(["On board", "On Vacation", "Earmarked", "Inactive"]);
+// The words TDG's AdvancedQuery uses (crewimport.normalizeStatus); anything else is no word. Reserved and Not for
+// Rehire are their own words since 8 Oct 2026 (they read On Vacation / Inactive before).
+export const REGISTRY_STATUSES = new Set(["On board", "On Vacation", "Earmarked", "Inactive", "Reserved", "Not for Rehire"]);
 
 // Final status string. opts: { retired:bool, imported:string }.
 //   INACTIVE REPLACES RETIRED (Miguel, 8 Oct 2026: "inactive replace retired"): the console has no Retired

@@ -120,7 +120,7 @@ export function sbmNormShip(s) {
 // retired/inactive. Returns the reason string, or null = not suppressed.
 // A suppressed request never un-cancels (status 'suppressed' is terminal).
 export function sbmSuppressReason(req, leg, crew, today) {
-  if (!crew || crew.retired || crew.status === "Inactive") return "retired";
+  if (!crew || crew.retired || crew.status === "Inactive" || crew.status === "Not for Rehire") return "retired";
   if (!leg) return "cancelled";                                          // gone from the live schedule
   if (String(leg.off) !== String(req.contract_signoff)) return "date_moved";
   if (String(req.contract_signoff) < String(today)) return "signed_off"; // already off the ship
@@ -664,7 +664,7 @@ export function installSbm(deps) {
     for (const leg of legs) {
       if (leg.off !== t7) continue;
       const cr = crew[leg.sc];
-      if (!cr || cr.retired || cr.status === "Inactive") { out.skipped.push({ sc: leg.sc, reason: "retired_or_inactive" }); continue; }
+      if (!cr || cr.retired || cr.status === "Inactive" || cr.status === "Not for Rehire") { out.skipped.push({ sc: leg.sc, reason: "retired_or_inactive" }); continue; }
       const dup = await env.DB.prepare("SELECT id FROM sbm_review_request WHERE agency_id=? AND contract_signoff=?").bind(leg.sc, leg.off).first();
       if (dup) continue;                                        // already handled (any status) -> sweep is idempotent
       const brand = sbmBrandForShip(leg.ship, deps.VESSEL_REF);

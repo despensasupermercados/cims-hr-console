@@ -102,7 +102,7 @@ export function assessCrew(row, todayStr) {
     else if (st === 'missing') missing++;
     else if (st === 'suspect') suspect++;
   }
-  const deployable = row.status === 'Earmarked' || row.status === 'On Vacation';
+  const deployable = row.status === 'Earmarked' || row.status === 'On Vacation' || row.status === 'Reserved';
   const flagged = (expired + expiring + missing + suspect) > 0;
   // worst-first score: expired critical dominates, then missing, then expiring; deployable adds
   // urgency. SUSPECT scores lowest — it is a registry defect to correct, not a seafarer at risk.
