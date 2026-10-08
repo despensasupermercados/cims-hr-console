@@ -273,10 +273,10 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 //               file carries (same crew, same hull, sign-on within ABSORB_DAYS) is dropped in favour
 //               of the file's dates; the rest of the Counter is served non-current.
 //   sign-off  = the first of these the console knows, in this order:
-//               tdg        TDG's own word: a DEBARKEDDATE on the row (final), the Counter's actual
-//                          sign-off for the same contract, or — the file's own cross-over — a SECOND
-//                          crew the same file has On board the same hull with a later embark (Wonder
-//                          and Navigator, 7 Oct 2026: both rows On board, the reliever already aboard).
+//               tdg        TDG's own word: a DEBARKEDDATE on the row (final), or the Counter's actual
+//                          sign-off for the same contract (final). The file's own cross-over — a SECOND
+//                          crew the same file has On board the same hull with a later embark — is the
+//                          sign-off DATE (source tdg, with the reliever), never the end (see "held").
 //               rita/card  whichever is NEWER: the sign-off Rita typed for this contract
 //                          (contract_edit, keyed on the embark date), or Rita's yellow card for a
 //                          RELIEVER on the same hull (its sign-on is the outgoing crew's sign-off —
@@ -289,7 +289,14 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 //               seat: from the file row if the file has them, else from the card (drawn green,
 //               awaiting the next file, which absorbs the card when it carries them).
 //   overdue   = a PROJECTED sign-off that has passed is still current (the seat is held, drawn red);
-//               a tdg / rita / card sign-off that has passed ended the contract.
+//               a tdg / rita / card sign-off that has passed ended the contract — UNLESS:
+//   held      = "we follow what TDG has in the software" (Miguel, 8 Oct 2026, on Belhida / Reyes /
+//               Villacortes: their relievers aboard since 2 and 7 Oct, TDG still listing them On board).
+//               While the latest file — dated ON or AFTER that sign-off — still has the crew On board this
+//               hull with no DEBARKEDDATE, the contract stays CURRENT: drawn red past its sign-off
+//               (`heldByFile`), status On board. Only TDG ends it: a debark date, the Counter's actual
+//               sign-off, or a file that no longer has them On board. A sign-off the file could not see
+//               yet (after its date) still swaps as before.
 //   ended     = a row On Vacation / Inactive / Reserved with embark + debark is the LAST contract,
 //               non-current, dated by TDG (the Score Card's default span, the scoring queue's
 //               "signed off recently").
@@ -387,7 +394,8 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today } 
     const act = counterActOff(L.sc, L.on);
     if (!L.tdgOff && act && act >= L.on) cand.push({ off: act, source: "tdg", at: null, final: true });
     const next = current.filter((o) => o.sc !== L.sc && o.key === L.key && o.on > L.on).map((o) => o.on).sort()[0];
-    if (next) cand.push({ off: next, source: "tdg", at: L.fileAt, final: true, reliever: current.find((o) => o.key === L.key && o.on === next) });
+    // The cross-over dates the sign-off but is not final: the same file still lists this crew On board (held).
+    const cross = next ? { off: next, source: "tdg", at: L.fileAt, reliever: current.find((o) => o.key === L.key && o.on === next) } : null;
     // 2. Rita: the sign-off she typed for this contract, or her reliever card on this hull — the newer wins.
     const e = editFor(L.sc, L.on);
     if (e && dayOf(e.sign_off) && dayOf(e.sign_off) >= L.on) cand.push({ off: dayOf(e.sign_off), source: "rita", at: String(e.updated_at || ""), conf: e.off_conf != null ? !!e.off_conf : false });
@@ -404,6 +412,7 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today } 
     if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id } });
     let pick = cand.find((c) => c.final) || null;
     if (pick) { const t = cand.filter((c) => c.final).sort((a, b) => (a.off < b.off ? -1 : 1)); pick = t[0]; }
+    if (!pick && cross) pick = cross;
     if (!pick) {
       const rc = cand.filter((c) => c.source === "rita" || c.source === "card");
       if (rc.length === 1) pick = rc[0];
@@ -411,9 +420,13 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today } 
     }
     if (!pick) pick = { off: plusMonths(L.on, isAz(L.key) ? AZAMARA_CONTRACT_MONTHS : CONTRACT_MONTHS), source: "projected", at: null };
     const passed = pick.off < today;
-    const leg = { ship: L.ship, name: L.name, sc: L.sc, ours: true, on: L.on, off: pick.off, brand: L.brand, is_current: pick.source === "projected" ? true : !passed, crew_id: L.crew_id, source: "registry", offSource: pick.source, offAt: pick.at ? dayOf(pick.at) : null, fileAt: L.fileAt };
+    // HELD (8 Oct 2026): a sign-off that is not TDG's final word, passed, and the file dated on/after it still
+    // has them On board this hull — the file wins, the contract stays current (red, past its sign-off).
+    const held = passed && !pick.final && pick.source !== "projected" && !!L.fileAt && L.fileAt >= pick.off;
+    const leg = { ship: L.ship, name: L.name, sc: L.sc, ours: true, on: L.on, off: pick.off, brand: L.brand, is_current: pick.source === "projected" || held ? true : !passed, crew_id: L.crew_id, source: "registry", offSource: pick.source, offAt: pick.at ? dayOf(pick.at) : null, fileAt: L.fileAt };
+    if (held) leg.heldByFile = true;
     if (pick.reliever) leg.reliever = { sc: pick.reliever.sc, name: pick.reliever.name || null, cardId: pick.reliever.cardId || null };
-    if (pick.source === "rita" && pick.conf) leg.offConfirmed = true;
+    if (pick.source === "rita" && pick.conf && !held) leg.offConfirmed = true;
     if (e) { if (e.embark) leg.embark = e.embark; if (e.disembark) leg.disembark = e.disembark; leg.edit = { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, onConfirmed: !!e.on_conf, seq: e.seq != null ? Number(e.seq) : null }; }
     out.push(leg);
   }
