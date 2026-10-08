@@ -171,7 +171,7 @@ test("crewStatus: retired > manual > not in the TDG file > the file's word (unle
   assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, {}, aboardLeg, T), NOT_IN_FILE, "Jaramiz: dropped from the file");
   assert.equal(crewStatus({ status: "On board", tdg_absent: 0 }, {}, [], T), "On board");
   assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, { status: "Earmarked" }, [], T), "Earmarked", "a manual edit still wins");
-  assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, { retired: 1 }, [], T), "Retired");
+  assert.equal(crewStatus({ status: "On board", tdg_absent: 1 }, { retired: 1 }, [], T), "Inactive"); // the manual tag reads Inactive (8 Oct 2026: Inactive replaces Retired)
   // Calayag: recorded sign-off 25 Sep on Navigator, the 5 Oct file still On board Navigator -> On Vacation
   const calayag = [{ on: "2026-02-02", off: "2026-09-25", is_current: false, ship: "Navigator" }];
   assert.equal(crewStatus({ status: "On board", tdg_ship: "MV NAVIGATOR OF THE SEAS" }, {}, calayag, T), "On Vacation");

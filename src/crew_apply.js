@@ -114,7 +114,7 @@ export function buildApplyPlan(review, decisions = {}, meta = {}) {
   for (const it of g.unretire || []) {
     if (dec(`unretire:${it.agency_id}`, "accept") !== "accept") continue;
     unretire.push({ agency_id: it.agency_id });
-    conflicts.push({ agency_id: it.agency_id, field: "retired", old_value: "Retired" + (it.manual_status ? " / " + it.manual_status : ""), new_value: it.new + (it.ship ? ", " + it.ship : "") + " per TDG", resolved: 1 });
+    conflicts.push({ agency_id: it.agency_id, field: "retired", old_value: "Inactive tag" + (it.manual_status ? " / " + it.manual_status : ""), new_value: it.new + (it.ship ? ", " + it.ship : "") + " per TDG", resolved: 1 });
   }
   // departed — flag only, default flag
   for (const it of g.departed || []) {

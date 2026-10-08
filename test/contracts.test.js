@@ -68,17 +68,17 @@ test("liveState: onboard when an assignment spans today, holiday after sign-off,
 
 test("deriveStatus: retired wins; on board now; future-only keeps registry", () => {
   const T = "2026-06-24";
-  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, { retired: true }), "Retired");
+  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, { retired: true }), "Inactive");
   assert.equal(deriveStatus([{ on: "2026-03-01", off: "2026-11-01" }], T, {}), "On board");
   assert.equal(deriveStatus([], T, { imported: "Earmarked" }), "Earmarked");
   assert.equal(deriveStatus([{ on: "2026-09-01", off: "2027-03-01" }], T, { imported: "Earmarked" }), "Earmarked");
 });
 
-test("deriveStatus: recently signed off -> On Vacation; inactive > 6 months -> auto Retired", () => {
+test("deriveStatus: recently signed off -> On Vacation; ashore > 6 months -> auto Inactive (Retired until 8 Oct 2026)", () => {
   const T = "2026-06-24";
   assert.equal(deriveStatus([{ on: "2026-01-01", off: "2026-05-01" }], T, {}), "On Vacation");  // ~1.8 mo ago
-  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, {}), "Retired");        // ~9.7 mo ago
-  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Inactive" }), "Retired"); // long inactive -> retired
+  assert.equal(deriveStatus([{ on: "2025-01-01", off: "2025-09-01" }], T, {}), "Inactive");        // ~9.7 mo ago
+  assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }], T, { imported: "Inactive" }), "Inactive"); // long ashore -> Inactive
   // a current assignment still wins over the retire rule
   assert.equal(deriveStatus([{ on: "2023-01-01", off: "2023-09-01" }, { on: "2026-03-01", off: "2026-11-01" }], T, {}), "On board");
 });
@@ -98,8 +98,8 @@ test("deriveStatus: an overdue CURRENT leg takes the registry status, else On bo
   assert.equal(deriveStatus(ancient, T, {}), "On board", "age does not retire an overdue seat; only a recorded sign-off or the next Counter ends it");
   // The same dates WITHOUT is_current are a closed leg: the old rule stands.
   assert.equal(deriveStatus([{ on: "2026-01-10", off: "2026-07-10" }], T, {}), "On Vacation");
-  assert.equal(deriveStatus([{ on: "2025-01-10", off: "2025-07-10" }], T, {}), "Retired");
+  assert.equal(deriveStatus([{ on: "2025-01-10", off: "2025-07-10" }], T, {}), "Inactive");
   // Retired still wins; a leg spanning today still wins.
-  assert.equal(deriveStatus(overdue, T, { retired: true, imported: "On board" }), "Retired");
+  assert.equal(deriveStatus(overdue, T, { retired: true, imported: "On board" }), "Inactive");
   assert.equal(deriveStatus([...overdue, { on: "2026-09-01", off: "2027-03-01", is_current: true }], T, { imported: "Inactive" }), "On board");
 });

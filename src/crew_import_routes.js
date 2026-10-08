@@ -428,7 +428,7 @@ export function applySummary(r) {
   if (closed.length) parts.push("earlier flags closed: " + closed.join(", "));
   if (r.board_unavailable) parts.push("board unavailable this run (no flag closed on the board rule)");
   if (r.ship_taken) parts.push(n(r.ship_taken, "ship taken from the file", "ships taken from the file") + " (registry updated)");
-  if (r.unretired) parts.push(n(r.unretired, "Retired tag", "Retired tags") + " cleared (TDG has them active)");
+  if (r.unretired) parts.push(n(r.unretired, "Inactive tag", "Inactive tags") + " cleared (TDG has them active)");
   if (r.override_cleared) parts.push(n(r.override_cleared, "manual entry", "manual entries") + " replaced by the file" + (r.override_skipped ? " (" + n(r.override_skipped, "changed", "changed") + " since review, left alone)" : ""));
   const pj = r.projections && r.projections.counts ? projectionSummary(r.projections.counts) : "";
   if (pj) parts.push(pj);
