@@ -29,6 +29,8 @@ export const KINDS = ["hull", "other_person", "inactive", "not_aboard", "embark_
 
 const day = (s) => (/^\d{4}-\d{2}-\d{2}/.test(String(s || "")) ? String(s).slice(0, 10) : null);
 const norm = (s) => String(s == null ? "" : s).trim().toLowerCase();
+// How recent a DEBARKEDDATE on an ashore row still reads as "just signed off" (8 Oct 2026).
+export const SIGNED_OFF_DAYS = 30;
 
 // PURE. The earmarks the file disagrees with, and the deployed ones it does not carry yet.
 //   projections : open assignments [{ id, sc, crew_name, ship, sign_on, planned_sign_off, deployed_at }]
@@ -38,10 +40,16 @@ const norm = (s) => String(s == null ? "" : s).trim().toLowerCase();
 // not like that no more") is a FUTURE earmark TDG does not carry yet: Rita tells Joy from the review ("Tell Joy"),
 // holds it ("Not yet", the default — a plan she is not sure of must not reach Joy), or drops it. A told earmark
 // carries told_at (assignment.deployed_at) so the next review says "told Joy on <date>, TDG still has no earmark".
-export function earmarkDiscrepancies({ projections, registry, today, shipOf } = {}) {
+// previous (8 Oct 2026): the file's rows from the LAST upload (registry_snapshot: agency_id, status, raw_status,
+// vessel, debarked_at). A crew the last file had On board ANOTHER ship who is no longer aboard it in this file has
+// just signed off: their earmark here is ready for TDG (signed_off, Tell Joy by default). A crew this file still
+// has On board another ship is waiting: TDG cannot earmark a seafarer who is aboard elsewhere (waiting).
+export function earmarkDiscrepancies({ projections, registry, today, shipOf, previous } = {}) {
   const of = typeof shipOf === "function" ? shipOf : (s) => (s == null || s === "" ? null : String(s).trim());
   const byId = {};
   for (const r of (registry || [])) if (r && r.agency_id) byId[String(r.agency_id).trim()] = r;
+  const prevById = {};
+  for (const r of (previous || [])) if (r && r.agency_id) prevById[String(r.agency_id).trim()] = r;
   // TDG's earmarks per hull (who the file earmarks where), and the crews holding a card per hull.
   const tdgMarks = {};
   for (const r of (registry || [])) {
@@ -99,9 +107,27 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf } = 
     // not carry at all). Rita's row: Tell Joy / Not yet / Drop mine. An aboard card is the seat, never this.
     if (!aboard && !(sameShip && (status === "Earmarked" || status === "On board"))) {
       const at0 = fileAt || today;
-      items.push({ ...base, kind: "not_in_tdg", told_at: base.deployed_at || null,
+      const item = { ...base, kind: "not_in_tdg", told_at: base.deployed_at || null,
         file: r ? { status, ship: fileShip || (r.vessel_observed ? String(r.vessel_observed) : null), embarked_at: embark, at: at0 } : { status: null, ship: null, embarked_at: null, at: at0, absent: true },
-        text: (base.deployed_at ? "Told Joy " + base.deployed_at + " · " : "") + "TDG file" + (at0 ? " " + at0 : "") + ": " + (r ? ((r.status_raw || status || "no status") + (fileShip ? ", " + fileShip : "")) : "not in the file") + " · no earmark for " + cardShip + " yet" });
+        text: (base.deployed_at ? "Told Joy " + base.deployed_at + " · " : "") + "TDG file" + (at0 ? " " + at0 : "") + ": " + (r ? ((r.status_raw || status || "no status") + (fileShip ? ", " + fileShip : "")) : "not in the file") + " · no earmark for " + cardShip + " yet" };
+      // Miguel, 8 Oct 2026: TDG cannot earmark a seafarer who is On board another ship, so CIMS holds the earmark;
+      // "when that crew signs off, you will email Joy and CC Rita".
+      const prev = prevById[String(p.sc).trim()];
+      const prevStatus = prev ? (prev.status || normalizeStatus(prev.raw_status) || null) : null;
+      const prevShip = prev ? of(prev.vessel) : null;
+      if (status === "On board" && fileShip && !sameShip) {
+        item.waiting = { ship: fileShip };
+        item.text = "TDG file" + (at0 ? " " + at0 : "") + ": On board " + fileShip + " · TDG cannot earmark them for " + cardShip + " until they sign off — Joy is emailed when the file shows the sign-off";
+      } else if (r && prevStatus === "On board" && prevShip && norm(prevShip) !== norm(cardShip) && !(status === "On board" && fileShip && norm(fileShip) === norm(prevShip))) {
+        item.signed_off = { ship: prevShip, on: day(r.debarked_at) || null };
+        item.text = "Signed off " + prevShip + (item.signed_off.on ? " on " + item.signed_off.on : "") + " per the TDG file " + at0 + " · your earmark for " + cardShip + (signOn ? " from " + signOn : "") + " is ready for TDG";
+      } else if (r && (status === "On Vacation" || status === "Reserved") && fileShip && !sameShip && day(r.debarked_at) && (daysBetween(r.debarked_at, at0) ?? 999) >= 0 && daysBetween(r.debarked_at, at0) <= SIGNED_OFF_DAYS) {
+        // The file alone says it too: ashore, debarked another ship within SIGNED_OFF_DAYS of the file's date (an
+        // upload skipped, or a snapshot not kept yet, must not lose the sign-off).
+        item.signed_off = { ship: fileShip, on: day(r.debarked_at) };
+        item.text = "Signed off " + fileShip + (item.signed_off.on ? " on " + item.signed_off.on : "") + " per the TDG file " + at0 + " · your earmark for " + cardShip + (signOn ? " from " + signOn : "") + " is ready for TDG";
+      }
+      items.push(item);
     }
   }
   const order = (k) => KINDS.indexOf(k);
@@ -134,11 +160,12 @@ export function tdgEarmarksWithoutCard({ projections, registry, shipOf, exclude 
 }
 
 // The one sentence the import screens print about the earmarks.
-export function earmarkSummary({ kept = 0, accepted = 0, emails = 0, cards = 0, told = 0, held = 0 } = {}) {
+export function earmarkSummary({ kept = 0, accepted = 0, emails = 0, cards = 0, told = 0, held = 0, edited = 0 } = {}) {
   const n = (k, one, many) => (k === 1 ? "1 " + one : k + " " + many);
   const parts = [];
   if (accepted) parts.push(n(accepted, "earmark corrected to the TDG file", "earmarks corrected to the TDG file"));
   if (kept) parts.push(n(kept, "earmark kept as yours", "earmarks kept as yours") + (emails ? " (" + n(emails, "discrepancy email", "discrepancy emails") + " to Joy, Rita in copy)" : ""));
+  if (edited) parts.push(n(edited, "earmark edited by Rita (Joy emailed the correction)", "earmarks edited by Rita (Joy emailed the corrections)"));
   if (told) parts.push(n(told, "earmark sent to Joy to enter in TDG", "earmarks sent to Joy to enter in TDG"));
   if (held) parts.push(n(held, "earmark not in TDG yet, held", "earmarks not in TDG yet, held"));
   if (cards) parts.push(n(cards, "TDG earmark given a card", "TDG earmarks given cards"));
@@ -183,12 +210,18 @@ const KIND_WORD = {
   embark_date: "TDG's embark date differs from the earmark's sign-on",
   not_in_tdg: "TDG has no earmark yet for this seafarer on this ship",
   rejected: "CIMS does not plan this seafarer for this ship",
+  signed_off: "the seafarer has signed off their last ship and can be earmarked in TDG now",
+  edited: "Rita has corrected the CIMS earmark",
 };
 // What Joy is asked to do, by the mode the notice is sent in.
 const MODE = {
   kept:   { title: "Earmark discrepancy", ask: "Rita has kept the CIMS earmark. Please correct TDG so the next export agrees; Rita is in copy and will re-import." },
   add:    { title: "Earmark for TDG", ask: "Please enter this earmark in TDG so the next export carries it; Rita is in copy and will re-import." },
   reject: { title: "Earmark not planned by CIMS", ask: "Please remove this earmark in TDG so the next export agrees; Rita is in copy and will re-import." },
+  // 8 Oct 2026: the seafarer was On board another ship (TDG cannot earmark them there); the file now shows the sign-off.
+  signed_off: { title: "Earmark for TDG", ask: "" },
+  // 8 Oct 2026: Rita edited her earmark in the upload review instead of accepting the file or keeping hers as it was.
+  edited: { title: "Earmark corrected by CIMS", ask: "Rita has corrected the CIMS earmark below. Please set TDG to match so the next export agrees; Rita is in copy and will re-import." },
 };
 
 // A crew's record without a card (a TDG earmark Rita rejects has no card of hers): the roster row with the
@@ -213,15 +246,33 @@ export function buildEarmarkNotice({ record, item, today, mode } = {}) {
   const r = record || {}, it = item || {};
   const m = MODE[mode] ? mode : "kept";
   const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || it.crew_name || r.sc || null;
+  const ship = r.ship || it.ship || null, signOn = day(r.sign_on) || it.sign_on || null, signOff = day(r.planned_sign_off) || it.sign_off || null;
+  const onCity = r.override_on_city || r.on_port_seed || null;
+  const so = it.signed_off || null;
+  let ask = MODE[m].ask, title = MODE[m].title;
+  if (m === "signed_off") {
+    title = "Earmark for TDG" + (so && so.ship ? " — signed off " + so.ship : "");
+    ask = (name || "The seafarer") + " signed off " + ((so && so.ship) || "their last ship") + (so && so.on ? " on " + so.on : "") + ". Please earmark " + (name || "them") +
+      " in TDG for " + (ship || "the ship below") + (signOn ? ", sign-on " + signOn + (onCity ? " (" + onCity + ")" : "") : "") + (signOff ? ", projected sign-off " + signOff : "") +
+      " — as planned by CIMS. Rita is in copy and will re-import.";
+  }
+  // Documents against the PLANNED CONTRACT (8 Oct 2026): not valid = expired, missing, or expiring before the
+  // planned sign-off; listed first so Joy sees what is missing before she enters the earmark.
+  const docs = documentLines(r, today || day(new Date().toISOString())).map((d) => {
+    const short = !!(d.exp && signOff && String(d.exp).slice(0, 10) < signOff && d.status !== "expired");
+    const valid = !(d.status === "expired" || (d.status === "missing" && d.required) || short);
+    return { ...d, before_off: short, valid, note: d.status === "expired" ? "expired" : (d.status === "missing" ? (d.required ? "missing" : "not held") : short ? "expires before the planned sign-off " + signOff : d.status === "expiring" ? "expires soon" : "valid") };
+  });
+  docs.sort((a, b) => (a.valid === b.valid ? 0 : a.valid ? 1 : -1));
   return {
     assignment_id: r.id || it.id || null, sc: r.sc || it.sc || null, ship_crew_id: r.ship_crew_id || null, name,
     rank: r.rank || null, email: r.email || null, phone: r.phone || null, dob: r.dob || null, province: r.province || null, pp_no: r.pp_no || null,
-    earmark: { ship: r.ship || it.ship || null, brand: r.brand || null, sign_on: day(r.sign_on) || it.sign_on || null, sign_off: day(r.planned_sign_off) || it.sign_off || null,
-               on_city: r.override_on_city || r.on_port_seed || null, off_city: r.override_off_city || r.off_port_seed || null, deployed_at: day(r.deployed_at) || it.deployed_at || null },
-    kind: it.kind || null, kind_word: KIND_WORD[it.kind] || "the TDG file disagrees with the earmark",
-    mode: m, title: MODE[m].title, ask: MODE[m].ask,
+    earmark: { ship, brand: r.brand || null, sign_on: signOn, sign_off: signOff,
+               on_city: onCity, off_city: r.override_off_city || r.off_port_seed || null, deployed_at: day(r.deployed_at) || it.deployed_at || null },
+    kind: it.kind || null, kind_word: KIND_WORD[m === "signed_off" || m === "edited" ? m : it.kind] || "the TDG file disagrees with the earmark",
+    mode: m, title, ask, signed_off: so,
     file: it.file || null, text: it.text || null,
-    documents: documentLines(r, today || day(new Date().toISOString())),
+    documents: docs,
     today: today || null,
   };
 }
@@ -236,16 +287,36 @@ const row = (label, value) =>
   '</td><td style="padding:5px 0;font-family:' + FB + ';font-size:13px;color:' + T.ink + ';font-weight:600;">' + dash(value) + "</td></tr>";
 const cell = (txt, bold) => '<td style="padding:7px 10px;border-top:1px solid ' + T.border + ';font-family:' + FB + ';font-size:13px;color:' + (bold ? T.ink : T.body) + ';' + (bold ? "font-weight:600;" : "") + '">' + txt + "</td>";
 
+// The opening paragraph, by mode: only a KEPT discrepancy says the export "does not match".
+function introOf(c) {
+  const f = c.file || {};
+  if (c.mode === "kept") return { lead: "The TDG export" + (f.at ? " of " + f.at : "") + " does not match what CIMS holds for this seafarer: ", word: c.kind_word, ask: c.ask || "" };
+  if (c.mode === "signed_off" || c.mode === "edited") return { lead: "", word: "", ask: c.ask || "" };
+  return { lead: "", word: c.kind_word ? c.kind_word.charAt(0).toUpperCase() + c.kind_word.slice(1) : "", ask: c.ask || "" };
+}
+
+// Miguel, 8 Oct 2026: "Put the not valid items first, the valid items second, and the bottom part following that."
 export function renderEarmarkEmail(n, opts = {}) {
   const c = n || {}, e = c.earmark || {}, f = c.file || {};
   const toName = opts.toName || "Joy";
-  const docRows = (c.documents || []).map((d) => "<tr>" + cell(esc(d.doc) + (d.required ? "" : ' <span style="color:' + T.mut + ';font-size:11px;">(optional)</span>'), true) + cell(dash(d.exp)) +
-    cell('<span style="font-family:' + FH + ';font-size:9px;font-weight:700;letter-spacing:.06em;color:' + (d.status === "expired" ? T.red : d.status === "ok" ? T.greenink : T.amber) + ';">' + esc(String(d.status || "").toUpperCase()) + "</span>") + "</tr>").join("");
+  const docs = c.documents || [];
+  const bad = docs.filter((d) => d.valid === false), good = docs.filter((d) => d.valid !== false);
+  const docRow = (d, color) => "<tr>" + cell(esc(d.doc) + (d.required ? "" : ' <span style="color:' + T.mut + ';font-size:11px;">(optional)</span>'), true) + cell(dash(d.exp)) +
+    cell('<span style="font-family:' + FH + ';font-size:10px;font-weight:700;letter-spacing:.04em;color:' + color + ';">' + esc(String(d.note || d.status || "").toUpperCase()) + "</span>") + "</tr>";
+  const head = (txt, color) => '<tr><td style="padding:14px 24px 4px;"><div style="font-family:' + FH + ';font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + color + ';">' + esc(txt) + "</div></td></tr>";
+  const table = (rows) => '<tr><td style="padding:0 24px 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ' + T.border + ';">' + rows + "</table></td></tr>";
+  const docBlock =
+    head("Not valid — needs action (" + bad.length + ")", bad.length ? T.red : T.mut) +
+    (bad.length ? table(bad.map((d) => docRow(d, T.red)).join("")) : '<tr><td style="padding:0 24px 6px;font-family:' + FB + ';font-size:13px;color:' + T.body + ';">None — every document on record is valid through the planned sign-off.</td></tr>') +
+    head("Valid (" + good.length + ")", T.greenink) +
+    (good.length ? table(good.map((d) => docRow(d, d.status === "expiring" ? T.amber : T.greenink)).join("")) : '<tr><td style="padding:0 24px 6px;font-family:' + FB + ';font-size:13px;color:' + T.body + ';">None on record.</td></tr>');
   const compare = "<tr>" + cell("", true) + cell('<b style="color:' + T.ink + ';">CIMS earmark</b>') + cell('<b style="color:' + T.ink + ';">TDG file' + (f.at ? " " + esc(f.at) : "") + "</b>") + "</tr>" +
     "<tr>" + cell("Status", true) + cell(c.mode === "reject" ? "Not planned" : "Earmarked") + cell(dash(f.status) + (f.other ? " · " + esc(f.other.name || f.other.sc) : "")) + "</tr>" +
     "<tr>" + cell("Ship", true) + cell(dash(e.ship)) + cell(dash(f.ship)) + "</tr>" +
-    "<tr>" + cell("Sign on / embark", true) + cell(dash(e.sign_on) + (e.on_city ? " · " + esc(e.on_city) : "")) + cell(dash(f.embarked_at)) + "</tr>" +
-    "<tr>" + cell("Projected sign off", true) + cell(dash(e.sign_off) + (e.off_city ? " · " + esc(e.off_city) : "")) + cell("—") + "</tr>";
+    "<tr>" + cell("Sign on / embark", true) + cell(dash(e.sign_on) + (e.on_city ? " · " + esc(e.on_city) : "")) + cell(dash(f.embarked_at) + (f.embarked_at && f.ship && e.ship && norm(f.ship) !== norm(e.ship) ? " (" + esc(f.ship) + ")" : "")) + "</tr>" +
+    "<tr>" + cell("Projected sign off", true) + cell(dash(e.sign_off) + (e.off_city ? " · " + esc(e.off_city) : "")) + cell("—") + "</tr>" +
+    (c.signed_off ? "<tr>" + cell("Last ship", true) + cell("Signed off " + dash(c.signed_off.ship) + (c.signed_off.on ? " · " + esc(c.signed_off.on) : "")) + cell("—") + "</tr>" : "");
+  const intro = introOf(c);
   return '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:0;background:' + T.cloud + ';">' +
     '<div style="display:none;font-size:1px;color:' + T.cloud + ';max-height:0;overflow:hidden;">' + esc(c.kind_word) + " — " + esc(c.name || c.sc || "") + ", " + esc(e.ship || "") + "</div>" +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="' + T.cloud + '" style="background:' + T.cloud + ';"><tr><td align="center" style="padding:24px 12px;">' +
@@ -253,27 +324,38 @@ export function renderEarmarkEmail(n, opts = {}) {
     mastRows() +
     '<tr><td style="padding:22px 24px 6px;"><div style="font-family:' + FH + ';font-size:20px;font-weight:700;color:' + M.navy + ';line-height:1.25;">' + esc(c.title || "Earmark discrepancy") + '</div>' +
     '<div style="font-family:' + FB + ';font-size:14px;color:' + T.body + ';margin-top:8px;">Hi ' + esc(toName) + ',</div>' +
-    '<div style="font-family:' + FB + ';font-size:14px;color:' + T.body + ';margin-top:8px;">The TDG export' + (f.at ? " of " + esc(f.at) : "") + " does not match what CIMS holds for this seafarer: <b>" + esc(c.kind_word) + "</b>. " + esc(c.ask || "") + "</div></td></tr>" +
-    '<tr><td style="padding:16px 24px 6px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ' + T.border + ';">' + compare + "</table></td></tr>" +
-    '<tr><td style="padding:16px 24px 6px;"><div style="font-family:' + FH + ';font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + T.mut + ';">Seafarer</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' +
+    '<div style="font-family:' + FB + ';font-size:14px;color:' + T.body + ';margin-top:8px;">' + esc(intro.lead) + (intro.word ? "<b>" + esc(intro.word) + "</b>. " : "") + esc(intro.ask) + "</div></td></tr>" +
+    docBlock +
+    '<tr><td style="padding:16px 24px 6px;"><div style="font-family:' + FH + ';font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + T.mut + ';">Earmark</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ' + T.border + ';margin-top:4px;">' + compare + "</table></td></tr>" +
+    '<tr><td style="padding:16px 24px 18px;"><div style="font-family:' + FH + ';font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + T.mut + ';">Seafarer</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">' +
     row("Name", c.name) + row("Agency ID", c.sc) + row("Ship's Crew ID", c.ship_crew_id) + row("Rank", c.rank) + row("Passport no.", c.pp_no) + row("Date of birth", c.dob) + row("Province", c.province) +
-    row("Contact", [c.email, c.phone].filter(Boolean).join(" · ")) + (e.deployed_at ? row("Deployment sent to TDG", e.deployed_at) : "") +
+    row("Contact", [c.email, c.phone].filter(Boolean).join(" · ")) + (e.deployed_at ? row("Earmark first sent to TDG", e.deployed_at) : "") +
     "</table></td></tr>" +
-    '<tr><td style="padding:10px 24px 4px;"><div style="font-family:' + FH + ';font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:' + T.mut + ';">Documents</div></td></tr>' +
-    '<tr><td style="padding:0 24px 18px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ' + T.border + ';">' + docRows + "</table></td></tr>" +
     '<tr><td style="padding:14px 24px 24px;border-top:1px solid ' + T.border + ';"><div style="font-family:' + FB + ';font-size:12px;color:' + T.mut + ';">Sent from the CIMS HR console' + (opts.sender ? " by " + esc(opts.sender) : "") + (c.today ? " on " + esc(c.today) : "") + ", from the CIMS Keyman board." + (c.mode === "reject" ? "" : " The earmark stands on the CIMS Keyman board.") + "</div></td></tr>" +
     "</table></td></tr></table></body></html>";
 }
 
 export function renderEarmarkText(n, opts = {}) {
   const c = n || {}, e = c.earmark || {}, f = c.file || {};
-  const L = ["Hi " + (opts.toName || "Joy") + ",", "", "The TDG export" + (f.at ? " of " + f.at : "") + " does not match what CIMS holds for this seafarer: " + c.kind_word + ". " + (c.ask || ""), ""];
-  L.push("Seafarer: " + (c.name || "—") + (c.sc ? " (" + c.sc + ")" : ""));
-  if (c.ship_crew_id) L.push("Ship's Crew ID: " + c.ship_crew_id);
-  if (c.rank) L.push("Rank: " + c.rank);
+  const intro = introOf(c);
+  const L = ["Hi " + (opts.toName || "Joy") + ",", "", intro.lead + (intro.word ? intro.word + ". " : "") + intro.ask, ""];
+  const docs = c.documents || [];
+  const bad = docs.filter((d) => d.valid === false), good = docs.filter((d) => d.valid !== false);
+  L.push("NOT VALID — needs action (" + bad.length + "):");
+  if (!bad.length) L.push("  none");
+  for (const d of bad) L.push("  - " + d.doc + ": " + (d.exp || "not on record") + " [" + (d.note || d.status) + "]");
+  L.push("", "VALID (" + good.length + "):");
+  if (!good.length) L.push("  none");
+  for (const d of good) L.push("  - " + d.doc + ": " + (d.exp || "not on record") + " [" + (d.note || d.status) + "]");
   L.push("", (c.mode === "reject" ? "CIMS: not planned for " : "CIMS earmark: ") + (e.ship || "—") + (c.mode === "reject" ? "" : " · sign on " + (e.sign_on || "—") + (e.on_city ? " (" + e.on_city + ")" : "") + " · projected sign off " + (e.sign_off || "—")));
   L.push("TDG file" + (f.at ? " " + f.at : "") + ": " + (f.status || "—") + (f.other ? " · " + (f.other.name || f.other.sc) : "") + (f.ship ? " · " + f.ship : "") + (f.embarked_at ? " · embarked " + f.embarked_at : ""));
-  L.push("", "Documents:");
-  for (const d of (c.documents || [])) L.push("  - " + d.doc + ": " + (d.exp || "not on record") + " [" + d.status + "]");
+  if (c.signed_off) L.push("Last ship: signed off " + (c.signed_off.ship || "—") + (c.signed_off.on ? " on " + c.signed_off.on : ""));
+  L.push("", "Seafarer: " + (c.name || "—") + (c.sc ? " (" + c.sc + ")" : ""));
+  if (c.ship_crew_id) L.push("Ship's Crew ID: " + c.ship_crew_id);
+  if (c.rank) L.push("Rank: " + c.rank);
+  if (c.pp_no) L.push("Passport no.: " + c.pp_no);
+  if (c.dob) L.push("Date of birth: " + c.dob);
+  const contact = [c.email, c.phone].filter(Boolean).join(" · ");
+  if (contact) L.push("Contact: " + contact);
   return L.join("\n");
 }

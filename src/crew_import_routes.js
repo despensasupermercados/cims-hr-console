@@ -170,8 +170,15 @@ export async function apiCrewImportStage(request, env, deps) {
   review.projection_counts = proj.counts;
   // THE EARMARK LOOP (Miguel, 7 Oct 2026, earmark.js): what the file disagrees with on Rita's earmarks, row
   // by row for a Keep / Accept decision; deployed earmarks the file still lacks; TDG earmarks with no card.
-  const em = earmarkDiscrepancies({ projections, registry, today, shipOf: SHIP_OF });
+  // previous (8 Oct 2026): the LAST file's word per crew, read before this file replaces it — a crew it had On
+  // board another ship whom this file no longer has aboard has signed off, and their earmark is ready for TDG.
+  const [prevRows, shipRows] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
+    env.DB.prepare("SELECT name FROM vessel ORDER BY name").all().then((r) => (r && r.results) || []).catch(() => []),
+  ]);
+  const em = earmarkDiscrepancies({ projections, registry, today, shipOf: SHIP_OF, previous: prevRows });
   review.earmarks = em.items;
+  review.ships = shipRows.map((r) => r.name).filter(Boolean); // the Edit choice's ship list (the names a move accepts)
   // A TDG earmark Rita REJECTED from the board (earmark_dismiss, worker.js) is not re-created while the file
   // that showed it stands; a LATER file still carrying it lists it again (Joy did not correct TDG).
   const dismissed = deps && deps.dismissed ? await deps.dismissed(env).catch(() => []) : [];
@@ -183,6 +190,23 @@ export async function apiCrewImportStage(request, env, deps) {
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
   return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
+}
+
+// Rita's edit of one earmark in the review: { ship, sign_on, sign_off }, blanks falling back to the card. ISO
+// dates only, the sign-off on or after the sign-on; the ship is checked by the move path itself.
+export function editOf(e, it) {
+  const iso = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || "").trim()) ? String(v).trim() : null);
+  const x = e && typeof e === "object" ? e : null;
+  if (!x) return { ok: false, error: "no_edit" };
+  const ship = String(x.ship || "").trim() || (it && it.ship) || null;
+  const sign_on = x.sign_on ? iso(x.sign_on) : ((it && it.sign_on) || null);
+  const sign_off = x.sign_off ? iso(x.sign_off) : ((it && it.sign_off) || null);
+  if (!ship) return { ok: false, error: "ship_required" };
+  if (x.sign_on && !sign_on) return { ok: false, error: "bad_sign_on" };
+  if (x.sign_off && !sign_off) return { ok: false, error: "bad_sign_off" };
+  if (!sign_on) return { ok: false, error: "sign_on_required" };
+  if (sign_off && sign_off < sign_on) return { ok: false, error: "sign_off_before_sign_on" };
+  return { ok: true, ship, sign_on, sign_off };
 }
 
 // POST /api/crew/import/apply — body { review, decisions, file_hash, filename, rows_seen, run_by }.
@@ -336,7 +360,7 @@ export async function apiCrewImportApply(request, env, deps) {
   // A TDG earmark with no card becomes a console card (sign-on = the hull's current printer's projected
   // sign-off, + 7 months). Every outcome is reported as what happened; a failure never undoes the import.
   const dec = body.decisions || {};
-  const earmarks = { accepted: [], kept: [], emails: [], cards: [], told: [], held: 0 };
+  const earmarks = { accepted: [], kept: [], edited: [], emails: [], cards: [], told: [], held: 0 };
   const staged = Array.isArray(body.review && body.review.earmarks) ? body.review.earmarks : [];
   const liveIds = new Set((projections || []).map((x) => x && x.id).filter(Boolean));
   const fail = (e) => ({ ok: false, error: String((e && e.message) || e) });
@@ -360,9 +384,11 @@ export async function apiCrewImportApply(request, env, deps) {
     // NOT IN TDG YET (the Deploy CTA, moved here, 7 Oct 2026): Tell Joy (email + the card is stamped told) /
     // Not yet (default: nothing) / Drop mine (the card goes).
     if (it.kind === "not_in_tdg") {
-      const c = dec["earmark:" + it.id];
+      // A crew who just signed off another ship (signed_off) is told by default (Miguel, 8 Oct 2026: "when that
+      // crew signs off, you will email Joy and CC Rita"); Rita can still pick Not yet or Drop in the review.
+      const c = dec["earmark:" + it.id] || (it.signed_off && !it.told_at ? "tell" : null);
       if (c === "tell") {
-        const r = await notify(it, "add");
+        const r = await notify(it, it.signed_off ? "signed_off" : "add");
         let stamped = null;
         if (r.ok && deps.markTold) stamped = await deps.markTold(env, it.id).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
         earmarks.told.push({ id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: it.ship, emailed: !!r.ok, error: r.ok ? null : r.error, stamped: !!(stamped && stamped.ok) });
@@ -372,7 +398,20 @@ export async function apiCrewImportApply(request, env, deps) {
       } else earmarks.held++;
       continue;
     }
-    const choice = dec["earmark:" + it.id] === "keep" ? "keep" : "accept";
+    const choice = dec["earmark:" + it.id] === "keep" ? "keep" : dec["earmark:" + it.id] === "edit" ? "edit" : "accept";
+    // EDIT (Miguel, 8 Oct 2026: "either accept it, change it, or ..."): Rita corrects her earmark in the review —
+    // ship, sign-on, projected sign-off — the card is saved through the move path (unknown_ship / already_projected
+    // checks), then Joy gets the corrected earmark. An edit that does not validate changes nothing.
+    if (choice === "edit") {
+      const ed = editOf(body.edits && body.edits["earmark:" + it.id], it);
+      let r = ed.ok ? null : ed;
+      if (!r) r = deps && deps.moveCard ? await deps.moveCard(env, { id: it.id, vessel_name: ed.ship, sign_on: ed.sign_on, planned_sign_off: ed.sign_off }).catch(fail) : { ok: false, error: "no_dep" };
+      const done = !!(r && r.ok);
+      const mail = done ? await notify({ ...it, ship: ed.ship, sign_on: ed.sign_on, sign_off: ed.sign_off }, "edited") : null;
+      earmarks.edited.push({ id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: ed.ship || it.ship, sign_on: ed.sign_on || null, sign_off: ed.sign_off || null, kind: it.kind,
+        ok: done, error: done ? null : (r && r.error) || "failed", emailed: !!(mail && mail.ok), mail_error: mail && !mail.ok ? mail.error : null });
+      continue;
+    }
     if (choice === "accept") {
       let r = { ok: false, error: "no_dep" }, action = null;
       if (it.kind === "hull" && it.file && it.file.ship && deps && deps.moveCard) { action = "moved to " + it.file.ship; r = await deps.moveCard(env, { id: it.id, vessel_name: it.file.ship }).catch(fail); }
@@ -435,8 +474,14 @@ export function applySummary(r) {
   const ab = (r.cards_absorbed || []).filter((x) => x && x.ok).length;
   if (ab) parts.push(n(ab, "earmark absorbed by the file (the file's row is the seat now)", "earmarks absorbed by the file (the file's rows are the seats now)"));
   const em = r.earmarks || {};
-  const es = earmarkSummary({ accepted: (em.accepted || []).filter((x) => x.ok).length, kept: (em.kept || []).length, emails: (em.kept || []).filter((x) => x.emailed).length, told: (em.told || []).filter((x) => x.emailed).length, held: em.held || 0, cards: (em.cards || []).filter((x) => x.ok).length });
+  const es = earmarkSummary({ accepted: (em.accepted || []).filter((x) => x.ok).length, kept: (em.kept || []).length, emails: (em.kept || []).filter((x) => x.emailed).length, told: (em.told || []).filter((x) => x.emailed).length, held: em.held || 0, cards: (em.cards || []).filter((x) => x.ok).length, edited: (em.edited || []).filter((x) => x.ok).length });
   if (es) parts.push(es);
+  // What did NOT happen is said too (8 Oct 2026): an edit the move path refused, an email that did not go.
+  const who = (x) => (x.crew_name || x.sc) + " (" + (x.error || x.mail_error || "failed") + ")";
+  const badEdit = (em.edited || []).filter((x) => !x.ok);
+  if (badEdit.length) parts.push("not saved: " + badEdit.map(who).join(", "));
+  const noMail = [].concat((em.edited || []).filter((x) => x.ok && !x.emailed), (em.kept || []).filter((x) => !x.emailed), (em.told || []).filter((x) => !x.emailed));
+  if (noMail.length) parts.push("Joy NOT emailed for " + noMail.map(who).join(", "));
   parts.push("logged to import history");
   return parts.join(" · ") + ".";
 }
