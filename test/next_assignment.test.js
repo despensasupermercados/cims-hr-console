@@ -59,6 +59,6 @@ test("static: the card draws the Next line under the status and one red tag per 
   assert.match(W, /\.rtag\.warn,\.rtag\.due\{/, "the chip's own amber class — never `warn`, which the page styles as a warning BOX");
   assert.doesNotMatch(W, /class="rtag warn/, "no chip may wear the box class");
   // 8 Oct 2026 (the earmark bench): the bench is built after the Next line, both before the board is returned.
-  assert.match(W, /attachNextAssignments\(sections, today\);[\s\S]{0,2000}?const out = \{ sections, pool/);
+  assert.match(W, /attachNextAssignments\(sections, today\);[\s\S]{0,3000}?const out = \{ sections, pool/);
   assert.doesNotMatch(W, /x\.nextShip/, "the old NEXT tag (never filled by the server) is gone");
 });

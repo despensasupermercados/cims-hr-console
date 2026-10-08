@@ -1630,7 +1630,7 @@ async function apiCrewAdd(request, env, session, ctx) {
   const ship = canonShipWith(planShip, SHIP_KEYS) || planShip;
   const placePlan = async () => {
     const r = await createProjection(env, { agencyId: id, ship, today: TODAY() },
-      { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds })
+      { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds, chain: true })
       .catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
     if (r && r.ok) await logActivity(env, session && session.email, "projection_create", id + " -> " + ship + " on " + r.sign_on + " (" + r.id + ", from Add crew)");
     else await logActivity(env, session && session.email, "projection_failed", id + " -> " + ship + ": " + ((r && r.error) || "error") + " (from Add crew)");
@@ -2240,9 +2240,12 @@ async function rotationSections(env) {
   const benchArgs = (sec) => ({ ship: sec.ship, brand: sec.brand, block: sec.brand === "Royal" && jrRule[normShip(sec.ship)] === "block" });
   for (const sec of sections) {
     if (!sec.crew || !sec.crew.length) continue;
-    const d = defaultProjectionDates({ ship: sec.ship, legs: HIST, today, brand: sec.brand, addMonths: addMonthsISO, turnarounds: (HIST.turnarounds || {})[String(sec.ship).trim().toLowerCase()] || [] });
+    // The chain (8 Oct 2026, Beyond / Allure): with an earmark still to come, the list is for the NEXT one — measured on
+    // the last earmark's sign-off, the day the one-tap card would start (the same chain createProjection reads).
+    const chain = (sec.projections || []).filter((p) => !p.aboard && p.signOn).map((p) => ({ on: p.signOn, off: p.signOff, name: p.name }));
+    const d = defaultProjectionDates({ ship: sec.ship, legs: HIST, today, brand: sec.brand, addMonths: addMonthsISO, turnarounds: (HIST.turnarounds || {})[String(sec.ship).trim().toLowerCase()] || [], chain });
     const r = rankBench(benchP, { ...benchArgs(sec), reliefDate: d.signOn, signOff: d.signOff });
-    sec.bench = { date: d.signOn, signOff: d.signOff, rows: r.ready.slice(0, BENCH_TOP), total: r.ready.length, rules: r.rules };
+    sec.bench = { date: d.signOn, signOff: d.signOff, after: d.after || null, rows: r.ready.slice(0, BENCH_TOP), total: r.ready.length, rules: r.rules };
   }
   const out = { sections, pool, shoreside, counts, sources, issues, fileKept, inDock: inDockNow(DRY_DOCK, today) };
   Object.defineProperty(out, "benchPool", { value: benchP, enumerable: false }); // for /api/rotation/bench; never serialized
@@ -2571,11 +2574,12 @@ async function apiReady(request, env, session) {
 // POST /api/rotation/project {agency_id, ship} — a drop on the board creates a PROJECTION (a yellow
 // card = an open assignment), never a registry write. The old /api/rotation/assign wrote
 // crew_override.vessel_observed and came back as a green, undated, undraggable card (15 Sep 2026).
-// Dates: the ship's current printer's sign-off (if ahead) else today; +6 months (+5 Azamara).
+// Dates: the ship's last earmark's sign-off, else its current printer's (if ahead), else today; +7 months (+5 Azamara)
+// on the turnaround (8 Oct 2026: the second earmark follows the first — chain).
 async function apiRotationProject(request, env, session, ctx) {
   const b = await request.json().catch(() => ({}));
   const res = await createProjection(env, { agencyId: b.agency_id, ship: b.ship, today: TODAY() },
-    { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds });
+    { boardLegs, save: saveReliefAssignment, addMonths: addMonthsISO, turnarounds: fetchShipTurnarounds, chain: true });
   if (res && res.ok) {
     // The audit row rides behind the response (one round trip the drag no longer waits for).
     const log = logActivity(env, session && session.email, "projection_create", String(b.agency_id) + " -> " + String(b.ship) + " on " + res.sign_on + " (" + res.id + ")");
@@ -5211,7 +5215,7 @@ var EB_DOC={'Medical':'medical',"Seaman's Book":'seaman&#8217;s book','Passport'
 function fmtMD(iso){var s=fmtDateS(iso);var i=s.indexOf(',');return i>0?s.slice(0,i):s;}
 function benchBox(rb,sec){var b=sec&&sec.bench;if(!b||!b.rows||!b.rows.length)return null;
   var more='All crew'+(b.total?(' &middot; '+b.total):'');
-  var h='<div class="rcard ebench" data-vk="'+rb.vessel_key+'"><div class=ebhd><span><b>Next for '+escHtml(sec.ship)+'</b><span class=ebsub> &middot; most rested by '+fmtMD(b.date)+'</span><span class=ebsubs> &middot; by '+fmtMD(b.date)+'</span></span>'
+  var h='<div class="rcard ebench" data-vk="'+rb.vessel_key+'"><div class=ebhd><span><b>Next for '+escHtml(sec.ship)+'</b>'+(b.after?('<span class=ebsub> &middot; after '+escHtml(b.after)+'</span><span class=ebsubs> &middot; after '+escHtml(String(b.after).split(' ').pop())+'</span>'):'')+'<span class=ebsub> &middot; most rested by '+fmtMD(b.date)+'</span><span class=ebsubs> &middot; by '+fmtMD(b.date)+'</span></span>'
    +'<button type=button class=ebmore data-vk="'+rb.vessel_key+'" data-aid="new" onclick="event.stopPropagation();openRelief(this)" title="Everyone available, and search"><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5v9M1.5 6h9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"></path></svg>'+more+'</button></div>';
   b.rows.forEach(function(r){
     var pct=Math.max(4,Math.min(100,Math.round((r.days-42)/140*100)));
@@ -5233,7 +5237,15 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
   t.innerHTML='<span>Earmarked <b>'+escHtml(nm)+'</b> for '+escHtml(ship)+' &middot; '+fmtMD(r.sign_on)+' &rarr; '+fmtDateS(r.planned_sign_off)+'</span><button type=button>Undo</button>';
   var u=t.querySelector('button');u.onclick=async function(){u.disabled=true;try{var x=await (await fetch('/api/relief/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:r.id})})).json();if(x&&x.ok){if(t.parentNode)t.parentNode.removeChild(t);renderRotation();}else{u.disabled=false;alert('Could not undo: '+((x&&x.error)||'error'));}}catch(_){u.disabled=false;}};
   document.body.appendChild(t);setTimeout(function(){t.classList.add('out');setTimeout(function(){if(t.parentNode)t.parentNode.removeChild(t);},400);},9000);}
-function reliefSlot(rb,projs,sec){if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return '';var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+// THE NEXT EARMARK (Miguel, 8 Oct 2026, on Beyond and Allure: "if I pick somebody ... automatically I need you to give
+// me a third card, which would be a second earmark"). The earmark already on the ship is drawn as its own card; the
+// slot after it lists who can follow it (sec.bench, dated on its sign-off by the server's chain), else a plain slot.
+// The list is drawn while it fits as the third item; a fourth column (~210px) is too narrow for it, so there the slot is
+// the plain one and its click opens the same list in the panel ("N available").
+function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
+  return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
+// Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -5776,7 +5788,7 @@ async function renderRotation(){
     +'<div class=bar style="margin-bottom:4px;justify-content:flex-end"><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
     +'<div class=crwrap id=rotwrap style="margin-top:12px">'
     +'<aside class=crrail id=rotrail>'
-    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Find ship</label><input id=rfind type=search placeholder="Ship name" oninput="ROT_FIND=this.value;drawRotation()"></div>'
+    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" oninput="ROT_FIND=this.value;drawRotation()"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
     +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div></div>'
@@ -5805,7 +5817,8 @@ function rotRail(shown,total){
   secs.forEach(function(s){
     brands[s.brand]=(brands[s.brand]||0)+1;
     if(!ROT_BRANDS.length||ROT_BRANDS.indexOf(s.brand)>=0){ships[s.ship]=s.onboard||0;names[s.ship]=s.ship;line[s.ship]=ROT_LINE[s.brand]||s.brand||'Other';}
-    (s.crew||[]).forEach(function(x){if(x.signOn)yrs[x.signOn.slice(0,4)]=1;if(x.signOff)yrs[x.signOff.slice(0,4)]=1;});
+    // Every year a contract or an earmark touches (earmarks were left out: 2028 never showed).
+    (s.crew||[]).concat(s.projections||[]).forEach(function(x){if(!x.signOn)return;var a=+String(x.signOn).slice(0,4),b=x.signOff?+String(x.signOff).slice(0,4):a;for(var y=a;y<=b;y++)yrs[y]=1;});
   });
   ROT_SHIPS=ROT_SHIPS.filter(function(k){return ships[k]!=null;});
   var put=function(id,html){var el=document.getElementById(id);if(el){el.innerHTML=html;el.onclick=rotFacetClick;}};
@@ -5834,18 +5847,32 @@ function rmonthChips(){
   document.getElementById('rotchips').innerHTML=h;
   document.querySelectorAll('#rotchips .chip').forEach(function(el){el.onclick=function(){var m=el.getAttribute('data-m');if(m==='all'){ROT_MONTHS=[];}else{m=+m;var k=ROT_MONTHS.indexOf(m);if(k>=0)ROT_MONTHS.splice(k,1);else ROT_MONTHS.push(m);}rmonthChips();drawRotation();};});
 }
-// True if a leg [signOn..signOff] overlaps the selected year and any selected month.
+// True if a contract [signOn..signOff] overlaps the selected year and any selected month (Miguel, 8 Oct 2026: "I looked
+// at picking a year and month .. and I think there is an issue"). Three defects fixed: dates were parsed as UTC and read
+// back in local time (a contract ending Dec 1 missed December in the Americas), a month without a year was checked in
+// the SIGN-ON year only (Nov 2026 → Jun 2027 missed March), and ships with nothing in the window stayed on the board.
+// Plain ISO strings now, no Date objects: a month is matched in every year the contract spans.
 function legInFilter(x){
   if(!ROT_YEAR&&!ROT_MONTHS.length)return true;
-  var on=x.signOn?new Date(x.signOn):null, off=x.signOff?new Date(x.signOff):on;
-  if(!on)return false;
-  if(ROT_YEAR){var y=+ROT_YEAR;if(!(on.getFullYear()<=y&&(off||on).getFullYear()>=y))return false;}
-  if(ROT_MONTHS.length){
-    var yr=ROT_YEAR?+ROT_YEAR:on.getFullYear();
-    var hit=ROT_MONTHS.some(function(m){var a=new Date(yr,m-1,1),b=new Date(yr,m,0);return on<=b&&(off||on)>=a;});
-    if(!hit)return false;
-  }
-  return true;
+  var on=x.signOn?String(x.signOn).slice(0,10):null;if(!on)return false;
+  var off=x.signOff?String(x.signOff).slice(0,10):on;if(off<on)off=on;
+  var y0=+on.slice(0,4),y1=+off.slice(0,4);
+  var pad=function(n){return (n<10?'0':'')+n;};
+  var last=function(y,m){return new Date(Date.UTC(y,m,0)).getUTCDate();};
+  var years=ROT_YEAR?[+ROT_YEAR]:[];if(!ROT_YEAR)for(var y=y0;y<=y1;y++)years.push(y);
+  var months=ROT_MONTHS.length?ROT_MONTHS:[0];
+  return years.some(function(y){return months.some(function(m){
+    var a=m?(y+'-'+pad(m)+'-01'):(y+'-01-01'),b=m?(y+'-'+pad(m)+'-'+pad(last(y,m))):(y+'-12-31');
+    return on<=b&&off>=a;});});
+}
+// THE SEARCH (Miguel, 8 Oct 2026: "instead of having a find ship .. I wanna just call it search .. and u can search by
+// ship, by city .. by name"): one box over the ship's name, every seafarer and earmark on it, and their ports. Accents
+// and case do not matter (Tañgonan, Curaçao). A ship that matches is shown whole: who relieves whom stays readable.
+function rotFold(t){t=String(t==null?'':t).toLowerCase();try{t=t.normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');}catch(_){}return t;}
+function rotSearchHit(s,q){
+  if(rotFold(s.ship).indexOf(q)>=0)return true;
+  return (s.crew||[]).concat(s.projections||[]).some(function(x){
+    return [x.name,x.on_city,x.embark,x.off_city,x.disembark].some(function(v){return v&&rotFold(v).indexOf(q)>=0;});});
 }
 function drawRotation(){
   var b=ROT,c=b.counts;
@@ -5881,7 +5908,7 @@ function drawRotation(){
   var allSecs=secs.length;
   if(ROT_BRANDS.length)secs=secs.filter(function(s){return ROT_BRANDS.indexOf(s.brand)>=0;});
   if(ROT_SHIPS.length)secs=secs.filter(function(s){return ROT_SHIPS.indexOf(s.ship)>=0;});
-  if(ROT_FIND){var q=ROT_FIND.toLowerCase();secs=secs.filter(function(s){return s.ship.toLowerCase().indexOf(q)>=0;});}
+  if(ROT_FIND&&ROT_FIND.trim()){var q=rotFold(ROT_FIND.trim());secs=secs.filter(function(s){return rotSearchHit(s,q);});}
   secs=secs.map(function(s){
     // Move an Inactive crew's leg into the ship's history (same shape the server uses for past crew),
     // so the tag hides the card but keeps the service record visible under the ship.
@@ -5894,7 +5921,8 @@ function drawRotation(){
     // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
     return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
   });
-  if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
+  // A status tile, a year or a month: a ship with nobody in it leaves the board (it used to stay, empty).
+  if(ROT_F||ROT_YEAR||ROT_MONTHS.length)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
   // 8 Oct 2026 (Miguel: "remove this"): no "Ships (48)" label above the hulls; the side rail's tile already counts vessels.
   h+=(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;

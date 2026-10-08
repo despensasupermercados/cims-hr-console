@@ -49,5 +49,7 @@ test("static: the slot stays when the ship's last earmark has joined (a NEW earm
   assert.match(W, /data-aid="new" onclick="openRelief\(this\)"/);
   const U = readFileSync(new URL("../src/relief_ui.js", import.meta.url), "utf8");
   assert.match(U, /const fresh=aid==="new";\s*const node=fresh\?null:/);
-  assert.match(U, /const printer=\(fresh&&row&&row\.reliever&&row\.reliever\.aboard\)\?row\.reliever:/);
+  // 8 Oct 2026 (the chain): a NEW earmark relieves the last in the chain — the latest earmark, else the one aboard, else the printer.
+  assert.match(U, /const printer=fresh&&row\?lastInChain\(row\):\(row\?row\.printer:null\);/);
+  assert.match(U, /function lastInChain\(row\)\{[\s\S]*?return \(row\.reliever&&row\.reliever\.aboard\)\?row\.reliever:p;\}/);
 });
