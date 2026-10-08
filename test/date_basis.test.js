@@ -76,6 +76,8 @@ test("UTC basis is used by exactly these functions", () => {
     "apiMariaKnowledge",
     // 2026-09-15: a drop creates a projection dated from the board's own day (TODAY, UTC) — the same
     // basis boardLegs/rotationSections use, so "sign-on = today" lands on the day the card shows.
+    // 2026-10-08: the contract modal's Documents tags (expired / within 30 days / valid) read the board's day.
+    "apiRotationCrew",
     "apiRotationProject",
     "boardLegs",
     // 2026-10-07: a TDG earmark with no card becomes a console card at the registry Apply — the same path and

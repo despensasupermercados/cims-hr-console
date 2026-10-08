@@ -113,16 +113,22 @@ export async function reliefBoardData(env, today) {
             a.succeeds_assignment_id, a.eccr, a.air, a.hotel, a.on_date_conf, a.off_date_conf,
             a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
             v.brand AS brand, COALESCE(v.name, a.vessel_name) AS ship_short,
-            TRIM(COALESCE(cr.first_name,'') || ' ' || COALESCE(cr.last_name,'')) AS crew_name
+            TRIM(COALESCE(cr.first_name,'') || ' ' || COALESCE(cr.last_name,'')) AS crew_name,
+            cr.agency_id AS sc,
+            COALESCE(NULLIF(o.med_exp,''), cr.med_exp) AS med_exp, COALESCE(NULLIF(o.sirb_exp,''), cr.sirb_exp) AS sirb_exp,
+            COALESCE(NULLIF(o.pp_exp,''), cr.pp_exp) AS pp_exp, COALESCE(NULLIF(o.usv_exp,''), cr.usv_exp) AS usv_exp,
+            COALESCE(NULLIF(o.sch_exp,''), cr.sch_exp) AS sch_exp
        FROM assignment a
        JOIN contract c ON c.id = a.contract_id
        JOIN crew cr    ON cr.id = c.crew_id
+       LEFT JOIN crew_override o ON o.agency_id = cr.agency_id
        LEFT JOIN vessel v ON v.id = a.vessel_id
       WHERE a.actual_sign_off IS NULL`
   ).all()).results;
 
   const relievers = rows.map((r) => ({
-    id: r.id, role: r.role, crew_name: r.crew_name,
+    id: r.id, role: r.role, crew_name: r.crew_name, sc: r.sc || null,
+    docs: { med_exp: r.med_exp || null, sirb_exp: r.sirb_exp || null, pp_exp: r.pp_exp || null, usv_exp: r.usv_exp || null, sch_exp: r.sch_exp || null }, // the panel's document tags (8 Oct 2026)
     vessel_key: (r.brand || "?") + "|" + (r.ship_short || "?"),
     on_date: r.sign_on || null,
     off_date: r.actual_sign_off || r.planned_sign_off || null,

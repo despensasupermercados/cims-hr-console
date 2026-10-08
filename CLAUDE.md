@@ -292,6 +292,16 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
   The `tg_update_run` table stays (no schema change). `TG_NOTIFY` survives only as Deploy's fallback recipient.
+- **Where they are, under the name; the documents against the contract** (Miguel, 8 Oct 2026, Villacortes' Allure
+  earmark: "tell me there that he's on board on Wonder ... right below the name ... remove the bottom part ... If I click
+  in the card ... right before the comments, all the tags"). The card's status line goes through `whereLine`: a crew the
+  file has On board ANOTHER hull reads "On board <b>Wonder</b>", Earmarked elsewhere reads so, else the console's status
+  (On Vacation, Reserved...). The bottom restatement ("Your earmark · TDG registry ...") is gone (`regNote` default ''). An
+  earmark's chips read its OWN dates (`contractDocBadge(docs, sign_on, planned_sign_off)`): expired by the sign-on red,
+  lapsing before the sign-off amber by name, required with no date one muted count; seats keep today's `docBadge`. Inside
+  the card, right before Comment, a **Documents** block tags every document (`documentLines(..., today, 30)` on
+  `/api/rotation/crew` → `docTags`; `docBlock` in the relief panel, reliever rows now carry `sc` + docs, manual entry
+  first): Expired red, Within 30 days amber, Valid green, "N of M valid". Pinned by `test/card_docs.test.js`.
 - The sources line names the FILE that dates the board first ("TDG file <date> · N crew, M with embark dates"); the
   Counter is "(history)", never warned about. Nothing here is money (§1) and nothing resolves a disagreement without
   Rita (§6).

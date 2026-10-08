@@ -36,7 +36,7 @@ import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail,
 import { fetchShipTurnarounds, fetchBoardPortDays } from "./port_days.js";
 import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
-import { installKeymanDeploy, docBadge } from "./keyman_deploy.js";
+import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
 import { classifyWindow } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
@@ -1884,12 +1884,13 @@ async function rotationSections(env) {
   // Document standing per seafarer, for the card. crew_override wins field by field, the same
   // precedence every other read uses (AdvancedQuery COALESCEs onto the base row).
   const DOCF = ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"];
-  const docsBy = {};
+  const docsBy = {}, docsRaw = {};
   for (const c of crewRows) {
     const o = ovMap[c.agency_id] || {};
     const merged = {};
     for (const f of DOCF) merged[f] = (o[f] != null && o[f] !== "") ? o[f] : c[f];
     docsBy[c.agency_id] = docBadge(merged, today);
+    docsRaw[c.agency_id] = merged; // the dates themselves: an earmark reads them against its own contract
   }
   // The ship's Junior PS rule, seeded in `vessel` since July and read here for the first time.
   // WARN only (Miguel, 14 Sep 2026: "Warn on drop now; block once Rita re-confirms the four hulls").
@@ -2090,7 +2091,7 @@ async function rotationSections(env) {
       registry: regOf(a.id), confirmed: regConfirmed(a.id), // the last AdvancedQuery verdict on this card (regByAsg above)
       awaiting: awaitingCard(a),
       deployedAt: deployedAtOf(a.id),
-      docs: docsBy[a.sc] || null,
+      docs: (a.sign_on && docsRaw[a.sc]) ? contractDocBadge(docsRaw[a.sc], a.sign_on, a.planned_sign_off || null) : (docsBy[a.sc] || null), // against the plan's own dates (8 Oct 2026)
       jrWarn: (isJr(a.rank) && jrRule[kk] && jrRule[kk] !== "open") ? jrRule[kk] : null,
       hasNote: !!(rm2.note && String(rm2.note).trim()),
     });
@@ -2319,15 +2320,20 @@ async function apiRotationCrew(env, url) {
   // Ensures together, then all reads as one wave. Same statements, same output, same 404.
   await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env)]);
   const id = url.searchParams.get("id");
-  const [c, legsRes, r, editRes, HIST, snap] = await Promise.all([
-    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, pp_exp, usv_exp FROM crew WHERE agency_id=?").bind(id).first(),
+  const [c, legsRes, r, editRes, HIST, snap, dov] = await Promise.all([
+    env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit WHERE sc=?").bind(id).all().catch(() => ({ results: [] })),
     boardLegs(env), // the ONE schedule: the file's current leg for this crew, with its resolved sign-off (7 Oct 2026)
     env.DB.prepare("SELECT status, raw_status, vessel, embarked_at, debarked_at, run_at FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null),
+    env.DB.prepare("SELECT med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override WHERE agency_id=?").bind(id).first().catch(() => null), // the modal's document tags (8 Oct 2026)
   ]);
   if (!c) return json({ error: "not_found" }, 404);
+  // Every document as the modal tags it (Miguel, 8 Oct 2026): the manual entry wins field by field; expiring = 30 days.
+  const dmerged = {};
+  for (const f of ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"]) dmerged[f] = (dov && dov[f] != null && dov[f] !== "") ? dov[f] : c[f];
+  const docs = documentLines(dmerged, TODAY(), 30);
   // THE FILE'S CONTRACT (Miguel, 7 Oct 2026): sign-on = the AdvancedQuery's embark; sign-off = TDG's debark or
   // cross-over, else Rita's typed date or her reliever card (newer wins), else embark + 7 months (Azamara 5).
   const regLegs = (HIST || []).filter((h) => h && h.ours && h.sc === id && h.source === "registry");
@@ -2367,7 +2373,7 @@ async function apiRotationCrew(env, url) {
       sign_off_is_projected: !leg.act_off && !(hasEdit && e.sign_off),
     };
   });
-  return json({ crew: c, legs, resolved, file, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
+  return json({ crew: c, legs, resolved, file, docs, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
 }
 async function apiNote(request, env, session) {
   const b = await request.json().catch(() => ({}));
@@ -5352,7 +5358,7 @@ function regNote(reg,confirmed){
   if(reg.verdict==='elsewhere')return '<div class=srcnote><b style="color:var(--amber)">TDG registry'+at+': '+st+(sh?(' &middot; '+sh):'')+'</b> &middot; not this ship</div>';
   if(reg.verdict==='ashore')return '<div class=srcnote><b style="color:var(--red)">TDG registry'+at+': '+st+(sh?(', '+sh):'')+'</b> &middot; not aboard here per the file</div>';
   if(reg.verdict==='earmarked')return '<div class=srcnote><b style="color:var(--green-d)">TDG earmarks them for this ship</b> (file of'+at+') &middot; your earmark agrees &middot; not aboard yet</div>';
-  return '<div class=srcnote>Your earmark &middot; TDG registry'+at+': '+st+(sh?(' &middot; '+sh):(reg.status==='On board'?' (ship not on file yet)':''))+'</div>';
+  return ''; // the file's word now sits under the name (whereLine, 8 Oct 2026): no restatement at the bottom
 }
 // What each port colour MEANS (city_resolver.js). Colour with no key is noise; 'seed' was painted the
 // danger red, which read as an error on a card that was simply falling back to the ship's homeport.
@@ -5363,6 +5369,10 @@ function nextLine(x){var n=x&&x.next;if(!n)return '';
   var when=n.signOn?fmtDateS(n.signOn):(n.tdg?'TDG earmark, dates to plan':'dates to plan');
   var g='';if(n.gapDays!=null&&x.signOff&&n.signOn){if(n.gapDays>0)g='<span class=nxgap>'+spanCompact(x.signOff,n.signOn)+' ashore</span>';else if(n.gapDays===0)g='<span class=nxgap>back to back</span>';else g='<span class="nxgap bad">overlaps '+spanCompact(n.signOn,x.signOff)+'</span>';}
   return '<div class=rnext><span class=nxk>Next</span> <b>'+escHtml(n.ship||'')+'</b> &middot; '+when+(g?(' &middot; '+g):'')+'</div>';}
+// WHERE THEY ARE, UNDER THE NAME (Miguel, 8 Oct 2026, Villacortes' earmark: "I need you to tell me there that he's on board
+// on Wonder, so I know that right now he is on Wonder ... put it right below the name"): an earmark card's status line
+// carries the hull the TDG file has them on; a seat card's status is its own ship, unchanged.
+function whereLine(x,plan,reg){var st=escHtml(x.status||'');if(!plan||!reg)return st;if(reg.status==='On board'&&reg.ship&&String(reg.ship).toLowerCase()!==String(x.ship||'').toLowerCase())return 'On board <b>'+escHtml(reg.ship)+'</b>';if(reg.status==='Earmarked'&&reg.ship&&String(reg.ship).toLowerCase()!==String(x.ship||'').toLowerCase())return 'Earmarked '+escHtml(reg.ship);return st;}
 function rotCard(x){
   var plan=x.state==='yellow';
   var tba='<span style="color:var(--amber);font-weight:700" title="port not set yet">TBA</span>';
@@ -5462,7 +5472,7 @@ function rotCard(x){
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
   return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the earmark':x.tdgEarmark?'TDG earmarks them here - drag to plan the dates, Remove to reject':plan?'Your earmark - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to earmark them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
-    +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+x.status+(dur?(' &middot; '+dur):'')+'</div>'+nextLine(x)+'</div>'+chip+'</div>'
+    +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+whereLine(x,plan,reg)+(dur?(' &middot; '+dur):'')+'</div>'+nextLine(x)+'</div>'+chip+'</div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +gap
     +(tg?'<div class=rtags>'+tg+'</div>':'')
@@ -5587,6 +5597,14 @@ function monthsDays(a,b){
 }
 // Dates on the seat card and its history read as a calendar date (Miguel, 7 Oct 2026: "the dates here should be
 // Sept 22, 2027"): short month, day, year — "Sep 22, 2027" — never the ISO string. fmtDate (full month) is the profile's.
+// THE DOCUMENTS AS TAGS (Miguel, 8 Oct 2026: "right before the comments, all the tags in a tag format: all the documents
+// ... who are expired. Below, all the documents who are expired within the next 30 days, and then everything else ...
+// in green"): three rows, expired red, lapsing within 30 days amber, the rest green; a required document with no date is
+// a grey tag in the first row. Shared by the contract modal; the earmark panel draws the same rows (relief_ui.js).
+function docTags(docs){if(!docs||!docs.length)return '';var t=function(d,cls){return '<span class="rtag '+cls+'" title="'+escHtml(d.doc)+'">'+escHtml(String(d.doc).toUpperCase())+(d.exp?(' &middot; '+escHtml(fmtDateS(d.exp))):' &middot; no date')+'</span>';};
+  var bad=docs.filter(function(d){return d.status==='expired'||(d.status==='missing'&&d.required);}),soon=docs.filter(function(d){return d.status==='expiring';}),ok=docs.filter(function(d){return d.status==='ok'||(d.status==='missing'&&!d.required);});
+  var row=function(lab,arr,cls){return arr.length?('<div class=docrow><span class=dock>'+lab+'</span><span class=docs>'+arr.map(function(d){return t(d,d.status==='missing'?'mis':cls);}).join('')+'</span></div>'):'';};
+  return '<div class=zlabel>Documents <span class=zcount>'+docs.filter(function(d){return d.status==='ok';}).length+' of '+docs.length+' valid</span></div><div class=docblock>'+row('Expired',bad,'bad')+row('Within 30 days',soon,'due')+row('Valid',ok,'on')+'</div>';}
 function niceShip(s){s=String(s||'').replace(/^\\s*M\\/?V\\s+/i,'').toLowerCase();return s.replace(/\\b[a-z]/g,function(c){return c.toUpperCase();});}
 function fmtDateS(iso){if(!iso)return '';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).slice(0,10).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo||!parseInt(p[2],10))return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 // The seat chip's ONE number (Miguel, 7 Oct 2026: "this should say 3M 22 days"): calendar months + days between two
@@ -5647,6 +5665,7 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'#rotmodal select:focus,#rotmodal input:focus,#rotmodal textarea:focus{outline:2px solid #1E5FB4;outline-offset:1px;border-color:#1E5FB4}'
    +'#rotmodal .echist td,#rotmodal .echist th{white-space:nowrap}'
    +'#rotmodal .ecfoot .btn{height:40px;padding:0 18px;font-size:13.5px}#rotmodal .ecfoot .btn.green{min-width:112px}#rotmodal .echide{height:40px;padding:0 12px}'
+   +'#rotmodal .docblock{display:flex;flex-direction:column;gap:7px}#rotmodal .docrow{display:flex;gap:10px;align-items:flex-start}#rotmodal .dock{flex:0 0 96px;font:700 10px "DM Sans";letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding-top:3px}#rotmodal .docs{display:flex;flex-wrap:wrap;gap:5px}#rotmodal .docs .rtag{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px}'
    +'#rotmodal .ckrow{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 2px}'
    +'#rotmodal .ckchip{display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);border-radius:999px;padding:7px 14px 7px 8px;cursor:pointer;font:700 11.5px "DM Sans";letter-spacing:.05em;color:var(--mut);background:#fff;transition:border-color .15s,background .15s,color .15s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}'
    +'#rotmodal .ckchip:hover{border-color:var(--navy);color:var(--navy)}'
@@ -5675,6 +5694,7 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'</div>'
    +'<div class=zlabel>Confirmed <span class=zcount>shows as green tags on the card</span></div>'
    +'<div class=ckrow>'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
+   +docTags(d.docs)
    +'<div class=zlabel>Comment</div><textarea id=cmt placeholder="Note for this crew…">'+note+'</textarea>'
    +(legs?'<div class=zlabel>Contract history <span class=zcount>'+(d.legs||[]).length+' contract'+((d.legs||[]).length===1?'':'s')+'</span></div><div class=echist><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table></div>':'')
    +'<div class=zlabel>Sign-off workflow</div><div class=ecwf><button class="btn ghost" onclick="sendSignoffInstructions(\\''+id+'\\','+seq+')">Send instructions</button><button class="btn ghost" onclick="sendSignoffLink(\\''+id+'\\','+seq+')">Send sign-off link</button><button class="btn ghost" onclick="sendReviewInvite(\\''+id+'\\','+seq+')">Send review invite</button></div>'

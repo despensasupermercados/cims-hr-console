@@ -51,7 +51,7 @@ test("docBadge names every expired document; missing / expiring stay one summary
 
 test("static: the card draws the Next line under the status and one red tag per expired document; the server attaches next", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /\+x\.status\+\(dur\?\(' &middot; '\+dur\):''\)\+'<\/div>'\+nextLine\(x\)\+'<\/div>'\+chip/);
+  assert.match(W, /\+whereLine\(x,plan,reg\)\+\(dur\?\(' &middot; '\+dur\):''\)\+'<\/div>'\+nextLine\(x\)\+'<\/div>'\+chip/);
   assert.match(W, /function nextLine\(x\)\{var n=x&&x\.next;/);
   assert.match(W, /' ashore<\/span>'/); assert.match(W, /overlaps '\+spanCompact\(n\.signOn,x\.signOff\)/);
   assert.match(W, /_di\.forEach\(function\(d\)\{tg\+='<span class="rtag bad"/);
