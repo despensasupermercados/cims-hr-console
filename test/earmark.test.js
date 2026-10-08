@@ -186,7 +186,8 @@ test("static: the Keyman page says EARMARK, the awaiting card is a GREEN card, t
   assert.doesNotMatch(W.slice(W.indexOf("function rotCard(x){"), W.indexOf("function rotIssuesBlock(")), /PLACEHOLDER/, "one word: earmark");
   assert.match(W, /createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc/);
   const UI = readFileSync(new URL("../src/crew_import_ui.js", import.meta.url), "utf-8");
-  assert.match(UI, /seg\("earmark:"\+it\.id,"accept",\["accept","keep"\],\["Accept TDG","Keep mine \(email Joy\)"\]\)/, "the per-row decision, TDG by default");
+  // 8 Oct 2026 (Miguel: "Accept, Keep mine, or Edit"): a third choice, TDG still the default.
+  assert.match(UI, /seg\("earmark:"\+it\.id,"accept",\["accept","keep","edit"\],\["Accept TDG","Keep mine \(email Joy\)","Edit"\]\)/, "the per-row decision, TDG by default");
   assert.match(UI, /Emails to Joy/, "the emails are listed BEFORE Apply");
 });
 

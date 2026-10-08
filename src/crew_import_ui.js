@@ -203,7 +203,7 @@ details.minor summary .c{font-family:var(--mono);font-size:11px;color:var(--slat
 </div>
 <script>
 var $=function(i){return document.getElementById(i);};
-var STAGE=null,DEC={},META={},PENDING=null;
+var STAGE=null,DEC={},EDITS={},META={},PENDING=null;
 var SIG=["crew id","first name","last name","status","rank","vessel","medical expiration","sirb","passport","us visa","mobile","province"];
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function norm(s){return String(s==null?"":s).toLowerCase().replace(/[^a-z0-9]/g,"");}
@@ -253,7 +253,7 @@ async function stage(){
  META={file_hash:PENDING.file_hash,filename:PENDING.filename,rows_seen:PENDING.rows.length};
  var res;try{res=await fetch("/api/crew/import/stage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({rows:PENDING.rows,file_hash:PENDING.file_hash,filename:PENDING.filename})}).then(function(r){return r.json();});}catch(e){res={ok:false,error:"network"};}
  if(!res.ok){$("msg").innerHTML='<div class="msg">'+(res.error==="already_processed"?(res.snapshot_saved?("This exact file was already imported. The Keyman board now reads it directly: "+res.snapshot_saved+" rows kept."):"This exact file was already imported — nothing to do."):"Stage failed: "+esc(res.error))+'</div>';return;}
- $("msg").innerHTML="";STAGE=res;DEC={};render();
+ $("msg").innerHTML="";STAGE=res;DEC={};EDITS={};render();
 }
 function badge(txt,cls){return ' <span class="tag '+cls+'">'+txt+'</span>';}
 function diff(lab,o,n,b){return '<div class="row"><span class="k">'+esc(lab)+'</span><span class="diff"><span class="old">'+esc(o)+'</span> <span class="arw">&#8594;</span> <span class="new">'+esc(n)+'</span>'+(b||"")+'</span></div>';}
@@ -262,6 +262,13 @@ function seg(key,def,opts,labels,soft){
  for(var i=0;i<opts.length;i++)h+='<button class="'+(cur===opts[i]?'on':'')+'" data-key="'+key+'" data-v="'+opts[i]+'">'+labels[i]+'</button>';
  return h+'</div>';
 }
+// 8 Oct 2026, the same rules as the Uploads screen (worker.js impEmDef / impEmEdit): a crew who signed off another
+// ship is told by default; Edit sends ship + dates in body.edits.
+function emDef(it){return it.kind!=="not_in_tdg"?"accept":(it.signed_off&&!it.told_at?"tell":"hold");}
+function emEdit(it){var k="earmark:"+it.id,e=EDITS[k]||{ship:it.ship,sign_on:it.sign_on||"",sign_off:it.sign_off||""};EDITS[k]=e;
+ var opts=(STAGE.review.ships||[]).map(function(n){return '<option'+(n===e.ship?' selected':'')+'>'+esc(n)+'</option>';}).join("");
+ if((STAGE.review.ships||[]).indexOf(e.ship)<0)opts='<option selected>'+esc(e.ship||"")+'</option>'+opts;
+ return '<div class="row" data-edit="'+esc(k)+'" style="display:'+((DEC[k]||"accept")==="edit"?"grid":"none")+'"><span class="k">Edit</span><span class="diff"><select data-ek="'+k+'" data-ef="ship">'+opts+'</select><input type="date" data-ek="'+k+'" data-ef="sign_on" value="'+esc(e.sign_on||"")+'"><input type="date" data-ek="'+k+'" data-ef="sign_off" value="'+esc(e.sign_off||"")+'"></span></div>';}
 function render(){
  var g=STAGE.review.groups,c=STAGE.review.counts,h="";
  // Rita's Keyman projections against this file (registry_sync.js, Miguel 5 Oct 2026). Shown here,
@@ -288,13 +295,13 @@ function render(){
  if(em.length){h+='<div class="sec"><h2>&#9873; Earmark discrepancies — the TDG file disagrees with your earmarks</h2><div class="d"><b>Accept</b>: the file wins (a different ship moves your earmark there with your dates; a different seafarer replaces yours; Inactive removes it; an embark far from your sign-on absorbs it). <b>Keep mine</b>: the earmark stands and Joy receives one email per seafarer, Rita in copy, with everything CIMS holds, so TDG is corrected before your next import.</div>';
   var EK={hull:["different ship","t-amber"],other_person:["TDG earmarks someone else","t-amber"],inactive:["TDG: inactive","t-red"],not_aboard:["not aboard per TDG","t-red"],embark_date:["embark date differs","t-amber"]};
   em.forEach(function(it){var l=EK[it.kind]||[it.kind,""];var f=it.file||{};
-   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),(f.status||"status not readable")+(f.ship?(" · "+f.ship):"")+(f.embarked_at?(" · embarked "+f.embarked_at):""),badge(l[0],l[1]))+seg("earmark:"+it.id,"accept",["accept","keep"],["Accept TDG","Keep mine (email Joy)"])+'</div>';});
+   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),(f.status||"status not readable")+(f.ship?(" · "+f.ship):"")+(f.embarked_at?(" · embarked "+f.embarked_at):""),badge(l[0],l[1]))+seg("earmark:"+it.id,"accept",["accept","keep","edit"],["Accept TDG","Keep mine (email Joy)","Edit"])+emEdit(it)+'</div>';});
   h+='</div>';}
  // NOT IN TDG YET (7 Oct 2026, the Deploy button retired): your earmarks the file does not carry. Tell Joy from
  // here, hold until you are sure (default), or drop the earmark.
  if(emNew.length){h+='<div class="sec"><h2>&#9873; Your earmarks TDG does not have yet</h2><div class="d"><b>Tell Joy</b> emails her the earmark with the full record, Rita in copy, so she enters it in TDG before your next import (the card is stamped SENT TO TDG). <b>Not yet</b> keeps it on your board and tells nobody. <b>Drop mine</b> removes it.</div>';
   emNew.forEach(function(it){var f=it.file||{};
-   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+(it.told_at?badge("told Joy "+esc(it.told_at)+" · still not in TDG","t-amber"):"")+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),f.absent?"not in the file":((f.status||"status not readable")+(f.ship?(" · "+f.ship):"")),"")+seg("earmark:"+it.id,"hold",["tell","hold","drop"],["Tell Joy (email)","Not yet","Drop mine"])+'</div>';});
+   h+='<div class="card"><div class="who">'+esc((it.crew_name||it.sc)+" · earmark "+it.ship+(it.sign_on?(" from "+it.sign_on):""))+(it.told_at?badge("told Joy "+esc(it.told_at)+" · still not in TDG","t-amber"):"")+(it.signed_off?badge("signed off "+esc(it.signed_off.ship||""),"t-green"):"")+(it.waiting?badge("aboard "+esc(it.waiting.ship||"")+" · TDG cannot earmark yet","t-amber"):"")+'</div>'+diff("TDG file"+(f.at?(" "+f.at):""),it.ship+(it.sign_on?(" · "+it.sign_on):""),f.absent?"not in the file":((f.status||"status not readable")+(f.ship?(" · "+f.ship):"")),"")+seg("earmark:"+it.id,emDef(it),["tell","hold","drop"],["Tell Joy (email)","Not yet","Drop mine"])+'</div>';});
   h+='</div>';}
  if(tdgEm.length){h+='<div class="sec"><h2>&#9873; TDG earmarks without a card</h2><div class="d">TDG has these seafarers earmarked for a ship your board has no earmark for. Each gets a console earmark on Apply (sign-on = the current printer’s projected sign-off, + 7 months); adjust the dates on the card afterwards.</div>';
   tdgEm.forEach(function(it){h+='<div class="card"><div class="who">'+esc((it.name||it.sc)+" · "+it.ship)+'</div>'+seg("tdgmark:"+it.sc,"add",["add","skip"],["Add earmark","Skip"],true)+'</div>';});h+='</div>';}
@@ -345,7 +352,7 @@ function renderCart(){
  if(g.ship_flag.length&&x.shipFlag)items+=cline("i-amber","&#9875;","Ship flag","kept on your board",x.shipFlag+" held","held");
  var pc=STAGE.review.projection_counts||{};
  if(pc.confirmed)items+=cline("i-green","&#9873;","Earmarks aboard per the file","the file's row is the seat",pc.confirmed+" auto","save");
- var emA=0,emK=0,emT=0,emH=0,emD=0;(STAGE.review.earmarks||[]).forEach(function(it){var v=DEC["earmark:"+it.id];if(it.kind==="not_in_tdg"){if(v==="tell")emT++;else if(v==="drop")emD++;else emH++;}else if((v||"accept")==="keep")emK++;else emA++;});
+ var emA=0,emK=0,emT=0,emH=0,emD=0;(STAGE.review.earmarks||[]).forEach(function(it){var v=DEC["earmark:"+it.id]||emDef(it);if(it.kind==="not_in_tdg"){if(v==="tell")emT++;else if(v==="drop")emD++;else emH++;}else if(v==="keep"||v==="edit")emK++;else emA++;});
  if(emA+emD)items+=cline("i-amber","&#9873;","Earmarks corrected to TDG","moved, removed or absorbed",(emA+emD)+" accept","save");
  if(emK+emT)items+=cline("i-red","&#9993;","Emails to Joy",(emK?emK+" kept":"")+(emK&&emT?" · ":"")+(emT?emT+" to enter in TDG":"")+" · Rita in copy",(emK+emT)+" send","held");
  if(emH)items+=cline("i-gray","&#9873;","Earmarks not in TDG yet","held, nobody told",emH+" hold","held");
@@ -369,13 +376,14 @@ function renderCart(){
 }
 async function apply(){
  var ap=$("ap");if(ap){ap.disabled=true;ap.textContent="Applying…";}
- var body={review:STAGE.review,decisions:DEC,file_hash:META.file_hash,filename:META.filename,rows_seen:META.rows_seen,run_by:"Rita"};
+ var ed={};for(var ek in EDITS)if(DEC[ek]==="edit")ed[ek]=EDITS[ek];
+ var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:META.file_hash,filename:META.filename,rows_seen:META.rows_seen,run_by:"Rita"};
  var res;try{res=await fetch("/api/crew/import/apply",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();});}catch(e){res={ok:false,error:"network"};}
  if(!res.ok){$("cart").innerHTML='<div class="ch"><div class="h">Apply failed</div></div><div class="foot"><div class="msg">'+(res.error==="already_processed"?"Already processed.":esc(res.error))+'</div></div>';return;}
  $("work").style.display="none";
  $("msg").innerHTML='<div class="msg">&#10003; '+esc(res.summary||('Applied '+res.applied+' changes.'))+'</div>';
 }
-function reset(){STAGE=null;DEC={};PENDING=null;$("band").innerHTML="";$("work").style.display="none";$("msg").innerHTML="";$("f").value="";}
+function reset(){STAGE=null;DEC={};EDITS={};PENDING=null;$("band").innerHTML="";$("work").style.display="none";$("msg").innerHTML="";$("f").value="";}
 function discard(){reset();$("msg").innerHTML='<div class="msg">Discarded. Nothing was saved.</div>';}
 var dz=$("dz"),fi=$("f");
 dz.onclick=function(){fi.click();};
@@ -383,6 +391,7 @@ fi.onchange=function(e){if(e.target.files[0])handle(e.target.files[0]);};
 ["dragenter","dragover"].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.add("over");});});
 ["dragleave","drop"].forEach(function(ev){dz.addEventListener(ev,function(e){e.preventDefault();dz.classList.remove("over");});});
 dz.addEventListener("drop",function(e){var f=e.dataTransfer.files[0];if(f)handle(f);});
-$("app").addEventListener("click",function(e){var b=e.target.closest("button[data-key]");if(!b)return;var k=b.getAttribute("data-key"),v=b.getAttribute("data-v");DEC[k]=v;b.parentNode.querySelectorAll("button").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-v")===v);});renderCart();});
+$("app").addEventListener("click",function(e){var b=e.target.closest("button[data-key]");if(!b)return;var k=b.getAttribute("data-key"),v=b.getAttribute("data-v");DEC[k]=v;b.parentNode.querySelectorAll("button").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-v")===v);});var ebox=document.querySelector('[data-edit="'+k+'"]');if(ebox)ebox.style.display=v==="edit"?"grid":"none";renderCart();});
+$("app").addEventListener("change",function(e){var t=e.target,k=t.getAttribute&&t.getAttribute("data-ek");if(!k)return;EDITS[k]=EDITS[k]||{};EDITS[k][t.getAttribute("data-ef")]=t.value;});
 document.addEventListener("click",function(e){var t=e.target.closest("[data-act]");if(!t)return;var a=t.getAttribute("data-act");if(a==="apply")apply();else if(a==="discard")discard();else if(a==="reset")reset();else if(a==="force")stage();});
 </script></body></html>`;

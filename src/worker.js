@@ -4690,7 +4690,7 @@ var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last 
 // Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
 // cart inline into #imp, using the console's existing brand (navy/green, Outfit/DM Sans).
 // No backticks and no dollar-brace interpolation and no quote nesting, so source == served JS.
-var STAGE=null,DEC={},IMPHASH=null,IMPNAME=null,NMAP={};
+var STAGE=null,DEC={},EDITS={},IMPHASH=null,IMPNAME=null,NMAP={};
 async function sha256buf(buf){var h=await crypto.subtle.digest("SHA-256",buf);return Array.from(new Uint8Array(h)).map(function(b){return b.toString(16).padStart(2,"0");}).join("");}
 function impEsc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":c==='"'?"&quot;":"&#39;";});}
 function impWho(id){var n=NMAP[id];return n&&n!==id?impEsc(n)+' <span class=iid>'+impEsc(id)+'</span>':impEsc(id);}
@@ -4700,9 +4700,20 @@ async function cimsStage(){
   $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
   var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?(res.snapshot_saved?("This exact file was already imported. The Keyman board now reads it directly: "+res.snapshot_saved+" rows kept."):"This exact file was already imported &mdash; nothing to do."):"Stage failed: "+impEsc(res.error))+'</div>';return;}
-  STAGE=res;DEC={};cimsRender();
+  STAGE=res;DEC={};EDITS={};cimsRender();
 }
 function impSeg(key,def,a,b,la,lb,soft){var cur=DEC[key]||def;return '<span class="iseg'+(soft?" soft":"")+'"><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
+function impSegN(key,def,opts,labels,soft){var cur=DEC[key]||def,h='<span class="iseg'+(soft?" soft":"")+'">';for(var i=0;i<opts.length;i++)h+='<button class="impb'+(cur===opts[i]?" on":"")+'" data-k="'+key+'" data-v="'+opts[i]+'">'+labels[i]+'</button>';return h+'</span>';}
+// THE EARMARK ROWS (8 Oct 2026). Until today this screen never showed them: every earmark decision took the
+// server default. Split as the server reads them (earmark.js): discrepancies (Accept / Keep mine / Edit),
+// signed off another ship (Tell Joy by default), aboard another ship (TDG cannot earmark them yet), not in TDG.
+function impEmSplit(){var all=(STAGE.review.earmarks||[]);return {dis:all.filter(function(i){return i.kind!=="not_in_tdg";}),off:all.filter(function(i){return i.kind==="not_in_tdg"&&i.signed_off;}),wait:all.filter(function(i){return i.kind==="not_in_tdg"&&i.waiting;}),add:all.filter(function(i){return i.kind==="not_in_tdg"&&!i.signed_off&&!i.waiting;}),tdg:(STAGE.review.tdg_earmarks||[])};}
+function impEmDef(it){return it.kind!=="not_in_tdg"?"accept":(it.signed_off&&!it.told_at?"tell":"hold");}
+function impEmWho(it){return '<div class=iwho>'+impEsc(it.crew_name||it.sc)+' <span class=iid>'+impEsc(it.sc)+'</span></div>';}
+function impEmEdit(it){var k="earmark:"+it.id,e=EDITS[k]||{ship:it.ship,sign_on:it.sign_on||"",sign_off:it.sign_off||""};EDITS[k]=e;var on=(DEC[k]||"accept")==="edit";
+  var opts=(STAGE.review.ships||[]).map(function(n){return '<option'+(n===e.ship?" selected":"")+'>'+impEsc(n)+'</option>';}).join("");
+  if((STAGE.review.ships||[]).indexOf(e.ship)<0)opts='<option selected>'+impEsc(e.ship||"")+'</option>'+opts;
+  return '<div class=iedit id="ied-'+impEsc(it.id)+'" style="display:'+(on?"flex":"none")+'"><label>Ship<select data-ek="'+k+'" data-ef="ship">'+opts+'</select></label><label>Sign-on<input type=date data-ek="'+k+'" data-ef="sign_on" value="'+impEsc(e.sign_on||"")+'"></label><label>Projected sign-off<input type=date data-ek="'+k+'" data-ef="sign_off" value="'+impEsc(e.sign_off||"")+'"></label><span class=csub>Saved to your earmark on Apply; Joy gets the corrected earmark, Rita in copy.</span></div>';}
 function impTag(txt,kind){return ' <span class="itag t-'+kind+'">'+txt+'</span>';}
 function impDiff(lab,o,n,tag){return '<div class=irow><span class=ik>'+impEsc(lab)+'</span><span class=idf><span class=iold>'+impEsc(o)+'</span> <span class=iarw>&#8594;</span> <span class=inew>'+impEsc(n)+'</span>'+(tag||"")+'</span></div>';}
 function impCard(inner){return '<div class=icard>'+inner+'</div>';}
@@ -4733,6 +4744,12 @@ function cimsRender(){
    +'.impb+.impb{border-left:1px solid var(--line-2)}'
    +'.impb.on{background:var(--navy);color:#fff}'
    +'.iseg.soft .impb.on{background:var(--bg);color:var(--navy)}'
+   +'.iedit{gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;padding:10px 12px;background:var(--bg);border-radius:9px}'
+   +'.iedit label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.4px}'
+   +'.iedit select,.iedit input{font:600 13px DM Sans;color:var(--navy);border:1px solid var(--line-2);border-radius:7px;padding:6px 8px;background:#fff;text-transform:none;letter-spacing:0}'
+   +'.iedit .csub{flex-basis:100%;font-size:12px}'
+   +'.itxt{margin-top:6px;font-size:13px;color:var(--ink,#374151)}'
+   +'@media (max-width:760px){.impgrid{grid-template-columns:1fr!important}.irow{grid-template-columns:1fr}}'
    +'details.iminor{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 15px;margin-top:20px;box-shadow:0 1px 2px rgba(20,45,72,.05)}'
    +'details.iminor summary{cursor:pointer;font-weight:600;color:var(--mut);padding:9px 0;font-size:13.5px}'
    +'details.iminor summary .c{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:var(--mut);background:var(--bg);border-radius:20px;padding:1px 8px;margin-right:4px}'
@@ -4760,7 +4777,7 @@ function cimsRender(){
    +'.discard2{width:100%;border:0;background:transparent;color:var(--mut);padding:10px;margin-top:4px;font-weight:600;font-size:13px;cursor:pointer;font-family:DM Sans}'
    +'.lock2{display:flex;align-items:center;gap:7px;justify-content:center;color:var(--green-d);background:#EAF5E4;border:1px solid #CDE8C1;border-radius:9px;padding:8px;margin-top:10px;font-size:11px;font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}'
    +'</style>';
-  L+='<div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start;margin-top:10px">';
+  L+='<div class=impgrid style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start;margin-top:10px">';
   L+='<div>';
   L+='<div class=chips2>'
     +'<span class="chip2 amber">&#9875; <span class=n>'+c.ship_flag+'</span> ship</span>'
@@ -4768,6 +4785,17 @@ function cimsRender(){
     +'<span class="chip2 green">&#9677; <span class=n>'+c.cert+'</span> certificates</span>'
     +'<span class="chip2 navy">&#65291; <span class=n>'+c.new+'</span> new</span>'
     +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
+  var EM=impEmSplit();
+  if(EM.dis.length){L+='<div class=isec><h3>&#9873; Earmarks the TDG file disagrees with</h3><div class=d><b>Accept TDG</b>: the file wins (another ship moves your earmark there with your dates; another seafarer replaces yours; Inactive or not aboard removes it; a far embark absorbs it). <b>Keep mine</b>: your earmark stands and Joy gets one email, Rita in copy, so TDG is corrected. <b>Edit</b>: change the ship or dates here; Joy gets the corrected earmark.</div>';
+    EM.dis.forEach(function(it){L+=impCard(impEmWho(it)+'<div class=itxt>'+impEsc(it.text||"")+'</div>'+impSegN("earmark:"+it.id,"accept",["accept","keep","edit"],["Accept TDG","Keep mine (email Joy)","Edit"])+impEmEdit(it));});L+='</div>';}
+  if(EM.off.length){L+='<div class=isec><h3>&#9993; Signed off &mdash; earmark ready for TDG</h3><div class=d>These seafarers were aboard another ship, so TDG could not earmark them. The file now shows the sign-off. <b>Tell Joy</b> (default) emails her the earmark with every document, not valid first, Rita in copy.</div>';
+    EM.off.forEach(function(it){L+=impCard(impEmWho(it)+'<div class=itxt>'+impEsc(it.text||"")+(it.told_at?impTag("told Joy "+impEsc(it.told_at),"amber"):"")+'</div>'+impSegN("earmark:"+it.id,impEmDef(it),["tell","hold","drop"],["Tell Joy (email)","Not yet","Drop mine"]));});L+='</div>';}
+  if(EM.add.length){L+='<div class=isec><h3>&#9873; Your earmarks TDG does not have yet</h3><div class=d><b>Tell Joy</b> emails her the earmark, Rita in copy, and stamps the card SENT TO TDG. <b>Not yet</b> (default) tells nobody. <b>Drop mine</b> removes it.</div>';
+    EM.add.forEach(function(it){L+=impCard(impEmWho(it)+'<div class=itxt>'+impEsc(it.text||"")+'</div>'+impSegN("earmark:"+it.id,impEmDef(it),["tell","hold","drop"],["Tell Joy (email)","Not yet","Drop mine"]));});L+='</div>';}
+  if(EM.wait.length){L+='<div class=isec><h3>&#9875; Aboard another ship &mdash; TDG cannot earmark them yet</h3><div class=d>Your earmark stands. When a file shows the sign-off, this screen offers Tell Joy for it.</div>';
+    EM.wait.forEach(function(it){L+=impCard(impEmWho(it)+'<div class=itxt>'+impEsc(it.text||"")+'</div>'+impSegN("earmark:"+it.id,"hold",["hold","drop"],["Keep waiting","Drop mine"],true));});L+='</div>';}
+  if(EM.tdg.length){L+='<div class=isec><h3>&#9873; TDG earmarks without a card</h3><div class=d>Each gets a console earmark on Apply (sign-on = the current printer&#8217;s projected sign-off, + 7 months); adjust the dates on the card afterwards.</div>';
+    EM.tdg.forEach(function(it){L+=impCard('<div class=iwho>'+impEsc(it.name||it.sc)+' <span class=iid>'+impEsc(it.sc)+'</span></div><div class=itxt>TDG earmarks them for '+impEsc(it.ship)+'</div>'+impSegN("tdgmark:"+it.sc,"add",["add","skip"],["Add earmark","Skip"],true));});L+='</div>';}
   if(g.ship_flag.length){L+='<div class=isec><h3>&#9875; Ship allocation &mdash; the file disagrees with your board</h3><div class=d>The ship in the file goes on the crew card by default (TDG is the source). Choose Keep board to hold yours.</div>';
     g.ship_flag.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Current ship",it.old,it.new,impTag("agency reports","amber"))+impSeg("ship:"+it.agency_id,"take","take","flag","Take TDG","Keep board"));});L+='</div>';}
   if(g.unretire&&g.unretire.length){L+='<div class=isec><h3>&#9679; Inactive tags TDG overrides</h3><div class=d>TDG has these crew active. The Inactive tag and the manual status kept with it come off on Apply.</div>';
@@ -4788,7 +4816,9 @@ function cimsRender(){
   L+='<div id=impcart></div>';
   L+='</div>';
   $("#imp").innerHTML=L;
-  $("#imp").onclick=function(e){var b=e.target.closest?e.target.closest(".impb"):null;if(!b)return;DEC[b.getAttribute("data-k")]=b.getAttribute("data-v");var sib=b.parentNode.querySelectorAll(".impb");for(var i=0;i<sib.length;i++)sib[i].classList.toggle("on",sib[i].getAttribute("data-v")===b.getAttribute("data-v"));cimsCart();};
+  $("#imp").onclick=function(e){var b=e.target.closest?e.target.closest(".impb"):null;if(!b)return;var k=b.getAttribute("data-k");DEC[k]=b.getAttribute("data-v");var sib=b.parentNode.querySelectorAll(".impb");for(var i=0;i<sib.length;i++)sib[i].classList.toggle("on",sib[i].getAttribute("data-v")===b.getAttribute("data-v"));
+    if(k.indexOf("earmark:")===0){var box=document.getElementById("ied-"+k.slice(8));if(box)box.style.display=DEC[k]==="edit"?"flex":"none";}cimsCart();};
+  $("#imp").onchange=function(e){var t=e.target,k=t&&t.getAttribute?t.getAttribute("data-ek"):null;if(!k)return;EDITS[k]=EDITS[k]||{};EDITS[k][t.getAttribute("data-ef")]=t.value;cimsCart();};
   cimsCart();
 }
 function cimsCart(){
@@ -4813,6 +4843,15 @@ function cimsCart(){
   if(absorbed)rows+=cli("ci-gray","&#9998;","Manual entries absorbed","already match the file",absorbed+" clear","save");
   if(g.ship_flag.length)rows+=cli("ci-amber","&#9875;","Ship flag","kept on your board",shipFlag+" held","held");
   if((g.override_conflict.length+g.critical.length)&&(ovKeep+crKeep))rows+=cli("ci-red","&#9995;","Manual edit","kept as yours",(ovKeep+crKeep)+" held","held");
+  var EM=impEmSplit(),emA=0,emK=0,emE=0,emT=0,emH=0,emD=0,emBad=0;
+  EM.dis.concat(EM.off,EM.add,EM.wait).forEach(function(it){var v=d("earmark:"+it.id,impEmDef(it));if(it.kind==="not_in_tdg"){if(v==="tell")emT++;else if(v==="drop")emD++;else emH++;}else if(v==="keep")emK++;else if(v==="edit"){emE++;var x=EDITS["earmark:"+it.id]||{};if(!x.ship||!x.sign_on||(x.sign_off&&x.sign_off<x.sign_on))emBad++;}else emA++;});
+  var tdgAdd=0;EM.tdg.forEach(function(it){if(d("tdgmark:"+it.sc,"add")==="add")tdgAdd++;});
+  if(emA+emD)rows+=cli("ci-amber","&#9873;","Earmarks corrected to TDG","moved, removed or absorbed",(emA+emD)+" accept","save");
+  if(emE)rows+=cli(emBad?"ci-red":"ci-navy","&#9998;","Earmarks you edited",emBad?(emBad+" with a missing ship or a sign-off before the sign-on"):"saved, Joy gets the correction",emE+" edit",emBad?"held":"save");
+  if(emK+emE+emT)rows+=cli("ci-red","&#9993;","Emails to Joy","Rita in copy"+(emK?" &middot; "+emK+" kept":"")+(emE?" &middot; "+emE+" edited":"")+(emT?" &middot; "+emT+" to enter in TDG":""),(emK+emE+emT)+" send","held");
+  if(emH)rows+=cli("ci-gray","&#9873;","Earmarks not in TDG yet","held, nobody told",emH+" hold","held");
+  if(tdgAdd)rows+=cli("ci-navy","&#9873;","TDG earmarks given a card","sign-on = current printer&#8217;s sign-off",tdgAdd+" add","save");
+  var emActs=emA+emD+emE+emK+emT+tdgAdd;
   if(!rows)rows='<div class=csub style="padding:8px 0">Nothing to apply &mdash; all rows match.</div>';
   var H='<div class=cart2>';
   var unp=(STAGE.unparsed||[]);
@@ -4820,7 +4859,7 @@ function cimsCart(){
     +(unp.length?'<div class=sub style="color:#9A6614;white-space:normal">'+unp.map(function(u){return impEsc(u.agency_id+' '+u.field+': '+u.raw);}).join(' &middot; ')+'</div>':'')+'</div>';
   H+='<div class=items>'+rows+'</div>';
   H+='<div class=totals><div class=ctl><span>Will save to roster</span><span class="v save">'+willSave+'</span></div><div class=ctl><span>Kept as yours</span><span class="v keep">'+kept+'</span></div></div>';
-  H+='<div class=foot><button class=applyb2 onclick="cimsApply()"'+((willSave+flags)?"":" disabled")+'>Apply <span class=k>'+willSave+'</span> updates <span>&#8594;</span></button>'
+  H+='<div class=foot><button class=applyb2 onclick="cimsApply()"'+((willSave+flags+emActs)&&!emBad?"":" disabled")+'>Apply <span class=k>'+willSave+'</span> updates <span>&#8594;</span></button>'
    +'<button class=discard2 onclick="setUploads()">Discard all</button>'
    +'<div class=lock2>&#128274; NOTHING SAVED UNTIL YOU APPLY</div></div>';
   H+='</div>';
@@ -4828,11 +4867,12 @@ function cimsCart(){
 }
 async function cimsApply(){
   var btn=$("#impcart")?$("#impcart").querySelector(".applyb2"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
-  var body={review:STAGE.review,decisions:DEC,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
+  var ed={};for(var ek in EDITS)if(DEC[ek]==="edit")ed[ek]=EDITS[ek];
+  var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
   $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; '+impEsc(res.summary||('Applied '+res.applied+' changes.'))+'</div>';
-  STAGE=null;DEC={};IMPROWS=null;
+  STAGE=null;DEC={};EDITS={};IMPROWS=null;
 }
 // [removed 2026-07-22] previewImport()/applyImport() deleted — dead code that POSTed to the
 // RETIRED /api/crew/import (direct-write). The live upload path is parseCrewFile -> cimsStage

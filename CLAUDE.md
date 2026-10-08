@@ -166,6 +166,25 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   (`deployed_at`, `markTold`); **Drop mine** removes it. A told earmark TDG still lacks comes back as the same row
   saying "told Joy <date>". Consequence, stated to Miguel: Joy learns of a new earmark at Rita's next upload, not the
   day Rita decides.
+- **AN EARMARK FOR A CREW ABOARD ANOTHER SHIP** (Miguel, 8 Oct 2026: Guazon aboard Liberty, earmarked Allure — "TDG
+  ... doesn't really allow them to have one person on board the ship assigned to multiple ships ... when that crew signs
+  off, you will email Joy and CC Rita"). A not_in_tdg row whose crew the file has On board ANOTHER ship is `waiting`
+  ("Keep waiting" / "Drop mine", nobody emailed). The upload whose file no longer has them aboard that ship — read
+  against the previous file (`registry_snapshot`, read at stage BEFORE apply replaces it, `previous`), or the file alone
+  (ashore with a DEBARKEDDATE on another ship within `SIGNED_OFF_DAYS` = 30 of the file's date) — makes it `signed_off`:
+  **Tell Joy is the default** (mode `signed_off`: "X signed off A on <date>. Please earmark X in TDG for B, sign-on …,
+  projected sign-off …"), Not yet / Drop mine still Rita's. An earmark already told (`told_at`) defaults to Not yet.
+  **Every Joy email lists the documents NOT VALID first** (expired, required and missing, or expiring before the planned
+  sign-off), **valid second**, then the earmark against the file, then the seafarer ("the bottom part following that").
+- **Edit** (Miguel's third choice, 8 Oct 2026: "accept it, change it, or ..."): on a discrepancy row Rita sets ship,
+  sign-on and projected sign-off in the review (`body.edits["earmark:<id>"]`, `editOf`: ISO dates, sign-off ≥ sign-on);
+  saved through the move path (`saveReliefAssignment`: unknown_ship / already_projected), then Joy gets mode `edited`
+  ("Earmark corrected by CIMS"). A bad edit saves nothing, sends nothing, and the page blocks Apply until it is fixed.
+  The apply sentence names every edit not saved and every email that did not go.
+- **The Uploads screen shows the earmark rows** (worker.js `cimsRender`, 8 Oct 2026). Until then only the unused
+  `/api/crew/import` page drew them, so every earmark decision of 7–8 Oct ran on the server default. The page's
+  default per row (`impEmDef`) equals the server's; `crew_import_ui.js` keeps parity. Pinned by
+  `test/earmark_signoff.test.js`.
 - **Accept** (default — "follow the TDG file always"): hull → the card MOVES to TDG's ship, Rita's dates kept;
   other_person → Rita's card goes and TDG's seafarer gets the card; inactive / not_aboard → removed; embark_date →
   absorbed (the file's row is the seat). **Keep mine**: the card stands and Joy gets ONE email per seafarer
