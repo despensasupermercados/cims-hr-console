@@ -57,7 +57,7 @@ test("rankBench for Vision on Jan 25: 6 weeks to 6 months home on that day, most
   const r2 = rankBench(pool, { ship: "Allure", reliefDate: "2027-04-01", signOff: "2027-11-01" });
   assert.ok(r2.ready.some((x) => x.sc === "SC-B" && x.days === 66));
   assert.equal(BENCH_MIN_DAYS, 42); assert.equal(BENCH_MAX_MONTHS, 6); assert.equal(BENCH_TOP, 9);
-  assert.deepEqual(rankBench(pool, { ship: "Vision" }), { ready: [], outside: [] }, "no relief date: nothing to rank");
+  assert.deepEqual(rankBench(pool, { ship: "Vision" }), { ready: [], outside: [], rules: [] }, "no relief date: nothing to rank");
 });
 
 test("benchDocIssues: expired by the sign-on, expiring before the sign-off, required and missing", () => {
@@ -68,8 +68,9 @@ test("benchDocIssues: expired by the sign-on, expiring before the sign-off, requ
 
 test("static: the board builds the bench per seated ship with the earmark's own dates, serves it on the route, draws the yellow box with one-tap rows and Undo; the relief panel lists everyone", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /const d = defaultProjectionDates\(\{ ship: sec\.ship, legs: HIST, today, brand: sec\.brand, addMonths: addMonthsISO \}\);\s*const r = rankBench\(benchP, \{ ship: sec\.ship, reliefDate: d\.signOn, signOff: d\.signOff \}\);/, "the list is measured on the day the one-tap earmark starts");
-  assert.match(W, /sec\.bench = \{ date: d\.signOn, signOff: d\.signOff, rows: r\.ready\.slice\(0, BENCH_TOP\), total: r\.ready\.length \};/);
+  assert.match(W, /const d = defaultProjectionDates\(\{ ship: sec\.ship, legs: HIST, today, brand: sec\.brand, addMonths: addMonthsISO \}\);\s*const r = rankBench\(benchP, \{ \.\.\.benchArgs\(sec\), reliefDate: d\.signOn, signOff: d\.signOff \}\);/, "the list is measured on the day the one-tap earmark starts");
+  assert.match(W, /const benchArgs = \(sec\) => \(\{ ship: sec\.ship, brand: sec\.brand, block: sec\.brand === "Royal" && jrRule\[normShip\(sec\.ship\)\] === "block" \}\);/, "the brand and the Oasis / Icon rule ride on the hull");
+  assert.match(W, /sec\.bench = \{ date: d\.signOn, signOff: d\.signOff, rows: r\.ready\.slice\(0, BENCH_TOP\), total: r\.ready\.length, rules: r\.rules \};/);
   assert.match(W, /if \(p === "\/api\/rotation\/bench" && request\.method === "GET"\) return apiRotationBench\(url, env\);/);
   assert.match(W, /function benchBox\(rb,sec\)\{var b=sec&&sec\.bench;if\(!b\|\|!b\.rows\|\|!b\.rows\.length\)return null;/, "no candidates: the plain Add earmark slot stays");
   assert.match(W, /onclick="benchPick\(event,this\)"/);
@@ -82,4 +83,27 @@ test("static: the board builds the bench per seated ship with the earmark's own 
   assert.match(U, /Everyone available · /); assert.match(U, /Most rested · /);
   const A = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
   assert.match(A, /SELECT c\.id, c\.agency_id, TRIM/, "the picker rows carry the agency id the bench rows are keyed on");
+});
+
+// THE BRAND RULE + THE OASIS / ICON RULE (Miguel, 8 Oct 2026, the same evening): "if we are looking within the Royal
+// environment, you only display people who have done Royal Caribbean ships ... I don't want to see, on an Allure, a
+// brand-new hire ... I don't want to have somebody from Celebrity, like Dan Belhida, on an Allure".
+test("brand rule: Royal hulls list Royal crew, Celebrity hulls Celebrity crew, Azamara takes Azamara or Royal; a crew with no contract on record has no brand and passes", () => {
+  const crew2 = [crew("SC-RY", "Royal Hand", "On Vacation"), crew("SC-CE", "Dan Belhida", "On Vacation"), crew("SC-AZ", "Az Hand", "On Vacation"), crew("SC-NH", "Brand New", "On Vacation")];
+  const legs2 = [leg("SC-RY", "Symphony", "2026-01-01", "2026-08-01", false), leg("SC-CE", "Apex", "2026-03-14", "2026-10-07", false), leg("SC-AZ", "Onward", "2026-02-01", "2026-07-01", false)];
+  legs2[0].brand = "Royal Caribbean"; legs2[1].brand = "Celebrity"; legs2[2].brand = "Azamara";
+  const snap2 = [{ agency_id: "SC-RY", vessel: "MV SYMPHONY OF THE SEAS", debarked_at: "2026-08-01" }, { agency_id: "SC-CE", vessel: "MV CELEBRITY APEX", debarked_at: "2026-10-07" }, { agency_id: "SC-AZ", vessel: "MV AZAMARA ONWARD", debarked_at: "2026-07-01" }, { agency_id: "SC-NH", vessel: null, debarked_at: "2026-09-01" }];
+  const brandOf = (s) => ({ Symphony: "Royal Caribbean", Apex: "Celebrity", Onward: "Azamara" })[s] || null;
+  const pool = benchPool({ crew: crew2, legs: legs2, snapshot: snap2, open: [], today: TODAY, shipOf: (v) => { const m = String(v || "").toUpperCase().match(/SYMPHONY|APEX|ONWARD/); return m ? m[0][0] + m[0].slice(1).toLowerCase() : null; }, brandOf, contractsOf: (sc) => (sc === "SC-NH" ? 0 : 3) });
+  assert.deepEqual(pool.map((p) => [p.sc, p.brands, p.newHire]), [["SC-RY", ["Royal"], false], ["SC-CE", ["Celebrity"], false], ["SC-AZ", ["Azamara"], false], ["SC-NH", [], true]]);
+  const on = (ship, brand, block) => rankBench(pool, { ship, brand, block, reliefDate: "2026-11-29", signOff: "2027-06-29" }).ready.map((r) => r.sc);
+  assert.deepEqual(on("Allure", "Royal", true), ["SC-RY"], "Oasis class: Royal crew, and never the new hire");
+  assert.deepEqual(on("Vision", "Royal", false), ["SC-RY", "SC-NH"], "a Vision class hull takes the new hire");
+  assert.deepEqual(on("Beyond", "Celebrity", false), ["SC-NH", "SC-CE"], "Celebrity: Belhida (and the new hire), never the Royal hand");
+  assert.deepEqual(on("Quest", "Azamara", false), ["SC-AZ", "SC-RY", "SC-NH"], "Azamara takes Azamara or Royal crew, most rested first");
+  assert.deepEqual(rankBench(pool, { ship: "Allure", brand: "Royal", block: true, reliefDate: "2026-11-29" }).rules, ["Royal crew only", "no Junior PS, no new hire"]);
+  assert.deepEqual(rankBench(pool, { ship: "Quest", brand: "Azamara", reliefDate: "2026-11-29" }).rules, ["Azamara or Royal crew"]);
+  const jr = benchPool({ crew: [{ ...crew("SC-JR", "Junior Hand", "On Vacation"), rank: "Junior Printer Specialist" }], legs: [Object.assign(leg("SC-JR", "Symphony", "2026-01-01", "2026-08-01", false), { brand: "Royal" })], snapshot: [{ agency_id: "SC-JR", vessel: "MV SYMPHONY OF THE SEAS", debarked_at: "2026-08-01" }], open: [], today: TODAY, brandOf, contractsOf: () => 1 });
+  assert.deepEqual(rankBench(jr, { ship: "Allure", brand: "Royal", block: true, reliefDate: "2026-11-29" }).ready, [], "a Junior PS never on an Oasis / Icon hull");
+  assert.equal(rankBench(jr, { ship: "Vision", brand: "Royal", block: false, reliefDate: "2026-11-29" }).ready.length, 1);
 });

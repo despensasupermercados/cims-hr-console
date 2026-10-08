@@ -256,6 +256,24 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   lists everyone (`#mbench`, Most rested / Everyone available, `RB.pick` on a row) above the search; the picker rows
   carry `agency_id` for that. No candidate → the plain "Add earmark" slot as before. `drawRotation` carries `bench` on
   the section clone (the 15 Sep 2026 field-drop trap). Pinned by `test/earmark_bench.test.js`.
+  **The brand rule and the Oasis / Icon rule** (Miguel, 8 Oct 2026, the same evening: "if we are looking within the Royal
+  environment, you only display people who have done Royal Caribbean ships ... Celebrity ... the same applies for
+  Azamara ... I don't want to see, on an Allure, a brand-new hire ... I don't want to have somebody from Celebrity, like
+  Dan Belhida, on an Allure"): a crew's brands are the brands of every contract the board knows (`benchPool`:
+  current, history, the file's last hull); a Royal hull lists Royal crew, Celebrity → Celebrity, Azamara → Azamara OR
+  Royal (§10e, 7 Oct); a crew with no contract on record has no brand and passes — except on a `block` hull (Royal
+  Oasis / Icon class, `vessel.jr_ps_rule`), where NO new hire (`newHire`: no leg, 0 completed contracts) and no Junior PS
+  is listed. The box's footer prints the rule in force ("Royal crew only · no Junior PS, no new hire") so Rita knows who
+  is not there. The rules filter the LIST only; a drag or the panel's search can still place anyone (a warning on the
+  drop for a Junior, as before) — the console never blocks a person's decision.
+  **Chips** (same day: "the tags all should be same size .. instead of 1 expiring .. name it and have it in yellow"):
+  every document chip is the ONE `.rtag` chip — expired red by name, expiring amber by name with its month (`rtag due`,
+  `docBadge().expiringItems`), the missing ones one muted count (`rtag mis`); never the page's `.warn` BOX class, which is
+  what made "1 EXPIRING" a different size. **The contract modal** had a pixel pass the same evening (`editContractModal`):
+  the file's word as a labelled strip (dates as "Oct 7, 2026", the hull as "Celebrity Apex", "projected · 7 months after
+  embark" — 5 on Azamara, never "(Azamara 5)" on a Celebrity hull), port options as "Southampton, England · Oct 7, 2026",
+  labels that never wrap the fields out of line, history dates formatted and unwrapped, 40px footer buttons with Save
+  the widest, focus rings. The card's own sign-off note is brand-aware the same way (`x.brand` set in `rotShip`).
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.

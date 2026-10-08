@@ -79,11 +79,14 @@ export function docBadge(crew, today, warnDays = CARD_WARN_DAYS) {
   // The expired documents BY NAME (Miguel, 8 Oct 2026: "instead of saying 1 expired ... tag in red all the items that
   // are expired ... if we know that seafarer is going to Europe and he has an expired Schengen, she would know"):
   // the card draws one red tag per item; the missing / expiring summary stays one chip (`rest`).
-  const restLabel = missing.length ? (missing.length + " MISSING") : expiring.length ? (expiring.length + " EXPIRING") : null;
-  const restTitle = [missing.length ? "No expiry on record: " + short(missing) : "", expiring.length ? "Within " + warnDays + " days: " + short(expiring) : ""].filter(Boolean).join(" · ");
+  // `rest` is what is NOT named on the card: the missing documents as one count (the card names expired and expiring).
+  const restLabel = missing.length ? (missing.length + " MISSING") : null;
+  const restTitle = missing.length ? "No expiry on record: " + short(missing) : "";
   return { worst, label, title, expired: expired.length, missing: missing.length, expiring: expiring.length,
     items: expired.map((d) => ({ doc: d.doc, exp: d.exp || null, required: !!d.required })),
-    rest: restLabel ? { worst: missing.length ? "missing" : "expiring", label: restLabel, title: restTitle } : null };
+    // Expiring by name too (Miguel, 8 Oct 2026: "instead of 1 expiring .. name it and have it in yellow color").
+    expiringItems: expiring.map((d) => ({ doc: d.doc, exp: d.exp || null, days: d.days == null ? null : d.days, required: !!d.required })),
+    rest: restLabel ? { worst: "missing", label: restLabel, title: restTitle } : null };
 }
 
 // The warnings that ride on the card and in the email. Expired first, then expiring, then missing.

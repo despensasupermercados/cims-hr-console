@@ -40,6 +40,12 @@ test("docBadge names every expired document; missing / expiring stay one summary
   assert.deepEqual(b.items, [{ doc: "Medical", exp: "2026-01-01", required: true }, { doc: "Schengen", exp: "2026-05-01", required: false }]);
   assert.deepEqual(b.rest && b.rest.label, "1 MISSING");
   assert.equal(b.label, "2 EXPIRED", "the old summary stays for every other reader");
+  // 8 Oct 2026 (Miguel: "instead of 1 expiring .. name it and have it in yellow color"): expiring by name too, with its
+  // date; `rest` is only the missing count now.
+  const e = docBadge({ med_exp: "2026-11-20", sirb_exp: "2030-01-01", pp_exp: "2030-01-01", usv_exp: "2030-01-01", sch_exp: null }, TODAY);
+  assert.deepEqual(e.expiringItems.map((d) => [d.doc, d.exp, d.days]), [["Medical", "2026-11-20", 43]]);
+  assert.equal(e.rest, null, "nothing missing: no summary chip at all");
+  assert.deepEqual(e.items, []);
   assert.equal(docBadge({ med_exp: "2030-01-01", sirb_exp: "2030-01-01", pp_exp: "2030-01-01", usv_exp: "2030-01-01" }, TODAY), null);
 });
 
@@ -49,6 +55,9 @@ test("static: the card draws the Next line under the status and one red tag per 
   assert.match(W, /function nextLine\(x\)\{var n=x&&x\.next;/);
   assert.match(W, /' ashore<\/span>'/); assert.match(W, /overlaps '\+spanCompact\(n\.signOn,x\.signOff\)/);
   assert.match(W, /_di\.forEach\(function\(d\)\{tg\+='<span class="rtag bad"/);
+  assert.match(W, /_dx\.forEach\(function\(d\)\{tg\+='<span class="rtag due"/, "expiring: the same chip, amber, by name");
+  assert.match(W, /\.rtag\.warn,\.rtag\.due\{/, "the chip's own amber class — never `warn`, which the page styles as a warning BOX");
+  assert.doesNotMatch(W, /class="rtag warn/, "no chip may wear the box class");
   // 8 Oct 2026 (the earmark bench): the bench is built after the Next line, both before the board is returned.
   assert.match(W, /attachNextAssignments\(sections, today\);[\s\S]{0,2000}?const out = \{ sections, pool/);
   assert.doesNotMatch(W, /x\.nextShip/, "the old NEXT tag (never filled by the server) is gone");
