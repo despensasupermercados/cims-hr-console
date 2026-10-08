@@ -187,8 +187,8 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   same evening: "I don't think it's necessary" — "Clean handover · Miami · 2026-11-29"): the line says who relieves whom.
   **One row per ship** (Miguel, same evening: "most likely ... three people assigned ... they should all be side by side ...
   four is the maximum ... this side should be a little bit wider"): a ship's cards share ONE flex row at equal width
-  (`.shipbody.onerow`, never a 2+1 wrap); the Keyman filter rail is 200px and the action column 260px so the board is
-  ~900px at 1440 (it was 719: the ship-tile side rail had stretched the column to 385px); a card under 260px compacts its
+  (`.shipbody.onerow`, never a 2+1 wrap); the Keyman filter rail is 200px and the action column 220px (8 Oct: "make this smaller .. more room on the cards"; the
+  "Ships (48)" label above the hulls is gone too) so the board is ~935px at 1440 (it was 719: the ship-tile side rail had stretched the column to 385px); a card under 260px compacts its
   type (container query); the pool and the shore list still wrap; phones stack. A card keeps its own height. The seat card lost its lane, dots and TODAY tick: a thin soft bar (4px) filled
   to today (soft red when overdue, a dashed track for an earmark), the two calendar dates under it as before — Miguel, same
   evening, when a first cut dropped them for an "aboard / to go" row: "you eliminated the dates ... we had them very, very
