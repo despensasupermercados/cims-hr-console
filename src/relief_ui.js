@@ -73,7 +73,7 @@ select:focus,input:focus{box-shadow:0 0 0 2px var(--bg-accent);border-color:var(
         <div style="display:flex;gap:10px;align-items:center"><span style="font-size:11px;color:var(--text-muted)"><i class="ti ti-command"></i> Esc</span><span class="x" onclick="RB.close()"><i class="ti ti-x"></i> Close</span></div></div>
       <div style="padding:6px 16px 16px">
         <div id="mbanner" style="display:none"></div>
-        <div class="lbl">Crew member<span id="mreq" style="color:var(--text-danger);text-transform:none;letter-spacing:0"> — required to activate</span></div>
+        <div class="lbl">Crew member<span id="mreq" style="color:var(--text-danger);text-transform:none;letter-spacing:0"> — pick a seafarer to save this card</span></div>
         <input type="text" id="mcrew" placeholder="Search crew…" autocomplete="off" oninput="RB.filter()" onfocus="RB.filter()">
         <div id="mdrop" class="drop"></div>
         <div id="mpicked" style="display:none;margin-top:6px;font-size:14px"></div>
@@ -253,7 +253,7 @@ const RB=(()=>{
  // Picker rows carry status · current ship · open projections · document standing (plan v5, phase 5).
  function pickMeta(c){var m=[c.status||"",c.vessel?("on "+c.vessel):"",c.planned?("planned: "+c.planned):""].filter(Boolean).join(" · ");var d=c.docs?('<span style="color:'+(c.docs.worst==="expiring"?"var(--text-warning)":"var(--text-danger)")+';font-weight:600">'+(m?" · ":"")+c.docs.label+'</span>'):"";return (m||d)?('<div style="font-size:11px;color:var(--text-muted);margin-top:1px">'+m+d+'</div>'):"";}
  function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+(c.name||c.id)+pickMeta(c)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
- function pick(id,name){var c=CREW.find(function(x){return x.id===id;});if(c&&c.planned&&!confirm(name+" already has a projection on "+c.planned+".\\n\\nPlan them here as well?"))return;cur.crew_id=id;$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>'+(c?pickMeta(c):"");}
+ function pick(id,name){var c=CREW.find(function(x){return x.id===id;});if(c&&c.planned&&!confirm(name+" already has a projection on "+c.planned+".\\n\\nPlan them here as well?"))return;cur.crew_id=id;if($("mreq"))$("mreq").style.display="none";$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>'+(c?pickMeta(c):"");}
  function close(){$("modal").classList.remove("show");if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefClose",changed:_CHG},"*");}catch(e){}}}
  function azTouch(){cur.azTouched=true;}
  async function save(){
