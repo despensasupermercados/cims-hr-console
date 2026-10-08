@@ -217,7 +217,10 @@ const RB=(()=>{
   buildDates(null,cur.role,false);}
  async function open(key,role,aid){const row=BOARD.find(r=>r.vessel_key===key);
   // Opened from a Keyman card: THAT card's projection (by assignment id), never the one the board picks as reliever (5 Oct 2026).
-  const node=(aid&&row&&row.relievers&&row.relievers.find(function(x){return x.id===aid;}))||(row?row[role]:null);const printer=row?row.printer:null;
+  // aid "new" (8 Oct 2026): the Keyman board's Add earmark slot on a ship whose last earmark has already joined —
+  // a NEW earmark after them, relieving the one who joined (never an edit of their card).
+  const fresh=aid==="new";
+  const node=fresh?null:((aid&&row&&row.relievers&&row.relievers.find(function(x){return x.id===aid;}))||(row?row[role]:null));const printer=(fresh&&row&&row.reliever&&row.reliever.aboard)?row.reliever:(row?row.printer:null);
   const ro=!!(node&&String(node.id||"").startsWith("leg:"));
   cur={key,role,id:node?node.id:null,isNew:!node,readonly:ro,crewName:node?node.crew_name:null,printerOff:(role==="reliever"&&printer)?{city:printer.off_city,conf:printer.off_conf,date:printer.off_date}:null,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
   $("mtitle").textContent=ro?(node.crew_name||"Keyman"):((node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract"));

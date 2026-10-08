@@ -89,8 +89,12 @@ test("the board does not draw a reliever who is already aboard", () => {
   const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   // The LAST definition of each is the one the browser runs.
   const slot = SRC.slice(SRC.lastIndexOf("function reliefSlot(rb,projs){"));
-  assert.match(slot.slice(0, slot.indexOf("\n")), /if\(rb\.reliever&&rb\.reliever\.aboard\)return '';/,
-    "an aboard reliever is already on the ship as a crew card — drawing the slot too is the duplicate");
+  // 8 Oct 2026 (Miguel: "dont have the option to create earmark"): the aboard reliever is still never drawn again —
+  // the slot there is an EMPTY "Add earmark" for the next one (data-aid="new"), not their card.
+  const line = slot.slice(0, slot.indexOf("\n"));
+  const aboard = line.slice(line.indexOf("if(rb.reliever&&rb.reliever.aboard){"), line.indexOf("if(rb.reliever){"));
+  assert.match(aboard, /ghostslot[\s\S]*data-aid="new"[\s\S]*Add earmark/, "an aboard reliever leaves an Add earmark slot for the next one");
+  assert.doesNotMatch(aboard, /rcard rlvr|RELIEVER<\/span>/, "an aboard reliever is already on the ship as a crew card — drawing it again is the duplicate");
   // 7 Oct 2026 (Miguel: "I don't think it's necessary"): the handover banner under the cards is gone — the ship's
   // timeline says who relieves whom and when. Nothing may announce a gap or a due reliever under the cards again.
   assert.doesNotMatch(SRC, /function reliefBanner\(|_rbanner/);

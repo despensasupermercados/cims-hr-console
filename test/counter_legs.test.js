@@ -142,14 +142,17 @@ test("fetchCurrentCounterLegs returns the current set only", async () => {
 });
 
 // Static pins: every reader that used to SELECT current legs from ship_leg now goes through here.
-test("relief printers, the backup CSV, the roster export and the board all read the Counter source — no reader takes current legs from ship_leg", () => {
+test("relief printers read the board schedule; the backup CSV, the roster export and the board read the Counter source — no reader takes current legs from ship_leg", () => {
   const relief = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
   const worker = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const roster = readFileSync(new URL("../src/roster_export.js", import.meta.url), "utf8");
   const legsrc = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf8");
-  // (5 Oct 2026) the recorded sign-offs ride the same wave: the banner folds them in like the board does
-  assert.match(relief, /fetchCurrentCounterLegs\(env\),\s*\n\s*fetchRecordedSignoffs\(env\)\.catch\(\(\) => \(\{\}\)\),\s*\n\s*\]\);/, "relief printers (read inside the board's one wave since 15 Sep 2026)");
-  assert.match(relief, /legWithRecordedSignoff\(l\.off_date, true, rec, _today\)/, "the printer leg carries Rita's recorded sign-off and goes once it has passed");
+  // (8 Oct 2026, §10d open item closed for the relief board) the printers are the Keyman board's seats: the ONE
+  // schedule (the AdvancedQuery first, the Counter for a crew the file does not date), recorded sign-offs and the
+  // held rule already applied there — read inside the relief board's one wave. Behaviour: test/relief_printers.test.js.
+  assert.match(relief, /boardLegsFromDb\(env, today \|\| new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\),\s*\n\s*fetchVesselBrands\(env\),\s*\n\s*\]\);/, "relief printers (read inside the board's one wave)");
+  assert.match(relief, /const legs = printerLegsFromBoard\(boardRows, vessels\);/, "the printer legs are the board's seats");
+  assert.doesNotMatch(relief, /fetchCurrentCounterLegs/, "relief printers no longer read the Counter alone");
   assert.doesNotMatch(relief, /FROM ship_leg l LEFT JOIN crew c ON c\.id = l\.crew_id\s+WHERE l\.is_current = 1 AND l\.ours = 1/, "relief printers still read the snapshot");
   assert.match(worker, /await fetchCurrentCounterLegs\(env\)/, "backup CSV");
   assert.doesNotMatch(worker, /FROM ship_leg l LEFT JOIN crew c/, "backup CSV still reads the snapshot");
