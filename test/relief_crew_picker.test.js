@@ -40,3 +40,13 @@ test("the picker rows: override wins, open projections listed, hidden crew absen
   assert.equal(ben.vessel, "Quest", "crew_override.vessel_observed wins");
   assert.equal(ben.planned, null);
 });
+
+// Miguel, 8 Oct 2026, on Guazon (On board Liberty) picked as Allure's reliever: "why ... it shows that requires to
+// activate .. that seafarer is active already". The red line meant "pick someone to save the card", and it stayed
+// after the pick. It now says so, and it hides once a seafarer is picked.
+test("the reliever modal's crew line says what it requires and hides after the pick", async () => {
+  const { RELIEF_HTML } = await import("../src/relief_ui.js");
+  assert.doesNotMatch(RELIEF_HTML, /required to activate/);
+  assert.match(RELIEF_HTML, /<span id="mreq"[^>]*> — pick a seafarer to save this card<\/span>/);
+  assert.match(RELIEF_HTML, /cur\.crew_id=id;if\(\$\("mreq"\)\)\$\("mreq"\)\.style\.display="none";/);
+});
