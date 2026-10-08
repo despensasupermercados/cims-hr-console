@@ -98,6 +98,7 @@ export function buildReliefBoard({ assignments = [], portDaysByShip = {}, config
         auto_on: !!a.auto_on,
         tags: { eccr: !!a.eccr, air: !!a.air, hotel: !!a.hotel, on_date_conf: !!a.on_date_conf, off_date_conf: !!a.off_date_conf },
         workflow: workflowStatus(a),
+        sc: a.sc || null, docs: a.docs || null, // the earmark panel's Documents tags (8 Oct 2026)
       };
     };
 

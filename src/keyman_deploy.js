@@ -89,6 +89,30 @@ export function docBadge(crew, today, warnDays = CARD_WARN_DAYS) {
     rest: restLabel ? { worst: "missing", label: restLabel, title: restTitle } : null };
 }
 
+// THE EARMARK CARD'S DOCUMENTS AGAINST ITS OWN CONTRACT (Miguel, 8 Oct 2026, Villacortes' Allure card: "I should also
+// see whether or not there is any document already expired"): a plan starts on its sign-on, not today, so a document
+// that lapses by then is EXPIRED for the plan (red, by name), one that lapses before the planned sign-off will not carry
+// the contract (amber, by name with its date), a required one with no date is missing (one count). Same shape as
+// docBadge() so the card draws it with the same chips.
+export function contractDocBadge(crew, signOn, signOff) {
+  const docs = documentLines(crew, signOn || new Date().toISOString().slice(0, 10), 0);
+  const on = signOn || null, off = signOff || null;
+  const items = [], expiringItems = [], missing = [];
+  for (const d of docs) {
+    const exp = d.exp ? String(d.exp).slice(0, 10) : null;
+    if (!exp) { if (d.required) missing.push(d); continue; }
+    if (on && exp < on) items.push({ doc: d.doc, exp, required: !!d.required });
+    else if (off && exp < off) expiringItems.push({ doc: d.doc, exp, days: null, required: !!d.required });
+  }
+  if (!items.length && !expiringItems.length && !missing.length) return null;
+  const short = (arr) => arr.map((d) => d.doc).join(", ");
+  const worst = items.length ? "expired" : missing.length ? "missing" : "expiring";
+  const label = items.length ? (items.length + " EXPIRED") : missing.length ? (missing.length + " MISSING") : (expiringItems.length + " EXPIRING");
+  const title = [items.length ? "Expired by the sign-on: " + short(items) : "", missing.length ? "No expiry on record: " + short(missing) : "", expiringItems.length ? "Lapse before the planned sign-off: " + short(expiringItems) : ""].filter(Boolean).join(" · ");
+  return { worst, label, title, expired: items.length, missing: missing.length, expiring: expiringItems.length, items, expiringItems,
+    rest: missing.length ? { worst: "missing", label: missing.length + " MISSING", title: "No expiry on record: " + short(missing) } : null, contract: true };
+}
+
 // The warnings that ride on the card and in the email. Expired first, then expiring, then missing.
 // A warning never blocks the send.
 export function deployWarnings(docs) {

@@ -468,9 +468,10 @@ test("a projection the registry contradicts stays yellow and prints the file's w
   const earmarked = ctx.rotCard({ ...YELLOW, registry: { verdict: "earmarked", status: "Earmarked", ship: "Icon", at: "2026-10-04" } });
   assert.match(earmarked, /TDG earmarks them for this ship<\/b> \(file of 2026-10-04\) &middot; your earmark agrees/);
   const pending = ctx.rotCard({ ...YELLOW, registry: { verdict: "pending", status: "On Vacation", ship: null, at: "2026-10-04" } });
-  assert.match(pending, /Your earmark &middot; TDG registry 2026-10-04: On Vacation<\/div>/);
+  // 8 Oct 2026 (Miguel: "put it right below the name"): the file's word sits on the status line; no restatement below.
+  assert.doesNotMatch(pending, /Your earmark &middot; TDG registry/);
   const unplaced = ctx.rotCard({ ...YELLOW, aboard: true, signOn: "2026-07-02", registry: { verdict: "pending", status: "On board", ship: null, at: "2026-10-04" } });
-  assert.match(unplaced, /TDG registry 2026-10-04: On board \(ship not on file yet\)/, "Bornea's shape today: the file has him aboard but the registry row carries no ship");
+  assert.doesNotMatch(unplaced, /ship not on file yet/, "Bornea's shape today: the file has him aboard with no ship — nothing restated below the name");
   assert.match(ctx.rotCard(YELLOW), /Your earmark &middot; not in a TDG file yet<\/div>/, "no verdict yet: the old line, reworded");
   // 7 Oct 2026: a deployed earmark a LATER file still lacks says so on the card (reported, never re-sent by itself)
   const late = ctx.rotCard({ ...YELLOW, deployedAt: "2026-10-01", registry: { verdict: "pending", status: "On Vacation", ship: null, at: "2026-10-07" } });
