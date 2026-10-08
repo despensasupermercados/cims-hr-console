@@ -68,9 +68,9 @@ test("benchDocIssues: expired by the sign-on, expiring before the sign-off, requ
 
 test("static: the board builds the bench per seated ship with the earmark's own dates, serves it on the route, draws the yellow box with one-tap rows and Undo; the relief panel lists everyone", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /const d = defaultProjectionDates\(\{ ship: sec\.ship, legs: HIST, today, brand: sec\.brand, addMonths: addMonthsISO, turnarounds: \(HIST\.turnarounds \|\| \{\}\)\[String\(sec\.ship\)\.trim\(\)\.toLowerCase\(\)\] \|\| \[\] \}\);\s*const r = rankBench\(benchP, \{ \.\.\.benchArgs\(sec\), reliefDate: d\.signOn, signOff: d\.signOff \}\);/, "the list is measured on the day the one-tap earmark starts, on the turnaround");
+  assert.match(W, /const d = defaultProjectionDates\(\{ ship: sec\.ship, legs: HIST, today, brand: sec\.brand, addMonths: addMonthsISO, turnarounds: \(HIST\.turnarounds \|\| \{\}\)\[String\(sec\.ship\)\.trim\(\)\.toLowerCase\(\)\] \|\| \[\], chain \}\);\s*const r = rankBench\(benchP, \{ \.\.\.benchArgs\(sec\), reliefDate: d\.signOn, signOff: d\.signOff \}\);/, "the list is measured on the day the one-tap earmark starts, on the turnaround");
   assert.match(W, /const benchArgs = \(sec\) => \(\{ ship: sec\.ship, brand: sec\.brand, block: sec\.brand === "Royal" && jrRule\[normShip\(sec\.ship\)\] === "block" \}\);/, "the brand and the Oasis / Icon rule ride on the hull");
-  assert.match(W, /sec\.bench = \{ date: d\.signOn, signOff: d\.signOff, rows: r\.ready\.slice\(0, BENCH_TOP\), total: r\.ready\.length, rules: r\.rules \};/);
+  assert.match(W, /sec\.bench = \{ date: d\.signOn, signOff: d\.signOff, after: d\.after \|\| null, rows: r\.ready\.slice\(0, BENCH_TOP\), total: r\.ready\.length, rules: r\.rules \};/);
   assert.match(W, /if \(p === "\/api\/rotation\/bench" && request\.method === "GET"\) return apiRotationBench\(url, env\);/);
   assert.match(W, /function benchBox\(rb,sec\)\{var b=sec&&sec\.bench;if\(!b\|\|!b\.rows\|\|!b\.rows\.length\)return null;/, "no candidates: the plain Add earmark slot stays");
   assert.match(W, /onclick="benchPick\(event,this\)"/);

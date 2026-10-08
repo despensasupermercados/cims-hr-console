@@ -288,6 +288,23 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   embark" — 5 on Azamara, never "(Azamara 5)" on a Celebrity hull), port options as "Southampton, England · Oct 7, 2026",
   labels that never wrap the fields out of line, history dates formatted and unwrapped, 40px footer buttons with Save
   the widest, focus rings. The card's own sign-off note is brand-aware the same way (`x.brand` set in `rotShip`).
+- **The next earmark follows the last one** (Miguel, 8 Oct 2026, on Beyond and Allure: "if I pick somebody ... automatically
+  I need you to give me a third card, which would be a second earmark ... I want to have the flexibility to pick another").
+  `defaultProjectionDates({ ..., chain })`: with an earmark still to come on the hull (open card, sign-on after today), the
+  next one starts on the LAST earmark's sign-off (an earmark without one: its sign-on + 7 months, Azamara 5) and says whom it
+  follows (`after`). The board's list (`sec.bench`) is measured on that day and its header reads "Next for X · after Y";
+  the one-tap / drag route and Add crew chain (`deps.chain`, `SHIP_EARMARKS_SQL`); the TDG-earmark card at Apply does not
+  (the review may be removing the card it would follow). On the page an earmark already drawn no longer swallows the slot
+  (`nextSlot`): the list while it fits as the third item, the plain "Add earmark · FROM <date> · N AVAILABLE" slot as the
+  fourth, nothing past four cards; a seat held by a card (no TDG printer on the relief board) gets the slot too. The relief
+  panel's new earmark relieves the last in the chain (`lastInChain`). Pinned by `test/earmark_chain.test.js`.
+- **The Keyman rail: Search, and a year / month filter that works** (same day: "I looked at picking a year and month .. I
+  think there is an issue"; "instead of having a find ship .. I wanna just call it search .. by ship, by city .. by name").
+  `legInFilter` compares ISO strings (it parsed dates as UTC and read them in local time: a contract ending Dec 1 missed
+  December west of UTC), matches a month without a year in every year the contract spans (it checked the sign-on year only),
+  and a ship with nothing in the window leaves the board (it stayed, empty); the Year facet lists the years earmarks reach.
+  **Search** (`rotSearchHit`, `rotFold`) matches the ship, every seafarer and earmark on it and their ports, accents and
+  case ignored; a matching ship is shown whole.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
@@ -536,8 +553,9 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **A drop on the Keyman board creates or moves a PROJECTION, never a registry ship** (2026-09-15,
   `src/projection.js`, `POST /api/rotation/project`). Every card drags: a yellow card MOVES (the
   assignment changes ship; on the pool it is removed after one confirm); a green or pool card CREATES a
-  yellow card on the target ship and stays where it is (one crew, two ships). Dates = the target ship's
-  current printer sign-off if ahead, else today; + 6 months (+ 5 Azamara); the same ship twice is refused
+  yellow card on the target ship and stays where it is (one crew, two ships). Dates = the ship's last earmark's
+  sign-off (the chain, §10d, 8 Oct 2026), else its current printer's if ahead, else today; + 7 months (+ 5 Azamara) on
+  the turnaround; the same ship twice is refused
   (`already_projected`). The old `/api/rotation/assign` (crew_override.vessel_observed) is retired: it
   produced an undated green, undraggable card. A crew with an open projection leaves the unassigned pool.
   Pinned by `test/projection.test.js` + `test/board_cards.test.js`.

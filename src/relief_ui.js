@@ -224,12 +224,17 @@ const RB=(()=>{
   const row=BOARD.find(r=>shipName(r.vessel_key)===s);const pr=row&&row.printer;
   cur.printerOff=(cur.role==="reliever"&&pr)?{city:pr.off_city,conf:pr.off_conf,date:pr.off_date}:null;
   buildDates(null,cur.role,false);}
+ // The one a NEW earmark relieves (8 Oct 2026, the chain): the earmark with the latest sign-off on the ship, else the
+ // reliever who joined, else the printer — the same rule the board's list and the one-tap card use.
+ // An earmark without a sign-off holds the seat for a contract (sign-on + 7 months, Azamara 5), as on the board.
+ function lastInChain(row){var best=null,n=/azamara/i.test(String(row.vessel_key||""))?5:7;(row.relievers||[]).forEach(function(x){var r=(x&&!x.off_date&&x.on_date)?Object.assign({},x,{off_date:addMonths(x.on_date,n)}):x;if(r&&r.off_date&&(!best||r.off_date>best.off_date))best=r;});
+  var p=row.printer;if(best&&(!p||!p.off_date||best.off_date>=p.off_date))return best;return (row.reliever&&row.reliever.aboard)?row.reliever:p;}
  async function open(key,role,aid){const row=BOARD.find(r=>r.vessel_key===key);
   // Opened from a Keyman card: THAT card's projection (by assignment id), never the one the board picks as reliever (5 Oct 2026).
   // aid "new" (8 Oct 2026): the Keyman board's Add earmark slot on a ship whose last earmark has already joined —
   // a NEW earmark after them, relieving the one who joined (never an edit of their card).
   const fresh=aid==="new";
-  const node=fresh?null:((aid&&row&&row.relievers&&row.relievers.find(function(x){return x.id===aid;}))||(row?row[role]:null));const printer=(fresh&&row&&row.reliever&&row.reliever.aboard)?row.reliever:(row?row.printer:null);
+  const node=fresh?null:((aid&&row&&row.relievers&&row.relievers.find(function(x){return x.id===aid;}))||(row?row[role]:null));const printer=fresh&&row?lastInChain(row):(row?row.printer:null);
   const ro=!!(node&&String(node.id||"").startsWith("leg:"));
   cur={key,role,id:node?node.id:null,isNew:!node,readonly:ro,crewName:node?node.crew_name:null,printerOff:(role==="reliever"&&printer)?{city:printer.off_city,conf:printer.off_conf,date:printer.off_date}:null,tags:node?Object.assign({},node.tags):{eccr:false,air:false,hotel:false,on_date_conf:false,off_date_conf:false}};
   $("mtitle").textContent=ro?(node.crew_name||"Keyman"):((node?"Edit ":"New ")+(role==="reliever"?"reliever":"contract"));
