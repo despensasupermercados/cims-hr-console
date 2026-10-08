@@ -3322,6 +3322,8 @@ nav button{white-space:nowrap}
 .gapnote{font-size:11px;color:#9A6410;background:#FBF0DA;border-radius:7px;padding:5px 8px;margin-top:9px}
 .tdgissues .isbody{display:block;padding:0}.tdgissues .isbody.closed{display:none}
 .tdgissues .isrow{display:flex;gap:10px;align-items:baseline;padding:7px 10px;border-top:1px solid var(--line);font-size:12.5px;cursor:pointer}
+/* In the 220px side column the row stacks: name · ship on one line, the message under it at full width, Remove under that. */
+#rotside .tdgissues .isrow{flex-wrap:wrap;gap:2px 8px}#rotside .tdgissues .istxt{flex:1 1 100%;line-height:16px}#rotside .tdgissues .isrow .pbtn{margin:4px 0 0 0!important}
 .tdgissues .isrow:hover{background:#FBF3F2}
 .tdgissues .isrow b{color:var(--navy);white-space:nowrap}
 .tdgissues .isship{color:var(--mut);white-space:nowrap}
@@ -3481,7 +3483,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
    wider (the filter rail is 200px on Keyman); a card narrower than 260px compacts its type. Phone stacks. */
 .shipbody{gap:12px;padding:8px 14px 14px}
 #rotwrap .crrail{flex:0 0 200px;min-width:200px;max-width:200px;padding:12px}
-#rotwrap .cract.rotact{flex:0 0 260px;max-width:260px}#rotwrap .cract.rotact #rotside{min-width:0}
+#rotwrap .cract.rotact{flex:0 0 220px;max-width:220px}#rotwrap #rotside .tile{padding:8px 6px}#rotwrap #rotside .tile .l{font-size:9.5px;letter-spacing:.04em}#rotwrap .cract.rotact #rotside{min-width:0}
 .rcard{container-type:inline-size}
 @container (max-width:260px){.rcard .rnm{font-size:14.5px;line-height:18px}.rcard .offchip b{font-size:22px;line-height:24px}.rcard .offchip.long b{font-size:18px}.rrot .rcity{font-size:12.5px;line-height:15px}.rrot .tl{column-gap:10px}.rcard .rleg{font-size:11px}}
 @media (max-width:640px){.shipbody.onerow{flex-direction:column;align-items:stretch}.shipbody.onerow>.rcard{flex:0 0 auto}}
@@ -5745,7 +5747,8 @@ function drawRotation(){
     return {ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:sfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
   });
   if(ROT_F)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
-  h+='<div class=zlabel style="margin-top:14px">Ships ('+secs.length+')</div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
+  // 8 Oct 2026 (Miguel: "remove this"): no "Ships (48)" label above the hulls; the side rail's tile already counts vessels.
+  h+='<div style="margin-top:14px"></div>'+(secs.length?secs.map(rotShip).join(''):'<div class=muted style="padding:10px">No ships match.</div>');
   document.getElementById('rotbody').innerHTML=h;
   var _sd=document.getElementById('rotside');if(_sd)_sd.innerHTML=side;else document.getElementById('rotbody').insertAdjacentHTML('afterbegin',side);
   rotRail(secs.length,allSecs);
