@@ -213,13 +213,27 @@ test("the page labels the two counts apart: completed (grade) vs bonus count (co
 });
 
 // TDG's newer count files spell the month in full ("..._as_of_08_October_2026.xlsx"); the page read only
-// "08 Oct 2026" and refused the 8 Oct file as having no date (need_as_of).
-test("the count file's as-of date is read from TDG's filename with the month short or spelled in full", () => {
-  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
-  const m = /var m=\/(as\[_ \]of[^\n]*?)\/i\.exec\(String\(f\.name/.exec(W);
+// "08 Oct 2026". And the regex is page code inside a template literal: tested on the SERVED page, where a single
+// backslash is dropped (the live page read d{1,2}, a literal "d", until 8 Oct 2026).
+test("the count file's as-of date is read from TDG's filename with the month short or spelled in full (on the served page)", async () => {
+  const SRC = new URL("../src/worker.js", import.meta.url);
+  const TMPU = new URL(`../src/__ccre_${process.pid}__.mjs`, import.meta.url);
+  writeFileSync(TMPU, readFileSync(SRC, "utf-8") + "\nexport { APP_HTML };\n", "utf-8");
+  let APP_HTML; try { ({ APP_HTML } = await import(TMPU.href)); } finally { unlinkSync(TMPU); }
+  const m = /var m=\/(as\[_ \]of[^\n]*?)\/i\.exec\(String\(f\.name/.exec(APP_HTML);
   assert.ok(m, "the page's as-of regex");
-  const re = new RegExp(m[1].replace(/\\\\/g, "\\"), "i");
-  for (const [name, mon] of [["DG3_Printer_Specialist_Completed_Contract_as_of_08_October_2026.xlsx", "Oct"], ["DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx", "Sep"], ["as of 5 September 2026.xlsx", "Sep"]]) {
-    const x = re.exec(name); assert.ok(x, name); assert.equal(x[2].slice(0, 3), mon);
+  const re = new RegExp(m[1], "i");
+  for (const [name, d, mon, y] of [["DG3_Printer_Specialist_Completed_Contract_as_of_08_October_2026.xlsx", "08", "Oct", "2026"], ["DG3 Printer Specialist Completed Contract as of 24 Sep 2026.xlsx", "24", "Sep", "2026"], ["as of 5 September 2026.xlsx", "5", "Sep", "2026"]]) {
+    const x = re.exec(name); assert.ok(x, name); assert.deepEqual([x[1], x[2].slice(0, 3), x[3]], [d, mon, y]);
   }
+});
+
+// No regex escape in the page may lose its backslash: inside the APP_HTML template literal "\d" renders as "d".
+test("page code: no single-backslash regex escape inside APP_HTML (it is dropped when the page is served)", () => {
+  const s = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  const a = s.indexOf("const APP_HTML = `"); assert.ok(a > 0);
+  let i = a + 18; for (; i < s.length; i++) { if (s[i] === "\\") { i++; continue; } if (s[i] === "`") break; }
+  const body = s.slice(a + 18, i);
+  const bad = body.match(/(^|[^\\])\\[dswDSW]/g) || [];
+  assert.deepEqual(bad, [], "write \\\\d / \\\\s / \\\\w in page code");
 });
