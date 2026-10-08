@@ -16,11 +16,16 @@ export const MIN_COVERAGE_MONTHS = 12;
 // now). Rita's override (leg_flags.override_off_date) always wins.
 export const AZAMARA_MONTHS = 5;
 
+// Calendar months, clamped to the target month's last day (8 Oct 2026): setUTCMonth rolled Aug 31 + 6 into Mar 3 and
+// Sep 30 + 5 (Azamara) into Mar 2 — the projected sign-off then snapped from the wrong day. earmark_bench clamps the same way.
 export function addMonthsISO(d, n) {
   if (!d) return null;
-  const dt = new Date(d + "T00:00:00Z");
-  dt.setUTCMonth(dt.getUTCMonth() + n);
-  return dt.toISOString().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d));
+  if (!m) return null;
+  const t = new Date(Date.UTC(+m[1], +m[2] - 1 + n, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  t.setUTCDate(Math.min(+m[3], last));
+  return t.toISOString().slice(0, 10);
 }
 
 // THE PRINTER IS WHO THE KEYMAN BOARD SEATS (8 Oct 2026, Miguel on Anthem: "dont have the option to create
@@ -86,8 +91,11 @@ export async function reliefBoardData(env, today) {
         off_date = ov;
         const hit = ta.find((x) => x.berth_date === ov);
         if (hit) off_seed = hit.port_name;
-      } else {
-        let base = l.on_date ? addMonthsISO(l.on_date, AZAMARA_MONTHS) : (l.off_date || today);
+      } else if (!l.off_date) {
+        // Only when the board gives no sign-off (8 Oct 2026): the printer comes from the board schedule, whose sign-off
+        // is already TDG's debark, Rita's date, a reliever card or the projection snapped to the NEAREST turnaround
+        // (§10d). Recomputing it here overrode all four and pre-filled the reliever's sign-on with a different day.
+        let base = l.on_date ? addMonthsISO(l.on_date, AZAMARA_MONTHS) : today;
         if (today && base && base < today) base = today;           // never project a sign-off in the past
         const hit = base ? ta.find((x) => x.berth_date >= base) : null;
         if (hit) { off_date = hit.berth_date; off_seed = hit.port_name; }

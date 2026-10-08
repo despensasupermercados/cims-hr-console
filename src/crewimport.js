@@ -137,6 +137,21 @@ export function normalizeStatus(v) {
   return null; // unknown -> caller decides (skip / keep existing)
 }
 
+// THE WORD THE crew TABLE CAN HOLD (8 Oct 2026). Production's crew.status carries CHECK (status IN ('On board','On
+// Vacation','Earmarked','Inactive')) from migration 0001; "Reserved" and "Not for Rehire" (§10f, the same day) made
+// the AdvancedQuery Apply fail as ONE transaction the first time a file row said either (De Leon, Sison). They are
+// stored as their nearest column word — Reserved reads like On Vacation, Not for Rehire like Inactive — while TDG's
+// own word stays on registry_snapshot.raw_status, which every reader shows first (fileStatusOf / tdg_raw).
+const STORABLE = new Set(["On board", "On Vacation", "Earmarked", "Inactive"]);
+export function storableStatus(s) {
+  if (s == null || s === "") return null;
+  if (STORABLE.has(s)) return s;
+  if (s === "Reserved") return "On Vacation";
+  if (s === "Not for Rehire" || s === "Retired") return "Inactive";
+  const n = normalizeStatus(s);
+  return n ? storableStatus(n) : null;
+}
+
 // Map one raw row to crew fields plus the date cells no reading could make a real date.
 // Returns null if no agency_id found. mapRow() below is the row-only view.
 export function mapRowFull(row) {

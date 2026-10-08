@@ -603,6 +603,32 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **A plan that starts after the file's current contract ends is the next contract**, not a conflict
   (`counter_sync.diffCounter`). Dashboard birthdays and tiles use the derived status and visible crew.
 
+## 11c. Invariants from the 8 Oct 2026 bug hunt (five reviews, every finding traced to a real input — don't regress)
+Pinned by `test/bughunt_1008.test.js`.
+- **crew.status holds four words.** Production's column carries `CHECK (status IN ('On board','On Vacation','Earmarked',
+  'Inactive'))` (migration 0001, read from D1). Every writer goes through `storableStatus` (`crewimport.js`): Reserved →
+  On Vacation, Not for Rehire → Inactive; TDG's own word stays on `registry_snapshot.raw_status`, which readers show first.
+  A raw "Reserved" in the batch failed the WHOLE AdvancedQuery Apply.
+- **`activeSpanOf` returns `{ active_on, active_off }`** in every branch (the 7 Oct registry branch returned another shape:
+  every file-dated crew read "No active contract on file" on the Crew tab and the ledger — 50 aboard on 8 Oct).
+- **`boardSource` returns null on a failed read and `boardLegs` throws** — never the frozen SHIP_HISTORY for a live board.
+- **A session is re-checked against the allowlist** (`stillAllowed`, cached 5 min per isolate). SESSION_TTL is 30 days in
+  code (12 h in "Project facts" above): Miguel's call, open.
+- **Only what Rita changes is written.** Edit crew posts changed fields only (`crewEditBody` vs `CREW_EDIT_INIT`); the
+  contract modal sends a PROJECTED sign-off only when changed (`offToSave`) — an untouched projection posted back became
+  "Rita's" date. Saves report a refused response and keep the modal open.
+- **Contributor answers, crew names and ports are text** (`escHtml`, `fbEsc`, `rEsc`): the Score Card's evidence ran HTML
+  from the public `/fb` link inside a money user's session.
+- **Dates are calendar dates**: month arithmetic clamps to the month's end (`addMonthsISO`, `plusMonths`); the page compares
+  document dates as days (`dUntil`, `ageOf`), never a UTC-midnight `Date` against the clock.
+- **Sign-off link / instructions resolve the SEAT** (`seatLeg`, the board schedule) and refuse to wipe an acknowledged row
+  (`already_acknowledged` unless `force`). Telling Joy (`markDeployed`) leaves `assignment.updated_at` alone.
+- **Earmarks:** one TDG earmark answers only the hull's EARLIEST future card (`firstFuture`); "signed off" needs an ashore
+  word (On Vacation / Reserved), never an unreadable hull. Dismissals compare full timestamps.
+- **Reported, not changed (owner's call):** feedback answers carry across contracts (bonus input, §1); `contract_group_id`
+  counts relief shells (§1); the magic link is not single-use (mail scanners would burn it); a name-ladder match whose
+  cruise-line id differs is kept (the count file uses PCN ids — Domingo — so a different id is not proof).
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

@@ -58,10 +58,20 @@ export function installAck(deps) {
     for (var j = 0; j < VESSEL_REF.length; j++) { var rn = ackNormShip(VESSEL_REF[j].name); if (rn && n.indexOf(rn) >= 0) return VESSEL_REF[j].homeport || null; }
     return null;
   }
+  // THE SEAT, NOT THE COUNTER POSITION (8 Oct 2026). Since 7 Oct the Contract Counter is history (§10d): a seat dated
+  // from the TDG file has no keyman_contract3 row at that seq, so the button failed (signoff_not_found), or the crew was
+  // emailed their PREVIOUS ship and sign-off. The crew's current contract on the board schedule — already carrying Rita's
+  // recorded sign-off and TDG's word (the ladder) — is used when there is one; the Counter row only otherwise.
+  async function seatLeg(env, sc, seq) {
+    if (!deps.boardLegs) return null;
+    var legs = (await deps.boardLegs(env).catch(function () { return null; })) || [];
+    var cur = legs.filter(function (l) { return l && l.ours && l.sc === sc && l.is_current && l.off; }).sort(function (a, b) { return a.on < b.on ? 1 : -1; })[0];
+    return cur ? { sc: sc, seq: seq, ship: cur.ship, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true } : null;
+  }
   async function resolveSignoff(env, sc, seq, ovr) {
     var leg = ovr || await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
     if (!leg) return null;
-    var ed = (await env.DB.prepare("SELECT ship, sign_off, disembark FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {};
+    var ed = (ovr && ovr.fromBoard) ? {} : ((await env.DB.prepare("SELECT ship, sign_off, disembark FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {});
     var base = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(sc).first();
     var ov = await env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(sc).first();
     var c = base ? applyOverride(base, ov) : {};
@@ -78,8 +88,12 @@ export function installAck(deps) {
     await ensureAck(env);
     var b = await request.json().catch(function () { return {}; });
     if (!b.sc || b.seq == null) return json({ error: "missing_sc_seq" }, 400);
-    var r = await resolveSignoff(env, String(b.sc), parseInt(b.seq));
+    var r = await resolveSignoff(env, String(b.sc), parseInt(b.seq), (await seatLeg(env, String(b.sc), parseInt(b.seq))) || undefined);
     if (!r) return json({ error: "signoff_not_found" }, 404);
+    // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
+    // acknowledged row (ack_at, ip, user agent) and revoke the link they had answered. Resend only with force.
+    var prev = await env.DB.prepare("SELECT status FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).first();
+    if (prev && prev.status === "acknowledged" && !b.force) return json({ ok: false, error: "already_acknowledged" }, 409);
     var token = await signToken({ p: "ack", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + ACK_TTL }, env.SESSION_SECRET);
     var th = await sha256hex(token);
     var now = new Date().toISOString();

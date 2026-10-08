@@ -235,10 +235,10 @@ test("static: rejecting a TDG earmark — the route, the table, the board skip w
   assert.match(route, /critical: true/);
   const rs = W.slice(W.indexOf("async function rotationSections("), W.indexOf("const sections = Object.values(shipNames)"));
   assert.match(rs, /FROM earmark_dismiss/, "read in the board's wave");
-  assert.match(rs, /const earmarkDismissed = \(sc, key, at\) => \{ const d = dismissedAt\[sc \+ "\|" \+ key\]; return !!d && \(!at \|\| String\(at\)\.slice\(0, 10\) <= d\); \};/, "off the board only while the file that showed it is not newer than the rejection");
-  assert.match(rs, /if \(earmarkDismissed\(sc, w\.key, w\.at\)\) continue;/);
+  assert.match(rs, /const earmarkDismissed = \(sc, key, at\) => \{ const d = dismissedAt\[sc \+ "\|" \+ key\]; return !!d && \(!at \|\| String\(at\) <= d\); \};/, "off the board only while the file that showed it is not newer than the rejection — by full timestamp (8 Oct 2026: same-day files were missed)");
+  assert.match(rs, /if \(earmarkDismissed\(sc, w\.key, w\.runAt \|\| w\.at\)\) continue;/);
   const lapse = W.slice(W.indexOf("async function dismissedEarmarks("), W.indexOf("// A TDG earmark the console has no card for becomes"));
-  assert.match(lapse, /\(!last \|\| last <= String\(x\.dismissed_at \|\| ""\)\.slice\(0, 10\)\)/, "a rejection older than the latest file has lapsed for the importer too");
+  assert.match(lapse, /\(!last \|\| last <= String\(x\.dismissed_at \|\| ""\)\)/, "a rejection older than the latest file has lapsed for the importer too");
   assert.match(W, /dismissed: dismissedEarmarks, markTold:/, "handed to the importer");
   // the page: Remove on every earmark card, no Deploy anywhere, the sources line names the file first
   const page = W.slice(W.indexOf("function rotCard(x){"), W.indexOf("function rotIssuesBlock("));

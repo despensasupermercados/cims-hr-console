@@ -60,6 +60,16 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf, pre
   }
   const carded = new Set();
   for (const p of (projections || [])) if (p && p.sc && p.ship) carded.add(String(p.sc).trim() + "|" + norm(of(p.ship) || p.ship));
+  // ONE card per TDG earmark (8 Oct 2026): with Rita's chain (two earmarks on a hull), every future card got its own
+  // other_person row for the SAME TDG seafarer, and the default Accept removed them all. Only the hull's EARLIEST future
+  // card is the one TDG's earmark answers; a later card is a plan TDG does not have yet (not_in_tdg).
+  const firstFuture = {};
+  for (const p of (projections || [])) {
+    if (!p || !p.ship) continue;
+    const on = day(p.sign_on), k = norm(of(p.ship) || p.ship);
+    if (!on || (today && on <= today)) continue;
+    if (!firstFuture[k] || on < firstFuture[k].on) firstFuture[k] = { on, id: p.id };
+  }
   const items = [];
   for (const p of (projections || [])) {
     if (!p || !p.id || !p.sc || !p.ship) continue;
@@ -96,7 +106,8 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf, pre
     // there — and not Rita's crew. Only for a FUTURE earmark: an aboard card is the seat, not a plan.
     const myMark = status === "Earmarked" && sameShip;
     const others = (tdgMarks[norm(cardShip)] || []).filter((o) => o.sc !== String(p.sc).trim() && !carded.has(o.sc + "|" + norm(cardShip)));
-    if (!aboard && !myMark && others.length) {
+    const ff = firstFuture[norm(cardShip)];
+    if (!aboard && !myMark && others.length && (!ff || ff.id === p.id)) {
       const o = others[0];
       const at0 = day((byId[o.sc] || {}).run_at) || today;
       items.push({ ...base, kind: "other_person", file: { status: "Earmarked", ship: cardShip, embarked_at: null, at: at0, other: o }, text: "TDG file" + (at0 ? " " + at0 : "") + " earmarks " + (o.name || o.sc) + " for " + cardShip + " · your earmark there is " + (p.crew_name || p.sc) + (signOn ? " from " + signOn : "") });
@@ -118,7 +129,9 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf, pre
       if (status === "On board" && fileShip && !sameShip) {
         item.waiting = { ship: fileShip };
         item.text = "TDG file" + (at0 ? " " + at0 : "") + ": On board " + fileShip + " · TDG cannot earmark them for " + cardShip + " until they sign off — Joy is emailed when the file shows the sign-off";
-      } else if (r && prevStatus === "On board" && prevShip && norm(prevShip) !== norm(cardShip) && !(status === "On board" && fileShip && norm(fileShip) === norm(prevShip))) {
+      } else if (r && prevStatus === "On board" && prevShip && norm(prevShip) !== norm(cardShip) && (status === "On Vacation" || status === "Reserved")) {
+        // A POSITIVE ashore word only (8 Oct 2026): On board with a blank or unreadable hull, or no readable status,
+        // used to fall here and, by default, email Joy that the seafarer had signed off while TDG still had them aboard.
         item.signed_off = { ship: prevShip, on: day(r.debarked_at) || null };
         item.text = "Signed off " + prevShip + (item.signed_off.on ? " on " + item.signed_off.on : "") + " per the TDG file " + at0 + " · your earmark for " + cardShip + (signOn ? " from " + signOn : "") + " is ready for TDG";
       } else if (r && (status === "On Vacation" || status === "Reserved") && fileShip && !sameShip && day(r.debarked_at) && (daysBetween(r.debarked_at, at0) ?? 999) >= 0 && daysBetween(r.debarked_at, at0) <= SIGNED_OFF_DAYS) {

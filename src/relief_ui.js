@@ -140,9 +140,9 @@ const RB=(()=>{
    const p=r.printer,rel=r.reliever,d=r.days_to_off;
    const bc=d==null?"muted":d<=CFG.critical_days?"danger":d<=CFG.due_days?"warning":"muted",bcol=col(bc);
    let printer="";
-   if(p){printer='<div class="card printer" onclick="RB.open(\\''+r.vessel_key+'\\',\\'printer\\')">'+(d!=null?'<span class="badge" style="background:'+bcol[0]+';color:'+bcol[1]+'">OFF in '+d+'d</span>':'')+'<div style="font-size:15px;font-weight:600;padding-right:64px">'+(p.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">PS</span></div><div class="line"><span class="dot" style="background:var(--text-success)"></span>On board</div><div class="line">'+cityLine(p,"off")+' · OFF '+(p.off_date||"TBA")+'</div>'+tagStrip(p.tags)+'</div>';}
+   if(p){printer='<div class="card printer" onclick="RB.open(\\''+r.vessel_key+'\\',\\'printer\\')">'+(d!=null?'<span class="badge" style="background:'+bcol[0]+';color:'+bcol[1]+'">OFF in '+d+'d</span>':'')+'<div style="font-size:15px;font-weight:600;padding-right:64px">'+rEsc(p.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">PS</span></div><div class="line"><span class="dot" style="background:var(--text-success)"></span>On board</div><div class="line">'+cityLine(p,"off")+' · OFF '+(p.off_date||"TBA")+'</div>'+tagStrip(p.tags)+'</div>';}
    let reliever;
-   if(rel){reliever='<div class="card relief" draggable="true" ondragstart="RB.cds(event,\\''+r.vessel_key+'\\',\\'reliever\\')" ondragend="RB.cde(event)" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:14px;font-weight:600">'+(rel.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">reliever</span></div><div class="line"><span class="dot" style="background:var(--text-accent)"></span>Signs on'+(rel.auto_on?' <span style="color:var(--text-muted)">(follows printer)</span>':'')+'</div><div class="line">'+cityLine(rel,"on")+' · ON '+(rel.on_date||"TBA")+'</div>'+tagStrip(rel.tags)+'</div>';}
+   if(rel){reliever='<div class="card relief" draggable="true" ondragstart="RB.cds(event,\\''+r.vessel_key+'\\',\\'reliever\\')" ondragend="RB.cde(event)" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:14px;font-weight:600">'+rEsc(rel.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">reliever</span></div><div class="line"><span class="dot" style="background:var(--text-accent)"></span>Signs on'+(rel.auto_on?' <span style="color:var(--text-muted)">(follows printer)</span>':'')+'</div><div class="line">'+cityLine(rel,"on")+' · ON '+(rel.on_date||"TBA")+'</div>'+tagStrip(rel.tags)+'</div>';}
    else{reliever='<div class="card ghost'+(bc==='danger'?' crit':bc==='warning'?' due':'')+'" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:13px;font-weight:500"><i class="ti ti-plus"></i> Add reliever</div><div style="font-size:11px;opacity:.8;margin-top:2px">empty slot · drop a card to fill</div></div>';}
    const ht=handTxt(r),hc=col(ht.c);
    return '<div class="ship" data-key="'+r.vessel_key+'" ondragover="RB.sov(event,\\''+r.vessel_key+'\\')" ondragleave="RB.sl(event)" ondrop="RB.sd(event,\\''+r.vessel_key+'\\')"><h3><span class="grip" draggable="true" title="Drag to reorder" ondragstart="RB.rs(event,\\''+r.vessel_key+'\\')" ondragend="RB.re(event)">⠿</span>'+shipName(r.vessel_key)+'</h3><div class="row">'+printer+reliever+'</div><div class="hand" style="background:'+hc[0]+';color:'+hc[1]+'"><i class="ti '+ht.ic+'"></i>'+ht.t+'</div></div>';
@@ -168,9 +168,11 @@ const RB=(()=>{
  // ---- turnaround-port picker (minimalist: flat, CITY · date, nearest ~8) ----
  async function fetchPorts(ship){try{const r=await fetch("/api/relief/ports?ship="+encodeURIComponent(ship));const j=await r.json();PORTS=(j&&j.ports)||[];}catch(e){PORTS=[];}}
  function taPorts(){return (PORTS||[]).filter(p=>Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name).slice().sort((a,b)=>a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0);}
+ // Names and ports from TDG files and manual entry are text, never markup (8 Oct 2026).
+ function rEsc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
  function addMonths(d,n){if(!d)return"";const dt=new Date(d+"T00:00:00Z");dt.setUTCMonth(dt.getUTCMonth()+n);return dt.toISOString().slice(0,10);}
  function brandOf(ship){const row=BOARD.find(r=>shipName(r.vessel_key)===ship);return row?String(row.vessel_key).split("|")[0]:"";}
- function minMonths(){const b=brandOf($("mship")?$("mship").value:shipName(cur&&cur.key));return /azamara/i.test(b)?5:6;}
+ function minMonths(){const b=brandOf($("mship")?$("mship").value:shipName(cur&&cur.key));return /azamara/i.test(b)?5:7;} // a contract is SEVEN months, five on Azamara (Miguel, 7 Oct 2026) — the board's own length; 6 here until 8 Oct
  function portOpts(list,selDate,lead){let h=lead;for(const p of list){h+='<option value="'+p.berth_date+'"'+(p.berth_date===selDate?' selected':'')+'>'+p.port_name+' · '+fmtDate(p.berth_date)+'</option>';}h+='<option value="__c">Custom date…</option>';return h;}
  function buildDates(node,role,ro){const el=$("mdates");
   if(ro){
@@ -242,12 +244,12 @@ const RB=(()=>{
   $("msave").style.display="inline-block";
   var _rm=$("mremove");if(_rm)_rm.style.display=(node&&!ro&&role==="reliever")?"inline-block":"none";
   const banner=$("mbanner");
-  if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div><button class="match" onclick="RB.matchHandover()"><i class="ti ti-wand"></i> Match handover</button>';}else banner.style.display="none";
+  if(role==="reliever"&&printer){banner.style.cssText="display:block;background:var(--bg-accent);border-radius:var(--radius);padding:10px 12px;margin:8px 0;font-size:13px";banner.innerHTML='<b style="color:var(--text-accent)"><i class="ti ti-arrows-left-right"></i> Relieving '+rEsc(printer.crew_name||"—")+'</b><div style="color:var(--text-secondary);margin-top:3px">Printer OFF · '+(printer.off_city||"—")+' · '+(printer.off_date||"TBA")+'</div><button class="match" onclick="RB.matchHandover()"><i class="ti ti-wand"></i> Match handover</button>';}else banner.style.display="none";
   // WHO CAN TAKE THE SEAT (8 Oct 2026, earmark_bench.js): a new reliever opens with everyone available for this ship,
   // most rested on the earmark's start date first; the search below stays for anyone else.
   if(!node&&role==="reliever"&&printer)loadBench(shipName(key));else{var _mb=$("mbench");if(_mb){_mb.style.display="none";_mb.innerHTML="";}}
   docBlock(node&&node.docs?node.docs:null);
-  if(node){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+(node.crew_name||"—")+'</b>';cur.crew_id=null;}
+  if(node){$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+rEsc(node.crew_name||"—")+'</b>';cur.crew_id=null;}
   else{$("mcrew").style.display="block";$("mcrew").value="";$("mpicked").style.display="none";}
   const ships=[...new Set(BOARD.map(r=>shipName(r.vessel_key)))];$("mship").innerHTML=ships.map(s=>'<option'+(s===shipName(key)?" selected":"")+'>'+s+'</option>').join("")||'<option>'+shipName(key)+'</option>';
   $("mdates").innerHTML="";togs();cur.sent=node?Object.assign({},node.workflow||{}):{};workflow();

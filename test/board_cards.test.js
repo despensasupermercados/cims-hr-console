@@ -564,7 +564,8 @@ test("the send dialog asks before a resend and posts resend:true; the server sta
   const sec = WSRC.slice(WSRC.indexOf("async function rotationSections("), WSRC.indexOf("async function rotationSections(") + 60000);
   assert.match(sec, /if \(d\.assignment_id && openIds\.has\(d\.assignment_id\)\) continue;/, "a sent card still on the board is not ALSO a 'sent to TDG' line");
   assert.equal((sec.match(/deployedAt: deployedAtOf\(/g) || []).length, 2, "the stamp rides BOTH card paths (roster loop + projection loop)");
-  assert.match(WSRC, /const markDeployed = async \(env, id, logId, at\) => \{ const r = await env\.DB\.prepare\("UPDATE assignment SET deployed_at=\?, deploy_log_id=\?, updated_at=\? WHERE id=\? AND actual_sign_off IS NULL"\)/);
+  // 8 Oct 2026: the stamp leaves updated_at alone — the sign-off ladder reads it as Rita's newer action on the card.
+  assert.match(WSRC, /const markDeployed = async \(env, id, logId, at\) => \{ const r = await env\.DB\.prepare\("UPDATE assignment SET deployed_at=\?, deploy_log_id=\? WHERE id=\? AND actual_sign_off IS NULL"\)/);
   assert.match(WSRC, /installKeymanDeploy\(\{[^}]*markDeployed[^}]*\}\)/, "the Worker hands the stamp to the deploy module");
   const dep = readFileSync(new URL("../src/keyman_deploy.js", import.meta.url), "utf-8");
   assert.doesNotMatch(dep.slice(dep.indexOf("/api/keyman/deploy/send")), /await removeReliefAssignment\(/, "the send path never removes a card");

@@ -21,7 +21,9 @@ const BRAND_SHORT = {
   NCL: "NCL",
 };
 
-// Which source the board should read. Reads app_config; fails safe to 'ship_history'.
+// Which source the board should read. Reads app_config: a missing row is 'ship_history'. A FAILED read is null (8 Oct
+// 2026): it used to read as 'ship_history' too, so one transient D1 error served the frozen July constant as the live
+// board with no error shown — boardLegs now fails loud on null instead.
 export async function boardSource(env) {
   try {
     const r = await env.DB.prepare(
@@ -29,7 +31,7 @@ export async function boardSource(env) {
     ).first();
     return r && r.value ? r.value : "ship_history";
   } catch {
-    return "ship_history";
+    return null;
   }
 }
 
@@ -314,10 +316,14 @@ function daysApart(a, b) {
   if (!x || !y) return null;
   return Math.round((Date.parse(y + "T00:00:00Z") - Date.parse(x + "T00:00:00Z")) / 86400000);
 }
+// Calendar months clamped to the month's last day (8 Oct 2026): Jul 31 + 7 is Feb 28, not Mar 3.
 function plusMonths(d, n) {
-  const dt = new Date(d + "T00:00:00Z");
-  dt.setUTCMonth(dt.getUTCMonth() + n);
-  return dt.toISOString().slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ""));
+  if (!m) return null;
+  const t = new Date(Date.UTC(+m[1], +m[2] - 1 + n, 1));
+  const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  t.setUTCDate(Math.min(+m[3], last));
+  return t.toISOString().slice(0, 10);
 }
 
 // The kept file, one row per crew, with the roster's name and id beside it.

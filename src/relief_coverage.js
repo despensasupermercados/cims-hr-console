@@ -49,11 +49,13 @@ async function fetchRelievers(env, minDate, maxDate) {
     `SELECT a.vessel_name AS ship,
             a.sign_on     AS signon,
             TRIM(COALESCE(rc.first_name,'') || ' ' || COALESCE(rc.last_name,'')) AS reliever,
-            rc.status     AS status
+            rc.status     AS status,
+            COALESCE(rs.vessel, rc.vessel_observed) AS aboard_ship
        FROM assignment a
        JOIN contract ct ON ct.id = a.contract_id
        JOIN crew     rc ON rc.id = ct.crew_id
-      WHERE a.sign_on BETWEEN ? AND ?`
+       LEFT JOIN registry_snapshot rs ON rs.agency_id = rc.agency_id
+      WHERE a.sign_on BETWEEN ? AND ? AND a.actual_sign_off IS NULL`
   ).bind(minDate, maxDate).all();
   return results || [];
 }
@@ -87,16 +89,18 @@ async function annotateReliefCoverage(env, signOffs) {
       o.relief = { state: "none", reliever: null, signon: null };
       continue;
     }
-    // Prefer a confirmed (on board) reliever; otherwise the nearest-dated planned one.
+    // Prefer a confirmed reliever — On board THIS ship per the TDG file (8 Oct 2026: "On board" anywhere read as
+    // confirmed, so Guazon aboard Liberty and earmarked Allure was "Relief confirmed" on Allure); else the nearest planned.
+    const here = (r) => { const a = norm(r.aboard_ship); return r.status === "On board" && !!a && !!shipKey && (a.includes(shipKey) || shipKey.includes(a)); };
     cands.sort((a, b) => {
-      const ca = a.status === "On board" ? 0 : 1;
-      const cb = b.status === "On board" ? 0 : 1;
+      const ca = here(a) ? 0 : 1;
+      const cb = here(b) ? 0 : 1;
       if (ca !== cb) return ca - cb;
       return daysBetween(a.signon, o.date) - daysBetween(b.signon, o.date);
     });
     const best = cands[0];
     o.relief = {
-      state: best.status === "On board" ? "confirmed" : "planned",
+      state: here(best) ? "confirmed" : "planned",
       reliever: best.reliever,
       signon: ymd(best.signon),
     };
