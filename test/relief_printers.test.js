@@ -45,7 +45,7 @@ test("Anthem gets its printer back, so the board draws the Add earmark slot with
 test("static: the slot stays when the ship's last earmark has joined (a NEW earmark after them), and the relief panel opens it as new, relieving the one aboard", async () => {
   const { readFileSync } = await import("node:fs");
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /if\(rb\.reliever&&rb\.reliever\.aboard\)\{var ra=offSpan\(rb\.reliever\.off_date\);/);
+  assert.match(W, /if\(rb\.reliever&&rb\.reliever\.aboard\)\{var _eb=benchBox\(rb,sec\);if\(_eb\)return _eb;var ra=offSpan\(rb\.reliever\.off_date\);/);
   assert.match(W, /data-aid="new" onclick="openRelief\(this\)"/);
   const U = readFileSync(new URL("../src/relief_ui.js", import.meta.url), "utf8");
   assert.match(U, /const fresh=aid==="new";\s*const node=fresh\?null:/);

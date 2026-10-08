@@ -328,7 +328,7 @@ const VPD_CHUNK = 50;
 // field by field (the same precedence as every other read); `planned` lists the ships they already
 // hold an open projection on; the document fields feed docBadge().
 export const RELIEF_CREW_PICKER_SQL =
-  `SELECT c.id, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS name,
+  `SELECT c.id, c.agency_id, TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS name,
           COALESCE(NULLIF(o.status,''), c.status) AS status,
           COALESCE(NULLIF(o.rank_override,''), c.rank_override, c.rank_observed) AS rank,
           COALESCE(NULLIF(o.vessel_observed,''), c.vessel_observed) AS vessel,

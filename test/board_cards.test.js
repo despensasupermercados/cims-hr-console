@@ -324,7 +324,7 @@ test("drawRotation hands the ship renderer its projections, deployed lines and J
   const src = readFileSync(SRC, "utf-8");
   const draw = src.slice(src.indexOf("function drawRotation(){"));
   const body = draw.slice(0, draw.indexOf("document.getElementById('rotbody').innerHTML=h;"));
-  const map = body.match(/return \{ship:s\.ship,[^\n]*\};/);
+  const map = body.match(/return \{bench:s\.bench,ship:s\.ship,[^\n]*\};/);
   assert.ok(map, "the per-section rebuild must still exist");
   for (const k of ["projections:", "deployed:", "jrPsRule:", "crew:", "history:"]) {
     assert.ok(map[0].includes(k), "the rebuilt section lost `" + k + "` — rotShip reads it, so it silently rendered nothing (this hid 26 yellow cards)");
