@@ -9,7 +9,7 @@ import { VESSEL_REF, DRY_DOCK } from "./vessel_ref.js";
 import { strictShipMatcher } from "./crew_flags.js";
 import { reconcileProjections, registryFromStore } from "./registry_sync.js";
 import { fleetDryDock, inDockNow, upcomingDocks } from "./fleet.js";
-import { mapRows, diffCrew } from "./crewimport.js";
+import { mapRows, diffCrew, storableStatus } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
@@ -55,10 +55,12 @@ import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
 import { apiRosterExport } from './roster_export.js';
 
-const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
-const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer });
+const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
+const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
 // markDeployed: the card STAYS on the ship once sent (Miguel, 5 Oct 2026) — stamped, not removed.
-const markDeployed = async (env, id, logId, at) => { const r = await env.DB.prepare("UPDATE assignment SET deployed_at=?, deploy_log_id=?, updated_at=? WHERE id=? AND actual_sign_off IS NULL").bind(at, logId, at, id).run(); return { ok: !r || !r.meta || r.meta.changes == null || r.meta.changes > 0 }; };
+// Telling Joy changes no date, so it leaves updated_at alone (8 Oct 2026): the sign-off ladder reads a reliever card's
+// updated_at as "Rita's newer action", and the stamp flipped an outgoing crew's typed sign-off to the card's sign-on.
+const markDeployed = async (env, id, logId, at) => { const r = await env.DB.prepare("UPDATE assignment SET deployed_at=?, deploy_log_id=? WHERE id=? AND actual_sign_off IS NULL").bind(at, logId, id).run(); return { ok: !r || !r.meta || r.meta.changes == null || r.meta.changes > 0 }; };
 const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, markDeployed, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
 const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
@@ -201,8 +203,8 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
-      { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer })(p, request, env, url, session); if (_a) return _a; }
-      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer })(p, request, env, url, session); if (_i) return _i; }
+      { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_a) return _a; }
+      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_i) return _i; }
       if (p === '/api/roster/export') return apiRosterExport(request, env);
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
@@ -359,12 +361,24 @@ function getCookie(request, name) {
   const m = c.match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
   return m ? decodeURIComponent(m[1]) : null;
 }
+// A signed session alone outlived a removed user for up to SESSION_TTL (8 Oct 2026): the allowlist is now re-read,
+// remembered per isolate for ALLOW_CACHE_MS so a request costs no extra round trip. A failed read keeps the last
+// answer (or lets the signed session stand) — a D1 hiccup must not log everyone out.
+const ALLOW_CACHE_MS = 5 * 60 * 1000;
+const _allowCache = new Map();
+async function stillAllowed(env, email) {
+  const k = String(email || "").toLowerCase(), hit = _allowCache.get(k), now = Date.now();
+  if (hit && now - hit.at < ALLOW_CACHE_MS) return hit.ok;
+  try { const ok = await isAllowed(env, email); _allowCache.set(k, { ok, at: now }); return ok; }
+  catch (e) { return hit ? hit.ok : true; }
+}
 async function getSession(request, env) {
   if (!env.SESSION_SECRET) return null;
   const t = getCookie(request, COOKIE);
   if (!t) return null;
   const p = await verifyToken(t, env.SESSION_SECRET);
-  return (p && p.p === "session") ? p : null;
+  if (!(p && p.p === "session")) return null;
+  return (await stillAllowed(env, p.email)) ? p : null;
 }
 async function isAllowed(env, email) {
   if (!email) return false;
@@ -1022,7 +1036,7 @@ async function apiCrewImport(request, env, session) {
   const batch = [];
   for (const m of mapped) {
     if (!applyIds.has(m.agency_id)) continue;
-    batch.push(stmt.bind("crew_" + m.agency_id, m.agency_id, m.first_name, m.middle_name, m.last_name, m.status,
+    batch.push(stmt.bind("crew_" + m.agency_id, m.agency_id, m.first_name, m.middle_name, m.last_name, storableStatus(m.status),
       m.rank_observed, m.vessel_observed, m.dob, m.province, m.phone, m.email, m.med_exp, m.sirb_exp, m.pp_exp, m.sch_exp, m.usv_exp, now, now));
   }
   if (batch.length) await env.DB.batch(batch);
@@ -1359,8 +1373,8 @@ async function apiDashboard(env) {
   const [hist, cc, csRes, ovRes, bo, bdRes, tyRow, trKind, trMs, trCat, trCy, HIST] = await Promise.all([
     env.DB.prepare("SELECT COUNT(*) contracts, COUNT(DISTINCT sc) crew, CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sign_on IS NOT NULL AND COALESCE(act_off,proj_off) IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").first(),
     env.DB.prepare("SELECT COUNT(*) total, COUNT(DISTINCT vessel_observed) vessels, SUM(CASE WHEN med_exp IS NOT NULL AND med_exp < ?1 THEN 1 ELSE 0 END) med, SUM(CASE WHEN sirb_exp IS NOT NULL AND sirb_exp < ?1 THEN 1 ELSE 0 END) sirb, SUM(CASE WHEN pp_exp IS NOT NULL AND pp_exp < ?1 THEN 1 ELSE 0 END) pp, SUM(CASE WHEN usv_exp IS NOT NULL AND usv_exp < ?1 THEN 1 ELSE 0 END) usv, SUM(CASE WHEN sch_exp IS NOT NULL AND sch_exp < ?1 THEN 1 ELSE 0 END) sch FROM crew WHERE redacted=0").bind(in90).first(),
-    env.DB.prepare("SELECT agency_id, status, vessel_observed, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
-    env.DB.prepare("SELECT agency_id, status, retired, vessel_observed FROM crew_override").all(),
+    env.DB.prepare("SELECT agency_id, status, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
+    env.DB.prepare("SELECT agency_id, status, retired, vessel_observed, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
     // Bonus committed to date (money path — read only). Resilient like the old try/catch.
     env.DB.prepare("SELECT COUNT(*) n, COALESCE(SUM(pay_usd),0) p FROM bonus_outcome").first().catch(() => null),
     // Birthdays today (match MM-DD of dob).
@@ -1375,7 +1389,9 @@ async function apiDashboard(env) {
     boardLegs(env), // the live schedule — same source as the crew list and rotation board (§11)
   ]);
   const total = cc.total || 0, vessels = cc.vessels || 0;
-  const medExp = cc.med || 0, sirbExp = cc.sirb || 0, ppExp = cc.pp || 0, usvExp = cc.usv || 0, schExp = cc.sch || 0;
+  // The document tiles count what the Compliance tab lists (8 Oct 2026): the manual date first (crew_override), active
+  // crew only (never Inactive / Not for Rehire). They read the raw imported columns over every crew until today.
+  let medExp = 0, sirbExp = 0, ppExp = 0, usvExp = 0, schExp = 0;
   // Count by EFFECTIVE status (auto-derived from the schedule; retired/manual win) so the dashboard
   // matches the crew cards and rotation board rather than the raw stored value.
   const cs = csRes.results;
@@ -1388,6 +1404,10 @@ async function apiDashboard(env) {
     statusMap[s] = (statusMap[s] || 0) + 1;
     // Donut counts the same ACTIVE set as the tiles (exclude Inactive), by client/brand.
     if (!isOffFleet(s)) byClient[clientOf(c.tdg_vessel || (ov && ov.vessel_observed) || c.vessel_observed)] += 1; // the kept file's hull first, as on the Crew tab
+    if (!isOffFleet(s)) {
+      const d = (f) => { const v = (ov && ov[f] != null && ov[f] !== "") ? ov[f] : c[f]; return v && String(v).slice(0, 10) < in90; };
+      if (d("med_exp")) medExp++; if (d("sirb_exp")) sirbExp++; if (d("pp_exp")) ppExp++; if (d("usv_exp")) usvExp++; if (d("sch_exp")) schExp++;
+    }
   }
   // (byClient is computed above from the same derived-status active set as the workforce tiles.)
   const bonus = { committed: (bo && bo.n) || 0, pay: (bo && bo.p) || 0 };
@@ -1468,6 +1488,7 @@ async function boardLegs(env) {
     boardSource(env),
     boardLegsFromDb(env, TODAY()).then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })),
   ]);
+  if (src == null) throw new Error("board_source_unreadable"); // never the frozen constant on a failed read
   if (src !== "ship_leg") return SHIP_HISTORY;
   if (!db.ok) throw db.e; // fail loud: never quietly serve the frozen constant for a live source
   return db.v;
@@ -1481,7 +1502,7 @@ async function boardLegs(env) {
 function activeSpanOf(legs, HIST, sc, today) {
   // THE FILE FIRST (7 Oct 2026): the AdvancedQuery's current leg (embark + the resolved sign-off) is the
   // active contract; the Counter is history and only stands in when the file gives no dates.
-  for (const h of HIST || []) if (h && h.ours && h.sc === sc && h.source === "registry" && h.is_current && h.on) return { sign_on: h.on, proj_off: h.off || null, act_off: null, source: "registry" };
+  for (const h of HIST || []) if (h && h.ours && h.sc === sc && h.source === "registry" && h.is_current && h.on) return { active_on: h.on, active_off: h.off || null }; // the shape every caller reads (8 Oct 2026: it returned sign_on/proj_off, so every crew the file dates read "No active contract on file")
   const ls = (legs || []).slice().sort((a, x) => (a.seq || 0) - (x.seq || 0));
   let act = ls.find(l => { const off = l.act_off || l.proj_off || "9999"; return l.sign_on <= today && off >= today; }) || ls[ls.length - 1] || null;
   if (!act) {
@@ -1558,7 +1579,7 @@ async function apiCrewOne(env, url) {
     env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
-    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
+    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(MIN(COALESCE(act_off,proj_off),date('now')))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND MIN(COALESCE(act_off,proj_off),date('now'))>sign_on").bind(id).first(),
     env.DB.prepare("SELECT vessel FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
   ]);
   if (!row) return json({ error: "not found" }, 404);
@@ -1608,7 +1629,7 @@ async function apiCrewAdd(request, env, session, ctx) {
   const baselineVal = (isMoneyUser(session && session.email) && b.baseline_count != null) ? +b.baseline_count : null;
   const writes = [];
   writes.push(env.DB.prepare("INSERT INTO crew (id,agency_id,agency_code,first_name,middle_name,last_name,status,rank_observed,vessel_observed,dob,pp_no,baseline_count,redacted,created_at,updated_at) VALUES (?,?,'MAN',?,?,?,?,?,NULL,?,?,?,0,?,?)")
-    .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, b.status || "Earmarked", b.rank_observed || null, b.dob || null, b.pp_no || null, baselineVal, now, now));
+    .bind("crew_" + id, id, b.first_name, b.middle_name || null, b.last_name, storableStatus(b.status) || "Earmarked", b.rank_observed || null, b.dob || null, b.pp_no || null, baselineVal, now, now));
   // NOTE: status is deliberately NOT written to the override (2026-09-09). crew_override.status is
   // a MANUAL PIN — crewStatus() returns it verbatim and never reaches deriveStatus(), so seeding it
   // here froze every manually added crew at their starting value for good: they stayed "Earmarked"
@@ -1732,7 +1753,7 @@ async function rotationSections(env) {
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
     env.DB.prepare("SELECT name, brand, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
-    env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient, assignment_id FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
     env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026) + the file's debark (completedSince)
     env.DB.prepare("SELECT MAX(imported_at) AS stamp, COUNT(*) AS rows, COUNT(DISTINCT sc) AS crew FROM keyman_contract3").all().catch(() => ({ results: [] })), // how old the Counter is
     // The last AdvancedQuery's word per crew, for the projection verdict (registry_sync.js, 5 Oct 2026):
@@ -1985,13 +2006,15 @@ async function rotationSections(env) {
   // A TDG earmark Rita REJECTED (earmark_dismiss) stays off the board while the file that showed it stands: the
   // dismissal is dated, and a file applied after it brings the earmark back.
   const dismissedAt = {};
-  for (const d of ((dismissRes && dismissRes.results) || [])) if (d && d.sc && d.ship_key) dismissedAt[d.sc + "|" + d.ship_key] = String(d.dismissed_at || "").slice(0, 10);
-  const earmarkDismissed = (sc, key, at) => { const d = dismissedAt[sc + "|" + key]; return !!d && (!at || String(at).slice(0, 10) <= d); };
+  for (const d of ((dismissRes && dismissRes.results) || [])) if (d && d.sc && d.ship_key) dismissedAt[d.sc + "|" + d.ship_key] = String(d.dismissed_at || "");
+  // Full timestamps (8 Oct 2026): by day, a file applied the SAME afternoon as a morning dismissal could not bring
+  // TDG's earmark back ("a LATER file still carrying it brings it back", §10d).
+  const earmarkDismissed = (sc, key, at) => { const d = dismissedAt[sc + "|" + key]; return !!d && (!at || String(at) <= d); };
   const earmarkSc = new Set();
   for (const c of crewRows) {
     const sc = c.agency_id, w = fileOf[sc];
     if (isShore(c) || !w || w.status !== "Earmarked" || !w.known || absentSince[sc]) continue;
-    if (earmarkDismissed(sc, w.key, w.at)) continue;
+    if (earmarkDismissed(sc, w.key, w.runAt || w.at)) continue;
     if ((openAsg || []).some((a) => a.sc === sc && !overriddenAsg.has(a.id) && keyOf(a.ship) === w.key)) continue;
     earmarkSc.add(sc);
   }
@@ -2539,8 +2562,8 @@ async function dismissedEarmarks(env) {
     env.DB.prepare("SELECT sc, ship_key, dismissed_at FROM earmark_dismiss").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT MAX(run_at) AS run_at FROM import_run").first().catch(() => null),
   ]);
-  const last = r && r.run_at ? String(r.run_at).slice(0, 10) : null;
-  return ((d && d.results) || []).filter((x) => x && x.sc && x.ship_key && (!last || last <= String(x.dismissed_at || "").slice(0, 10))).map((x) => x.sc + "|" + x.ship_key);
+  const last = r && r.run_at ? String(r.run_at) : null; // full timestamps, as on the board (8 Oct 2026)
+  return ((d && d.results) || []).filter((x) => x && x.sc && x.ship_key && (!last || last <= String(x.dismissed_at || ""))).map((x) => x.sc + "|" + x.ship_key);
 }
 // A TDG earmark the console has no card for becomes a console earmark (7 Oct 2026): the same card Rita would
 // have dragged there — sign-on = the hull's current printer's projected sign-off (else today), + 7 months.
@@ -2728,13 +2751,19 @@ async function apiContracts(env) {
 }
 // Assemble everything the PDF statement needs for one crew (crew + contracts + sea-days + bonus).
 async function gatherStatement(env, id) {
-  const crew = await env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first();
-  if (!crew) return null;
+  // Rita's manual corrections apply (8 Oct 2026), as on every other screen: the statement was emailed to the file's
+  // old address and printed a renewed document as EXPIRED. The money reads below keep the BASE row's baseline.
+  const [base, ov] = await Promise.all([
+    env.DB.prepare("SELECT * FROM crew WHERE agency_id=?").bind(id).first(),
+    env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first().catch(() => null),
+  ]);
+  if (!base) return null;
+  const crew = Object.assign(applyOverride(base, ov), { id: base.id, baseline_count: base.baseline_count });
   await Promise.all([ensureKeyman(env), ensureContractCount(env)]); // guards together (§12), both memoized
   // The reads that only need the crew row travel together (§12: this chain was eight serial trips).
   const [ctRes, dw, baseline, tdgRow, outs] = await Promise.all([
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
-    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(COALESCE(act_off,proj_off))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND COALESCE(act_off,proj_off)>sign_on").bind(id).first(),
+    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(MIN(COALESCE(act_off,proj_off),date('now')))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND MIN(COALESCE(act_off,proj_off),date('now'))>sign_on").bind(id).first(),
     effectiveBaseline(env, id, crew.baseline_count),
     env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
@@ -3026,6 +3055,8 @@ async function apiScoreQueue(env, url, state) {
     if (!h.ours || !h.sc || !h.off || !byId[h.sc]) continue;
     const w = classifyWindow(h.off, today, days);
     if (!w) continue;
+    // A contract still CURRENT past its sign-off is overdue or held by TDG's On board (§10d) — not signed off.
+    if (w === "recent" && h.is_current) continue;
     if (w === "recent") { const cur = recBy[h.sc]; if (!cur || h.off > cur.off) recBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
     else { const cur = upBy[h.sc]; if (!cur || h.off < cur.off) upBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
   }
@@ -3218,8 +3249,15 @@ function fromDisplayName(raw, fallback) {
 // both file it), then decodes -> matches crew -> AI summarises -> files (high/med) or pending.
 async function processIntelEmail(env, row, roster) {
   // Claim: only proceed if this row is still 'new' (atomic guard against double-processing).
-  const claim = await env.DB.prepare("UPDATE email_inbox SET status='processing' WHERE id=? AND status='new'").bind(row.id).run();
+  // The claim is stamped (processed_at) so a row left 'processing' by a failure the catch below could not undo (the
+  // isolate stopped mid-call) is released by the next sweep after INTEL_STALE_MIN instead of vanishing (8 Oct 2026).
+  const claim = await env.DB.prepare("UPDATE email_inbox SET status='processing', processed_at=? WHERE id=? AND status='new'").bind(new Date().toISOString(), row.id).run();
   if (!claim.meta || claim.meta.changes === 0) return false;
+  let inserted = false;
+  try {
+  // Idempotent: an email that already made a card (a retry after a failed status update) is only marked processed.
+  const done = await env.DB.prepare("SELECT id FROM crew_intel WHERE source_email_id=? LIMIT 1").bind(row.id).first();
+  if (done) { await env.DB.prepare("UPDATE email_inbox SET status='processed', processed_at=? WHERE id=?").bind(new Date().toISOString(), row.id).run(); return false; }
   const body = decodeEmailBody(row.raw);
   const match = matchCrew((row.subject || "") + " \n " + body, roster);
   const reporter = fromDisplayName(row.raw, row.from_addr);
@@ -3233,16 +3271,25 @@ async function processIntelEmail(env, row, roster) {
   const id = "ci_" + crypto.randomUUID();
   await env.DB.prepare("INSERT INTO crew_intel (id,agency_id,reporter,summary,source,source_email_id,confidence,status,candidates,ts,created_by,contract_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(id, match.agency_id || null, reporter, summary, "email", row.id, match.confidence, filed ? "filed" : "pending", JSON.stringify(match.candidates || []), new Date().toISOString(), "ai", contractNo).run();
+  inserted = true;
   await env.DB.prepare("UPDATE email_inbox SET status='processed', processed_at=? WHERE id=?").bind(new Date().toISOString(), row.id).run();
+  } catch (e) {
+    // Never leave the row 'processing' (it showed nowhere: not the inbox, not the review queue — the email was lost).
+    await env.DB.prepare("UPDATE email_inbox SET status=? WHERE id=?").bind(inserted ? "processed" : "new", row.id).run().catch(() => {});
+    throw e;
+  }
   await logActivity(env, "ai", "intel_auto", (match.agency_id || "pending") + " " + match.confidence);
   return true;
 }
+const INTEL_STALE_MIN = 30;
 
 // Sweep up to `limit` unprocessed inbox rows. Used on arrival and by the hourly cron. Never throws.
 async function processIntelInbox(env, limit) {
   try {
     await ensureIntel(env);
     if (pickEngine(env) === "none") return 0;
+    // Release rows stuck 'processing' past INTEL_STALE_MIN (a claim the isolate never finished), so they are retried.
+    await env.DB.prepare("UPDATE email_inbox SET status='new' WHERE status='processing' AND (processed_at IS NULL OR processed_at < ?)").bind(new Date(Date.now() - INTEL_STALE_MIN * 60000).toISOString()).run().catch(() => {});
     const roster = await intelRoster(env);
     const rows = (await env.DB.prepare("SELECT id, from_addr, subject, raw, received_at FROM email_inbox WHERE status='new' ORDER BY received_at ASC LIMIT ?").bind(limit || 10).all()).results;
     let n = 0;
@@ -4012,7 +4059,8 @@ const FB_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta na
 var T=new URLSearchParams(location.search).get('t');
 var ROLE=null;
 function sel(id,opts,val){return '<select id='+id+'>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('')+'</select>';}
-function ta(id,v){return '<textarea id='+id+' rows=2>'+(v||'')+'</textarea>';}
+function fbEsc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function ta(id,v){return '<textarea id='+id+' rows=2>'+fbEsc(v||'')+'</textarea>';}
 async function start(){
   if(!T){document.getElementById('fbsub').textContent='Missing link token.';return;}
   var d=await (await fetch('/api/feedback/form?t='+encodeURIComponent(T))).json();
@@ -4024,7 +4072,7 @@ async function start(){
   if(d.role==='ray'){
     f+='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+sel('order',['No','Yes'],a.order||'No')+'</div>'
      +'<div class=fg><label>If yes — cause</label>'+sel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause||'N/A')+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
-     +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
+     +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+fbEsc(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
      +'<div class=fg><label>Orders placed on time (par respected)?</label>'+sel('ontime',['Always','Mostly','Often late'],a.ontime||'Always')+'</div>'
      +'<div class=fg><label>Order accuracy</label>'+sel('acc',['Accurate','Minor errors','Frequent errors'],a.acc||'Accurate')+'</div>'
      +'<div class=fg><label>Par maintained at handover</label>'+sel('par',['Maintained','Some gaps','Not maintained'],a.par||'Maintained')+'</div>'
@@ -4037,7 +4085,7 @@ async function start(){
      +'<div class=fg><label>Note / evidence (optional)</label>'+ta('note',a.note)+'</div>';
   } else {
     f+='<div class=fg><label>Did you assess this crew this contract?</label>'+sel('assessed',['No (N/A)','Yes'],a.assessed||'No (N/A)')+'</div>'
-     +'<div class=fg><label>Mono click % this contract (&lt;20% target)</label><input id=mono type=number min=0 max=100 step=0.1 value="'+(a.mono||'')+'" placeholder="e.g. 14"><div class=hint>Feeds the Mono discipline sub-score.</div></div>'
+     +'<div class=fg><label>Mono click % this contract (&lt;20% target)</label><input id=mono type=number min=0 max=100 step=0.1 value="'+fbEsc(a.mono||'')+'" placeholder="e.g. 14"><div class=hint>Feeds the Mono discipline sub-score.</div></div>'
      +'<div class=fg><label>Inventory observations</label>'+ta('inv',a.inv)+'</div>'
      +'<div class=fg><label>Technical observations</label>'+ta('tech',a.tech)+'</div>'
      +'<div class=fg><label>Overall impression</label>'+ta('overall',a.overall)+'</div>';
@@ -4051,7 +4099,11 @@ async function submitFb(){
   else if(ROLE==='rolando')ans={clean:val('clean'),pm:val('pm'),unres:val('unres'),note:val('note')};
   else ans={assessed:val('assessed'),mono:val('mono'),inv:val('inv'),tech:val('tech'),overall:val('overall')};
   document.getElementById('sb').disabled=true;document.getElementById('fbmsg').textContent='Saving…';
-  var r=await (await fetch('/api/feedback/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({t:T,answers:ans})})).json();
+  // The thank-you only when the server saved it (8 Oct 2026): an expired or revoked link, or a network error, said
+  // "recorded" and the answers were lost; the button now comes back with the reason.
+  var r=null;try{var _res=await fetch('/api/feedback/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({t:T,answers:ans})});r=await _res.json().catch(function(){return null;});if(!_res.ok&&r&&!r.error)r.error='HTTP '+_res.status;}catch(_){r={error:'network'};}
+  if(r&&r.already){document.getElementById('fbmsg').textContent='This feedback was already recorded for Rita. You can close this page.';return;}
+  if(!r||r.error||r.ok===false){document.getElementById('sb').disabled=false;document.getElementById('fbmsg').textContent='Not saved'+(r&&r.error?(' ('+r.error+')'):'')+'. This link may have expired or been replaced — ask Rita for a new one, or try again.';return;}
   document.getElementById('fbbody').innerHTML='<div class=card2 style="text-align:center"><div style="font-family:Outfit;font-weight:800;color:var(--green-d);font-size:20px">✓ Thank you</div><div class=hint style="margin-top:6px">Your feedback was recorded for Rita. You can close this page.</div></div>';
 }
 start();
@@ -4131,7 +4183,12 @@ function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/864
 // Revalidation is skipped for two seconds after a successful read, which is also what stops the
 // re-render from starting another round of revalidation.
 var API_CACHE={};
-function cachedJson(url,rerender){
+// A background refresh redraws ONLY the view that asked for it (8 Oct 2026): it used to repaint the Crew list over an
+// open profile, or over the Keyman tab the user had moved to. VIEW_GEN moves on every tab switch and profile open.
+var VIEW_GEN=0;
+function cachedJson(url,rerender0){
+  var _tab0=tabFromHash(),_gen0=VIEW_GEN;
+  var rerender=rerender0?function(){if(tabFromHash()!==_tab0||VIEW_GEN!==_gen0)return;rerender0();}:null;
   var e=API_CACHE[url]||(API_CACHE[url]={});
   var live=function(){
     e.inflight=fetch(url,{cache:'no-store'}).then(function(r){
@@ -4173,6 +4230,7 @@ function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
 var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','billing','travel','fleet','reports','data','settings','ask'];
 function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
+  VIEW_GEN++;
   var _vw=document.getElementById('view');if(_vw)_vw.classList.remove('wide');
   try{if(TABS.indexOf(tab)>=0&&location.hash!=='#'+tab)history.replaceState(null,'','#'+tab);}catch(_){}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
@@ -4181,7 +4239,7 @@ async function show(tab){
   if(tab==='dashboard')return renderDashboard();
   if(tab==='crew')return renderCrew();
   if(tab==='contracts')return renderContracts();
-  if(tab==='rotation')return renderRotation();
+  if(tab==='rotation'){ROT_FRESH=1;return renderRotation();}
   if(tab==='feedback')return renderFeedback();
   if(tab==='compliance')return renderCompliance();
   if(tab==='billing')return renderBilling();
@@ -4930,7 +4988,7 @@ function cimsCart(){
   $("#impcart").innerHTML=H;
 }
 async function cimsApply(){
-  var btn=$("#impcart")?$("#impcart").querySelector(".applyb2"):null;if(btn){btn.disabled=true;btn.textContent="Applying&hellip;";}
+  var btn=$("#impcart")?$("#impcart").querySelector(".applyb2"):null;if(btn){btn.disabled=true;btn.textContent="Applying…";}
   var ed={};for(var ek in EDITS)if(DEC[ek]==="edit")ed[ek]=EDITS[ek];
   var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
@@ -5074,7 +5132,7 @@ function paintTravel(){
   if(outs.length){
     h+='<div class=zlabel style="margin-top:18px">Anomalies — single movements &gt; 2.5× median ('+usd0(med)+')</div>';
     h+='<table class=tbl><thead><tr><th>Mo</th><th>Person</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">Total</th></tr></thead><tbody>';
-    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+r.crew_name+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(r.total)+'</b></td></tr>';});
+    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(r.total)+'</b></td></tr>';});
     h+='</tbody></table>';
   }
   var q=(TF.q||'').toLowerCase();
@@ -5089,7 +5147,7 @@ function paintTravel(){
 function profileHTML(name){
   var rows=TRVALL.filter(function(r){return r.crew_name===name;});
   var ys=Array.from(new Set(rows.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
-  var h='<div class=zlabel>'+name+'</div>';
+  var h='<div class=zlabel>'+escHtml(name)+'</div>';
   h+='<div class=tiles style="grid-template-columns:repeat('+Math.min(ys.length+1,5)+',1fr);margin-bottom:6px">';
   ys.forEach(function(y){var t=rows.filter(function(r){return r.year===y;}).reduce(function(a,b){return a+b.total;},0);var c=rows.filter(function(r){return r.year===y;}).length;h+=tile(usd0(t),y+' · '+c+' trips');});
   h+=tile(usd0(rows.reduce(function(a,b){return a+b.total;},0)),'All-time');
@@ -5183,7 +5241,7 @@ async function loadBilling(){
   let h='<div class=zlabel>By vessel</div><table class=tbl><thead><tr><th>Vessel</th><th>Crew</th><th>Days</th><th>Basis</th></tr></thead><tbody>'
     +BILL.perVessel.map(function(v){return '<tr><td>'+v.ship+'</td><td>'+v.crew+'</td><td>'+v.days.toLocaleString()+'</td><td>'+bdg(v.basis)+'</td></tr>';}).join('')+'</tbody></table>';
   h+='<div class=zlabel style="margin-top:18px">By crew</div><table class=tbl><thead><tr><th>Crew</th><th>Days</th><th>Contracts</th><th>Basis</th></tr></thead><tbody>'
-    +BILL.perCrew.map(function(c){return '<tr><td>'+c.name+'</td><td>'+c.days.toLocaleString()+'</td><td>'+c.contracts+'</td><td>'+bdg(c.basis)+'</td></tr>';}).join('')+'</tbody></table>'
+    +BILL.perCrew.map(function(c){return '<tr><td>'+escHtml(c.name)+'</td><td>'+c.days.toLocaleString()+'</td><td>'+c.contracts+'</td><td>'+bdg(c.basis)+'</td></tr>';}).join('')+'</tbody></table>'
     +'<p class=muted style="text-align:left;padding:10px 2px">Basis: actual = real sign-off · projected = planned · mixed = both. Per-vessel reflects current vessel assignment.</p>';
   $('#billbody').innerHTML=h;
 }
@@ -5199,7 +5257,7 @@ function exportBilling(){
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='days-worked_'+$('#billfrom').value+'_'+$('#billto').value+'.csv';a.click();
 }
-let ROT_CHROME=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRANDS=[],ROT_SHIPS=[],ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
+let ROT_FRESH=1,ROT_CHROME=0,DRAGID=null,DRAGEL=null,ROT_F='',ROT_BRANDS=[],ROT_SHIPS=[],ROT_FIND='',ROT_CLOSED={},dragMoved=false,ROT_YEAR='',ROT_MONTHS=[];
 function dragStart(el,id){dragMoved=true;DRAGID=id;DRAGEL=el;setTimeout(function(){el.classList.add('dragging');},0);}
 function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('.shipdrop.dragover').forEach(function(z){z.classList.remove('dragover');});}
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
@@ -5245,7 +5303,7 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
 function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
   return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
 // Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
-function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+r.crew_name+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -5484,7 +5542,7 @@ function rotCard(x){
   // a ship CREATES a yellow projection there and stays where it is (a jumper: green here, yellow there).
   var dragAttrs=' draggable="true" ondragstart="rcDrag(event,this)" ondragend="dragEnd(this)"';
   return '<div class="'+cls+'"'+dragAttrs+' data-crew="'+x.agency_id+'" data-seq="'+(x.seq||1)+'"'+((plan&&!x.tdgEarmark)?(' data-plan="1" data-vk="'+(x.vessel_key||'')+'"'+(x.assignment_id?(' data-aid="'+x.assignment_id+'"'):'')):'')+' title="'+(confirmed?'Aboard per the TDG registry - click to edit, drag to another ship to move the earmark':x.tdgEarmark?'TDG earmarks them here - drag to plan the dates, Remove to reject':plan?'Your earmark - click to edit, drag to another ship, drop on the pool to remove':'TDG contract - click to edit, drag to another ship to earmark them there')+'" onmousedown="dragMoved=false" onclick="rcClickP(this)">'
-    +'<div class=rhead><div class=rhcol><div class=rnm>'+x.name+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+whereLine(x,plan,reg)+(dur?(' &middot; '+dur):'')+'</div>'+nextLine(x)+'</div>'+chip+'</div>'
+    +'<div class=rhead><div class=rhcol><div class=rnm>'+escHtml(x.name)+(x.rank?(' <span class=rrank>'+rankAbbr(x.rank)+'</span>'):'')+(lab?(' '+lab):'')+(x.hasNote?' <span class=notedot title="has comment"></span>':'')+'</div><div class=rleg><i style="background:'+dot(x.status)+'"></i>'+whereLine(x,plan,reg)+(dur?(' &middot; '+dur):'')+'</div>'+nextLine(x)+'</div>'+chip+'</div>'
     +(rows?'<div class=rrot>'+rows+'</div>':'')
     +gap
     +(tg?'<div class=rtags>'+tg+'</div>':'')
@@ -5634,8 +5692,8 @@ function histCard(h){
     h.offSource==='tdg'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' per the TDG file'):'sign-off per the TDG file')+'</div>'):
     h.offSource==='card'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' (your card)'):'relieved per your card')+'</div>'):
     h.offSource==='rita'?'<div class=hdur>sign-off recorded in the console</div>':'';
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+h.name+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
-  return '<div class="hcard former"><div class=hnm><span>'+h.name+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
+  return '<div class="hcard former"><div class=hnm><span>'+escHtml(h.name)+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
 function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
@@ -5695,13 +5753,13 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'#rotmodal .ecpill{display:inline-block;background:var(--bg);border-radius:999px;padding:2px 10px;font:600 11px "DM Sans";color:var(--mut);margin-left:7px;vertical-align:1px}'
    +'#rotmodal .zcount{letter-spacing:0;text-transform:none;font:600 11px "DM Sans";color:var(--mut)}'
    +'</style>'
-   +'<div class=modhd><div><div class=cname>Edit contract — '+e.name+'</div><div class=csub>'+id+'<span class=ecpill>contract #'+seq+'</span></div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
+   +'<div class=modhd><div><div class=cname>Edit contract — '+escHtml(e.name)+'</div><div class=csub>'+id+'<span class=ecpill>contract #'+seq+'</span></div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
    +fileLine+'<input type=hidden id=eKey value="'+escHtml(e.onKey||'')+'">'
    +'<div class=ecgrid>'
    +fld('Embark port · itinerary','<select id=eEmb onchange="pickPort(this)">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
    +fld('Disembark port · itinerary','<select id=eDis onchange="pickPort(this)">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
    +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'">')
-   +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'">')
+   +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'" data-init="'+(e.signOff||'')+'" data-proj="'+((fc&&fc.off_source==='projected')?'1':'')+'">')
    +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip>'+shipOpts+'</select>')+'</div>'
    +'</div>'
    +'<div class=zlabel>Confirmed <span class=zcount>shows as green tags on the card</span></div>'
@@ -5716,14 +5774,21 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
   window.rotEscHandler=function(ev){if(ev.key==='Escape')closeRotModal();};document.addEventListener('keydown',window.rotEscHandler);
   document.body.appendChild(w);
 }
+// A PROJECTED sign-off the modal only displayed is not Rita's date (8 Oct 2026): saving a tick or a comment used to post
+// it back as contract_edit.sign_off, so the card turned "Sign-off yours", stopped following the turnaround and ENDED the
+// contract when it passed instead of reading overdue (§10d). It is sent only when changed, or when it was already hers.
+function offToSave(el){if(!el)return null;var v=el.value||'';if(el.getAttribute('data-proj')==='1'&&v===(el.getAttribute('data-init')||''))return null;return v;}
 async function saveContract(id,seq){
   var g=function(x){return document.getElementById(x);};
   if(g('eOn').value&&g('eOff').value&&g('eOff').value<g('eOn').value){g('cmtmsg').textContent='Sign-off is before sign-on.';return;}
   g('cmtmsg').textContent='Saving…';
-  var body={sc:id,seq:seq,on_key:(g('eKey')&&g('eKey').value)||null,embark:g('eEmb').value,disembark:g('eDis').value,sign_on:g('eOn').value,sign_off:g('eOff').value,ship:g('eShip').value,eccr:g('cEccr').checked,air:g('cAir').checked,hotel:g('cHotel').checked,on_conf:g('cOn').checked,off_conf:g('cOff').checked};
+  var body={sc:id,seq:seq,on_key:(g('eKey')&&g('eKey').value)||null,embark:g('eEmb').value,disembark:g('eDis').value,sign_on:g('eOn').value,sign_off:offToSave(g('eOff')),ship:g('eShip').value,eccr:g('cEccr').checked,air:g('cAir').checked,hotel:g('cHotel').checked,on_conf:g('cOn').checked,off_conf:g('cOff').checked};
   try{
-    await fetch('/api/rotation/contract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:g('cmt').value})});
+    // A refused save says so and keeps the modal open (8 Oct 2026: a 400/500 closed it as if it had saved).
+    var r1=await fetch('/api/rotation/contract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});var j1=await r1.json().catch(function(){return {};});
+    if(!r1.ok||j1.error){g('cmtmsg').textContent='Not saved: '+(j1.error||('HTTP '+r1.status));return;}
+    var r2=await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:g('cmt').value})});var j2=await r2.json().catch(function(){return {};});
+    if(!r2.ok||j2.error){g('cmtmsg').textContent='Dates saved; the comment was not: '+(j2.error||('HTTP '+r2.status));return;}
     closeRotModal();renderRotation();
   }catch(e){g('cmtmsg').textContent='Failed to save.';}
 }
@@ -5756,7 +5821,7 @@ async function renderRotation(){
   try{ROT=await cachedJson('/api/rotation',renderRotation);}catch(e){_st=(e&&e.status)||0;ROT={error:(e&&e.message)||'network'};}
   // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
   // and nobody could tell the server from the page.
-  if(_st||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered HTTP '+_rr.status+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
+  if(_st||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered '+(_st?('HTTP '+_st):'with no board')+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
   window.RELIEF={};window.reliefKey=function(b,s){return (b==='Royal'?'Royal Caribbean':b)+'|'+s;};
   // TWO-PHASE (16 Sep 2026, Starlink). The ships draw as soon as the board data lands; the relief banners
   // and the Add-reliever slots paint when their own request answers. Awaiting both made every load — and
@@ -5769,7 +5834,9 @@ async function renderRotation(){
       if(document.getElementById('rotbody'))drawRotation();
     }catch(_){}
   });
-  ROT_F='';ROT_BRANDS=[];ROT_SHIPS=[];ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];
+  // The filters reset when the tab is OPENED, not on every redraw (8 Oct 2026): a save, a drag, a one-tap earmark or an
+  // Undo redraws the board, and used to drop Rita back to all 48 ships with her search gone (and the year kept).
+  if(ROT_FRESH){ROT_FRESH=0;ROT_F='';ROT_BRANDS=[];ROT_SHIPS=[];ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];ROT_YEAR='';}
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   $('#view').innerHTML='<style>'
     +'.rcard{transition:transform .16s ease,box-shadow .16s ease,opacity .18s ease}'
@@ -5788,7 +5855,7 @@ async function renderRotation(){
     +'<div class=bar style="margin-bottom:4px;justify-content:flex-end"><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
     +'<div class=crwrap id=rotwrap style="margin-top:12px">'
     +'<aside class=crrail id=rotrail>'
-    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" oninput="ROT_FIND=this.value;drawRotation()"></div>'
+    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;drawRotation()"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
     +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div></div>'
@@ -5975,7 +6042,7 @@ async function exportDaysExcel(){
     // so accounting can bill the customer. The server scopes to [1st-of-month -> today].
     var d=await (await fetch('/api/billing/month')).json();
     var T=d.totals||{};var from=d.from||'';var to=d.to||'';
-    var monthLabel=new Date((d.month||'')+'-01T00:00:00').toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'});
+    var monthLabel=new Date((d.month||'')+'-01T00:00:00Z').toLocaleDateString('en-US',{month:'long',year:'numeric',timeZone:'UTC'});
     var rows=[
       ['DAYS WORKED FOR BILLING — '+monthLabel],
       ['Period (month-to-date):',from+' to '+to],
@@ -6326,13 +6393,18 @@ function paintDashCost(){
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
 var CF={q:'',status:[],comp:'',client:[],ship:[],sort:'az',rank:[]};
-function ageOf(dob){if(!dob)return'';var d=new Date(dob);if(isNaN(d))return'';var t=new Date(),a=t.getFullYear()-d.getFullYear();if(t.getMonth()<d.getMonth()||(t.getMonth()===d.getMonth()&&t.getDate()<d.getDate()))a--;return a>0&&a<100?a:'';}
+// Calendar dates are read as calendar dates (8 Oct 2026): new Date('YYYY-MM-DD') is UTC midnight, and read with local
+// getters (or against the clock) it shifted a day in the Americas — a birthday a day early, a document "Expired" on its
+// last valid day (the server says expiring). dayNum / dUntil compare the dates only, against the viewer's own today.
+function dayNum(iso){var m=/^(\\d{4})-(\\d{2})-(\\d{2})/.exec(String(iso||''));return m?Date.UTC(+m[1],+m[2]-1,+m[3])/86400000:NaN;}
+function dUntil(iso){var t=new Date();return dayNum(iso)-Date.UTC(t.getFullYear(),t.getMonth(),t.getDate())/86400000;}
+function ageOf(dob){var m=/^(\\d{4})-(\\d{2})-(\\d{2})/.exec(String(dob||''));if(!m)return'';var t=new Date(),a=t.getFullYear()-(+m[1]);if(t.getMonth()+1<+m[2]||(t.getMonth()+1===+m[2]&&t.getDate()<+m[3]))a--;return a>0&&a<100?a:'';}
 function fmtPhone(p){if(!p)return{txt:'',bad:false};var raw=String(p).replace(/[^0-9+]/g,'');var ok=/^\\+?63\\d{10}$/.test(raw)||/^09\\d{9}$/.test(raw);return{txt:String(p).trim(),bad:!ok};}
 function rankShort(c){return (c!=null&&c>=1)?'PS':'Jr PS';}
 // Rank tag from the REGISTRY rank string (AdvancedQuery: 'Printer Specialist' / 'Junior Printer
 // Specialist'), falling back to count only if no registry rank. Fixes everyone showing 'Jr PS'.
 function rankTag(r,c){var s=String(r||'').toLowerCase();if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s===' ps'||s==='ps')return 'PS';return rankShort(c);}
-function docFlag(exp){if(!exp)return'missing';var days=(new Date(exp)-new Date())/86400000;if(days<0)return'expired';if(days<=90)return'90d';return'ok';}
+function docFlag(exp){if(!exp)return'missing';var days=dUntil(exp);if(isNaN(days))return'missing';if(days<0)return'expired';if(days<=90)return'90d';return'ok';}
 function crewMatchesComp(c){
   var f=CF.comp;
   // "All documents valid" is the green tag on the card: no problem on any document, whoever they are.
@@ -6423,9 +6495,9 @@ function docsModal(id){
   var map={expired:['Expired','red'],'90d':['Expiring','amber'],ok:['Valid','ok'],missing:['Missing','amber']};
   var body='<div class=hint style="margin-bottom:8px">'+c.agency_id+' · '+(c.vessel_observed||'—')+' · '+(c.status||'')+'</div>'
    +'<table class=tbl><thead><tr><th>Document</th><th>Expiry</th><th>Status</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'
-   +docs.map(function(d){var exp=c[d[1]];var g=docFlag(exp);var st=map[g]||map.missing;var days=exp?Math.round((new Date(exp)-new Date())/86400000):null;var dtxt=(days==null)?'—':(days<0?(Math.abs(days)+'d ago'):(days+'d left'));return '<tr><td>'+d[0]+'</td><td>'+(exp||'—')+'</td><td><span class="cchip '+st[1]+'">'+st[0]+'</span></td><td style="text-align:right">'+dtxt+'</td></tr>';}).join('')
+   +docs.map(function(d){var exp=c[d[1]];var g=docFlag(exp);var st=map[g]||map.missing;var days=exp?dUntil(exp):null;var dtxt=(days==null)?'—':(days<0?(Math.abs(days)+'d ago'):(days+'d left'));return '<tr><td>'+d[0]+'</td><td>'+(exp||'—')+'</td><td><span class="cchip '+st[1]+'">'+st[0]+'</span></td><td style="text-align:right">'+dtxt+'</td></tr>';}).join('')
    +'</tbody></table><div class=hint style="margin-top:8px">Fleet-wide list &amp; export: Crew tab → Docs CSV, or click the Docs tiles to filter.</div>';
-  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Document compliance — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
+  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Document compliance — '+escHtml(name)+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
 }
 async function exportDocsCSV(){
   var d=await (await fetch('/api/compliance?days=90')).json();
@@ -6542,6 +6614,7 @@ function paintCrew(){
 async function loadCrew(){return renderCrew();}
 function filterCrew(){paintCrew();}
 async function openCrew(id){
+  VIEW_GEN++;
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   var dq=fetch('/api/crew/get?id='+encodeURIComponent(id)).then(function(r){return r.json();});
@@ -6581,7 +6654,7 @@ async function openCrew(id){
       +'<div class=pfnote>Rank <b>'+escHtml(bz.rank||'—')+'</b> · '+(bz.contracts!=null?bz.contracts:0)+' completed contract(s) '+ctSrc(bz)+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
   }
   var docT=function(label,dt,optional){
-    var f=docFlag(dt),days=dt?Math.round((new Date(dt+'T00:00:00Z').getTime()-Date.now())/86400000):null,st;
+    var f=docFlag(dt),days=dt?dUntil(dt):null,st;
     if(!dt)st=optional?['Not held','na']:['Missing','red'];
     else if(f==='expired')st=['Expired '+(-days)+' d ago','red'];
     else if(f==='90d')st=[days+' days left','amber'];
@@ -6815,14 +6888,22 @@ async function editCrewModal(id){
    +'<span class=ck style="margin-top:8px;font-weight:600;cursor:pointer;display:flex" onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"> Inactive (manual — out of the rotation until you clear it)</span>'
    +'<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><button class="btn ghost" style="color:var(--red)" onclick="hideCrew(\\''+id+'\\')" title="Remove this card from all rosters (reversible)">Hide card</button><span><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></span></div></div>';
   var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
+  CREW_EDIT_INIT=crewEditBody(id); // what the modal showed: only what Rita changes is saved (8 Oct 2026)
 }
+// ONLY WHAT CHANGED BECOMES A MANUAL ENTRY (8 Oct 2026). The save used to post every field, so fixing a phone number
+// wrote the displayed (derived) status, the ship and every document date into crew_override: a manual pin that
+// outranks TDG's word (§11) and raised "your manual entry" conflicts at every upload that Rita never made.
+var CREW_EDIT_INIT=null;
+function crewEditBody(id){var v=function(x){var e=document.getElementById(x);return e?e.value:undefined;};var cnt=v('eCount');var er=document.getElementById('eRetired');var sh=document.getElementById('eShip');
+  return {agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:sh?sh.value:undefined,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===undefined?undefined:(cnt===''?null:Number(cnt)),retired:er?(er.checked?1:0):undefined};}
 async function saveEditCrew(id){
-  var v=function(x){var e=document.getElementById(x);return e?e.value:undefined;};
   document.getElementById('eMsg').textContent='Saving…';
-  var cnt=v('eCount');
-  var er=document.getElementById('eRetired');
-  var body={agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:document.getElementById('eShip').value,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===''?null:Number(cnt),retired:er&&er.checked?1:0};
-  try{await fetch('/api/crew/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});closeCrewModal();renderCrew();}
+  var all=crewEditBody(id),init=CREW_EDIT_INIT||{},body={agency_id:id},n=0;
+  Object.keys(all).forEach(function(k){if(k==='agency_id'||all[k]===undefined)return;if(String(all[k])!==String(init[k]))(body[k]=all[k],n++);});
+  if(!n){closeCrewModal();return;}
+  try{var r=await fetch('/api/crew/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});var j=await r.json().catch(function(){return {};});
+    if(!r.ok||j.error){document.getElementById('eMsg').textContent='Not saved: '+(j.error||('HTTP '+r.status));return;}
+    closeCrewModal();renderCrew();}
   catch(e){document.getElementById('eMsg').textContent='Could not save.';}
 }
 // Hide (void) a crew card — reversible. Removes it from every roster via the server's redacted flag.
@@ -6852,7 +6933,7 @@ async function restoreCrew(id){
 }
 async function notesModal(id){
   var c=crewById(id);var name=c?[c.first_name,c.last_name].filter(Boolean).join(' '):id;
-  var h='<div class=modcard><div class=modhd><div><div class=cname>Notes & field intel — '+name+'</div><div class=csub>The crew\\'s story over time — newest first.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
+  var h='<div class=modcard><div class=modhd><div><div class=cname>Notes & field intel — '+escHtml(name)+'</div><div class=csub>The crew\\'s story over time — newest first.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
    +'<div class=sec style="margin-top:12px">Field intel<span id=intelcount class=intcount></span> — from contributor emails</div>'
    +'<div id=intellog class=notelog><div class=muted style="padding:14px">Loading…</div></div>'
    +'<div class=sec style="margin-top:16px">Manual notes</div>'
@@ -7079,7 +7160,7 @@ async function renderFeedback(){
   function dlabel(n){return n<0?(Math.abs(n)+'d ago'):(n===0?'today':('in '+n+'d'));}
   function pill(id,r){var cls=r.answered?'on':(r.status==='pending'?'pend':'');var mark=r.answered?'✓':(r.status==='pending'?'…':'+');var tt=r.answered?'response in':(r.status==='pending'?'requested — awaiting':'click to request a window');return '<span class="fbp '+cls+'" title="'+tt+'" onclick="fbRequest(\\''+id+'\\',\\''+r.role+'\\')">'+pn[r.role]+' '+mark+'</span>';}
   var body=rows.map(function(x){var due=x.days<=7?'red':(x.days<=21?'amber':'ok');
-    return '<tr><td><b>'+x.name+'</b><div class=csub>'+x.agency_id+'</div></td><td>'+(x.vessel||'—')+'</td><td><span class="cchip '+due+'">'+x.signOff+' · '+dlabel(x.days)+'</span></td><td>'+x.roles.map(function(r){return pill(x.agency_id,r);}).join(' ')+'</td><td style="text-align:center">'+x.answeredCount+'/3</td><td><button class="btn green" onclick="ledgerScore(\\''+x.agency_id+'\\')">Score</button></td></tr>';
+    return '<tr><td><b>'+escHtml(x.name)+'</b><div class=csub>'+x.agency_id+'</div></td><td>'+(x.vessel||'—')+'</td><td><span class="cchip '+due+'">'+x.signOff+' · '+dlabel(x.days)+'</span></td><td>'+x.roles.map(function(r){return pill(x.agency_id,r);}).join(' ')+'</td><td style="text-align:center">'+x.answeredCount+'/3</td><td><button class="btn green" onclick="ledgerScore(\\''+x.agency_id+'\\')">Score</button></td></tr>';
   }).join('')||'<tr><td colspan=6 class=muted>No crew in the feedback window right now.</td></tr>';
   $('#view').innerHTML='<div class=bar><h2>Feedback windows</h2><span class=csub style="margin-left:auto">'+rows.length+' crew · ending ≤45d or ended ≤30d</span></div>'
    +'<div class=hint style="margin:-4px 0 12px">Collect contributor feedback before a contract is scored. Click a role pill to generate a single-use window link — green = response in, amber = requested, grey = not yet. Score pulls the evidence into the Score Card.</div>'
@@ -7100,7 +7181,7 @@ var _SW={};
 var FBLABEL={ray:'Ray — Inventory & Orders',rolando:'Rolando — Technical',dexter:'Dexter — Field review'};
 function swRender(title,inner){$('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>'+title+'<button onclick="mClose()">×</button></div><div class=mb id=swBody>'+inner+'</div></div></div>';MODAL_T=Date.now();}
 function swSel(id,opts,val){return '<select id='+id+'>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+o+'</option>';}).join('')+'</select>';}
-function swTa(id,val){return '<textarea id='+id+' rows=2>'+(val||'')+'</textarea>';}
+function swTa(id,val){return '<textarea id='+id+' rows=2>'+escHtml(val||'')+'</textarea>';} // answers come from the public /fb link: never raw HTML (8 Oct 2026)
 function sv(id){var e=$('#'+id);return e?e.value:undefined;}
 function swIndex(arr){(arr||[]).forEach(function(c){_SW.byId[c.agency_id]=c;});}
 async function openScoreWindow(){
@@ -7170,7 +7251,7 @@ function swQuestions(){
   if(role==='ray'){
     f='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+swSel('order',['No','Yes'],a.order)+'</div>'
      +'<div class=fg><label>If yes — cause</label>'+swSel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause)+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
-     +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
+     +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+escHtml(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
      +'<div class=fg><label>Orders placed on time (par respected)?</label>'+swSel('ontime',['Always','Mostly','Often late'],a.ontime)+'</div>'
      +'<div class=fg><label>Order accuracy</label>'+swSel('acc',['Accurate','Minor errors','Frequent errors'],a.acc)+'</div>'
      +'<div class=fg><label>Par maintained at handover</label>'+swSel('par',['Maintained','Some gaps','Not maintained'],a.par)+'</div>'
@@ -7183,7 +7264,7 @@ function swQuestions(){
      +'<div class=fg><label>Note / evidence (optional)</label>'+swTa('note',a.note)+'</div>';
   } else {
     f='<div class=fg><label>Did you assess this crew this contract?</label>'+swSel('assessed',['No (N/A)','Yes'],a.assessed)+'</div>'
-     +'<div class=fg><label>Mono click % this contract (&lt;20% target)</label><input id=mono type=number min=0 max=100 step=0.1 value="'+(a.mono||'')+'" placeholder="e.g. 14"><div class=hint>Feeds the Mono discipline sub-score.</div></div>'
+     +'<div class=fg><label>Mono click % this contract (&lt;20% target)</label><input id=mono type=number min=0 max=100 step=0.1 value="'+escHtml(a.mono||'')+'" placeholder="e.g. 14"><div class=hint>Feeds the Mono discipline sub-score.</div></div>'
      +'<div class=fg><label>Inventory observations</label>'+swTa('inv',a.inv)+'</div>'
      +'<div class=fg><label>Technical observations</label>'+swTa('tech',a.tech)+'</div>'
      +'<div class=fg><label>Overall impression</label>'+swTa('overall',a.overall)+'</div>';
@@ -7256,7 +7337,7 @@ async function openScore(id){
    +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore();sevalDirty()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div id=sevalBadge class=hint style="margin-top:5px"></div><div id=sevalReview></div><div class=fg id=sevalReasonWrap style="display:none;margin-top:6px"><label class=req>Reason for overriding the review (10+ chars)</label><textarea id=sevalReason rows=2 placeholder="e.g. guest complaint substantiated on final cruise"></textarea></div><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
    +'</div>'
    +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()"'+(_blockCommit?' disabled title="Baseline pending — reconcile the starting count first"':'')+'>Commit</button></div></div>';
-  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class="modal '+scCls+'"><div class=mh>Score Card — '+name+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
+  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class="modal '+scCls+'"><div class=mh>Score Card — '+escHtml(name)+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
   if(d.lastLeg){if(d.lastLeg.on)$('#spanStart').value=d.lastLeg.on;if(d.lastLeg.off)$('#spanEnd').value=d.lastLeg.off;}
   recalcScore();
   applyFeedback(cr.agency_id);
@@ -7268,7 +7349,7 @@ async function applyFeedback(id){
   var byRole={};(d.requests||[]).forEach(function(r){byRole[r.role]=r.status;});
   var roles=[['ray','Ray'],['rolando','Rolando'],['dexter','Dexter']];
   var btns=roles.map(function(x){var st=byRole[x[0]]||'none';var lbl=st==='answered'?'✓ '+x[1]:st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
-  var ev=(d.prefill&&d.prefill.evidence&&d.prefill.evidence.length)?('<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Evidence from windows</b><br>'+d.prefill.evidence.join('<br>')+'</div>'):'';
+  var ev=(d.prefill&&d.prefill.evidence&&d.prefill.evidence.length)?('<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Evidence from windows</b><br>'+d.prefill.evidence.map(escHtml).join('<br>')+'</div>'):'';
   document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'</div><div id=fbLink></div>'+ev+'</div>';
   var pf=d.prefill||{};
   if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}

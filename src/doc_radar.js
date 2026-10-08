@@ -84,6 +84,7 @@ function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','
 export function docStatus(exp, todayStr) {
   if (!isoOk(exp)) return 'missing';
   const d = daysUntil(exp, todayStr);
+  if (Number.isNaN(d)) return 'suspect'; // an impossible date (2027-13-01) read as VALID until 8 Oct 2026
   if (d < -365 * SUSPECT_PAST_YEARS || d > 365 * SUSPECT_FUTURE_YEARS) return 'suspect';
   if (d < 0) return 'expired';
   if (d <= WINDOW_DAYS) return 'expiring';

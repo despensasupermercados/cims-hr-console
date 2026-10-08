@@ -69,7 +69,9 @@ export function installAutoSend(deps) {
   async function dueWithin(env, today, upper) {
     var legs = BOARD_LEGS ? await BOARD_LEGS(env) : [];
     var em = {}, red = {};
-    for (var r of (await env.DB.prepare("SELECT agency_id, email, redacted FROM crew").all()).results || []) { em[r.agency_id] = r.email || null; red[r.agency_id] = !!r.redacted; }
+    // Rita's manual email first (crew_override), as every sender reads it (8 Oct 2026): a crew whose only address was
+    // hers never got T-14 / T-7 and sat in the digest as "NO EMAIL" every day.
+    for (var r of (await env.DB.prepare("SELECT c.agency_id, COALESCE(NULLIF(o.email,''), c.email) AS email, c.redacted FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id").all()).results || []) { em[r.agency_id] = r.email || null; red[r.agency_id] = !!r.redacted; }
     var out = [];
     for (var l of legs) {
       if (!l.off || l.off < today || l.off > upper || red[l.sc]) continue;

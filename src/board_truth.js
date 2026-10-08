@@ -42,7 +42,7 @@ export function fileWordBySc(registry, { shipOf, keyOf, valid } = {}) {
       status: r.status || null,
       raw, ship: ship || null, key,
       known: !!(key && (!valid || valid.has(key))),     // a hull the console knows
-      at: day(r.run_at) || null, vesselAt: day(r.vessel_at) || null,
+      at: day(r.run_at) || null, runAt: r.run_at || null, vesselAt: day(r.vessel_at) || null,
       hullUnknown: !!r.vessel_unknown,                  // bootstrap: older than an in-force card elsewhere
       source: r.source || null,
       name: r.name || null, rawStatus: r.raw_status || null, // the file's own words (kept copy only)

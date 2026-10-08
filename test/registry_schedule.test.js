@@ -234,7 +234,7 @@ test("rotationSections dates a seat from the file's leg (regEnr) before the Coun
   assert.match(b, /offConfirmed: !h\.heldByFile && \(h\.offSource === "tdg" \|\| !!h\.offConfirmed\), heldByFile: !!h\.heldByFile,/);
   assert.match(WORKER, /if\(x\.heldByFile\)return true; \/\/ TDG's file still has them On board/, "cardOverdue: held is red before any recorded-sign-off check");
   assert.match(WORKER, /TDG still has them On board<\/b>, past the sign-off/);
-  assert.match(WORKER, /for \(const h of HIST \|\| \[\]\) if \(h && h\.ours && h\.sc === sc && h\.source === "registry" && h\.is_current && h\.on\) return \{ sign_on: h\.on, proj_off: h\.off \|\| null, act_off: null, source: "registry" \};/, "the Crew tab's active span is the file's leg first");
+  assert.match(WORKER, /for \(const h of HIST \|\| \[\]\) if \(h && h\.ours && h\.sc === sc && h\.source === "registry" && h\.is_current && h\.on\) return \{ active_on: h\.on, active_off: h\.off \|\| null \};/, "the Crew tab's active span is the file's leg first — in the shape the callers read (active_on / active_off): the 7 Oct shape left every file-dated crew 'No active contract on file'");
   assert.match(WORKER, /boardLegs\(env\), \/\/ the ONE schedule: the file's current leg for this crew/, "the Edit modal API reads the same schedule");
   assert.match(WORKER, /function fileDatesNote\(x\)\{/);
   assert.match(WORKER, /ABOARD &middot; AWAITING TDG FILE/);

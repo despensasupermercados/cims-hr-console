@@ -63,7 +63,11 @@ export function composeStatement(data) {
   if (bonus && !bonus.error) {
     pdf.text("Bonus standing", { size: 11, bold: true, color: NAVY });
     pdf.gap(2);
-    pdf.text("Rank: " + (bonus.rank || "-") + "      Completed contracts: " + (bonus.count != null ? bonus.count : 0) +
+    // Two counts, never confused (CLAUDE.md §10c): the grade reads the CUMULATIVE completed contracts; the ladder reads
+    // the CONSECUTIVE bonus count, which a gate resets. Until 8 Oct 2026 the statement printed the consecutive count as
+    // "Completed contracts" — a Senior PS on 8 contracts whose count a gate reset read "Completed contracts: 0".
+    pdf.text("Rank: " + (bonus.rank || "-") + "      Completed contracts: " + (bonus.contracts != null ? bonus.contracts : "-"), { size: 9.5 });
+    pdf.text("Consecutive bonus count: " + (bonus.count != null ? bonus.count : 0) +
       (bonus.baseline_set ? "" : "   (baseline not yet set)"), { size: 9.5 });
     pdf.text("Next rung if clean: " + (bonus.nextRungIfClean != null ? money(bonus.nextRungIfClean) : "-"),
       { size: 9.5, bold: true, color: GREEN });

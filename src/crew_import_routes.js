@@ -11,7 +11,7 @@
 //     (plan.shipTakes, an explicit per-row "Take TDG", 2026-09-15) has its own fixed statement below.
 //   - idempotent by import_run.file_hash (re-dropping the same file is a no-op).
 
-import { mapRows, diffCrew } from "./crewimport.js";
+import { mapRows, diffCrew, storableStatus } from "./crewimport.js";
 import { buildReview, OVR_COL, unretireItems } from "./crew_review.js";
 import { buildApplyPlan } from "./crew_apply.js";
 import { CREW_IMPORT_HTML } from "./crew_import_ui.js";
@@ -266,8 +266,11 @@ export async function apiCrewImportApply(request, env, deps) {
 
   for (const u of plan.crewUpdates) {
     if (!CREW_WRITABLE.has(u.field)) continue; // hard whitelist — no vessel_observed, no injection
+    // crew.status takes only its four column words (storableStatus): a Reserved / Not for Rehire row failed the whole batch.
+    const v = u.field === "status" ? storableStatus(u.value) : u.value;
+    if (u.field === "status" && !v) continue;
     stmts.push(env.DB.prepare(`UPDATE crew SET ${u.field}=?, updated_at=? WHERE agency_id=?`)
-      .bind(u.value ?? null, run_at, u.agency_id));
+      .bind(v ?? null, run_at, u.agency_id));
   }
   // D3 accepted: the manual value is superseded by the ratified TDG value. Clear ONLY that field
   // (the rest of the override row — retired flag, notes, other fields — stays), else the override
@@ -301,6 +304,7 @@ export async function apiCrewImportApply(request, env, deps) {
     const vals = INSERT_COLS.map(c =>
       c === "id" ? crypto.randomUUID()
         : c === "created_at" || c === "updated_at" ? run_at
+          : c === "status" ? (storableStatus(n.status) || "On Vacation")
           : (n[c] ?? null));
     stmts.push(env.DB.prepare(
       `INSERT INTO crew (${INSERT_COLS.join(",")}) VALUES (${INSERT_COLS.map(() => "?").join(",")})`).bind(...vals));
