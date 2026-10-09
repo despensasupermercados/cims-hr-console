@@ -2887,10 +2887,16 @@ async function sha256hex(s) {
 // Memoized once per isolate (§12) — was 2 DDL round trips on each of 7 feedback routes per request.
 const ensureFb = memoEnsure(ensureFbImpl);
 async function ensureFbImpl(env) {
-  await env.DB.batch([ // one round trip per isolate
+  await Promise.all([env.DB.batch([ // one round trip per isolate
     env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_request2 (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, role TEXT NOT NULL, token_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', due_date TEXT, requested_by TEXT, requested_at TEXT NOT NULL, UNIQUE (crew_id, role))"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL)"),
-  ]);
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL, superseded_at TEXT)"),
+  ]),
+  // the existing table gains the column; on a fresh database the CREATE above already has it (this one fails, caught)
+  env.DB.prepare("ALTER TABLE feedback_response2 ADD COLUMN superseded_at TEXT").run().catch(() => null)]);
+  // PAST ANSWERS ARE KEPT, NOT CARRIED (Miguel, 9 Oct 2026: "I like your idea but we need to keep stored somewhere the
+  // previous feedback"). A response is superseded — never deleted — when a new window is fired for that crew + role, or
+  // the in-app form is answered again. Only rows with superseded_at NULL feed the Score Card: a Rush ticked for
+  // contract 1 no longer comes pre-ticked on contract 2.
 }
 // Rita fires a scoped request for a crew+role -> returns a single-use signed link.
 async function apiFeedbackRequest(request, env, session, url) {
@@ -2904,7 +2910,9 @@ async function apiFeedbackRequest(request, env, session, url) {
   const th = await sha256hex(token);
   const rid = "fr_" + crypto.randomUUID();
   const now = new Date().toISOString();
-  // one open request per crew+role: replace any existing
+  // one open request per crew+role: replace any existing — and the answers to the old one are kept as history, out of
+  // the Score Card (superseded_at), never carried onto the new contract.
+  await env.DB.prepare("UPDATE feedback_response2 SET superseded_at=? WHERE crew_id=? AND role=? AND superseded_at IS NULL").bind(now, cr.id, role).run();
   await env.DB.prepare("DELETE FROM feedback_request2 WHERE crew_id=? AND role=?").bind(cr.id, role).run();
   await env.DB.prepare("INSERT INTO feedback_request2 (id,crew_id,role,token_hash,status,due_date,requested_by,requested_at) VALUES (?,?,?,?,?,?,?,?)")
     .bind(rid, cr.id, role, th, "pending", b.due_date || null, (session && session.email) || null, now).run();
@@ -2939,7 +2947,7 @@ async function apiFeedbackSubmit(request, env) {
   if (!feedbackSubmittable(req.status)) return json({ ok: false, already: true, error: "already_submitted" }, 409);
   const now = new Date().toISOString();
   const naDexter = req.role === "dexter" && (b.answers && b.answers.assessed === "No (N/A)") && !(b.answers && b.answers.mono);
-  await env.DB.prepare("DELETE FROM feedback_response2 WHERE request_id=?").bind(req.id).run();
+  await env.DB.prepare("UPDATE feedback_response2 SET superseded_at=? WHERE request_id=? AND superseded_at IS NULL").bind(now, req.id).run();
   await env.DB.prepare("INSERT INTO feedback_response2 (id,request_id,crew_id,role,answers_json,submitted_at) VALUES (?,?,?,?,?,?)")
     .bind("fp_" + crypto.randomUUID(), req.id, req.crew_id, req.role, JSON.stringify(b.answers || {}), now).run();
   await env.DB.prepare("UPDATE feedback_request2 SET status=? WHERE id=?").bind(naDexter ? "na" : "answered", req.id).run();
@@ -2954,9 +2962,13 @@ async function apiFeedbackCrew(env, url) {
   const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(url.searchParams.get("id")).first();
   if (!cr) return json({ error: "not_found" }, 404);
   const reqs = await env.DB.prepare("SELECT role, status, requested_at FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all();
-  const resp = await env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=?").bind(cr.id).all();
+  const [resp, prev] = await Promise.all([
+    env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NULL").bind(cr.id).all(),
+    env.DB.prepare("SELECT role, answers_json, submitted_at, superseded_at FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NOT NULL ORDER BY submitted_at DESC LIMIT 30").bind(cr.id).all(),
+  ]);
   const answers = {}; for (const r of resp.results) answers[r.role] = JSON.parse(r.answers_json);
-  return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers) });
+  const previous = (prev.results || []).map((r) => ({ role: r.role, submitted_at: r.submitted_at, superseded_at: r.superseded_at, answers: JSON.parse(r.answers_json || "{}") }));
+  return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers), previous });
 }
 // In-app contributor scoring (authenticated, NO token). Ray/Rolando/Dexter pick a crew + their
 // name in the Scoring window and submit; this writes the same feedback_response2 the token form
@@ -2978,14 +2990,14 @@ async function apiFeedbackScore(request, env, session) {
       .bind(rid, cr.id, role, "inapp", "pending", null, (session && session.email) || null, now).run();
   }
   const naDexter = role === "dexter" && b.answers && b.answers.assessed === "No (N/A)" && !(b.answers && b.answers.mono);
-  await env.DB.prepare("DELETE FROM feedback_response2 WHERE request_id=?").bind(rid).run();
+  await env.DB.prepare("UPDATE feedback_response2 SET superseded_at=? WHERE request_id=? AND superseded_at IS NULL").bind(now, rid).run(); // the earlier answer is kept
   await env.DB.prepare("INSERT INTO feedback_response2 (id,request_id,crew_id,role,answers_json,submitted_at) VALUES (?,?,?,?,?,?)")
     .bind("fp_" + crypto.randomUUID(), rid, cr.id, role, JSON.stringify(b.answers || {}), now).run();
   await env.DB.prepare("UPDATE feedback_request2 SET status=? WHERE id=?").bind(naDexter ? "na" : "answered", rid).run();
   await logActivity(env, session && session.email, "feedback_score", cr.agency_id + " " + role);
   // The writes above must stay in order; the two read-backs below are independent -> one wave.
   const [respRes, reqsRes] = await Promise.all([
-    env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=?").bind(cr.id).all(),
+    env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NULL").bind(cr.id).all(),
     env.DB.prepare("SELECT role, status FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all(),
   ]);
   const resp = respRes.results;
@@ -3007,7 +3019,7 @@ async function loadFeedbackState(env) {
     env.DB.prepare("SELECT id, agency_id, first_name, last_name, vessel_observed, status, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, status, retired FROM crew_override").all(),
     env.DB.prepare("SELECT crew_id, role, status FROM feedback_request2").all(),
-    env.DB.prepare("SELECT crew_id, role FROM feedback_response2").all(),
+    env.DB.prepare("SELECT crew_id, role FROM feedback_response2 WHERE superseded_at IS NULL").all(),
     boardLegs(env), // the LIVE board schedule, in the same wave (§12)
   ]);
   const crewRows = crewRes.results;
@@ -7350,6 +7362,8 @@ async function applyFeedback(id){
   var roles=[['ray','Ray'],['rolando','Rolando'],['dexter','Dexter']];
   var btns=roles.map(function(x){var st=byRole[x[0]]||'none';var lbl=st==='answered'?'✓ '+x[1]:st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
   var ev=(d.prefill&&d.prefill.evidence&&d.prefill.evidence.length)?('<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Evidence from windows</b><br>'+d.prefill.evidence.map(escHtml).join('<br>')+'</div>'):'';
+  // Earlier windows are kept, not used (9 Oct 2026): listed so Rita can see them, never pre-filled into this contract.
+  var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10)));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
   document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'</div><div id=fbLink></div>'+ev+'</div>';
   var pf=d.prefill||{};
   if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}
