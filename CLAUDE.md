@@ -311,7 +311,13 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   axis (`fleetGantt`, `ganttRows`, read off the board the page holds — no request): the header line's segments and colours,
   Inactive seats out, a future gap between contracts red, TODAY, a dashed stub for an undated TDG earmark; sorted least
   covered first, the right column "covered to <date>" red under 60 days, amber under 120, "Nobody" for an empty hull. A row
-  closes the view and opens that ship on the board. Pinned by `test/fleet_gantt.test.js`.
+  closes the view and opens that ship on the board. **Second cut, the same day** ("more colorful .. colors are too similar ..
+  only 1 month before and 6 months after .. the entire width .. keep the headers on top"): the view is the whole window
+  (`#ganttwrap` fixed, no card), the title, legend and month axis stay sticky while the rows scroll, Esc closes; the horizon
+  is FIXED — the 1st of last month to the end of the month six months out — and a bar running past the right edge is clipped
+  with a chevron (`.gs.over`); five states, five hues (aboard green `#2E9E5B`, awaiting the file teal `#1E9CB2`, earmark amber
+  `#F2B01E`, TDG earmark orange `#E8702A`, uncovered red `#E5484D`), a projected sign-off FADES at its end instead of striping;
+  the rows are split by tier (Nobody / under 2 months / under 4 months / 4+) with a count. Pinned by `test/fleet_gantt.test.js`.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
