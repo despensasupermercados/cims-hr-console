@@ -628,7 +628,8 @@ test("a card the file confirms renders once, green, with Remove; the ship lists 
 test("the Keyman tab uses the whole window (Miguel, 9 Oct 2026: 'utilize a bit more of the screen .. more space to the cards'); the other wide tabs keep their cap", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   assert.match(W, /\.wrap\.full\{max-width:none;padding:22px 28px\}/);
-  assert.match(W, /async function renderRotation\(\)\{[\s\S]{0,1200}_vw\.classList\.add\('wide','full'\);/);
+  const rr = W.slice(W.indexOf("async function renderRotation(){"), W.indexOf("\n}", W.indexOf("async function renderRotation(){")));
+  assert.match(rr, /_vw\.classList\.add\('wide','full'\);/);
   assert.match(W, /_vw\.classList\.remove\('wide','full'\);/, "show() drops both before any other tab renders");
   assert.equal((W.match(/classList\.add\('wide','full'\)/g) || []).length, 1, "only the Keyman tab is full-width");
 });
