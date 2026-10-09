@@ -3665,6 +3665,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crbell{position:relative;width:38px;height:38px;border-radius:10px;border:1px solid var(--line-2);background:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;flex:0 0 auto}
 .crbell:hover{background:#F3F6FA}
 .wrap.wide{max-width:1500px}
+.wrap.full{max-width:none;padding:22px 28px}
+@media(min-width:1700px){.wrap.full{padding:22px 36px}}
 .rmgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:0 4px}.rmgrid .chip{margin:0;text-align:center;justify-content:center;padding:5px 0}
 .rauto{display:flex;flex-direction:column;gap:12px;padding:0 8px}.rauto>span{display:flex!important;justify-content:space-between;align-items:center;width:100%;margin-left:0!important;font-size:13.5px!important}
 .cract{flex:0 0 172px;position:sticky;top:78px;display:flex;flex-direction:column;gap:10px}
@@ -4273,7 +4275,7 @@ var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','bil
 function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
   VIEW_GEN++;
-  var _vw=document.getElementById('view');if(_vw)_vw.classList.remove('wide');
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.remove('wide','full');
   try{if(TABS.indexOf(tab)>=0&&location.hash!=='#'+tab)history.replaceState(null,'','#'+tab);}catch(_){}
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   var _nv=document.querySelector('header nav');if(_nv)_nv.classList.remove('open');
@@ -5933,7 +5935,7 @@ async function renderRotation(){
   // The filters reset when the tab is OPENED, not on every redraw (8 Oct 2026): a save, a drag, a one-tap earmark or an
   // Undo redraws the board, and used to drop Rita back to all 48 ships with her search gone (and the year kept).
   if(ROT_FRESH){ROT_FRESH=0;ROT_F='';ROT_BRANDS=[];ROT_SHIPS=[];ROT_FIND='';ROT_CLOSED={__POOL__:true};ROT_MONTHS=[];ROT_YEAR='';}
-  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide','full');
   $('#view').innerHTML='<style>'
     +'.rcard{transition:transform .16s ease,box-shadow .16s ease,opacity .18s ease}'
     +'.rcard:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(20,45,72,.12)}'
