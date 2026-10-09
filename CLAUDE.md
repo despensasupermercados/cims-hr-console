@@ -68,7 +68,8 @@ the fix was never live; found and corrected in Session 4.)
 - 7 full users (Miguel, Rita + 5 contributors, added 2026-06-12 by Miguel's explicit decision).
   **Money actions (bonus commit, baseline) are restricted to Miguel + Rita** (`MONEY_USERS` in
   `policy.js`). Do NOT widen `@dg3.com` into role 'full'. Crew never log in.
-- Auth: magic-link (stateless HMAC token) + bootstrap dev-login; 12h signed-cookie session.
+- Auth: magic-link (stateless HMAC token) + bootstrap dev-login; 30-day signed-cookie session (Miguel, 9 Oct 2026:
+  "30 days" — it read 12h here while the code said 30 days); the allowlist is re-checked on every request (§11c).
 - DB: Cloudflare D1 `cims-hr-console` (id f0ac8b6a-deac-4214-8f42-e22b202d7d7d).
 - Bonus count is event-sourced from `bonus_outcome` (append-only); never overwrite history.
 
@@ -612,8 +613,8 @@ Pinned by `test/bughunt_1008.test.js`.
 - **`activeSpanOf` returns `{ active_on, active_off }`** in every branch (the 7 Oct registry branch returned another shape:
   every file-dated crew read "No active contract on file" on the Crew tab and the ledger — 50 aboard on 8 Oct).
 - **`boardSource` returns null on a failed read and `boardLegs` throws** — never the frozen SHIP_HISTORY for a live board.
-- **A session is re-checked against the allowlist** (`stillAllowed`, cached 5 min per isolate). SESSION_TTL is 30 days in
-  code (12 h in "Project facts" above): Miguel's call, open.
+- **A session is re-checked against the allowlist** (`stillAllowed`, cached 5 min per isolate). SESSION_TTL is 30 days
+  (Miguel, 9 Oct 2026).
 - **Only what Rita changes is written.** Edit crew posts changed fields only (`crewEditBody` vs `CREW_EDIT_INIT`); the
   contract modal sends a PROJECTED sign-off only when changed (`offToSave`) — an untouched projection posted back became
   "Rita's" date. Saves report a refused response and keep the modal open.
@@ -625,9 +626,15 @@ Pinned by `test/bughunt_1008.test.js`.
   (`already_acknowledged` unless `force`). Telling Joy (`markDeployed`) leaves `assignment.updated_at` alone.
 - **Earmarks:** one TDG earmark answers only the hull's EARLIEST future card (`firstFuture`); "signed off" needs an ashore
   word (On Vacation / Reserved), never an unreadable hull. Dismissals compare full timestamps.
-- **Reported, not changed (owner's call):** feedback answers carry across contracts (bonus input, §1); `contract_group_id`
-  counts relief shells (§1); the magic link is not single-use (mail scanners would burn it); a name-ladder match whose
-  cruise-line id differs is kept (the count file uses PCN ids — Domingo — so a different id is not proof).
+- **Feedback answers are kept, not carried** (Miguel, 9 Oct 2026: "I like your idea but we need to keep stored somewhere
+  the previous feedback"): a new window for a crew + role, or a second in-app answer, marks the old response
+  `superseded_at` (never deleted); only `superseded_at IS NULL` feeds the Score Card prefill, the feedback board and the
+  scoring queue; `/api/feedback/crew` returns `previous` and the Score Card lists them ("Earlier feedback kept · not used
+  for this contract"). A money-adjacent change (bonus input): merged by Miguel, §1.
+- **Decided, left as is (Miguel, 9 Oct 2026):** `contract_group_id` counting relief shells ("is ok"); any user may email a
+  statement to any address ("is ok for now .. will change next year or so"); SESSION_TTL 30 days. Still open by design:
+  the magic link is not single-use (mail scanners would burn it); a name-ladder match whose cruise-line id differs is
+  kept (the count file uses PCN ids — Domingo — so a different id is not proof).
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by

@@ -63,11 +63,17 @@ test("feedback board + scoring queue issue no D1 reads of their own — they con
 });
 
 test("cold-start ensure guards seed/DDL in ONE batch, not one round trip per statement", () => {
-  for (const fn of ["async function ensureUsersImpl(", "async function ensureMariaKBImpl(", "async function ensureFbImpl("]) {
+  for (const fn of ["async function ensureUsersImpl(", "async function ensureMariaKBImpl("]) {
     const b = body(fn);
     assert.match(b, /env\.DB\.batch\(/, fn + " lost its batch");
     assert.doesNotMatch(b, /\.run\(\)/, fn + " has a sequential .run() again");
   }
+  // 9 Oct 2026: feedback_response2 gained superseded_at (past answers kept, not carried). The one ALTER rides CONCURRENTLY
+  // with the batch (Promise.all), never after it — the same single round trip; a failing ALTER would abort a batch.
+  const fb = body("async function ensureFbImpl(");
+  assert.match(fb, /await Promise\.all\(\[env\.DB\.batch\(/, "ensureFbImpl: the batch and the ALTER travel together");
+  assert.equal((fb.match(/\.run\(\)/g) || []).length, 1, "only the one ALTER may run alone");
+  assert.match(fb, /ALTER TABLE feedback_response2 ADD COLUMN superseded_at TEXT"\)\.run\(\)\.catch/);
   const intel = body("async function ensureIntelImpl(");
   assert.match(intel, /env\.DB\.batch\(/, "ensureIntelImpl CREATEs must be batched");
   assert.equal((intel.match(/\.run\(\)/g) || []).length, 2, "only the two ALTERs may run alone (a failing ALTER would abort a batch)");
