@@ -30,3 +30,23 @@ test("ganttRows: the header line's rules — seats and earmarks, Inactive seats 
   assert.deepEqual(a.gaps.map((g) => g.b), ["2036-12-10"], "Nov 29 → Dec 10 is the ship uncovered");
   assert.equal(j.until, null, "nobody: no coverage");
 });
+
+test("the second cut (Miguel, 9 Oct 2026: 'more colorful .. 1 month before and 6 months after .. entire width .. keep the headers on top')", () => {
+  const G = fnSrc("fleetGantt");
+  // the horizon is fixed: the 1st of last month → the end of the month six months out; a bar running past it is clipped and chevroned
+  assert.match(G, /start\.setUTCDate\(1\);start\.setUTCMonth\(start\.getUTCMonth\(\)-1\)/);
+  assert.match(G, /end\.setUTCDate\(1\);end\.setUTCMonth\(end\.getUTCMonth\(\)\+7\)/);
+  assert.match(G, /over=P\(x\.end\)>E/);
+  assert.match(W, /\.gntr \.gs\.over:after\{content:'›'/);
+  // full width, header + legend + month axis sticky while the rows scroll, Escape closes
+  assert.match(W, /#ganttwrap\{position:fixed;inset:0;z-index:200;background:#fff;display:flex;flex-direction:column\}/);
+  assert.match(W, /\.gntop\{position:sticky;top:0;z-index:5;background:#fff/);
+  assert.match(G, /if\(e\.key==='Escape'\)\{w\.remove\(\);/);
+  // five states, five hues (green / teal / amber / orange / red), the projected end fades instead of striping
+  for (const c of ["#2E9E5B", "#1E9CB2", "#F2B01E", "#E8702A", "#E5484D"]) assert.match(W, new RegExp("\\.gntr \\.(gs|gs\\.await|gs\\.earmark|gs\\.tdg|gap)\\{[^}]*" + c));
+  assert.match(W, /\.gntr \.gs\.proj\{-webkit-mask-image:linear-gradient/);
+  assert.doesNotMatch(W, /\.gntr \.gs\.proj\{background:repeating-linear-gradient/);
+  // tiers divide the list so the eye lands on the ships that need a decision
+  assert.match(G, /TIER=\{none:'Nobody aboard, nobody earmarked',crit:'Covered under 2 months',due:'Covered under 4 months',ok:'Covered 4 months or more'\}/);
+  assert.match(G, /r\.tier=!r\.until\?'none':\(r\.days<60\?'crit':\(r\.days<120\?'due':'ok'\)\)/);
+});
