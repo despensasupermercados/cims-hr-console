@@ -306,6 +306,12 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   and a ship with nothing in the window leaves the board (it stayed, empty); the Year facet lists the years earmarks reach.
   **Search** (`rotSearchHit`, `rotFold`) matches the ship, every seafarer and earmark on it and their ports, accents and
   case ignored; a matching ship is shown whole.
+- **The Fleet Gantt** (Miguel, 9 Oct 2026: "right above the expand all ... this icon or similar Carta gantt icon", then
+  "Open fleet Gantt"): a button with the Gantt icon (`GANTT_ICON`) right above Expand all opens every ship on ONE time
+  axis (`fleetGantt`, `ganttRows`, read off the board the page holds — no request): the header line's segments and colours,
+  Inactive seats out, a future gap between contracts red, TODAY, a dashed stub for an undated TDG earmark; sorted least
+  covered first, the right column "covered to <date>" red under 60 days, amber under 120, "Nobody" for an empty hull. A row
+  closes the view and opens that ship on the board. Pinned by `test/fleet_gantt.test.js`.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.

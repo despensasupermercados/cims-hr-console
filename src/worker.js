@@ -3405,6 +3405,28 @@ nav button{white-space:nowrap}
 .stl .std.soft{color:#AEB8C4}.stl .std small{display:block;font-size:8px;letter-spacing:.08em;text-transform:uppercase;text-align:right;color:#B8C2CF}
 .stl .swho{position:absolute;transform:translateX(-50%);font-size:10.5px;line-height:13px;font-weight:600;color:#3F5068;white-space:nowrap;letter-spacing:.01em}
 .stl .snow{position:absolute;top:-6px;width:1px;height:15px;background:var(--navy);z-index:2}.stl .snow em{position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-style:normal;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--navy);background:#fff;padding:0 3px;line-height:12px}
+.ganttbtn{display:flex;align-items:center;justify-content:center;gap:9px}.ganttbtn svg{flex:0 0 auto}
+#ganttwrap .modcard{max-width:1240px;padding:22px 24px 18px}
+.gnhd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px}
+.gnhd h3{margin:0;font-family:Outfit,sans-serif;font-size:20px;color:var(--navy);display:flex;align-items:center;gap:10px}.gnhd .gnsub{font-size:12.5px;color:#7D8A99;margin-top:3px}
+.gnlg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:#5B6B7F;margin:10px 0 12px}.gnlg i{display:inline-block;width:18px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.gnbox{position:relative;overflow-x:auto}.gngrid{position:relative;min-width:760px}
+.gnax,.gnrow{display:grid;grid-template-columns:150px 1fr 132px;align-items:center;column-gap:12px}
+.gnax{height:32px;border-bottom:1px solid #E3E8EF;position:sticky;top:0;background:#fff;z-index:3}
+.gnax .gnm{position:relative;height:32px}.gnax .gnm span{position:absolute;top:15px;transform:translateX(-50%);font-size:10.5px;color:#7D8A99;white-space:nowrap;font-variant-numeric:tabular-nums}.gnax .gnm span.yr{font-weight:700;color:#3F5068}
+.gnrow{min-height:34px;border-bottom:1px solid #F1F4F8;cursor:pointer;border-radius:6px}.gnrow:hover{background:#F6F9FC}
+.gnrow .gnn{font-size:12.5px;font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:7px;padding-left:4px}.gnrow .gnn i{width:3px;height:16px;border-radius:2px;flex:0 0 auto}
+.gntr{position:relative;height:34px}.gntr .gml{position:absolute;top:0;bottom:0;width:1px;background:#F1F4F8}
+.gntr .gs{font-style:normal;position:absolute;top:11px;height:12px;border-radius:3px;background:#8CCB78;overflow:hidden;font-size:9.5px;line-height:12px;color:#22401A;font-weight:600;padding:0 4px;white-space:nowrap;box-sizing:border-box}
+.gntr .gs.proj{background:repeating-linear-gradient(90deg,#8CCB78 0 7px,#BFE2B3 7px 10px)}.gntr .gs.await{background:#C3E6B9}
+.gntr .gs.earmark{background:#EBCB6E;color:#5A4511}.gntr .gs.earmark.proj{background:repeating-linear-gradient(90deg,#EBCB6E 0 7px,#F5E2A6 7px 10px)}
+.gntr .gs.tdg{background:#D9B24C;color:#4A380C}.gntr .gs.tdg.proj{background:repeating-linear-gradient(90deg,#D9B24C 0 7px,#EBD394 7px 10px)}
+.gntr .gs.l1{top:21px;height:9px;font-size:0}.gntr .gap{position:absolute;top:15px;height:4px;border-radius:2px;background:#E9A39E}
+.gntr .gund{position:absolute;top:13px;height:8px;border-radius:2px;background:repeating-linear-gradient(90deg,#D9B24C 0 3px,transparent 3px 7px)}
+.gnnow{position:absolute;top:0;bottom:0;width:1px;background:var(--navy);z-index:2;pointer-events:none}.gnnow em{position:absolute;top:0;left:50%;transform:translateX(-50%);font-style:normal;font-size:8.5px;font-weight:700;letter-spacing:.12em;color:var(--navy);background:#fff;padding:0 3px}
+.gnend{font-size:11.5px;color:#5B6B7F;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;padding-right:4px}.gnend b{display:block;font-size:12px;color:var(--navy)}.gnend.crit b{color:#B0342F}.gnend.due b{color:#9A6614}.gnend.none b{color:#B0342F}
+.gnft{font-size:11px;color:#8A97A6;margin-top:10px}
+@media (max-width:640px){#ganttwrap .modcard{padding:16px 12px}.gnax,.gnrow{grid-template-columns:96px 1fr 92px;column-gap:8px}}
 @container (max-width:460px){.stl .swho{display:none}.stl .std{display:none}.stl .std.first,.stl .std.last{display:block}.stl .snow em{display:none}}
 @media (max-width:640px){.stl{margin-top:6px;padding-top:10px}}
 .shipbody{display:flex;flex-wrap:wrap;gap:10px;padding:6px 14px 14px;align-items:start}
@@ -5661,6 +5683,57 @@ function shipTimeline(sec){
   und.slice(0,3).forEach(function(c,i){var sw=segs.length?STUB:100/und.slice(0,3).length,l=W+i*sw+(segs.length||i?1:0),w=sw-1;h+='<i class="sg tdg und" style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%;top:0" title="'+escHtml(c.name)+' \u00b7 TDG earmark \u00b7 no dates yet"></i><b class=swho style="left:'+(l+w/2).toFixed(2)+'%;top:-17px">'+escHtml((c.name||'').split(' ').slice(-1)[0])+'</b><span class="std soft" style="left:'+(l+w/2).toFixed(2)+'%;top:'+dy+'px">no dates</span>';});
   return '<div class=stl style="padding-bottom:'+(14+(nl-1)*9+rows*13+(segs.some(function(x){return !x.off;})?10:0))+'px"><div class=stlb style="height:'+hgt+'px">'+h+'</div></div>';
 }
+// THE FLEET GANTT (Miguel, 9 Oct 2026). Every ship on ONE time axis: the same segments as the ship header's line
+// (green aboard, dashed when projected, light green awaiting the file, yellow earmark, darker when TDG earmarks them),
+// a future gap between contracts red, TODAY. Sorted least covered first; the right column says how far each ship is
+// covered. Read off the board the page already holds — no request. A row opens that ship on the board.
+var GANTT_ICON='<svg width="18" height="16" viewBox="0 0 18 16" aria-hidden="true"><path d="M7 1v14M1 15h16" stroke="#2E3440" stroke-width="1.4" stroke-linecap="round"/><rect x="1.6" y="2.6" width="10.4" height="2.8" rx=".8" fill="#F28AA0" stroke="#2E3440" stroke-width=".9"/><rect x="3.6" y="6.6" width="8" height="2.8" rx=".8" fill="#FCE06C" stroke="#2E3440" stroke-width=".9"/><rect x="2.6" y="10.6" width="12" height="2.8" rx=".8" fill="#7FDDF6" stroke="#2E3440" stroke-width=".9"/></svg>';
+function ganttRows(){
+  var today=new Date().toISOString().slice(0,10);
+  var add7=function(iso,m){var p=String(iso).split('-');var t=new Date(Date.UTC(+p[0],+p[1]-1+m,1));var last=new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth()+1,0)).getUTCDate();t.setUTCDate(Math.min(+p[2],last));return t.toISOString().slice(0,10);};
+  var off=function(x){return x.status==='Inactive'||x.status==='Retired'||x.status==='Not for Rehire';};
+  return ((ROT&&ROT.sections)||[]).map(function(sec){
+    var segs=[],und=[];
+    (sec.crew||[]).forEach(function(c){if(off(c))return;if(c.tdgEarmark){und.push(c);return;}if(!c.signOn)return;var k=c.awaiting?'await':(c.state==='yellow'&&!c.confirmed)?((c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark'):'seat';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:c.offSource==='projected'||(k!=='seat'&&!c.offConfirmed)});});
+    (sec.projections||[]).forEach(function(c){if(!c.signOn){if(c.tdgEarmark)und.push(c);return;}var k=c.awaiting?'await':(c.registry&&c.registry.verdict==='earmarked')?'tdg':'earmark';segs.push({k:k,name:c.name,on:c.signOn,off:c.signOff||null,proj:!c.offConfirmed});});
+    segs.forEach(function(x){x.end=x.off||add7(x.on,/azamara/i.test(sec.brand||'')?5:7);});
+    segs.sort(function(a,b){return a.on<b.on?-1:a.on>b.on?1:0;});
+    var lanes=[];segs.forEach(function(x){var L=0;while(lanes[L]&&lanes[L].some(function(y){return x.on<y.end&&y.on<x.end;}))L++;(lanes[L]=lanes[L]||[]).push(x);x.lane=L;});
+    var gaps=[],until=null;segs.forEach(function(x){if(until&&x.on>until&&x.on>today)gaps.push({a:until>today?until:today,b:x.on});if(!until||x.end>until)until=x.end;});
+    return {ship:sec.ship,brand:sec.brand,segs:segs,und:und,gaps:gaps,until:until};
+  });
+}
+function fleetGantt(){
+  var rows=ganttRows();if(!rows.length){alert('The board has not loaded yet.');return;}
+  var today=new Date().toISOString().slice(0,10),P=function(iso){return Date.parse(String(iso).slice(0,10)+'T00:00:00Z');};
+  var start=new Date(P(today));start.setUTCDate(1);start.setUTCMonth(start.getUTCMonth()-1);var S=start.getTime();
+  var maxEnd=today;rows.forEach(function(r){if(r.until&&r.until>maxEnd)maxEnd=r.until;});
+  var lim=new Date(P(today));lim.setUTCMonth(lim.getUTCMonth()+18);var lo=new Date(P(today));lo.setUTCMonth(lo.getUTCMonth()+6);
+  var E=Math.min(Math.max(P(maxEnd),lo.getTime()),lim.getTime());E=new Date(E);E.setUTCMonth(E.getUTCMonth()+1,1);E=E.getTime();
+  var pct=function(iso){return Math.max(0,Math.min(100,(P(iso)-S)/(E-S)*100));};
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],months='',lines='';
+  for(var d=new Date(S);d.getTime()<E;d.setUTCMonth(d.getUTCMonth()+1)){var x=((d.getTime()-S)/(E-S)*100).toFixed(2),m=d.getUTCMonth();months+='<span class="'+(m===0?'yr':'')+'" style="left:'+x+'%">'+MN[m]+(m===0?' '+d.getUTCFullYear():'')+'</span>';lines+='<i class=gml style="left:'+x+'%"></i>';}
+  rows.sort(function(a,b){var ua=a.until||'0000',ub=b.until||'0000';return ua<ub?-1:ua>ub?1:String(a.ship).localeCompare(String(b.ship));});
+  var nowX=pct(today).toFixed(2),body='';
+  rows.forEach(function(r){
+    var h=lines;
+    r.segs.forEach(function(x){var l=pct(x.on),w=Math.max(0.5,pct(x.end)-l),sur=(x.name||'').split(' ').slice(-1)[0];
+      h+='<i class="gs '+x.k+(x.proj?' proj':'')+(x.lane?' l1':'')+'" style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%" title="'+escHtml(x.name+' · '+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):fmtDateS(x.end)+' (projected)'))+'">'+(w>7&&!x.lane?escHtml(sur):'')+'</i>';});
+    r.gaps.forEach(function(g){h+='<i class=gap style="left:'+pct(g.a).toFixed(2)+'%;width:'+Math.max(0.5,pct(g.b)-pct(g.a)).toFixed(2)+'%" title="'+escHtml('Uncovered '+fmtDateS(g.a)+' → '+fmtDateS(g.b))+'"></i>';});
+    if(r.und.length&&r.until){var ul=pct(r.until);h+='<i class=gund style="left:'+Math.min(97,ul+0.4).toFixed(2)+'%;width:3%" title="'+escHtml(r.und.map(function(c){return c.name;}).join(', ')+' · TDG earmark, no dates yet')+'"></i>';}
+    h+='<i class=gnnow style="left:'+nowX+'%"></i>';
+    var days=r.until?Math.round((P(r.until)-P(today))/86400000):null,cls=!r.until?'none':(days<60?'crit':(days<120?'due':''));
+    var endTxt=!r.until?'<b>Nobody</b>no crew, no earmark':'<b>'+fmtDateS(r.until)+'</b>'+(days<0?'ended':spanCompact(today,r.until)+' covered')+(r.und.length?' · +'+r.und.length+' TDG':'');
+    body+='<div class=gnrow data-jump="'+escHtml(r.ship)+'" onclick="ganttJump(this)"><div class=gnn><i style="background:'+(BRANDCOL[r.brand]||'#1E6FD0')+'"></i>'+escHtml(r.ship)+'</div><div class=gntr>'+h+'</div><div class="gnend '+cls+'">'+endTxt+'</div></div>';
+  });
+  var lg='<div class=gnlg><span><i style="background:#8CCB78"></i>Aboard</span><span><i style="background:repeating-linear-gradient(90deg,#8CCB78 0 7px,#BFE2B3 7px 10px)"></i>Projected sign-off</span><span><i style="background:#C3E6B9"></i>Aboard, awaiting TDG file</span><span><i style="background:#EBCB6E"></i>Earmark</span><span><i style="background:#D9B24C"></i>Earmark, TDG too</span><span><i style="background:#E9A39E;height:4px"></i>Uncovered</span></div>';
+  var w=document.createElement('div');w.id='ganttwrap';w.className='modwrap';w.onclick=function(e){if(e.target===w)w.remove();};
+  w.innerHTML='<div class=modcard><div class=gnhd><div><h3>'+GANTT_ICON+'Fleet coverage</h3><div class=gnsub>'+rows.length+' ships · least covered first · the right column is how far each ship is covered</div></div><button class="btn ghost" onclick="document.getElementById(\\'ganttwrap\\').remove()">Close</button></div>'+lg
+    +'<div class=gnbox><div class=gngrid><div class=gnax><div></div><div class=gnm>'+months+'<i class=gnnow style="left:'+nowX+'%"><em>TODAY</em></i></div><div></div></div>'+body+'</div></div>'
+    +'<div class=gnft>Read from the Keyman board · click a ship to open it there</div></div>';
+  document.body.appendChild(w);
+}
+function ganttJump(el){var ship=el.getAttribute('data-jump');var g=document.getElementById('ganttwrap');if(g)g.remove();if(!ship)return;ROT_CLOSED[ship]=false;drawRotation();setTimeout(function(){rotJump({getAttribute:function(){return ship;}});},60);}
 function monthsDaysParts(a,b){
   if(!a||!b)return null;
   var d1=new Date(a),d2=new Date(b);
@@ -5876,6 +5949,9 @@ async function renderRotation(){
     +'</aside>'
     +'<section class=crmain><div id=rotbody></div></section>'
     +'<aside class="cract rotact">'
+    // THE FLEET GANTT (Miguel, 9 Oct 2026: "right above the expand all ... this icon or similar Carta gantt icon"):
+    // every ship on one shared timeline, least covered first.
+    +'<button class="btn ghost ganttbtn" onclick="fleetGantt()" title="All ships on one timeline: who is aboard, who is earmarked, where a ship is uncovered">'+GANTT_ICON+'<span>Fleet Gantt</span></button>'
     +'<button class="btn ghost" onclick="rotExpand(true)">Expand all</button>'
     +'<button class="btn ghost" onclick="rotExpand(false)">Collapse all</button>'
     +'<button class="btn ghost" onclick="hiddenCardsModal()" title="Hidden (voided) crew cards — restore here">Hidden cards</button>'
