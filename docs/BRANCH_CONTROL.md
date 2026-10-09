@@ -1,6 +1,6 @@
 # Branch control — keeping unreviewed branches away from production
 
-Last verified 2026-09-07.
+Last verified 2026-10-09.
 
 ## The exposure
 
@@ -45,13 +45,14 @@ Two things worth knowing:
   preview URLs are off for the Worker, including for versions uploaded later by branch
   builds. It does not touch the production deployment, its routes, or `workers.dev`.
 
-### 2. "Builds for non-production branches" — NOT done, needs the dashboard
+### 2. "Builds for non-production branches" — DONE for `cims-hr-console` (Miguel, 9 Oct 2026), dashboard
 
 Stops the build from **running at all**. Also saves the build minutes, and stops the
 version records piling up. Cloudflare dashboard → the Worker → **Settings → Build → Branch
 control** → untick **Builds for non-production branches**.
 
-Still open for: `cims-hr-console`, `cims-recruitment`, `cims-travel-console`,
+Unticked for `cims-hr-console` by Miguel on 9 Oct 2026 (the first branch push after it showed no Workers Builds run).
+Still open for: `cims-recruitment`, `cims-travel-console`,
 `dg3-internal-tracker`, `ncl-tracker`.
 (`cims-housing` is excluded: its production branch is a `claude/*` branch and it has no
 `main`, so its default branch needs sorting first — turning off non-production builds there
