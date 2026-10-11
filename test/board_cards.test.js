@@ -418,7 +418,7 @@ test("cards size to their own content — the grid must not stretch a short card
   const m = src.match(/\.shipbody\{display:flex;[^}]*\}/);
   assert.ok(m, ".shipbody flex rule not found");
   assert.match(m[0], /align-items:start/, "without this a crew with no dates renders as a tall empty box");
-  assert.match(src, /\.shipbody\.onerow\{flex-wrap:nowrap\}\.shipbody\.onerow>\.rcard\{flex:1 1 0\}/, "a ship's cards share ONE row at equal width");
+  assert.match(src, /\.shipbody\.onerow\{flex-wrap:nowrap\}\.shipbody\.onerow>\.rcard\{flex:1 1 0;max-width:520px\}/, "a ship's cards share ONE row at equal width, and stop growing at 520px on wide screens (Miguel, 11 Oct 2026)");
   assert.match(src, /class="shipbody shipdrop onerow/, "the ship section opts into the one row; the pool and the shore list still wrap");
   assert.match(src, /\.rtags\{[^}]*align-items:center/, "chips stretched to the tallest chip in the row");
 });

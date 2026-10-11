@@ -327,7 +327,19 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   is FIXED — the 1st of last month to the end of the month six months out — and a bar running past the right edge is clipped
   with a chevron (`.gs.over`); five states, five hues (aboard green `#2E9E5B`, awaiting the file teal `#1E9CB2`, earmark amber
   `#F2B01E`, TDG earmark orange `#E8702A`, uncovered red `#E5484D`), a projected sign-off FADES at its end instead of striping;
-  the rows are split by tier (Nobody / under 2 months / under 4 months / 4+) with a count. Pinned by `test/fleet_gantt.test.js`.
+  the rows are split by tier (Nobody / under 2 months / under 4 months / 4+) with a count. **11 Oct 2026** (Miguel: "Solid bars, ~
+  on the date"): no fade, no stripes; a coverage end that is only projected reads "~Apr 18, 2027" in the right column
+  (`ganttRows().untilProj`). Pinned by `test/fleet_gantt.test.js`.
+- **Miguel's answers of 11 Oct 2026** (Brain recAC90rD6BWf4tit): (1) the open earmarks dated before the turnaround rule were
+  re-snapped in D1 — only cards whose sign-off was still the raw embark + 7 months (Azamara 5); 9 moved 1–3 days onto a
+  turnaround day, Harmony already on one (port filled), Spectrum none within 14 days (unchanged); typed sign-offs untouched;
+  backup `bak_assignment_resnap_20261011`, `activity_log` `act_resnap_20261011`. (2) Fleet Gantt "~" (above). (3) The bench
+  hides crew already earmarked — it already did (`benchPool`: an open card with a future sign-on or TDG's Earmarked row).
+  (4) New hires stay on every brand's bench except Royal Oasis/Icon — unchanged. (5) A ship's cards stop growing at 520px
+  (`.shipbody.onerow>.rcard{max-width:520px}`). (6) The Documents block reads the contract (`docTags(docs, signOn,
+  signOff)`, relief panel `docBlock` from its date inputs): expired BY the sign-on is Expired, valid at sign-on but gone
+  before the sign-off is a fourth row **"Lapses during this contract"** (amber), "N of M valid for this contract".
+  Pinned by `test/card_docs.test.js`, `test/board_cards.test.js`.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
