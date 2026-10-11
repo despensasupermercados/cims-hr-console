@@ -165,7 +165,17 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
   lost). Recorded sign-offs and the held rule are applied once, in the board schedule. A ship whose last earmark has
   joined keeps an "Add earmark" slot for the NEXT one (`data-aid="new"`, the relief panel opens a new reliever who
   relieves the one aboard). Pinned by `test/relief_printers.test.js`. Still on the Counter: the backup CSV and the
-  roster export (`fetchCurrentCounterLegs`, `roster_export.js`) — open item.
+  roster export (`fetchCurrentCounterLegs`, `roster_export.js`) — open item. (11 Oct 2026, closed for the export's
+  placement: a crew TDG has On board is placed from `registry_snapshot` when the Counter/relief board give no sign-on
+  or an older one — `roster_export.placeFromRegistry`, pinned by `test/roster_export_registry.test.js`, PR #198. Why:
+  the 8 Oct rebuild of in-force contracts/assignments left 17 printers TDG had aboard with no ship in the export, and
+  cims-timecard counted 30 ships owing a card against 47.)
+- **THE 7 OCT FILE IS THE ONE TRUE SOURCE — Miguel, 11 Oct 2026: "keep the one from oct 7 as the one true source of
+  knowledge and u start counting from there."** Who is aboard and since when is the AdvancedQuery (`registry_snapshot`),
+  read through the rules above. The daily "Cims keyman board guard" scheduled task — which every morning deleted
+  `keyman_contract3` and re-seeded it from the frozen `ship_leg` snapshot (`keyman_version` 2026-06-13-cc-v3) — is
+  DISABLED as of 11 Oct 2026: it pinned the board to June, wiped any newer Counter upload, and contradicted §10d.
+  Do not re-enable it or re-seed `keyman_contract3` from `ship_leg`; the Counter is history and stays as last uploaded.
 
 **THE EARMARK LOOP** (Miguel, 7 Oct 2026, same day, `src/earmark.js`, pinned by `test/earmark.test.js`): "all the
 projections, people who are not on board but they're coming on board, we're going to call them earmarks". Rita's
@@ -475,7 +485,7 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
   embark/debark** (`registry_snapshot`, `ship_leg_source.legsFromRegistry`) + the **Contract Counter** folded
   in as history (`keyman_contract3`, `src/counter_legs.js`, current only for a crew the file does not date)
   + crew aboard per the relief board (in-force `assignment` rows); it dates the seats and feeds the overdue
-  rule. (The roster export and backup CSV still read the Counter — §10d open item; the relief printers read this schedule since 8 Oct 2026.) A leg
+  rule. (The backup CSV still reads the Counter; the roster export reads it first with the TDG file as fallback and newer-embark override since 11 Oct 2026 — §10d; the relief printers read this schedule since 8 Oct 2026.) A leg
   past its PROJECTED sign-off is overdue, not gone: TDG's word, Rita's date or a reliever ends it. Never call
   `scheduleBySc()` bare — it used to fall back to the frozen `SHIP_HISTORY` constant. The same schedule feeds the
   Score Card's default sign-on/off (`apiBonusCrew`) and the scoring queue (`apiScoreQueue`).
