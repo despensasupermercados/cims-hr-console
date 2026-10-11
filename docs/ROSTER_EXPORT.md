@@ -48,11 +48,28 @@ leak.
 
 ## Source discipline
 
-- `ship_leg` is the movement source (`is_current = 1 AND ours = 1`). Brand and
-  ship short-name come from there, not from a vessel-by-name join.
-- `crew_override` always wins — but only when `retired = 0`.
+Precedence, per crew (the doc above this section predates all of it and is
+kept for its history; the code comments in `src/roster_export.js` are the
+reference):
+
+1. **Contract Counter** current leg (`counter_legs.COUNTER_LEG_SELECT`), with
+   Rita's recorded edit applied by the board's own pair (`editFor` +
+   `resolveLeg`, newer write wins).
+2. **Relief board**: an in-force `assignment` (started, not signed off) where
+   the Counter has no current leg.
+3. **The TDG file** (`registry_snapshot`, since 11 Oct 2026): a crew the latest
+   AdvancedQuery has **On board**, with an EMBARKEDDATE already passed and a
+   vessel that resolves to a hull in `vessel` (via `shipname.js`), is placed on
+   that hull from that date when (1) and (2) give no sign-on, or when the
+   file's embark is **strictly later** than theirs. Sign-off is the file's
+   DEBARKEDDATE or nothing. A tie keeps (1)/(2), Rita's sign-off included.
+   Why: on 8 Oct 2026 the in-force assignments were rebuilt and seventeen
+   printers TDG had aboard left this endpoint with no ship — cims-timecard
+   counted 30 ships owing a card against 47.
+
+- `crew_override` always wins for identity fields — but only when `retired = 0`.
 - `crew.redacted = 0` respects the `redact_crew()` seam.
-- `keyman_contract3` is never read. Bonus/scoring layer only (P3.13 audit).
+- Nothing is written; `EXPORT_FIELDS` is the only thing that can leave.
 
 ## Coverage counters
 
