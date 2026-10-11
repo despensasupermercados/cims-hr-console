@@ -52,8 +52,11 @@ version records piling up. Cloudflare dashboard → the Worker → **Settings �
 control** → untick **Builds for non-production branches**.
 
 Unticked for `cims-hr-console` by Miguel on 9 Oct 2026 (the first branch push after it showed no Workers Builds run).
-Still open for: `cims-recruitment`, `cims-travel-console`,
-`dg3-internal-tracker`, `ncl-tracker`.
+Checked 11 Oct 2026 (Claude in Chrome, Miguel's login; dashboard freshly loaded + the Builds API read-only): already OFF
+on `cims-recruitment`, `cims-travel-console`, `dg3-internal-tracker` and `ncl-tracker` — nothing needed saving. Each has one
+build trigger only, "Deploy default branch" on `main`, no non-production trigger: the same as `cims-hr-console`. When they
+were switched off is not recorded. Odd but untouched: `ncl-tracker`'s Root directory on the Previews Base tab is
+`ncl-tracker` (the others show `/`).
 (`cims-housing` is excluded: its production branch is a `claude/*` branch and it has no
 `main`, so its default branch needs sorting first — turning off non-production builds there
 today would stop it building at all.)
