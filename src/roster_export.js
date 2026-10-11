@@ -27,6 +27,10 @@
 //                     Before that this joined ship_leg, a frozen copy of the 6 Jul Counter.
 //   assignment        the relief board's record of who is on which hull NOW.
 //                     Read ONLY as a fallback where the Counter has no current leg.
+//   registry_snapshot the latest TDG AdvancedQuery as uploaded (status, vessel, EMBARKEDDATE,
+//                     DEBARKEDDATE). Since 11 Oct 2026 it places a crew the TDG file has On board
+//                     when nothing above dates them, or when the file's embark is NEWER than the
+//                     date the export would otherwise send. See placeFromRegistry below.
 //
 // WHY assignment IS READ HERE (3 Sep 2026)
 // ship_leg is a one-time keyman_roster snapshot; nothing writes a CURRENT leg to
@@ -71,6 +75,7 @@
 
 import { COUNTER_LEG_SELECT } from "./counter_legs.js";
 import { indexEdits, editFor, resolveLeg } from "./counter_sync.js";
+import { buildShipKeys, canonShipWith, normShip } from "./shipname.js";
 
 /** Columns this endpoint is permitted to emit. Anything not listed cannot leave. */
 export const EXPORT_FIELDS = [
@@ -155,6 +160,52 @@ export function coverage(rows) {
   };
 }
 
+// THE TDG FILE PLACES WHOEVER NOTHING ELSE PLACES — 11 Oct 2026.
+//
+// What broke. On 8 Oct 2026 the relief board's in-force contracts and assignments were rebuilt
+// (backups bak_contract_20261008 / bak_assignment_20261008) and every assignment left in the table
+// starts on 16 Oct or later. ROSTER_SQL had two ways to place a crew — a Contract Counter leg (the
+// July file) or an in-force assignment — so from the next morning seventeen printers whom the TDG
+// file has On board came through with NO ship and NO dates: Vicedo/Journey, Jeyuson/Quest,
+// Lazo/Harmony, Paqueo/Reflection, Tañgonan/Summit, Billones/Beyond, Bornea/Independence,
+// Lumanglas/Rhapsody, Calang/Silhouette, Tuazon/Spectrum, Espenilla/Explorer, Caag/Anthem,
+// Alega/Symphony, Encina/Serenade, Sapungan/Freedom, Valdesco/Brilliance, Eresmas/Solstice.
+// cims-timecard counted 30 ships owing a card against 47 hulls with a printer aboard, and
+// Valdesco's September card was owed with nobody chasing it. Nothing errored; the export answered
+// 200 with a shorter fleet. The console's own board had read TDG's embark date since 7 Oct (§10d);
+// this route was the open item still on the Counter.
+//
+// The rule, deliberately narrow — a TDG row replaces what the export would send only when:
+//   - the file has the crew On board, with an EMBARKEDDATE that has already happened, and
+//   - its vessel resolves to a hull in the `vessel` table (the same canonicaliser the board uses,
+//     shipname.js); an unrecognised vessel string places nobody — a guessed hull is worse than none,
+//   - AND either nothing else dates the crew (no sign-on from the Counter, Rita's edit or an
+//     in-force assignment), or the file's embark is STRICTLY LATER than that sign-on: a newer
+//     movement than the July Counter knows about (Noche: Counter Summit, ended 17 Jul; TDG
+//     Constellation from 5 Oct). A tie keeps today's answer, Rita's recorded sign-off included.
+// Sign-off is TDG's DEBARKEDDATE or nothing: while the file has them On board they are aboard
+// (§10d HELD). Nothing is written, no status is touched, EXPORT_FIELDS is unchanged.
+export function vesselIndex(vessels) {
+  const rows = (vessels || []).filter((v) => v && v.name);
+  const byKey = {};
+  for (const v of rows) byKey[normShip(v.name)] = v;
+  return { keys: buildShipKeys(rows), byKey };
+}
+
+export function placeFromRegistry(out, tdg, vidx, today) {
+  if (!out || !tdg || !vidx) return null;
+  if (tdg.status !== 'On board') return null;
+  const embark = /^\d{4}-\d{2}-\d{2}/.test(String(tdg.embarked_at || '')) ? String(tdg.embarked_at).slice(0, 10) : null;
+  if (!embark || embark > today) return null;
+  const name = canonShipWith(tdg.vessel, vidx.keys);
+  const hull = name ? vidx.byKey[normShip(name)] : null;
+  if (!hull) return null;
+  const current = out.sign_on ? String(out.sign_on).slice(0, 10) : null;
+  if (current && embark <= current) return null;
+  const off = /^\d{4}-\d{2}-\d{2}/.test(String(tdg.debarked_at || '')) ? String(tdg.debarked_at).slice(0, 10) : null;
+  return { ship: hull.name, brand: hull.brand || null, sign_on: embark, sign_off: off };
+}
+
 /**
  * GET /api/roster/export
  *
@@ -178,10 +229,12 @@ export async function apiRosterExport(request, env) {
   // join. The rule is not re-implemented in SQL: this runs the board's OWN pair (editFor +
   // resolveLeg, the newer write wins) over the same current leg, so there is one definition of
   // precedence in the console and the export cannot drift from the card again.
-  const [{ results }, editRes, legRes] = await Promise.all([
+  const [{ results }, editRes, legRes, tdgRes, vesRes] = await Promise.all([
     env.DB.prepare(ROSTER_SQL).all(),
     env.DB.prepare('SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit').all().catch(() => ({ results: [] })),
     env.DB.prepare('SELECT sc, seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sign_on IS NOT NULL').all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT agency_id, status, vessel, embarked_at, debarked_at FROM registry_snapshot WHERE status = 'On board'").all().catch(() => ({ results: [] })),
+    env.DB.prepare('SELECT id, name, brand FROM vessel').all().catch(() => ({ results: [] })),
   ]);
   const idx = indexEdits(editRes.results || []);
   // The current leg is the crew's highest seq — the same definition counter_legs.js uses for is_current.
@@ -197,6 +250,12 @@ export async function apiRosterExport(request, env) {
     resolved[sc] = resolveLeg(leg, e && e.sc ? e : null);
   }
 
+  // The TDG file's On-board rows, one per crew (registry_snapshot is keyed on agency_id).
+  const tdgBySc = {};
+  for (const t of (tdgRes.results || [])) if (t && t.agency_id) tdgBySc[t.agency_id] = t;
+  const vidx = vesselIndex(vesRes.results || []);
+  const today = new Date().toISOString().slice(0, 10);
+
   const crew = (results || []).map((r) => {
     const out = {};
     for (const f of EXPORT_FIELDS) out[f] = r[f] ?? null;
@@ -208,6 +267,9 @@ export async function apiRosterExport(request, env) {
       if (rl.signOn) out.sign_on = rl.signOn;
       if (rl.signOff) out.sign_off = rl.signOff;
     }
+    // Last, so it sees exactly what would otherwise leave: see placeFromRegistry.
+    const tdg = placeFromRegistry(out, tdgBySc[r.agency_id], vidx, today);
+    if (tdg) Object.assign(out, tdg);
     return out;
   });
 
