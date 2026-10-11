@@ -38,8 +38,8 @@ test("static: the card's status line names the hull the file has them on, the bo
   assert.match(W, /docs: \(a\.sign_on && docsRaw\[a\.sc\]\) \? contractDocBadge\(docsRaw\[a\.sc\], a\.sign_on, a\.planned_sign_off \|\| null\) : \(docsBy\[a\.sc\] \|\| null\)/, "an earmark's chips are read against its own contract");
   assert.match(W, /const docs = documentLines\(dmerged, TODAY\(\), 30\);/, "apiRotationCrew: the 30-day window");
   assert.match(W, /return json\(\{ crew: c, legs, resolved, file, docs, ready:/);
-  assert.match(W, /\+docTags\(d\.docs\)\s*\n\s*\+'<div class=zlabel>Comment<\/div>/, "the modal: Documents right before Comment");
-  assert.match(W, /function docTags\(docs\)\{[\s\S]*row\('Expired',bad,'bad'\)\+row\('Within 30 days',soon,'due'\)\+row\('Valid',ok,'on'\)/);
+  assert.match(W, /\+docTags\(d\.docs,e\.signOn,e\.signOff\)\s*\n\s*\+'<div class=zlabel>Comment<\/div>/, "the modal: Documents right before Comment");
+  assert.match(W, /function docTags\(docs,son,soff\)\{[\s\S]*row\('Expired',bad,'bad'\)\+row\('Within 30 days',soon,'due'\)\+row\('Lapses during this contract',lap,'due'\)\+row\('Valid',ok,'on'\)/);
   const A = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
   assert.match(A, /cr\.agency_id AS sc,\s*COALESCE\(NULLIF\(o\.med_exp,''\), cr\.med_exp\) AS med_exp/, "reliever rows carry the documents, manual entry first");
   assert.match(A, /LEFT JOIN crew_override o ON o\.agency_id = cr\.agency_id\s*LEFT JOIN vessel v ON v\.id = a\.vessel_id\s*WHERE a\.actual_sign_off IS NULL/);
@@ -48,6 +48,26 @@ test("static: the card's status line names the hull the file has them on, the bo
   const U = readFileSync(new URL("../src/relief_ui.js", import.meta.url), "utf8");
   assert.match(U, /<div id="mdocs"><\/div><div class="lbl">Comment<\/div>/, "the panel: Documents right before Comment");
   assert.match(U, /docBlock\(node&&node\.docs\?node\.docs:null\);/);
-  assert.match(U, /row\("Expired",bad\)\+row\("Within 30 days",due\)\+row\("Valid",ok\)/);
+  assert.match(U, /row\("Expired",bad\)\+row\("Within 30 days",due\)\+row\("Lapses during this contract",lap\)\+row\("Valid",ok\)/);
   assert.match(U, /docBlock\(c\?\{med_exp:c\.med_exp/, "picking a seafarer draws their documents");
+});
+
+test("Documents block reads the contract: 'Lapses during this contract' between sign-on and sign-off; expired by the sign-on is Expired (Miguel, 11 Oct 2026)", () => {
+  const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const i = src.indexOf("function docTags("); const fn = src.slice(i, src.indexOf("\n", src.indexOf("return '<div class=zlabel>Documents", i)) + 1);
+  const docTags = new Function("escHtml", "fmtDateS", fn + "; return docTags;")((s) => String(s), (s) => String(s));
+  const docs = [
+    { doc: "Medical", exp: "2027-03-01", status: "ok", required: true },   // lapses mid-contract
+    { doc: "Passport", exp: "2030-01-01", status: "ok", required: true },  // valid throughout
+    { doc: "US visa", exp: "2026-12-01", status: "ok", required: true },   // gone before the sign-on
+  ];
+  const h = docTags(docs, "2027-01-10", "2027-08-10");
+  const rowOf = (lab) => { const m = h.match(new RegExp("<span class=dock>" + lab + "</span><span class=docs>(.*?)</span></div>")); return m ? m[1] : ""; };
+  assert.match(rowOf("Lapses during this contract"), /MEDICAL/);
+  assert.match(rowOf("Expired"), /US VISA/);
+  assert.match(rowOf("Valid"), /PASSPORT/);
+  assert.doesNotMatch(rowOf("Valid"), /MEDICAL|US VISA/);
+  assert.match(h, /1 of 3 valid for this contract/);
+  const plain = docTags(docs);
+  assert.doesNotMatch(plain, /Lapses during this contract/, "no contract dates: the three rows as before");
 });

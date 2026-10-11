@@ -3426,8 +3426,7 @@ nav button{white-space:nowrap}
 .gntr .gs.await{background:#1E9CB2}
 .gntr .gs.earmark{background:#F2B01E;color:#3A2B00;text-shadow:none}
 .gntr .gs.tdg{background:#E8702A}
-.gntr .gs.proj{-webkit-mask-image:linear-gradient(90deg,#000 55%,rgba(0,0,0,.18));mask-image:linear-gradient(90deg,#000 55%,rgba(0,0,0,.18))}
-.gntr .gs.over{border-radius:4px 0 0 4px;-webkit-mask-image:none;mask-image:none}.gntr .gs.over:after{content:'›';position:absolute;right:4px;top:0;font-size:14px;line-height:16px;font-weight:700}
+.gntr .gs.over{border-radius:4px 0 0 4px}.gntr .gs.over:after{content:'›';position:absolute;right:4px;top:0;font-size:14px;line-height:16px;font-weight:700}
 .gntr .gs.l0{top:5px;height:14px;line-height:14px;font-size:10px}.gntr .gs.l1{top:21px;height:14px;line-height:14px;font-size:10px}
 .gntr .gap{position:absolute;top:14px;height:12px;border-radius:3px;background:#E5484D;color:#fff;font-size:9px;line-height:12px;font-weight:700;letter-spacing:.08em;padding:0 5px;white-space:nowrap;overflow:hidden;box-sizing:border-box;font-style:normal}
 .gntr .gund{position:absolute;top:12px;height:16px;border-radius:4px;border:1.5px dashed #E8702A;box-sizing:border-box;background:#FFF4EC}
@@ -3439,7 +3438,7 @@ nav button{white-space:nowrap}
 @media (max-width:640px){.stl{margin-top:6px;padding-top:10px}}
 .shipbody{display:flex;flex-wrap:wrap;gap:10px;padding:6px 14px 14px;align-items:start}
 .shipbody>.rcard{flex:1 1 300px;min-width:0}
-.shipbody.onerow{flex-wrap:nowrap}.shipbody.onerow>.rcard{flex:1 1 0}
+.shipbody.onerow{flex-wrap:nowrap}.shipbody.onerow>.rcard{flex:1 1 0;max-width:520px}
 .shipbody.closed{display:none}
 .rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:grab}
 .rcard:active{cursor:grabbing}.rcard:hover{border-color:var(--navy)}
@@ -5709,8 +5708,8 @@ function ganttRows(){
     segs.forEach(function(x){x.end=x.off||add7(x.on,/azamara/i.test(sec.brand||'')?5:7);});
     segs.sort(function(a,b){return a.on<b.on?-1:a.on>b.on?1:0;});
     var lanes=[];segs.forEach(function(x){var L=0;while(lanes[L]&&lanes[L].some(function(y){return x.on<y.end&&y.on<x.end;}))L++;(lanes[L]=lanes[L]||[]).push(x);x.lane=L;});
-    var gaps=[],until=null;segs.forEach(function(x){if(until&&x.on>until&&x.on>today)gaps.push({a:until>today?until:today,b:x.on});if(!until||x.end>until)until=x.end;});
-    return {ship:sec.ship,brand:sec.brand,segs:segs,und:und,gaps:gaps,until:until};
+    var gaps=[],until=null,untilProj=false;segs.forEach(function(x){if(until&&x.on>until&&x.on>today)gaps.push({a:until>today?until:today,b:x.on});if(!until||x.end>until){until=x.end;untilProj=!!(x.proj||!x.off);}});
+    return {ship:sec.ship,brand:sec.brand,segs:segs,und:und,gaps:gaps,until:until,untilProj:until?untilProj:false};
   });
 }
 function fleetGantt(){
@@ -5734,13 +5733,13 @@ function fleetGantt(){
     r.gaps.forEach(function(g){if(P(g.b)<S||P(g.a)>=E)return;var l=pct(g.a),w=Math.max(0.6,pct(g.b)-l);h+='<i class=gap style="left:'+l.toFixed(2)+'%;width:'+w.toFixed(2)+'%" title="'+escHtml('Uncovered '+fmtDateS(g.a)+' → '+fmtDateS(g.b))+'">'+(w>8?'UNCOVERED':'')+'</i>';});
     if(r.und.length){var ul=r.until?pct(r.until):pct(today);if(ul<96)h+='<i class=gund style="left:'+(ul+0.4).toFixed(2)+'%;width:'+Math.min(4,99.5-ul).toFixed(2)+'%" title="'+escHtml(r.und.map(function(c){return c.name;}).join(', ')+' · TDG earmark, no dates yet')+'"></i>';}
     h+='<i class=gnnow style="left:'+nowX+'%"></i>';
-    var endTxt=!r.until?'<b>Nobody</b>no crew, no earmark':'<b>'+fmtDateS(r.until)+'</b>'+(r.days<0?'ended':spanCompact(today,r.until)+' covered')+(r.und.length?'<span class=gntdg> · +'+r.und.length+' TDG</span>':'');
+    var endTxt=!r.until?'<b>Nobody</b>no crew, no earmark':'<b>'+(r.untilProj?'~':'')+fmtDateS(r.until)+'</b>'+(r.days<0?'ended':spanCompact(today,r.until)+' covered')+(r.und.length?'<span class=gntdg> · +'+r.und.length+' TDG</span>':'');
     body+='<div class=gnrow data-jump="'+escHtml(r.ship)+'" onclick="ganttJump(this)"><div class=gnn><i style="background:'+(BRANDCOL[r.brand]||'#1E6FD0')+'"></i>'+escHtml(r.ship)+'</div><div class=gntr>'+h+'</div><div class="gnend '+(r.tier==='ok'?'':r.tier)+'">'+endTxt+'</div></div>';
   });
-  var lg='<div class=gnlg><span><i style="background:#2E9E5B"></i>Aboard</span><span><i style="background:linear-gradient(90deg,#2E9E5B 55%,rgba(46,158,91,.18))"></i>Projected sign-off, fades</span><span><i style="background:#1E9CB2"></i>Aboard, awaiting TDG file</span><span><i style="background:#F2B01E"></i>Earmark</span><span><i style="background:#E8702A"></i>Earmark, TDG too</span><span><i style="border:1.5px dashed #E8702A;background:#FFF4EC;box-sizing:border-box"></i>TDG earmark, no dates</span><span><i style="background:#E5484D"></i>Uncovered</span></div>';
+  var lg='<div class=gnlg><span><i style="background:#2E9E5B"></i>Aboard</span><span><i style="background:#1E9CB2"></i>Aboard, awaiting TDG file</span><span><i style="background:#F2B01E"></i>Earmark</span><span><i style="background:#E8702A"></i>Earmark, TDG too</span><span><i style="border:1.5px dashed #E8702A;background:#FFF4EC;box-sizing:border-box"></i>TDG earmark, no dates</span><span><i style="background:#E5484D"></i>Uncovered</span></div>';
   var w=document.createElement('div');w.id='ganttwrap';
   var esc=function(e){if(e.key==='Escape'){w.remove();document.removeEventListener('keydown',esc);}};document.addEventListener('keydown',esc);
-  w.innerHTML='<div class=gnscroll><div class=gntop><div class=gnhd><div><h3>'+GANTT_ICON+'Fleet coverage</h3><div class=gnsub>'+rows.length+' ships · least covered first · '+MN[start.getUTCMonth()]+' '+start.getUTCFullYear()+' → '+MN[(end.getUTCMonth()+11)%12]+' '+new Date(E-1).getUTCFullYear()+'<span class=gnlong> · bars running past the right edge continue</span></div></div><div class=gnx><kbd>ESC</kbd><button class="btn ghost" onclick="document.getElementById(\\'ganttwrap\\').remove()">Close</button></div></div>'+lg
+  w.innerHTML='<div class=gnscroll><div class=gntop><div class=gnhd><div><h3>'+GANTT_ICON+'Fleet coverage</h3><div class=gnsub>'+rows.length+' ships · least covered first · '+MN[start.getUTCMonth()]+' '+start.getUTCFullYear()+' → '+MN[(end.getUTCMonth()+11)%12]+' '+new Date(E-1).getUTCFullYear()+'<span class=gnlong> · bars running past the right edge continue · ~ = projected date</span></div></div><div class=gnx><kbd>ESC</kbd><button class="btn ghost" onclick="document.getElementById(\\'ganttwrap\\').remove()">Close</button></div></div>'+lg
     +'<div class=gnax><div></div><div class=gnm>'+months+'<i class=gnnow style="left:'+nowX+'%"><em>TODAY</em></i></div><div></div></div></div>'
     +'<div class=gngrid>'+body+'</div>'
     +'<div class=gnft>Read from the Keyman board · click a ship to open it there</div></div>';
@@ -5769,10 +5768,11 @@ function monthsDays(a,b){
 // ... who are expired. Below, all the documents who are expired within the next 30 days, and then everything else ...
 // in green"): three rows, expired red, lapsing within 30 days amber, the rest green; a required document with no date is
 // a grey tag in the first row. Shared by the contract modal; the earmark panel draws the same rows (relief_ui.js).
-function docTags(docs){if(!docs||!docs.length)return '';var t=function(d,cls){return '<span class="rtag '+cls+'" title="'+escHtml(d.doc)+'">'+escHtml(String(d.doc).toUpperCase())+(d.exp?(' &middot; '+escHtml(fmtDateS(d.exp))):' &middot; no date')+'</span>';};
-  var bad=docs.filter(function(d){return d.status==='expired'||(d.status==='missing'&&d.required);}),soon=docs.filter(function(d){return d.status==='expiring';}),ok=docs.filter(function(d){return d.status==='ok'||(d.status==='missing'&&!d.required);});
-  var row=function(lab,arr,cls){return arr.length?('<div class=docrow><span class=dock>'+lab+'</span><span class=docs>'+arr.map(function(d){return t(d,d.status==='missing'?'mis':cls);}).join('')+'</span></div>'):'';};
-  return '<div class=zlabel>Documents <span class=zcount>'+docs.filter(function(d){return d.status==='ok';}).length+' of '+docs.length+' valid</span></div><div class=docblock>'+row('Expired',bad,'bad')+row('Within 30 days',soon,'due')+row('Valid',ok,'on')+'</div>';}
+function docTags(docs,son,soff){if(!docs||!docs.length)return '';son=son?String(son).slice(0,10):'';soff=soff?String(soff).slice(0,10):'';var ex=function(d){return d.exp?String(d.exp).slice(0,10):'';};var t=function(d,cls){return '<span class="rtag '+cls+'" title="'+escHtml(d.doc)+'">'+escHtml(String(d.doc).toUpperCase())+(d.exp?(' &middot; '+escHtml(fmtDateS(d.exp))):' &middot; no date')+'</span>';};
+  var byOn=function(d){return d.status!=='expired'&&d.status!=='missing'&&son&&ex(d)&&ex(d)<son;},lapse=function(d){return d.status==='ok'&&!byOn(d)&&soff&&ex(d)&&ex(d)<soff;};
+  var bad=docs.filter(function(d){return d.status==='expired'||(d.status==='missing'&&d.required)||byOn(d);}),soon=docs.filter(function(d){return d.status==='expiring'&&!byOn(d);}),lap=docs.filter(lapse),ok=docs.filter(function(d){return (d.status==='ok'&&!byOn(d)&&!lapse(d))||(d.status==='missing'&&!d.required);});
+  var row=function(lab,arr,cls){return arr.length?('<div class=docrow><span class=dock>'+lab+'</span><span class=docs>'+arr.map(function(d){return t(d,d.status==='missing'?'mis':(byOn(d)?'bad':cls));}).join('')+'</span></div>'):'';};
+  return '<div class=zlabel>Documents <span class=zcount>'+docs.filter(function(d){return d.status==='ok'&&!byOn(d)&&!lapse(d);}).length+' of '+docs.length+' valid'+(soff?' for this contract':'')+'</span></div><div class=docblock>'+row('Expired',bad,'bad')+row('Within 30 days',soon,'due')+row('Lapses during this contract',lap,'due')+row('Valid',ok,'on')+'</div>';}
 function niceShip(s){s=String(s||'').replace(/^\\s*M\\/?V\\s+/i,'').toLowerCase();return s.replace(/\\b[a-z]/g,function(c){return c.toUpperCase();});}
 function fmtDateS(iso){if(!iso)return '';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).slice(0,10).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo||!parseInt(p[2],10))return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 // The seat chip's ONE number (Miguel, 7 Oct 2026: "this should say 3M 22 days"): calendar months + days between two
@@ -5862,7 +5862,7 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'</div>'
    +'<div class=zlabel>Confirmed <span class=zcount>shows as green tags on the card</span></div>'
    +'<div class=ckrow>'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
-   +docTags(d.docs)
+   +docTags(d.docs,e.signOn,e.signOff)
    +'<div class=zlabel>Comment</div><textarea id=cmt placeholder="Note for this crew…">'+note+'</textarea>'
    +(legs?'<div class=zlabel>Contract history <span class=zcount>'+(d.legs||[]).length+' contract'+((d.legs||[]).length===1?'':'s')+'</span></div><div class=echist><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table></div>':'')
    +'<div class=zlabel>Sign-off workflow</div><div class=ecwf><button class="btn ghost" onclick="sendSignoffInstructions(\\''+id+'\\','+seq+')">Send instructions</button><button class="btn ghost" onclick="sendSignoffLink(\\''+id+'\\','+seq+')">Send sign-off link</button><button class="btn ghost" onclick="sendReviewInvite(\\''+id+'\\','+seq+')">Send review invite</button></div>'

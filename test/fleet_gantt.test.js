@@ -42,11 +42,22 @@ test("the second cut (Miguel, 9 Oct 2026: 'more colorful .. 1 month before and 6
   assert.match(W, /#ganttwrap\{position:fixed;inset:0;z-index:200;background:#fff;display:flex;flex-direction:column\}/);
   assert.match(W, /\.gntop\{position:sticky;top:0;z-index:5;background:#fff/);
   assert.match(G, /if\(e\.key==='Escape'\)\{w\.remove\(\);/);
-  // five states, five hues (green / teal / amber / orange / red), the projected end fades instead of striping
+  // five states, five hues (green / teal / amber / orange / red)
   for (const c of ["#2E9E5B", "#1E9CB2", "#F2B01E", "#E8702A", "#E5484D"]) assert.match(W, new RegExp("\\.gntr \\.(gs|gs\\.await|gs\\.earmark|gs\\.tdg|gap)\\{[^}]*" + c));
-  assert.match(W, /\.gntr \.gs\.proj\{-webkit-mask-image:linear-gradient/);
-  assert.doesNotMatch(W, /\.gntr \.gs\.proj\{background:repeating-linear-gradient/);
+  // 11 Oct 2026 (Miguel): solid bars, no fade, no stripes; a projected coverage end reads "~" in the right column
+  assert.doesNotMatch(W, /\.gntr \.gs\.proj\{/);
+  assert.match(G, /'<b>'\+\(r\.untilProj\?'~':''\)\+fmtDateS\(r\.until\)\+'<\/b>'/);
   // tiers divide the list so the eye lands on the ships that need a decision
   assert.match(G, /TIER=\{none:'Nobody aboard, nobody earmarked',crit:'Covered under 2 months',due:'Covered under 4 months',ok:'Covered 4 months or more'\}/);
   assert.match(G, /r\.tier=!r\.until\?'none':\(r\.days<60\?'crit':\(r\.days<120\?'due':'ok'\)\)/);
+});
+
+test("ganttRows says when the coverage end is only projected (the right column prints '~')", () => {
+  const ROT = { sections: [
+    { ship: "Allure", brand: "Royal", crew: [{ name: "A Seat", signOn: "2036-04-29", signOff: "2036-11-29", offSource: "projected", state: "green" }], projections: [] },
+    { ship: "Apex", brand: "Celebrity", crew: [{ name: "B Seat", signOn: "2036-04-29", signOff: "2036-11-29", offSource: "tdg", state: "green" }], projections: [] },
+  ] };
+  const rows = new Function("ROT", fnSrc("ganttRows") + "; return ganttRows();")(ROT);
+  assert.equal(rows.find((r) => r.ship === "Allure").untilProj, true);
+  assert.equal(rows.find((r) => r.ship === "Apex").untilProj, false, "TDG's own sign-off is a fact, no ~");
 });
