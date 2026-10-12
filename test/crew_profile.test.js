@@ -215,3 +215,10 @@ test("the page's documents block reads a contract: expired by the sign-on red, l
   assert.match(h, /Read against a 7-month contract from today, to 2027-05-12/);
   assert.match(h, /P1 · DFA/);
 });
+
+test("the Crew tab opens on the active crew: On board selected by default, on open and after Clear filters (Miguel, 12 Oct 2026)", () => {
+  assert.match(W, /var CREW_DEFAULT_STATUS=\['On board'\];\nvar CF=\{q:'',status:CREW_DEFAULT_STATUS\.slice\(\),/);
+  assert.match(body("async function renderCrew("), /CF\.status=CREW_DEFAULT_STATUS\.slice\(\);/);
+  assert.match(W, /function clearCrewFilters\(\)\{CF\.q='';CF\.status=CREW_DEFAULT_STATUS\.slice\(\);/);
+  assert.doesNotMatch(W, /CF\.status=\[\];CF\.comp=''/, "no path resets the Crew tab to All crew on open");
+});

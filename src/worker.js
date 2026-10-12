@@ -6620,7 +6620,10 @@ function paintDashCost(){
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
-var CF={q:'',status:[],comp:'',client:[],ship:[],sort:'az',rank:[]};
+// The Crew tab opens on the ACTIVE crew (Miguel, 12 Oct 2026: "I want the active crew selected by default when u open the
+// site"; his glossary, 8 Oct: On board = active). "All crew" is one tap away; Clear filters returns to this default.
+var CREW_DEFAULT_STATUS=['On board'];
+var CF={q:'',status:CREW_DEFAULT_STATUS.slice(),comp:'',client:[],ship:[],sort:'az',rank:[]};
 // Calendar dates are read as calendar dates (8 Oct 2026): new Date('YYYY-MM-DD') is UTC midnight, and read with local
 // getters (or against the clock) it shifted a day in the Americas — a birthday a day early, a document "Expired" on its
 // last valid day (the server says expiring). dayNum / dUntil compare the dates only, against the viewer's own today.
@@ -6645,7 +6648,7 @@ function crewMatchesComp(c){
 }
 async function renderCrew(){
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
-  CREW=[];CF.q='';CF.status=[];CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];
+  CREW=[];CF.q='';CF.status=CREW_DEFAULT_STATUS.slice();CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
   try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   $('#view').innerHTML=
@@ -6714,7 +6717,7 @@ async function intelDiscard(id){
   try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,discard:true})});}catch(e){}
   loadIntelReview();intelReviewCount();
 }
-function clearCrewFilters(){CF.q='';CF.status=[];CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];renderCrew();}
+function clearCrewFilters(){CF.q='';CF.status=CREW_DEFAULT_STATUS.slice();CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];renderCrew();}
 function docsModal(id){
   var c=null,i;for(i=0;i<CREW.length;i++){if(CREW[i].agency_id===id){c=CREW[i];break;}}
   if(!c)return;

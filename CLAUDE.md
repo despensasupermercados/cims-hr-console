@@ -425,7 +425,7 @@ the console's grade vs TDG's position, feedback never asked after a contract end
 manual status over TDG's word) — the console never picks — and who did what. Sign-off sends are offered only while a
 contract runs. The status word is `crewStatus`, the crew list's. The statement PDF reads the same schedule
 (`statementContracts`): it printed James Agbada "projected Nov 21" and 163 sea-days while TDG had him off Sep 5 after
-126. Masked: nothing (it is Miguel's own console). No schema change: "Resigned" is not an `end_reason` value — adding
+126. Masked: nothing (it is Miguel's own console). **The Crew tab opens on the active crew** (Miguel, 12 Oct 2026: "I want the active crew selected by default when u open the site"): `CREW_DEFAULT_STATUS = ['On board']` on open, on every return to the tab and on Clear filters; All crew is one tap. No schema change: "Resigned" is not an `end_reason` value — adding
 it is Miguel's call (asked 12 Oct 2026, not answered). Pinned by `test/crew_profile.test.js`.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
