@@ -1743,7 +1743,7 @@ async function rotationSections(env) {
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
-  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes, hiddenRes, dismissRes] = await Promise.all([
+  const [HIST, crewRowsRes, ovRowsRes, rdRes, edsRes, vpdRes, legsRes, openAsg, vesRes, depRes, cntRes, ageRes, snapRes, flagRes, runRes, hiddenRes, dismissRes, noteLogRes] = await Promise.all([
     boardLegs(env),
     env.DB.prepare("SELECT agency_id, first_name, last_name, status, rank_observed, rank_override, vessel_observed, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=0").all(),
     env.DB.prepare("SELECT agency_id, vessel_observed, status, retired, baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override").all(),
@@ -1771,6 +1771,7 @@ async function rotationSections(env) {
     // hidden — said as such, never "not on the roster" (Encina, Serenade).
     env.DB.prepare("SELECT agency_id FROM crew WHERE redacted=1").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT sc, ship_key, dismissed_at FROM earmark_dismiss").all().catch(() => ({ results: [] })), // TDG earmarks Rita rejected (7 Oct 2026)
+    env.DB.prepare("SELECT agency_id, MAX(ts) AS last_ts FROM crew_note_log GROUP BY agency_id").all().catch(() => ({ results: [] })), // the card's note dot counts a note logged in THIS contract (12 Oct 2026)
   ]);
   // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
   // file, or that the count had been flat since 6 July; Rita found it from the outside. A NULL stamp
@@ -2248,6 +2249,9 @@ async function rotationSections(env) {
   ["On board", "On Vacation", "Reserved", "Earmarked", "Inactive", "Not for Rehire", NOT_IN_FILE].forEach(s => counts[s] = crewRows.filter(c => c.status === s && !isShore(c)).length);
   counts.shoreside = shoreside.length; counts.vessels = sections.length; counts.issues = issues.length;
   attachNextAssignments(sections, today); // the seat card's "Next" line (8 Oct 2026), read off the cards above
+  // THE NOTE DOT (Miguel, 12 Oct 2026): the comment, or a dated note (Crew tab) logged since this contract's sign-on.
+  const noteLast = {}; for (const n of ((noteLogRes && noteLogRes.results) || [])) if (n && n.agency_id && n.last_ts) noteLast[n.agency_id] = String(n.last_ts).slice(0, 10);
+  for (const sec of sections) for (const x of [].concat(sec.crew || [], sec.projections || [])) { const k = x && (x.agency_id || x.sc); if (x && !x.hasNote && k && noteLast[k] && x.signOn && noteLast[k] >= String(x.signOn).slice(0, 10)) x.hasNote = true; }
   // WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, earmark_bench.js): per ship with a crew aboard, the seafarers home 6 weeks
   // to 6 months on the day the next earmark would start (the date the one-click earmark uses), most rested first.
   // Read off what this function already holds — no extra round trip (§12).
@@ -2346,7 +2350,7 @@ async function apiRotationCrew(env, url) {
   // Ensures together, then all reads as one wave. Same statements, same output, same 404.
   await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env)]);
   const id = url.searchParams.get("id");
-  const [c, legsRes, r, editRes, HIST, snap, dov] = await Promise.all([
+  const [c, legsRes, r, editRes, HIST, snap, dov, notesRes] = await Promise.all([
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first(),
@@ -2354,6 +2358,7 @@ async function apiRotationCrew(env, url) {
     boardLegs(env), // the ONE schedule: the file's current leg for this crew, with its resolved sign-off (7 Oct 2026)
     env.DB.prepare("SELECT status, raw_status, vessel, embarked_at, debarked_at, run_at FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override WHERE agency_id=?").bind(id).first().catch(() => null), // the modal's document tags (8 Oct 2026)
+    env.DB.prepare("SELECT id, ts, text FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(() => ({ results: [] })), // the contract's notes (12 Oct 2026)
   ]);
   if (!c) return json({ error: "not_found" }, 404);
   // Every document as the modal tags it (Miguel, 8 Oct 2026): the manual entry wins field by field; expiring = 30 days.
@@ -2399,7 +2404,7 @@ async function apiRotationCrew(env, url) {
       sign_off_is_projected: !leg.act_off && !(hasEdit && e.sign_off),
     };
   });
-  return json({ crew: c, legs, resolved, file, docs, ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
+  return json({ crew: c, legs, resolved, file, docs, notes: (notesRes && notesRes.results) || [], ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
 }
 async function apiNote(request, env, session) {
   const b = await request.json().catch(() => ({}));
@@ -5773,6 +5778,14 @@ function docTags(docs,son,soff){if(!docs||!docs.length)return '';son=son?String(
   var bad=docs.filter(function(d){return d.status==='expired'||(d.status==='missing'&&d.required)||byOn(d);}),soon=docs.filter(function(d){return d.status==='expiring'&&!byOn(d);}),lap=docs.filter(lapse),ok=docs.filter(function(d){return (d.status==='ok'&&!byOn(d)&&!lapse(d))||(d.status==='missing'&&!d.required);});
   var row=function(lab,arr,cls){return arr.length?('<div class=docrow><span class=dock>'+lab+'</span><span class=docs>'+arr.map(function(d){return t(d,d.status==='missing'?'mis':(byOn(d)?'bad':cls));}).join('')+'</span></div>'):'';};
   return '<div class=zlabel>Documents <span class=zcount>'+docs.filter(function(d){return d.status==='ok'&&!byOn(d)&&!lapse(d);}).length+' of '+docs.length+' valid'+(soff?' for this contract':'')+'</span></div><div class=docblock>'+row('Expired',bad,'bad')+row('Within 30 days',soon,'due')+row('Lapses during this contract',lap,'due')+row('Valid',ok,'on')+'</div>';}
+// NOTES OF THIS CONTRACT (Miguel, 12 Oct 2026: "put those notes right below the sign-off workflow ... the notes for this current
+// contract ... we don't need all the notes over the history, we have them in the crew tab"): the dated notes logged since this
+// contract's sign-on (to its sign-off when it has ended), newest first. The full history stays on the Crew tab.
+function contractNotes(notes,son,soff){son=son?String(son).slice(0,10):'';soff=soff?String(soff).slice(0,10):'';var today=new Date().toISOString().slice(0,10);var end=(soff&&soff<today)?soff:'';
+  var list=(notes||[]).filter(function(n){var d=String(n.ts||'').slice(0,10);return d&&(!son||d>=son)&&(!end||d<=end);});
+  var head='<div class=zlabel>Notes <span class=zcount>'+(son?('this contract &middot; since '+escHtml(fmtDateS(son))):'this contract')+'</span></div>';
+  if(!list.length)return head+'<div class=ecnone>No notes logged in this contract. Earlier notes are on the Crew tab.</div>';
+  return head+'<div class=ecnotes>'+list.map(function(n){return '<div class=ecnote><span class=ecnd>'+escHtml(fmtDateS(String(n.ts).slice(0,10)))+'</span><span class=ecnt>'+escHtml(n.text||'')+'</span></div>';}).join('')+'</div>';}
 function niceShip(s){s=String(s||'').replace(/^\\s*M\\/?V\\s+/i,'').toLowerCase();return s.replace(/\\b[a-z]/g,function(c){return c.toUpperCase();});}
 function fmtDateS(iso){if(!iso)return '';var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso).slice(0,10).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo||!parseInt(p[2],10))return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 // The seat chip's ONE number (Miguel, 7 Oct 2026: "this should say 3M 22 days"): calendar months + days between two
@@ -5816,17 +5829,30 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
   // never "(Azamara 5)" on a Celebrity hull.
   var _brand=(function(){var b=null;(ROT.sections||[]).forEach(function(s){if(s.ship===e.ship)b=s.brand;});return b;})();
   var offWord=function(w){w=String(w||'');if(/^projected/i.test(w))return 'projected · '+(_brand==='Azamara'?'5':'7')+' months after embark · until TDG or you set it';return w;};
-  var fileLine=F?('<div class=ecfile><div class=ecfrow><span class=ecfk>TDG file'+(F.at?(' '+escHtml(F.at)):'')+'</span><span class=ecfv>'+escHtml(F.status||F.raw_status||'no status')+(F.ship?(' &middot; '+escHtml(niceShip(F.ship))):'')+(F.embarked_at?(' &middot; embarked '+escHtml(fmtDateS(F.embarked_at))):' &middot; no embark date')+(F.debarked_at?(' &middot; debarked '+escHtml(fmtDateS(F.debarked_at))):'')+'</span></div>'
-    +(fc?('<div class=ecfrow><span class=ecfk>Sign-off shown</span><span class=ecfv><b>'+escHtml(fc.sign_off?fmtDateS(fc.sign_off):'—')+'</b> &middot; '+escHtml(offWord(fc.off_from))+(fc.reliever&&fc.reliever.name?(' ('+escHtml(fc.reliever.name)+')'):'')+'</span></div>'):'')+'</div>'):'';
+  var ecft=function(k,v,sub,cls){return '<div class="ecft'+(cls?' '+cls:'')+'"><span class=ecfk>'+k+'</span><b>'+v+'</b>'+(sub?('<small>'+sub+'</small>'):'')+'</div>';};
+  var fileLine=F?('<div class=ecfile><div class=ecfhd>From the TDG file'+(F.at?(' of '+escHtml(fmtDateS(F.at))):'')+'</div><div class=ecfgrid>'
+    +ecft('Status',escHtml(F.status||F.raw_status||'no status'))
+    +ecft('Ship',F.ship?escHtml(niceShip(F.ship)):'—')
+    +ecft('Embarked',F.embarked_at?escHtml(fmtDateS(F.embarked_at)):'no date')
+    +(F.debarked_at?ecft('Debarked',escHtml(fmtDateS(F.debarked_at))):'')
+    +(fc?ecft('Sign-off shown',escHtml(fc.sign_off?fmtDateS(fc.sign_off):'—'),escHtml(offWord(fc.off_from))+(fc.reliever&&fc.reliever.name?(' &middot; '+escHtml(fc.reliever.name)):''),'off'):'')
+    +'</div></div>'):'';
   var fld=function(lab,inp){return '<div><label>'+lab+'</label>'+inp+'</div>';};
   var h='<div class=modcard><style>'
    +'#rotmodal .modcard{max-width:720px;padding:24px 26px 22px}'
    +'#rotmodal .cname{font-size:18px;line-height:1.25}#rotmodal .modhd .csub{margin-top:4px}'
-   +'#rotmodal .ecfile{margin-top:14px;background:#F3F6FB;border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;gap:5px}'
+   +'#rotmodal .ecfile{margin-top:14px;background:#F3F6FB;border-radius:12px;padding:12px 14px 14px}'
+   +'#rotmodal .ecfhd{font:700 10px "DM Sans";letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-bottom:10px}'
+   +'#rotmodal .ecfgrid{display:grid;grid-template-columns:minmax(90px,.7fr) minmax(170px,1.6fr) minmax(110px,.9fr) minmax(110px,.9fr);gap:10px 18px}'
+   +'@media (max-width:560px){#rotmodal .ecfgrid{grid-template-columns:1fr 1fr}}'
+   +'#rotmodal .ecft{display:flex;flex-direction:column;gap:2px;min-width:0}#rotmodal .ecft .ecfk{flex:none;padding:0}#rotmodal .ecft b{font-size:13.5px;line-height:1.3;color:var(--navy);font-weight:700}'
+   +'#rotmodal .ecft small{font-size:11.5px;line-height:1.35;color:#5B6B7F}#rotmodal .ecft.off{grid-column:1/-1;padding-top:10px;border-top:1px solid #DDE5EF;flex-direction:row;flex-wrap:wrap;align-items:baseline;column-gap:10px}#rotmodal .ecft.off .ecfk{flex:0 0 100%}#rotmodal .ecft.off small{font-size:12.5px}'
    +'#rotmodal .ecfrow{display:flex;gap:10px;align-items:baseline;font-size:12.5px;line-height:1.45;color:var(--navy)}'
    +'#rotmodal .ecfk{flex:0 0 118px;font:700 10px "DM Sans";letter-spacing:.08em;text-transform:uppercase;color:var(--mut);padding-top:2px}'
    +'#rotmodal .ecfv{flex:1 1 0;min-width:0;color:#374151}#rotmodal .ecfv b{color:var(--navy)}'
    +'#rotmodal .ecgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-top:18px}'
+   +'#rotmodal .ecnotes{display:flex;flex-direction:column;gap:8px}#rotmodal .ecnote{display:grid;grid-template-columns:96px 1fr;gap:12px;font-size:13px;line-height:1.45;padding:10px 12px;background:#FFFBEB;border:1px solid #F5E2A6;border-radius:10px}'
+   +'#rotmodal .ecnd{font-weight:700;color:#8A6A12;white-space:nowrap;font-variant-numeric:tabular-nums}#rotmodal .ecnt{color:var(--navy);white-space:pre-wrap;overflow-wrap:anywhere}#rotmodal .ecnone{font-size:12.5px;color:var(--mut)}'
    +'#rotmodal .ecgrid>div{display:flex;flex-direction:column;justify-content:flex-end;min-width:0}'
    +'#rotmodal .ecgrid label{display:block;font:600 11.5px "DM Sans";letter-spacing:.03em;color:var(--mut);margin:0 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
    +'#rotmodal .ecgrid select,#rotmodal .ecgrid input{width:100%;height:42px;padding:0 12px;font-size:13.5px;color:var(--navy);box-sizing:border-box;border-radius:10px}'
@@ -5866,6 +5892,7 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'<div class=zlabel>Comment</div><textarea id=cmt placeholder="Note for this crew…">'+note+'</textarea>'
    +(legs?'<div class=zlabel>Contract history <span class=zcount>'+(d.legs||[]).length+' contract'+((d.legs||[]).length===1?'':'s')+'</span></div><div class=echist><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table></div>':'')
    +'<div class=zlabel>Sign-off workflow</div><div class=ecwf><button class="btn ghost" onclick="sendSignoffInstructions(\\''+id+'\\','+seq+')">Send instructions</button><button class="btn ghost" onclick="sendSignoffLink(\\''+id+'\\','+seq+')">Send sign-off link</button><button class="btn ghost" onclick="sendReviewInvite(\\''+id+'\\','+seq+')">Send review invite</button></div>'
+   +contractNotes(d.notes,e.signOn,e.signOff)
    +'<div class=ecfoot><button class=echide onclick="hideCrewFromBoard(\\''+id+'\\')" title="Remove this crew card from all rosters (reversible)">Hide crew card</button><span style="display:flex;align-items:center;gap:8px"><span id=cmtmsg class=csub></span><button class="btn ghost" onclick="closeRotModal()">Cancel</button><button class="btn green" onclick="saveContract(\\''+id+'\\','+seq+')">Save</button></span></div></div>';
   var w=document.createElement('div');w.id='rotmodal';w.className='modwrap';w.innerHTML=h;
   w.onclick=function(ev){if(ev.target===w)closeRotModal();};

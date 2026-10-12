@@ -340,6 +340,16 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   signOff)`, relief panel `docBlock` from its date inputs): expired BY the sign-on is Expired, valid at sign-on but gone
   before the sign-off is a fourth row **"Lapses during this contract"** (amber), "N of M valid for this contract".
   Pinned by `test/card_docs.test.js`, `test/board_cards.test.js`.
+- **The contract modal, 12 Oct 2026** (Miguel, on Valderrama: "put those notes right below the sign-off workflow ... the notes
+  for this current contract ... we don't need all the notes over the history ... we have them in the crew tab"; and on the
+  file strip: "I love this information .. just organized it better"). (1) **Notes · this contract**, right below the Sign-off
+  workflow (`contractNotes(d.notes, signOn, signOff)`): the dated Crew-tab notes (`crew_note_log`, now returned by
+  `/api/rotation/crew` as `notes`) logged since this contract's sign-on (to its sign-off once it has ended), newest first; none
+  = "No notes logged in this contract. Earlier notes are on the Crew tab." (2) **The card's note dot** (`hasNote`) was the
+  Comment box only (`crew_ready.note`, one undated text per crew); it now also lights for a dated note logged on or after the
+  card's sign-on — one grouped read (`MAX(ts) ... GROUP BY agency_id`) in the board's wave (§12). (3) **The TDG strip** is a
+  labelled grid: "From the TDG file of <date>", then Status · Ship · Embarked (· Debarked), then a full-width "Sign-off shown"
+  row with the date bold and its source beside it. Pinned by `test/card_docs.test.js`.
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
