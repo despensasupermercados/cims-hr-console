@@ -37,7 +37,7 @@ test("static: the card's status line names the hull the file has them on, the bo
   assert.match(W, /return ''; \/\/ the file's word now sits under the name/, "regNote's default restatement is gone");
   assert.match(W, /docs: \(a\.sign_on && docsRaw\[a\.sc\]\) \? contractDocBadge\(docsRaw\[a\.sc\], a\.sign_on, a\.planned_sign_off \|\| null\) : \(docsBy\[a\.sc\] \|\| null\)/, "an earmark's chips are read against its own contract");
   assert.match(W, /const docs = documentLines\(dmerged, TODAY\(\), 30\);/, "apiRotationCrew: the 30-day window");
-  assert.match(W, /return json\(\{ crew: c, legs, resolved, file, docs, ready:/);
+  assert.match(W, /return json\(\{ crew: c, legs, resolved, file, docs, notes: \(notesRes && notesRes\.results\) \|\| \[\], ready:/);
   assert.match(W, /\+docTags\(d\.docs,e\.signOn,e\.signOff\)\s*\n\s*\+'<div class=zlabel>Comment<\/div>/, "the modal: Documents right before Comment");
   assert.match(W, /function docTags\(docs,son,soff\)\{[\s\S]*row\('Expired',bad,'bad'\)\+row\('Within 30 days',soon,'due'\)\+row\('Lapses during this contract',lap,'due'\)\+row\('Valid',ok,'on'\)/);
   const A = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
@@ -70,4 +70,27 @@ test("Documents block reads the contract: 'Lapses during this contract' between 
   assert.match(h, /1 of 3 valid for this contract/);
   const plain = docTags(docs);
   assert.doesNotMatch(plain, /Lapses during this contract/, "no contract dates: the three rows as before");
+});
+
+test("Notes of THIS contract under the sign-off workflow (Miguel, 12 Oct 2026); the card's dot counts a note logged since sign-on", () => {
+  const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const i = src.indexOf("function contractNotes("); const fn = src.slice(i, src.indexOf("\n", src.indexOf("return head+'<div class=ecnotes>'", i)) + 1);
+  const contractNotes = new Function("escHtml", "fmtDateS", fn + "; return contractNotes;")((s) => String(s), (s) => String(s));
+  const notes = [
+    { id: 3, ts: "2036-09-01T10:00:00Z", text: "Asked for early sign-off" },
+    { id: 2, ts: "2036-03-02T10:00:00Z", text: "Joined fine" },
+    { id: 1, ts: "2035-11-01T10:00:00Z", text: "Previous contract note" },
+  ];
+  const h = contractNotes(notes, "2036-03-01", "2036-10-01");
+  assert.match(h, /Asked for early sign-off/);
+  assert.match(h, /Joined fine/);
+  assert.doesNotMatch(h, /Previous contract note/, "a note from before this contract's sign-on stays on the Crew tab");
+  assert.ok(h.indexOf("Asked for early") < h.indexOf("Joined fine"), "newest first");
+  assert.match(contractNotes([], "2036-03-01"), /No notes logged in this contract/);
+  assert.match(contractNotes([{ ts: "2036-04-01T00:00:00Z", text: "<b>x</b>" }], "2036-03-01", "2036-10-01"), /<span class=ecnt><b>x<\/b><\/span>/, "rendered through escHtml (stubbed here)");
+  // placement: right below the sign-off workflow buttons, above the footer
+  assert.match(src, /Send review invite<\/button><\/div>'\n\s+\+contractNotes\(d\.notes,e\.signOn,e\.signOff\)\n\s+\+'<div class=ecfoot>/);
+  // the board's dot: one grouped read in the wave, then a note on or after the card's sign-on lights it
+  assert.match(src, /SELECT agency_id, MAX\(ts\) AS last_ts FROM crew_note_log GROUP BY agency_id/);
+  assert.match(src, /noteLast\[k\] >= String\(x\.signOn\)\.slice\(0, 10\)\) x\.hasNote = true;/);
 });
