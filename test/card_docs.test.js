@@ -91,7 +91,7 @@ test("Notes of THIS contract under the sign-off workflow (Miguel, 12 Oct 2026); 
   // placement: right below the sign-off workflow buttons, above the footer
   assert.match(src, /Send review invite<\/button><\/div>'\n\s+\+contractNotes\(d\.notes,e\.signOn,e\.signOff\)\n\s+\+'<div class=ecfoot>/);
   // the board's dot: one grouped read in the wave, then a note on or after the card's sign-on lights it
-  assert.match(src, /SELECT agency_id, MAX\(ts\) AS last_ts FROM crew_note_log GROUP BY agency_id/);
+  assert.match(src, /SELECT agency_id, MAX\(ts\) AS last_ts FROM crew_note_log WHERE archived_at IS NULL GROUP BY agency_id/);
   assert.match(src, /noteLast\[k\] >= String\(x\.signOn\)\.slice\(0, 10\)\) x\.hasNote = true;/);
 });
 

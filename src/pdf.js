@@ -8,9 +8,9 @@
 //
 // Coordinates: PDF origin is bottom-left; this API works top-down via a cursor.
 
-const PAGE_W = 612;   // US Letter, 72 dpi points
-const PAGE_H = 792;
-const MARGIN = 54;
+export const PAGE_W = 612;   // US Letter, 72 dpi points
+export const PAGE_H = 792;
+export const MARGIN = 54;
 
 // WinAnsi-safe: keep bytes 0..255, replace anything higher with '?'.
 function latin1(s) {
@@ -79,6 +79,35 @@ export class Pdf {
     return this;
   }
   gap(h = 8) { this.y -= h; return this; }
+
+  // ---- absolute drawing, top-down coordinates from the page's top-left (12 Oct 2026, the statement redesign) ----
+  get top() { return PAGE_H - this.y; }
+  setTop(t) { this.y = PAGE_H - t; return this; }
+  // A filled rectangle.
+  rect(x, top, w, h, color) {
+    this.cur.push(`${color[0]} ${color[1]} ${color[2]} rg ${x} ${PAGE_H - top - h} ${w} ${h} re f\n`);
+    return this;
+  }
+  // A stroked rectangle (a box border).
+  frame(x, top, w, h, color = [0.89, 0.91, 0.94], lw = 0.75) {
+    this.cur.push(`${color[0]} ${color[1]} ${color[2]} RG ${lw} w ${x} ${PAGE_H - top - h} ${w} ${h} re S\n`);
+    return this;
+  }
+  // A horizontal line.
+  hline(x1, x2, top, color = [0.89, 0.91, 0.94], lw = 0.75) {
+    this.cur.push(`${color[0]} ${color[1]} ${color[2]} RG ${lw} w ${x1} ${PAGE_H - top} m ${x2} ${PAGE_H - top} l S\n`);
+    return this;
+  }
+  // One line of text whose top sits at \`top\`; \`spacing\` is extra space between letters (Tc), in points.
+  textAt(str, x, top, { size = 10, bold = false, color = null, spacing = 0 } = {}) {
+    const f = bold ? "F2" : "F1";
+    const col = color ? `${color[0]} ${color[1]} ${color[2]} rg ` : "0 0 0 rg ";
+    this.cur.push(`${col}BT /${f} ${size} Tf ${spacing} Tc ${x} ${PAGE_H - top - size * 0.8} Td (${esc(str)}) Tj 0 Tc ET\n`);
+    return this;
+  }
+  // Rough Helvetica width (no font metrics in a hand-rolled writer): enough to right-align a short label.
+  static width(str, size, bold = false) { let w = 0; for (const ch of String(str)) w += /[il.,:;'| ]/.test(ch) ? 0.28 : /[mwMW]/.test(ch) ? 0.83 : /[A-Z0-9]/.test(ch) ? 0.64 : 0.52; return w * size * (bold ? 1.05 : 1); }
+  newPageIfBelow(top) { if (this.top > top) { this._newPage(); return true; } return false; }
 
   // Serialize to a Uint8Array (valid PDF with xref).
   build() {

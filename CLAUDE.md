@@ -428,6 +428,32 @@ contract runs. The status word is `crewStatus`, the crew list's. The statement P
 126. Masked: nothing (it is Miguel's own console). **Who he relieved and who relieves him** (same evening: "show who was before he took over and who is coming after .. in the timeline"): the contract's bar names, at its two ends, the contract on the same hull whose sign-off is nearest this sign-on (±`HANDOVER_DAYS` = 45) and the first contract or earmark starting after (TDG's undated Earmarked row only when nothing dated follows), each linked to that profile (`handovers`, `pfHandover`); a running contract with nobody after reads "No reliever planned yet"; a missing predecessor reads "Before: not on record" (the file keeps one row per crew — a predecessor who moved on may have no leg left). **The Crew tab opens on the active crew** (Miguel, 12 Oct 2026: "I want the active crew selected by default when u open the site"): `CREW_DEFAULT_STATUS = ['On board']` on open, on every return to the tab and on Clear filters; All crew is one tap. No schema change: "Resigned" is not an `end_reason` value — adding
 it is Miguel's call (asked 12 Oct 2026, not answered). Pinned by `test/crew_profile.test.js`.
 
+**The windows, the statement and its email** (Miguel, 12 Oct 2026, evening: "review pixel by pixel .. the edit crew pop window
+is not really well design .. the notes .. the same .. the pdf .. the email statement CC rita"; mock-ups approved: "1. archive.
+2. yes .. 3. yes .. go"; the rendered proofs under `docs/mockups/proofs_20261012/`). Pinned by `test/crew_windows.test.js`.
+- **Notes are archived, never deleted.** `crew_note_log` gained `created_by`, `archived_at`, `archived_by`
+  (`migrations/0020_note_archive.sql`, the same ALTERs in `ensureCrewExtras`, one wave). `/api/crew/notes` `archive` /
+  `restore` (the old `delete` archives too); every reader skips archived rows (crew list dot, board card dot, contract
+  modal, profile feed); the Notes window shows them struck through with Restore. A note's author is `created_by`, else
+  the activity row of the same second.
+- **The Notes window** is one stream (notes, field intel, feedback, shipboard reviews), newest first, grouped by the
+  contract it falls in, filter chips, the composer on top.
+- **Edit crew** in sections (Person, Contact, Status & ship, Documents, Bonus). Every field starts as TDG's value; a field
+  with a manual entry shows TDG's value under it and **Reset to TDG**, which sends "" (the manual entry CLEARED, never TDG's
+  value pinned as one). No manual status / ship = "TDG: <word>". Save counts the changes; the baseline is disabled for
+  anyone but Miguel and Rita (`canMoney` on `/api/crew/get`, the server still strips it — §1). `/api/crew/get` returns `tdg`
+  (the row as the import wrote it) and `override`.
+- **The statement email** (`hr.statement.v2`, `src/emails/hr.statement.v2.js`, canonical `cims-mast.js` letterhead) goes to
+  the crew, **CC Rita and reply-to Rita** (`deployCc`), once per crew per `STATEMENT_RESEND_MIN` = 10 minutes
+  (`already_sent` unless the page confirms a resend; Miguel's click sent Ian Alega's statement three times in three
+  seconds on 12 Oct 2026). The page names the recipient before sending and disables the button while it sends.
+- **The statement PDF** (`composeStatement`, `pdf.js` gained boxes, lines and letter spacing): the CIMS band, the crew and
+  last ship, four numbers, the contracts with TDG's dates, every document with number / issue / expiry / issuer, the
+  bonus standing, Rita as the contact on every page. **Both the PDF and the email are crew-facing: never notes, intel,
+  feedback, the To-check rows, the console's status word or its grade beside TDG's position.**
+- Profile pixel pass: the four numbers sit in the header's right half, the career card has its gap, the feedback buttons
+  read "Ray · Orders ✓", the sign-off note "Ended <date>".
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

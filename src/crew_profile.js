@@ -50,7 +50,7 @@ export function whoOf(u) {
   return local ? local.charAt(0).toUpperCase() + local.slice(1).toLowerCase() : s;
 }
 const ACTIONS = {
-  crew_note_log: "Note added", crew_note: "Comment saved", crew_note_delete: "Note deleted",
+  crew_note_log: "Note added", crew_note: "Comment saved", crew_note_delete: "Note deleted", crew_note_archive: "Note archived", crew_note_restore: "Note restored",
   contract_edit: "Contract edited", crew_edit: "Crew record edited", crew_add: "Crew added",
   intel_auto: "Field intel filed", intel_file: "Field intel filed", intel_edit: "Field intel edited",
   feedback_score: "Feedback entered", feedback_request: "Feedback requested",
@@ -203,7 +203,9 @@ export function buildCrewProfile(input) {
     const a = A(I.activity).find((x) => (x.action === "crew_note_log" || x.action === "crew_note") && Math.abs(Date.parse(x.at) - t) <= 5000);
     return a ? whoOf(a.user_id) : null;
   };
-  for (const n of A(I.notes)) if (n && String(n.text || "").trim()) feed.push({ at: n.ts, kind: "note", src: "typed", text: String(n.text), who: authorAt(n.ts) });
+  // An archived note leaves the feed (it stays in the Notes window, struck through, with Restore — 12 Oct 2026).
+  const liveNotes = A(I.notes).filter((n) => n && !n.archived_at);
+  for (const n of liveNotes) if (String(n.text || "").trim()) feed.push({ at: n.ts, kind: "note", src: "typed", text: String(n.text), who: n.created_by ? whoOf(n.created_by) : authorAt(n.ts) });
   const comment = I.ready && String(I.ready.note || "").trim();
   if (comment && !A(I.notes).some((n) => String(n.text || "").trim() === comment)) feed.push({ at: I.ready.updated_at, kind: "comment", src: "typed", text: comment, who: authorAt(I.ready.updated_at) });
   for (const x of A(I.intel)) feed.push({ at: x.ts, kind: "intel", src: "intel", text: String(x.summary || ""), parts: intelParts(x.summary), who: x.reporter || null, via: x.source || "email", confidence: x.confidence || null, contractNo: x.contract_no != null ? Number(x.contract_no) : null });

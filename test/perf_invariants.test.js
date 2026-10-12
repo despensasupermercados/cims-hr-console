@@ -142,7 +142,7 @@ test("the board's cold-start guards are two round trips at most, not one per sta
   assert.match(k, /await Promise\.all\(\[\s*env\.DB\.prepare\("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT"\)\.run\(\)\.catch/, "the ALTER rides beside the read");
   const c = body("async function ensureCrewExtrasImpl(");
   assert.match(c, /await env\.DB\.batch\(\[/, "crew_override + crew_note_log + the MAN agency row are one batch");
-  assert.equal((c.match(/\.run\(\)/g) || []).length, 1, "only the retired-column ALTER runs alone");
+  assert.equal((c.match(/\.run\(\)/g) || []).length, 1, "the ALTERs (retired tag + the note archive columns, 12 Oct 2026) leave together in one wave");
   const r = body("async function ensureReadyImpl(");
   assert.match(r, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS crew_ready/, "CREATE and legacy ALTER leave together");
   const e = body("async function ensureContractEditImpl(");
