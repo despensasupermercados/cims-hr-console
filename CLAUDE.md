@@ -349,7 +349,11 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   Comment box only (`crew_ready.note`, one undated text per crew); it now also lights for a dated note logged on or after the
   card's sign-on — one grouped read (`MAX(ts) ... GROUP BY agency_id`) in the board's wave (§12). (3) **The TDG strip** is a
   labelled grid: "From the TDG file of <date>", then Status · Ship · Embarked (· Debarked), then a full-width "Sign-off shown"
-  row with the date bold and its source beside it. Pinned by `test/card_docs.test.js`.
+  row with the date bold and its source beside it. Pinned by `test/card_docs.test.js`. (4) **Nothing said is lost** (Miguel,
+  same day: "absolutely yes .. I dont wanna lose the notes"): `apiNote` keeps a CHANGED, non-empty Comment as a dated
+  `crew_note_log` row in the same batch as the box (same text again or an empty box logs nothing; the box shows what Rita
+  left in it). The 6 comments already saved were copied into the log on 12 Oct 2026, each dated by its own
+  `crew_ready.updated_at` (`activity_log` `act_comment_backfill_20261012`; `crew_ready` untouched).
 - **Update TG is gone** (Miguel, 8 Oct 2026: "remove it"). The 17 Aug 2026 per-ship digest of board changes to Joy never
   sent once (`TG_NOTIFY` was never set; 240 changes had queued, `tg_update_run` empty). The import review tells Joy row by
   row instead. Removed: the button, its page code, `/api/tg/*`, `src/tg_update.js`, `src/tg_collect.js` and their tests.
