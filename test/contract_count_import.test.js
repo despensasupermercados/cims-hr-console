@@ -205,8 +205,12 @@ test("the page labels the two counts apart: completed (grade) vs bonus count (co
   const src = readFileSync(SRC, "utf-8");
   // Before this change the crew card printed the CONSECUTIVE bonus count under the label
   // "completed contract(s)" — a crew reset by a gate read as having completed fewer contracts.
-  assert.match(src, /\(bz\.contracts!=null\?bz\.contracts:0\)\+' completed contract\(s\) '\+ctSrc\(bz\)/);
-  assert.match(src, /tile\(\(bz\.count!=null\?bz\.count:0\),'Bonus count \(consecutive\)'\)/);
+  // 12 Oct 2026 (crew profile A+): the profile's number row keeps the two apart, each tile with its source — the
+  // completed count is TDG's (+ finished since), else the bonus route's cumulative number; the bonus count is the
+  // consecutive one, read from the bonus route only.
+  assert.match(src, /var cnN=CN&&CN\.n!=null\?CN\.n:\(bz&&bz\.contracts!=null\?bz\.contracts:0\);/);
+  assert.match(src, /pfNum\(cnN,'Completed contracts',cnSrc\)/);
+  assert.match(src, /pfNum\(bz&&!bz\.error&&bz\.count!=null\?bz\.count:'—','Bonus count \(consecutive\)'/);
   assert.match(src, /d\.rank\+' \('\+d\.contracts\+' completed '\+ctSrc\(d\)\+'\) · Bonus count <b>'\+d\.count/);
   assert.match(src, /function ctSrc\(x\)/);
   assert.match(src, /date-derived, count file not loaded/, "a missing count file is said, in amber, not hidden");

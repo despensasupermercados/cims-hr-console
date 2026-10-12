@@ -83,6 +83,8 @@ test("UTC basis is used by exactly these functions", () => {
     // 2026-10-07: a TDG earmark with no card becomes a console card at the registry Apply — the same path and
     // day basis as a drop (createProjection), so its default dates land on the board's day.
     "createEarmarkCard",
+    // 2026-10-12: the statement PDF's contract table and sea-days read the schedule on the board's day (statementContracts).
+    "gatherStatement",
     "loadFeedbackState", "rotationSections",
   ], "a function changed its date basis to UTC (or stopped using it) — was that deliberate?");
 });

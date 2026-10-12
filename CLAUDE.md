@@ -406,6 +406,28 @@ crew. **Inactive** = has sailed with us, no ship, NOT part of the rotation until
   status list and Maria carry both. On 8 Oct data: De Leon (DG3 shoreside) → Reserved, Sison → Not for Rehire,
   nothing else changed.
 
+## 10g. THE CREW PROFILE COLLECTS EVERYTHING, EACH VALUE WITH ITS SOURCE — Miguel, 12 Oct 2026
+"lets start by showing the right data from the crew .. is where all the data should be collected from the crew .. coz is
+the crew tab"; then, of three mock-ups, "I like A .. but add few things missing from the other 2 versions" (A+, artifact
+GTGkBnj6Hvg3ki3a1zFcDk). `apiCrewOne` reads every table that holds something on one seafarer in ONE wave (§12) — crew +
+override, the kept TDG row, the ONE schedule (`boardLegs`), the Counter (history), Rita's contract edits, the count file,
+notes, the Comment + readiness, field intel, feedback (request2/response2, superseded kept), shipboard reviews, cards,
+emails to Joy, TDG earmarks removed, status changes per upload (`sync_conflict`), travel (by name, "Last, First"),
+the activity log, sign-off instructions/link sends — and `buildCrewProfile` (`src/crew_profile.js`, pure) turns them
+into the page: the header with TDG's own row (and its age), a decision band when the crew is out of the rotation or a
+contract ended early (> `EARLY_DAYS` = 21 before the plan), the numbers each with a source, the career line (bars, the
+planned end dashed, a pin per note / intel / feedback, today), the last contract with EVERY date and its source (TDG's
+shown, Rita's agrees or differs, the Counter's struck as history), readiness, sign-off emails, travel, what people said
+(Ray / Rolando / Dexter / ship review slots + the feed; a note's author is the activity row of the same second — the
+note table has no author), status history, documents (number, issuer, issue, expiry) read against the running
+contract else a 7-month one from today, rotation, **To check** (why a contract ended early when nothing records it,
+the console's grade vs TDG's position, feedback never asked after a contract ended, the name-only TDG id bridge, a
+manual status over TDG's word) — the console never picks — and who did what. Sign-off sends are offered only while a
+contract runs. The status word is `crewStatus`, the crew list's. The statement PDF reads the same schedule
+(`statementContracts`): it printed James Agbada "projected Nov 21" and 163 sea-days while TDG had him off Sep 5 after
+126. Masked: nothing (it is Miguel's own console). No schema change: "Resigned" is not an `end_reason` value — adding
+it is Miguel's call (asked 12 Oct 2026, not answered). Pinned by `test/crew_profile.test.js`.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

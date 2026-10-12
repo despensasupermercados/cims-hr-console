@@ -27,6 +27,7 @@ import { contractLedgerRow, psRank, psSalary } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts, completedSince } from "./contract_count.js";
 import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet } from "./crew_status.js";
+import { buildCrewProfile, statementContracts } from "./crew_profile.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
@@ -1571,23 +1572,58 @@ async function apiCrew(env, url) {
 
 async function apiCrewOne(env, url) {
   const id = url.searchParams.get("id");
-  // PERF (2026-09): opening a crew card was 4 sequential Worker->D1 round trips. Every read is keyed
-  // by the same agency_id, so they fire as ONE wave after the (memoized) ensures. Same statements,
-  // same output, same 404.
-  await Promise.all([ensureKeyman(env), ensureCrewExtras(env)]);
-  const [row, ov, ctRes, dw, rsRow] = await Promise.all([
-    env.DB.prepare("SELECT * FROM crew WHERE agency_id = ?").bind(id).first(),
+  // THE CREW PROFILE (Miguel, 12 Oct 2026: "lets start by showing the right data from the crew .. is where all the
+  // data should be collected"): every table that holds something on this seafarer, read in ONE wave (§12) and
+  // turned into the page's model by the pure buildCrewProfile (src/crew_profile.js). The contracts are the ONE
+  // schedule (boardLegs: TDG's embark/debark first, the Counter as history, §10d) — the profile used to read the
+  // Counter alone and showed James Agbada "OFF in 39 d · Nov 21" four weeks after TDG had him off on Sep 5.
+  // A table an older database lacks reads as empty (.catch), never as a failed page. `contracts` (the Counter
+  // rows, seq-keyed) stays for the sign-off buttons and the CSV, which address a Counter position.
+  await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
+  const today = TODAY();
+  const none = () => ({ results: [] });
+  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes] = await Promise.all([
+    env.DB.prepare("SELECT crew.*, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE crew.agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
-    env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
-    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(MIN(COALESCE(act_off,proj_off),date('now')))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND MIN(COALESCE(act_off,proj_off),date('now'))>sign_on").bind(id).first(),
-    env.DB.prepare("SELECT vessel FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
+    env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
+    env.DB.prepare("SELECT * FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
+    boardLegs(env), // the ONE schedule (§11)
+    env.DB.prepare("SELECT * FROM contract_edit WHERE sc=?").bind(id).all().catch(none),
+    env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    env.DB.prepare("SELECT id, ts, text FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT * FROM crew_ready WHERE agency_id=?").bind(id).first().catch(() => null),
+    env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT r.role, r.status, r.requested_at FROM feedback_request2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=?").bind(id).all().catch(none),
+    env.DB.prepare("SELECT p.role, p.answers_json, p.submitted_at, p.superseded_at FROM feedback_response2 p JOIN crew c ON c.id = p.crew_id WHERE c.agency_id=? ORDER BY p.submitted_at DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT ship, contract_signon, contract_signoff, sent_at, status, created_at FROM sbm_review_request WHERE agency_id=?").bind(id).all().catch(none),
+    env.DB.prepare("SELECT q.ship, r.rating, r.q_final, r.submitted_at FROM sbm_review_response r JOIN sbm_review_request q ON q.id = r.request_id WHERE q.agency_id=? ORDER BY r.submitted_at DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT a.id, a.vessel_name, a.sign_on, a.planned_sign_off, a.actual_sign_off, a.end_reason, a.deployed_at FROM assignment a JOIN contract k ON k.id = a.contract_id JOIN crew c ON c.id = k.crew_id WHERE c.agency_id=?").bind(id).all().catch(none),
+    env.DB.prepare("SELECT ship, sign_on, sign_off, sent_at, sent_by FROM deploy_log WHERE sc=? ORDER BY sent_at DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT ship_key, dismissed_at, dismissed_by FROM earmark_dismiss WHERE sc=?").bind(id).all().catch(none),
+    env.DB.prepare("SELECT field, old_value, new_value, resolved, created_at FROM sync_conflict WHERE agency_id=? AND field='status'").bind(id).all().catch(none),
+    env.DB.prepare("SELECT t.* FROM travel_expense t JOIN crew c ON lower(t.crew_name) = lower(c.last_name || ', ' || c.first_name) WHERE c.agency_id=?").bind(id).all().catch(none), // the ledger names crew "Last, First" — matched by name
+    env.DB.prepare("SELECT at, user_id, action, detail FROM activity_log WHERE detail LIKE ? ORDER BY at DESC LIMIT 60").bind("%" + id + "%").all().catch(none),
+    env.DB.prepare("SELECT vessel, sign_off_date, status, requested_at, ack_at FROM instr_ack WHERE sc=?").bind(id).all().catch(none),
+    env.DB.prepare("SELECT vessel, sign_off_date, status, requested_at, ack_at FROM ack_request WHERE sc=?").bind(id).all().catch(none),
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
   if (rsRow && rsRow.vessel) crew.vessel_observed = rsRow.vessel; // TDG's ship, as on the crew list (6 Oct 2026)
   crew.client = clientOf(crew.vessel_observed); // the customer, as on the crew list
+  crew.status = crewStatus(row, ov, scheduleBySc(HIST)[id], today); // the same word as the crew list (§11)
   const ct = ctRes.results;
-  return json({ crew, contracts: ct, daysWorked: (dw && dw.days) || 0, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, TODAY()) });
+  // The grade the console derives from TDG's count (+ a contract TDG ended since the as-of date, §10c) — set
+  // beside TDG's own position so a disagreement is a row to check, never silently one or the other.
+  const added = ccRow ? completedSince(ccRow.as_of, rsRow, today) : 0;
+  const grade = ccRow && ccRow.completed != null ? psRank(Number(ccRow.completed) + added, true) : null;
+  const profile = buildCrewProfile({
+    today, crew: row, override: ov, snap: rsRow, count: ccRow, countAdded: added, grade,
+    legs: HIST.filter((h) => h && h.sc === id), counter: ct.map((k) => ({ seq: k.seq, ship: k.ship, sign_on: k.on, proj_off: k.proj, act_off: k.act, imported_at: k.imported_at })),
+    edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
+    sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
+    statusRows: statusRes.results, travel: travelRes.results, activity: actRes.results, instr: instrRes.results, links: linkRes.results,
+  });
+  return json({ crew, contracts: ct, daysWorked: profile.numbers.seaDays, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, today), profile });
 }
 // Manual edit (manual-wins): upsert only the provided fields into crew_override.
 async function apiCrewSave(request, env, session) {
@@ -2774,20 +2810,25 @@ async function gatherStatement(env, id) {
   const crew = Object.assign(applyOverride(base, ov), { id: base.id, baseline_count: base.baseline_count });
   await Promise.all([ensureKeyman(env), ensureContractCount(env)]); // guards together (§12), both memoized
   // The reads that only need the crew row travel together (§12: this chain was eight serial trips).
-  const [ctRes, dw, baseline, tdgRow, outs] = await Promise.all([
+  // The contract table and sea-days come from the ONE schedule (12 Oct 2026), the same as the profile page: the
+  // Counter-only read printed a sign-off TDG had already replaced. The grade's derived fallback still counts the
+  // Counter's full contracts (fullContracts below), as every other grade reader does (§11).
+  const [ctRes, HIST, baseline, tdgRow, outs] = await Promise.all([
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
-    env.DB.prepare("SELECT CAST(ROUND(SUM(julianday(MIN(COALESCE(act_off,proj_off),date('now')))-julianday(sign_on))) AS INTEGER) days FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL AND MIN(COALESCE(act_off,proj_off),date('now'))>sign_on").bind(id).first(),
+    boardLegs(env),
     effectiveBaseline(env, id, crew.baseline_count),
     env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
   ]);
-  const contracts = ctRes.results;
+  const counterRows = ctRes.results;
+  const sched = statementContracts(HIST, id, TODAY());
+  const contracts = sched.contracts.length ? sched.contracts : counterRows; // a crew the schedule does not date keeps the Counter's rows
   const count = await crewCount(env, crew.id, baseline); // needs the baseline: its own trip, after the wave
-  const fc = fullContracts(contracts.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
+  const fc = fullContracts(counterRows.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc, tdgRow ? completedSince(tdgRow.as_of, tdgRow.tdg_off, new Date().toISOString().slice(0, 10)) : 0); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
   const effFc = cc.n;
   const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
-  return { crew, contracts, daysWorked: (dw && dw.days) || 0, bonus, generatedAt: new Date().toISOString() };
+  return { crew, contracts, daysWorked: sched.seaDays, bonus, generatedAt: new Date().toISOString() };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
 async function apiStatementPdf(env, url) {
@@ -3742,6 +3783,57 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pfrp .cpass{max-width:none}
 .pffb{border-top:1px solid var(--line);padding:10px 0}.pffb:first-child{border-top:0;padding-top:0}
 @container (max-width:820px){.pfhero{grid-template-columns:1fr}.pfnow{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:12px}.pfstats{grid-template-columns:repeat(2,minmax(0,1fr))}.pfstats .tile:nth-child(3){border-left:0}.pfstats .tile:nth-child(n+3){border-top:1px solid var(--line)}.pfgrid{grid-template-columns:1fr}.pfrow{grid-template-columns:1fr;gap:6px}}
+/* Crew profile A+ (12 Oct 2026): everything on the seafarer, each value with its source. */
+.pf2hd{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.pf2top{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px 26px;align-items:start}
+.pfchip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;background:#F1F3F6;color:#374151;font-size:12px;font-weight:600;white-space:nowrap}
+.pf2file{background:#F6F8FB;border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.pf2fh{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.pf2fh span{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.pf2fh em{font-style:normal;font-size:11.5px;color:var(--mut)}
+.pf2fg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.pf2fg span{display:block;font-size:11px;color:var(--mut)}.pf2fg b{font-size:13.5px;color:var(--deep)}
+.pf2ff{font-size:12px;color:var(--mut);border-top:1px solid var(--line);padding-top:8px}.pf2ff b{color:var(--ink)}
+.pfok{color:var(--green-d)}.pfwarn{color:var(--amber);font-weight:700}
+.pf2srcs{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;border-top:1px solid var(--line);padding-top:10px}
+.pf2k{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.pfsrc{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--mut);white-space:nowrap}.pfsrc i{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none}
+.pf2band{display:flex;flex-wrap:wrap;gap:12px 16px;align-items:center;background:#FBF4E6;border:1px solid #EED9AE;border-radius:14px;padding:13px 18px;margin-top:12px}
+.pf2bt{font-family:'Outfit';font-weight:600;font-size:15px;color:#6B4510}.pf2bb{font-size:13px;color:#5C4520;margin-top:3px;line-height:1.5}
+.pf2bx{display:flex;gap:8px;flex-wrap:wrap}.pf2bx .btn{background:#fff}
+.pf2nums{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:12px}
+.pf2n{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 16px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.pf2n b{font-family:'Outfit';font-size:24px;color:var(--navy);line-height:1.2}.pf2n>span{font-size:12.5px;color:var(--ink)}
+.pf2ch{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.pf2mut{font-size:12px;color:var(--mut)}
+.pf2cs{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:10px}.pf2cs b{font-family:'Outfit';font-size:18px;color:var(--deep)}.pf2cs span{font-size:13px;color:var(--mut)}
+.pf2bar{position:relative;height:8px;border-radius:999px;background:#EEF1F5}
+.pf2bar i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--green)}
+.pf2bar em{position:absolute;top:3px;right:0;border-top:2px dashed #C5CEDA}
+.pf2bar u{position:absolute;top:-4px;width:2px;height:16px;background:var(--deep);text-decoration:none}
+.pf2bar s{position:absolute;top:-5px;width:2px;height:18px;background:var(--deep)}
+.pf2dt{width:100%;border-collapse:collapse;margin-top:10px}.pf2dt th{font-size:11px;font-weight:600;color:var(--mut);text-align:left;padding:6px 8px 6px 0}.pf2dt td{padding:7px 8px 7px 0;border-top:1px solid var(--line);font-size:12.5px}
+.pf2tri{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}.pf2tri>div{background:#F6F8FB;border-radius:10px;padding:10px 12px;font-size:12.5px;min-width:0}.pf2tri .pflbl{margin-bottom:6px;display:flex;justify-content:space-between;gap:6px}
+.pf2tk{display:flex;flex-wrap:wrap;gap:5px}.pf2tick{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:11.5px;color:var(--mut);white-space:nowrap}.pf2tick.on{background:#EAF5E4;border-color:#CFE6C6;color:var(--green-d);font-weight:600}
+.pf2er{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:12.5px}.pf2er:first-of-type{border-top:0}.pf2er b{color:var(--deep);min-width:110px}.pf2er span{color:var(--mut)}
+.pf2tl{position:relative;height:74px;margin:6px 0 0}
+.pf2cb{position:absolute;top:22px;height:16px;border-radius:8px;background:#2E9E5B;color:#fff;font-size:10.5px;font-weight:700;line-height:16px;padding-left:8px;box-sizing:border-box;overflow:hidden;white-space:nowrap}
+.pf2cp{position:absolute;top:29px;border-top:2px dashed #B8C2D0}
+.pf2pin{position:absolute;top:6px;width:10px;height:10px;margin-left:-5px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+.pf2today{position:absolute;top:0;height:46px;width:2px;background:var(--deep)}.pf2today em{position:absolute;top:-2px;left:5px;font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--deep)}
+.pf2ax{position:absolute;left:0;right:0;top:52px;height:18px;border-top:1px solid var(--line)}.pf2ax span{position:absolute;top:3px;font-size:10.5px;color:var(--mut);white-space:nowrap}
+.pf2lgs{display:flex;flex-wrap:wrap;gap:4px 12px;margin-left:auto}.pf2lg{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--mut)}.pf2lg i{width:10px;height:8px;border-radius:3px;display:inline-block}.pf2lg i.dash{height:0;border-top:2px dashed #B8C2D0;border-radius:0;width:14px}
+.pf2slots{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:6px}
+.pf2slot{border:1px dashed var(--line-2);border-radius:10px;padding:7px 10px;display:flex;flex-direction:column;min-width:0}.pf2slot b{font-size:12px;color:var(--deep)}.pf2slot span{font-size:11px;color:var(--mut)}
+.pf2slot.answered{border:1px solid #DCD3F0;background:#F7F4FC}.pf2slot.answered span{color:#5A3FA6}
+.pf2slot.pending{border-style:solid}
+.pf2fd{display:grid;grid-template-columns:118px minmax(0,1fr);gap:12px;padding:11px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.5}.pf2fd>div:first-child{display:flex;flex-direction:column;gap:3px}.pf2fd>div:first-child b{font-size:12.5px;color:var(--deep)}
+.pf2more summary{cursor:pointer;font-size:12px;color:var(--royal);margin-top:4px}
+.pf2sh{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:10px;align-items:baseline;padding:5px 0;font-size:13px}.pf2sh i{width:9px;height:9px;border-radius:50%}.pf2sh small{font-size:12px;color:var(--mut)}.pf2sh em{font-style:normal;font-size:11px;color:var(--amber);font-weight:700}
+.pf2ck{border-color:#EED9AE;background:#FFFCF6}.pf2ck .pflbl{color:#8A5A12}.pf2ckr{font-size:13px;line-height:1.45;padding:8px 0;border-top:1px solid #F1E3C4}
+.pf2ac{display:grid;grid-template-columns:96px 70px minmax(0,1fr);gap:8px;font-size:12.5px;padding:4px 0}.pf2ac span:first-child,.pf2ac span:nth-child(2){color:var(--mut)}
+.pf2 .pfgrid{grid-template-columns:minmax(0,1.25fr) minmax(280px,1fr)}
+.pfact .btn:disabled{opacity:.45;cursor:not-allowed}
+.pf2n .pfsrc,.pf2dt .pfsrc{white-space:normal}
+@container (max-width:900px){.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}}
+@media(max-width:700px){.pf2ax span:nth-child(even){display:none}.pf2dt th:nth-child(4),.pf2dt td:nth-child(4){display:none}.pf2dt td{vertical-align:top}.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}.pf2fg{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2fd{grid-template-columns:1fr;gap:4px}.pf2lgs{margin-left:0}}
 .crstat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 14px;display:flex;flex-direction:column}
 .crstat .r{display:flex;flex-direction:column;gap:2px;padding:10px 0;border-top:1px solid var(--line)}
 .crstat .r:first-child{border-top:0}
@@ -6758,93 +6850,216 @@ async function openCrew(id){
   const d=await dq; const bz=await bq;
   if(d.error){$('#view').innerHTML='<div class=muted>Not found.</div>';return;}
   const c=d.crew;const name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
-  CURRENT_CREW=c.agency_id; CURD={crew:c,contracts:(d.contracts||[]),bonus:bz};
+  CURRENT_CREW=c.agency_id; CURD={crew:c,contracts:(d.contracts||[]),bonus:bz,profile:d.profile||null};
   var ct=d.contracts||[],lastSeq=ct.length?ct[ct.length-1].seq:0;
-  // The profile (Miguel, 6 Oct 2026: "people don't read .. review it and use a trendy layout"): one header card,
-  // one row of numbers, documents as coloured tiles, one row per contract; every action in the right column.
+  // THE CREW PROFILE, A+ (Miguel, 12 Oct 2026: "lets start by showing the right data from the crew .. is where all the
+  // data should be collected"; "I like A .. but add few things missing from the other 2 versions"). Everything the
+  // console holds on the seafarer, each value with its source (pfSrc): the header with TDG's own row, a decision band
+  // when they are out of the rotation, the numbers, the career line, the last contract with every date's source,
+  // what people said, status history, documents against a contract, rotation, what to check, who did what.
+  var P=d.profile||{},todayS=new Date().toISOString().slice(0,10);
+  var K=P.contracts||[],last=K[0]||null,cur=K.filter(function(x){return x.current&&x.on<=todayS;})[0]||null;
+  var F=P.file||null,CN=P.count||null,N=P.numbers||{},PE=P.people||{slots:[],feed:[]},RO=P.rotation||{earmarks:[],dismissed:[],joy:[]};
   var stc=crStyle(c.status),ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
-  var age=ageOf(c.dob),who=[c.agency_id,age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
+  var age=ageOf(c.dob),who=[c.agency_id,(P.identity&&P.identity.km)?('TDG '+P.identity.km):'',age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
   var rank=c.rank_override||c.rank_observed||'';
   var ph=fmtPhone(c.phone);
-  var contact=[c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'',ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'):'',c.province?escHtml(c.province):'',c.dob?('Born '+passDate(c.dob)):'',c.pp_no?('Passport '+escHtml(c.pp_no)):''].filter(Boolean).join('<span class=sep>·</span>');
-  var todayS=new Date().toISOString().slice(0,10),cur=null;
-  ct.forEach(function(x){var off=x.act||x.proj||null;if(x.on&&x.on<=todayS&&(!x.act||x.act>=todayS)&&(!off||off>=todayS||!x.act))cur=x;});
-  var cp=cur?contractPass(cur.on,cur.act||cur.proj||null):null;
+  var contact=[c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'',ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'):'',c.province?escHtml(c.province):'',c.dob?('Born '+fmtDateS(c.dob)):'',c.pp_no?('Passport '+escHtml(c.pp_no)):''].filter(Boolean).join('<span class=sep>·</span>');
+  var cp=cur?contractPass(cur.on,cur.off||null):null;
+  var stateChip=cur?(cp&&cp.chip?cp.chip.replace('class=croff','class="croff inrow"'):''):(N.ashoreDays!=null?'<span class=pfchip>Ashore '+N.ashoreDays+' d</span>':'');
+  var nextEm=(RO.earmarks||[])[0];
   var h='<div class="bar noprint" style="margin-bottom:10px"><button class="btn ghost" onclick="renderCrew()">← Crew</button><span style="margin-left:auto"></span></div>';
-  h+='<div class=crwrap><section class=crmain><div class=stmt>';
+  h+='<div class=crwrap><section class=crmain><div class="stmt pf2">';
   h+='<div class=printhead>DG3 CIMS — Crew Statement · '+escHtml(name)+' · '+todayS+'</div>';
-  // Second pass (Miguel, 6 Oct 2026: "you are wasting so much space .. appealing to the eye, easy to understand"):
-  // a compact header, one strip of numbers, then two columns — records left, documents + deployment right.
-  // An empty section is one line, never a card of white space.
-  h+='<div class="pfhero'+(cp?'':' solo')+'"><div class=pfid><div class=crav style="width:56px;height:56px;font-size:17px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+  // 1 · the header: who, where, and TDG's own row beside it
+  var shipLine=cur?('<b>'+escHtml(niceShip(cur.ship))+'</b><span class=pfcl>'+escHtml(cur.brand||c.client||'')+(cur.embark?(' · '+escHtml(pfPort(cur.embark))):'')+'</span>')
+    :(last?('Last ship <b>'+escHtml(niceShip(last.ship))+'</b><span class=pfcl>off '+fmtDateS(last.off)+(last.disembark?(' · '+escHtml(pfPort(last.disembark))):'')+'</span>'):'<span style="color:var(--mut);font-weight:500">No contract on file</span>');
+  h+='<div class=pf2hd><div class=pf2top><div class=pfid><div class=crav style="width:56px;height:56px;font-size:17px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
     +'<div class=pfnmrow><span class=pfname>'+escHtml(name)+'</span><span class=pfwho>'+escHtml(who)+'</span></div>'
-    +'<div class=pfchips><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status||'')+'</span>'+(rank?'<span class=crrank>'+escHtml(rankTag(rank,null).toUpperCase())+'</span>':'')+(cp&&cp.chip?cp.chip.replace('class=croff','class="croff inrow"'):'')+(cp?'':'<span class=pfnone>No active contract</span>')+'</div>'
-    +'<div class=pfship>'+(c.vessel_observed?escHtml(c.vessel_observed)+(c.client?'<span class=pfcl>'+escHtml(c.client)+'</span>':''):'<span style="color:var(--mut);font-weight:500">No ship assigned</span>')+'</div>'
+    +'<div class=pfchips><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status||'')+'</span>'+(rank?'<span class=crrank>'+escHtml(rankTag(rank,null).toUpperCase())+'</span>':'')+stateChip
+    +(nextEm?'<span class=pfchip>Earmark '+escHtml(niceShip(nextEm.ship))+' · '+fmtDateS(nextEm.on)+'</span>':'<span class=pfchip>No earmark</span>')+'</div>'
+    +'<div class=pfship>'+shipLine+'</div>'
     +(contact?'<div class=pfcontact>'+contact+'</div>':'')
-    +'</div></div>'
-    +(cp?('<div class=pfnow><div class=pflbl>Current contract</div>'+cp.html+'</div>'):'')+'</div>';
-  if(bz&&!bz.error){
-    // The two counts stay labelled apart (§10c): completed (grade, with its source) vs bonus count (consecutive).
-    h+='<div class=pfstats>'+tile((bz.contracts!=null?bz.contracts:0),'Completed contracts')+tile((bz.count!=null?bz.count:0),'Bonus count (consecutive)')
-      +tile('$'+(bz.nextRungIfClean!=null?Number(bz.nextRungIfClean).toLocaleString():'—'),'Next rung if clean','green')+tile(Number(d.daysWorked||0).toLocaleString(),'Sea-days')+'</div>'
-      +'<div class=pfnote>Rank <b>'+escHtml(bz.rank||'—')+'</b> · '+(bz.contracts!=null?bz.contracts:0)+' completed contract(s) '+ctSrc(bz)+(bz.baseline_set?'':' · baseline not yet set')+'</div>';
+    +'</div></div>';
+  if(F){
+    h+='<div class=pf2file><div class=pf2fh><span>From the TDG file of '+fmtDateS(F.at)+'</span><em>'+(F.ageDays!=null?(F.ageDays===0?'today':(F.ageDays+' day'+(F.ageDays===1?'':'s')+' old')):'')+'</em></div>'
+      +'<div class=pf2fg><div><span>Status</span><b>'+escHtml(F.status||'—')+'</b></div><div><span>Ship</span><b>'+escHtml(F.ship?niceShip(F.ship):'—')+'</b></div>'
+      +'<div><span>Embarked</span><b>'+(F.embarked?fmtDateS(F.embarked):'—')+'</b></div><div><span>Debarked</span><b>'+(F.debarked?fmtDateS(F.debarked):'—')+'</b></div></div>'
+      +'<div class=pf2ff>'+(CN&&CN.completed!=null?('Count file '+fmtDateS(CN.asOf)+': <b>'+CN.completed+' completed</b>'+(CN.position?(' · '+escHtml(CN.position)):'')+(CN.tab?(' · '+escHtml(CN.tab)+' tab'):'')):'Not in TDG’s count file')
+      +' · '+((P.identity&&P.identity.manual&&P.identity.manual.length)?('<span class=pfwarn>'+P.identity.manual.length+' manual entr'+(P.identity.manual.length===1?'y':'ies')+' over TDG</span>'):'<span class=pfok>no manual entries</span>')+'</div></div>';
+  }else h+='<div class=pf2file><div class=pf2fh><span>Not in the kept TDG file</span></div><div class=pf2ff>No row for this crew in the last AdvancedQuery.</div></div>';
+  h+='</div><div class=pf2srcs><span class=pf2k>Sources</span>'+['tdg','count','typed','intel','feedback','counter','travel'].map(function(k){return pfSrc(k);}).join('')+'</div></div>';
+  // 2 · the decision band: out of the rotation, or a contract that ended early
+  var off=c.status==='Inactive'||c.status==='Not for Rehire';
+  if(off||(last&&last.earlyDays)){
+    var why=[];
+    if(last&&!last.current&&last.off)why.push('Off '+escHtml(niceShip(last.ship))+' '+fmtDateS(last.off)+(last.earlyDays?(' (planned '+fmtDateS(last.planned)+')'):'')+'.');
+    var cm=(PE.feed||[]).filter(function(x){return x.kind==='note'||x.kind==='comment';})[0];
+    if(cm)why.push((cm.who?escHtml(cm.who)+'’s note':'Note')+' <b>“'+escHtml(String(cm.text).slice(0,120))+'”</b> ('+fmtDateS(cm.at)+').');
+    var it=(PE.feed||[]).filter(function(x){return x.kind==='intel';})[0];
+    if(it)why.push('Field intel: <b>'+escHtml(pfIntelHead(it,110))+'</b> ('+fmtDateS(it.at)+').');
+    var hs=(P.status&&P.status.history)||[];
+    if(F&&F.status)why.push('TDG: '+escHtml(F.status)+(hs[0]&&hs[0].from?(' since '+fmtDateS(hs[0].from)):'')+'.');
+    h+='<div class=pf2band><div style="flex:1 1 420px;min-width:0"><div class=pf2bt>'+(off?'Out of the rotation':'Contract ended early')+(last&&last.earlyDays?(' — ended '+last.earlyDays+' days early'):'')+'</div><div class=pf2bb>'+why.join(' ')+'</div></div>'
+      +'<div class=pf2bx><button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Add note</button><button class="btn ghost" onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Change status…</button></div></div>';
   }
-  var docT=function(label,dt,optional){
-    var f=docFlag(dt),days=dt?dUntil(dt):null,st;
-    if(!dt)st=optional?['Not held','na']:['Missing','red'];
-    else if(f==='expired')st=['Expired '+(-days)+' d ago','red'];
-    else if(f==='90d')st=[days+' days left','amber'];
-    else st=['Valid','ok'];
-    return '<div class="pfdoc '+st[1]+'"><i></i><span class=l>'+label+'</span><b>'+st[0]+'</b><span class=d>'+(dt?passDate(dt):'—')+'</span></div>';
-  };
+  // 3 · the numbers, each with where it comes from
+  var cnN=CN&&CN.n!=null?CN.n:(bz&&bz.contracts!=null?bz.contracts:0);
+  var cnSrc=CN&&CN.n!=null?pfSrc('count','TDG count '+fmtDateS(CN.asOf)+(CN.added?(' + '+CN.added+' since'):'')):pfSrc('counter','derived from dates');
+  h+='<div class=pf2nums>'
+    +pfNum(cnN,'Completed contracts',cnSrc)
+    +pfNum(Number(N.seaDays||0).toLocaleString(),'Days at sea',pfSrc('tdg','the schedule'))
+    +pfNum(bz&&!bz.error&&bz.count!=null?bz.count:'—','Bonus count (consecutive)','<span class=pfsrc>'+(bz&&bz.baseline_set?'baseline set':'baseline not set')+'</span>')
+    +(cur?pfNum(Number(N.aboardDays||0)+' d','Aboard',pfSrc('tdg','since '+fmtDateS(cur.on))):pfNum(N.ashoreDays!=null?(N.ashoreDays+' d'):'—','Ashore',N.ashoreDays!=null?pfSrc('tdg','since '+fmtDateS(last.off)):'<span class=pfsrc>no contract ended</span>'))
+    +'</div>';
+  // 4 · the career line
+  if(K.length)h+=pfCareer(K,PE.feed||[],todayS);
+  // left column: the last contract, what people said, bonus
   var left='',right='';
-  // left: contracts, outcomes, feedback
-  if(!ct.length)left+='<div class="pfsec one"><div class=pflbl>Contracts <span>· none on file</span></div></div>';
-  else left+='<div class=pfsec><div class=pflbl>Contracts <span>· '+ct.length+'</span></div><div class=pfhist>'+ct.slice().reverse().map(function(x){var off=x.act||x.proj||null;var basis=x.act?'<span class="cchip ok">Actual</span>':(x.proj?'<span class="cchip royal">Projected</span>':'<span class="cchip amber">Open</span>');var p=contractPass(x.on,off,{done:!!x.act});return '<div class=pfrow><div class=pfrs><b>'+escHtml(x.ship||'—')+'</b><span>Contract '+x.seq+'</span>'+basis+'</div><div class=pfrp>'+p.html+'</div></div>';}).join('')+'</div></div>';
+  if(last)left+=pfContract(last,cur===last,todayS);
+  else left+='<div class="pfsec one"><div class=pflbl>Contracts <span>· none on file</span></div></div>';
+  if(K.length>1)left+='<div class=pfsec><div class=pflbl>Earlier contracts <span>· '+(K.length-1)+'</span></div>'+K.slice(1).map(function(x){return '<div class=pf2er><b>'+escHtml(niceShip(x.ship))+'</b><span>'+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open')+'</span><span>'+spanCompact(x.on,x.off||todayS)+'</span>'+pfSrc(x.offSource==='counter'?'counter':(x.offSource==='projected'?'projected':(x.offSource==='rita'||x.offSource==='card'?'typed':'tdg')))+(x.earlyDays?'<span class="cchip red">'+x.earlyDays+' d early</span>':'')+'</div>';}).join('')+'</div>';
+  left+=pfPeople(PE,c.agency_id);
   if(bz&&!bz.error){
     var outs=bz.outcomes||[];
-    if(!outs.length)left+='<div class="pfsec one"><div class=pflbl>Bonus outcomes <span>· none committed yet</span></div></div>';
-    else left+='<div class=pfsec><div class=pflbl>Bonus outcomes <span>· '+outs.length+'</span></div><table class=tbl><thead><tr><th>Date</th><th>Ships</th><th>Score</th><th>Gate</th><th>Pay</th></tr></thead><tbody>'
-      +outs.map(function(o){var ships='';try{ships=JSON.parse(o.ships_json||'[]').join(', ');}catch(e){}return '<tr><td>'+(o.committed_at||'').slice(0,10)+'</td><td>'+ships+'</td><td>'+o.score_pct+'%</td><td>'+(o.gate||'—')+'</td><td>$'+(o.pay_usd||0).toLocaleString()+'</td></tr>';}).join('')+'</tbody></table></div>';
+    if(!outs.length)left+='<div class="pfsec one"><div class=pflbl>Bonus outcomes <span>· none committed · read only</span></div></div>';
+    else left+='<div class=pfsec><div class=pflbl>Bonus outcomes <span>· '+outs.length+' · read only</span></div><table class=tbl><thead><tr><th>Date</th><th>Ships</th><th>Score</th><th>Gate</th><th>Pay</th></tr></thead><tbody>'
+      +outs.map(function(o){var ships='';try{ships=JSON.parse(o.ships_json||'[]').join(', ');}catch(e){}return '<tr><td>'+fmtDateS((o.committed_at||'').slice(0,10))+'</td><td>'+escHtml(ships)+'</td><td>'+o.score_pct+'%</td><td>'+escHtml(o.gate||'—')+'</td><td>$'+(o.pay_usd||0).toLocaleString()+'</td></tr>';}).join('')+'</tbody></table></div>';
   }
-  left+='<div class="pfsec" id=sbmsec><div class=pflbl>Manager feedback <span id=sbmnone></span></div><div id=sbmcards><div class=csub style="margin-top:0">Loading…</div></div></div>';
-  // right: documents, deployment
-  right+='<div class=pfsec><div class=pflbl>Documents</div><div class=pfdocs>'+docT('Medical',c.med_exp)+docT('Seaman book',c.sirb_exp)+docT('Passport',c.pp_exp)+docT('US visa',c.usv_exp)+docT('Schengen',c.sch_exp,true)+'</div></div>';
-  var dp=d.deployment||{};
-  if(dp.matched){
-    var vlabel=dp.visa?(dp.visa.required+' · '+(dp.visa.exp?passDate(dp.visa.exp):'missing')):'Varies by nationality';
-    var vcls='';if(dp.visa){var vs2=dp.visa.status;vcls=vs2==='ok'?'ok':(vs2==='expiring'?'amber':'red');}
-    var dd=dp.nextDryDock;
-    right+='<div class=pfsec><div class=pflbl>Deployment fit</div><div class=pfkv>'
-      +'<div><span>Ship</span><b>'+escHtml(dp.vessel||'')+'</b><small>'+escHtml([(dp.brand||''),(dp.cls?dp.cls+' class':'')].filter(Boolean).join(' · '))+'</small></div>'
-      +'<div><span>Homeport</span><b>'+escHtml(dp.homeport||'—')+'</b><small>'+escHtml(dp.region||'')+'</small></div>'
-      +'<div><span>Entry visa</span><b class="pfv '+vcls+'">'+escHtml(vlabel)+'</b></div>'
-      +'<div><span>Next dry dock</span><b>'+(dd?escHtml(passDate(dd.start)+(dd.end?(' → '+passDate(dd.end)):'')):'None scheduled')+'</b>'+(dd?'<small>'+escHtml([dd.loc,dd.note].filter(Boolean).join(' · '))+'</small>':'')+'</div>'
-      +'</div></div>';
-  }
+  // right column: status history, documents, rotation, to check, activity
+  var hs2=(P.status&&P.status.history)||[];
+  right+='<div class=pfsec><div class=pflbl>Status history</div>'+(hs2.length?hs2.map(function(x,i){var st=crStyle(x.word);return '<div class=pf2sh><i style="background:'+st[2]+'"></i><span'+(i===0?' style="font-weight:700"':'')+'>'+escHtml(x.word)+(x.held?' <em>held</em>':'')+'</span><small>'+(x.from?fmtDateS(x.from):'')+(x.to?(' → '+fmtDateS(x.to)):(i===0?' → now':''))+'</small></div>';}).join(''):'<div class=pf2mut>No status change recorded by a TDG upload.</div>')
+    +'<div class=pf2mut style="margin-top:6px">'+(P.identity&&P.identity.manual&&P.identity.manual.length?('Manual: '+P.identity.manual.map(function(m){return escHtml(m.label)+' = '+escHtml(m.value);}).join(' · ')):'No manual tag, no manual status.')+'</div></div>';
+  right+=pfDocs(c,cur,todayS);
+  var dp=d.deployment||{},rot=[];
+  rot.push('<div><span>Earmark</span><b>'+((RO.earmarks||[]).length?RO.earmarks.map(function(e){return escHtml(niceShip(e.ship))+' · '+fmtDateS(e.on)+(e.off?(' → '+fmtDateS(e.off)):'')+(e.told?' · told Joy '+fmtDateS(e.told):'');}).join('<br>'):'None open')+'</b></div>');
+  if((RO.dismissed||[]).length)rot.push('<div><span>Removed</span><b>'+RO.dismissed.map(function(x){return escHtml(niceShip(x.ship))+' · '+fmtDateS(x.at)+' by '+escHtml(x.by);}).join('<br>')+'</b></div>');
+  rot.push('<div><span>Emails to Joy</span><b>'+((RO.joy||[]).length?RO.joy.map(function(x){return escHtml(niceShip(x.ship))+' · '+fmtDateS(x.at)+' by '+escHtml(x.by);}).join('<br>'):'None about this crew')+'</b></div>');
+  if(off)rot.push('<div><span>Bench</span><b>Off every bench while '+escHtml(c.status)+'</b></div>');
+  if(dp.matched)rot.push('<div><span>Deployment</span><b>'+escHtml([dp.brand||'',dp.cls?(dp.cls+' class'):'',dp.homeport?('homeport '+dp.homeport):''].filter(Boolean).join(' · '))+'</b><small>'+(dp.visa?('Entry visa '+escHtml(dp.visa.required)+' · '+(dp.visa.exp?fmtDateS(dp.visa.exp):'missing')):'')+(dp.nextDryDock?(' · dry dock '+fmtDateS(dp.nextDryDock.start)):' · no dry dock')+'</small></div>');
+  right+='<div class=pfsec><div class=pflbl>Next &amp; rotation</div><div class=pfkv>'+rot.join('')+'</div></div>';
+  var CK=P.checks||[];
+  if(CK.length)right+='<div class="pfsec pf2ck"><div class=pflbl>To check <span>· '+CK.length+' · the console never picks</span></div>'+CK.map(function(x){return '<div class=pf2ckr>'+escHtml(x.text)+'</div>';}).join('')+'</div>';
+  var AC=P.activity||[];
+  if(AC.length)right+='<div class=pfsec><div class=pflbl>Activity <span>· '+AC.length+'</span></div>'+AC.slice(0,8).map(pfAct).join('')+(AC.length>8?'<details class=pf2more><summary>All '+AC.length+'</summary>'+AC.slice(8).map(pfAct).join('')+'</details>':'')+'</div>';
   h+='<div class=pfgrid><div class=pfcol>'+left+'</div><div class=pfcol>'+right+'</div></div>';
   h+='</div></section>';
-  // actions
+  // actions: what can be done for THIS crew now — sign-off sends only while a contract runs
+  var slots=PE.slots||[];
+  var fbBtn=function(role,label){var s=slots.filter(function(x){return x.role===role;})[0]||{};return '<button class="btn ghost rf" data-role="'+role+'">'+label+(s.state==='answered'?' · answered '+fmtDateS(s.at):(s.state==='pending'?' · asked':''))+'</button>';};
   h+='<aside class="cract pfact noprint">'
+    +'<div class=pfgl>Crew record</div>'
+    +'<button class=btn onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Edit crew</button>'
+    +'<button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Notes</button>'
+    +'<button class="btn ghost" onclick="docsModal(\\''+escHtml(c.agency_id)+'\\')">Documents</button>'
     +'<div class=pfgl>Statement</div>'
-    +'<button class=btn onclick="downloadStatement()">Download PDF</button>'
+    +'<button class="btn ghost" onclick="downloadStatement()">Download PDF</button>'
     +'<button class="btn ghost" onclick="emailStatement()">Email statement</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<div id=stmtout class=csub style="margin:0"></div>'
-    +'<div class=pfgl>Sign-off</div>'
-    +'<button class="btn ghost" onclick="sendSignoffInstructions(\\''+c.agency_id+'\\','+lastSeq+')">Send instructions</button>'
-    +'<button class="btn ghost" onclick="sendSignoffLink(\\''+c.agency_id+'\\','+lastSeq+')">Send sign-off link</button>'
     +'<div class=pfgl>Request feedback</div>'
-    +'<button class="btn ghost rf" data-role="ray">Ray · Orders</button>'
-    +'<button class="btn ghost rf" data-role="rolando">Rolando · Technical</button>'
-    +'<button class="btn ghost rf" data-role="dexter">Dexter · Field</button>'
+    +fbBtn('ray','Ray · Orders')+fbBtn('rolando','Rolando · Technical')+fbBtn('dexter','Dexter · Field')
     +'<div id=fbout class=csub style="margin:0"></div>'
-    +'<div class=hint style="font-size:11.5px;line-height:1.4;padding:0 2px">Each feedback button creates a single-use link to send the contributor.</div>'
+    +'<div class=pfgl>Sign-off</div>'
+    +(cur?('<button class="btn ghost" onclick="sendSignoffInstructions(\\''+c.agency_id+'\\','+lastSeq+')">Send instructions</button>'
+      +'<button class="btn ghost" onclick="sendSignoffLink(\\''+c.agency_id+'\\','+lastSeq+')">Send sign-off link</button>')
+      :('<div class=hint style="font-size:12px;padding:0 2px">'+(last&&last.off?('Contract ended '+fmtDateS(last.off)+'.'):'No contract running.')+'</div><button class="btn ghost" disabled>Send instructions</button><button class="btn ghost" disabled>Send sign-off link</button>'))
     +'</aside></div>';
   $('#view').innerHTML=h;
   document.querySelectorAll('#view .rf').forEach(function(b){b.onclick=function(){reqFeedback(b.getAttribute('data-role'));};});
   try{window.scrollTo(0,0);}catch(_){}
-  loadSbmCards(c.agency_id);
+}
+// The source tag every value carries on the profile (12 Oct 2026). One colour per source, the same everywhere.
+var PF_SRC={tdg:['#2E9E5B','TDG file'],tdg_embark:['#2E9E5B','TDG embark'],count:['#1E9CB2','TDG count'],typed:['#1E6FD0','Typed in the console'],rita:['#1E6FD0','Typed in the console'],card:['#1E6FD0','Reliever card'],
+  intel:['#BC3B2C','Field intel'],feedback:['#7A5BC7','Feedback'],counter:['#9AA7B8','Counter · history'],projected:['#9AA7B8','Projected'],travel:['#B0741A','Travel ledger']};
+function pfSrc(k,label){var s=PF_SRC[k]||['#9AA7B8',k];return '<span class=pfsrc><i style="background:'+s[0]+'"></i>'+escHtml(label||s[1])+'</span>';}
+function pfNum(n,l,src){return '<div class=pf2n><b>'+n+'</b><span>'+escHtml(l)+'</span>'+(src||'')+'</div>';}
+function pfPort(p){return String(p||'').split(',')[0].toLowerCase().replace(/(^|[ -])[a-z]/g,function(m){return m.toUpperCase();});}
+function pfIntelHead(it,n){var ps=it.parts||[];var s=ps.filter(function(p){return p.label==='Summary';})[0]||ps[0]||{text:it.text||''};var t=String(s.text||'');n=n||160;if(t.length<=n)return t;var cut=t.slice(0,n);var sp=cut.lastIndexOf(' ');return (sp>n*0.6?cut.slice(0,sp):cut).replace(/[,;:. ]+$/,'')+'…';}
+function pfAct(a){return '<div class=pf2ac><span>'+fmtDateS(String(a.at||'').slice(0,10))+'</span><span>'+escHtml(a.who||'')+'</span><span>'+escHtml(a.text||'')+'</span></div>';}
+function pfAddMo(iso,n){var y=+iso.slice(0,4),m=+iso.slice(5,7)-1+n,dd=+iso.slice(8,10);y+=Math.floor(m/12);m=((m%12)+12)%12;var last=new Date(Date.UTC(y,m+1,0)).getUTCDate();return y+'-'+String(m+1).padStart(2,'0')+'-'+String(Math.min(dd,last)).padStart(2,'0');}
+// The last (or running) contract: the bar, every date with its source, readiness, the sign-off emails, travel.
+function pfContract(x,isCur,todayS){
+  var lbl={tdg:'TDG debark · final',tdg_embark:'TDG embark',rita:'Typed in the console',card:'Reliever card',projected:'Projected',counter:'Counter · history'};
+  var off=x.off,end=x.planned&&x.planned>(off||'')?x.planned:off;
+  var tot=x.on&&end?Math.max(1,dayNum(end)-dayNum(x.on)):1,pctOff=off?Math.max(0,Math.min(100,Math.round((dayNum(off)-dayNum(x.on))/tot*100))):100;
+  var pctNow=Math.max(0,Math.min(100,Math.round((dayNum(todayS)-dayNum(x.on))/tot*100)));
+  var fill=isCur?Math.min(pctNow,pctOff):pctOff;
+  var bar='<div class=pf2bar><i style="width:'+fill+'%"></i>'+(x.earlyDays?'<em style="left:'+pctOff+'%"></em><u style="left:'+pctOff+'%"></u>':'')+(isCur?'<s style="left:'+pctNow+'%"></s>':'')+'</div>';
+  var rows=x.dates.map(function(r){var src=r.src==='tdg_embark'?'tdg':(r.src==='rita'?'typed':r.src);var l=r.src==='tdg'&&r.what==='Sign-off'?lbl.tdg:(r.src==='counter'&&r.used?'Contract Counter':(lbl[r.src]||r.src));
+    var st=r.used?'<span class="cchip ok">Shown</span>':(r.history?'<span class=pf2mut>History</span>':(r.agrees?'<span class=pf2mut>Agrees</span>':'<span class="cchip amber">Differs</span>'));
+    if(r.used&&r.held)st='<span class="cchip red">Held · TDG still has them aboard</span>';
+    return '<tr><td>'+escHtml(r.what)+'</td><td>'+(r.used?'<b>':'')+(r.history&&!r.agrees?'<s>':'')+fmtDateS(r.value)+(r.history&&!r.agrees?'</s>':'')+(r.used?'</b>':'')+'</td><td>'+pfSrc(src,l+(r.at?(' · '+fmtDateS(r.at)):''))+'</td><td>'+st+'</td></tr>';}).join('');
+  var R=x.readiness,rd=R?['eccr:ECCR','air:Air','hotel:Hotel','on:On date','off:Off date'].map(function(p){var k=p.split(':');return '<span class="pf2tick'+(R[k[0]]?' on':'')+'">'+(R[k[0]]?'✓ ':'')+k[1]+'</span>';}).join(''):'<span class=pf2mut>Nothing recorded</span>';
+  var E=x.emails||{},em=function(v,l){return l+' — '+(v?('sent '+fmtDateS(v.sent)+(v.acked?(', acknowledged '+fmtDateS(v.acked)):'')):'not sent');};
+  var T=x.travel||[],tr=T.length?T.map(function(t){return '<div>'+(t.leg==='on'?'Sign-on':'Sign-off')+' leg · <b>$'+t.total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'</b></div><div class=pf2mut>'+['Air $'+t.air.toLocaleString(),t.hotel?'Hotel $'+t.hotel.toLocaleString():'',t.medical?'Medical $'+t.medical.toLocaleString():'',t.visa?'Visa $'+t.visa.toLocaleString():'',t.other?'Other $'+t.other.toLocaleString():''].filter(Boolean).join(' · ')+'</div>';}).join(''):'<span class=pf2mut>No travel line for this contract</span>';
+  var ports=[x.embark?pfPort(x.embark):'',x.disembark?pfPort(x.disembark):''];
+  return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">'+(isCur?'Current contract':'Last contract')+'</span>'
+    +(x.earlyDays?'<span class="cchip red">Ended '+x.earlyDays+' d early</span>':'')+(x.held?'<span class="cchip red">Past the sign-off · TDG still has them aboard</span>':'')
+    +'<span class=pf2mut style="margin-left:auto">Contract '+x.n+'</span></div>'
+    +'<div class=pf2cs><b>'+escHtml(niceShip(x.ship))+'</b>'+(ports[0]||ports[1]?'<span>'+escHtml((ports[0]||'?')+' → '+(ports[1]||'?'))+'</span>':'')+'</div>'
+    +bar+'<div class=pf2mut style="margin-top:6px">'+(isCur?('Day '+x.days+' of '+x.plannedDays+' planned · '+spanCompact(x.on,todayS)+' aboard'):(x.days+' of '+x.plannedDays+' planned days · '+spanCompact(x.on,off||todayS)))+'</div>'
+    +'<table class=pf2dt><thead><tr><th>Date</th><th>Value</th><th>Source</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div class=pf2tri><div><div class=pflbl>Readiness</div><div class=pf2tk>'+rd+'</div></div>'
+    +'<div><div class=pflbl>Sign-off emails</div><div class=pf2mut style="line-height:1.6">'+em(E.instructions,'Instructions')+'<br>'+em(E.link,'Link')+'<br>'+(E.review?('Ship review — sent '+fmtDateS(E.review.sent)):'Ship review — not sent')+'</div></div>'
+    +'<div><div class=pflbl>Travel '+pfSrc('travel','by name')+'</div>'+tr+'</div></div></div>';
+}
+// The career line: every contract on one axis, the planned end dashed where it ended early, a pin for every note,
+// intel card and feedback answer, and today. Read off the profile the page holds — no request.
+function pfCareer(K,feed,todayS){
+  var on=K.map(function(x){return x.on;}).sort()[0];
+  var ends=K.map(function(x){return x.planned&&x.planned>(x.off||'')?x.planned:(x.off||todayS);}).concat([todayS]).sort();
+  var t0=dayNum(pfAddMo(on.slice(0,8)+'01',-1)),t1=dayNum(pfAddMo(ends[ends.length-1].slice(0,8)+'01',2));
+  var W=Math.max(1,t1-t0),pc=function(iso){return Math.max(0,Math.min(100,(dayNum(iso)-t0)/W*100));};
+  var bars=K.map(function(x){var a=pc(x.on),b=pc(x.off||todayS),p=x.planned?pc(x.planned):b;
+    return '<div class=pf2cb style="left:'+a+'%;width:'+Math.max(0.6,b-a)+'%" title="'+escHtml(niceShip(x.ship)+' · '+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open'))+'">'+(b-a>9?escHtml(niceShip(x.ship))+' · '+x.days+' d':'')+'</div>'
+      +(x.earlyDays?'<div class=pf2cp style="left:'+b+'%;width:'+Math.max(0,p-b)+'%"></div>':'');}).join('');
+  var col={note:'#1E6FD0',comment:'#1E6FD0',intel:'#BC3B2C',feedback:'#7A5BC7',review:'#7A5BC7'};
+  var pins=feed.filter(function(f){var d=String(f.at||'').slice(0,10);return d&&dayNum(d)>=t0&&dayNum(d)<=t1;}).map(function(f){var d=String(f.at).slice(0,10);
+    var t=f.kind==='intel'?pfIntelHead(f):(f.kind==='feedback'?(f.who+' answered'):(f.text||''));
+    return '<i class=pf2pin style="left:'+pc(d)+'%;background:'+(col[f.kind]||'#6B7280')+'" title="'+escHtml(fmtDateS(d)+' · '+String(t).slice(0,120))+'"></i>';}).join('');
+  var ticks='',months=Math.round(W/30.4),stepM=months>30?12:(months>15?3:1),dt=pfAddMo(new Date(t0*86400000).toISOString().slice(0,8)+'01',0);
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  for(var g=0;g<80&&dayNum(dt)<=t1;g++){var m=+dt.slice(5,7)-1;if((stepM===1||m%stepM===0)&&pc(dt)<=93)ticks+='<span style="left:'+pc(dt)+'%">'+(stepM===12?dt.slice(0,4):(MN[m]+(m===0||g===0?' '+dt.slice(0,4):'')))+'</span>';dt=pfAddMo(dt,1);}
+  var leg='<span class=pf2lg><i style="background:#2E9E5B"></i>Aboard</span><span class=pf2lg><i class=dash></i>Was planned</span><span class=pf2lg><i style="background:#7A5BC7;border-radius:50%"></i>Feedback</span><span class=pf2lg><i style="background:#BC3B2C;border-radius:50%"></i>Intel</span><span class=pf2lg><i style="background:#1E6FD0;border-radius:50%"></i>Note</span>';
+  return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">Career</span><span class=pf2mut>'+K.length+' contract'+(K.length===1?'':'s')+'</span><span class=pf2lgs>'+leg+'</span></div>'
+    +'<div class=pf2tl>'+bars+pins+'<b class=pf2today style="left:'+pc(todayS)+'%"><em>Today</em></b><div class=pf2ax>'+ticks+'</div></div></div>';
+}
+// What people said: who has answered for this seafarer, then every note, comment, intel card, feedback answer and
+// shipboard review, newest first. Intel is narrative, never scored (§10).
+var PF_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontime:'On time',acc:'Accuracy',par:'PAR',audit:'Audit'};
+function pfPeople(PE,sc){
+  var sl=(PE.slots||[]).map(function(s){var lab=String(s.label).split(' · ')[0];return '<div class="pf2slot '+s.state+'"><b>'+escHtml(lab)+'</b><span>'+(s.state==='answered'?('Answered '+fmtDateS(s.at)):(s.state==='pending'?('Asked '+fmtDateS(s.at)):(s.state==='na'?'Not assessed':'Never asked')))+'</span></div>';}).join('');
+  var fd=(PE.feed||[]).map(function(f){
+    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='comment'?'Comment':'Note')));
+    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'?'feedback':'typed');
+    var body='';
+    if(f.kind==='intel'){var ps=f.parts||[];var head=pfIntelHead(f);var rest=ps.filter(function(p){return p.label!=='Summary';});
+      body='<div>'+escHtml(head)+'</div>'+(rest.length?'<details class=pf2more><summary>Full report</summary>'+rest.map(function(p){return '<div style="margin-top:6px">'+(p.label?'<b>'+escHtml(p.label)+':</b> ':'')+escHtml(p.text)+'</div>';}).join('')+'</details>':'')
+        +'<div class=pf2mut style="margin-top:4px">'+escHtml([f.who?('From '+f.who):'',f.via?('by '+f.via):'',f.confidence?(f.confidence+' match'):'',f.contractNo!=null?('contract '+f.contractNo):'','never scored'].filter(Boolean).join(' · '))+'</div>';}
+    else if(f.kind==='feedback'){var a=f.answers||{};body='<div class=pf2tk>'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((PF_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div style="margin-top:4px">“'+escHtml(a.note)+'”</div>':'')+(f.superseded?'<div class=pf2mut>Earlier answer · kept, not used</div>':'');}
+    else if(f.kind==='review')body='<div><b>'+(f.rating!=null?f.rating+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'</div>'+(f.text?'<div>“'+escHtml(f.text)+'”</div>':'');
+    else body='<div style="font-size:14px">“'+escHtml(f.text)+'”</div>';
+    return '<div class=pf2fd><div><b>'+fmtDateS(String(f.at||'').slice(0,10))+'</b>'+pfSrc(src,kind+(f.who&&f.kind!=='intel'?(' · '+String(f.who).split(' · ')[0]):''))+'</div><div>'+body+'</div></div>';
+  }).join('');
+  return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">What people said</span><span class=pf2mut>'+(PE.feed||[]).length+' · newest first</span><a href="#" style="margin-left:auto;font-size:12.5px" onclick="notesModal(\\''+escHtml(sc)+'\\');return false">+ Add note</a></div>'
+    +'<div class=pf2slots>'+sl+'</div>'+(fd||'<div class=pf2mut style="padding-top:8px">Nothing said yet.</div>')+'</div>';
+}
+// Documents: everything TDG sent (number, issuer, issue and expiry), read against the running contract, else a
+// 7-month contract from today — the same three words as the contract modal (expired / lapses during / valid).
+function pfDocs(c,cur,todayS){
+  var son=cur?cur.on:todayS,soff=cur&&cur.off?cur.off:pfAddMo(todayS,7);
+  var D=[['Medical',c.med_exp,c.med_cert_no,c.med_issue,c.med_place],['Seaman book',c.sirb_exp,c.sirb_no,c.sirb_issue,c.sirb_place],['Passport',c.pp_exp,c.pp_no,c.pp_issue,c.pp_place],['US visa',c.usv_exp,c.usv_no,c.usv_issue,c.usv_place],['Schengen',c.sch_exp,c.sch_no,c.sch_issue,c.sch_place,true]];
+  var req=0,ok=0;
+  var rows=D.map(function(x){var exp=x[1],opt=!!x[5],cls,st;if(!opt)req++;
+    if(!exp){cls=opt?'na':'red';st=opt?'Not held · optional':'Missing';}
+    else if(exp<son){cls='red';st='Expired '+fmtDateS(exp);}
+    else if(exp<soff){cls='amber';st='Lapses '+fmtDateS(exp);}
+    else{cls='ok';st=fmtDateS(exp);if(!opt)ok++;}
+    var meta=[x[2]?escHtml(x[2]):'',x[4]?escHtml(x[4]):'',x[3]?('issued '+fmtDateS(x[3])):''].filter(Boolean).join(' · ');
+    return '<div class="pfdoc '+cls+'"><i></i><span class=l>'+x[0]+'</span><b>'+st+'</b>'+(meta?'<span class=d>'+meta+'</span>':'')+'</div>';}).join('');
+  return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">Documents</span><span class="pf2mut" style="margin-left:auto;font-weight:700;color:'+(ok===req?'var(--green-d)':'var(--red)')+'">'+ok+' of '+req+' required valid</span></div>'
+    +'<div class=pf2mut style="margin:2px 0 8px">'+(cur?('Read against this contract, to '+fmtDateS(soff)):('Read against a 7-month contract from today, to '+fmtDateS(soff)))+'</div><div class=pfdocs>'+rows+'</div></div>';
 }
 // Shipboard Management Review responses -> permanent "Manager Feedback" cards (below Contract history).
 async function loadSbmCards(id){
