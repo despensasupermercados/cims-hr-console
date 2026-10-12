@@ -94,3 +94,25 @@ test("Notes of THIS contract under the sign-off workflow (Miguel, 12 Oct 2026); 
   assert.match(src, /SELECT agency_id, MAX\(ts\) AS last_ts FROM crew_note_log GROUP BY agency_id/);
   assert.match(src, /noteLast\[k\] >= String\(x\.signOn\)\.slice\(0, 10\)\) x\.hasNote = true;/);
 });
+
+test("a saved Comment is also kept as a dated note — a change logs once, the same text or an empty box logs nothing (Miguel, 12 Oct 2026: 'I dont wanna lose the notes')", async () => {
+  let DatabaseSync; try { ({ DatabaseSync } = await import("node:sqlite")); } catch { return; }
+  const W = await import("../src/worker.js");
+  const { signToken } = await import("../src/auth.js");
+  const d = new DatabaseSync(":memory:");
+  d.exec(`CREATE TABLE agency (id TEXT, code TEXT, name TEXT); CREATE TABLE users (email TEXT); INSERT INTO users VALUES ('rita@test.local');
+    CREATE TABLE activity_log (id TEXT, user_id TEXT, action TEXT, detail TEXT, at TEXT);`);
+  const db = { prepare: (sql) => { const mk = (args = []) => ({ bind: (...a) => mk(a), all: async () => ({ results: d.prepare(sql).all(...args) }),
+    first: async () => d.prepare(sql).get(...args) ?? null, run: async () => { d.prepare(sql).run(...args); return { meta: {} }; } }); return mk(); },
+    batch: async (sts) => { for (const s of sts) await s.run(); return []; } };
+  const env = { DB: db, SESSION_SECRET: "test-only-not-a-secret" };
+  const sess = await signToken({ p: "session", email: "rita@test.local", exp: Math.floor(Date.now() / 1000) + 3600 }, env.SESSION_SECRET);
+  const save = (note) => W.default.fetch(new Request("https://t.local/api/rotation/note", { method: "POST", headers: { "content-type": "application/json", cookie: "cims_sid=" + sess }, body: JSON.stringify({ agency_id: "SC-1", note }) }), env, { waitUntil() {} });
+  assert.equal((await save("To be retired as per Ray and Rolando.")).status, 200);
+  await save("To be retired as per Ray and Rolando.");   // unchanged: no second entry
+  await save("Cleared by Ray: stays one more contract."); // changed: a second dated entry
+  await save("");                                          // cleared box: nothing logged, history kept
+  const log = d.prepare("SELECT text FROM crew_note_log WHERE agency_id='SC-1' ORDER BY id").all().map((r) => r.text);
+  assert.deepEqual(log, ["To be retired as per Ray and Rolando.", "Cleared by Ray: stays one more contract."]);
+  assert.equal(d.prepare("SELECT note FROM crew_ready WHERE agency_id='SC-1'").get().note, "", "the box itself shows what Rita left in it");
+});

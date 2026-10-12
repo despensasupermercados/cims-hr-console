@@ -2409,9 +2409,17 @@ async function apiRotationCrew(env, url) {
 async function apiNote(request, env, session) {
   const b = await request.json().catch(() => ({}));
   if (!b.agency_id) return json({ error: "no_id" }, 400);
-  await ensureReady(env);
-  await env.DB.prepare("INSERT INTO crew_ready (agency_id,note,updated_at) VALUES (?,?,?) ON CONFLICT(agency_id) DO UPDATE SET note=excluded.note, updated_at=excluded.updated_at")
-    .bind(b.agency_id, String(b.note || "").slice(0, 2000), new Date().toISOString()).run();
+  await Promise.all([ensureReady(env), ensureCrewExtras(env)]);
+  // NOTHING SAID IS LOST (Miguel, 12 Oct 2026: "absolutely yes .. I dont wanna lose the notes"): the Comment box is one
+  // text per crew that each save overwrites, so a CHANGED, non-empty comment is also kept as a dated note in
+  // crew_note_log — the Crew tab's history and the contract modal's "Notes · this contract". Clearing the box logs nothing.
+  const note = String(b.note || "").slice(0, 2000), now = new Date().toISOString();
+  const prev = await env.DB.prepare("SELECT note FROM crew_ready WHERE agency_id=?").bind(b.agency_id).first().catch(() => null);
+  const changed = note.trim() && note.trim() !== String((prev && prev.note) || "").trim();
+  const writes = [env.DB.prepare("INSERT INTO crew_ready (agency_id,note,updated_at) VALUES (?,?,?) ON CONFLICT(agency_id) DO UPDATE SET note=excluded.note, updated_at=excluded.updated_at")
+    .bind(b.agency_id, note, now)];
+  if (changed) writes.push(env.DB.prepare("INSERT INTO crew_note_log (agency_id,ts,text) VALUES (?,?,?)").bind(b.agency_id, now, note.trim()));
+  await env.DB.batch(writes);
   await logActivity(env, session && session.email, "crew_note", b.agency_id);
   return json({ ok: true });
 }
