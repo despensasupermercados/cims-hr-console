@@ -1582,7 +1582,7 @@ async function apiCrewOne(env, url) {
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
   const today = TODAY();
   const none = () => ({ results: [] });
-  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes] = await Promise.all([
+  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes] = await Promise.all([
     env.DB.prepare("SELECT crew.*, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE crew.agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
@@ -1605,6 +1605,10 @@ async function apiCrewOne(env, url) {
     env.DB.prepare("SELECT at, user_id, action, detail FROM activity_log WHERE detail LIKE ? ORDER BY at DESC LIMIT 60").bind("%" + id + "%").all().catch(none),
     env.DB.prepare("SELECT vessel, sign_off_date, status, requested_at, ack_at FROM instr_ack WHERE sc=?").bind(id).all().catch(none),
     env.DB.prepare("SELECT vessel, sign_off_date, status, requested_at, ack_at FROM ack_request WHERE sc=?").bind(id).all().catch(none),
+    // who he relieved and who relieves him (12 Oct 2026): the fleet's open cards, TDG's Earmarked rows, everyone's name
+    fetchOpenAssignments(env).catch(() => []),
+    env.DB.prepare("SELECT agency_id, name, vessel FROM registry_snapshot WHERE status='Earmarked'").all().catch(none),
+    env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all().catch(none),
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
@@ -1622,6 +1626,7 @@ async function apiCrewOne(env, url) {
     edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
     sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
     statusRows: statusRes.results, travel: travelRes.results, activity: actRes.results, instr: instrRes.results, links: linkRes.results,
+    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
   return json({ crew, contracts: ct, daysWorked: profile.numbers.seaDays, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, today), profile });
 }
@@ -3785,12 +3790,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 @container (max-width:820px){.pfhero{grid-template-columns:1fr}.pfnow{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:12px}.pfstats{grid-template-columns:repeat(2,minmax(0,1fr))}.pfstats .tile:nth-child(3){border-left:0}.pfstats .tile:nth-child(n+3){border-top:1px solid var(--line)}.pfgrid{grid-template-columns:1fr}.pfrow{grid-template-columns:1fr;gap:6px}}
 /* Crew profile A+ (12 Oct 2026): everything on the seafarer, each value with its source. */
 .pf2hd{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
-.pf2top{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px 26px;align-items:start}
+.pf2top{display:block}
 .pfchip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;background:#F1F3F6;color:#374151;font-size:12px;font-weight:600;white-space:nowrap}
-.pf2file{background:#F6F8FB;border-radius:12px;padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
-.pf2fh{display:flex;justify-content:space-between;gap:8px;align-items:baseline}.pf2fh span{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.pf2fh em{font-style:normal;font-size:11.5px;color:var(--mut)}
-.pf2fg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.pf2fg span{display:block;font-size:11px;color:var(--mut)}.pf2fg b{font-size:13.5px;color:var(--deep)}
-.pf2ff{font-size:12px;color:var(--mut);border-top:1px solid var(--line);padding-top:8px}.pf2ff b{color:var(--ink)}
 .pfok{color:var(--green-d)}.pfwarn{color:var(--amber);font-weight:700}
 .pf2srcs{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;border-top:1px solid var(--line);padding-top:10px}
 .pf2k{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
@@ -3810,6 +3811,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf2bar u{position:absolute;top:-4px;width:2px;height:16px;background:var(--deep);text-decoration:none}
 .pf2bar s{position:absolute;top:-5px;width:2px;height:18px;background:var(--deep)}
 .pf2dt{width:100%;border-collapse:collapse;margin-top:10px}.pf2dt th{font-size:11px;font-weight:600;color:var(--mut);text-align:left;padding:6px 8px 6px 0}.pf2dt td{padding:7px 8px 7px 0;border-top:1px solid var(--line);font-size:12.5px}
+.pf2ho{display:flex;justify-content:space-between;gap:6px 16px;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--ink)}.pf2ho span:last-child{text-align:right;margin-left:auto}.pf2ho em{font-style:normal;color:var(--mut);font-size:11.5px}.pf2who{font-weight:700;color:var(--deep);text-decoration:none}.pf2who:hover{text-decoration:underline}.pf2warn{color:var(--amber);font-weight:600}
 .pf2tri{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}.pf2tri>div{background:#F6F8FB;border-radius:10px;padding:10px 12px;font-size:12.5px;min-width:0}.pf2tri .pflbl{margin-bottom:6px;display:flex;justify-content:space-between;gap:6px}
 .pf2tk{display:flex;flex-wrap:wrap;gap:5px}.pf2tick{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:11.5px;color:var(--mut);white-space:nowrap}.pf2tick.on{background:#EAF5E4;border-color:#CFE6C6;color:var(--green-d);font-weight:600}
 .pf2er{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:12.5px}.pf2er:first-of-type{border-top:0}.pf2er b{color:var(--deep);min-width:110px}.pf2er span{color:var(--mut)}
@@ -6884,13 +6886,8 @@ async function openCrew(id){
     +'<div class=pfship>'+shipLine+'</div>'
     +(contact?'<div class=pfcontact>'+contact+'</div>':'')
     +'</div></div>';
-  if(F){
-    h+='<div class=pf2file><div class=pf2fh><span>From the TDG file of '+fmtDateS(F.at)+'</span><em>'+(F.ageDays!=null?(F.ageDays===0?'today':(F.ageDays+' day'+(F.ageDays===1?'':'s')+' old')):'')+'</em></div>'
-      +'<div class=pf2fg><div><span>Status</span><b>'+escHtml(F.status||'—')+'</b></div><div><span>Ship</span><b>'+escHtml(F.ship?niceShip(F.ship):'—')+'</b></div>'
-      +'<div><span>Embarked</span><b>'+(F.embarked?fmtDateS(F.embarked):'—')+'</b></div><div><span>Debarked</span><b>'+(F.debarked?fmtDateS(F.debarked):'—')+'</b></div></div>'
-      +'<div class=pf2ff>'+(CN&&CN.completed!=null?('Count file '+fmtDateS(CN.asOf)+': <b>'+CN.completed+' completed</b>'+(CN.position?(' · '+escHtml(CN.position)):'')+(CN.tab?(' · '+escHtml(CN.tab)+' tab'):'')):'Not in TDG’s count file')
-      +' · '+((P.identity&&P.identity.manual&&P.identity.manual.length)?('<span class=pfwarn>'+P.identity.manual.length+' manual entr'+(P.identity.manual.length===1?'y':'ies')+' over TDG</span>'):'<span class=pfok>no manual entries</span>')+'</div></div>';
-  }else h+='<div class=pf2file><div class=pf2fh><span>Not in the kept TDG file</span></div><div class=pf2ff>No row for this crew in the last AdvancedQuery.</div></div>';
+  // The TDG file box beside the name is gone (Miguel, 12 Oct 2026: "this here .. dont think is needed"): the file's word
+  // is the status chip, its dates are the contract's rows below, its count is the first number.
   h+='</div><div class=pf2srcs><span class=pf2k>Sources</span>'+['tdg','count','typed','intel','feedback','counter','travel'].map(function(k){return pfSrc(k);}).join('')+'</div></div>';
   // 2 · the decision band: out of the rotation, or a contract that ended early
   var off=c.status==='Inactive'||c.status==='Not for Rehire';
@@ -7001,11 +6998,23 @@ function pfContract(x,isCur,todayS){
     +(x.earlyDays?'<span class="cchip red">Ended '+x.earlyDays+' d early</span>':'')+(x.held?'<span class="cchip red">Past the sign-off · TDG still has them aboard</span>':'')
     +'<span class=pf2mut style="margin-left:auto">Contract '+x.n+'</span></div>'
     +'<div class=pf2cs><b>'+escHtml(niceShip(x.ship))+'</b>'+(ports[0]||ports[1]?'<span>'+escHtml((ports[0]||'?')+' → '+(ports[1]||'?'))+'</span>':'')+'</div>'
-    +bar+'<div class=pf2mut style="margin-top:6px">'+(isCur?('Day '+x.days+' of '+x.plannedDays+' planned · '+spanCompact(x.on,todayS)+' aboard'):(x.days+' of '+x.plannedDays+' planned days · '+spanCompact(x.on,off||todayS)))+'</div>'
+    +bar+pfHandover(x.handover,isCur,todayS)+'<div class=pf2mut style="margin-top:6px">'+(isCur?('Day '+x.days+' of '+x.plannedDays+' planned · '+spanCompact(x.on,todayS)+' aboard'):(x.days+' of '+x.plannedDays+' planned days · '+spanCompact(x.on,off||todayS)))+'</div>'
     +'<table class=pf2dt><thead><tr><th>Date</th><th>Value</th><th>Source</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table>'
     +'<div class=pf2tri><div><div class=pflbl>Readiness</div><div class=pf2tk>'+rd+'</div></div>'
     +'<div><div class=pflbl>Sign-off emails</div><div class=pf2mut style="line-height:1.6">'+em(E.instructions,'Instructions')+'<br>'+em(E.link,'Link')+'<br>'+(E.review?('Ship review — sent '+fmtDateS(E.review.sent)):'Ship review — not sent')+'</div></div>'
     +'<div><div class=pflbl>Travel '+pfSrc('travel','by name')+'</div>'+tr+'</div></div></div>';
+}
+// Who he relieved and who relieves him, at the two ends of the contract's bar (Miguel, 12 Oct 2026: "show who was
+// before he took over and who is coming after"). Each name opens that seafarer's profile.
+function pfHandover(H,isCur,todayS){
+  H=H||{};var b=H.before,a=H.after;
+  var who=function(p){return '<a href="#" class=pf2who data-sc="'+escHtml(p.sc)+'" onclick="openCrew(this.dataset.sc);return false">'+escHtml(p.name||p.sc)+'</a>';};
+  var L=b?('<span>Took over from '+who(b)+' · off '+fmtDateS(b.off)+'</span>'):'<span class=pf2mut>Before: not on record</span>';
+  var R;
+  if(a){var lab=a.src==='earmark'?(a.told?'earmark · sent to TDG':'earmark'):(a.src==='tdg_earmark'?'TDG earmark, no dates':(a.src==='card'?'aboard per relief board':''));
+    R='<span>'+(a.on&&a.on<=todayS?'Relieved by ':'Next: ')+who(a)+(a.on?' · '+fmtDateS(a.on):'')+(lab?' <em>'+lab+'</em>':'')+'</span>';}
+  else R=isCur?'<span class=pf2warn>No reliever planned yet</span>':'<span class=pf2mut>After: not on record</span>';
+  return '<div class=pf2ho>'+L+R+'</div>';
 }
 // The career line: every contract on one axis, the planned end dashed where it ended early, a pin for every note,
 // intel card and feedback answer, and today. Read off the profile the page holds — no request.

@@ -191,9 +191,10 @@ test("static: apiCrewOne reads every source in ONE wave and returns the profile;
 
 test("static: the page draws A+ — header with TDG's row, the band, the numbers with sources, the career line, the contract's dates, people, status history, documents, rotation, checks, activity", () => {
   const p = body("async function openCrew(");
-  for (const s of ["From the TDG file of ", "class=pf2band", "pfNum(cnN,'Completed contracts',cnSrc)", "'Days at sea'", "pfCareer(K,PE.feed||[],todayS)", "pfContract(last,cur===last,todayS)", "pfPeople(PE,c.agency_id)", "Status history", "pfDocs(c,cur,todayS)", "Next &amp; rotation", "To check <span>", "Activity <span>"])
+  for (const s of ["class=pf2band", "pfNum(cnN,'Completed contracts',cnSrc)", "'Days at sea'", "pfCareer(K,PE.feed||[],todayS)", "pfContract(last,cur===last,todayS)", "pfPeople(PE,c.agency_id)", "Status history", "pfDocs(c,cur,todayS)", "Next &amp; rotation", "To check <span>", "Activity <span>"])
     assert.ok(p.includes(s), "the profile draws " + s);
   assert.doesNotMatch(p, /Next rung if clean/, "a $0 rung for a Junior said nothing");
+  assert.doesNotMatch(p, /class=pf2file/, "the TDG file box beside the name is gone (Miguel, 12 Oct 2026: \"dont think is needed\")");
   assert.doesNotMatch(p, /loadSbmCards\(/, "shipboard reviews ride in the profile's feed");
   // sign-off sends only while a contract runs
   assert.match(p, /\+\(cur\?\('<button class="btn ghost" onclick="sendSignoffInstructions/);
@@ -221,4 +222,31 @@ test("the Crew tab opens on the active crew: On board selected by default, on op
   assert.match(body("async function renderCrew("), /CF\.status=CREW_DEFAULT_STATUS\.slice\(\);/);
   assert.match(W, /function clearCrewFilters\(\)\{CF\.q='';CF\.status=CREW_DEFAULT_STATUS\.slice\(\);/);
   assert.doesNotMatch(W, /CF\.status=\[\];CF\.comp=''/, "no path resets the Crew tab to All crew on open");
+});
+
+test("the contract's bar names who he relieved and who relieves him: same hull, nearest sign-off before, first start after; a TDG earmark only when nothing dated follows (Miguel, 12 Oct 2026)", async () => {
+  const { handovers, HANDOVER_DAYS } = await import("../src/crew_profile.js");
+  const c = { ship: "Symphony", on: "2026-09-12", off: "2027-04-10" };
+  const legs = [
+    { sc: "SC-A", ship: "Symphony", on: "2026-02-10", off: "2026-09-14", source: "registry", name: "Ana A" },  // relieved by him (2-day handover)
+    { sc: "SC-Z", ship: "Symphony", on: "2025-07-01", off: "2026-02-10", source: "registry" },                 // the one before that
+    { sc: "SC-B", ship: "Allure", on: "2026-02-10", off: "2026-09-12", source: "registry" },                   // another hull
+    { sc: "SC-ME", ship: "Symphony", on: "2026-09-12", off: "2027-04-10", source: "registry" },                // himself
+  ];
+  const cards = [{ sc: "SC-C", ship: "Symphony", sign_on: "2027-04-08", crew_name: "Carl C", deployed_at: null }, { sc: "SC-D", ship: "Symphony", sign_on: "2027-11-01", crew_name: "Dan D" }];
+  const h = handovers(c, { legs, cards, names: { "SC-A": "Ana Alonzo", "SC-C": "Carl Cruz" }, sc: "SC-ME" });
+  assert.deepEqual(h.before, { sc: "SC-A", name: "Ana Alonzo", off: "2026-09-14", src: "tdg" });
+  assert.deepEqual(h.after, { sc: "SC-C", name: "Carl Cruz", on: "2027-04-08", src: "earmark", told: false });
+  // nothing dated after: TDG's Earmarked row names the next one, without dates
+  const t = handovers(c, { legs, cards: [], tdgEarmarks: [{ agency_id: "SC-E", name: "Eve E", vessel: "MV SYMPHONY OF THE SEAS" }], sc: "SC-ME" });
+  assert.deepEqual(t.after, { sc: "SC-E", name: "Eve E", on: null, src: "tdg_earmark" });
+  // a sign-off far from his sign-on is not a handover
+  assert.equal(handovers({ ship: "Symphony", on: "2026-12-01" }, { legs: [legs[0]], sc: "SC-ME" }).before, null);
+  assert.equal(HANDOVER_DAYS, 45);
+  // the page draws both ends and links each name to that profile
+  assert.match(W, /function pfHandover\(H,isCur,todayS\)\{/);
+  assert.match(W, /\+bar\+pfHandover\(x\.handover,isCur,todayS\)\+/);
+  assert.match(W, /Took over from '\+who\(b\)\+' · off '\+fmtDateS\(b\.off\)/);
+  assert.match(W, /isCur\?'<span class=pf2warn>No reliever planned yet<\/span>'/);
+  assert.match(W, /onclick="openCrew\(this\.dataset\.sc\);return false"/);
 });

@@ -414,7 +414,7 @@ override, the kept TDG row, the ONE schedule (`boardLegs`), the Counter (history
 notes, the Comment + readiness, field intel, feedback (request2/response2, superseded kept), shipboard reviews, cards,
 emails to Joy, TDG earmarks removed, status changes per upload (`sync_conflict`), travel (by name, "Last, First"),
 the activity log, sign-off instructions/link sends — and `buildCrewProfile` (`src/crew_profile.js`, pure) turns them
-into the page: the header with TDG's own row (and its age), a decision band when the crew is out of the rotation or a
+into the page: the header (name, chips, ship, contact — the TDG file box beside it was removed the same evening: "dont think is needed"), a decision band when the crew is out of the rotation or a
 contract ended early (> `EARLY_DAYS` = 21 before the plan), the numbers each with a source, the career line (bars, the
 planned end dashed, a pin per note / intel / feedback, today), the last contract with EVERY date and its source (TDG's
 shown, Rita's agrees or differs, the Counter's struck as history), readiness, sign-off emails, travel, what people said
@@ -425,7 +425,7 @@ the console's grade vs TDG's position, feedback never asked after a contract end
 manual status over TDG's word) — the console never picks — and who did what. Sign-off sends are offered only while a
 contract runs. The status word is `crewStatus`, the crew list's. The statement PDF reads the same schedule
 (`statementContracts`): it printed James Agbada "projected Nov 21" and 163 sea-days while TDG had him off Sep 5 after
-126. Masked: nothing (it is Miguel's own console). **The Crew tab opens on the active crew** (Miguel, 12 Oct 2026: "I want the active crew selected by default when u open the site"): `CREW_DEFAULT_STATUS = ['On board']` on open, on every return to the tab and on Clear filters; All crew is one tap. No schema change: "Resigned" is not an `end_reason` value — adding
+126. Masked: nothing (it is Miguel's own console). **Who he relieved and who relieves him** (same evening: "show who was before he took over and who is coming after .. in the timeline"): the contract's bar names, at its two ends, the contract on the same hull whose sign-off is nearest this sign-on (±`HANDOVER_DAYS` = 45) and the first contract or earmark starting after (TDG's undated Earmarked row only when nothing dated follows), each linked to that profile (`handovers`, `pfHandover`); a running contract with nobody after reads "No reliever planned yet"; a missing predecessor reads "Before: not on record" (the file keeps one row per crew — a predecessor who moved on may have no leg left). **The Crew tab opens on the active crew** (Miguel, 12 Oct 2026: "I want the active crew selected by default when u open the site"): `CREW_DEFAULT_STATUS = ['On board']` on open, on every return to the tab and on Clear filters; All crew is one tap. No schema change: "Resigned" is not an `end_reason` value — adding
 it is Miguel's call (asked 12 Oct 2026, not answered). Pinned by `test/crew_profile.test.js`.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026

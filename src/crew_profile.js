@@ -70,6 +70,33 @@ const MANUAL_LABEL = {
   med_exp: "Medical expiry", sirb_exp: "Seaman book expiry", pp_exp: "Passport expiry", usv_exp: "US visa expiry",
   sch_exp: "Schengen expiry", retired: "Inactive tag",
 };
+// WHO HE RELIEVED AND WHO RELIEVES HIM (Miguel, 12 Oct 2026: "show who was before he took over and who is coming after
+// .. in the timeline"). Same hull, another seafarer, read off the ONE schedule + Rita's open cards + TDG's undated
+// Earmarked rows. Before: the contract on the hull whose sign-off is nearest this sign-on (within HANDOVER_DAYS either
+// side). After: the first contract or earmark on the hull that starts after this one did; TDG's Earmarked word (no
+// dates) only when nothing dated follows. Nothing is inferred beyond that — the names are the board's own.
+export const HANDOVER_DAYS = 45;
+export function handovers(c, { legs, cards, tdgEarmarks, names, sc } = {}) {
+  if (!c || !c.ship || !c.on) return { before: null, after: null };
+  const k = key(c.ship), nm = (x, fallback) => (names && names[x]) || fallback || x;
+  let before = null;
+  for (const l of (legs || [])) {
+    if (!l || l.sc === sc || !l.sc || key(l.ship) !== k || !iso(l.on) || l.on >= c.on || !iso(l.off)) continue;
+    const g = Math.abs(daysBetween(l.off, c.on));
+    if (g > HANDOVER_DAYS) continue;
+    if (!before || g < before.gap) before = { sc: l.sc, name: nm(l.sc, l.name), off: l.off, src: legSrc(l), gap: g };
+  }
+  const after = [];
+  for (const l of (legs || [])) if (l && l.sc && l.sc !== sc && key(l.ship) === k && iso(l.on) && l.on > c.on && daysBetween(c.on, l.on) > 14)
+    after.push({ sc: l.sc, name: nm(l.sc, l.name), on: l.on, src: legSrc(l) });
+  for (const a of (cards || [])) if (a && a.sc && a.sc !== sc && a.ship && key(a.ship) === k && iso(a.sign_on) && a.sign_on > c.on && daysBetween(c.on, a.sign_on) > 14 && !after.some((x) => x.sc === a.sc))
+    after.push({ sc: a.sc, name: nm(a.sc, a.crew_name), on: iso(a.sign_on), src: "earmark", told: !!a.deployed_at });
+  after.sort((a, b) => (a.on < b.on ? -1 : 1));
+  let next = after[0] || null;
+  if (!next) { const t = (tdgEarmarks || []).find((r) => r && r.agency_id !== sc && r.vessel && key(r.vessel) === k); if (t) next = { sc: t.agency_id, name: nm(t.agency_id, t.name), on: null, src: "tdg_earmark" }; }
+  if (before) delete before.gap;
+  return { before, after: next };
+}
 const legSrc = (l) => (l.source === "registry" ? "tdg" : String(l.source || "").startsWith("assignment") ? "card" : "counter");
 
 // The whole profile. `input` carries the raw rows of the one wave; every list may be missing (an older
@@ -158,6 +185,7 @@ export function buildCrewProfile(input) {
       dates, readiness: r,
       emails: { instructions: sentFor(instr, off, l.ship), link: sentFor(links, off, l.ship), review: review ? { sent: day(review.sent_at || review.created_at), status: review.status || null } : null },
       travel: travelFor(l, off),
+      handover: handovers(l, { legs: I.fleetLegs, cards: I.openCards, tdgEarmarks: I.tdgEarmarks, names: I.names, sc }),
     };
   }).reverse();
 
