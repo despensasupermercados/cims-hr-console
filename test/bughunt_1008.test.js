@@ -53,7 +53,13 @@ test("server: statement and sea-days, the intel inbox, the feedback form", () =>
   const S = src("statement.js");
   assert.match(S, /Completed contracts: " \+ \(bonus\.contracts != null \? bonus\.contracts : "-"\)/, "the CUMULATIVE count beside the rank");
   assert.match(S, /"Consecutive bonus count: " \+ \(bonus\.count != null \? bonus\.count : 0\)/);
-  assert.equal((W.match(/julianday\(MIN\(COALESCE\(act_off,proj_off\),date\('now'\)\)\)/g) || []).length, 2, "sea-days stop at today on the card and the statement");
+  // 12 Oct 2026 (crew profile A+): the card and the statement no longer count sea-days off the Counter — both read the
+  // ONE schedule (TDG's embark/debark first) and stop at today there (statementContracts / buildCrewProfile, pinned in
+  // test/crew_profile.test.js). The Counter-only SQL printed 163 sea-days for a crew TDG had off after 126.
+  assert.equal((W.match(/julianday\(MIN\(COALESCE\(act_off,proj_off\),date\('now'\)\)\)/g) || []).length, 0, "sea-days come from the schedule, not the Counter");
+  assert.match(W, /const sched = statementContracts\(HIST, id, TODAY\(\)\);/, "the statement reads the schedule");
+  assert.match(W, /daysWorked: sched\.seaDays/, "the statement's sea-days are the schedule's");
+  assert.match(W, /daysWorked: profile\.numbers\.seaDays/, "the card's sea-days are the schedule's");
   assert.match(W, /const crew = Object\.assign\(applyOverride\(base, ov\), \{ id: base\.id, baseline_count: base\.baseline_count \}\);/, "the statement reads Rita's corrections; the money keeps the base baseline");
   assert.match(W, /SELECT id FROM crew_intel WHERE source_email_id=\? LIMIT 1/, "idempotent: a retry never files the same email twice");
   assert.match(W, /bind\(inserted \? "processed" : "new", row\.id\)/, "a failure never leaves the row 'processing'");

@@ -25,7 +25,9 @@ test("the Data page's AdvancedQuery reader hands dates over as text, never as a 
 test("the PDF statement gathers its per-crew reads in one wave (§12), guards together", () => {
   const b = fn("async function gatherStatement(", "\n}\n");
   assert.match(b, /await Promise\.all\(\[ensureKeyman\(env\), ensureContractCount\(env\)\]\);/);
-  assert.match(b, /const \[ctRes, dw, baseline, tdgRow, outs\] = await Promise\.all\(\[/);
+  // 12 Oct 2026: the sea-days read became the schedule (boardLegs) in the same wave — the Counter-only SQL is gone.
+  assert.match(b, /const \[ctRes, HIST, baseline, tdgRow, outs\] = await Promise\.all\(\[/);
+  assert.match(b, /boardLegs\(env\),/);
   assert.equal((b.match(/await /g) || []).length, 4, "crew row, guards, the wave, then crewCount (needs the baseline)");
 });
 

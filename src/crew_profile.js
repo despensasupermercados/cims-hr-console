@@ -1,0 +1,271 @@
+// THE CREW PROFILE (Miguel, 12 Oct 2026: "lets start by showing the right data from the crew .. is where all the
+// data should be collected from the crew .. coz is the crew tab"; then "I like A .. but add few things missing
+// from the other 2 versions", mock-up A+). PURE: apiCrewOne reads every table that holds something on one
+// seafarer in ONE wave (§12) and this module turns the rows into what the profile draws. Every value carries
+// where it came from (`src`): the TDG file, TDG's count file, a date Rita typed, field intel, feedback, the
+// Contract Counter (history only, §10d), the travel ledger. Nothing here writes, and nothing picks between two
+// sources that disagree — a disagreement is a `checks` row for a person (§6).
+//
+// Until this, the profile read the Contract Counter for its contracts: James Agbada read "OFF in 39 d · Nov 21"
+// while TDG's file and Rita's recorded edit both had him off Silhouette on Sep 5; sea-days counted 163 instead
+// of 126; Ray's feedback, the intel card and the "Resigned." comment were nowhere on the page.
+import { VESSEL_REF } from "./vessel_ref.js";
+import { buildShipKeys, canonShipWith, normShip, AZAMARA_SHORT } from "./shipname.js";
+
+const SHIP_KEYS = buildShipKeys(VESSEL_REF);
+const key = (s) => normShip(canonShipWith(s, SHIP_KEYS) || s || "");
+const isAz = (s) => AZAMARA_SHORT.includes(key(s));
+const day = (v) => (v ? String(v).slice(0, 10) : null);
+const iso = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
+const toN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 86400000;
+export function daysBetween(a, b) { const x = iso(a), y = iso(b); return x && y ? Math.round(toN(y) - toN(x)) : null; }
+// Calendar months, clamped to the month's end (§11c: Jan 31 + 1 month = Feb 28, never Mar 3).
+export function plusMonths(d, n) {
+  const x = iso(d); if (!x) return null;
+  let y = +x.slice(0, 4), m = +x.slice(5, 7) - 1 + n; const dd = +x.slice(8, 10);
+  y += Math.floor(m / 12); m = ((m % 12) + 12) % 12;
+  const last = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return y + "-" + String(m + 1).padStart(2, "0") + "-" + String(Math.min(dd, last)).padStart(2, "0");
+}
+const NEAR = 21; // the absorb window: TDG books the real port day, the Counter the nearest turnaround
+const near = (a, b) => { const g = daysBetween(a, b); return g != null && Math.abs(g) <= NEAR; };
+// An end more than three weeks before the plan is "early" — a projected end lands on a turnaround a few days
+// either side (§10d), so a smaller gap is the rota, not the seafarer leaving.
+export const EARLY_DAYS = 21;
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function fmtD(v) { const d = iso(v); return d ? MON[+d.slice(5, 7) - 1] + " " + (+d.slice(8, 10)) + ", " + d.slice(0, 4) : ""; }
+// The intel summary comes as "• Summary: … • What happened: …" — split into its labelled parts.
+export function intelParts(text) {
+  const t = String(text || "").trim();
+  const bits = t.split(/\s*•\s*/).map((x) => x.trim()).filter(Boolean);
+  return bits.map((b) => { const m = b.match(/^([A-Z][\w ]{2,30}):\s*([\s\S]*)$/); return m ? { label: m[1], text: m[2].trim() } : { label: null, text: b }; });
+}
+
+// Who did it, in the words the page uses: a person's first name, the AI, TDG's file.
+export function whoOf(u) {
+  const s = String(u || "").trim();
+  if (!s) return "—";
+  if (s.toLowerCase() === "ai") return "AI";
+  const local = s.split("@")[0].split(/[._-]/)[0];
+  return local ? local.charAt(0).toUpperCase() + local.slice(1).toLowerCase() : s;
+}
+const ACTIONS = {
+  crew_note_log: "Note added", crew_note: "Comment saved", crew_note_delete: "Note deleted",
+  contract_edit: "Contract edited", crew_edit: "Crew record edited", crew_add: "Crew added",
+  intel_auto: "Field intel filed", intel_file: "Field intel filed", intel_edit: "Field intel edited",
+  feedback_score: "Feedback entered", feedback_request: "Feedback requested",
+  rotation_assign: "Board placement", projection_create: "Earmark created", projection_move: "Earmark moved",
+  projection_remove: "Earmark removed", relief_remove: "Earmark removed", earmark_dismiss: "TDG earmark removed",
+  keyman_deploy: "Sent to TDG", signoff_link: "Sign-off link sent", signoff_instructions: "Sign-off instructions sent",
+  crew_hide: "Card hidden", crew_restore: "Card restored", bonus_commit: "Bonus committed", baseline_set: "Baseline set",
+};
+const FB = [
+  { role: "ray", label: "Ray · Orders" },
+  { role: "rolando", label: "Rolando · Technical" },
+  { role: "dexter", label: "Dexter · Field" },
+];
+const MANUAL_LABEL = {
+  first_name: "First name", middle_name: "Middle name", last_name: "Last name", status: "Status", rank_override: "Rank",
+  vessel_observed: "Ship", dob: "Date of birth", province: "Province", phone: "Phone", email: "Email", pp_no: "Passport no.",
+  med_exp: "Medical expiry", sirb_exp: "Seaman book expiry", pp_exp: "Passport expiry", usv_exp: "US visa expiry",
+  sch_exp: "Schengen expiry", retired: "Inactive tag",
+};
+const legSrc = (l) => (l.source === "registry" ? "tdg" : String(l.source || "").startsWith("assignment") ? "card" : "counter");
+
+// The whole profile. `input` carries the raw rows of the one wave; every list may be missing (an older
+// database without the table reads as empty, never as an error).
+export function buildCrewProfile(input) {
+  const I = input || {};
+  const today = iso(I.today) || new Date().toISOString().slice(0, 10);
+  const crew = I.crew || {}, ov = I.override || {}, snap = I.snap || null, cnt = I.count || null;
+  const sc = crew.agency_id;
+  const A = (x) => (Array.isArray(x) ? x : []);
+
+  // ---- the TDG file row (the header's box) and the count file
+  const file = snap ? {
+    at: day(snap.run_at), status: snap.raw_status || snap.status || null, ship: snap.vessel || null,
+    embarked: iso(snap.embarked_at), debarked: iso(snap.debarked_at),
+    ageDays: snap.run_at ? daysBetween(day(snap.run_at), today) : null,
+  } : null;
+  const count = cnt ? {
+    completed: cnt.completed != null ? Number(cnt.completed) : null, added: Number(I.countAdded || 0),
+    asOf: iso(cnt.as_of), position: cnt.position || null, tab: cnt.tab || null, km: cnt.km || null,
+  } : null;
+  if (count && count.completed != null) count.n = count.completed + count.added;
+
+  // ---- identity: which fields a person typed over TDG's row
+  const manual = [];
+  for (const f of Object.keys(MANUAL_LABEL)) {
+    const v = ov[f];
+    if (f === "retired" ? !!v : (v != null && String(v).trim() !== "")) manual.push({ field: f, label: MANUAL_LABEL[f], value: f === "retired" ? "Inactive (manual)" : String(v) });
+  }
+  const identity = { km: (count && count.km) || null, shipCrewId: crew.ship_crew_id || null, manual };
+
+  // ---- status history: each AdvancedQuery that moved the word (sync_conflict, field status), newest first
+  // An upload re-run on the same day writes the same transition twice: kept once.
+  const sRows = A(I.statusRows).filter((r) => r && r.field === "status").sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+    .filter((r, i, arr) => !arr.slice(0, i).some((q) => q.old_value === r.old_value && q.new_value === r.new_value && day(q.created_at) === day(r.created_at)));
+  const history = [];
+  sRows.forEach((r, i) => {
+    const nxt = sRows[i + 1];
+    history.push({ word: r.new_value, from: day(r.created_at), to: nxt ? day(nxt.created_at) : null, held: !Number(r.resolved), src: "tdg" });
+  });
+  if (sRows.length && sRows[0].old_value) history.unshift({ word: sRows[0].old_value, from: sRows[0].old_value === "On board" && file && file.embarked && file.embarked < day(sRows[0].created_at) ? file.embarked : null, to: day(sRows[0].created_at), src: "tdg" });
+  history.reverse();
+
+  // ---- contracts: the ONE schedule (boardLegs) for this crew, newest first, every date with its source
+  const counter = A(I.counter), edits = A(I.edits);
+  const instr = A(I.instr), links = A(I.links), sbmReq = A(I.sbmRequests), travel = A(I.travel);
+  const legs = A(I.legs).filter((l) => l && l.sc === sc && l.ours !== false && iso(l.on)).sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
+  const editFor = (l) => edits.find((e) => e.on_key && near(e.on_key, l.on)) ||
+    edits.find((e) => !e.on_key && counter.some((k) => near(k.sign_on, l.on) && Number(k.seq) === Number(e.seq))) || null;
+  const counterFor = (l) => counter.find((k) => near(k.sign_on, l.on) && key(k.ship) === key(l.ship)) || null;
+  const travelFor = (l, off) => travel.filter((t) => {
+    const ym = (d) => (d ? d.slice(0, 7) : null);
+    const tym = t.year && t.month ? t.year + "-" + String(t.month).padStart(2, "0") : null;
+    return tym && ((t.leg === "on" && tym === ym(l.on)) || (t.leg === "off" && tym === ym(off)));
+  }).map((t) => ({ leg: t.leg, air: +t.air || 0, hotel: +t.hotel || 0, medical: +t.medical || 0, visa: +t.visa || 0, other: (+t.food || 0) + (+t.transport || 0) + (+t.other || 0), total: +t.total || 0 }));
+  const sentFor = (rows, off, shipName) => {
+    const hit = rows.filter((r) => (iso(r.sign_off_date) && off && near(r.sign_off_date, off)) && (!r.vessel || !shipName || key(r.vessel) === key(shipName)))
+      .sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)))[0];
+    return hit ? { sent: day(hit.requested_at), acked: day(hit.ack_at), status: hit.status || null } : null;
+  };
+  const contracts = legs.map((l, i) => {
+    const off = iso(l.off), src = legSrc(l), e = editFor(l), k = counterFor(l);
+    const offSource = src === "tdg" ? (l.offSource || "projected") : src === "card" ? "card" : "counter";
+    const dates = [{ what: "Sign-on", value: l.on, src: src === "tdg" ? "tdg_embark" : src, at: src === "tdg" ? (l.fileAt || null) : null, used: true }];
+    if (off) dates.push({ what: "Sign-off", value: off, src: offSource, at: l.offAt || (offSource === "tdg" ? l.fileAt || null : null), used: true, held: !!l.heldByFile, snapped: l.offSnapped || 0 });
+    if (e && iso(e.sign_off) && !(offSource === "rita" && iso(e.sign_off) === off)) dates.push({ what: "Sign-off", value: iso(e.sign_off), src: "rita", at: day(e.updated_at), used: false, agrees: iso(e.sign_off) === off });
+    if (k && src !== "counter") {
+      const kOff = iso(k.act_off) || iso(k.proj_off);
+      if (kOff) dates.push({ what: "Sign-off", value: kOff, src: "counter", at: day(k.imported_at), used: false, agrees: kOff === off, history: true });
+    }
+    // The plan the contract was measured against: the Counter's projection, else the standard length.
+    const planned = (k && iso(k.proj_off)) || plusMonths(l.on, isAz(l.ship) ? 5 : 7);
+    const ended = !l.is_current && !!off && off <= today;
+    const earlyBy = ended && planned && offSource !== "projected" ? daysBetween(off, planned) : null;
+    const lastDay = off && off < today ? off : today;
+    const r = e ? { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, on: !!e.on_conf, off: !!e.off_conf, src: "rita" }
+      : (l.is_current && I.ready ? { eccr: !!I.ready.eccr, air: !!I.ready.air, hotel: !!I.ready.hotel, on: false, off: false, src: "board" } : null);
+    const review = sbmReq.filter((q) => (iso(q.contract_signoff) && off && near(q.contract_signoff, off)) || (iso(q.contract_signon) && near(q.contract_signon, l.on)))
+      .sort((a, b) => String(b.sent_at || b.created_at).localeCompare(String(a.sent_at || a.created_at)))[0];
+    return {
+      n: i + 1, ship: l.ship, brand: l.brand || null, on: l.on, off, current: !!l.is_current, src, offSource,
+      held: !!l.heldByFile, confirmed: !!l.offConfirmed, reliever: l.reliever || null,
+      embark: (e && e.embark) || l.embark || null, disembark: (e && e.disembark) || l.disembark || null,
+      planned, earlyDays: earlyBy != null && earlyBy > EARLY_DAYS ? earlyBy : 0,
+      days: l.on <= lastDay ? daysBetween(l.on, lastDay) : 0, plannedDays: daysBetween(l.on, planned),
+      dates, readiness: r,
+      emails: { instructions: sentFor(instr, off, l.ship), link: sentFor(links, off, l.ship), review: review ? { sent: day(review.sent_at || review.created_at), status: review.status || null } : null },
+      travel: travelFor(l, off),
+    };
+  }).reverse();
+
+  // ---- numbers
+  const seaDays = contracts.reduce((s, c) => s + (c.on <= today ? c.days : 0), 0);
+  const cur = contracts.find((c) => c.current && c.on <= today) || null;
+  const last = contracts.find((c) => !c.current && c.off && c.off <= today) || null;
+  const ashoreDays = !cur && last ? daysBetween(last.off, today) : null;
+
+  // ---- what people said: notes, the comment, field intel, feedback, shipboard reviews — newest first
+  const feed = [];
+  // Who wrote a note: crew_note_log has no author, so the activity row written in the same second names them.
+  const authorAt = (ts) => {
+    const t = Date.parse(ts || ""); if (isNaN(t)) return null;
+    const a = A(I.activity).find((x) => (x.action === "crew_note_log" || x.action === "crew_note") && Math.abs(Date.parse(x.at) - t) <= 5000);
+    return a ? whoOf(a.user_id) : null;
+  };
+  for (const n of A(I.notes)) if (n && String(n.text || "").trim()) feed.push({ at: n.ts, kind: "note", src: "typed", text: String(n.text), who: authorAt(n.ts) });
+  const comment = I.ready && String(I.ready.note || "").trim();
+  if (comment && !A(I.notes).some((n) => String(n.text || "").trim() === comment)) feed.push({ at: I.ready.updated_at, kind: "comment", src: "typed", text: comment, who: authorAt(I.ready.updated_at) });
+  for (const x of A(I.intel)) feed.push({ at: x.ts, kind: "intel", src: "intel", text: String(x.summary || ""), parts: intelParts(x.summary), who: x.reporter || null, via: x.source || "email", confidence: x.confidence || null, contractNo: x.contract_no != null ? Number(x.contract_no) : null });
+  const reqs = A(I.fbReqs), resp = A(I.fbResp);
+  for (const r of resp) {
+    let ans = {}; try { ans = JSON.parse(r.answers_json || "{}"); } catch (e) {}
+    feed.push({ at: r.submitted_at, kind: "feedback", src: "feedback", role: r.role, who: (FB.find((f) => f.role === r.role) || {}).label || r.role, answers: ans, superseded: !!r.superseded_at });
+  }
+  for (const s of A(I.sbm)) feed.push({ at: s.submitted_at, kind: "review", src: "feedback", who: "Shipboard review", rating: s.rating != null ? Number(s.rating) : null, ship: s.ship || null, text: s.q_final || "" });
+  feed.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  const slots = FB.map((f) => {
+    const live = resp.filter((r) => r.role === f.role && !r.superseded_at).sort((a, b) => String(b.submitted_at).localeCompare(String(a.submitted_at)))[0];
+    const q = reqs.find((r) => r.role === f.role);
+    return { role: f.role, label: f.label, state: live ? "answered" : q ? (q.status === "na" ? "na" : "pending") : "never", at: day(live ? live.submitted_at : q ? q.requested_at : null) };
+  });
+  const lastReview = sbmReq.slice().sort((a, b) => String(b.sent_at || b.created_at).localeCompare(String(a.sent_at || a.created_at)))[0];
+  const reviewAnswered = A(I.sbm).length > 0;
+  slots.push({ role: "sbm", label: "Shipboard review", state: reviewAnswered ? "answered" : lastReview ? "pending" : "never", at: day(reviewAnswered ? A(I.sbm)[0].submitted_at : lastReview ? (lastReview.sent_at || lastReview.created_at) : null) });
+
+  // ---- rotation: earmarks still to come, TDG earmarks removed, what went to Joy
+  const earmarks = A(I.cards).filter((c) => c && !c.actual_sign_off && iso(c.sign_on) && c.sign_on > today)
+    .map((c) => ({ id: c.id, ship: c.vessel_name, on: iso(c.sign_on), off: iso(c.planned_sign_off), told: day(c.deployed_at) }))
+    .sort((a, b) => (a.on < b.on ? -1 : 1));
+  const dismissed = A(I.dismissals).map((d) => ({ ship: d.ship_key, at: day(d.dismissed_at), by: whoOf(d.dismissed_by) }));
+  const joy = A(I.deploys).map((d) => ({ ship: d.ship, on: iso(d.sign_on), off: iso(d.sign_off), at: day(d.sent_at), by: whoOf(d.sent_by) }));
+
+  // ---- to check: where two sources disagree or something is missing. The console never picks.
+  const checks = [];
+  const latest = contracts[0] || null;
+  if (latest && latest.earlyDays && !A(I.cards).some((c) => c.end_reason && iso(c.sign_on) && near(c.sign_on, latest.on)))
+    checks.push({ key: "end_reason", text: "Why the " + latest.ship + " contract ended " + latest.earlyDays + " days early is not recorded." + (comment ? " The comment says “" + comment.replace(/[.\s]+$/, "") + "”." : "") });
+  if (I.grade && count && count.position && normGrade(I.grade) !== normGrade(count.position))
+    checks.push({ key: "grade", text: "The console grades " + I.grade + " (" + count.n + " completed contract" + (count.n === 1 ? "" : "s") + "); TDG’s count file says " + count.position + "." });
+  if (latest && !latest.current && latest.off && daysBetween(latest.off, today) >= 0) {
+    const missing = slots.filter((s) => s.state === "never").map((s) => s.label.split(" · ")[0]);
+    if (missing.length) checks.push({ key: "feedback", text: "Contract ended " + fmtD(latest.off) + " — never asked: " + missing.join(", ") + "." });
+  }
+  if (identity.km && !identity.shipCrewId) checks.push({ key: "identity", text: "TDG id " + identity.km + " is matched to " + sc + " by name; the ship crew id is not stored." });
+  if (file && file.status && crew.status && normStatusWord(file.status) !== normStatusWord(crew.status) && !(ov.status || ov.retired))
+    checks.push({ key: "status", text: "TDG’s file says " + file.status + "; the crew record says " + crew.status + "." });
+  for (const m of manual) if (m.field === "status" || m.field === "retired") checks.push({ key: "manual_status", text: "A manual " + m.label.toLowerCase() + " (" + m.value + ") sits over TDG’s word." });
+
+  // ---- activity: who did what, newest first (the activity log + every TDG file that moved the status)
+  const activity = A(I.activity).map((a) => ({ at: a.at, who: whoOf(a.user_id), text: (ACTIONS[a.action] || String(a.action || "").replace(/_/g, " ")) + activityDetail(a, sc) }));
+  for (const r of sRows) activity.push({ at: r.created_at, who: "TDG file", text: "Status " + (r.old_value || "—") + " → " + r.new_value + (Number(r.resolved) ? "" : " (held)") });
+  if (file && file.embarked) activity.push({ at: file.embarked, who: "TDG file", text: "Embarked " + (canonShipWith(file.ship, SHIP_KEYS) || file.ship || "") });
+  activity.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+
+  return {
+    file, count, identity, status: { history }, contracts,
+    numbers: { seaDays, ashoreDays, aboardDays: cur ? daysBetween(cur.on, today) : null },
+    people: { slots, feed }, rotation: { earmarks, dismissed, joy }, checks, activity,
+  };
+}
+function activityDetail(a, sc) {
+  const d = String(a.detail || "").replace(sc, "").trim();
+  if (!d) return "";
+  if (a.action === "feedback_score") { const f = FB.find((x) => x.role === d.toLowerCase()); return " · " + (f ? f.label : d); }
+  if (a.action === "intel_auto" || a.action === "intel_file") return d ? " · " + d + " match" : "";
+  if (a.action === "contract_edit") return " · contract " + d.replace(/^#/, "");
+  return " · " + d.replace(/^->\s*/, "→ ");
+}
+function normGrade(s) {
+  const t = String(s || "").toLowerCase();
+  if (/senior|sr\b/.test(t)) return "senior";
+  if (/junior|jr\b/.test(t)) return "junior";
+  return t.includes("printer") || /\bps\b/.test(t) ? "ps" : t;
+}
+function normStatusWord(s) {
+  const t = String(s || "").toLowerCase();
+  if (t.startsWith("reserved")) return "on vacation";
+  if (t.startsWith("not for rehire")) return "inactive";
+  return t;
+}
+
+// The statement PDF's contract table and sea-days, from the SAME schedule as the profile (12 Oct 2026: the PDF
+// read the Counter and printed James Agbada "projected Nov 21" and 163 sea-days while the page said Sep 5 and
+// 126). Oldest first, numbered in order; a sign-off TDG, Rita or a reliever card gave is "actual" once it has
+// passed, a projected one stays "projected".
+export function statementContracts(legs, sc, today) {
+  const t = iso(today) || new Date().toISOString().slice(0, 10);
+  const rows = (Array.isArray(legs) ? legs : []).filter((l) => l && l.sc === sc && l.ours !== false && iso(l.on))
+    .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
+  let seaDays = 0;
+  const contracts = rows.map((l, i) => {
+    const off = iso(l.off), projected = l.source === "registry" ? (l.offSource || "projected") === "projected" : !!l.is_current;
+    const actual = off && !projected && off <= t;
+    const end = off && off < t ? off : t;
+    if (l.on <= end) seaDays += daysBetween(l.on, end);
+    return { seq: i + 1, ship: l.ship, on: l.on, act: actual ? off : null, proj: actual ? null : off || null };
+  });
+  return { contracts, seaDays };
+}
