@@ -503,6 +503,8 @@ the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned 
   (`pfCareer(K, feed, today, hiOn)`) is drawn INSIDE the contract card under who handed over and who takes over
   (`pfRelay`, `.pf3relay2`): every contract on one axis, this one bright and the earlier ones soft (`.pf2cb.dim`), a pin per
   note / intel / feedback, today, the planned end dashed. The separate Career section is gone.
+- **The contract card runs the full page width** (same day: "the width of the page u built .. is too small. perhaps below
+  the main or top card"): drawn right under the header card (and the decision band), above the two columns (`.pf3wide`).
 - **The emergency contact** (Miguel: "u can add it"; Joy asked to add a next-of-kin / emergency-contact column to the
   AdvancedQuery): `crew.emergency_name / emergency_relation / emergency_phone` + the same on `crew_override`
   (`migrations/0022_emergency_contact.sql`, ALTERs in `ensureCrewExtras`). The import reads it from whatever header TDG uses
