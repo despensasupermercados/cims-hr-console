@@ -63,6 +63,10 @@ agent MUST confirm the change is actually serving by hitting the live API
 (`fetch('/api/…', {cache:'no-store'})`) and checking the behaviour — never trust a
 screenshot of a green commit. (Cautionary case: `ed41384` read as shipped + tests green but
 the fix was never live; found and corrected in Session 4.)
+**Proving it is the agent's job, never Miguel's** (13 Oct 2026: "I told u .. dont ask me to prove the merges.. u go
+ahead and do it"). When the agent's network cannot open cims.work, prove the deploy through the deployed worker code
+(Cloudflare `workers_get_worker_code`, grep for the new functions) and the D1 rows/schema the change needs, and report
+what was proven and what could not be — never ask Miguel to open the site to check.
 
 ## Project facts
 - 7 full users (Miguel, Rita + 5 contributors, added 2026-06-12 by Miguel's explicit decision).
