@@ -106,7 +106,7 @@ test("profile pixel pass: the numbers sit in the header's right half; the feedba
 // size ... so much lack of detail ... the current contract ... too crowded ... See what the people need to know").
 test("the contract card: header + state, the relay, four facts with sources, ONE crew-change checklist; sources and travel fold away", () => {
   const b = body("function pfContract(");
-  assert.match(b, /h\+=pfRelay\(x,isCur,todayS\);/);
+  assert.match(b, /h\+=pfRelay\(x,isCur,todayS,K,feed\);/);
   assert.match(b, /fact\('Signed on',fmtDateS\(on\)/);
   assert.match(b, /fact\(isCur\?'Sign-off':'Signed off'/);
   assert.match(b, /isCur\?fact\('To go'/);
@@ -195,4 +195,39 @@ test("the profile attaches the reason to its contract and the To-check row clear
   const after = buildCrewProfile({ ...base, ends: [{ on_key: "2026-05-02", reason: "Resigned", note: "Family reasons", set_by: "rita.berenyi@dg3.com", set_at: "2026-10-13T08:00:00Z" }] });
   assert.deepEqual(after.contracts[0].end, { reason: "Resigned", note: "Family reasons", by: "Rita", at: "2026-10-13", onKey: "2026-05-02" });
   assert.ok(!after.checks.some((c) => c.key === "end_reason"));
+});
+
+// THE EMERGENCY CONTACT (Miguel, 13 Oct 2026: "u can add it"): from TDG's file once it carries the column.
+test("emergency contact: read from whatever header TDG uses, never mistaken for the crew's own phone or email; an empty cell clears it", async () => {
+  const { mapRow, pickEmergency } = await import("../src/crewimport.js");
+  const base = { "CREW ID": "SC-1", "FIRST NAME": "Ian", "LAST NAME": "Alega", "CREW STATUS": "On board" };
+  // TDG adds the columns AFTER the crew's own: the crew's mobile stays the crew's
+  const r = mapRow({ ...base, "MOBILE NO.": "+63 900 000 0001", "EMAIL ADDRESS": "ian@x.com", "EMERGENCY CONTACT": "Maria Alega", "RELATIONSHIP": "Wife", "EMERGENCY CONTACT NO.": "+63 900 000 0002" });
+  assert.deepEqual([r.phone, r.email, r.emergency_name, r.emergency_relation, r.emergency_phone], ["+63 900 000 0001", "ian@x.com", "Maria Alega", "Wife", "+63 900 000 0002"]);
+  // a file WITHOUT a mobile column: "contact no" must not take the emergency number as the crew's phone
+  const n = mapRow({ ...base, "NEXT OF KIN": "Jose Alega", "NOK CONTACT NUMBER": "0917 1234567" });
+  assert.equal(n.phone, null);
+  assert.deepEqual([n.emergency_name, n.emergency_phone], ["Jose Alega", "0917 1234567"]);
+  // split name
+  assert.equal(pickEmergency({ "EMERGENCY FIRST NAME": "Ana", "EMERGENCY LAST NAME": "Cruz" }).emergency_name, "Ana Cruz");
+  // the column is there and the cell is empty: TDG removed it, the card clears it
+  const blank = (await import("../src/crewimport.js")).mapRowFull({ ...base, "EMERGENCY CONTACT": "", "EMERGENCY CONTACT NO.": "-" });
+  assert.deepEqual([...blank.row._blank].sort(), ["emergency_name", "emergency_phone"]);
+  // today's file (no such column) says nothing
+  assert.equal(mapRow({ ...base, "MOBILE NO.": "1" }).emergency_name, null);
+  assert.equal(((await import("../src/crewimport.js")).mapRowFull({ ...base, "MOBILE NO.": "1" }).row._blank || []).length, 0);
+});
+
+test("emergency contact: written by the import, typed in Edit crew with Reset to TDG, shown on the profile and the crew's statement", async () => {
+  const { CREW_WRITABLE } = await import("../src/crew_import_routes.js");
+  const { OVR_FIELDS } = await import("../src/override.js");
+  for (const f of ["emergency_name", "emergency_relation", "emergency_phone"]) { assert.ok(CREW_WRITABLE.has(f), f); assert.ok(OVR_FIELDS.includes(f), f); }
+  assert.match(W, /"ALTER TABLE crew ADD COLUMN emergency_name TEXT"/);
+  assert.match(W, /"ALTER TABLE crew_override ADD COLUMN emergency_phone TEXT"/);
+  assert.match(readFileSync(new URL("../migrations/0022_emergency_contact.sql", import.meta.url), "utf8"), /ALTER TABLE crew_override ADD COLUMN emergency_relation TEXT;/);
+  assert.match(W, /txt\('emergency_name','eEmName','Name'\)\+txt\('emergency_relation','eEmRel','Relationship'\)\+txt\('emergency_phone','eEmPh','Phone'\)/);
+  assert.match(W, /emergency_name:v\('eEmName'\),emergency_relation:v\('eEmRel'\),emergency_phone:v\('eEmPh'\)/);
+  assert.match(W, /<span class=pf3l style="margin-right:6px">Emergency<\/span>/);
+  const s = Buffer.from(composeStatement({ crew: { ...JAMES, emergency_name: "Maria Agbada", emergency_relation: "Mother", emergency_phone: "+63 900 1" }, contracts: [], daysWorked: 0, bonus: null, generatedAt: "2026-10-13T10:00:00Z" })).toString("latin1");
+  assert.ok(s.includes("(Maria Agbada \\(Mother\\) +63 900 1)"));
 });

@@ -7,7 +7,7 @@
 
 export const OVR_FIELDS = ["first_name", "middle_name", "last_name", "status", "rank_override",
   "vessel_observed", "dob", "province", "phone", "email", "pp_no", "med_exp", "sirb_exp",
-  "pp_exp", "usv_exp", "sch_exp", "baseline_count", "notes"];
+  "pp_exp", "usv_exp", "sch_exp", "baseline_count", "notes", "emergency_name", "emergency_relation", "emergency_phone"];
 
 export function applyOverride(base, ov) {
   if (!ov) return base;

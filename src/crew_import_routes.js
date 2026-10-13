@@ -95,6 +95,7 @@ export const CREW_WRITABLE = new Set([
   "first_name", "middle_name", "last_name", "status", "rank_observed",
   "dob", "province", "phone", "email", "gender", "pp_no",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp",
+  "emergency_name", "emergency_relation", "emergency_phone", // 13 Oct 2026, once TDG's file carries the column
 ]);
 
 // crew_override columns an ACCEPTED override conflict may set to NULL — only fields that exist on
@@ -104,7 +105,7 @@ export const OVR_CLEARABLE = new Set(OVR_FIELDS.filter(f => CREW_WRITABLE.has(f)
 // Columns written when INSERTing a brand-new crew member (agency_code has a DB default).
 const INSERT_COLS = ["id", "agency_id", "first_name", "middle_name", "last_name", "status",
   "rank_observed", "vessel_observed", "dob", "province", "phone", "email", "gender", "pp_no",
-  "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp", "created_at", "updated_at"];
+  "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp", "emergency_name", "emergency_relation", "emergency_phone", "created_at", "updated_at"];
 
 const J = (o, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });

@@ -95,11 +95,12 @@ export function composeStatement(data) {
   const last = contracts[contracts.length - 1] || null;
   const running = last && !last.act && isoD(last.on) && last.on <= today;
   if (last) pdf.textAt((running ? "On board " : "Last ship ") + (last.ship || ""), L, 152, { size: 9, color: SLATE });
-  const det = [["Born", c.dob ? fmtD(c.dob) : ""], ["Province", c.province || ""], ["Mobile", c.phone || ""], ["Email", c.email || ""]];
-  pdf.rrect(PX, 98, PW, 72, 6, CLOUD);
+  const emg = [c.emergency_name, c.emergency_relation ? "(" + c.emergency_relation + ")" : "", c.emergency_phone].filter(Boolean).join(" ");
+  const det = [["Born", c.dob ? fmtD(c.dob) : ""], ["Province", c.province || ""], ["Mobile", c.phone || ""], ["Email", c.email || ""], ["Emergency", emg]];
+  pdf.rrect(PX, 98, PW, 78, 6, CLOUD);
   caps("YOUR DETAILS ON FILE  \u00b7  PLEASE CHECK", PX + 12, 106, SLATE, 6);
   det.forEach(([k, v], i) => {
-    const t = 120 + i * 11.5;
+    const t = 118 + i * 10.6;
     pdf.textAt(k, PX + 12, t, { size: 7.5, color: SLATE });
     pdf.textAt(v ? fit(v, PW - 72, 8, true) : "Not on file", PX + 60, t, { size: 8, bold: !!v, color: v ? INK : SUBT });
   });
@@ -116,7 +117,7 @@ export function composeStatement(data) {
     [Number(data.daysWorked || 0).toLocaleString("en-US"), "Days at sea", "across " + contracts.length + " contract" + (contracts.length === 1 ? "" : "s") + " on file", GREEN],
     [valid + " of 4", "Documents valid", "required documents, today", docCol],
     [bonus ? String(bonus.count != null ? bonus.count : 0) : "-", "Bonus count", bonus && bonus.nextRungIfClean ? "next clean contract: " + money(bonus.nextRungIfClean) : (bonus && bonus.baseline_set === false ? "consecutive, baseline not set" : "consecutive contracts"), NAVY]];
-  const tg = 8, tw = (W - 3 * tg) / 4, tt = 180, th = 58;
+  const tg = 8, tw = (W - 3 * tg) / 4, tt = 184, th = 58;
   tiles.forEach(([n, l, sub, col], i) => {
     const x = L + i * (tw + tg);
     pdf.rrect(x, tt, tw, th, 6, CLOUD).rect(x + 12, tt + 13, 2.5, 20, col);
