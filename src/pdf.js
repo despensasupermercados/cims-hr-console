@@ -26,6 +26,14 @@ function esc(s) {
   return latin1(s).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
+// Standard 14-font metrics for chars 32..126 (Adobe Helvetica / Helvetica-Bold AFM).
+const HR = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,
+  1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,
+  333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const HB = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,
+  975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,
+  333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+
 export class Pdf {
   constructor() {
     this.pages = [];      // each page = array of content-stream fragments (strings)
@@ -105,8 +113,22 @@ export class Pdf {
     this.cur.push(`${col}BT /${f} ${size} Tf ${spacing} Tc ${x} ${PAGE_H - top - size * 0.8} Td (${esc(str)}) Tj 0 Tc ET\n`);
     return this;
   }
-  // Rough Helvetica width (no font metrics in a hand-rolled writer): enough to right-align a short label.
-  static width(str, size, bold = false) { let w = 0; for (const ch of String(str)) w += /[il.,:;'| ]/.test(ch) ? 0.28 : /[mwMW]/.test(ch) ? 0.83 : /[A-Z0-9]/.test(ch) ? 0.64 : 0.52; return w * size * (bold ? 1.05 : 1); }
+  // A filled rectangle with rounded corners (r in points): pills, panels, the progress bar (13 Oct 2026).
+  rrect(x, top, w, h, r, color) {
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    const k = 0.5523 * r, y = PAGE_H - top - h, X = x + w, Y = y + h;
+    this.cur.push(`${color[0]} ${color[1]} ${color[2]} rg ${x + r} ${y} m ${X - r} ${y} l ${X - r + k} ${y} ${X} ${y + r - k} ${X} ${y + r} c `
+      + `${X} ${Y - r} l ${X} ${Y - r + k} ${X - r + k} ${Y} ${X - r} ${Y} c ${x + r} ${Y} l ${x + r - k} ${Y} ${x} ${Y - r + k} ${x} ${Y - r} c `
+      + `${x} ${y + r} l ${x} ${y + r - k} ${x + r - k} ${y} ${x + r} ${y} c f\n`);
+    return this;
+  }
+  // Helvetica / Helvetica-Bold advance widths (the standard AFM metrics, per 1000 em) for ASCII; anything else reads
+  // as a digit's width. Real metrics, so a right-aligned date or a pill's text sits where it should.
+  static width(str, size, bold = false) {
+    const T = bold ? HB : HR; let w = 0;
+    for (const ch of latin1(str)) { const c = ch.charCodeAt(0); w += c >= 32 && c < 127 ? T[c - 32] : (c === 0xb7 ? 278 : 556); }
+    return w * size / 1000;
+  }
   newPageIfBelow(top) { if (this.top > top) { this._newPage(); return true; } return false; }
 
   // Serialize to a Uint8Array (valid PDF with xref).

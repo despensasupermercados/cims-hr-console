@@ -101,3 +101,68 @@ test("profile pixel pass: the numbers sit in the header's right half; the feedba
   assert.match(W, /\.pf2hd\+\.pfsec,\.pf2band\+\.pfsec/);
   assert.match(W, /\+label\+\(s\.state==='answered'\?' ✓'/);
 });
+
+// ROUND 2 (Miguel, 13 Oct 2026: "the PDF still comes out pretty bad. The window for notes and documents is not the same
+// size ... so much lack of detail ... the current contract ... too crowded ... See what the people need to know").
+test("the contract card: header + state, the relay, four facts with sources, ONE crew-change checklist; sources and travel fold away", () => {
+  const b = body("function pfContract(");
+  assert.match(b, /h\+=pfRelay\(x,isCur,todayS\);/);
+  assert.match(b, /fact\('Signed on',fmtDateS\(on\)/);
+  assert.match(b, /fact\(isCur\?'Sign-off':'Signed off'/);
+  assert.match(b, /isCur\?fact\('To go'/);
+  assert.match(b, /fact\(isCur\?'Signs off at':'Signed off at'/);
+  assert.match(b, /if\(isCur\)h\+=cc\.html;/, "the checklist shows while the contract runs");
+  assert.match(b, /if\(!isCur\)more\.push\('<details class=pf3more><summary><span>Crew-change record<\/span>/, "an ended contract folds its record away");
+  assert.match(b, /<summary><span>How these dates were set<\/span>/);
+  assert.match(b, /<summary><span>Travel<\/span>/);
+  const cc = body("function pfCrewChange(");
+  for (const s of ["'Reliever'", "'Dates'", "'Travel'", "'Sign-off'", "'Planned'", "'In TDG'", "'Sign-on confirmed'", "'Sign-off confirmed'", "'ECCR'", "'Flight'", "'Hotel'", "'Instructions'", "'Sign-off link'", "'Ship review'"]) assert.ok(cc.includes(s), s);
+  assert.match(cc, /var inTdg=!!a&&\(a\.src==='tdg'\|\|a\.src==='tdg_earmark'\);/, "a console earmark told to Joy is not yet in TDG");
+  assert.match(W, /<span>No reliever yet<\/span><small>Earmark one on the Keyman board<\/small>/);
+  assert.doesNotMatch(W, /class="pf3p next none warn"/, "the page's global .warn box class is never reused");
+});
+
+test("Edit crew, Notes and Documents open in ONE side panel of one size", () => {
+  assert.match(W, /function openSheet\(kind\)\{/);
+  assert.match(body("async function editCrewModal("), /var w=openSheet\('ec2'\);/);
+  assert.match(body("async function notesModal("), /openSheet\('nt2'\);/);
+  assert.match(body("async function docsModal("), /var w=openSheet\('dc2'\);/);
+  assert.match(W, /\.modwrap\.sheetwrap>\.modcard\.sheet\{width:640px;max-width:100%;height:100vh;height:100dvh;/);
+  assert.match(W, /'<div class="modcard sheet ec2"><div class=echd>/);
+  assert.match(W, /'<div class="modcard sheet nt2">'\+sheetHead\(S\.crew,/);
+  assert.match(W, /'<div class="modcard sheet dc2">'\+sheetHead\(c,'Documents · '/);
+  assert.match(W, /e\.key==='Escape'&&document\.querySelector\('#crewmodal\.sheetwrap'\)/, "Esc closes the panel");
+});
+
+test("Documents: number, issued, expires (with time left), issuer per document, read against the contract, the line zoomed on it", () => {
+  const b = body("async function docsModal(");
+  assert.match(b, /fetch\('\/api\/crew\/get\?id='/, "the full crew record, not the list's row");
+  assert.match(b, /if\(!exp\)k=opt\?'na':'miss';else if\(exp<son\)k='exp';else if\(exp<soff\)k='lapse';else k='ok';/);
+  assert.match(b, /if\(!opt&&cnt\[k\]!=null\)cnt\[k\]\+\+;/, "the count is the four required documents");
+  const r = body("function dcRow(");
+  assert.match(r, /kv\('Number',x\[2\]\)\+kv\('Issued',/);
+  assert.match(r, /kv\('Issued by',x\[4\]\)/);
+  assert.match(r, /t0=dayNum\(son<todayS\?son:todayS\)-45,t1=dayNum\(soff\)\+120/, "zoomed on the contract");
+  assert.match(r, /valid to '\+fmtDateS\(exp\)\+' →/);
+  assert.match(W, /function dcSpan\(a,b\)\{/);
+});
+
+test("the status history is one span per word: the same word from upload after upload is merged", () => {
+  const rows = [["On board", "On Vacation", "2026-07-23"], ["On board", "On Vacation", "2026-07-26"], ["On board", "On Vacation", "2026-07-28"], ["On Vacation", "Earmarked", "2026-09-06"], ["On Vacation", "Earmarked", "2026-09-07"], ["Earmarked", "On board", "2026-09-26"]]
+    .map(([o, n, d], i) => ({ id: "s" + i, field: "status", old_value: o, new_value: n, created_at: d + "T10:00:00Z", resolved: 1 }));
+  const p = buildCrewProfile({ today: "2026-10-13", crew: { agency_id: "X" }, statusRows: rows });
+  assert.deepEqual(p.status.history.map((h) => [h.word, h.from, h.to]), [["On board", "2026-09-26", null], ["Earmarked", "2026-09-06", "2026-09-26"], ["On Vacation", "2026-07-23", "2026-09-06"], ["On board", null, "2026-07-23"]]);
+});
+
+test("the statement PDF, rebuilt: details for the crew to check, four tiles, the contract feature, striped tables with pills, one page", () => {
+  const S = readFileSync(new URL("../src/statement.js", import.meta.url), "utf8");
+  for (const s of ['"YOUR DETAILS ON FILE  \\u00b7  PLEASE CHECK"', '"CURRENT CONTRACT" : "LAST CONTRACT"', '"Completed contracts"', '"Days at sea"', '"Documents valid"', '"Bonus count"', '"Please check this statement."', '"Bonus paid"'])
+    assert.ok(S.includes(s) || S.includes(s.replace("\\u00b7", "·")), s);
+  const bytes = composeStatement({ crew: { ...JAMES, rank_observed: "Junior Printer Specialist", pp_no: "P6005315C", pp_place: "DFA - San Pablo" },
+    contracts: [{ seq: 1, ship: "Silhouette", on: "2026-05-02", act: "2026-09-05", proj: null, from: "FORT LAUDERDALE, FLORIDA", to: "FORT LAUDERDALE, FLORIDA" }], daysWorked: 126,
+    bonus: { contracts: 1, count: 0, baseline_set: true, outcomes: [] }, generatedAt: "2026-10-12T19:00:00Z", fileAt: "2026-10-10" });
+  const s = Buffer.from(bytes).toString("latin1");
+  assert.equal((s.match(/\/Type \/Page /g) || []).length, 1, "a one-contract career is one page");
+  for (const t of ["(Fort Lauderdale  to  Fort Lauderdale)", "(Completed)", "(Signed off)", "(Valid)", "(Not held \\(optional\\))", "(Please check this statement.)"]) assert.ok(s.includes(t), t);
+  assert.ok(!s.includes("(Bonus paid)"), "nothing paid = no payout table");
+});

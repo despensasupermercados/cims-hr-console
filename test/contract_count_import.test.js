@@ -189,7 +189,7 @@ test("every grade reader takes TDG's stated count first, in its own wave, and ke
   const ledger = fn("async function apiContracts(");
   assert.match(wave(ledger), /contractCountMap\(env\)/, "ledger: the count is read in the wave");
   assert.match(ledger, /cumulativeContracts\(TDG\[b\.agency_id\]/);
-  const stmt = fn("async function gatherStatement(", 3000);
+  const stmt = fn("async function gatherStatement(", 4000); // 13 Oct 2026: the wave gained the typed-ports read
   assert.match(stmt, /FROM contract_count WHERE sc=\?/);
   assert.match(stmt, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, fc, tdgRow \? completedSince\(tdgRow\.as_of, tdgRow\.tdg_off, /);
   assert.match(stmt, /CC_ONE_WITH_OFF_SQL/, "the statement reads the count with the file's debark, one query");

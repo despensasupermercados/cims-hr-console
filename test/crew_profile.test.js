@@ -243,10 +243,11 @@ test("the contract's bar names who he relieved and who relieves him: same hull, 
   // a sign-off far from his sign-on is not a handover
   assert.equal(handovers({ ship: "Symphony", on: "2026-12-01" }, { legs: [legs[0]], sc: "SC-ME" }).before, null);
   assert.equal(HANDOVER_DAYS, 45);
-  // the page draws both ends and links each name to that profile
-  assert.match(W, /function pfHandover\(H,isCur,todayS\)\{/);
-  assert.match(W, /\+bar\+pfHandover\(x\.handover,isCur,todayS\)\+/);
-  assert.match(W, /Took over from '\+who\(b\)\+' · off '\+fmtDateS\(b\.off\)/);
-  assert.match(W, /isCur\?'<span class=pf2warn>No reliever planned yet<\/span>'/);
+  // the page draws both ends and links each name to that profile — since 13 Oct 2026 as the card's relay (pfRelay:
+  // the one who handed over, this contract's track, the one who takes over), re-pinned from the 12 Oct bar line
+  assert.match(W, /function pfRelay\(x,isCur,todayS\)\{/);
+  assert.match(W, /h\+=pfRelay\(x,isCur,todayS\);/);
+  assert.match(W, /who\(b\)\+'<small>Handed over '\+fmtDateS\(b\.off\)\+'<\/small>/);
+  assert.match(W, /<span>No reliever yet<\/span><small>Earmark one on the Keyman board<\/small>/);
   assert.match(W, /onclick="openCrew\(this\.dataset\.sc\);return false"/);
 });

@@ -454,6 +454,33 @@ is not really well design .. the notes .. the same .. the pdf .. the email state
 - Profile pixel pass: the four numbers sit in the header's right half, the career card has its gap, the feedback buttons
   read "Ray · Orders ✓", the sign-off note "Ended <date>".
 
+**Round 2 — the contract card, one panel, the PDF** (Miguel, 13 Oct 2026: "the PDF still comes out pretty bad. The window
+for notes and documents is not the same size ... so much lack of detail ... the current contract ... too crowded ... See what
+the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned by `test/crew_windows.test.js`.
+- **The contract card** (`pfContract`) answers, in order: where and how far along (ship, route, a state pill: "Aboard · day N
+  of M", "Ended N days early", "Past the sign-off · TDG still has them aboard"); **the relay** (`pfRelay`: who handed the
+  seat over → this contract's track filled to today → who takes it next, each name a link; "No reliever yet" when nobody);
+  **four facts** each with its source (Signed on · Sign-off · To go / Served · Signs off at); **the crew change**
+  (`pfCrewChange`) as ONE checklist in four steps with a count — Reliever (planned, in TDG: only a file row or TDG's
+  Earmarked row counts, "told Joy" is not yet in TDG), Dates (on / off confirmed), Travel (ECCR, flight, hotel), Sign-off
+  (instructions, link, ship review) — read from Readiness and the sends, never typed here. "How these dates were set" and
+  "Travel" fold away under the card; an ended contract folds its crew-change record away too. The header chip reads
+  "Off in 5 mo 8 d" like the card (never "OFF in 159 d"). Status history merges the same word from upload after upload.
+- **One side panel** (`openSheet`): Edit crew, Notes and Documents open in the same sheet — right edge, full height, 640px,
+  the whole screen on a phone; header (`sheetHead`), scrolling body, footer; Esc or a click outside closes it.
+- **Documents** (`docsModal`, now from `/api/crew/get`): per document the number, issued, expires with the time left
+  (`dcSpan`: "in 9 yrs", "1 yr 5 mo ago"), the issuer, a standing pill read against the running contract (else 7 months
+  from today, 5 on Azamara), and a line zoomed on the contract (45 days before it to 4 months after) showing the validity
+  under the contract's window. Schengen stays optional ("Expired · optional", grey). Edit dates opens Edit crew's Documents.
+- **The statement PDF** (`composeStatement`, `pdf.js` gained `rrect` and the real Helvetica metrics): the band, the name
+  and position, "Your details on file · please check" (born, province, mobile, email), four shaded tiles (completed
+  contracts with the TDG count's date, days at sea, documents valid, the CONSECUTIVE bonus count — two tiles, never one
+  number, §10c), the current / last contract as a feature with its route and progress bar, the contracts as a striped
+  table with a status pill and the route (the leg's ports, else the ones Rita typed — `gatherStatement` reads
+  `contract_edit` in its wave), every document with number / issued / expires + time left / issuer / standing pill,
+  "Bonus paid" only when something was paid, a "please check" note naming Rita when it fits, and the same line in the
+  footer of every page. One page for a normal career. Still crew-facing only (no notes, intel, feedback, status word).
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

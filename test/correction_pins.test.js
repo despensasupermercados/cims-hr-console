@@ -26,7 +26,7 @@ test("the PDF statement gathers its per-crew reads in one wave (§12), guards to
   const b = fn("async function gatherStatement(", "\n}\n");
   assert.match(b, /await Promise\.all\(\[ensureKeyman\(env\), ensureContractCount\(env\)\]\);/);
   // 12 Oct 2026: the sea-days read became the schedule (boardLegs) in the same wave — the Counter-only SQL is gone.
-  assert.match(b, /const \[ctRes, HIST, baseline, tdgRow, outs, rsRow\] = await Promise\.all\(\[/); // + the TDG file's date (12 Oct 2026)
+  assert.match(b, /const \[ctRes, HIST, baseline, tdgRow, outs, rsRow, portRes\] = await Promise\.all\(\[/); // + Rita's typed ports (13 Oct 2026) // + the TDG file's date (12 Oct 2026)
   assert.match(b, /boardLegs\(env\),/);
   assert.equal((b.match(/await /g) || []).length, 4, "crew row, guards, the wave, then crewCount (needs the baseline)");
 });

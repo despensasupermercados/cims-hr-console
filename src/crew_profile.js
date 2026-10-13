@@ -138,6 +138,9 @@ export function buildCrewProfile(input) {
     history.push({ word: r.new_value, from: day(r.created_at), to: nxt ? day(nxt.created_at) : null, held: !Number(r.resolved), src: "tdg" });
   });
   if (sRows.length && sRows[0].old_value) history.unshift({ word: sRows[0].old_value, from: sRows[0].old_value === "On board" && file && file.embarked && file.embarked < day(sRows[0].created_at) ? file.embarked : null, to: day(sRows[0].created_at), src: "tdg" });
+  // The same word from upload after upload is ONE span (13 Oct 2026: Ian Alega read "On Vacation" six rows running —
+  // a held change re-flagged by every weekly file). Held only while every row of the span was held.
+  for (let i = history.length - 1; i > 0; i--) if (history[i].word === history[i - 1].word) { history[i - 1].to = history[i].to; history[i - 1].held = !!(history[i - 1].held && history[i].held); history.splice(i, 1); }
   history.reverse();
 
   // ---- contracts: the ONE schedule (boardLegs) for this crew, newest first, every date with its source
@@ -295,7 +298,9 @@ export function statementContracts(legs, sc, today) {
     const actual = off && !projected && off <= t;
     const end = off && off < t ? off : t;
     if (l.on <= end) seaDays += daysBetween(l.on, end);
-    return { seq: i + 1, ship: l.ship, on: l.on, act: actual ? off : null, proj: actual ? null : off || null };
+    const row = { seq: i + 1, ship: l.ship, on: l.on, act: actual ? off : null, proj: actual ? null : off || null };
+    if (l.embark || l.disembark) Object.assign(row, { from: l.embark || null, to: l.disembark || null }); // the route, for the PDF (13 Oct 2026)
+    return row;
   });
   return { contracts, seaDays };
 }

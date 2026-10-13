@@ -51,8 +51,10 @@ test("server: dashboard tiles = Compliance tab; a removed user loses access; sam
 
 test("server: statement and sea-days, the intel inbox, the feedback form", () => {
   const S = src("statement.js");
-  assert.match(S, /Completed contracts: " \+ \(bonus\.contracts != null \? bonus\.contracts : "-"\)/, "the CUMULATIVE count beside the rank");
-  assert.match(S, /"Consecutive bonus count: " \+ \(bonus\.count != null \? bonus\.count : 0\)/);
+  // 13 Oct 2026 (the statement rebuilt): the two counts are two separate tiles, each named — never one number for both.
+  assert.match(S, /const cnt = bonus && bonus\.contracts != null \? bonus\.contracts : null;/, "the CUMULATIVE count");
+  assert.match(S, /\[cnt != null \? String\(cnt\) : "-", "Completed contracts"/);
+  assert.match(S, /\[bonus \? String\(bonus\.count != null \? bonus\.count : 0\) : "-", "Bonus count"/, "the CONSECUTIVE count, its own tile");
   // 12 Oct 2026 (crew profile A+): the card and the statement no longer count sea-days off the Counter — both read the
   // ONE schedule (TDG's embark/debark first) and stop at today there (statementContracts / buildCrewProfile, pinned in
   // test/crew_profile.test.js). The Counter-only SQL printed 163 sea-days for a crew TDG had off after 126.
