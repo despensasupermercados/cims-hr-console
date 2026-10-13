@@ -53,6 +53,20 @@ function leftTxt(exp, today) {
   return e < today ? t + " ago" : (e === today ? "today" : "in " + t);
 }
 const portTxt = (p) => String(p || "").split(",")[0].trim().toLowerCase().replace(/(^|[ -])[a-z]/g, (m) => m.toUpperCase());
+// Time at sea in months and days, as the profile says it (Miguel, 13 Oct 2026: "X months at sea .. 1 is enough"): each
+// contract's calendar span to its sign-off or today, added up, days carried into months at 30.
+function seaTime(contracts, today) {
+  let m = 0, d = 0;
+  for (const x of contracts || []) {
+    const a = isoD(x.on); if (!a || a > today) continue;
+    const off = isoD(x.act) || (isoD(x.proj) && x.proj < today ? x.proj : null), b = off && off < today ? off : today;
+    let mm = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)), dd = +b.slice(8, 10) - +a.slice(8, 10);
+    if (dd < 0) { mm -= 1; dd += new Date(Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, 0)).getUTCDate(); }
+    m += mm; d += dd;
+  }
+  m += Math.floor(d / 30); d %= 30;
+  return m ? m + " mo" + (d ? " " + d + " d" : "") : d + " d";
+}
 // Cut a string to a width in points (real Helvetica metrics), with a trailing "." when cut.
 const fit = (s, w, size, bold) => { s = String(s == null ? "" : s); if (Pdf.width(s, size, bold) <= w) return s; while (s.length > 1 && Pdf.width(s + ".", size, bold) > w) s = s.slice(0, -1); return s.trimEnd() + "."; };
 // Word-wrap to a width; returns lines.
@@ -64,6 +78,7 @@ function wrap(s, w, size, bold) {
 
 export function composeStatement(data) {
   const c = data.crew || {};
+  const INT = !!data.feedback; // the INTERNAL crew file (13 Oct 2026): HR reads it, so nothing on it is addressed to the crew
   const contracts = (data.contracts || []).slice().sort((a, b) => String(a.on || "").localeCompare(String(b.on || "")));
   const bonus = data.bonus || null;
   const today = (data.generatedAt || new Date().toISOString()).slice(0, 10);
@@ -80,9 +95,9 @@ export function composeStatement(data) {
   pdf.textAt("CIMS", L, 25, { size: 22, bold: true, color: [1, 1, 1], spacing: 5 });
   pdf.rect(L, 52, 78, 2, GREEN);
   pdf.textAt("CRUISE INDUSTRY MANAGED SERVICES", L, 60, { size: 6, bold: true, color: SUBT, spacing: 1.6 });
-  rtext("Crew statement", R, 26, { size: 10, bold: true, color: [1, 1, 1] });
+  rtext(data.feedback ? "Crew file  -  internal" : "Crew statement", R, 26, { size: 10, bold: true, color: [1, 1, 1] });
   rtext(fmtD(today), R, 41, { size: 13, bold: true, color: [1, 1, 1] });
-  if (c.agency_id) rtext("Issued to " + c.agency_id, R, 60, { size: 7.5, color: SUBT });
+  if (c.agency_id) rtext((INT ? "" : "Issued to ") + c.agency_id, R, 60, { size: 7.5, color: SUBT });
 
   // 2. who: the name, the position TDG holds, the ship; beside it the details on file, for them to check
   const name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ") || c.agency_id || "Crew";
@@ -98,7 +113,7 @@ export function composeStatement(data) {
   const emg = [c.emergency_name, c.emergency_relation ? "(" + c.emergency_relation + ")" : "", c.emergency_phone].filter(Boolean).join(" ");
   const det = [["Born", c.dob ? fmtD(c.dob) : ""], ["Province", c.province || ""], ["Mobile", c.phone || ""], ["Email", c.email || ""], ["Emergency", emg]];
   pdf.rrect(PX, 98, PW, 78, 6, CLOUD);
-  caps("YOUR DETAILS ON FILE  \u00b7  PLEASE CHECK", PX + 12, 106, SLATE, 6);
+  caps(INT ? "DETAILS ON FILE" : "YOUR DETAILS ON FILE  \u00b7  PLEASE CHECK", PX + 12, 106, SLATE, 6);
   det.forEach(([k, v], i) => {
     const t = 118 + i * 10.6;
     pdf.textAt(k, PX + 12, t, { size: 7.5, color: SLATE });
@@ -108,14 +123,21 @@ export function composeStatement(data) {
   // 3. four numbers, shaded tiles with a coloured mark
   const DOCS = [["Medical", c.med_exp, c.med_cert_no, c.med_issue, c.med_place], ["Seaman book", c.sirb_exp, c.sirb_no, c.sirb_issue, c.sirb_place],
     ["Passport", c.pp_exp, c.pp_no, c.pp_issue, c.pp_place], ["US visa (C1/D)", c.usv_exp, c.usv_no, c.usv_issue, c.usv_place], ["Schengen", c.sch_exp, c.sch_no, c.sch_issue, c.sch_place, true]];
-  const stOf = (exp, opt) => { const e = isoD(exp); if (!e) return opt ? "Not held" : "Missing"; const s = docStatus(e, today); return s.color === RED ? "Expired" : (s.color === AMBER ? "Expiring" : "Valid"); };
-  const valid = DOCS.filter((d) => !d[5] && (stOf(d[1]) === "Valid" || stOf(d[1]) === "Expiring")).length;
+  // Read against the running contract, as the profile reads them (Miguel, 13 Oct 2026: "this is also important .. also in
+  // the PDF"): expired today = Expired, valid today but gone before the sign-off = Lapses; with no contract running, today
+  // and the next 90 days (Expiring).
+  const lastC = contracts[contracts.length - 1] || null;
+  const runOff = lastC && !lastC.act && isoD(lastC.on) && lastC.on <= today && isoD(lastC.proj) ? lastC.proj : null;
+  const stOf = (exp, opt) => { const e = isoD(exp); if (!e) return opt ? "Not held" : "Missing";
+    if (runOff) return e < today ? "Expired" : (e < runOff ? "Lapses" : "Valid");
+    const s = docStatus(e, today); return s.color === RED ? "Expired" : (s.color === AMBER ? "Expiring" : "Valid"); };
+  const valid = DOCS.filter((d) => !d[5] && (stOf(d[1]) === "Valid" || (!runOff && stOf(d[1]) === "Expiring"))).length;
   const docCol = valid === 4 ? GREEN : (DOCS.some((d) => !d[5] && (stOf(d[1]) === "Expired" || stOf(d[1]) === "Missing")) ? RED : AMBER);
   const cnt = bonus && bonus.contracts != null ? bonus.contracts : null;
-  const cntSub = bonus && bonus.contracts_source === "tdg" && bonus.contracts_as_of ? "TDG count, " + fmtD(bonus.contracts_as_of) + (bonus.contracts_added ? " + " + bonus.contracts_added : "") : "from your contract dates";
+  const cntSub = bonus && bonus.contracts_source === "tdg" && bonus.contracts_as_of ? "TDG count, " + fmtD(bonus.contracts_as_of) + (bonus.contracts_added ? " + " + bonus.contracts_added : "") : INT ? "from the contract dates" : "from your contract dates";
   const tiles = [[cnt != null ? String(cnt) : "-", "Completed contracts", cnt != null ? cntSub : "", GREEN],
-    [Number(data.daysWorked || 0).toLocaleString("en-US"), "Days at sea", "across " + contracts.length + " contract" + (contracts.length === 1 ? "" : "s") + " on file", GREEN],
-    [valid + " of 4", "Documents valid", "required documents, today", docCol],
+    [seaTime(contracts, today), "Time at sea", Number(data.daysWorked || 0).toLocaleString("en-US") + " days, " + contracts.length + " contract" + (contracts.length === 1 ? "" : "s"), GREEN],
+    [valid + " of 4", "Documents valid", runOff ? "for this contract, to " + fmtD(runOff) : "required documents, today", docCol],
     [bonus ? String(bonus.count != null ? bonus.count : 0) : "-", "Bonus count", bonus && bonus.nextRungIfClean ? "next clean contract: " + money(bonus.nextRungIfClean) : (bonus && bonus.baseline_set === false ? "consecutive, baseline not set" : "consecutive contracts"), NAVY]];
   const tg = 8, tw = (W - 3 * tg) / 4, tt = 184, th = 58;
   tiles.forEach(([n, l, sub, col], i) => {
@@ -178,7 +200,7 @@ export function composeStatement(data) {
   pdf.setTop(pdf.top + 16);
 
   // 6. documents: number, issue, expiry with the time left, issuer, standing
-  section("Documents", "Standing on " + fmtD(today) + ". Expiring = within 90 days.");
+  section("Documents", runOff ? (INT ? "Read against the current contract, to " : "Read against your current contract, to ") + fmtD(runOff) + ". Lapses = expires before the sign-off." : "Standing on " + fmtD(today) + ". Expiring = within 90 days.");
   const dx = [8, 92, 178, 250, 334, W - 8];
   const dHead = () => {
     const t = pdf.top; pdf.rrect(L, t, W, 18, 4, CLOUD);
@@ -194,9 +216,9 @@ export function composeStatement(data) {
     pdf.textAt(label, L + dx[0], t + 8, { size: 8.5, bold: true, color: INK });
     const n1 = nf(no, dx[2] - dx[1] - 8); pdf.textAt(n1.s, L + dx[1], t + 8, { size: 8.5, color: n1.c });
     const n2 = nf(iss ? fmtD(iss) : "", 70); pdf.textAt(n2.s, L + dx[2], t + 8, { size: 8.5, color: n2.c });
-    if (isoD(exp)) { pdf.textAt(fmtD(exp), L + dx[3], t + 4.5, { size: 8.5, color: INK }); pdf.textAt(leftTxt(exp, today), L + dx[3], t + 14, { size: 6.8, color: st === "Expired" ? RED : (st === "Expiring" ? AMBER : SLATE) }); }
+    if (isoD(exp)) { pdf.textAt(fmtD(exp), L + dx[3], t + 4.5, { size: 8.5, color: INK }); pdf.textAt(leftTxt(exp, today), L + dx[3], t + 14, { size: 6.8, color: st === "Expired" ? RED : (st === "Expiring" || st === "Lapses" ? AMBER : SLATE) }); }
     else pdf.textAt(opt ? "" : "Not on file", L + dx[3], t + 8, { size: 8.5, color: SUBT });
-    const P = { Valid: [GTINT, GINK], Expiring: [ATINT, AMBER], Expired: [RTINT, RED], Missing: [RTINT, RED], "Not held": [CLOUD, SLATE] }[st];
+    const P = { Valid: [GTINT, GINK], Expiring: [ATINT, AMBER], Lapses: [ATINT, AMBER], Expired: [RTINT, RED], Missing: [RTINT, RED], "Not held": [CLOUD, SLATE] }[st];
     const pw = pill(st === "Not held" ? "Not held (optional)" : st, L + dx[5], t + 6, P[0], P[1], 6.8);
     const n3 = nf(place, dx[5] - dx[4] - pw - 10); pdf.textAt(n3.s, L + dx[4], t + 8, { size: 8.5, color: n3.c });
     pdf.setTop(t + 24);
@@ -232,18 +254,88 @@ export function composeStatement(data) {
   // 8. please check — who to write to; on the last page only when it fits (the footer says it on every page)
   const ct = pdf.top, msg = "If your name, your details, a contract date or a document is wrong, reply to the email this came with, or write to Rita Berenyi at rita.berenyi@dg3.com. CIMS corrects it and sends you a new statement.";
   const lines = wrap(msg, W - 40, 8.5);
-  if (ct + 22 + lines.length * 11.5 <= BOTTOM) {
+  if (!INT && ct + 22 + lines.length * 11.5 <= BOTTOM) { // the crew file is HR's: nothing asks the crew to check it
   pdf.rrect(L, ct, W, 22 + lines.length * 11.5, 6, GTINT).rect(L, ct + 8, 3, 6 + lines.length * 11.5, GREEN);
   pdf.textAt("Please check this statement.", L + 16, ct + 9, { size: 9, bold: true, color: GINK });
   lines.forEach((ln, i) => pdf.textAt(ln, L + 16, ct + 22 + i * 11.5, { size: 8.5, color: INK }));
   }
 
-  // 9. footer on every page
+  // 9. CONTRACT FEEDBACK — the internal crew file only (Miguel, 13 Oct 2026: "in a clean page .. regardless if there is space
+  // on a previous one .. as Contract feedback .. the entire historical data"). Always starts a new page; every contract,
+  // newest first, everything said in it. Never in the crew's statement or its email (data.feedback is absent there).
+  let fbStart = null;
+  const FBK = data.feedback;
+  if (FBK) {
+    pdf._newPage(); fbStart = pdf.pages.length - 1;
+    const KC = { note: [0.118, 0.435, 0.816], comment: [0.118, 0.435, 0.816], intel: RED, feedback: [0.478, 0.357, 0.780], review: [0.478, 0.357, 0.780] };
+    pdf.rect(0, 0, PAGE_W * 0.6, 5, NAVY).rect(PAGE_W * 0.6, 0, PAGE_W * 0.4, 5, GREEN);
+    pdf.textAt("Contract feedback", L, 34, { size: 20, bold: true, color: NAVY });
+    rtext(name, R, 36, { size: 10, bold: true, color: INK }); rtext(c.agency_id || "", R, 50, { size: 8, color: SLATE });
+    pdf.textAt("Everything recorded about this seafarer, every contract, newest first. Internal - never sent to the crew.", L, 62, { size: 8.5, color: SLATE });
+    pdf.setTop(84); // (the feedback-requests strip is not printed: Miguel, 13 Oct 2026, "this is not needed in the PDF")
+    const LX = 112, TW = W - LX;
+    const line = (str, x, o, lh) => { room(lh); const t = pdf.top; pdf.textAt(str, x, t, o); pdf.setTop(t + lh); };
+    for (const g of FBK.groups || []) {
+      room(70);
+      const t = pdf.top, k = g.contract;
+      const title = k ? "Contract " + k.n + "  -  " + (k.ship || "") : "Between contracts";
+      const span = k ? fmtD(k.on) + "  to  " + (k.off ? fmtD(k.off) : "open") + (k.current ? "  -  running" : "") : "notes and reports dated outside a contract";
+      const endTxt = k && (k.earlyDays || k.end) ? [k.earlyDays ? "Ended " + k.earlyDays + " days early" : "", k.end ? "Why: " + k.end.reason + (k.end.note ? " - " + k.end.note : "") : ""].filter(Boolean).join("   ") : "";
+      pdf.rrect(L, t, W, endTxt ? 34 : 22, 5, NTINT);
+      pdf.textAt(title, L + 12, t + 6, { size: 10.5, bold: true, color: NAVY });
+      rtext(span, R - 12, t + 7.5, { size: 8, color: SLATE });
+      if (endTxt) pdf.textAt(fit(endTxt, W - 24, 8, true), L + 12, t + 21, { size: 8, bold: true, color: RED });
+      pdf.setTop(t + (endTxt ? 34 : 22) + 8);
+      if (!g.items.length) { line("Nothing recorded in this contract.", L + 12, { size: 8.5, color: SLATE }, 18); continue; }
+      g.items.forEach((it, idx) => {
+        room(34);
+        const top = pdf.top, col = KC[it.kind] || SLATE;
+        pdf.textAt(fmtD(it.at), L, top, { size: 8.5, bold: true, color: INK });
+        pdf.rect(L, top + 14, 5, 5, col);
+        pdf.textAt(it.label, L + 9, top + 12.5, { size: 7.5, bold: true, color: col });
+        if (it.who) pdf.textAt(fit(it.who, LX - 14, 7.5), L, top + 24, { size: 7.5, color: SLATE });
+        let first = true;
+        if (it.tags.length) {
+          // the answers as label + value, two columns
+          const CW = TW / 2;
+          for (let q = 0; q < it.tags.length; q += 2) {
+            room(12); const y = pdf.top;
+            [it.tags[q], it.tags[q + 1]].forEach((tg, ci) => { if (!tg) return; const x = L + LX + ci * CW, lab = tg[0] + "  ";
+              pdf.textAt(lab, x, y + 0.6, { size: 7.5, color: SLATE });
+              pdf.textAt(fit(tg[1], CW - Pdf.width(lab, 7.5) - 8, 8.5, true), x + Pdf.width(lab, 7.5), y, { size: 8.5, bold: true, color: INK }); });
+            pdf.setTop(y + 12.5);
+          }
+          first = false;
+        }
+        for (const ln0 of it.lines) {
+          // an intel part's label in bold, its text running on beside it
+          const lab = ln0.label ? ln0.label + ":  " : "", lw = lab ? Pdf.width(lab, 8.5, true) : 0;
+          const words = String(ln0.text || "").split(/\s+/).filter(Boolean);
+          let head = "";
+          while (words.length && Pdf.width(head ? head + " " + words[0] : words[0], 8.5) <= TW - lw) head = head ? head + " " + words.shift() : words.shift();
+          room(12); const y = pdf.top;
+          if (lab) pdf.textAt(lab, L + LX, y, { size: 8.5, bold: true, color: INK });
+          pdf.textAt(head, L + LX + lw, y, { size: 8.5, color: INK }); pdf.setTop(y + 12);
+          if (words.length) wrap(words.join(" "), TW, 8.5).forEach((ln) => line(ln, L + LX, { size: 8.5, color: INK }, 12));
+          first = false;
+        }
+        if (it.superseded) line("Earlier answer - kept, not used for scoring.", L + LX, { size: 7.5, color: SLATE }, 11);
+        if (it.meta) line(it.meta, L + LX, { size: 7.5, color: SLATE }, 11);
+        if (first) pdf.setTop(top + 12);
+        pdf.setTop(Math.max(pdf.top, top + 34) + 6);
+        if (idx < g.items.length - 1) { pdf.hline(L, R, pdf.top - 4, LINE); }
+      });
+      pdf.setTop(pdf.top + 10);
+    }
+  }
+
+  // 10. footer on every page
   pdf.pages.forEach((pg, i) => {
     pg.push(`0.89 0.91 0.94 RG 0.75 w ${L} ${MARGIN - 6} m ${R} ${MARGIN - 6} l S\n`);
     const foot = (str, x, y, col = SLATE) => pg.push(`${col[0]} ${col[1]} ${col[2]} rg BT /F1 7.5 Tf ${x} ${y} Td (${String(str).replace(/[()\\]/g, "")}) Tj ET\n`);
     foot("Generated by CIMS for DG3 Cruise Industry Managed Services on " + fmtD(today) + ".", L, MARGIN - 18);
-    foot("Questions: Rita Berenyi - rita.berenyi@dg3.com. Something wrong? Reply to the email or write to her.", L, MARGIN - 29);
+    if (INT) foot("Internal - CIMS HR crew file. Not for the crew.", L, MARGIN - 29, RED);
+    else foot("Questions: Rita Berenyi - rita.berenyi@dg3.com. Something wrong? Reply to the email or write to her.", L, MARGIN - 29);
     const pgTxt = (c.agency_id || "") + "   Page " + (i + 1) + " of " + pdf.pages.length;
     foot(pgTxt, R - Pdf.width(pgTxt, 7.5), MARGIN - 18);
   });

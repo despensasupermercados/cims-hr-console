@@ -27,7 +27,7 @@ import { contractLedgerRow, psRank, psSalary } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts, completedSince } from "./contract_count.js";
 import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet } from "./crew_status.js";
-import { buildCrewProfile, statementContracts } from "./crew_profile.js";
+import { buildCrewProfile, statementContracts, feedbackFile } from "./crew_profile.js";
 import { statementEmail, TEMPLATE_ID as STATEMENT_TEMPLATE_ID } from "./emails/hr.statement.v2.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
@@ -220,6 +220,7 @@ export default {
         if (p === "/api/crew/notes") return apiCrewNotes(request, env, session, url);
         if (p === "/api/crew/contract-end" && request.method === "POST") return apiContractEnd(request, env, session);
         if (p === "/api/crew/statement.pdf") return apiStatementPdf(env, url);
+        if (p === "/api/crew/file.pdf") return apiCrewFilePdf(env, url, session);
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
@@ -2892,6 +2893,22 @@ async function apiStatementPdf(env, url) {
     "Content-Disposition": `inline; filename="CIMS_Statement_${id}.pdf"`,
   }});
 }
+// THE CREW FILE (Miguel, 13 Oct 2026: "the PDF should include this also in a clean page .. as Contract feedback .. the
+// entire historical data"). INTERNAL: the statement's pages, then "Contract feedback" on a page of its own — every note,
+// field-intel report, feedback answer and shipboard review, grouped by contract, newest first. Never emailed: the crew's
+// statement (above, and its email) stays the crew-facing document. The profile's one wave and the statement's run together.
+async function apiCrewFilePdf(env, url, session) {
+  const id = url.searchParams.get("id");
+  const [data, prof] = await Promise.all([gatherStatement(env, id), apiCrewOne(env, url, session).then((r) => r.json()).catch(() => null)]);
+  if (!data) return json({ error: "not_found" }, 404);
+  const feedback = feedbackFile(prof && prof.profile, TODAY());
+  const bytes = composeStatement({ ...data, feedback });
+  await logActivity(env, session && session.email, "crew_file_pdf", id);
+  return new Response(bytes, { headers: {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `inline; filename="CIMS_CrewFile_${id}.pdf"`,
+  }});
+}
 // POST /api/crew/statement/email {id, to?} -> store in R2 (if bound) + email PDF via Resend (if configured).
 // THE STATEMENT EMAIL (12 Oct 2026): to the seafarer, CC Rita and reply-to Rita (Miguel: "the email statement CC rita"),
 // the hr.statement.v2 body (src/emails/hr.statement.v2.js, CIMS letterhead). ONE send per crew per 10 minutes: Miguel's
@@ -3977,6 +3994,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf3step li small{display:block;font-size:11px;color:var(--mut)}
 .pf3hint{font-size:12px;color:var(--mut);margin-top:8px}
 .pf3wide{margin-top:12px}.pf3wide .pf3relay2{margin-top:18px}.pf3wide .pf2tl{height:78px}
+.pf2cb.live{border-top-right-radius:0;border-bottom-right-radius:0}
+.pf2ct{position:absolute;top:22px;height:16px;border-radius:0 8px 8px 0;background:#D4ECDC;border:1.5px dashed #2E9E5B;border-left:0;box-sizing:border-box}
+.pf2nx{position:absolute;top:22px;height:16px;border-radius:8px;background:#FCEFC7;border:1.5px dashed #E8B64A;color:#7A4E0E;font-size:10.5px;font-weight:700;line-height:13px;padding-left:8px;box-sizing:border-box;overflow:hidden;white-space:nowrap}
+.pf2nx.firm{background:#F2B01E;border-style:solid;color:#4A2F05}
+.pf2nx.stub{background:#FDE7D3;border:1.5px dashed #E8702A}
+.pf2nxl{position:absolute;top:4px;font-size:10px;font-weight:700;color:#9A4A12;white-space:nowrap;transform:translateX(-100%)}
 .pf3relay2{margin:16px 0 4px}.pf3ppl{display:flex;justify-content:space-between;align-items:center;gap:10px 16px;flex-wrap:wrap}.pf3ppl .pf3p.next{margin-left:auto}
 .pf3career{margin-top:4px}.pf3career .pf2tl{margin-top:2px}.pf2cb.dim{background:#A8D5B8;color:#1F5E3A}
 .pf3why{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
@@ -7127,7 +7150,8 @@ async function openCrew(id){
     +'<button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Notes</button>'
     +'<button class="btn ghost" onclick="docsModal(\\''+escHtml(c.agency_id)+'\\')">Documents</button>'
     +'<div class=pfgl>Statement</div>'
-    +'<button class="btn ghost" onclick="downloadStatement()">Download PDF</button>'
+    +'<button class="btn ghost" onclick="downloadStatement()">Download statement</button>'
+    +'<button class="btn ghost" onclick="downloadCrewFile()" title="The statement plus Contract feedback: every note, intel report and feedback answer, every contract. Internal — never emailed.">Crew file · internal</button>'
     +'<button class="btn ghost" id=stmtbtn onclick="emailStatement()">Email statement</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<div id=stmtout class=csub style="margin:0"></div>'
@@ -7237,20 +7261,20 @@ function pfRelay(x,isCur,todayS,K,feed){
   var ini=function(n){return escHtml(String(n||'?').split(/[ ,]+/).filter(Boolean).slice(0,2).map(function(w){return w.charAt(0);}).join('').toUpperCase()||'?');};
   var L=b?'<div class="pf3p prev"><i>'+ini(b.name)+'</i><div>'+who(b)+'<small>Handed over '+fmtDateS(b.off)+'</small></div></div>'
     :'<div class="pf3p prev none"><i>–</i><div><span>Before</span><small>Not on record</small></div></div>';
-  var lab=a?(a.src==='earmark'?(a.told?'earmark · told Joy':'earmark · console only'):(a.src==='tdg_earmark'?'TDG earmark · no dates yet':(a.src==='card'?'aboard per relief board':'in the TDG file'))):'';
+  var lab=a?(a.src==='earmark'?(a.tdg?'earmark · TDG has them':(a.told?'earmark · told Joy':'earmark · console only')):(a.src==='tdg_earmark'?'TDG earmark · no dates yet':(a.src==='card'?'aboard per relief board':'in the TDG file'))):'';
   var R=a?'<div class="pf3p next'+(a.src==='earmark'||a.src==='tdg_earmark'?' em':'')+'"><div>'+who(a)+'<small>'+(a.on?((a.on<=todayS?'Took over ':'From ')+fmtDateS(a.on)+' · '):'')+lab+'</small></div><i>'+ini(a.name)+'</i></div>'
     :(isCur?'<div class="pf3p next none pf3w"><div><span>No reliever yet</span><small>Earmark one on the Keyman board</small></div><i>!</i></div>'
       :'<div class="pf3p next none"><div><span>After</span><small>Not on record</small></div><i>–</i></div>');
   // ONE line (Miguel, 13 Oct 2026, the Career box and the card's track: "u can merge these 2 into 1"): who handed over
   // and who takes over above it, the whole career under them — this contract bright, the earlier ones soft, a pin per
   // note / intel / feedback, today, the planned end dashed where a contract ended early.
-  return '<div class=pf3relay2><div class=pf3ppl>'+L+R+'</div>'+pfCareer(K&&K.length?K:[x],feed||[],todayS,x.on)+'</div>';
+  return '<div class=pf3relay2><div class=pf3ppl>'+L+R+'</div>'+pfCareer(K&&K.length?K:[x],feed||[],todayS,x.on,isCur&&a&&(a.on?a.on>=x.on:a.src==='tdg_earmark')?a:null)+'</div>';
 }
 // The crew change as one checklist in four steps, with a count. Ticks are set in the contract on the Keyman board
 // (Readiness) and by the sign-off sends; nothing here is typed.
 function pfCrewChange(x,isCur,todayS){
   var a=(x.handover||{}).after,R=x.readiness||{},E=x.emails||{};
-  var inTdg=!!a&&(a.src==='tdg'||a.src==='tdg_earmark');
+  var inTdg=!!a&&(a.src==='tdg'||a.src==='tdg_earmark'||!!a.tdg);
   var S=[
     ['Reliever',[['Planned',!!a,a?a.name:'nobody yet'],['In TDG',inTdg,inTdg?'TDG has them':(a&&a.told?'told Joy · not in the file yet':'not in TDG yet')]]],
     ['Dates',[['Sign-on confirmed',!!R.on,''],['Sign-off confirmed',!!R.off,'']]],
@@ -7363,14 +7387,26 @@ function dcRow(x,exp,k,son,soff,todayS){
 }
 // The career line: every contract on one axis, the planned end dashed where it ended early, a pin for every note,
 // intel card and feedback answer, and today. Read off the profile the page holds — no request.
-function pfCareer(K,feed,todayS,hiOn){
+function pfCareer(K,feed,todayS,hiOn,next){
+  // The replacement, the way the Keyman board draws it (Miguel, 13 Oct 2026: "if u have a replacement .. projected .. so we
+  // are consistent on how we show it elsewhere"): an earmark segment after this contract, amber, dashed while it is the
+  // console's plan only; the running contract solid to today and a lighter dashed tail to its sign-off.
+  var nx=next&&next.on?{on:next.on,off:next.off||pfAddMo(next.on,7),name:next.name,firm:next.src==='tdg'||next.src==='tdg_earmark'||!!next.tdg}:null;
+  // TDG's Earmarked row carries no dates: a short dashed stub after this contract's sign-off, named, "no dates" (as the board)
+  var hiK=K.filter(function(x){return x.on===hiOn;})[0];
+  if(!nx&&next&&next.src==='tdg_earmark'&&hiK&&hiK.off)nx={on:hiK.off,off:pfAddMo(hiK.off,1),name:next.name,firm:true,stub:true};
   var on=K.map(function(x){return x.on;}).sort()[0];
-  var ends=K.map(function(x){return x.planned&&x.planned>(x.off||'')?x.planned:(x.off||todayS);}).concat([todayS]).sort();
+  var ends=K.map(function(x){return x.planned&&x.planned>(x.off||'')?x.planned:(x.off||todayS);}).concat([todayS]).concat(nx?[nx.off]:[]).sort();
   var t0=dayNum(pfAddMo(on.slice(0,8)+'01',-1)),t1=dayNum(pfAddMo(ends[ends.length-1].slice(0,8)+'01',2));
   var W=Math.max(1,t1-t0),pc=function(iso){return Math.max(0,Math.min(100,(dayNum(iso)-t0)/W*100));};
-  var bars=K.map(function(x){var a=pc(x.on),b=pc(x.off||todayS),p=x.planned?pc(x.planned):b;
-    return '<div class="pf2cb'+(hiOn&&x.on!==hiOn?' dim':'')+'" style="left:'+a+'%;width:'+Math.max(0.6,b-a)+'%" title="'+escHtml(niceShip(x.ship)+' · '+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open'))+'">'+(b-a>9?escHtml(niceShip(x.ship)):'')+'</div>'
-      +(x.earlyDays?'<div class=pf2cp style="left:'+b+'%;width:'+Math.max(0,p-b)+'%"></div>':'');}).join('');
+  // earlier contracts first, this one last: an older bar never covers the one the card is about
+  var KK=K.slice().sort(function(a,b){return (hiOn&&a.on===hiOn?1:0)-(hiOn&&b.on===hiOn?1:0);});
+  var bars=KK.map(function(x){var a=pc(x.on),live=x.current&&x.off&&x.off>todayS,b=pc(live?todayS:(x.off||todayS)),p=x.planned?pc(x.planned):b;
+    return '<div class="pf2cb'+(hiOn&&x.on!==hiOn?' dim':'')+(live?' live':'')+'" style="left:'+a+'%;width:'+Math.max(0.6,b-a)+'%" title="'+escHtml(niceShip(x.ship)+' · '+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open'))+'">'+(b-a>9?escHtml(niceShip(x.ship)):'')+'</div>'
+      +(live?'<div class=pf2ct style="left:'+b+'%;width:'+Math.max(0.4,pc(x.off)-b)+'%" title="'+escHtml('Sign-off '+fmtDateS(x.off))+'"></div>':'')
+      +(x.earlyDays?'<div class=pf2cp style="left:'+b+'%;width:'+Math.max(0,p-b)+'%"></div>':'');}).join('')
+    +(nx?'<div class="pf2nx'+(nx.firm?' firm':'')+(nx.stub?' stub':'')+'" style="left:'+pc(nx.on)+'%;width:'+Math.max(0.6,pc(nx.off)-pc(nx.on))+'%" title="'+escHtml(nx.stub?(nx.name+' · earmarked by TDG, no dates yet'):(nx.name+' · from '+fmtDateS(nx.on)+(next.off?'':' · projected 7 months')))+'">'+(nx.stub?'':(pc(nx.off)-pc(nx.on)>9?escHtml(nx.name):''))+'</div>'
+      +(nx.stub?'<span class=pf2nxl style="left:'+pc(nx.off)+'%">'+escHtml(nx.name)+' · no dates</span>':''):'');
   var col={note:'#1E6FD0',comment:'#1E6FD0',intel:'#BC3B2C',feedback:'#7A5BC7',review:'#7A5BC7'};
   var pins=feed.filter(function(f){var d=String(f.at||'').slice(0,10);return d&&dayNum(d)>=t0&&dayNum(d)<=t1;}).map(function(f){var d=String(f.at).slice(0,10);
     var t=f.kind==='intel'?pfIntelHead(f):(f.kind==='feedback'?(f.who+' answered'):(f.text||''));
@@ -7378,7 +7414,7 @@ function pfCareer(K,feed,todayS,hiOn){
   var ticks='',months=Math.round(W/30.4),stepM=months>30?12:(months>15?3:1),dt=pfAddMo(new Date(t0*86400000).toISOString().slice(0,8)+'01',0);
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   for(var g=0;g<80&&dayNum(dt)<=t1;g++){var m=+dt.slice(5,7)-1;if((stepM===1||m%stepM===0)&&pc(dt)<=93)ticks+='<span style="left:'+pc(dt)+'%">'+(stepM===12?dt.slice(0,4):(MN[m]+(m===0||g===0?' '+dt.slice(0,4):'')))+'</span>';dt=pfAddMo(dt,1);}
-  var leg='<span class=pf2lg><i style="background:#2E9E5B"></i>Aboard</span><span class=pf2lg><i class=dash></i>Was planned</span><span class=pf2lg><i style="background:#7A5BC7;border-radius:50%"></i>Feedback</span><span class=pf2lg><i style="background:#BC3B2C;border-radius:50%"></i>Intel</span><span class=pf2lg><i style="background:#1E6FD0;border-radius:50%"></i>Note</span>';
+  var leg=(nx?'<span class=pf2lg><i style="'+(nx.stub?'background:#FDE7D3;border:1px dashed #E8702A':(nx.firm?'background:#F2B01E':'background:#FCEFC7;border:1px dashed #E8B64A'))+'"></i>Next · '+(nx.firm?'TDG earmark':'earmark, console only')+'</span>':'')+'<span class=pf2lg><i style="background:#2E9E5B"></i>Aboard</span><span class=pf2lg><i class=dash></i>Was planned</span><span class=pf2lg><i style="background:#7A5BC7;border-radius:50%"></i>Feedback</span><span class=pf2lg><i style="background:#BC3B2C;border-radius:50%"></i>Intel</span><span class=pf2lg><i style="background:#1E6FD0;border-radius:50%"></i>Note</span>';
   return '<div class=pf3career><div class=pf2tl>'+bars+pins+'<b class=pf2today style="left:'+pc(todayS)+'%"><em>Today</em></b><div class=pf2ax>'+ticks+'</div></div>'
     +'<div class=pf2ch style="margin:2px 0 0"><span class=pf2mut>Career · '+K.length+' contract'+(K.length===1?'':'s')+'</span><span class=pf2lgs>'+leg+'</span></div></div>';
 }
@@ -7455,6 +7491,7 @@ function exportCrewCSV(){
   var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='crew_'+c.agency_id+'.csv';a.click();
 }
 function downloadStatement(){ if(CURRENT_CREW) window.open('/api/crew/statement.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
+function downloadCrewFile(){ if(CURRENT_CREW) window.open('/api/crew/file.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
 // THE STATEMENT EMAIL (12 Oct 2026): says who it goes to before it goes, and goes once — Miguel's click sent Ian Alega's
 // statement three times in three seconds. The server refuses a repeat inside 10 minutes (already_sent) unless resent.
 async function emailStatement(resend){

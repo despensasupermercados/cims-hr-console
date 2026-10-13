@@ -13,9 +13,14 @@ export const PAGE_H = 792;
 export const MARGIN = 54;
 
 // WinAnsi-safe: keep bytes 0..255, replace anything higher with '?'.
+// Typographic punctuation people type into notes and the AI writes into intel (13 Oct 2026: the crew file prints them)
+// has no WinAnsi byte here; each is spelled in plain Latin-1 instead of turning into "?".
+const PUNCT = { "\u2018": "'", "\u2019": "'", "\u201C": '"', "\u201D": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u2022": "\u00b7", "\u2192": "->", "\u2190": "<-", "\u2264": "<=", "\u2265": ">=" };
 function latin1(s) {
   let o = "";
-  for (const ch of String(s == null ? "" : s)) {
+  for (const ch0 of String(s == null ? "" : s)) {
+    const ch = PUNCT[ch0] || ch0;
+    if (ch.length > 1) { o += ch; continue; }
     const c = ch.codePointAt(0);
     o += c <= 255 ? ch : "?";
   }
