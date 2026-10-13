@@ -50,7 +50,7 @@ export function whoOf(u) {
   return local ? local.charAt(0).toUpperCase() + local.slice(1).toLowerCase() : s;
 }
 const ACTIONS = {
-  crew_note_log: "Note added", crew_note: "Comment saved", crew_note_delete: "Note deleted",
+  crew_note_log: "Note added", crew_note: "Comment saved", crew_note_delete: "Note deleted", crew_note_archive: "Note archived", crew_note_restore: "Note restored",
   contract_edit: "Contract edited", crew_edit: "Crew record edited", crew_add: "Crew added",
   intel_auto: "Field intel filed", intel_file: "Field intel filed", intel_edit: "Field intel edited",
   feedback_score: "Feedback entered", feedback_request: "Feedback requested",
@@ -138,6 +138,9 @@ export function buildCrewProfile(input) {
     history.push({ word: r.new_value, from: day(r.created_at), to: nxt ? day(nxt.created_at) : null, held: !Number(r.resolved), src: "tdg" });
   });
   if (sRows.length && sRows[0].old_value) history.unshift({ word: sRows[0].old_value, from: sRows[0].old_value === "On board" && file && file.embarked && file.embarked < day(sRows[0].created_at) ? file.embarked : null, to: day(sRows[0].created_at), src: "tdg" });
+  // The same word from upload after upload is ONE span (13 Oct 2026: Ian Alega read "On Vacation" six rows running —
+  // a held change re-flagged by every weekly file). Held only while every row of the span was held.
+  for (let i = history.length - 1; i > 0; i--) if (history[i].word === history[i - 1].word) { history[i - 1].to = history[i].to; history[i - 1].held = !!(history[i - 1].held && history[i].held); history.splice(i, 1); }
   history.reverse();
 
   // ---- contracts: the ONE schedule (boardLegs) for this crew, newest first, every date with its source
@@ -203,7 +206,9 @@ export function buildCrewProfile(input) {
     const a = A(I.activity).find((x) => (x.action === "crew_note_log" || x.action === "crew_note") && Math.abs(Date.parse(x.at) - t) <= 5000);
     return a ? whoOf(a.user_id) : null;
   };
-  for (const n of A(I.notes)) if (n && String(n.text || "").trim()) feed.push({ at: n.ts, kind: "note", src: "typed", text: String(n.text), who: authorAt(n.ts) });
+  // An archived note leaves the feed (it stays in the Notes window, struck through, with Restore — 12 Oct 2026).
+  const liveNotes = A(I.notes).filter((n) => n && !n.archived_at);
+  for (const n of liveNotes) if (String(n.text || "").trim()) feed.push({ at: n.ts, kind: "note", src: "typed", text: String(n.text), who: n.created_by ? whoOf(n.created_by) : authorAt(n.ts) });
   const comment = I.ready && String(I.ready.note || "").trim();
   if (comment && !A(I.notes).some((n) => String(n.text || "").trim() === comment)) feed.push({ at: I.ready.updated_at, kind: "comment", src: "typed", text: comment, who: authorAt(I.ready.updated_at) });
   for (const x of A(I.intel)) feed.push({ at: x.ts, kind: "intel", src: "intel", text: String(x.summary || ""), parts: intelParts(x.summary), who: x.reporter || null, via: x.source || "email", confidence: x.confidence || null, contractNo: x.contract_no != null ? Number(x.contract_no) : null });
@@ -293,7 +298,9 @@ export function statementContracts(legs, sc, today) {
     const actual = off && !projected && off <= t;
     const end = off && off < t ? off : t;
     if (l.on <= end) seaDays += daysBetween(l.on, end);
-    return { seq: i + 1, ship: l.ship, on: l.on, act: actual ? off : null, proj: actual ? null : off || null };
+    const row = { seq: i + 1, ship: l.ship, on: l.on, act: actual ? off : null, proj: actual ? null : off || null };
+    if (l.embark || l.disembark) Object.assign(row, { from: l.embark || null, to: l.disembark || null }); // the route, for the PDF (13 Oct 2026)
+    return row;
   });
   return { contracts, seaDays };
 }

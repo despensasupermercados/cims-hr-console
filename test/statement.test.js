@@ -33,8 +33,10 @@ test("composeStatement returns a PDF and stays ASCII-safe (no '?' substitution f
   const s = Buffer.from(bytes).toString("latin1");
   assert.ok(s.startsWith("%PDF-1.4"));
   assert.ok(bytes.length > 1500);
-  // The title separator should be a hyphen, not a '?' from a dropped em-dash.
-  assert.ok(s.includes("DG3 CIMS  -  Crew Statement"));
+  // 12 Oct 2026 redesign: the CIMS letterhead band and the "Crew statement" title (Helvetica, Latin-1 only — no em-dash
+  // becomes a '?').
+  assert.ok(s.includes("(CIMS)") && s.includes("(Crew statement)"));
+  assert.ok(!/\(\?\)|\? \?/.test(s), "no character fell back to '?'");
 });
 
 test("composeStatement handles a crew with no contracts/bonus", () => {

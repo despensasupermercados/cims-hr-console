@@ -79,6 +79,8 @@ test("UTC basis is used by exactly these functions", () => {
     // 2026-10-08: the contract modal's Documents tags (expired / within 30 days / valid) read the board's day.
     "apiRotationCrew",
     "apiRotationProject",
+    // 2026-10-12: the statement email dates its body by the board's day (hr.statement.v2).
+    "apiStatementEmail",
     "boardLegs",
     // 2026-10-07: a TDG earmark with no card becomes a console card at the registry Apply — the same path and
     // day basis as a drop (createProjection), so its default dates land on the board's day.

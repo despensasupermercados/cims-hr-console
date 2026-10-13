@@ -28,6 +28,7 @@ import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts, completedSince } from "./contract_count.js";
 import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet } from "./crew_status.js";
 import { buildCrewProfile, statementContracts } from "./crew_profile.js";
+import { statementEmail, TEMPLATE_ID as STATEMENT_TEMPLATE_ID } from "./emails/hr.statement.v2.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
 import { fetchCurrentCounterLegs, KC3_LEGS_SQL } from "./counter_legs.js";
 import { diffCounter, indexEdits, editFor, resolveLeg, daysBetween, ABSORB_DAYS } from "./counter_sync.js";
@@ -212,7 +213,7 @@ export default {
         if (p === "/api/me")        return json({ email: session.email });
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/crew")      return apiCrew(env, url);
-        if (p === "/api/crew/get")  return apiCrewOne(env, url);
+        if (p === "/api/crew/get")  return apiCrewOne(env, url, session);
         if (p === "/api/crew/save" && request.method === "POST") return apiCrewSave(request, env, session);
         if (p === "/api/crew/add"  && request.method === "POST") return apiCrewAdd(request, env, session, ctx);
         if (p === "/api/crew/hide" && request.method === "POST") return apiCrewHide(request, env, session);
@@ -1473,7 +1474,12 @@ async function ensureCrewExtrasImpl(env) {
     // the rest of this guard; migrations/0018_agency_manual.sql carries the same row for the record.
     env.DB.prepare("INSERT OR IGNORE INTO agency (id,code,name) VALUES ('agency-man','MAN','Manual entry (CIMS console)')"),
   ]);
-  try { await env.DB.prepare("ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0").run(); } catch {} // manual 'Retired' tag (Rita)
+  // The ALTERs leave together, each alone (a duplicate-column error would abort a batch — they are already there in
+  // prod): the manual 'Retired' tag (Rita), and — NOTES ARE ARCHIVED, NEVER DELETED (Miguel, 12 Oct 2026: "archive";
+  // "I dont wanna lose the notes") — who wrote a note and when / by whom it was archived (migrations/0020_note_archive.sql).
+  const alters = ["ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0", "ALTER TABLE crew_note_log ADD COLUMN created_by TEXT",
+    "ALTER TABLE crew_note_log ADD COLUMN archived_at TEXT", "ALTER TABLE crew_note_log ADD COLUMN archived_by TEXT"];
+  await Promise.all(alters.map((q) => env.DB.prepare(q).run().catch(() => null)));
 }
 // Board legs = the live schedule: current ship_leg rows + crew aboard per the relief board
 // (ship_leg_source.boardLegsFromDb). The source flip is a DATA change (app_config.board_source);
@@ -1526,7 +1532,7 @@ async function apiCrew(env, url) {
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, dob, province, phone, email, gender, pp_no, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, baseline_count, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE redacted=" + redFlag).all(),
     env.DB.prepare("SELECT * FROM crew_override").all(),
     env.DB.prepare(KC3_LEGS_SQL).all(), // every Counter contract, seq-ordered (2026-09-14: was the frozen snapshot)
-    env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log GROUP BY agency_id").all(),
+    env.DB.prepare("SELECT agency_id, COUNT(*) n FROM crew_note_log WHERE archived_at IS NULL GROUP BY agency_id").all(),
     boardLegs(env), // the live schedule — same source as the rotation board and dashboard (§11)
     contractCountMap(env), // TDG's stated completed-contract count (§10c); a crew the file does not carry falls back to the derived number
   ]);
@@ -1570,7 +1576,7 @@ async function apiCrew(env, url) {
   return json({ count: crew.length, crew });
 }
 
-async function apiCrewOne(env, url) {
+async function apiCrewOne(env, url, session) {
   const id = url.searchParams.get("id");
   // THE CREW PROFILE (Miguel, 12 Oct 2026: "lets start by showing the right data from the crew .. is where all the
   // data should be collected"): every table that holds something on this seafarer, read in ONE wave (§12) and
@@ -1590,7 +1596,7 @@ async function apiCrewOne(env, url) {
     boardLegs(env), // the ONE schedule (§11)
     env.DB.prepare("SELECT * FROM contract_edit WHERE sc=?").bind(id).all().catch(none),
     env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
-    env.DB.prepare("SELECT id, ts, text FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT id, ts, text, created_by, archived_at, archived_by FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT * FROM crew_ready WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT r.role, r.status, r.requested_at FROM feedback_request2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=?").bind(id).all().catch(none),
@@ -1628,7 +1634,10 @@ async function apiCrewOne(env, url) {
     statusRows: statusRes.results, travel: travelRes.results, activity: actRes.results, instr: instrRes.results, links: linkRes.results,
     fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
-  return json({ crew, contracts: ct, daysWorked: profile.numbers.seaDays, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, today), profile });
+  // `tdg` = the crew row as the last import wrote it, `override` = what a person typed over it: the Edit crew window
+  // shows TDG's value under every field someone changed, with Reset to TDG (12 Oct 2026).
+  const tdg = {}; for (const k of OVR_FIELDS) tdg[k] = row[k] == null ? null : row[k];
+  return json({ crew, contracts: ct, daysWorked: profile.numbers.seaDays, deployment: crewDeployment(crew, VESSEL_REF, DRY_DOCK, today), profile, tdg, override: ov || null, canMoney: isMoneyUser(session && session.email) });
 }
 // Manual edit (manual-wins): upsert only the provided fields into crew_override.
 async function apiCrewSave(request, env, session) {
@@ -1727,18 +1736,25 @@ async function apiCrewNotes(request, env, session, url) {
   await ensureCrewExtras(env);
   if (request.method === "POST") {
     const b = await request.json().catch(() => ({}));
-    if (b.delete != null) {
-      await env.DB.prepare("DELETE FROM crew_note_log WHERE id=?").bind(+b.delete).run();
-      await logActivity(env, session && session.email, "crew_note_delete", String(b.delete));
+    // Archive, never delete (Miguel, 12 Oct 2026): the row and its text stay; archived notes leave the feed, the
+    // card's dot and the contract modal, and Restore brings them back. `delete` is the old page's name for it.
+    const arch = b.archive != null ? b.archive : b.delete;
+    if (arch != null || b.restore != null) {
+      const nid = +(arch != null ? arch : b.restore);
+      const row = await env.DB.prepare("SELECT agency_id FROM crew_note_log WHERE id=?").bind(nid).first();
+      if (!row) return json({ error: "not_found" }, 404);
+      if (arch != null) await env.DB.prepare("UPDATE crew_note_log SET archived_at=?, archived_by=? WHERE id=? AND archived_at IS NULL").bind(new Date().toISOString(), (session && session.email) || null, nid).run();
+      else await env.DB.prepare("UPDATE crew_note_log SET archived_at=NULL, archived_by=NULL WHERE id=?").bind(nid).run();
+      await logActivity(env, session && session.email, arch != null ? "crew_note_archive" : "crew_note_restore", row.agency_id + " #" + nid);
       return json({ ok: true });
     }
     if (!b.agency_id || !String(b.text || "").trim()) return json({ error: "empty" }, 400);
-    await env.DB.prepare("INSERT INTO crew_note_log (agency_id,ts,text) VALUES (?,?,?)").bind(b.agency_id, new Date().toISOString(), String(b.text).slice(0, 2000)).run();
+    await env.DB.prepare("INSERT INTO crew_note_log (agency_id,ts,text,created_by) VALUES (?,?,?,?)").bind(b.agency_id, new Date().toISOString(), String(b.text).slice(0, 2000), (session && session.email) || null).run();
     await logActivity(env, session && session.email, "crew_note_log", b.agency_id);
     return json({ ok: true });
   }
   const id = url.searchParams.get("id");
-  const rows = (await env.DB.prepare("SELECT id, ts, text FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all()).results;
+  const rows = (await env.DB.prepare("SELECT id, ts, text, created_by, archived_at, archived_by FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all()).results;
   return json({ notes: rows });
 }
 
@@ -1812,7 +1828,7 @@ async function rotationSections(env) {
     // hidden — said as such, never "not on the roster" (Encina, Serenade).
     env.DB.prepare("SELECT agency_id FROM crew WHERE redacted=1").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT sc, ship_key, dismissed_at FROM earmark_dismiss").all().catch(() => ({ results: [] })), // TDG earmarks Rita rejected (7 Oct 2026)
-    env.DB.prepare("SELECT agency_id, MAX(ts) AS last_ts FROM crew_note_log GROUP BY agency_id").all().catch(() => ({ results: [] })), // the card's note dot counts a note logged in THIS contract (12 Oct 2026)
+    env.DB.prepare("SELECT agency_id, MAX(ts) AS last_ts FROM crew_note_log WHERE archived_at IS NULL GROUP BY agency_id").all().catch(() => ({ results: [] })), // the card's note dot counts a note logged in THIS contract (12 Oct 2026)
   ]);
   // THE BOARD SAYS ITS OWN AGE (Miguel, 23-24 Sep 2026). Nothing anywhere said the Counter was the July
   // file, or that the count had been flat since 6 July; Rita found it from the outside. A NULL stamp
@@ -2399,7 +2415,7 @@ async function apiRotationCrew(env, url) {
     boardLegs(env), // the ONE schedule: the file's current leg for this crew, with its resolved sign-off (7 Oct 2026)
     env.DB.prepare("SELECT status, raw_status, vessel, embarked_at, debarked_at, run_at FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override WHERE agency_id=?").bind(id).first().catch(() => null), // the modal's document tags (8 Oct 2026)
-    env.DB.prepare("SELECT id, ts, text FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(() => ({ results: [] })), // the contract's notes (12 Oct 2026)
+    env.DB.prepare("SELECT id, ts, text FROM crew_note_log WHERE agency_id=? AND archived_at IS NULL ORDER BY ts DESC").bind(id).all().catch(() => ({ results: [] })), // the contract's notes (12 Oct 2026; archived ones out)
   ]);
   if (!c) return json({ error: "not_found" }, 404);
   // Every document as the modal tags it (Miguel, 8 Oct 2026): the manual entry wins field by field; expiring = 30 days.
@@ -2459,7 +2475,7 @@ async function apiNote(request, env, session) {
   const changed = note.trim() && note.trim() !== String((prev && prev.note) || "").trim();
   const writes = [env.DB.prepare("INSERT INTO crew_ready (agency_id,note,updated_at) VALUES (?,?,?) ON CONFLICT(agency_id) DO UPDATE SET note=excluded.note, updated_at=excluded.updated_at")
     .bind(b.agency_id, note, now)];
-  if (changed) writes.push(env.DB.prepare("INSERT INTO crew_note_log (agency_id,ts,text) VALUES (?,?,?)").bind(b.agency_id, now, note.trim()));
+  if (changed) writes.push(env.DB.prepare("INSERT INTO crew_note_log (agency_id,ts,text,created_by) VALUES (?,?,?,?)").bind(b.agency_id, now, note.trim(), (session && session.email) || null));
   await env.DB.batch(writes);
   await logActivity(env, session && session.email, "crew_note", b.agency_id);
   return json({ ok: true });
@@ -2818,12 +2834,14 @@ async function gatherStatement(env, id) {
   // The contract table and sea-days come from the ONE schedule (12 Oct 2026), the same as the profile page: the
   // Counter-only read printed a sign-off TDG had already replaced. The grade's derived fallback still counts the
   // Counter's full contracts (fullContracts below), as every other grade reader does (§11).
-  const [ctRes, HIST, baseline, tdgRow, outs] = await Promise.all([
+  const [ctRes, HIST, baseline, tdgRow, outs, rsRow, portRes] = await Promise.all([
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     boardLegs(env),
     effectiveBaseline(env, id, crew.baseline_count),
     env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
+    env.DB.prepare("SELECT run_at FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the TDG file that dates the contracts
+    env.DB.prepare("SELECT on_key, sign_on, embark, disembark FROM contract_edit WHERE sc=?").bind(id).all().catch(() => ({ results: [] })), // the ports Rita typed (13 Oct 2026)
   ]);
   const counterRows = ctRes.results;
   const sched = statementContracts(HIST, id, TODAY());
@@ -2833,7 +2851,9 @@ async function gatherStatement(env, id) {
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc, tdgRow ? completedSince(tdgRow.as_of, tdgRow.tdg_off, new Date().toISOString().slice(0, 10)) : 0); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
   const effFc = cc.n;
   const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
-  return { crew, contracts, daysWorked: sched.seaDays, bonus, generatedAt: new Date().toISOString() };
+  // The route the PDF prints: the leg's own ports, else the ones Rita typed for that contract — as the profile reads them.
+  for (const k of contracts) { const e = (portRes.results || []).find((r) => (r.on_key || r.sign_on) && String(r.on_key || r.sign_on).slice(0, 10) === String(k.on || "").slice(0, 10)); if (e && !k.from && !k.to && (e.embark || e.disembark)) { k.from = e.embark || null; k.to = e.disembark || null; } }
+  return { crew, contracts, daysWorked: sched.seaDays, bonus, generatedAt: new Date().toISOString(), fileAt: rsRow && rsRow.run_at ? String(rsRow.run_at).slice(0, 10) : null };
 }
 // GET /api/crew/statement.pdf?id= -> server-generated PDF (download). Works today, no R2/email needed.
 async function apiStatementPdf(env, url) {
@@ -2847,13 +2867,24 @@ async function apiStatementPdf(env, url) {
   }});
 }
 // POST /api/crew/statement/email {id, to?} -> store in R2 (if bound) + email PDF via Resend (if configured).
+// THE STATEMENT EMAIL (12 Oct 2026): to the seafarer, CC Rita and reply-to Rita (Miguel: "the email statement CC rita"),
+// the hr.statement.v2 body (src/emails/hr.statement.v2.js, CIMS letterhead). ONE send per crew per 10 minutes: Miguel's
+// click sent Ian Alega's statement three times in three seconds on 12 Oct 2026 (a June test sent another crew six) —
+// a repeat inside the window is refused (`already_sent`) unless the page confirms a resend (`resend`).
+const STATEMENT_RESEND_MIN = 10;
 async function apiStatementEmail(request, env, session) {
   const b = await request.json().catch(() => ({}));
   const id = b.id;
-  const data = await gatherStatement(env, id);
+  const since = new Date(Date.now() - STATEMENT_RESEND_MIN * 60000).toISOString();
+  const [data, recent] = await Promise.all([
+    gatherStatement(env, id),
+    env.DB.prepare("SELECT at FROM activity_log WHERE action='statement_email' AND detail LIKE ? AND at >= ? ORDER BY at DESC LIMIT 1").bind(id + " -> %sent%", since).first().catch(() => null),
+  ]);
   if (!data) return json({ error: "not_found" }, 404);
   const to = b.to || data.crew.email;
   if (!to) return json({ ok: false, error: "no_recipient", note: "This crew has no email on file. Pass an address or add one to the registry." });
+  if (recent && !b.resend) return json({ ok: false, error: "already_sent", at: recent.at, to, note: "This statement was emailed " + String(recent.at).slice(11, 16) + " UTC, less than " + STATEMENT_RESEND_MIN + " minutes ago." });
+  const cc = deployCc(env).filter((a) => a.toLowerCase() !== String(to).toLowerCase());
   const bytes = composeStatement(data);
   const b64 = (() => { let s = ""; for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]); return btoa(s); })();
   const key = `statements/${id}/${data.generatedAt.slice(0, 10)}.pdf`;
@@ -2863,17 +2894,18 @@ async function apiStatementEmail(request, env, session) {
     await logActivity(env, session && session.email, "statement_email", id + " no_mailer");
     return json({ ok: false, stored, sent: false, note: "Email is not configured yet (MAILER binding). PDF " + (stored ? "was stored in R2." : "generated but not stored — no R2 bucket bound yet.") });
   }
+  const mail = statementEmail({ crew: data.crew, contracts: data.contracts, daysWorked: data.daysWorked, bonus: data.bonus, today: TODAY(), fileAt: data.fileAt, replyName: "Rita" });
   const out = await sendViaMailer(env, {
-    templateId: "hr.statement.v1",
-    to: [to],
-    subject: "Your DG3 CIMS crew statement",
-    html: `<p>Please find your CIMS crew statement attached.</p><p>DG3 Cruise Industry Managed Services</p>`,
-    attachments: [{ filename: `CIMS_Statement_${id}.pdf`, content: b64 }],
+    templateId: STATEMENT_TEMPLATE_ID,
+    idempotencyKey: "hr.statement:" + id + ":" + String(to).toLowerCase() + ":" + Math.floor(Date.now() / (STATEMENT_RESEND_MIN * 60000)) + (b.resend ? ":resend" : ""),
+    to: [to], cc: cc.length ? cc : undefined, replyTo: cc[0] || undefined,
+    subject: mail.subject, html: mail.html, text: mail.text,
+    attachments: [{ filename: `CIMS_Statement_${id}_${data.generatedAt.slice(0, 10)}.pdf`, content: b64 }],
     critical: false
   });
   const ok = !!(out && out.ok);
-  await logActivity(env, session && session.email, "statement_email", id + " -> " + to + (ok ? " sent" : " send_failed") + (stored ? " stored" : ""));
-  return json({ ok, stored, sent: ok, to });
+  await logActivity(env, session && session.email, "statement_email", id + " -> " + to + (cc.length ? " cc " + cc.join(",") : "") + (ok ? " sent" : " send_failed") + (stored ? " stored" : ""));
+  return json({ ok, stored, sent: ok, to, cc });
 }
 async function apiBonusCommit(request, env, session) {
   // Money authority gate: committing a payout is restricted to the money users (GM/HR),
@@ -3790,7 +3822,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 @container (max-width:820px){.pfhero{grid-template-columns:1fr}.pfnow{border-left:0;padding-left:0;border-top:1px solid var(--line);padding-top:12px}.pfstats{grid-template-columns:repeat(2,minmax(0,1fr))}.pfstats .tile:nth-child(3){border-left:0}.pfstats .tile:nth-child(n+3){border-top:1px solid var(--line)}.pfgrid{grid-template-columns:1fr}.pfrow{grid-template-columns:1fr;gap:6px}}
 /* Crew profile A+ (12 Oct 2026): everything on the seafarer, each value with its source. */
 .pf2hd{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:14px}
-.pf2top{display:block}
+.pf2top{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px 26px;align-items:start}
 .pfchip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;background:#F1F3F6;color:#374151;font-size:12px;font-weight:600;white-space:nowrap}
 .pfok{color:var(--green-d)}.pfwarn{color:var(--amber);font-weight:700}
 .pf2srcs{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;border-top:1px solid var(--line);padding-top:10px}
@@ -3833,9 +3865,134 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf2ac{display:grid;grid-template-columns:96px 70px minmax(0,1fr);gap:8px;font-size:12.5px;padding:4px 0}.pf2ac span:first-child,.pf2ac span:nth-child(2){color:var(--mut)}
 .pf2 .pfgrid{grid-template-columns:minmax(0,1.25fr) minmax(280px,1fr)}
 .pfact .btn:disabled{opacity:.45;cursor:not-allowed}
+.pf2nums.inhd{margin-top:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.pf2nums.inhd .pf2n{background:#F6F8FB;border:0;border-radius:12px;padding:10px 14px}.pf2nums.inhd .pf2n b{font-size:22px}
+.pf2hd+.pfsec,.pf2band+.pfsec,.pf2hd+.pf2band+.pfsec{margin-top:12px}
 .pf2n .pfsrc,.pf2dt .pfsrc{white-space:normal}
 @container (max-width:900px){.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}}
-@media(max-width:700px){.pf2ax span:nth-child(even){display:none}.pf2dt th:nth-child(4),.pf2dt td:nth-child(4){display:none}.pf2dt td{vertical-align:top}.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}.pf2fg{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2fd{grid-template-columns:1fr;gap:4px}.pf2lgs{margin-left:0}}
+@media(max-width:700px){.pf2nums.inhd{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2ax span:nth-child(even){display:none}.pf2dt th:nth-child(4),.pf2dt td:nth-child(4){display:none}.pf2dt td{vertical-align:top}.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}.pf2fg{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2fd{grid-template-columns:1fr;gap:4px}.pf2lgs{margin-left:0}}
+/* Edit crew + Notes windows (12 Oct 2026): sections, TDG's value under a changed field, one stream of what was said. */
+.modcard.ec2,.modcard.nt2{max-width:820px;padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 80px)}
+.modcard.nt2{max-width:760px}
+.echd{display:flex;gap:14px;align-items:center;padding:18px 22px 14px}
+.ectitle{font-family:'Outfit';font-weight:700;font-size:19px;color:var(--deep);line-height:1.25}
+.ecsub{font-size:12.5px;color:var(--mut);margin-top:3px;line-height:1.45}
+.ecx{width:40px;height:40px;padding:0;flex:none}
+.ecnav{display:flex;justify-content:flex-start;margin:0;width:auto;gap:22px;padding:0 22px;border-bottom:1px solid var(--line);border-top:1px solid var(--line);flex-wrap:wrap}
+.ecnav a{display:flex;align-items:center;min-height:42px;font-weight:600;font-size:13.5px;color:var(--mut);text-decoration:none;border-bottom:2px solid transparent}
+.ecnav a.cur{color:var(--deep);border-bottom-color:var(--navy)}
+.ecbody{padding:4px 22px 18px;overflow:auto;flex:1}
+.ecbody section{padding-top:14px}.ecbody section+section{border-top:1px solid #EEF1F5;margin-top:16px}
+.ecsec{font-family:'Outfit';font-weight:600;font-size:14px;color:var(--deep);margin:4px 0 10px}.ecsec span{font-family:'DM Sans';font-weight:500;font-size:12px;color:var(--mut)}
+.ecg{display:grid;gap:12px 14px;margin-bottom:12px}.ecg.g2{grid-template-columns:repeat(2,minmax(0,1fr))}.ecg.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ecf label{display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px}.ecf label em{font-style:normal;font-weight:700;color:var(--royal);margin-left:6px}
+.ecf input,.ecf select{width:100%;box-sizing:border-box;height:40px;border:1px solid var(--line-2);border-radius:10px;padding:0 12px;font:14px 'DM Sans',sans-serif;color:var(--ink);background:#fff}
+.ecf input:disabled{background:#F6F8FB;color:var(--mut)}
+.ecf input:focus,.ecf select:focus{outline:none;border-color:var(--royal);box-shadow:0 0 0 3px #E3EDFB}
+.ecf.ecov input,.ecf.ecov select{border-color:var(--royal);box-shadow:0 0 0 3px #E3EDFB}
+.ecf.ecrs input,.ecf.ecrs select{border-color:var(--green)}
+.echint{font-size:11.5px;color:var(--mut);margin-top:4px;line-height:1.4}.echint a{color:var(--royal);font-weight:600}
+.ectog{display:flex;gap:12px;align-items:flex-start;background:#F6F8FB;border-radius:12px;padding:12px 14px;cursor:pointer;margin-top:4px}.ectog input{margin-top:3px;width:18px;height:18px;flex:none}
+.ecdocs{display:flex;flex-direction:column}
+.ecdoc{display:grid;grid-template-columns:130px minmax(0,1fr) 190px;gap:6px 14px;align-items:center;padding:8px 0;border-top:1px solid #EEF1F5;font-size:13px}.ecdoc:first-child{border-top:0}
+.ecdoc>b{color:var(--deep)}.ecdoc>span{color:var(--mut);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ecdoc .ecf label{position:absolute;left:-9999px}
+.ecft{display:flex;align-items:center;gap:10px;padding:12px 22px;border-top:1px solid var(--line);background:#FBFCFD;flex-wrap:wrap}
+.echide{font-size:13px;font-weight:600;color:var(--red)}
+.btn.ecsave{background:var(--navy);color:#fff;border-color:var(--navy);min-width:110px}.btn.ecsave:disabled{opacity:.45;cursor:not-allowed}
+.ntcomp{margin:0 22px;border:1px solid var(--line-2);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.ntcomp label{font-size:12px;font-weight:600;color:#374151}
+.ntcomp textarea{border:0;outline:none;resize:vertical;font:14px 'DM Sans',sans-serif;color:var(--ink);min-height:44px;padding:0}
+.ntcrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ntpill{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:999px;background:#EEF3FA;color:var(--navy);font-size:12px;font-weight:600}
+.ntchips{display:flex;gap:8px;padding:14px 22px 6px;flex-wrap:wrap}
+.ntchip{height:32px;padding:0 12px;border-radius:999px;border:1px solid var(--line-2);background:#fff;font:600 12.5px 'DM Sans',sans-serif;color:#374151;cursor:pointer}.ntchip.sel{background:var(--navy);border-color:var(--navy);color:#fff}
+.ntlist{overflow:auto;flex:1;padding:0 22px 8px}
+.ntgrp{display:flex;align-items:baseline;gap:10px;padding:14px 0 8px;border-bottom:1px solid #EEF1F5;flex-wrap:wrap}.ntgrp b{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--deep)}.ntgrp span{font-size:12.5px;color:var(--mut)}
+.ntitem{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid #EEF1F5}.ntitem.ntarch{opacity:.6}.ntitem.ntarch .nttext{text-decoration:line-through}
+.ntav{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:700 11px 'Outfit',sans-serif;flex:none}
+.nthead{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.nthead b{font-size:13.5px;color:var(--ink)}.ntwhen{font-size:12px;color:var(--mut);margin-left:auto}
+.nttext{font-size:14px;margin-top:4px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
+.ntacts{display:flex;gap:14px;margin-top:6px;font-size:12px;color:var(--mut);flex-wrap:wrap}.ntacts a{color:var(--royal);font-weight:600}
+.ntft{padding:12px 22px 16px;border-top:1px solid var(--line);font-size:12px;color:var(--mut)}
+@media(max-width:700px){.ecg.g2,.ecg.g3{grid-template-columns:1fr}.ecdoc{grid-template-columns:1fr}.ntwhen{margin-left:0;flex-basis:100%}.modwrap{padding:12px 8px}.modcard.ec2,.modcard.nt2{max-height:calc(100vh - 24px)}}
+/* The contract card, round 2 (13 Oct 2026): header + state, the relay, four facts, the crew-change checklist, folds. */
+.pf3top{display:flex;align-items:flex-start;gap:12px;justify-content:space-between;flex-wrap:wrap}
+.pf3k{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.pf3ship{font-family:'Outfit';font-weight:700;font-size:22px;color:var(--deep);line-height:1.2;margin-top:2px}
+.pf3route{font-size:13px;color:var(--mut);margin-top:2px}
+.pf3st{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 12px;border-radius:999px;font-size:12.5px;font-weight:700;white-space:nowrap}
+.pf3st:before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
+.pf3st.green{background:#EAF5E4;color:var(--green-d)}.pf3st.red{background:#FBEAE8;color:var(--red)}.pf3st.grey{background:#EEF1F5;color:#4B5563}
+.pf3relay{display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr) minmax(0,180px);gap:14px;align-items:center;margin:18px 0 6px}
+.pf3p{display:flex;align-items:center;gap:9px;min-width:0}.pf3p.next{justify-content:flex-end;text-align:right}
+.pf3p i{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font:700 11.5px 'Outfit',sans-serif;font-style:normal;background:#EEF1F5;color:#4B5563}
+.pf3p.next i{background:#EAF5E4;color:var(--green-d)}.pf3p.next.em i{background:#FFF3D6;color:#8A5A12;border:1.5px dashed #E8B64A}
+.pf3p.none i{background:#F6F8FB;color:#9AA7B8;border:1.5px dashed #D5DCE5}.pf3p.pf3w i{background:#FFF3D6;color:#8A5A12;border:0}
+.pf3p>div{min-width:0;display:flex;flex-direction:column}.pf3p .pf2who,.pf3p>div>span{font-size:13px;font-weight:700;color:var(--deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pf3p.none>div>span{color:#6B7280}.pf3p.pf3w>div>span{color:#8A5A12}
+.pf3p small{font-size:11.5px;color:var(--mut);line-height:1.35}
+.pf3mid{min-width:0}
+.pf3trk{position:relative;height:8px;border-radius:999px;background:#EEF1F5;margin-top:16px}
+.pf3trk b{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--green)}
+.pf3trk u{position:absolute;top:3px;right:0;border-top:2px dashed #C5CEDA;text-decoration:none}
+.pf3trk s{position:absolute;top:-6px;width:2px;height:20px;margin-left:-1px;background:var(--deep);border-radius:2px}
+.pf3trk s em{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--deep);white-space:nowrap}
+.pf3td{position:relative;display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;color:var(--ink);margin-top:7px;white-space:nowrap}
+.pf3td.early{min-height:17px}.pf3td .pf3off{position:absolute;top:0;transform:translateX(-100%)}.pf3td.low{min-height:34px}.pf3td.low .pf3off{top:17px;transform:none}
+.pf3facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:16px;border:1px solid var(--line);border-radius:12px}
+.pf3f{padding:12px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}.pf3f+.pf3f{border-left:1px solid var(--line)}
+.pf3f>.pf3l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.pf3f>b{font-family:'Outfit';font-weight:700;font-size:17px;color:var(--deep);line-height:1.25}
+.pf3f .pfsrc{white-space:normal}.pf3sub{font-size:12px;color:var(--mut)}.pf3na{color:var(--mut);font-weight:500;font-size:15px}
+.pf3dif{display:block;font-style:normal;font-size:11.5px;font-weight:600;color:var(--amber)}
+.pf3cc{margin-top:16px;background:#F8FAFC;border-radius:12px;padding:14px}
+.pf3cch{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.pf3cch b{font-family:'Outfit';font-size:15px;color:var(--deep)}.pf3cch>span{font-size:12.5px;font-weight:600;color:var(--ink)}
+.pf3ccbar{flex:1 1 120px;max-width:220px;height:6px;border-radius:999px;background:#E3E8EF;overflow:hidden}.pf3ccbar i{display:block;height:100%;background:var(--green);border-radius:999px}
+.pf3cch a{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--royal);text-decoration:none}
+.pf3steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.pf3step{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:0}
+.pf3sh{display:flex;align-items:center;gap:7px;margin-bottom:6px}.pf3sh i{width:9px;height:9px;border-radius:50%;background:#D5DCE5;flex:none}.pf3sh b{font-size:12.5px;color:var(--deep)}.pf3sh span{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--mut)}
+.pf3step.done .pf3sh i{background:var(--green)}.pf3step.part .pf3sh i{background:#E8B64A}.pf3step.done{border-color:#CFE6C6}
+.pf3step ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pf3step li{display:flex;gap:7px;align-items:flex-start;font-size:12.5px;color:#4B5563;line-height:1.35}
+.pf3step li>span{flex:none;width:16px;height:16px;border-radius:50%;border:1.5px solid #CBD3DD;display:grid;place-items:center;font-size:10px;font-weight:800;margin-top:1px}
+.pf3step li.ok{color:var(--ink)}.pf3step li.ok>span{background:var(--green);border-color:var(--green);color:#fff}
+.pf3step li small{display:block;font-size:11px;color:var(--mut)}
+.pf3hint{font-size:12px;color:var(--mut);margin-top:8px}
+.pf3mores{margin-top:14px;border-top:1px solid var(--line)}
+.pf3more{border-bottom:1px solid var(--line)}.pf3more summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:42px;cursor:pointer;font-size:13px;font-weight:600;color:var(--deep)}
+.pf3more summary::-webkit-details-marker{display:none}.pf3more summary:before{content:'›';display:inline-block;width:12px;color:var(--mut);font-size:16px;transition:transform .15s}
+.pf3more[open] summary:before{transform:rotate(90deg)}.pf3more summary em{margin-left:auto;font-style:normal;font-weight:500;font-size:12.5px;color:var(--mut)}
+.pf3more>*:not(summary){margin-bottom:12px}.pf3more .pf3cc{margin-top:0}
+@container (max-width:900px){.pf3facts{grid-template-columns:repeat(2,minmax(0,1fr))}.pf3f:nth-child(3){border-left:0}.pf3f:nth-child(n+3){border-top:1px solid var(--line)}.pf3steps{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.pf3relay{grid-template-columns:1fr 1fr;gap:10px}.pf3mid{grid-column:1/-1;order:3}.pf3facts{grid-template-columns:repeat(2,minmax(0,1fr))}.pf3f:nth-child(3){border-left:0}.pf3f:nth-child(n+3){border-top:1px solid var(--line)}.pf3steps{grid-template-columns:1fr 1fr}.pf3ship{font-size:20px}}
+/* One side panel for Edit crew, Notes and Documents (13 Oct 2026): same width, full height, right edge. */
+.modwrap.sheetwrap{align-items:stretch;justify-content:flex-end;padding:0;overflow:hidden;animation:shfade .15s ease-out}
+.modwrap.sheetwrap>.modcard.sheet{width:640px;max-width:100%;height:100vh;height:100dvh;max-height:none;border-radius:18px 0 0 18px;padding:0;overflow:hidden;display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(16,30,48,.25);animation:shin .2s ease-out}
+@keyframes shin{from{transform:translateX(40px);opacity:.6}to{transform:none;opacity:1}}@keyframes shfade{from{background:rgba(16,30,48,0)}}
+.modcard.sheet .echd{border-bottom:1px solid var(--line)}.modcard.sheet .ntcomp{margin-top:16px}.modcard.sheet .ecnav{border-top:0}
+@media(max-width:700px){.modwrap.sheetwrap>.modcard.sheet{width:100%;border-radius:0}}
+/* Documents in the panel */
+.dcsum{padding:14px 22px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.dcsum>div:first-child{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.dcsum b{font-family:'Outfit';font-size:22px;color:var(--deep)}.dcsum>div:first-child span{font-size:13px;color:var(--mut)}
+.dcbar{display:flex;gap:3px;height:8px}.dcbar i{border-radius:999px}
+.dcleg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut)}.dcleg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:0}
+.dcbar .ok,.dcleg .ok{background:#2E9E5B}.dcbar .lapse,.dcleg .lapse{background:#E8B64A}.dcbar .exp,.dcleg .exp{background:#D2453A}.dcbar .miss,.dcleg .miss{background:#9AA7B8}
+.dccard{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-top:12px}.dccard.exp{border-color:#F0CFCB}.dccard.lapse{border-color:#F1DDB3}
+.dchd{display:flex;align-items:center;gap:10px}.dchd b{font-family:'Outfit';font-size:15.5px;color:var(--deep)}
+.dcpill{margin-left:auto;display:inline-flex;align-items:center;height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.dcpill.ok{background:#EAF5E4;color:var(--green-d)}.dcpill.lapse{background:#FFF3D6;color:#8A5A12}.dcpill.exp,.dcpill.miss{background:#FBEAE8;color:var(--red)}.dcpill.na{background:#EEF1F5;color:#6B7280}
+.dckv{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:10px}.dckv>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dckv span{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut)}.dckv b{font-size:13.5px;color:var(--ink);overflow-wrap:anywhere}.dckv b.dcna{color:#9AA7B8;font-weight:500}
+.dckv small{font-size:11.5px;color:var(--mut)}.dckv small.exp,.dckv small.miss{color:var(--red);font-weight:600}.dckv small.lapse{color:#8A5A12;font-weight:600}
+.dcln{position:relative;height:22px;margin-top:14px}
+.dcwin{position:absolute;top:0;bottom:0;background:#EEF3FA;border-left:1.5px solid #9DB7DD;border-right:1.5px solid #9DB7DD}.dcwin em{position:absolute;top:-1px;left:5px;white-space:nowrap;font-style:normal;font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#4F6F9C}
+.dcval{position:absolute;top:13px;height:5px;border-radius:999px;background:#2E9E5B}.dcval.lapse{background:#E8B64A}.dcval.exp{background:#D2453A}.dcval.na{background:#B8C2D0}.dcval.open{border-top-left-radius:0;border-bottom-left-radius:0}
+.dcln s{position:absolute;top:8px;bottom:-2px;width:2px;margin-left:-1px;background:var(--deep)}
+.dcval.past{border-top-right-radius:0;border-bottom-right-radius:0}.dcend{position:absolute;top:10px;width:2px;height:11px;margin-left:-1px;background:currentColor;color:#6B7280}
+.dcax{position:relative;height:16px;font-size:11px;color:var(--mut)}.dcax span{position:absolute;top:3px;white-space:nowrap}.dcax span.r{transform:translateX(-100%)}
+.dcnote{font-size:12.5px;color:#4B5563;margin-top:6px}
+.dccsv{font-size:13px;font-weight:600;color:var(--royal)}
+@media(max-width:700px){.dckv{grid-template-columns:1fr 1fr}.dc2 .ecft .dccsv{display:none}}
 .crstat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 14px;display:flex;flex-direction:column}
 .crstat .r{display:flex;flex-direction:column;gap:2px;padding:10px 0;border-top:1px solid var(--line)}
 .crstat .r:first-child{border-top:0}
@@ -6720,18 +6877,6 @@ async function intelDiscard(id){
   loadIntelReview();intelReviewCount();
 }
 function clearCrewFilters(){CF.q='';CF.status=CREW_DEFAULT_STATUS.slice();CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];renderCrew();}
-function docsModal(id){
-  var c=null,i;for(i=0;i<CREW.length;i++){if(CREW[i].agency_id===id){c=CREW[i];break;}}
-  if(!c)return;
-  var name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
-  var docs=[['Medical','med_exp'],['Seaman Bk','sirb_exp'],['Passport','pp_exp'],['US C1/D Visa','usv_exp'],['Schengen','sch_exp']];
-  var map={expired:['Expired','red'],'90d':['Expiring','amber'],ok:['Valid','ok'],missing:['Missing','amber']};
-  var body='<div class=hint style="margin-bottom:8px">'+c.agency_id+' · '+(c.vessel_observed||'—')+' · '+(c.status||'')+'</div>'
-   +'<table class=tbl><thead><tr><th>Document</th><th>Expiry</th><th>Status</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'
-   +docs.map(function(d){var exp=c[d[1]];var g=docFlag(exp);var st=map[g]||map.missing;var days=exp?dUntil(exp):null;var dtxt=(days==null)?'—':(days<0?(Math.abs(days)+'d ago'):(days+'d left'));return '<tr><td>'+d[0]+'</td><td>'+(exp||'—')+'</td><td><span class="cchip '+st[1]+'">'+st[0]+'</span></td><td style="text-align:right">'+dtxt+'</td></tr>';}).join('')
-   +'</tbody></table><div class=hint style="margin-top:8px">Fleet-wide list &amp; export: Crew tab → Docs CSV, or click the Docs tiles to filter.</div>';
-  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Document compliance — '+escHtml(name)+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
-}
 async function exportDocsCSV(){
   var d=await (await fetch('/api/compliance?days=90')).json();
   var rows=[['Crew','ID','Vessel','Status','Document','Doc status','Expiry','Days']];
@@ -6870,8 +7015,8 @@ async function openCrew(id){
   var rank=c.rank_override||c.rank_observed||'';
   var ph=fmtPhone(c.phone);
   var contact=[c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'',ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'):'',c.province?escHtml(c.province):'',c.dob?('Born '+fmtDateS(c.dob)):'',c.pp_no?('Passport '+escHtml(c.pp_no)):''].filter(Boolean).join('<span class=sep>·</span>');
-  var cp=cur?contractPass(cur.on,cur.off||null):null;
-  var stateChip=cur?(cp&&cp.chip?cp.chip.replace('class=croff','class="croff inrow"'):''):(N.ashoreDays!=null?'<span class=pfchip>Ashore '+N.ashoreDays+' d</span>':'');
+  // the chip reads like the card (13 Oct 2026: "OFF in 159 d" beside "5 mo 8 d to go"): months and days, never a bare count
+  var stateChip=cur?(cur.off?(cur.off<todayS?'<span class="croff inrow" style="background:#F8ECEB;color:var(--red)">Past the sign-off</span>':'<span class="croff inrow" style="background:'+(dayNum(cur.off)-dayNum(todayS)<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">Off in '+spanCompact(todayS,cur.off)+'</span>'):''):(N.ashoreDays!=null&&last&&last.off?'<span class=pfchip>Ashore '+spanCompact(last.off,todayS)+'</span>':'');
   var nextEm=(RO.earmarks||[])[0];
   var h='<div class="bar noprint" style="margin-bottom:10px"><button class="btn ghost" onclick="renderCrew()">← Crew</button><span style="margin-left:auto"></span></div>';
   h+='<div class=crwrap><section class=crmain><div class="stmt pf2">';
@@ -6879,6 +7024,15 @@ async function openCrew(id){
   // 1 · the header: who, where, and TDG's own row beside it
   var shipLine=cur?('<b>'+escHtml(niceShip(cur.ship))+'</b><span class=pfcl>'+escHtml(cur.brand||c.client||'')+(cur.embark?(' · '+escHtml(pfPort(cur.embark))):'')+'</span>')
     :(last?('Last ship <b>'+escHtml(niceShip(last.ship))+'</b><span class=pfcl>off '+fmtDateS(last.off)+(last.disembark?(' · '+escHtml(pfPort(last.disembark))):'')+'</span>'):'<span style="color:var(--mut);font-weight:500">No contract on file</span>');
+  // the numbers, each with where it comes from — in the header's right half (12 Oct 2026 pixel pass: it stood empty)
+  var cnN=CN&&CN.n!=null?CN.n:(bz&&bz.contracts!=null?bz.contracts:0);
+  var cnSrc=CN&&CN.n!=null?pfSrc('count','TDG count '+fmtDateS(CN.asOf)+(CN.added?(' + '+CN.added+' since'):'')):pfSrc('counter','derived from dates');
+  var NUMS='<div class="pf2nums inhd">'
+    +pfNum(cnN,'Completed contracts',cnSrc)
+    +pfNum(Number(N.seaDays||0).toLocaleString(),'Days at sea',pfSrc('tdg','the schedule'))
+    +pfNum(bz&&!bz.error&&bz.count!=null?bz.count:'—','Bonus count (consecutive)','<span class=pfsrc>'+(bz&&bz.baseline_set?'baseline set':'baseline not set')+'</span>')
+    +(cur?pfNum(Number(N.aboardDays||0)+' d','Aboard',pfSrc('tdg','since '+fmtDateS(cur.on))):pfNum(N.ashoreDays!=null?(N.ashoreDays+' d'):'—','Ashore',N.ashoreDays!=null?pfSrc('tdg','since '+fmtDateS(last.off)):'<span class=pfsrc>no contract ended</span>'))
+    +'</div>';
   h+='<div class=pf2hd><div class=pf2top><div class=pfid><div class=crav style="width:56px;height:56px;font-size:17px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
     +'<div class=pfnmrow><span class=pfname>'+escHtml(name)+'</span><span class=pfwho>'+escHtml(who)+'</span></div>'
     +'<div class=pfchips><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status||'')+'</span>'+(rank?'<span class=crrank>'+escHtml(rankTag(rank,null).toUpperCase())+'</span>':'')+stateChip
@@ -6888,7 +7042,7 @@ async function openCrew(id){
     +'</div></div>';
   // The TDG file box beside the name is gone (Miguel, 12 Oct 2026: "this here .. dont think is needed"): the file's word
   // is the status chip, its dates are the contract's rows below, its count is the first number.
-  h+='</div><div class=pf2srcs><span class=pf2k>Sources</span>'+['tdg','count','typed','intel','feedback','counter','travel'].map(function(k){return pfSrc(k);}).join('')+'</div></div>';
+  h+=NUMS+'</div><div class=pf2srcs><span class=pf2k>Sources</span>'+['tdg','count','typed','intel','feedback','counter','travel'].map(function(k){return pfSrc(k);}).join('')+'</div></div>';
   // 2 · the decision band: out of the rotation, or a contract that ended early
   var off=c.status==='Inactive'||c.status==='Not for Rehire';
   if(off||(last&&last.earlyDays)){
@@ -6903,15 +7057,6 @@ async function openCrew(id){
     h+='<div class=pf2band><div style="flex:1 1 420px;min-width:0"><div class=pf2bt>'+(off?'Out of the rotation':'Contract ended early')+(last&&last.earlyDays?(' — ended '+last.earlyDays+' days early'):'')+'</div><div class=pf2bb>'+why.join(' ')+'</div></div>'
       +'<div class=pf2bx><button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Add note</button><button class="btn ghost" onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Change status…</button></div></div>';
   }
-  // 3 · the numbers, each with where it comes from
-  var cnN=CN&&CN.n!=null?CN.n:(bz&&bz.contracts!=null?bz.contracts:0);
-  var cnSrc=CN&&CN.n!=null?pfSrc('count','TDG count '+fmtDateS(CN.asOf)+(CN.added?(' + '+CN.added+' since'):'')):pfSrc('counter','derived from dates');
-  h+='<div class=pf2nums>'
-    +pfNum(cnN,'Completed contracts',cnSrc)
-    +pfNum(Number(N.seaDays||0).toLocaleString(),'Days at sea',pfSrc('tdg','the schedule'))
-    +pfNum(bz&&!bz.error&&bz.count!=null?bz.count:'—','Bonus count (consecutive)','<span class=pfsrc>'+(bz&&bz.baseline_set?'baseline set':'baseline not set')+'</span>')
-    +(cur?pfNum(Number(N.aboardDays||0)+' d','Aboard',pfSrc('tdg','since '+fmtDateS(cur.on))):pfNum(N.ashoreDays!=null?(N.ashoreDays+' d'):'—','Ashore',N.ashoreDays!=null?pfSrc('tdg','since '+fmtDateS(last.off)):'<span class=pfsrc>no contract ended</span>'))
-    +'</div>';
   // 4 · the career line
   if(K.length)h+=pfCareer(K,PE.feed||[],todayS);
   // left column: the last contract, what people said, bonus
@@ -6946,7 +7091,7 @@ async function openCrew(id){
   h+='</div></section>';
   // actions: what can be done for THIS crew now — sign-off sends only while a contract runs
   var slots=PE.slots||[];
-  var fbBtn=function(role,label){var s=slots.filter(function(x){return x.role===role;})[0]||{};return '<button class="btn ghost rf" data-role="'+role+'">'+label+(s.state==='answered'?' · answered '+fmtDateS(s.at):(s.state==='pending'?' · asked':''))+'</button>';};
+  var fbBtn=function(role,label){var s=slots.filter(function(x){return x.role===role;})[0]||{};return '<button class="btn ghost rf" data-role="'+role+'" title="'+(s.state==='answered'?'Answered '+fmtDateS(s.at)+' — a new request makes a new link':(s.state==='pending'?'Asked '+fmtDateS(s.at):'Never asked'))+'">'+label+(s.state==='answered'?' ✓':(s.state==='pending'?' · asked':''))+'</button>';};
   h+='<aside class="cract pfact noprint">'
     +'<div class=pfgl>Crew record</div>'
     +'<button class=btn onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Edit crew</button>'
@@ -6954,7 +7099,7 @@ async function openCrew(id){
     +'<button class="btn ghost" onclick="docsModal(\\''+escHtml(c.agency_id)+'\\')">Documents</button>'
     +'<div class=pfgl>Statement</div>'
     +'<button class="btn ghost" onclick="downloadStatement()">Download PDF</button>'
-    +'<button class="btn ghost" onclick="emailStatement()">Email statement</button>'
+    +'<button class="btn ghost" id=stmtbtn onclick="emailStatement()">Email statement</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<div id=stmtout class=csub style="margin:0"></div>'
     +'<div class=pfgl>Request feedback</div>'
@@ -6963,7 +7108,7 @@ async function openCrew(id){
     +'<div class=pfgl>Sign-off</div>'
     +(cur?('<button class="btn ghost" onclick="sendSignoffInstructions(\\''+c.agency_id+'\\','+lastSeq+')">Send instructions</button>'
       +'<button class="btn ghost" onclick="sendSignoffLink(\\''+c.agency_id+'\\','+lastSeq+')">Send sign-off link</button>')
-      :('<div class=hint style="font-size:12px;padding:0 2px">'+(last&&last.off?('Contract ended '+fmtDateS(last.off)+'.'):'No contract running.')+'</div><button class="btn ghost" disabled>Send instructions</button><button class="btn ghost" disabled>Send sign-off link</button>'))
+      :('<div class=hint style="font-size:12px;padding:0 2px">'+(last&&last.off?('Ended '+fmtDateS(last.off)):'No contract running')+'</div><button class="btn ghost" disabled>Send instructions</button><button class="btn ghost" disabled>Send sign-off link</button>'))
     +'</aside></div>';
   $('#view').innerHTML=h;
   document.querySelectorAll('#view .rf').forEach(function(b){b.onclick=function(){reqFeedback(b.getAttribute('data-role'));};});
@@ -6978,43 +7123,186 @@ function pfPort(p){return String(p||'').split(',')[0].toLowerCase().replace(/(^|
 function pfIntelHead(it,n){var ps=it.parts||[];var s=ps.filter(function(p){return p.label==='Summary';})[0]||ps[0]||{text:it.text||''};var t=String(s.text||'');n=n||160;if(t.length<=n)return t;var cut=t.slice(0,n);var sp=cut.lastIndexOf(' ');return (sp>n*0.6?cut.slice(0,sp):cut).replace(/[,;:. ]+$/,'')+'…';}
 function pfAct(a){return '<div class=pf2ac><span>'+fmtDateS(String(a.at||'').slice(0,10))+'</span><span>'+escHtml(a.who||'')+'</span><span>'+escHtml(a.text||'')+'</span></div>';}
 function pfAddMo(iso,n){var y=+iso.slice(0,4),m=+iso.slice(5,7)-1+n,dd=+iso.slice(8,10);y+=Math.floor(m/12);m=((m%12)+12)%12;var last=new Date(Date.UTC(y,m+1,0)).getUTCDate();return y+'-'+String(m+1).padStart(2,'0')+'-'+String(Math.min(dd,last)).padStart(2,'0');}
-// The last (or running) contract: the bar, every date with its source, readiness, the sign-off emails, travel.
+// THE CONTRACT CARD, round 2 (Miguel, 13 Oct 2026: "I like the way you did it, but it is too crowded ... See what the
+// people need to know, what they need to see"). What a coordinator asks of a running contract, in that order: where and
+// how far along (the header and its state), who hands over to whom (the relay), the four dates that matter (each with
+// its source), and what is left for the crew change (ONE checklist with a count, the way a CRM shows a deal's path).
+// Where each date came from and the travel cost fold away under the card. An ended contract keeps the header, the relay
+// and the facts; its crew-change record folds away with the rest.
+var PF3_SRC={tdg:'TDG debark · final',tdg_embark:'TDG embark',rita:'Typed in the console',card:'Reliever card',projected:'Projected',counter:'Contract Counter'};
 function pfContract(x,isCur,todayS){
-  var lbl={tdg:'TDG debark · final',tdg_embark:'TDG embark',rita:'Typed in the console',card:'Reliever card',projected:'Projected',counter:'Counter · history'};
-  var off=x.off,end=x.planned&&x.planned>(off||'')?x.planned:off;
-  var tot=x.on&&end?Math.max(1,dayNum(end)-dayNum(x.on)):1,pctOff=off?Math.max(0,Math.min(100,Math.round((dayNum(off)-dayNum(x.on))/tot*100))):100;
-  var pctNow=Math.max(0,Math.min(100,Math.round((dayNum(todayS)-dayNum(x.on))/tot*100)));
-  var fill=isCur?Math.min(pctNow,pctOff):pctOff;
-  var bar='<div class=pf2bar><i style="width:'+fill+'%"></i>'+(x.earlyDays?'<em style="left:'+pctOff+'%"></em><u style="left:'+pctOff+'%"></u>':'')+(isCur?'<s style="left:'+pctNow+'%"></s>':'')+'</div>';
-  var rows=x.dates.map(function(r){var src=r.src==='tdg_embark'?'tdg':(r.src==='rita'?'typed':r.src);var l=r.src==='tdg'&&r.what==='Sign-off'?lbl.tdg:(r.src==='counter'&&r.used?'Contract Counter':(lbl[r.src]||r.src));
-    var st=r.used?'<span class="cchip ok">Shown</span>':(r.history?'<span class=pf2mut>History</span>':(r.agrees?'<span class=pf2mut>Agrees</span>':'<span class="cchip amber">Differs</span>'));
-    if(r.used&&r.held)st='<span class="cchip red">Held · TDG still has them aboard</span>';
-    return '<tr><td>'+escHtml(r.what)+'</td><td>'+(r.used?'<b>':'')+(r.history&&!r.agrees?'<s>':'')+fmtDateS(r.value)+(r.history&&!r.agrees?'</s>':'')+(r.used?'</b>':'')+'</td><td>'+pfSrc(src,l+(r.at?(' · '+fmtDateS(r.at)):''))+'</td><td>'+st+'</td></tr>';}).join('');
-  var R=x.readiness,rd=R?['eccr:ECCR','air:Air','hotel:Hotel','on:On date','off:Off date'].map(function(p){var k=p.split(':');return '<span class="pf2tick'+(R[k[0]]?' on':'')+'">'+(R[k[0]]?'✓ ':'')+k[1]+'</span>';}).join(''):'<span class=pf2mut>Nothing recorded</span>';
-  var E=x.emails||{},em=function(v,l){return l+' — '+(v?('sent '+fmtDateS(v.sent)+(v.acked?(', acknowledged '+fmtDateS(v.acked)):'')):'not sent');};
-  var T=x.travel||[],tr=T.length?T.map(function(t){return '<div>'+(t.leg==='on'?'Sign-on':'Sign-off')+' leg · <b>$'+t.total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'</b></div><div class=pf2mut>'+['Air $'+t.air.toLocaleString(),t.hotel?'Hotel $'+t.hotel.toLocaleString():'',t.medical?'Medical $'+t.medical.toLocaleString():'',t.visa?'Visa $'+t.visa.toLocaleString():'',t.other?'Other $'+t.other.toLocaleString():''].filter(Boolean).join(' · ')+'</div>';}).join(''):'<span class=pf2mut>No travel line for this contract</span>';
+  var off=x.off,on=x.on,T=x.travel||[],D=x.dates||[];
+  var offRow=D.filter(function(r){return r.what==='Sign-off'&&r.used;})[0]||null;
+  var differs=D.filter(function(r){return r.what==='Sign-off'&&!r.used&&!r.history&&!r.agrees;})[0]||null;
+  var st;
+  if(x.held)st=['red','Past the sign-off · TDG still has them aboard'];
+  else if(isCur&&off&&off<todayS)st=['red','Past the projected sign-off'];
+  else if(isCur)st=['green','Aboard · day '+x.days+' of '+x.plannedDays];
+  else if(x.earlyDays)st=['red','Ended '+x.earlyDays+' days early'];
+  else st=['grey','Signed off '+fmtDateS(off)];
   var ports=[x.embark?pfPort(x.embark):'',x.disembark?pfPort(x.disembark):''];
-  return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">'+(isCur?'Current contract':'Last contract')+'</span>'
-    +(x.earlyDays?'<span class="cchip red">Ended '+x.earlyDays+' d early</span>':'')+(x.held?'<span class="cchip red">Past the sign-off · TDG still has them aboard</span>':'')
-    +'<span class=pf2mut style="margin-left:auto">Contract '+x.n+'</span></div>'
-    +'<div class=pf2cs><b>'+escHtml(niceShip(x.ship))+'</b>'+(ports[0]||ports[1]?'<span>'+escHtml((ports[0]||'?')+' → '+(ports[1]||'?'))+'</span>':'')+'</div>'
-    +bar+pfHandover(x.handover,isCur,todayS)+'<div class=pf2mut style="margin-top:6px">'+(isCur?('Day '+x.days+' of '+x.plannedDays+' planned · '+spanCompact(x.on,todayS)+' aboard'):(x.days+' of '+x.plannedDays+' planned days · '+spanCompact(x.on,off||todayS)))+'</div>'
-    +'<table class=pf2dt><thead><tr><th>Date</th><th>Value</th><th>Source</th><th>Status</th></tr></thead><tbody>'+rows+'</tbody></table>'
-    +'<div class=pf2tri><div><div class=pflbl>Readiness</div><div class=pf2tk>'+rd+'</div></div>'
-    +'<div><div class=pflbl>Sign-off emails</div><div class=pf2mut style="line-height:1.6">'+em(E.instructions,'Instructions')+'<br>'+em(E.link,'Link')+'<br>'+(E.review?('Ship review — sent '+fmtDateS(E.review.sent)):'Ship review — not sent')+'</div></div>'
-    +'<div><div class=pflbl>Travel '+pfSrc('travel','by name')+'</div>'+tr+'</div></div></div>';
+  var route=ports[0]||ports[1]?escHtml((ports[0]||'?')+' → '+(ports[1]||'?')):'Ports not on file';
+  var h='<div class="pfsec pf3">'
+    +'<div class=pf3top><div style="min-width:0"><div class=pf3k>'+(isCur?'Current contract':'Last contract')+' · '+x.n+'</div>'
+    +'<div class=pf3ship>'+escHtml(niceShip(x.ship))+'</div><div class=pf3route>'+route+(x.brand?' · '+escHtml(x.brand):'')+'</div></div>'
+    +'<span class="pf3st '+st[0]+'">'+escHtml(st[1])+'</span></div>';
+  h+=pfRelay(x,isCur,todayS);
+  // the four facts, each with where it comes from
+  var offSrc=offRow?offRow.src:(x.offSource||'projected');
+  var az=/azamara/i.test(String(x.brand||'')+' '+String(x.ship||''));
+  var offNote=offSrc==='projected'?('Projected · '+(az?'5':'7')+' months'+(offRow&&offRow.snapped?', on the turnaround':'')):((PF3_SRC[offSrc]||offSrc)+(offRow&&offRow.at?' · '+fmtDateS(offRow.at):''));
+  var fact=function(k,v,extra){return '<div class=pf3f><span class=pf3l>'+k+'</span><b>'+v+'</b>'+(extra||'')+'</div>';};
+  var dLeft=isCur&&off?dayNum(off)-dayNum(todayS):null;
+  h+='<div class=pf3facts>'
+    +fact('Signed on',fmtDateS(on),pfSrc('tdg',PF3_SRC[(D[0]||{}).src]||'TDG embark'))
+    +fact(isCur?'Sign-off':'Signed off',off?fmtDateS(off):'Not set',pfSrc(offSrc==='rita'?'typed':offSrc,offNote)+(differs?'<em class=pf3dif>'+escHtml((PF3_SRC[differs.src]||differs.src)+' says '+fmtDateS(differs.value))+'</em>':''))
+    +(isCur?fact('To go',dLeft==null?'—':(dLeft>=0?spanCompact(todayS,off):'<span style="color:var(--red)">'+spanCompact(off,todayS)+' over</span>'),'<span class=pf3sub>'+spanCompact(on,todayS)+' aboard so far</span>')
+      :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):(x.days+' days'))+'</span>'))
+    +fact(isCur?'Signs off at':'Signed off at',ports[1]?escHtml(ports[1]):'<span class=pf3na>Not on file</span>','<span class=pf3sub>'+(ports[0]?'joined at '+escHtml(ports[0]):'joining port not on file')+'</span>')
+    +'</div>';
+  var cc=pfCrewChange(x,isCur,todayS);
+  if(isCur)h+=cc.html;
+  var more=[];
+  if(!isCur)more.push('<details class=pf3more><summary><span>Crew-change record</span><em>'+cc.done+' of '+cc.total+' done</em></summary>'+cc.html+'</details>');
+  more.push('<details class=pf3more><summary><span>How these dates were set</span><em>'+D.length+' source'+(D.length===1?'':'s')+(differs?' · one differs':'')+'</em></summary>'+pfDateTable(D)+'</details>');
+  var tot=T.reduce(function(s,t){return s+(+t.total||0);},0);
+  more.push('<details class=pf3more><summary><span>Travel</span><em>'+(T.length?'$'+tot.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'None recorded')+'</em></summary>'+pfTravel(T)+'</details>');
+  return h+'<div class=pf3mores>'+more.join('')+'</div></div>';
 }
-// Who he relieved and who relieves him, at the two ends of the contract's bar (Miguel, 12 Oct 2026: "show who was
-// before he took over and who is coming after"). Each name opens that seafarer's profile.
-function pfHandover(H,isCur,todayS){
-  H=H||{};var b=H.before,a=H.after;
+// The relay: who handed the seat over, this contract between its two dates (filled to today, or to the sign-off), who
+// takes it next (Miguel, 12 Oct 2026: "show who was before he took over and who is coming after"). Names open profiles.
+function pfRelay(x,isCur,todayS){
+  var H=x.handover||{},b=H.before,a=H.after;
   var who=function(p){return '<a href="#" class=pf2who data-sc="'+escHtml(p.sc)+'" onclick="openCrew(this.dataset.sc);return false">'+escHtml(p.name||p.sc)+'</a>';};
-  var L=b?('<span>Took over from '+who(b)+' · off '+fmtDateS(b.off)+'</span>'):'<span class=pf2mut>Before: not on record</span>';
-  var R;
-  if(a){var lab=a.src==='earmark'?(a.told?'earmark · sent to TDG':'earmark'):(a.src==='tdg_earmark'?'TDG earmark, no dates':(a.src==='card'?'aboard per relief board':''));
-    R='<span>'+(a.on&&a.on<=todayS?'Relieved by ':'Next: ')+who(a)+(a.on?' · '+fmtDateS(a.on):'')+(lab?' <em>'+lab+'</em>':'')+'</span>';}
-  else R=isCur?'<span class=pf2warn>No reliever planned yet</span>':'<span class=pf2mut>After: not on record</span>';
-  return '<div class=pf2ho>'+L+R+'</div>';
+  var ini=function(n){return escHtml(String(n||'?').split(/[ ,]+/).filter(Boolean).slice(0,2).map(function(w){return w.charAt(0);}).join('').toUpperCase()||'?');};
+  var L=b?'<div class="pf3p prev"><i>'+ini(b.name)+'</i><div>'+who(b)+'<small>Handed over '+fmtDateS(b.off)+'</small></div></div>'
+    :'<div class="pf3p prev none"><i>–</i><div><span>Before</span><small>Not on record</small></div></div>';
+  var lab=a?(a.src==='earmark'?(a.told?'earmark · told Joy':'earmark · console only'):(a.src==='tdg_earmark'?'TDG earmark · no dates yet':(a.src==='card'?'aboard per relief board':'in the TDG file'))):'';
+  var R=a?'<div class="pf3p next'+(a.src==='earmark'||a.src==='tdg_earmark'?' em':'')+'"><div>'+who(a)+'<small>'+(a.on?((a.on<=todayS?'Took over ':'From ')+fmtDateS(a.on)+' · '):'')+lab+'</small></div><i>'+ini(a.name)+'</i></div>'
+    :(isCur?'<div class="pf3p next none pf3w"><div><span>No reliever yet</span><small>Earmark one on the Keyman board</small></div><i>!</i></div>'
+      :'<div class="pf3p next none"><div><span>After</span><small>Not on record</small></div><i>–</i></div>');
+  var end=x.planned&&x.planned>(x.off||'')?x.planned:x.off;
+  var tot=x.on&&end?Math.max(1,dayNum(end)-dayNum(x.on)):1,pc=function(d){return Math.max(0,Math.min(100,Math.round((dayNum(d)-dayNum(x.on))/tot*100)));};
+  var fill=isCur?pc(todayS):pc(x.off||todayS);
+  var trk='<div class=pf3trk><b style="width:'+fill+'%"></b>'+(x.earlyDays?'<u style="left:'+pc(x.off)+'%"></u>':'')+(isCur?'<s style="left:'+pc(todayS)+'%"><em>Today</em></s>':'')+'</div>'
+    +(x.earlyDays?'<div class="pf3td early'+(pc(x.off)<=35?' low':'')+'"><span>'+fmtDateS(x.on)+'</span><span class=pf3off style="left:'+pc(x.off)+'%">'+fmtDateS(x.off)+'</span></div>'
+      :'<div class=pf3td><span>'+fmtDateS(x.on)+'</span><span>'+(x.off?fmtDateS(x.off):'open')+'</span></div>');
+  return '<div class=pf3relay>'+L+'<div class=pf3mid>'+trk+'</div>'+R+'</div>';
+}
+// The crew change as one checklist in four steps, with a count. Ticks are set in the contract on the Keyman board
+// (Readiness) and by the sign-off sends; nothing here is typed.
+function pfCrewChange(x,isCur,todayS){
+  var a=(x.handover||{}).after,R=x.readiness||{},E=x.emails||{};
+  var inTdg=!!a&&(a.src==='tdg'||a.src==='tdg_earmark');
+  var S=[
+    ['Reliever',[['Planned',!!a,a?a.name:'nobody yet'],['In TDG',inTdg,inTdg?'TDG has them':(a&&a.told?'told Joy · not in the file yet':'not in TDG yet')]]],
+    ['Dates',[['Sign-on confirmed',!!R.on,''],['Sign-off confirmed',!!R.off,'']]],
+    ['Travel',[['ECCR',!!R.eccr,''],['Flight',!!R.air,''],['Hotel',!!R.hotel,'']]],
+    ['Sign-off',[['Instructions',!!E.instructions,E.instructions?'sent '+fmtDateS(E.instructions.sent):'not sent'],
+      ['Sign-off link',!!E.link,E.link?(E.link.acked?'acknowledged '+fmtDateS(E.link.acked):'sent '+fmtDateS(E.link.sent)):'not sent'],
+      ['Ship review',!!E.review,E.review?'sent '+fmtDateS(E.review.sent):'not sent']]]];
+  var done=0,total=0;
+  var steps=S.map(function(s){var n=s[1].filter(function(i){return i[1];}).length;done+=n;total+=s[1].length;
+    var cls=n===s[1].length?'done':(n?'part':'todo');
+    return '<div class="pf3step '+cls+'"><div class=pf3sh><i></i><b>'+s[0]+'</b><span>'+n+'/'+s[1].length+'</span></div><ul>'
+      +s[1].map(function(i){return '<li class="'+(i[1]?'ok':'')+'"><span>'+(i[1]?'✓':'')+'</span><div>'+escHtml(i[0])+(i[2]?'<small>'+escHtml(i[2])+'</small>':'')+'</div></li>';}).join('')+'</ul></div>';}).join('');
+  var pct=Math.round(done/total*100);
+  var html='<div class=pf3cc><div class=pf3cch><b>Crew change</b><span>'+done+' of '+total+' done</span><div class=pf3ccbar><i style="width:'+pct+'%"></i></div>'
+    +(isCur?'<a href="#" onclick="pfToKeyman(\\''+escHtml(niceShip(x.ship))+'\\');return false">Open on Keyman →</a>':'')+'</div>'
+    +'<div class=pf3steps>'+steps+'</div>'+(x.readiness?'':'<div class=pf3hint>Nothing ticked yet for this contract.</div>')+'</div>';
+  return {html:html,done:done,total:total};
+}
+function pfDateTable(D){
+  return '<table class=pf2dt><thead><tr><th>Date</th><th>Value</th><th>Source</th><th>Status</th></tr></thead><tbody>'+D.map(function(r){
+    var src=r.src==='tdg_embark'?'tdg':(r.src==='rita'?'typed':r.src);var l=r.src==='counter'&&r.used?'Contract Counter':(PF3_SRC[r.src]||r.src);
+    var st=r.used?'<span class="cchip ok">Shown</span>':(r.history?'<span class=pf2mut>History</span>':(r.agrees?'<span class=pf2mut>Agrees</span>':'<span class="cchip amber">Differs</span>'));
+    if(r.used&&r.held)st='<span class="cchip red">Held</span>';
+    return '<tr><td>'+escHtml(r.what)+'</td><td>'+(r.used?'<b>':'')+(r.history&&!r.agrees?'<s>':'')+fmtDateS(r.value)+(r.history&&!r.agrees?'</s>':'')+(r.used?'</b>':'')+'</td><td>'+pfSrc(src,l+(r.at?(' · '+fmtDateS(r.at)):''))+'</td><td>'+st+'</td></tr>';}).join('')+'</tbody></table>';
+}
+function pfTravel(T){
+  if(!T.length)return '<div class=pf3hint>No travel line for this contract in the travel ledger (matched by name and month).</div>';
+  var m=function(v){return '$'+Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});};
+  return '<table class=pf2dt><thead><tr><th>Leg</th><th>Air</th><th>Hotel</th><th>Medical</th><th>Visa</th><th>Other</th><th>Total</th></tr></thead><tbody>'
+    +T.map(function(t){return '<tr><td>'+(t.leg==='on'?'Sign-on':'Sign-off')+'</td><td>'+m(t.air)+'</td><td>'+m(t.hotel)+'</td><td>'+m(t.medical)+'</td><td>'+m(t.visa)+'</td><td>'+m(t.other)+'</td><td><b>'+m(t.total)+'</b></td></tr>';}).join('')+'</tbody></table>'
+    +'<div class=pf3hint>From the travel ledger, matched by name and month.</div>';
+}
+async function pfToKeyman(ship){await show('rotation');ROT_FIND=ship;var f=document.getElementById('rfind');if(f)f.value=ship;drawRotation();}
+
+// ONE SIDE PANEL FOR THE CREW WINDOWS (Miguel, 13 Oct 2026: "the window for notes and documents is not the same size").
+// Edit crew, Notes and Documents open in the same sheet: the right edge, full height, 640px (the whole screen on a
+// phone); a header, then the body that scrolls, then the footer. Esc or a click outside closes it.
+function openSheet(kind){
+  closeCrewModal();
+  var w=document.createElement('div');w.id='crewmodal';w.className='modwrap sheetwrap';
+  w.innerHTML='<div class="modcard sheet '+kind+'"><div class=muted style="padding:22px">Loading…</div></div>';
+  w.onclick=function(e){if(e.target===w)closeCrewModal();};
+  document.body.appendChild(w);
+  if(!window.__sheetEsc){window.__sheetEsc=1;document.addEventListener('keydown',function(e){if(e.key==='Escape'&&document.querySelector('#crewmodal.sheetwrap'))closeCrewModal();});}
+  return w;
+}
+function sheetHead(c,title,sub){
+  var st=crStyle(c&&c.status),ini=c?(((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?'):'?';
+  return '<div class=echd><div class=crav style="width:44px;height:44px;font-size:15px;flex:none;background:'+st[0]+';color:'+st[1]+'">'+escHtml(ini)+'</div><div style="flex:1;min-width:0">'
+    +'<div class=ectitle>'+title+'</div><div class=ecsub>'+sub+'</div></div><button class="btn ghost ecx" aria-label="Close" onclick="closeCrewModal()">✕</button></div>';
+}
+
+// DOCUMENTS, in the same panel (13 Oct 2026: "so much lack of detail"). Every document TDG sent — number, issuer, issue
+// and expiry — read against the contract that matters (the running one, else a 7-month contract from today, 5 on
+// Azamara): Valid / Lapses during the contract / Expired / Missing, with a line from issue to expiry under the contract's
+// window so the gap is seen, not read. The dates are edited in Edit crew (the same panel, its Documents section).
+async function docsModal(id){
+  var w=openSheet('dc2');
+  var d;try{d=await (await fetch('/api/crew/get?id='+encodeURIComponent(id))).json();}catch(e){d={error:'network'};}
+  if(!d||d.error||!d.crew){w.querySelector('.modcard').innerHTML='<div class=muted style="padding:22px">Could not load this crew.</div>';return;}
+  var c=d.crew,P=d.profile||{},todayS=new Date().toISOString().slice(0,10);
+  var cur=(P.contracts||[]).filter(function(k){return k.current&&k.on<=todayS;})[0]||null;
+  var az=cur&&/azamara/i.test(String(cur.brand||'')+' '+String(cur.ship||''));
+  var son=cur?cur.on:todayS,soff=cur&&cur.off?cur.off:pfAddMo(todayS,7);
+  var name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ')||id;
+  var D=[['Medical','med_exp',c.med_cert_no,c.med_issue,c.med_place],['Seaman book','sirb_exp',c.sirb_no,c.sirb_issue,c.sirb_place],['Passport','pp_exp',c.pp_no,c.pp_issue,c.pp_place],
+    ['US visa (C1/D)','usv_exp',c.usv_no,c.usv_issue,c.usv_place],['Schengen','sch_exp',c.sch_no,c.sch_issue,c.sch_place,true]];
+  var cnt={ok:0,lapse:0,exp:0,miss:0},req=0;
+  var rows=D.map(function(x){var exp=c[x[1]],opt=!!x[5],k;if(!opt)req++;
+    if(!exp)k=opt?'na':'miss';else if(exp<son)k='exp';else if(exp<soff)k='lapse';else k='ok';
+    if(!opt&&cnt[k]!=null)cnt[k]++;
+    return dcRow(x,exp,k,son,soff,todayS);}).join('');
+  var seg=function(n,cls){return n?'<i class='+cls+' style="flex:'+n+'"></i>':'';};
+  var against=cur?('the current contract on '+escHtml(niceShip(cur.ship))+', '+fmtDateS(son)+' → '+fmtDateS(soff)):('a '+(az?5:7)+'-month contract from today, to '+fmtDateS(soff));
+  w.innerHTML='<div class="modcard sheet dc2">'+sheetHead(c,'Documents · '+escHtml(name),escHtml(id)+' · read against '+against+'.')
+    +'<div class=dcsum><div><b>'+cnt.ok+' of '+req+'</b><span>required documents carry '+(cur?'this contract':'a contract from today')+'</span></div>'
+    +'<div class=dcbar>'+seg(cnt.ok,'ok')+seg(cnt.lapse,'lapse')+seg(cnt.exp,'exp')+seg(cnt.miss,'miss')+'</div>'
+    +'<div class=dcleg><span><i class=ok></i>Valid '+cnt.ok+'</span><span><i class=lapse></i>Lapses during '+cnt.lapse+'</span><span><i class=exp></i>Expired '+cnt.exp+'</span><span><i class=miss></i>Missing '+cnt.miss+'</span></div></div>'
+    +'<div class=ecbody>'+rows+'</div>'
+    +'<div class=ecft><a href="#" class=dccsv onclick="exportDocsCSV();return false">Fleet documents CSV</a><span style="margin-left:auto"></span><button class="btn ghost" onclick="closeCrewModal()">Close</button>'
+    +'<button class="btn ecsave" data-sc="'+escHtml(id)+'" onclick="dcEdit(this.dataset.sc)">Edit dates</button></div></div>';
+}
+// A span a person reads: "1 yr 2 mo", "9 yrs", else months and days (spanCompact).
+function dcSpan(a,b){var A=String(a<b?a:b),B=String(a<b?b:a),m=(+B.slice(0,4)-+A.slice(0,4))*12+(+B.slice(5,7)-+A.slice(5,7));if(+B.slice(8,10)<+A.slice(8,10))m--;if(m<12)return spanCompact(A,B);var y=Math.floor(m/12),r=m%12;return y+(y===1?' yr':' yrs')+(r?' '+r+' mo':'');}
+function dcEdit(id){editCrewModal(id).then(function(){setTimeout(function(){ecGo('ecs_docs');},60);});}
+function dcRow(x,exp,k,son,soff,todayS){
+  var opt=!!x[5],lab=opt&&k!=='ok'&&k!=='na'?[{lapse:'Lapses · optional',exp:'Expired · optional'}[k],'na']:{ok:['Valid','ok'],lapse:['Lapses during contract','lapse'],exp:['Expired','exp'],miss:['Missing','miss'],na:['Not held · optional','na']}[k];
+  var left=exp?dUntil(exp):null;
+  var leftTxt=exp==null?'':(left<0?(dcSpan(exp,todayS)+' ago'):(left===0?'today':('in '+dcSpan(todayS,exp))));
+  var note={ok:'Valid past the sign-off, '+fmtDateS(soff)+'.',lapse:exp?'Lapses '+dcSpan(exp,soff)+' before the sign-off, '+fmtDateS(soff)+'.':'',exp:exp?(exp<todayS?'Expired '+leftTxt+'.':'Expires before the sign-on, '+fmtDateS(son)+'.'):'',miss:'Required, and TDG sent no expiry date.',na:'Only needed for a Schengen itinerary.'}[k];
+  if(opt&&k!=='ok')note=(k==='na'?'':note+' ')+'Only needed for a Schengen itinerary.';
+  // the line, zoomed on the contract: 45 days before it (or today) to 4 months after the sign-off. The document's
+  // validity runs under the contract's window; one running past the right edge says until when.
+  var line='';
+  if(exp){
+    var iss=x[3]&&x[3]<exp?x[3]:null,t0=dayNum(son<todayS?son:todayS)-45,t1=dayNum(soff)+120,W=t1-t0;
+    var pc=function(d){return Math.max(0,Math.min(100,(dayNum(d)-t0)/W*100));},f=function(v){return v.toFixed(1);};
+    var vs=iss?pc(iss):0,ve=pc(exp),past=dayNum(exp)>t1,before=dayNum(exp)<t0;
+    line='<div class=dcln><div class=dcwin style="left:'+f(pc(son))+'%;width:'+f(pc(soff)-pc(son))+'%"><em>Contract · '+fmtDateS(son).replace(/, \\d{4}$/,'')+' → '+fmtDateS(soff)+'</em></div>'
+      +(before?'':'<div class="dcval '+lab[1]+(iss&&dayNum(iss)>=t0?'':' open')+(past?' past':'')+'" style="left:'+f(vs)+'%;width:'+f(Math.max(0.8,ve-vs))+'%"></div>')
+      +(!past&&!before?'<i class=dcend style="left:'+f(ve)+'%"></i>':'')+'<s style="left:'+f(pc(todayS))+'%"></s></div>'
+      +'<div class=dcax>'+(iss&&dayNum(iss)>=t0?'<span style="left:'+f(vs)+'%">Issued '+fmtDateS(iss)+'</span>':'')
+      +(past?'<span class=r style="left:100%">valid to '+fmtDateS(exp)+' →</span>':(before?'<span>expired '+fmtDateS(exp)+', before this window</span>':'<span class="'+(ve>60?'r':'')+'" style="left:'+f(ve)+'%">Expires '+fmtDateS(exp)+'</span>'))+'</div>';
+  }
+  var kv=function(k2,v){return '<div><span>'+k2+'</span><b'+(v?'':' class=dcna')+'>'+(v?escHtml(v):'Not on file')+'</b></div>';};
+  return '<div class="dccard '+lab[1]+'"><div class=dchd><b>'+x[0]+'</b><span class="dcpill '+lab[1]+'">'+lab[0]+'</span></div>'
+    +(k==='na'&&!exp?'<div class=dcnote>'+note+'</div>':(
+    '<div class=dckv>'+kv('Number',x[2])+kv('Issued',x[3]?fmtDateS(x[3]):'')+'<div><span>Expires</span><b'+(exp?'':' class=dcna')+'>'+(exp?fmtDateS(exp):'Not on file')+'</b>'+(exp?'<small class='+lab[1]+'>'+leftTxt+'</small>':'')+'</div>'+kv('Issued by',x[4])+'</div>'
+    +line+(note?'<div class=dcnote>'+note+'</div>':'')))+'</div>';
 }
 // The career line: every contract on one axis, the planned end dashed where it ended early, a pin for every note,
 // intel card and feedback answer, and today. Read off the profile the page holds — no request.
@@ -7110,16 +7398,24 @@ function exportCrewCSV(){
   var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='crew_'+c.agency_id+'.csv';a.click();
 }
 function downloadStatement(){ if(CURRENT_CREW) window.open('/api/crew/statement.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
-async function emailStatement(){
+// THE STATEMENT EMAIL (12 Oct 2026): says who it goes to before it goes, and goes once — Miguel's click sent Ian Alega's
+// statement three times in three seconds. The server refuses a repeat inside 10 minutes (already_sent) unless resent.
+async function emailStatement(resend){
   if(!CURRENT_CREW)return;
-  var out=document.getElementById('stmtout'); if(out){out.style.color='';out.textContent='Sending…';}
+  var c=(CURD&&CURD.crew)||{},out=document.getElementById('stmtout'),btn=document.getElementById('stmtbtn');
+  var nm=[c.first_name,c.last_name].filter(Boolean).join(' ')||CURRENT_CREW;
+  if(!c.email){if(out)out.innerHTML='<span style="color:var(--amber)">No email on file for '+escHtml(nm)+'. Add one in Edit crew.</span>';return;}
+  if(!resend&&!confirm('Email the crew statement to '+nm+'?\\n\\nTo: '+c.email+'\\nCC: Rita Berenyi\\nReplies go to Rita.'))return;
+  if(btn)btn.disabled=true;if(out){out.style.color='';out.textContent='Sending…';}
   try{
-    var r=await (await fetch('/api/crew/statement/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:CURRENT_CREW})})).json();
+    var r=await (await fetch('/api/crew/statement/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:CURRENT_CREW,resend:!!resend})})).json();
+    if(r.error==='already_sent'){if(out)out.textContent='';if(btn)btn.disabled=false;if(confirm((r.note||'Already sent a few minutes ago.')+'\\n\\nSend it again?'))return emailStatement(true);return;}
     if(out){
-      if(r.sent) out.innerHTML='<span style="color:var(--green-d)">Statement emailed to '+r.to+(r.stored?' (stored)':'')+'.</span>';
-      else out.innerHTML='<span style="color:var(--amber)">'+(r.note||'Could not send.')+'</span>';
+      if(r.sent)out.innerHTML='<span style="color:var(--green-d)">Sent to '+escHtml(r.to)+((r.cc&&r.cc.length)?', CC '+escHtml(r.cc.join(', ')):'')+(r.stored?' (stored)':'')+'.</span>';
+      else out.innerHTML='<span style="color:var(--amber)">'+escHtml(r.note||r.error||'Could not send.')+'</span>';
     }
-  }catch(e){ if(out){out.style.color='var(--red)';out.textContent='Could not send the statement.';} }
+  }catch(e){if(out){out.style.color='var(--red)';out.textContent='Could not send the statement.';}}
+  if(btn)btn.disabled=false;
 }
 // The CONTRACT PASS: "ON <date> → OFF <date> · 203d · ~7mo" over a progress bar, and the chip people look for
 // (OFF in N d / OFF N d ago / ON in N d). One drawing for the roster card, the crew profile and the Keyman card.
@@ -7230,28 +7526,82 @@ async function saveNewCrew(){
     if(r.ok){closeCrewModal();renderCrew();if(r.projection&&r.projection.pending)uiToast('Added. The yellow card is being placed on '+(r.projection.ship||body.ship||'the ship')+' — it shows on the Keyman board in a moment.');else if(r.projection&&!r.projection.ok)alert('Crew added, but the plan on '+(body.ship||'?')+' was not created: '+(r.projection.error||'error')+'. Drag the card onto the ship on the Keyman board instead.');}else document.getElementById('aMsg').textContent=r.error==='exists'?'That crew ID already exists.':'Could not add.';
   }catch(e){document.getElementById('aMsg').textContent='Could not add.';}
 }
+// EDIT CREW, REDESIGNED (Miguel, 12 Oct 2026: "the edit crew pop window is not really well design"; mock-up approved
+// with "go"). One window in sections — Person, Contact, Status & ship, Documents, Bonus — every field starting as
+// TDG's value; a field someone typed over shows TDG's value under it with Reset to TDG (which CLEARS the manual entry,
+// never pins TDG's value as one). Only what changed is saved (CREW_EDIT_INIT, §11c); Save counts the changes.
+var CREW_RESET={};
 async function editCrewModal(id){
-  var c=crewById(id);if(!c)return;
-  var fg=function(lab,inp){return '<div class=fg><label>'+lab+'</label>'+inp+'</div>';};
-  var iv=function(v){return v==null?'':String(v).replace(/"/g,'&quot;');};
-  var h='<div class=modcard><div class=modhd><div><div class=cname>Edit crew — '+[c.first_name,c.last_name].filter(Boolean).join(' ')+'</div><div class=csub>'+id+' · manual edits win over imports</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
-   +'<div class=f2 style="margin-top:12px">'
-   +fg('First name','<input id=eFirst value="'+iv(c.first_name)+'">')+fg('Last name','<input id=eLast value="'+iv(c.last_name)+'">')
-   +fg('Middle name','<input id=eMid value="'+iv(c.middle_name)+'">')+fg('Province','<input id=eProv value="'+iv(c.province)+'">')
-   +fg('Mobile','<input id=ePhone value="'+iv(c.phone)+'">')+fg('Email','<input id=eEmail value="'+iv(c.email)+'">')
-   +fg('Crew ID (locked)','<input value="'+iv(c.agency_id)+'" disabled>')+fg('Passport no.','<input id=ePass value="'+iv(c.pp_no)+'">')
-   +fg('Status','<select id=eStatus>'+statusOptions(c.status)+'</select>')+fg('Current vessel','<select id=eShip>'+shipOptions(c.vessel_observed)+'</select>')
-   +fg('Date of birth','<input id=eDob type=date value="'+iv(c.dob)+'">')+fg('Consecutive contract count (bonus baseline)','<input id=eCount type=number min=0 value="'+(c.baseline_count!=null?c.baseline_count:'')+'">')
-   +'</div>'
-   +'<div class=zlabel>Document expiry (compliance)</div><div class=f2>'
-   +fg('Medical','<input id=eMed type=date value="'+iv(c.med_exp)+'">')+fg('Seaman&rsquo;s book','<input id=eSirb type=date value="'+iv(c.sirb_exp)+'">')
-   +fg('Passport','<input id=ePp type=date value="'+iv(c.pp_exp)+'">')+fg('US visa','<input id=eUsv type=date value="'+iv(c.usv_exp)+'">')
-   +fg('Schengen (Europe only)','<input id=eSch type=date value="'+iv(c.sch_exp)+'">')
-   +'</div>'
-   +'<span class=ck style="margin-top:8px;font-weight:600;cursor:pointer;display:flex" onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"> Inactive (manual — out of the rotation until you clear it)</span>'
-   +'<div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center"><button class="btn ghost" style="color:var(--red)" onclick="hideCrew(\\''+id+'\\')" title="Remove this card from all rosters (reversible)">Hide card</button><span><span id=eMsg class=csub style="margin-right:8px"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button> <button class="btn green" onclick="saveEditCrew(\\''+id+'\\')">Save</button></span></div></div>';
-  var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
-  CREW_EDIT_INIT=crewEditBody(id); // what the modal showed: only what Rita changes is saved (8 Oct 2026)
+  CREW_RESET={};CURRENT_EDIT=id;
+  var w=openSheet('ec2'); // the shared side panel (13 Oct 2026): Edit crew, Notes and Documents are one size
+  var d;try{d=await (await fetch('/api/crew/get?id='+encodeURIComponent(id))).json();}catch(e){d={error:'network'};}
+  if(!d||d.error||!d.crew){w.querySelector('.modcard').innerHTML='<div class=muted style="padding:18px">Could not load this crew.</div>';return;}
+  var c=d.crew,T=d.tdg||{},O=d.override||{},P=d.profile||{},F=P.file||{};CREW_TDG_RAW=T;
+  var iv=function(v){return v==null?'':escHtml(String(v));};
+  var has=function(k){return O[k]!=null&&String(O[k]).trim()!=='';};
+  var tdgTxt=function(k,v){if(v==null||v==='')return 'empty';return /_exp$|^dob$/.test(k)?fmtDateS(v):String(v);};
+  // one field: label, input, and — when a person typed over TDG — TDG's value with Reset
+  var fld=function(k,el,label,input,hint){
+    var ov=has(k);
+    return '<div class="ecf'+(ov?' ecov':'')+'" id=ecf_'+k+'><label for='+el+'>'+label+(ov?'<em>· changed by you</em>':'')+'</label>'+input
+      +(ov?'<div class=echint>TDG: '+escHtml(tdgTxt(k,T[k]))+' · <a href="#" onclick="ecReset(\\''+k+'\\',\\''+el+'\\');return false">Reset to TDG</a></div>':(hint?'<div class=echint>'+hint+'</div>':''))+'</div>';
+  };
+  var txt=function(k,el,label,hint){return fld(k,el,label,'<input id='+el+' value="'+iv(c[k])+'" data-k='+k+'>',hint);};
+  var dt=function(k,el,label,hint){return fld(k,el,label,'<input id='+el+' type=date value="'+iv(c[k])+'" data-k='+k+'>',hint);};
+  var name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
+  var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?',st=crStyle(c.status);
+  var age=ageOf(c.dob),ph=fmtPhone(c.phone);
+  var docLeft=function(e){if(!e)return '';var n=dUntil(e);return n<0?'<span style="color:var(--red);font-weight:600">Expired</span>':(n<=90?'<span style="color:var(--amber);font-weight:600">'+n+' days left</span>':fmtDateS(e));};
+  var docRow=function(lab,k,el,no,place,opt){
+    var meta=[no,place].filter(Boolean).map(escHtml).join(' · ')||(opt?'Not held · optional':'No number on file');
+    return '<div class=ecdoc><b>'+lab+'</b><span>'+meta+'</span>'+fld(k,el,'<span class=sr>'+lab+' expiry</span>','<input id='+el+' type=date value="'+iv(c[k])+'" data-k='+k+'>',docLeft(c[k]))+'</div>';
+  };
+  var stSel='<select id=eStatus data-k=status><option value="">TDG: '+escHtml(F.status||c.status||'—')+'</option>'+['On board','On Vacation','Reserved','Earmarked','Inactive','Not for Rehire'].map(function(s){return '<option'+(O.status===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select>';
+  var shSel='<select id=eShip data-k=vessel_observed>'+shipOptions(O.vessel_observed||'').replace('<option value="">—</option>','<option value="">TDG: '+escHtml(F.ship?niceShip(F.ship):(c.vessel_observed?niceShip(c.vessel_observed):'—'))+'</option>')+'</select>';
+  var h='<div class="modcard sheet ec2"><div class=echd><div class=crav style="width:44px;height:44px;font-size:15px;background:'+st[0]+';color:'+st[1]+'">'+ini+'</div><div style="flex:1;min-width:0">'
+    +'<div class=ectitle>Edit crew · '+escHtml(name)+'</div><div class=ecsub>'+escHtml(id)+(P.identity&&P.identity.km?' · TDG '+escHtml(P.identity.km):'')+' · Each field starts as TDG’s value. What you change here stays until you reset it.</div></div>'
+    +'<button class="btn ghost ecx" aria-label="Close" onclick="closeCrewModal()">✕</button></div>'
+    +'<nav class=ecnav><a href="#" onclick="ecGo(\\'ecs_person\\');return false" class=cur>Person</a><a href="#" onclick="ecGo(\\'ecs_status\\');return false">Status &amp; ship</a><a href="#" onclick="ecGo(\\'ecs_docs\\');return false">Documents</a><a href="#" onclick="ecGo(\\'ecs_bonus\\');return false">Bonus</a></nav>'
+    +'<div class=ecbody id=ecbody>'
+    +'<section id=ecs_person><div class=ecsec>Name <span>· as TDG has it</span></div><div class="ecg g3">'+txt('first_name','eFirst','First name')+txt('middle_name','eMid','Middle name')+txt('last_name','eLast','Last name')+'</div>'
+    +'<div class="ecg g3">'+dt('dob','eDob','Date of birth',age!==''?age+' years':'')+txt('province','eProv','Province')+'<div class=ecf><label>Crew ID</label><input value="'+iv(c.agency_id)+'" disabled><div class=echint>Locked — the agency id</div></div></div>'
+    +'<div class=ecsec>Contact</div><div class="ecg g2">'+txt('phone','ePhone','Mobile',ph.txt?(ph.bad?'<span style="color:var(--amber)">Check the number</span>':'Philippine mobile ✓'):'')+txt('email','eEmail','Email')+'</div>'
+    +'<div class="ecg g2">'+txt('pp_no','ePass','Passport no.')+'<div></div></div></section>'
+    +'<section id=ecs_status><div class=ecsec>Status &amp; ship <span>· TDG’s word, unless you set one</span></div><div class="ecg g2">'
+    +fld('status','eStatus','Status',stSel,F.at?'From the TDG file of '+fmtDateS(F.at)+'. Pick another only to correct TDG.':'Pick one only to correct TDG.')
+    +fld('vessel_observed','eShip','Ship',shSel,'A plan for a future ship goes on the Keyman board, not here.')+'</div>'
+    +'<div class=ectog onclick="tgFlip(\\'eRetired\\')"><input type=checkbox id=eRetired'+(c.retired?' checked':'')+' style="pointer-events:none"><div><b>Keep out of the rotation (Inactive tag)</b><div class=echint>Off every bench and the roster export until you clear it. A TDG file that has them On board clears it at the next upload.</div></div></div></section>'
+    +'<section id=ecs_docs><div class=ecsec>Documents <span>· number from TDG, expiry editable</span></div><div class=ecdocs>'
+    +docRow('Medical','med_exp','eMed',c.med_cert_no,c.med_place)+docRow('Seaman book','sirb_exp','eSirb',c.sirb_no,c.sirb_place)+docRow('Passport','pp_exp','ePp',c.pp_no,c.pp_place)
+    +docRow('US visa C1/D','usv_exp','eUsv',c.usv_no,c.usv_place)+docRow('Schengen','sch_exp','eSch',c.sch_no,c.sch_place,true)+'</div></section>'
+    +'<section id=ecs_bonus><div class="ecg g2" style="align-items:end"><div><div class=ecsec style="margin:0">Bonus baseline <span>· money · Miguel and Rita only</span></div><div class=echint>Consecutive contracts before the first one on file. Changing it moves the bonus ladder.</div></div>'
+    +'<div class=ecf><label for=eCount>Baseline</label><input id=eCount type=number min=0 value="'+(c.baseline_count!=null?c.baseline_count:'')+'"'+(d.canMoney?'':' disabled')+'>'+(d.canMoney?'':'<div class=echint>Only Miguel or Rita can change it.</div>')+'</div></div></section>'
+    +'</div>'
+    +'<div class=ecft><a href="#" class=echide onclick="hideCrew(\\''+escHtml(id)+'\\');return false">Hide this card…</a><span id=eMsg class=echint style="margin:0 0 0 auto"></span><button class="btn ghost" onclick="closeCrewModal()">Cancel</button><button class="btn ecsave" id=eSave onclick="saveEditCrew(\\''+escHtml(id)+'\\')" disabled>Save</button></div></div>';
+  w.innerHTML=h;
+  CREW_EDIT_INIT=crewEditBody(id); // what the window showed: only what changes is saved (8 Oct 2026)
+  w.querySelectorAll('input,select').forEach(function(el){el.addEventListener('input',ecCount);el.addEventListener('change',ecCount);});
+  var tg=w.querySelector('.ectog');if(tg)tg.addEventListener('click',function(){setTimeout(ecCount,0);});
+}
+function ecGo(sec){var b=document.getElementById('ecbody'),s=document.getElementById(sec);if(b&&s)b.scrollTo({top:s.offsetTop-b.offsetTop-4,behavior:'smooth'});document.querySelectorAll('.ecnav a').forEach(function(a){a.classList.toggle('cur',a.getAttribute('onclick').indexOf(sec)>=0);});}
+// Reset to TDG: the field shows TDG's value and the save CLEARS the manual entry (sends "", stored as NULL).
+function ecReset(k,el){var d=document.getElementById(el);if(!d)return;var f=document.getElementById('ecf_'+k);var hint=f&&f.querySelector('.echint');
+  d.value=d.tagName==='SELECT'?'':(CREW_TDG_RAW[k]==null?'':String(CREW_TDG_RAW[k]));
+  CREW_RESET[k]=d.value;if(f){f.classList.remove('ecov');f.classList.add('ecrs');if(hint)hint.innerHTML='Back to TDG’s value — saved as no manual entry.';}ecCount();}
+var CREW_TDG_RAW={};
+function ecChanges(id){var all=crewEditBody(id),init=CREW_EDIT_INIT||{},body={agency_id:id},n=0;
+  Object.keys(all).forEach(function(k){if(k==='agency_id'||all[k]===undefined)return;if(String(all[k])!==String(init[k]))(body[k]=all[k],n++);});
+  Object.keys(CREW_RESET).forEach(function(k){if(all[k]===undefined)return;if(String(all[k])===String(CREW_RESET[k])){if(!(k in body))n++;body[k]='';}});
+  return {body:body,n:n};}
+function ecCount(){var b=document.getElementById('eSave');if(!b||!CURRENT_EDIT)return;var r=ecChanges(CURRENT_EDIT);b.disabled=!r.n;b.textContent=r.n?('Save '+r.n+' change'+(r.n===1?'':'s')):'Save';}
+var CURRENT_EDIT=null;
+async function saveEditCrew(id){
+  var r=ecChanges(id);if(!r.n){closeCrewModal();return;}
+  document.getElementById('eMsg').textContent='Saving…';
+  try{var x=await fetch('/api/crew/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(r.body)});var j=await x.json().catch(function(){return {};});
+    if(!x.ok||j.error){document.getElementById('eMsg').textContent='Not saved: '+(j.error||('HTTP '+x.status));return;}
+    closeCrewModal();if(document.querySelector('.pf2')&&CURRENT_CREW===id)openCrew(id);else renderCrew();}
+  catch(e){document.getElementById('eMsg').textContent='Could not save.';}
 }
 // ONLY WHAT CHANGED BECOMES A MANUAL ENTRY (8 Oct 2026). The save used to post every field, so fixing a phone number
 // wrote the displayed (derived) status, the ship and every document date into crew_override: a manual pin that
@@ -7259,16 +7609,6 @@ async function editCrewModal(id){
 var CREW_EDIT_INIT=null;
 function crewEditBody(id){var v=function(x){var e=document.getElementById(x);return e?e.value:undefined;};var cnt=v('eCount');var er=document.getElementById('eRetired');var sh=document.getElementById('eShip');
   return {agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:sh?sh.value:undefined,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===undefined?undefined:(cnt===''?null:Number(cnt)),retired:er?(er.checked?1:0):undefined};}
-async function saveEditCrew(id){
-  document.getElementById('eMsg').textContent='Saving…';
-  var all=crewEditBody(id),init=CREW_EDIT_INIT||{},body={agency_id:id},n=0;
-  Object.keys(all).forEach(function(k){if(k==='agency_id'||all[k]===undefined)return;if(String(all[k])!==String(init[k]))(body[k]=all[k],n++);});
-  if(!n){closeCrewModal();return;}
-  try{var r=await fetch('/api/crew/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});var j=await r.json().catch(function(){return {};});
-    if(!r.ok||j.error){document.getElementById('eMsg').textContent='Not saved: '+(j.error||('HTTP '+r.status));return;}
-    closeCrewModal();renderCrew();}
-  catch(e){document.getElementById('eMsg').textContent='Could not save.';}
-}
 // Hide (void) a crew card — reversible. Removes it from every roster via the server's redacted flag.
 async function hideCrew(id){
   if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Crew, Dashboard, Keyman, Billing) AND from the timecard roster export. You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
@@ -7294,24 +7634,90 @@ async function restoreCrew(id){
     if(r.ok){closeCrewModal();if(document.getElementById('rotbody'))renderRotation();else renderCrew();}
   }catch(e){}
 }
+// NOTES, REDESIGNED (Miguel, 12 Oct 2026: "the notes .. the same"; mock-up approved; "1. archive"). Everything said
+// about the seafarer in one stream — notes (with their author), field intel, feedback, shipboard reviews — newest first,
+// filed under the contract it falls in. A note is ARCHIVED, never deleted: it stays here struck through with Restore,
+// and leaves the profile's feed, the card's dot and the contract modal. Intel keeps its Edit (narrative, never scored).
+var NOTES_STATE=null;
 async function notesModal(id){
-  var c=crewById(id);var name=c?[c.first_name,c.last_name].filter(Boolean).join(' '):id;
-  var h='<div class=modcard><div class=modhd><div><div class=cname>Notes & field intel — '+escHtml(name)+'</div><div class=csub>The crew\\'s story over time — newest first.</div></div><button class="btn ghost" onclick="closeCrewModal()">Close ✕</button></div>'
-   +'<div class=sec style="margin-top:12px">Field intel<span id=intelcount class=intcount></span> — from contributor emails</div>'
-   +'<div id=intellog class=notelog><div class=muted style="padding:14px">Loading…</div></div>'
-   +'<div class=sec style="margin-top:16px">Manual notes</div>'
-   +'<div style="margin-top:8px;display:flex;gap:8px;align-items:stretch"><textarea id=newNote rows=2 style="flex:1;padding:9px 12px;line-height:1.45;font-family:inherit;font-size:14px;resize:vertical" placeholder="Add a note…"></textarea><button class="btn green" onclick="addCrewNote(\\''+id+'\\')">Add note</button></div>'
-   +'<div id=notelog class=notelog><div class=muted style="padding:14px">Loading…</div></div></div>';
-  var w=document.createElement('div');w.id='crewmodal';w.className='modwrap';w.innerHTML=h;w.onclick=function(e){if(e.target===w)closeCrewModal();};document.body.appendChild(w);
-  loadNoteLog(id); loadIntelLog(id);
+  openSheet('nt2');
+  NOTES_STATE={id:id,filter:'all'};
+  await ntLoad();
 }
-async function loadIntelLog(id){
-  var box=document.getElementById('intellog');if(!box)return;
-  try{var r=await (await fetch('/api/intel/crew?id='+encodeURIComponent(id))).json();var ns=r.intel||[];
-    var hdr=document.getElementById('intelcount');if(hdr)hdr.textContent=ns.length?(' · '+ns.length+(ns.length===1?' entry':' entries')):'';
-    box.innerHTML=ns.length?ns.map(function(n){return intelCard(id,n);}).join(''):'<div class=muted style="padding:12px">No field intel yet. Forward crew emails to <b>crew-reports@cims.work</b> and they\\'ll be summarised here.</div>';
-  }catch(e){box.innerHTML='<div class=muted style="padding:12px">Could not load intel.</div>';}
+async function ntLoad(){
+  var S=NOTES_STATE;if(!S)return;var id=S.id;
+  var rs=await Promise.all([
+    fetch('/api/crew/get?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch('/api/crew/notes?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch('/api/intel/crew?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};})]);
+  var d=rs[0]||{},c=d.crew||{},P=d.profile||{};
+  S.name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ')||id;S.crew=c;
+  S.contracts=(P.contracts||[]).slice();
+  var items=[];
+  (rs[1].notes||[]).forEach(function(n){items.push({kind:'note',at:n.ts,id:n.id,text:n.text,who:n.created_by?ntWho(n.created_by):null,archived:n.archived_at,archivedBy:n.archived_by});});
+  (rs[2].intel||[]).forEach(function(x){items.push({kind:'intel',at:x.ts,id:x.id,text:x.summary,who:x.reporter,confidence:x.confidence,contractNo:x.contract_no,edited:x.edited_at});});
+  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});});
+  // a note written before authors were recorded: the activity row of the same second names them (as on the profile)
+  var feedNotes=((P.people&&P.people.feed)||[]).filter(function(f){return f.kind==='note'&&f.who;});
+  items.forEach(function(it){if(it.kind==='note'&&!it.who){var m=feedNotes.filter(function(f){return f.at===it.at;})[0];if(m)it.who=m.who;}});
+  items.sort(function(a,b){return String(b.at||'').localeCompare(String(a.at||''));});
+  S.items=items;ntDraw();
 }
+function ntWho(e){var s=String(e||'').split('@')[0].split(/[._-]/)[0];return s?s.charAt(0).toUpperCase()+s.slice(1).toLowerCase():'';}
+function ntGroup(day){var K=NOTES_STATE.contracts||[],today=new Date().toISOString().slice(0,10);
+  for(var i=0;i<K.length;i++){var k=K[i],end=k.off&&k.off<today?k.off:today;if(day>=k.on&&day<=end)return k;}return null;}
+function ntDraw(){
+  var S=NOTES_STATE,w=document.getElementById('crewmodal');if(!S||!w)return;
+  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'?'feedback':it.kind]++;});
+  var chip=function(k,l){return '<button class="ntchip'+(S.filter===k?' sel':'')+'" onclick="NOTES_STATE.filter=\\''+k+'\\';ntDraw()">'+l+' · '+cnt[k]+'</button>';};
+  var cur=(S.contracts||[]).filter(function(k){return k.current;})[0]||(S.contracts||[])[0]||null;
+  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&it.kind==='review');});
+  var body='',lastKey=null;
+  shown.forEach(function(it){
+    var day=String(it.at||'').slice(0,10),k=ntGroup(day),key=k?(k.ship+k.on):'none';
+    if(key!==lastKey){lastKey=key;body+='<div class=ntgrp>'+(k?('<b>'+escHtml(niceShip(k.ship))+'</b><span>Contract '+k.n+' · '+fmtDateS(k.on)+' → '+(k.off?fmtDateS(k.off):'open')+(k.earlyDays?' · ended '+k.earlyDays+' days early':'')+'</span>'):'<b>Not inside a contract</b><span>between contracts, or before the first one on file</span>')+'</div>';}
+    body+=ntItem(it);
+  });
+  if(!shown.length)body='<div class=muted style="padding:18px 2px">'+(S.items.length?'Nothing of this kind.':'Nothing said yet — the first note starts the log.')+'</div>';
+  w.innerHTML='<div class="modcard sheet nt2">'+sheetHead(S.crew,'Notes · '+escHtml(S.name),escHtml(S.id)+' · everything said about them, newest first, under the contract it belongs to. Nothing is ever deleted.')
+    +'<div class=ntcomp><label for=newNote>Add a note</label><textarea id=newNote rows=2 placeholder="What happened, who said it, what was agreed…"></textarea>'
+    +'<div class=ntcrow>'+(cur?'<span class=echint style="margin:0">Files under</span><span class=ntpill>'+escHtml(niceShip(cur.ship))+' · '+fmtDateS(cur.on)+' → '+(cur.off?fmtDateS(cur.off):'open')+'</span>':'')+'<span id=ntMsg class=echint style="margin:0 0 0 auto"></span><button class="btn ecsave" onclick="addCrewNote(NOTES_STATE.id)">Add note</button></div></div>'
+    +'<div class=ntchips>'+chip('all','All')+chip('note','Notes')+chip('intel','Field intel')+chip('feedback','Feedback')+'</div>'
+    +'<div class=ntlist>'+body+'</div>'
+    +'<div class=ntft>Field intel arrives from crew-reports@cims.work. Notes stay on the crew across every contract.</div></div>';
+}
+var NT_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontime:'On time',acc:'Accuracy',par:'PAR',audit:'Audit'};
+function ntItem(it){
+  var when=fmtDateS(String(it.at||'').slice(0,10))+(it.kind==='note'&&it.at&&String(it.at).length>10?' · '+new Date(it.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'');
+  var ini=String(it.who||'?').split(/[ ·]+/).filter(Boolean).slice(0,2).map(function(x){return x.charAt(0);}).join('').toUpperCase()||'?';
+  var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6']}[it.kind];
+  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review'}[it.kind];
+  var body='',acts='';
+  if(it.kind==='note'){body='<div class=nttext>'+escHtml(it.text)+'</div>';
+    acts=it.archived?('<div class=ntacts><span>Archived '+fmtDateS(String(it.archived).slice(0,10))+(it.archivedBy?' by '+escHtml(ntWho(it.archivedBy)):'')+'</span><a href="#" onclick="ntArchive('+it.id+',true);return false">Restore</a></div>'):('<div class=ntacts><a href="#" onclick="ntArchive('+it.id+',false);return false">Archive</a></div>');}
+  else if(it.kind==='intel'){body='<div class=nttext id=ictext_'+escHtml(it.id)+'>'+escHtml(it.text||'').split('\\n').join('<br>')+'</div>';
+    acts='<div class=ntacts><span>'+escHtml([it.confidence?it.confidence+' match':'',it.contractNo!=null?'contract '+it.contractNo:'','never scored',it.edited?'edited':''].filter(Boolean).join(' · '))+'</span><a href="#" onclick="intelEdit(NOTES_STATE.id,\\''+escHtml(it.id)+'\\');return false">Edit summary</a></div>';}
+  else if(it.kind==='feedback'){var a=it.answers||{};body='<div class=pf2tk style="margin-top:6px">'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((NT_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div class=nttext>“'+escHtml(a.note)+'”</div>':'')+(it.superseded?'<div class=echint>Earlier answer · kept, not used</div>':'');}
+  else body='<div class=nttext><b>'+(it.rating!=null?it.rating+'/5':'')+'</b>'+(it.ship?' · '+escHtml(niceShip(it.ship)):'')+(it.text?' — “'+escHtml(it.text)+'”':'')+'</div>';
+  return '<div class="ntitem'+(it.archived?' ntarch':'')+'"><div class=ntav style="background:'+col[0]+';color:'+col[1]+'">'+escHtml(ini)+'</div><div style="flex:1;min-width:0">'
+    +'<div class=nthead><b>'+escHtml(it.who||'Author not recorded')+'</b><span class=pfsrc><i style="background:'+col[1]+'"></i>'+tag+'</span><span class=ntwhen>'+when+'</span></div>'+body+acts+'</div></div>';
+}
+async function ntArchive(nid,restore){
+  try{var r=await fetch('/api/crew/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(restore?{restore:nid}:{archive:nid})});
+    if(!r.ok){var m=document.getElementById('ntMsg');if(m)m.textContent='Not saved (HTTP '+r.status+')';return;}}catch(e){return;}
+  await ntLoad();ntDot();
+}
+function ntDot(){var S=NOTES_STATE;if(!S)return;var c=crewById(S.id);if(c){c.hasNote=S.items.some(function(it){return it.kind==='note'&&!it.archived;});if(typeof paintCrew==='function'&&document.querySelector('.crcard'))paintCrew();}}
+async function addCrewNote(id){
+  var t=document.getElementById('newNote');if(!t||!t.value.trim())return;
+  var txt=t.value.trim(),m=document.getElementById('ntMsg');if(m)m.textContent='Saving…';
+  try{var r=await fetch('/api/crew/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,text:txt})});
+    if(!r.ok){if(m)m.textContent='Not saved (HTTP '+r.status+')';return;}
+    await ntLoad();ntDot();
+  }catch(e){if(m)m.textContent='Could not save.';}
+}
+// intel edit/save inside the stream: reload the stream afterwards (intelEdit draws the editor in place)
+function loadIntelLog(id){if(NOTES_STATE&&document.getElementById('crewmodal'))return ntLoad();}
 function intelCard(id,n){
   var d=new Date(n.ts);
   var dt=isNaN(d)?'':d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
@@ -7338,27 +7744,6 @@ async function intelDelete(id,nid){
   if(!confirm('Delete this field-intel entry? This cannot be undone.'))return;
   try{await fetch('/api/intel/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:nid,discard:true})});}catch(e){}
   loadIntelLog(id);
-}
-async function loadNoteLog(id){
-  var box=document.getElementById('notelog');if(!box)return;
-  try{var r=await (await fetch('/api/crew/notes?id='+encodeURIComponent(id))).json();var ns=r.notes||[];
-    box.innerHTML=ns.length?ns.map(function(n){var d=new Date(n.ts);var meta=d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});return '<div class=noteitem><div class=notemeta>'+meta+'<span class=notedel title="Delete note" onclick="deleteCrewNote(\\''+id+'\\','+n.id+')">✕</span></div><div class=notetext>'+String(n.text||'').replace(/</g,'&lt;')+'</div></div>';}).join(''):'<div class=muted style="padding:14px">No notes yet — the first one starts the log.</div>';
-  }catch(e){box.innerHTML='<div class=muted style="padding:14px">Could not load notes.</div>';}
-}
-async function deleteCrewNote(id,noteId){
-  if(!confirm('Delete this note? This cannot be undone.'))return;
-  try{await fetch('/api/crew/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delete:noteId})});
-    await loadNoteLog(id);
-    // refresh the gold note dot if no notes remain
-    var rr=await (await fetch('/api/crew/notes?id='+encodeURIComponent(id))).json();var c=crewById(id);if(c){c.hasNote=!!(rr.notes&&rr.notes.length);paintCrew();}
-  }catch(e){}
-}
-async function addCrewNote(id){
-  var t=document.getElementById('newNote');if(!t||!t.value.trim())return;
-  var txt=t.value.trim();t.value='';
-  try{await fetch('/api/crew/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,text:txt})});
-    loadNoteLog(id);var c=crewById(id);if(c){c.hasNote=true;paintCrew();}
-  }catch(e){t.value=txt;}
 }
 /* ---- bonus engine (client mirror of server logic) ---- */
 var FW={sOrder:20,sAcc:25,sPar:15,sHand:10,sComm:10,sMono:5};
