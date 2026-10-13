@@ -274,9 +274,27 @@ test("a tab you have already opened paints from the last answer and revalidates 
 });
 
 test("a write empties the read cache, so a save is never answered from memory", () => {
-  assert.match(SRC, /function apiDirty\(\)\{ for\(var k in API_CACHE\) delete API_CACHE\[k\]; \}/);
+  // 13 Oct 2026: after the cache is emptied the tabs are warmed again behind the paint (prefetchTabs), so the next tab
+  // Rita opens after a save is answered from memory too.
+  assert.match(SRC, /function apiDirty\(\)\{ for\(var k in API_CACHE\) delete API_CACHE\[k\]; prefetchTabs\(2500\); \}/);
   // one shim instead of a list of save paths that someone has to keep in sync
   // 13 Oct 2026: a POST that changes nothing (Maria, a preview, a dry run) keeps the cache; every other write empties it.
   assert.match(SRC, /if\(m!=='GET'&&!_ro&&typeof u==='string'&&u\.indexOf\('\/api\/'\)===0\)p\.then\(apiDirty,function\(\)\{\}\);/);
   assert.match(SRC, /var _ro=typeof u==='string'&&\(\/\^\\\\\/api\\\\\/\(ask\|maria\\\\\/\|keyman\\\\\/deploy\\\\\/preview\)\//, "only Maria, previews and dry runs are read-only");
+});
+
+// 13 Oct 2026 (Miguel: "going from tab to tab.. takes a lot"): the FIRST visit to a tab paid its full request on the
+// critical path. After boot the page warms the five tab reads one at a time, in the background, so a tab switch paints
+// from memory. One request per URL (a cached or in-flight entry is skipped), 250ms apart (never a burst that delays the
+// tab the user is on), skipped in a hidden window, and re-armed after every write.
+test("the tabs are prefetched after boot, one at a time, through the same cache", () => {
+  assert.match(SRC, /var PREFETCH_URLS=\['\/api\/dashboard','\/api\/crew','\/api\/rotation','\/api\/relief\/board','\/api\/contracts'\];/);
+  const m = SRC.match(/function prefetchTabs\(delay\)\{[^\n]*\n/);
+  assert.ok(m, "prefetchTabs defined");
+  const fn = m[0];
+  assert.match(fn, /if\(document\.hidden\)return;/, "a hidden window is not warmed");
+  assert.match(fn, /if\(e&&\(e\.data\|\|e\.inflight\)\)\{next\(\);return;\}/, "a URL already cached or in flight is skipped");
+  assert.match(fn, /cachedJson\(u\)\.catch\(function\(\)\{\}\)\.then\(function\(\)\{setTimeout\(next,250\);\}\);/, "one at a time, 250ms apart, through cachedJson");
+  assert.match(fn, /clearTimeout\(window\._pfT\);window\._pfT=setTimeout\(/, "re-arming cancels the earlier timer");
+  assert.match(SRC, /show\(tabFromHash\(\)\);\s*\n\s*prefetchTabs\(1200\);/, "armed once after the first paint");
 });
