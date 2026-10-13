@@ -865,3 +865,12 @@ The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRI
   `env.DB`). Never call raw DDL per request. New `ensureX` helpers must be wrapped the same way.
 - **Every `/api` response carries `Server-Timing`** — it is the measurement instrument; without it
   a perf regression is invisible. Keep the stamp in the fetch handler.
+- **A wave of reads is ONE D1 batch** (`src/d1batch.js`, 13 Oct 2026 — Miguel: "going from tab to tab takes a lot").
+  perf_log, his own clicks: every tab 1.2–1.4s, and the Dashboard on a WARM isolate 866ms for 22 statements — fired
+  together they still cost ~40ms EACH (D1 serialises them, one trip apiece). `batchingDb(env.DB)` is installed once per
+  binding in the fetch handler: the SELECTs a wave issues in one turn go as one `env.DB.batch()`; each caller gets its own
+  `.all()` / `.first()` answer; writes are never grouped; a batch that fails or answers without rows falls back to the
+  statements one by one — today's path, so a caller's `.catch` sees its own error. All 62 hot-tab statements verified clean
+  in prod D1 before shipping (a failing one would cost a trip, not correctness). Sim at 40ms/trip: a Keyman load 38 trips /
+  1.6s → 1–3 trips / ~0.2s. Pinned by `test/d1batch.test.js`. The sim harness's `batch` must answer like D1 (rows for a
+  SELECT), or the fallback path is what you measure.

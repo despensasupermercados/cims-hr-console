@@ -36,6 +36,7 @@ import { removeReliefAssignment, saveReliefAssignment, addMonthsISO } from "./re
 import { deployRecipient, deployCc } from "./keyman_deploy.js";
 import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID as EARMARK_TEMPLATE } from "./earmark.js";
 import { fetchShipTurnarounds, fetchBoardPortDays } from "./port_days.js";
+import { batchingDb } from "./d1batch.js";
 import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
@@ -170,6 +171,9 @@ const COOKIE = "cims_sid";
 
 export default {
   async fetch(request, env, ctx) {
+    // One trip per wave of reads (d1batch.js): the same binding wrapped once per isolate, so the guard and
+    // in-flight memos keyed by env.DB keep their identity.
+    env = Object.assign({}, env, { DB: batchingDb(env.DB) });
     const url = new URL(request.url);
     const p = url.pathname;
     const t0 = Date.now(); // PERF: request start, for the Server-Timing header on /api responses
