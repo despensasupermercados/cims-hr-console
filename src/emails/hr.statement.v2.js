@@ -19,14 +19,16 @@ const dayN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)
 export function span(on, off) {
   const a = iso(on), b = iso(off); if (!a || !b || b < a) return "";
   let m = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)); let d = +b.slice(8, 10) - +a.slice(8, 10);
-  if (d < 0) { m -= 1; d += new Date(Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, 0)).getUTCDate(); }
+  if (d < 0) { m -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); } // the days left after m whole months from a, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d, never 7 mo -2 d)
   return (m ? m + (m === 1 ? " month" : " months") : "") + (m && d ? " " : "") + (d || !m ? d + (d === 1 ? " day" : " days") : "");
 }
 // The four required documents (Schengen is optional) and where each stands today.
-export function docLines(c, today) {
-  const t = iso(today);
+// With a running contract (runOff = its projected sign-off) they are read against it, as the attached PDF reads them
+// (13 Oct 2026 bug hunt: the email said "4 of 4" while the PDF beside it said Medical "Lapses", 3 of 4).
+export function docLines(c, today, runOff) {
+  const t = iso(today), ro = iso(runOff);
   const L = [["Medical", c.med_exp], ["Seaman book", c.sirb_exp], ["Passport", c.pp_exp], ["US visa (C1/D)", c.usv_exp]];
-  return L.map(([name, exp]) => { const e = iso(exp); return { name, exp: e, state: !e ? "missing" : (e < t ? "expired" : (dayN(e) - dayN(t) <= 90 ? "soon" : "ok")) }; });
+  return L.map(([name, exp]) => { const e = iso(exp); return { name, exp: e, state: !e ? "missing" : (e < t ? "expired" : (ro ? (e < ro ? "lapses" : "ok") : (dayN(e) - dayN(t) <= 90 ? "soon" : "ok"))) }; });
 }
 
 export function statementEmail({ crew = {}, contracts = [], daysWorked = 0, bonus = null, today, fileAt = null, replyName = "Rita" } = {}) {
@@ -35,9 +37,10 @@ export function statementEmail({ crew = {}, contracts = [], daysWorked = 0, bonu
   const first = c.first_name || "there";
   const full = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ") || c.agency_id || "";
   const done = bonus && bonus.contracts != null ? bonus.contracts : null;
-  const docs = docLines(c, t);
-  const valid = docs.filter((d) => d.state === "ok" || d.state === "soon").length;
   const last = (contracts || []).slice().sort((a, b) => String(a.on).localeCompare(String(b.on))).pop() || null;
+  const runOff = last && !last.act && iso(last.on) && last.on <= t && iso(last.proj) ? last.proj : null; // the PDF's rule (statement.js)
+  const docs = docLines(c, t, runOff);
+  const valid = docs.filter((d) => d.state === "ok" || d.state === "soon").length;
   const lastOff = last ? (last.act || last.proj || null) : null;
   const running = last && last.on <= t && !last.act;
   const subject = "Your CIMS crew statement · " + fmtDate(t);
@@ -45,7 +48,7 @@ export function statementEmail({ crew = {}, contracts = [], daysWorked = 0, bonu
   const rule = (col) => `<td width="33%" valign="top" style="padding:0 6px 0 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td height="3" bgcolor="${col}" style="background:${col};height:3px;font-size:0;line-height:0;">&nbsp;</td></tr>`;
   const stat = (n, label, col) => rule(col) + `<tr><td style="padding:10px 0 0;font-family:${FH};font-size:30px;font-weight:700;color:${T.navy};line-height:1.1;">${esc(n)}</td></tr><tr><td style="font-family:${FB};font-size:12px;color:${T.slate};padding-top:2px;">${esc(label)}</td></tr></table></td>`;
   const docCol = valid === 4 ? T.green : (docs.some((d) => d.state === "expired" || d.state === "missing") ? T.red : T.amber);
-  const docText = docs.map((d) => d.name + (d.state === "missing" ? " not on file" : d.state === "expired" ? " expired " + fmtDate(d.exp) : " to " + fmtDate(d.exp))).join(" · ");
+  const docText = docs.map((d) => d.name + (d.state === "missing" ? " not on file" : d.state === "expired" ? " expired " + fmtDate(d.exp) : d.state === "lapses" ? " lapses " + fmtDate(d.exp) + ", before your sign-off" : " to " + fmtDate(d.exp))).join(" · ");
   const pill = (txt, bg, fg) => `<span style="display:inline-block;font-family:${FB};font-size:12px;font-weight:700;padding:6px 11px;border-radius:999px;background:${bg};color:${fg};">${esc(txt)}</span>`;
   const card = last ? `<tr><td class="px" style="padding:18px 32px 0;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${T.cloud}" style="background:${T.cloud};border-radius:16px;"><tr><td style="padding:20px;">

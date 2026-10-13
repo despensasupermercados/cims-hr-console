@@ -509,7 +509,7 @@ test("rotationSections DERIVES the registry verdict at read time from the stored
   assert.match(b, /projByShip\[ship\]\.sort\(\(a, b\) => \(\(b\.confirmed \|\| b\.awaiting\) \? 1 : 0\) - \(\(a\.confirmed \|\| a\.awaiting\) \? 1 : 0\)/);
   const tail = src.slice(src.indexOf("const sections = Object.values(shipNames)"), src.indexOf("async function rotationSections(") + 60000);
   assert.match(tail, /\(a\.state === "yellow" && !a\.confirmed && !a\.awaiting \? 1 : 0\) - \(b\.state === "yellow" && !b\.confirmed && !b\.awaiting \? 1 : 0\)/, "a confirmed or awaiting card sorts with the people aboard, not with the plans");
-  assert.match(b, /ensureRegistrySnapshot\(env\)\]\);/, "the snapshot table guard runs in the ensure wave, before the read wave");
+  assert.match(b, /ensureRegistrySnapshot\(env\), ensurePortDayIndexes\(env\)\]\);/, "the snapshot table guard runs in the ensure wave, before the read wave");
   const S = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
   assert.doesNotMatch(S, /registry_verdict/, "the yellow-card feed carries no verdict column");
 });

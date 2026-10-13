@@ -224,7 +224,7 @@ export default {
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
-        if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
+        if (session) { if (p === "/api/relief/board") await ensurePortDayIndexes(env); const rr = await handleRelief(request, url, env); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc, dismissed: dismissedEarmarks, markTold: (env, id) => markDeployed(env, id, null, new Date().toISOString()) }); if (ci) return ci; }
         // "Update TG" (17 Aug 2026 per-ship digest to Joy) was removed on 8 Oct 2026 (Miguel: "remove it"): it never sent
         // (TG_NOTIFY unset), and the import review now tells Joy row by row (§10d). The tg_update_run table is left as is.
@@ -1458,6 +1458,17 @@ async function apiDashboard(env) {
 // clientOf (client/brand from a vessel name) lives in ./shipname.js — pure + unit-tested.
 // Manual edits live in crew_override and ALWAYS win over the imported base row.
 // applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
+// The itinerary indexes the board's port-day reads seek (migrations/0023, port_days.js THE JOIN ORDER). Without
+// idx_vpd_ship_date the CROSS JOIN order would scan the table once per date, so any database that lacks it gets it.
+// Only a missing itinerary table is tolerated: any other failure THROWS, so memoEnsure retries next time instead of
+// recording a guard that never ran (13 Oct 2026 review — a swallowed transient error would be remembered forever).
+const noTable = (e) => { if (!/no such table/i.test(String(e && e.message))) throw e; };
+const ensurePortDayIndexes = memoEnsure(async (env) => {
+  await Promise.all([
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vpd_ship_date ON vessel_port_day (ship_short, berth_date)").run().catch(noTable),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vpd_turn_date ON vessel_port_day (berth_date) WHERE is_turnaround = 1").run().catch(noTable),
+  ]);
+});
 const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
 // crew.gender (6 Oct 2026): M / F as TDG's file states it. Its own one-statement guard, so it rides in the
 // existing ensure wave of every reader that selects it (§12) without adding a statement to ensureCrewExtras.
@@ -1823,7 +1834,7 @@ async function apiRotation(env) { return json(await rotationSections(env)); }
 async function rotationSections(env) {
   // PERF (2026-07): ensures first (concurrently), then ALL independent reads in one concurrent
   // wave instead of 7 sequential Worker->D1 round trips. Same statements, same downstream logic.
-  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureRegistrySnapshot(env)]);
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureRegistrySnapshot(env), ensurePortDayIndexes(env)]);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
@@ -3574,6 +3585,7 @@ nav button{white-space:nowrap}
 .shipbody>.rcard{flex:1 1 300px;min-width:0}
 .shipbody.onerow{flex-wrap:nowrap}.shipbody.onerow>.rcard{flex:1 1 0;max-width:520px}
 .shipbody.closed{display:none}
+#rotbody>.shipsec{content-visibility:auto;contain-intrinsic-size:auto 220px}
 .rcard{background:#fcfdff;border:1px solid var(--line);border-radius:11px;padding:10px 12px;cursor:grab}
 .rcard:active{cursor:grabbing}.rcard:hover{border-color:var(--navy)}
 .rcard .rnm{font-family:'Outfit';font-weight:700;color:var(--navy);font-size:13.5px;margin-bottom:4px}
@@ -4576,7 +4588,10 @@ function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
   window.fetch=function(u,o){
     var m=((o&&o.method)||'GET').toUpperCase();
     var p=_f.apply(this,arguments);
-    if(m!=='GET'&&typeof u==='string'&&u.indexOf('/api/')===0)p.then(apiDirty,function(){});
+    // A POST that changes nothing (asking Maria, a preview, a dry run) keeps the cache (13 Oct 2026: one question to Maria
+    // made every tab start cold again — "Loading…" and a full round trip — on the satellite link the cache exists for).
+    var _ro=typeof u==='string'&&(/^\\/api\\/(ask|maria\\/|keyman\\/deploy\\/preview)/.test(u)||(o&&typeof o.body==='string'&&/"dryRun"\\s*:\\s*true/.test(o.body)));
+    if(m!=='GET'&&!_ro&&typeof u==='string'&&u.indexOf('/api/')===0)p.then(apiDirty,function(){});
     return p;
   };
 })();
@@ -5495,7 +5510,7 @@ function paintTravel(){
   var rows=TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;return true;});
   h+='<div class=zlabel style="margin-top:18px">Line items'+(rows.length?(' · '+rows.length):'')+'</div>';
   h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
-    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+r.crew_name+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=13 class=muted>No line items match these filters.</td></tr>';
+    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+escHtml(r.crew_name)+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=13 class=muted>No line items match these filters.</td></tr>';
   h+='</tbody></table>';
   document.getElementById('trbody').innerHTML=h;
 }
@@ -5621,7 +5636,7 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}// WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, mock-up B "polished, real list" chosen): the empty earmark slot lists the
+function openRelief(el){if(document.getElementById('reliefovl'))return;var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}// WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, mock-up B "polished, real list" chosen): the empty earmark slot lists the
 // nine most rested seafarers for this ship (sec.bench, earmark_bench.js on the server) on a soft yellow card. One tap
 // earmarks them through the same route as a drag (sign-on = the printer's sign-off, +7 months / Azamara 5), with Undo.
 // "+ N more" opens the relief panel, which lists everyone available and keeps the search.
@@ -5659,7 +5674,7 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
 function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
   return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
 // Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
-function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -6051,14 +6066,16 @@ function fleetGantt(){
   });
   var lg='<div class=gnlg><span><i style="background:#2E9E5B"></i>Aboard</span><span><i style="background:#1E9CB2"></i>Aboard, awaiting TDG file</span><span><i style="background:#F2B01E"></i>Earmark</span><span><i style="background:#E8702A"></i>Earmark, TDG too</span><span><i style="border:1.5px dashed #E8702A;background:#FFF4EC;box-sizing:border-box"></i>TDG earmark, no dates</span><span><i style="background:#E5484D"></i>Uncovered</span></div>';
   var w=document.createElement('div');w.id='ganttwrap';
-  var esc=function(e){if(e.key==='Escape'){w.remove();document.removeEventListener('keydown',esc);}};document.addEventListener('keydown',esc);
-  w.innerHTML='<div class=gnscroll><div class=gntop><div class=gnhd><div><h3>'+GANTT_ICON+'Fleet coverage</h3><div class=gnsub>'+rows.length+' ships · least covered first · '+MN[start.getUTCMonth()]+' '+start.getUTCFullYear()+' → '+MN[(end.getUTCMonth()+11)%12]+' '+new Date(E-1).getUTCFullYear()+'<span class=gnlong> · bars running past the right edge continue · ~ = projected date</span></div></div><div class=gnx><kbd>ESC</kbd><button class="btn ghost" onclick="document.getElementById(\\'ganttwrap\\').remove()">Close</button></div></div>'+lg
+  var esc=function(e){if(e.key==='Escape')ganttClose();};document.addEventListener('keydown',esc);window._ganttEsc=esc;
+  w.innerHTML='<div class=gnscroll><div class=gntop><div class=gnhd><div><h3>'+GANTT_ICON+'Fleet coverage</h3><div class=gnsub>'+rows.length+' ships · least covered first · '+MN[start.getUTCMonth()]+' '+start.getUTCFullYear()+' → '+MN[(end.getUTCMonth()+11)%12]+' '+new Date(E-1).getUTCFullYear()+'<span class=gnlong> · bars running past the right edge continue · ~ = projected date</span></div></div><div class=gnx><kbd>ESC</kbd><button class="btn ghost" onclick="ganttClose()">Close</button></div></div>'+lg
     +'<div class=gnax><div></div><div class=gnm>'+months+'<i class=gnnow style="left:'+nowX+'%"><em>TODAY</em></i></div><div></div></div></div>'
     +'<div class=gngrid>'+body+'</div>'
     +'<div class=gnft>Read from the Keyman board · click a ship to open it there</div></div>';
   document.body.appendChild(w);
 }
-function ganttJump(el){var ship=el.getAttribute('data-jump');var g=document.getElementById('ganttwrap');if(g)g.remove();if(!ship)return;ROT_CLOSED[ship]=false;drawRotation();setTimeout(function(){rotJump({getAttribute:function(){return ship;}});},60);}
+// One close for every way out (13 Oct 2026: the Close button and a row jump left the keydown listener and ~850 nodes behind).
+function ganttClose(){var g=document.getElementById('ganttwrap');if(g)g.remove();if(window._ganttEsc){document.removeEventListener('keydown',window._ganttEsc);window._ganttEsc=null;}}
+function ganttJump(el){var ship=el.getAttribute('data-jump');ganttClose();if(!ship)return;ROT_CLOSED[ship]=false;drawRotation();setTimeout(function(){rotJump({getAttribute:function(){return ship;}});},60);}
 function monthsDaysParts(a,b){
   if(!a||!b)return null;
   var d1=new Date(a),d2=new Date(b);
@@ -6066,7 +6083,7 @@ function monthsDaysParts(a,b){
   // ISO dates parse as UTC midnight: read UTC fields, or Santiago shows "6 mos 3 days" for exactly 6 months.
   var m=(d2.getUTCFullYear()-d1.getUTCFullYear())*12+(d2.getUTCMonth()-d1.getUTCMonth());
   var d=d2.getUTCDate()-d1.getUTCDate();
-  if(d<0){m--;d+=new Date(Date.UTC(d2.getUTCFullYear(),d2.getUTCMonth(),0)).getUTCDate();}
+  if(d<0){m--;var ay=d1.getUTCFullYear(),am=d1.getUTCMonth()+m,ad=Math.min(d1.getUTCDate(),new Date(Date.UTC(ay,am+1,0)).getUTCDate());d=Math.round((Date.UTC(d2.getUTCFullYear(),d2.getUTCMonth(),d2.getUTCDate())-Date.UTC(ay,am,ad))/864e5);} // days after m whole months, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d)
   if(m<0)return null;
   return {m:m,d:d};
 }
@@ -6118,8 +6135,11 @@ function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){R
 function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
 function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){return Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name;}).sort(function(a,b){return a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0;});var start=0,f=false;if(date){for(var i=0;i<ta.length;i++){if(ta[i].berth_date>=date){start=i;f=true;break;}}}if(!f)start=Math.max(0,ta.length-6);var win=ta.slice(start,start+6);var opts='',matched=false;for(var j=0;j<win.length;j++){var p=win[j],v=String(p.port_name).replace(/"/g,'');var isSel=date&&p.berth_date===date;if(isSel)matched=true;opts+='<option value="'+v+'" data-d="'+p.berth_date+'"'+(isSel?' selected':'')+'>'+niceCity(p.port_name)+' · '+fmtDateS(p.berth_date)+'</option>';}if(current&&!matched){opts='<option value="'+String(current).replace(/"/g,'')+'" selected>'+niceCity(current)+'</option>'+opts;}return opts||'<option value="">— no ports —</option>';}function pickPort(sel){var m={eEmb:'eOn',eDis:'eOff'};var o=sel.options[sel.selectedIndex];var dd=o?o.getAttribute('data-d'):null;var el=document.getElementById(m[sel.id]);if(dd&&el)el.value=dd;}async function editContractModal(id,seq){
   var e=null;(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.agency_id===id&&x.seq===seq)e=x;});});
-  if(!e)return;
-  var d={};try{d=await (await fetch('/api/rotation/crew?id='+encodeURIComponent(id))).json();}catch(_){}var P=[];try{P=(((await (await fetch('/api/relief/ports?ship='+encodeURIComponent(e.ship||''))).json())||{}).ports)||[];}catch(_){}
+  if(!e||document.getElementById('rotmodal')||window._rotOpening)return; // one modal (a double click stacked two and leaked a key listener)
+  window._rotOpening=1;
+  var _dq=fetch('/api/rotation/crew?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};}),
+      _pq=fetch('/api/relief/ports?ship='+encodeURIComponent(e.ship||'')).then(function(r){return r.json();}).then(function(j){return (j&&j.ports)||[];}).catch(function(){return [];});
+  var d={},P=[];try{d=(await _dq)||{};P=(await _pq)||[];}finally{window._rotOpening=0;}
   var note=String((d.ready&&d.ready.note)||'').replace(/</g,'&lt;');
   var ships={};(ROT.sections||[]).forEach(function(s){ships[s.ship]=1;});if(e.ship)ships[e.ship]=1;
   var shipOpts=Object.keys(ships).sort().map(function(s){return '<option'+(s===e.ship?' selected':'')+'>'+s+'</option>';}).join('');
@@ -6235,11 +6255,11 @@ async function saveNote(id){
   var t=document.getElementById('cmt').value;document.getElementById('cmtmsg').textContent='Saving…';
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
-async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();var c=document.getElementById('autoToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
-async function autoToggleClick(){var c=document.getElementById('autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn Crew auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}if(c)c.checked=!!r.enabled;alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?(' — '+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_ON=!!r.enabled;var c=document.getElementById('autoToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
+async function autoToggleClick(){var c=document.getElementById('autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn Crew auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_ON=!!r.enabled;if(c)c.checked=!!r.enabled;alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?(' — '+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
 function ensureSbmToggle(){var a=document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
-async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
-async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
+async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();window.SBM_ON=!!r.enabled;ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
+async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}window.SBM_ON=!!r.enabled;if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 // THE BOARD SAYS ITS OWN AGE (24 Sep 2026) through sources on /api/rotation. The page line that printed it above the
 // ships went on 7 Oct 2026 with the heading and the hint — Miguel: "remove this".
 async function renderRotation(){
@@ -6249,7 +6269,9 @@ async function renderRotation(){
   else{$('#view').innerHTML='<div class=muted>Loading…</div>';}
   // Both board reads leave together (15 Sep 2026): the relief board used to be fetched only AFTER the
   // rotation had arrived — one whole round trip added to every render, every drag, every save.
-  var _relP=cachedJson('/api/relief/board',renderRotation).catch(function(){return {};});
+  // _relIn is set in the SAME reaction that settles _relP, so a cached answer is known before the board's await resumes.
+  var _relV=null,_relIn=false;
+  var _relP=cachedJson('/api/relief/board',renderRotation).then(function(v){_relV=v;_relIn=true;return v;},function(){_relV={};_relIn=true;return {};});
   var _st=0;
   try{ROT=await cachedJson('/api/rotation',renderRotation);}catch(e){_st=(e&&e.status)||0;ROT={error:(e&&e.message)||'network'};}
   // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
@@ -6261,9 +6283,13 @@ async function renderRotation(){
   // every refresh after a save — as slow as the SLOWER of the two requests, on a satellite link where the
   // two do not even arrive together. If the relief data wins the race the redraw is skipped, because the
   // first paint below already reads window.RELIEF.
-  _relP.then(function(_rel){
+  // 13 Oct 2026: it drew twice on EVERY render (the redraw was not actually skipped). Now the relief data that is already
+  // here goes into the first paint, and only a late answer redraws.
+  var _relFill=function(_rel){(_rel&&_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});};
+  if(_relIn)_relFill(_relV);
+  else _relP.then(function(_rel){
     try{
-      (_rel&&_rel.board||[]).forEach(function(e){window.RELIEF[e.vessel_key]=e;});
+      _relFill(_rel);
       if(document.getElementById('rotbody'))drawRotation();
     }catch(_){}
   });
@@ -6288,7 +6314,7 @@ async function renderRotation(){
     +'<div class=bar style="margin-bottom:4px;justify-content:flex-end"><button class="btn ghost crfbtn" onclick="document.getElementById(\\'rotrail\\').classList.toggle(\\'open\\')">Filters</button></div>'
     +'<div class=crwrap id=rotwrap style="margin-top:12px">'
     +'<aside class=crrail id=rotrail>'
-    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;drawRotation()"></div>'
+    +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
     +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div></div>'
@@ -6311,8 +6337,11 @@ async function renderRotation(){
   // the relief board, and these three. A render happens after EVERY save and EVERY drag, so a card move
   // cost three extra satellite round trips for things a card move cannot change — the two toggles only
   // move when the user clicks them, and each click already updates its own state.
-  if(!ROT_CHROME){ROT_CHROME=1;loadAutoToggle();loadSbmToggle();}
+  if(!ROT_CHROME){ROT_CHROME=1;loadAutoToggle();loadSbmToggle();}else applyChromeToggles();
 }
+// 13 Oct 2026: every re-render rebuilt the rail with Crew auto-timing unchecked and no GSM review switch, while the
+// emails stayed armed on the server. The last known values are kept and painted back.
+function applyChromeToggles(){var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_ON!=null)c.checked=!!window.AUTO_ON;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
 var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
 function rotRail(shown,total){
@@ -6432,7 +6461,11 @@ function drawRotation(){
   var _sd=document.getElementById('rotside');if(_sd)_sd.innerHTML=side;else document.getElementById('rotbody').insertAdjacentHTML('afterbegin',side);
   rotRail(secs.length,allSecs);
   document.querySelectorAll('#rotwrap .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
-  document.querySelectorAll('#rotwrap [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle');ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();};});
+  // A chevron folds ITS section in place (13 Oct 2026: each click redrew all 48 ships, ~1s of layout on a laptop).
+  document.querySelectorAll('#rotwrap [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle'),sec=el.closest('.shipsec'),arw=el.querySelector('.arw');
+    if(!sec||!arw){ROT_CLOSED[s]=!ROT_CLOSED[s];drawRotation();return;}
+    var willClose=!arw.classList.contains('closed');ROT_CLOSED[s]=willClose;arw.classList.toggle('closed',willClose);
+    sec.querySelectorAll(':scope>.shipbody,:scope>.histsec').forEach(function(b){b.classList.toggle('closed',willClose);});};});
   document.querySelectorAll('#rotwrap .rtoggle').forEach(function(el){el.onclick=function(e){e.stopPropagation();var nv=el.getAttribute('data-v')==='1'?0:1;el.setAttribute('data-v',nv);el.classList.toggle('on',!!nv);fetch('/api/rotation/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:el.getAttribute('data-crew'),field:el.getAttribute('data-f'),value:nv})});};});
   document.querySelectorAll('#rotwrap .shipdrop').forEach(function(z){
     z.ondragover=function(e){e.preventDefault();z.classList.add('dragover');};
@@ -6543,7 +6576,7 @@ async function loadCompliance(){
       const txt=f.status==='missing'?(f.doc+' missing'):(f.doc+' '+(f.exp||'')+(f.days!=null?(' ('+(f.days<0?(Math.abs(f.days)+'d ago'):(f.days+'d'))+')'):''));
       return '<span class="cchip '+cls+'">'+txt+'</span>';
     }).join('');
-    return '<div class="card b-'+brandOf(r.vessel)+'" data-crew="'+r.agency_id+'" style="cursor:pointer"><div class=cname>'+r.name+'</div><div class=csub>'+r.agency_id+' · '+(r.vessel||'—')+'</div><div class=statdot><i style="background:'+dot(r.status)+'"></i>'+(r.status||'')+'</div><div class=cchips>'+flags+'</div></div>';
+    return '<div class="card b-'+brandOf(r.vessel)+'" data-crew="'+r.agency_id+'" style="cursor:pointer"><div class=cname>'+escHtml(r.name)+'</div><div class=csub>'+r.agency_id+' · '+(r.vessel||'—')+'</div><div class=statdot><i style="background:'+dot(r.status)+'"></i>'+(r.status||'')+'</div><div class=cchips>'+flags+'</div></div>';
   }).join('')+'</div>';
   document.querySelectorAll('#compbody .card[data-crew]').forEach(function(el){el.onclick=function(){openCrew(el.getAttribute('data-crew'));};});
 }
@@ -6731,7 +6764,7 @@ function rptSbm(){
   h+='<div class=rblk><h3>Specialist board &middot; min 2 reviews</h3>';
   if(board.length)h+='<table class=tbl><thead><tr><th>Specialist</th><th>Latest ship</th><th>Reviews</th><th>Avg</th></tr></thead><tbody>'
    +board.map(function(b){var col=b.avg>=4.5?'var(--green-d)':(b.avg<4?'var(--amber)':'var(--navy)');
-     return '<tr><td>'+b.name+'</td><td>'+b.ship+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg.toFixed(1)+'</td></tr>';}).join('')
+     return '<tr><td>'+escHtml(b.name)+'</td><td>'+escHtml(b.ship)+'</td><td>'+b.n+'</td><td style="font-weight:800;color:'+col+'">'+b.avg.toFixed(1)+'</td></tr>';}).join('')
    +'</tbody></table><div class=csub style="margin-top:8px">Everyone else has one review so far &mdash; the board fills in as second contracts complete.</div>';
   else h+='<div class=csub style="padding:12px 2px">No specialist has two reviews in this period yet.</div>';
   h+='</div></div>';
@@ -6854,11 +6887,14 @@ function crewMatchesComp(c){
   if(f==='schengen'){if(!c.sch_exp)return false;var g=docFlag(c.sch_exp);return g==='expired'||g==='90d';}
   return true;
 }
+// A background refresh (another user saved) repaints the list with the new data and KEEPS the search, the filters and
+// the focus (13 Oct 2026: it re-opened the tab — "alega" typed, 1 of 105 shown, became "", 52 of 105, focus gone).
+function crewRefresh(){var e=API_CACHE['/api/crew'];if(!e||!e.data||!document.getElementById('crrail')){renderCrew();return;}CREW=e.data.crew||[];paintCrew();}
 async function renderCrew(){
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   CREW=[];CF.q='';CF.status=CREW_DEFAULT_STATUS.slice();CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
-  try{var r=await cachedJson('/api/crew',renderCrew);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
+  try{var r=await cachedJson('/api/crew',crewRefresh);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   $('#view').innerHTML=
    // No page heading (Miguel, 6 Oct 2026: "remove this .. All crew · 104 results"): the count lives at the foot of the rail.
    '<div class=bar style="margin:0;justify-content:flex-end">'
@@ -7041,12 +7077,13 @@ function paintCrew(){
 async function loadCrew(){return renderCrew();}
 function filterCrew(){paintCrew();}
 async function openCrew(id){
-  VIEW_GEN++;
+  var _gen=++VIEW_GEN; // 13 Oct 2026: a slow earlier profile painted over the newer one (and CURRENT_CREW with it)
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   var dq=fetch('/api/crew/get?id='+encodeURIComponent(id)).then(function(r){return r.json();});
   var bq=fetch('/api/bonus/crew?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};});
   const d=await dq; const bz=await bq;
+  if(_gen!==VIEW_GEN)return;
   if(d.error){$('#view').innerHTML='<div class=muted>Not found.</div>';return;}
   const c=d.crew;const name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
   CURRENT_CREW=c.agency_id; CURD={crew:c,contracts:(d.contracts||[]),bonus:bz,profile:d.profile||null};
@@ -7476,7 +7513,7 @@ async function reqFeedback(role){
   $('#fbout').textContent='Creating link…';
   try{
     var r=await (await fetch('/api/feedback/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:CURRENT_CREW,role:role})})).json();
-    if(r.ok)$('#fbout').innerHTML='<div style="margin-top:4px"><b style="color:var(--navy)">'+r.role+'</b> link for '+r.crew+' (send to the contributor):<br><input readonly value="'+r.link+'" style="width:100%;margin-top:4px" onclick="this.select()"></div>';
+    if(r.ok)$('#fbout').innerHTML='<div style="margin-top:4px"><b style="color:var(--navy)">'+escHtml(r.role)+'</b> link for '+escHtml(r.crew)+' (send to the contributor):<br><input readonly value="'+escHtml(r.link)+'" style="width:100%;margin-top:4px" onclick="this.select()"></div>';
     else $('#fbout').textContent='Could not create the link.';
   }catch(e){$('#fbout').textContent='Could not create the link.';}
 }
@@ -7763,6 +7800,7 @@ function ntGroup(day){var K=NOTES_STATE.contracts||[],today=new Date().toISOStri
   for(var i=0;i<K.length;i++){var k=K[i],end=k.off&&k.off<today?k.off:today;if(day>=k.on&&day<=end)return k;}return null;}
 function ntDraw(){
   var S=NOTES_STATE,w=document.getElementById('crewmodal');if(!S||!w)return;
+  var _dr=document.getElementById('newNote');if(_dr)S.draft=_dr.value; // the draft survives a chip or an archive (13 Oct 2026)
   var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'?'feedback':it.kind]++;});
   var chip=function(k,l){return '<button class="ntchip'+(S.filter===k?' sel':'')+'" onclick="NOTES_STATE.filter=\\''+k+'\\';ntDraw()">'+l+' · '+cnt[k]+'</button>';};
   var cur=(S.contracts||[]).filter(function(k){return k.current;})[0]||(S.contracts||[])[0]||null;
@@ -7775,7 +7813,7 @@ function ntDraw(){
   });
   if(!shown.length)body='<div class=muted style="padding:18px 2px">'+(S.items.length?'Nothing of this kind.':'Nothing said yet — the first note starts the log.')+'</div>';
   w.innerHTML='<div class="modcard sheet nt2">'+sheetHead(S.crew,'Notes · '+escHtml(S.name),escHtml(S.id)+' · everything said about them, newest first, under the contract it belongs to. Nothing is ever deleted.')
-    +'<div class=ntcomp><label for=newNote>Add a note</label><textarea id=newNote rows=2 placeholder="What happened, who said it, what was agreed…"></textarea>'
+    +'<div class=ntcomp><label for=newNote>Add a note</label><textarea id=newNote rows=2 placeholder="What happened, who said it, what was agreed…">'+escHtml(S.draft||'')+'</textarea>'
     +'<div class=ntcrow>'+(cur?'<span class=echint style="margin:0">Files under</span><span class=ntpill>'+escHtml(niceShip(cur.ship))+' · '+fmtDateS(cur.on)+' → '+(cur.off?fmtDateS(cur.off):'open')+'</span>':'')+'<span id=ntMsg class=echint style="margin:0 0 0 auto"></span><button class="btn ecsave" onclick="addCrewNote(NOTES_STATE.id)">Add note</button></div></div>'
     +'<div class=ntchips>'+chip('all','All')+chip('note','Notes')+chip('intel','Field intel')+chip('feedback','Feedback')+'</div>'
     +'<div class=ntlist>'+body+'</div>'
@@ -7804,12 +7842,13 @@ async function ntArchive(nid,restore){
 }
 function ntDot(){var S=NOTES_STATE;if(!S)return;var c=crewById(S.id);if(c){c.hasNote=S.items.some(function(it){return it.kind==='note'&&!it.archived;});if(typeof paintCrew==='function'&&document.querySelector('.crcard'))paintCrew();}}
 async function addCrewNote(id){
-  var t=document.getElementById('newNote');if(!t||!t.value.trim())return;
+  var t=document.getElementById('newNote');if(!t||!t.value.trim()||window._noteBusy)return; // one note per click (a double click stored it twice)
+  window._noteBusy=1;setTimeout(function(){window._noteBusy=0;},4000);
   var txt=t.value.trim(),m=document.getElementById('ntMsg');if(m)m.textContent='Saving…';
   try{var r=await fetch('/api/crew/notes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,text:txt})});
     if(!r.ok){if(m)m.textContent='Not saved (HTTP '+r.status+')';return;}
-    await ntLoad();ntDot();
-  }catch(e){if(m)m.textContent='Could not save.';}
+    t.value='';window._noteBusy=0;await ntLoad();ntDot();
+  }catch(e){window._noteBusy=0;if(m)m.textContent='Could not save.';}
 }
 // intel edit/save inside the stream: reload the stream afterwards (intelEdit draws the editor in place)
 function loadIntelLog(id){if(NOTES_STATE&&document.getElementById('crewmodal'))return ntLoad();}
@@ -8013,7 +8052,7 @@ async function renderFeedback(){
 async function fbRequest(id,role){
   var out=document.getElementById('fbreqout');if(out)out.textContent='Creating link…';
   try{var r=await (await fetch('/api/feedback/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,role:role})})).json();
-    if(r.ok&&out)out.innerHTML='<b style="color:var(--navy)">'+r.role+'</b> link for '+r.crew+' — send to the contributor: <input readonly value="'+r.link+'" style="width:55%;margin:0 6px" onclick="this.select()"><button class="btn ghost" onclick="renderFeedback()">Refresh board</button>';
+    if(r.ok&&out)out.innerHTML='<b style="color:var(--navy)">'+escHtml(r.role)+'</b> link for '+escHtml(r.crew)+' — send to the contributor: <input readonly value="'+escHtml(r.link)+'" style="width:55%;margin:0 6px" onclick="this.select()"><button class="btn ghost" onclick="renderFeedback()">Refresh board</button>';
     else if(out)out.textContent='Could not create the link.';
   }catch(e){if(out)out.textContent='Could not create the link.';}
 }
@@ -8114,7 +8153,7 @@ function swQuestions(){
   }
   swRender('Contributor scoring · '+_SW.crew.name,
    '<button class="btn ghost" onclick="swRoleStep()" style="margin-bottom:10px">← back</button>'
-   +'<div class=hint style="margin-bottom:8px"><b>'+FBLABEL[role]+'</b> · scoring '+_SW.crew.name+'</div>'
+   +'<div class=hint style="margin-bottom:8px"><b>'+FBLABEL[role]+'</b> · scoring '+escHtml(_SW.crew.name)+'</div>'
    +f+'<div class=mf><button class="btn ghost" onclick="swRoleStep()">Cancel</button><button class="btn green" id=swSub onclick="swSubmit()">Submit</button></div><div class=hint id=swMsg style="text-align:right"></div>');
 }
 async function swSubmit(){
@@ -8128,7 +8167,7 @@ async function swSubmit(){
   _SW.prefill=res.prefill;_SW.status=res.status;_SW.rawAnswers=_SW.rawAnswers||{};_SW.rawAnswers[role]=ans;
   swRender('Contributor scoring · '+_SW.crew.name,
    '<div style="text-align:center;font-family:Outfit;font-weight:800;color:var(--green-d);font-size:18px;margin-bottom:4px">✓ '+FBLABEL[role].split(' — ')[0]+' submitted</div>'
-   +'<div class=hint style="text-align:center;margin-bottom:6px">Recorded for '+_SW.crew.name+' — it will pre-fill the Score Card.</div>'
+   +'<div class=hint style="text-align:center;margin-bottom:6px">Recorded for '+escHtml(_SW.crew.name)+' — it will pre-fill the Score Card.</div>'
    +swResultBox(_SW.prefill,_SW.status)
    +'<div class=mf style="margin-top:12px"><button class="btn ghost" onclick="swRoleStep()">Score another contributor</button><button class="btn green" onclick="mClose()">Done</button></div>');
 }
@@ -8205,7 +8244,7 @@ async function applyFeedback(id){
 async function genLink(id,role){
   var r=await (await fetch('/api/feedback/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,role:role})})).json();
   if(r.error){alert('Error: '+r.error);return;}
-  document.getElementById('fbLink').innerHTML='<div class=hint style="margin-top:6px">Single-use '+role+' link — send to the contributor:<br><input readonly value="'+r.link+'" onclick="this.select()" style="width:100%;margin-top:4px;font-size:11px"></div>';
+  document.getElementById('fbLink').innerHTML='<div class=hint style="margin-top:6px">Single-use '+role+' link — send to the contributor:<br><input readonly value="'+escHtml(r.link)+'" onclick="this.select()" style="width:100%;margin-top:4px;font-size:11px"></div>';
 }
 function fmtDate(iso){if(!iso)return'—';var m=['January','February','March','April','May','June','July','August','September','October','November','December'];var p=String(iso).split('-');if(p.length!==3)return iso;var mo=m[parseInt(p[1],10)-1];if(!mo)return iso;return mo+' '+parseInt(p[2],10)+', '+p[0];}
 function recalcScore(){

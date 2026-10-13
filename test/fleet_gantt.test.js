@@ -41,7 +41,9 @@ test("the second cut (Miguel, 9 Oct 2026: 'more colorful .. 1 month before and 6
   // full width, header + legend + month axis sticky while the rows scroll, Escape closes
   assert.match(W, /#ganttwrap\{position:fixed;inset:0;z-index:200;background:#fff;display:flex;flex-direction:column\}/);
   assert.match(W, /\.gntop\{position:sticky;top:0;z-index:5;background:#fff/);
-  assert.match(G, /if\(e\.key==='Escape'\)\{w\.remove\(\);/);
+  // 13 Oct 2026: one close for every way out, so the Esc listener never outlives the view
+  assert.match(G, /var esc=function\(e\)\{if\(e\.key==='Escape'\)ganttClose\(\);\};/);
+  assert.match(W, /function ganttClose\(\)\{var g=document\.getElementById\('ganttwrap'\);if\(g\)g\.remove\(\);if\(window\._ganttEsc\)\{document\.removeEventListener\('keydown',window\._ganttEsc\)/);
   // five states, five hues (green / teal / amber / orange / red)
   for (const c of ["#2E9E5B", "#1E9CB2", "#F2B01E", "#E8702A", "#E5484D"]) assert.match(W, new RegExp("\\.gntr \\.(gs|gs\\.await|gs\\.earmark|gs\\.tdg|gap)\\{[^}]*" + c));
   // 11 Oct 2026 (Miguel): solid bars, no fade, no stripes; a projected coverage end reads "~" in the right column

@@ -362,6 +362,10 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
   const brandOf = {};
   for (const v of (vessels || [])) if (v && v.name) brandOf[shipKey(v.name)] = BRAND_SHORT[v.brand] || v.brand || null;
   const isAz = (k) => AZAMARA_SHORT.includes(k);
+  // The fleet's turnaround days re-keyed the way legs are keyed (shipKey): turnaroundsByShip keys by the lower-cased
+  // name WITH its spaces, so "Celebrity Compass" (key "celebritycompass") never found its days (13 Oct 2026 bug hunt).
+  const taBy = {};
+  for (const k in (turnarounds || {})) taBy[shipKey(k)] = turnarounds[k];
   // Rita's edits for a crew: by contract key (on_key), and by Counter position for rows older than on_key.
   const editsBy = {};
   for (const e of (edits || [])) if (e && e.sc) (editsBy[e.sc] = editsBy[e.sc] || []).push(e);
@@ -431,7 +435,7 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
       // the nearest crew-change day of the ship's itinerary — a few days under or over. TDG's, Rita's and a card's
       // dates are never moved. No itinerary for the hull: the raw date stands.
       const raw = plusMonths(L.on, isAz(L.key) ? AZAMARA_CONTRACT_MONTHS : CONTRACT_MONTHS);
-      const sn = snapToTurnaround(raw, (turnarounds && turnarounds[L.key]) || []);
+      const sn = snapToTurnaround(raw, taBy[L.key] || []);
       pick = { off: sn.date || raw, source: "projected", at: null, snapped: sn.snapped ? sn.delta : 0, port: sn.port };
     }
     const passed = pick.off < today;
@@ -463,8 +467,20 @@ export function foldCounterHistory(counterLegs, registryLegs) {
     const rs = h && h.sc ? reg[h.sc] : null;
     if (!rs || !rs.length) { out.push(h); continue; }
     const k = shipKey(h.ship);
-    const dup = rs.some((r) => shipKey(r.ship) === k && (() => { const g = daysApart(r.on, h.on); return g != null && Math.abs(g) <= ABSORB_DAYS; })());
+    const hOff = dayOf(h.off) || null;
+    // The SAME contract: same hull, and the sign-on within ABSORB_DAYS of the embark — or the two contracts overlapping
+    // (one crew never holds two contracts on one hull at once). 13 Oct 2026 bug hunt: a Counter sign-on 10 days off the
+    // embark survived as a second Allure contract, and sea days counted Mar–Oct twice.
+    const dup = rs.some((r) => shipKey(r.ship) === k && (() => {
+      const g = daysApart(r.on, h.on); if (g != null && Math.abs(g) <= ABSORB_DAYS) return true;
+      const rOff = dayOf(r.off) || "9999-12-31";
+      return !!(h.on && r.on && h.on < rOff && (hOff || h.on) > r.on);
+    })());
     if (dup) continue;
+    // A Counter contract on ANOTHER hull still running when the file has them embarked elsewhere ended by then: TDG's
+    // own embark on the new hull (a contract the file dates, not a guess). Its projection no longer overlaps the file's.
+    const later = rs.filter((r) => shipKey(r.ship) !== k && r.on && h.on && r.on > h.on && (!hOff || hOff > r.on)).map((r) => r.on).sort()[0];
+    if (later) { out.push({ ...h, is_current: false, off: later, endedPerFile: true }); continue; }
     out.push(h.is_current ? { ...h, is_current: false } : h);
   }
   return out;

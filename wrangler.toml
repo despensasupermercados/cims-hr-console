@@ -30,6 +30,12 @@ preview_urls = false
 # DEPLOY_TO typed into Settings > Variables is wiped by the next merge and the Deploy button
 # refuses again with `no_recipient`. Pinned by test/wrangler_config.test.js.
 keep_vars = true
+# SMART PLACEMENT (13 Oct 2026, "it appears that is getting slower"). The D1 primary is in Prague (EEUR); the Worker
+# ran at the colo nearest each user, so every SEQUENTIAL database round trip crossed the ocean: perf_log measured
+# /api/crew/get 2.1s and /api/bonus/crew 2.3s from HKG against 0.85s from VIE for the same reads. Placed near the
+# database, the user pays the long hop once per request instead of once per round trip.
+[placement]
+mode = "smart"
 
 # DEPLOY GATE (2026-07-03 white-screen incident; patch retired 2026-09-04): wrangler runs
 # this before every bundle/deploy, no matter how wrangler is invoked (Workers Builds,

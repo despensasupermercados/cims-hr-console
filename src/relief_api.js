@@ -54,13 +54,32 @@ export function printerLegsFromBoard(legs, vessels) {
 export async function reliefBoardData(env, today) {
   // ONE wave (CLAUDE.md §12). The itinerary is fetched for the card dates only — never the whole
   // 40k-row table (port_days.js, 2026-09-15). Azamara turnarounds come as their own small list.
-  const [cfgRow, pd, taRows, flagRes, boardRows, vessels] = await Promise.all([
+  const [cfgRow, pd, taRows, flagRes, boardRows, vessels, inForceRes] = await Promise.all([
     env.DB.prepare("SELECT critical_days, due_days FROM relief_window_config WHERE key='default'").first(),
     fetchBoardPortDays(env),
     fetchAzamaraTurnarounds(env, today || new Date().toISOString().slice(0, 10)),
     env.DB.prepare("SELECT vessel_key, crew_name, eccr, air, hotel, on_date_conf, off_date_conf, override_off_date FROM leg_flags").all(),
     boardLegsFromDb(env, today || new Date().toISOString().slice(0, 10)),
     fetchVesselBrands(env),
+    // IN-FORCE assignments only (the relievers below). It depends on nothing above, so it rides this wave.
+    env.DB.prepare(
+    `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.actual_sign_off,
+            a.on_port_seed, a.off_port_seed, a.override_on_city, a.override_off_city,
+            a.succeeds_assignment_id, a.eccr, a.air, a.hotel, a.on_date_conf, a.off_date_conf,
+            a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
+            v.brand AS brand, COALESCE(v.name, a.vessel_name) AS ship_short,
+            TRIM(COALESCE(cr.first_name,'') || ' ' || COALESCE(cr.last_name,'')) AS crew_name,
+            cr.agency_id AS sc,
+            COALESCE(NULLIF(o.med_exp,''), cr.med_exp) AS med_exp, COALESCE(NULLIF(o.sirb_exp,''), cr.sirb_exp) AS sirb_exp,
+            COALESCE(NULLIF(o.pp_exp,''), cr.pp_exp) AS pp_exp, COALESCE(NULLIF(o.usv_exp,''), cr.usv_exp) AS usv_exp,
+            COALESCE(NULLIF(o.sch_exp,''), cr.sch_exp) AS sch_exp
+       FROM assignment a
+       JOIN contract c ON c.id = a.contract_id
+       JOIN crew cr    ON cr.id = c.crew_id
+       LEFT JOIN crew_override o ON o.agency_id = cr.agency_id
+       LEFT JOIN vessel v ON v.id = a.vessel_id
+      WHERE a.actual_sign_off IS NULL`
+    ).all(),
   ]);
   // THE SAME DEFINITION AS THE BOARD (CLAUDE.md §11): boardLegsFromDb has already applied Rita's recorded
   // sign-offs and TDG's held rule (§10d) — applying a recorded sign-off a second time here would drop a crew
@@ -115,24 +134,7 @@ export async function reliefBoardData(env, today) {
   // IN-FORCE assignments only. This query had no WHERE clause at all, so a reliever who signed off
   // months ago was still a candidate for "who is relieving this printer" — buildReliefBoard takes the
   // first reliever it finds for the ship.
-  const rows = (await env.DB.prepare(
-    `SELECT a.id, a.role, a.sign_on, a.planned_sign_off, a.actual_sign_off,
-            a.on_port_seed, a.off_port_seed, a.override_on_city, a.override_off_city,
-            a.succeeds_assignment_id, a.eccr, a.air, a.hotel, a.on_date_conf, a.off_date_conf,
-            a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
-            v.brand AS brand, COALESCE(v.name, a.vessel_name) AS ship_short,
-            TRIM(COALESCE(cr.first_name,'') || ' ' || COALESCE(cr.last_name,'')) AS crew_name,
-            cr.agency_id AS sc,
-            COALESCE(NULLIF(o.med_exp,''), cr.med_exp) AS med_exp, COALESCE(NULLIF(o.sirb_exp,''), cr.sirb_exp) AS sirb_exp,
-            COALESCE(NULLIF(o.pp_exp,''), cr.pp_exp) AS pp_exp, COALESCE(NULLIF(o.usv_exp,''), cr.usv_exp) AS usv_exp,
-            COALESCE(NULLIF(o.sch_exp,''), cr.sch_exp) AS sch_exp
-       FROM assignment a
-       JOIN contract c ON c.id = a.contract_id
-       JOIN crew cr    ON cr.id = c.crew_id
-       LEFT JOIN crew_override o ON o.agency_id = cr.agency_id
-       LEFT JOIN vessel v ON v.id = a.vessel_id
-      WHERE a.actual_sign_off IS NULL`
-  ).all()).results;
+  const rows = (inForceRes && inForceRes.results) || []; // read in the first wave (13 Oct 2026: it was a second round trip)
 
   const relievers = rows.map((r) => ({
     id: r.id, role: r.role, crew_name: r.crew_name, sc: r.sc || null,
@@ -218,6 +220,14 @@ export async function saveReliefAssignment(env, payload) {
   if (!cleaned.crew_id) return { ok: false, error: "crew_id_required_for_insert" };
   if (!cleaned.vessel_name && !cleaned.vessel_id) return { ok: false, error: "vessel_required_for_insert" };
   if (!cleaned.role) return { ok: false, error: "role_required_for_insert" };
+  // The same crew twice on one ship is refused here too, as on a move and a drop (13 Oct 2026: two quick Saves in the
+  // panel inserted the same earmark twice — "Wonder, Wonder").
+  if (cleaned.vessel_id) {
+    const dup = await env.DB.prepare(
+      "SELECT a.id FROM assignment a JOIN contract k ON k.id = a.contract_id WHERE k.crew_id = ? AND a.vessel_id = ? AND a.actual_sign_off IS NULL LIMIT 1"
+    ).bind(cleaned.crew_id, cleaned.vessel_id).first().catch(() => null);
+    if (dup) return { ok: false, error: "already_projected", id: dup.id };
+  }
 
   const contractId = "ct_" + crypto.randomUUID();
   const contractIns = env.DB.prepare(

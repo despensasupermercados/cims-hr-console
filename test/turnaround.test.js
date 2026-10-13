@@ -63,3 +63,16 @@ test("static: the itinerary reads are bounded (never the whole table), the board
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   assert.equal((W.match(/turnarounds: fetchShipTurnarounds/g) || []).length, 3, "the drag, the TDG-earmark card and the one-tap route all snap");
 });
+
+// 13 Oct 2026 bug hunt: turnaroundsByShip keys "celebrity compass" (with its space), the legs key "celebritycompass" —
+// a two-word hull's projected sign-off never snapped. The schedule re-keys the days the way it keys the legs.
+test("a two-word hull's projected sign-off snaps too (Celebrity Compass)", async () => {
+  const { legsFromRegistry } = await import("../src/ship_leg_source.js");
+  const { turnaroundsByShip } = await import("../src/turnaround.js");
+  const ta = turnaroundsByShip([{ ship_short: "Celebrity Compass", berth_date: "2027-05-03", port_name: "Miami" }]);
+  const legs = legsFromRegistry({ rows: [{ sc: "SC-1", status: "On board", vessel: "MV CELEBRITY COMPASS", embarked_at: "2026-10-01", run_at: "2026-10-07" }],
+    today: "2026-10-13", turnarounds: ta });
+  const l = legs.find((x) => x.sc === "SC-1");
+  assert.ok(l, "the leg exists");
+  assert.equal(l.off, "2027-05-03", "embark + 7 months (May 1) moves to the turnaround two days later");
+});

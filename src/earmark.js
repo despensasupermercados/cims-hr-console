@@ -27,6 +27,8 @@ import { daysBetween, ABSORB_DAYS } from "./counter_sync.js";
 export const TEMPLATE_ID = "hr.keyman.earmark_discrepancy.v1";
 export const KINDS = ["hull", "other_person", "inactive", "not_aboard", "embark_date", "not_in_tdg"];
 
+// A card starting this long after the file's embark on the same hull is the next contract (contracts run 5-7 months).
+export const NEXT_CONTRACT_DAYS = 90;
 const day = (s) => (/^\d{4}-\d{2}-\d{2}/.test(String(s || "")) ? String(s).slice(0, 10) : null);
 const norm = (s) => String(s == null ? "" : s).trim().toLowerCase();
 // How recent a DEBARKEDDATE on an ashore row still reads as "just signed off" (8 Oct 2026).
@@ -95,7 +97,10 @@ export function earmarkDiscrepancies({ projections, registry, today, shipOf, pre
       kind = "hull"; text = "TDG file" + (fileAt ? " " + fileAt : "") + " earmarks them for " + fileShip + " · your earmark is for " + cardShip + (signOn ? " from " + signOn : "");
     } else if (status === "On board" && fileShip && !sameShip && seen) {
       kind = "hull"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": On board " + fileShip + " · your card has them aboard " + cardShip + " since " + signOn;
-    } else if (status === "On board" && sameShip && embark && signOn && Math.abs(daysBetween(embark, signOn)) > ABSORB_DAYS) {
+    } else if (status === "On board" && sameShip && embark && signOn && Math.abs(daysBetween(embark, signOn)) > ABSORB_DAYS
+      // A FUTURE card well after the file's embark is Rita's NEXT contract on the same hull, not this contract's date
+      // (13 Oct 2026 bug hunt: the default Accept absorbed — deleted — that plan). registry_sync reads it the same way.
+      && !(!aboard && daysBetween(embark, signOn) >= NEXT_CONTRACT_DAYS)) {
       kind = "embark_date"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": embarked " + cardShip + " on " + embark + " · your earmark says " + signOn;
     } else if ((status === "On Vacation" || status === "Reserved" || (status === "Earmarked" && !fileShip)) && seen) {
       kind = "not_aboard"; text = "TDG file" + (fileAt ? " " + fileAt : "") + ": " + ((r && r.status_raw) || status) + " · your card has them aboard " + cardShip + " since " + signOn;
