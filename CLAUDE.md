@@ -842,9 +842,12 @@ Pinned by `test/bughunt_1013.test.js`, `test/port_days.test.js`, `test/turnaroun
   the PDF and the page (`monthsDaysParts`). The email reads documents against the running contract like its PDF.
 - **Rita's NEXT contract on the hull a crew is aboard** (a future card >= `NEXT_CONTRACT_DAYS` = 90 after the embark) is not an
   `embark_date` row — the default Accept deleted it.
-- **The Counter folds into the file's contract when they overlap on the hull**; a Counter contract on another hull ends on
-  TDG's embark elsewhere (`endedPerFile`) — sea time no longer counts the same months twice. Board output on 13 Oct data
-  is identical before and after.
+- **The Counter is folded ONLY within `ABSORB_DAYS`** — never on overlap. A first cut of this review dropped a Counter
+  contract that overlapped the file's on the same hull (Quiming, Infinity: Counter Apr 8, file embarked Aug 7 — 255 sea
+  days became 67 on his statement); that was the console reconciling TDG's two files (§6, §10b). Reverted the same day:
+  the contract is history, shown and counted, and the profile's To-check says "TDG's two files disagree"
+  (`counter_overlap`). The triple check that found it: `scratchpad sim/moneydiff.mjs` — the Score Card's inputs, the
+  statement and the schedule for every crew, before vs after. Run it before merging anything near the schedule.
 - **Turnarounds are keyed like legs** (`shipKey`): "Celebrity Compass" now snaps.
 - **PDF text**: a word wider than its column is cut, WinAnsi letters (Š, Ž, Œ, €, ™) print as themselves, the name is
   fitted to its column. Imported names are escaped everywhere the review found them raw.

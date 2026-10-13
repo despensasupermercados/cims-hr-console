@@ -255,6 +255,14 @@ export function buildCrewProfile(input) {
   if (file && file.status && crew.status && normStatusWord(file.status) !== normStatusWord(crew.status) && !(ov.status || ov.retired))
     checks.push({ key: "status", text: "TDG’s file says " + file.status + "; the crew record says " + crew.status + "." });
   for (const m of manual) if (m.field === "status" || m.field === "retired") checks.push({ key: "manual_status", text: "A manual " + m.label.toLowerCase() + " (" + m.value + ") sits over TDG’s word." });
+  // TDG'S TWO FILES DISAGREE ON ONE HULL (13 Oct 2026): a Counter contract that overlaps the file's on the same ship,
+  // its sign-on too far from the embark to be the same contract (ABSORB_DAYS). Both are shown and counted; the console
+  // never drops or re-dates either (§6, §10b) — it says so here, for Rita to settle with TDG.
+  for (const c of contracts) if (c.src === "counter") for (const r of contracts) {
+    if (r === c || r.src !== "tdg" || key(r.ship) !== key(c.ship)) continue;
+    const cOff = c.off || today, rOff = r.off || today;
+    if (c.on < rOff && cOff > r.on) checks.push({ key: "counter_overlap", text: "The Contract Counter has a " + c.ship + " contract from " + fmtD(c.on) + " that overlaps the file’s (embarked " + fmtD(r.on) + "). TDG’s two files disagree; both are shown and counted until TDG corrects one." });
+  }
 
   // ---- activity: who did what, newest first (the activity log + every TDG file that moved the status)
   const activity = A(I.activity).map((a) => ({ at: a.at, who: whoOf(a.user_id), text: (ACTIONS[a.action] || String(a.action || "").replace(/_/g, " ")) + activityDetail(a, sc) }));

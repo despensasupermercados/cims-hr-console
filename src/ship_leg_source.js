@@ -467,20 +467,12 @@ export function foldCounterHistory(counterLegs, registryLegs) {
     const rs = h && h.sc ? reg[h.sc] : null;
     if (!rs || !rs.length) { out.push(h); continue; }
     const k = shipKey(h.ship);
-    const hOff = dayOf(h.off) || null;
-    // The SAME contract: same hull, and the sign-on within ABSORB_DAYS of the embark — or the two contracts overlapping
-    // (one crew never holds two contracts on one hull at once). 13 Oct 2026 bug hunt: a Counter sign-on 10 days off the
-    // embark survived as a second Allure contract, and sea days counted Mar–Oct twice.
-    const dup = rs.some((r) => shipKey(r.ship) === k && (() => {
-      const g = daysApart(r.on, h.on); if (g != null && Math.abs(g) <= ABSORB_DAYS) return true;
-      const rOff = dayOf(r.off) || "9999-12-31";
-      return !!(h.on && r.on && h.on < rOff && (hOff || h.on) > r.on);
-    })());
+    // THE SAME CONTRACT is the sign-on within ABSORB_DAYS of the embark — nothing wider (§10d, Miguel's rule). A Counter
+    // contract further off that still overlaps the file's on the same hull is TDG's two files DISAGREEING: it is served
+    // as history and the profile FLAGS it (crew_profile "counter_overlap"); the console never drops or re-dates it (§6,
+    // §10b). 13 Oct 2026: an overlap rule here silently removed Quiming's Infinity Apr-Oct contract (255 -> 67 sea days).
+    const dup = rs.some((r) => shipKey(r.ship) === k && (() => { const g = daysApart(r.on, h.on); return g != null && Math.abs(g) <= ABSORB_DAYS; })());
     if (dup) continue;
-    // A Counter contract on ANOTHER hull still running when the file has them embarked elsewhere ended by then: TDG's
-    // own embark on the new hull (a contract the file dates, not a guess). Its projection no longer overlaps the file's.
-    const later = rs.filter((r) => shipKey(r.ship) !== k && r.on && h.on && r.on > h.on && (!hOff || hOff > r.on)).map((r) => r.on).sort()[0];
-    if (later) { out.push({ ...h, is_current: false, off: later, endedPerFile: true }); continue; }
     out.push(h.is_current ? { ...h, is_current: false } : h);
   }
   return out;
