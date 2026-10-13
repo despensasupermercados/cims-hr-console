@@ -4,9 +4,32 @@
 
 const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]/g, "");
 
+// EMERGENCY CONTACT (Miguel, 13 Oct 2026: "u can add it" — the next-of-kin / emergency-contact column Joy is asked to
+// add to the AdvancedQuery). A header that names the emergency contact is never read for the crew's OWN fields: an
+// "EMERGENCY CONTACT NO." must not become the crew's phone, nor an "EMERGENCY CONTACT EMAIL" their email.
+const EMERG = /emergency|nextofkin|kin$|^nok|beneficiar/;
+const isEmergHeader = (h) => EMERG.test(norm(h));
+// The emergency contact from whatever headers TDG uses: a name (EMERGENCY CONTACT / NEXT OF KIN / NOK, or split into
+// first + last), a relationship (RELATIONSHIP / RELATION), a phone (… NO / NUMBER / PHONE / MOBILE / TEL). "-" is blank.
+// Returns the values and, per field, whether the file carries such a column at all (an empty cell then CLEARS it).
+export function pickEmergency(row) {
+  const hs = Object.keys(row || {}), val = (h) => (h == null ? "" : String(dash(row[h]) == null ? "" : dash(row[h])).trim());
+  const num = /(no|number|phone|mobile|tel|cel|cell|contact(no|number))$/;
+  const em = hs.filter(isEmergHeader);
+  const relH = hs.find((h) => /relation/.test(norm(h)));
+  const phoneH = em.find((h) => num.test(norm(h)) || /(phone|mobile|tel)/.test(norm(h)));
+  const firstH = em.find((h) => /(first|given)/.test(norm(h))), lastH = em.find((h) => /(last|surname|family)/.test(norm(h)));
+  const nameH = em.find((h) => h !== phoneH && h !== firstH && h !== lastH && !/relation|address|email|mail|middle/.test(norm(h)));
+  const name = nameH ? val(nameH) : [val(firstH), val(lastH)].filter(Boolean).join(" ");
+  return {
+    emergency_name: name || null, emergency_relation: relH ? val(relH) || null : null, emergency_phone: phoneH ? val(phoneH) || null : null,
+    has: { emergency_name: !!(nameH || firstH || lastH), emergency_relation: !!relH, emergency_phone: !!phoneH },
+  };
+}
+
 // Find the value in a raw row whose header matches any of the given normalized substrings.
 function pick(row, patterns) {
-  const keys = Object.keys(row || {});
+  const keys = Object.keys(row || {}).filter((h) => !isEmergHeader(h));
   for (const p of patterns) {
     const np = norm(p);
     const k = keys.find(h => norm(h).includes(np));
@@ -19,7 +42,7 @@ function pick(row, patterns) {
 // "if it gets removed?? as in any information fro the crew ?? u pick it up and ensure you remove it from
 // the crew card"). A column the file does not carry at all says nothing. Same matching as pick().
 function blankCell(row, patterns) {
-  const keys = Object.keys(row || {});
+  const keys = Object.keys(row || {}).filter((h) => !isEmergHeader(h));
   for (const p of patterns) {
     const np = norm(p);
     const k = keys.find(h => norm(h).includes(np));
@@ -212,9 +235,12 @@ export function mapRowFull(row) {
     med_exp: date("med_exp"), sirb_exp: date("sirb_exp"), pp_exp: date("pp_exp"), sch_exp: date("sch_exp"), usv_exp: date("usv_exp"),
     embarked_at: date("embarked_at"), debarked_at: date("debarked_at"),
   };
+  const emg = pickEmergency(row);
+  out.emergency_name = emg.emergency_name; out.emergency_relation = emg.emergency_relation; out.emergency_phone = emg.emergency_phone;
   // The fields this row EMPTIED (column present, cell blank). Carried on the row, never written as a field
   // itself; diffCrew turns each into a clear of a value the card still holds.
-  const blank = Object.keys(CLEARABLE).filter((f) => out[f] == null && blankCell(row, CLEARABLE[f]));
+  const blank = Object.keys(CLEARABLE).filter((f) => out[f] == null && blankCell(row, CLEARABLE[f]))
+    .concat(Object.keys(emg.has).filter((f) => emg.has[f] && out[f] == null)); // the column is there and the cell is empty
   if (blank.length) Object.defineProperty(out, "_blank", { value: blank, enumerable: false });
   return { row: out, unparsed };
 }
@@ -233,7 +259,7 @@ export function mapRows(rows) {
 
 const TRACK = ["first_name", "middle_name", "last_name", "status", "rank_observed",
   "vessel_observed", "dob", "province", "phone", "email", "gender", "pp_no",
-  "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp"];
+  "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp", "emergency_name", "emergency_relation", "emergency_phone"];
 
 // --- identity ---------------------------------------------------------------
 // A crew member carries TWO ids: our agency id ("SC-0040010") and the cruise line's numeric

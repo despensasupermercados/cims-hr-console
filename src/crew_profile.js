@@ -68,7 +68,7 @@ const MANUAL_LABEL = {
   first_name: "First name", middle_name: "Middle name", last_name: "Last name", status: "Status", rank_override: "Rank",
   vessel_observed: "Ship", dob: "Date of birth", province: "Province", phone: "Phone", email: "Email", pp_no: "Passport no.",
   med_exp: "Medical expiry", sirb_exp: "Seaman book expiry", pp_exp: "Passport expiry", usv_exp: "US visa expiry",
-  sch_exp: "Schengen expiry", retired: "Inactive tag",
+  sch_exp: "Schengen expiry", retired: "Inactive tag", emergency_name: "Emergency contact", emergency_relation: "Emergency relationship", emergency_phone: "Emergency phone",
 };
 // WHO HE RELIEVED AND WHO RELIEVES HIM (Miguel, 12 Oct 2026: "show who was before he took over and who is coming after
 // .. in the timeline"). Same hull, another seafarer, read off the ONE schedule + Rita's open cards + TDG's undated

@@ -191,9 +191,14 @@ test("static: apiCrewOne reads every source in ONE wave and returns the profile;
 
 test("static: the page draws A+ — header with TDG's row, the band, the numbers with sources, the career line, the contract's dates, people, status history, documents, rotation, checks, activity", () => {
   const p = body("async function openCrew(");
-  for (const s of ["class=pf2band", "pfNum(cnN,'Completed contracts',cnSrc)", "'Days at sea'", "pfCareer(K,PE.feed||[],todayS)", "pfContract(last,cur===last,todayS)", "pfPeople(PE,c.agency_id)", "Status history", "pfDocs(c,cur,todayS)", "Next &amp; rotation", "To check <span>", "Activity <span>"])
+  for (const s of ["class=pf2band", "pfNum(cnN,'Completed contracts',cnSrc)", "'Time at sea'", "pfSeaTime(K,todayS)", "pfContract(last,cur===last,todayS,K,PE.feed||[])", "pfPeople(PE,c.agency_id)", "Status history", "pfDocs(c,cur,todayS)", "Next &amp; rotation", "To check <span>", "Activity <span>"])
     assert.ok(p.includes(s), "the profile draws " + s);
   assert.doesNotMatch(p, /Next rung if clean/, "a $0 rung for a Junior said nothing");
+  // 13 Oct 2026 (Miguel: "u repeat it in the crew tab few times .. 1 is enough"; "u can merge these 2 into 1"): time at
+  // sea is said once, in months and days; the Aboard / Ashore tile and the separate Career box are gone — the career line
+  // is drawn inside the contract card, under who handed over and who takes over.
+  assert.doesNotMatch(p, /'Aboard',pfSrc|'Days at sea'|h\+=pfCareer\(/);
+  assert.match(W, /return '<div class=pf3relay2><div class=pf3ppl>'\+L\+R\+'<\/div>'\+pfCareer\(K&&K\.length\?K:\[x\],feed\|\|\[\],todayS,x\.on\)\+'<\/div>';/);
   assert.doesNotMatch(p, /class=pf2file/, "the TDG file box beside the name is gone (Miguel, 12 Oct 2026: \"dont think is needed\")");
   assert.doesNotMatch(p, /loadSbmCards\(/, "shipboard reviews ride in the profile's feed");
   // sign-off sends only while a contract runs
@@ -245,8 +250,8 @@ test("the contract's bar names who he relieved and who relieves him: same hull, 
   assert.equal(HANDOVER_DAYS, 45);
   // the page draws both ends and links each name to that profile — since 13 Oct 2026 as the card's relay (pfRelay:
   // the one who handed over, this contract's track, the one who takes over), re-pinned from the 12 Oct bar line
-  assert.match(W, /function pfRelay\(x,isCur,todayS\)\{/);
-  assert.match(W, /h\+=pfRelay\(x,isCur,todayS\);/);
+  assert.match(W, /function pfRelay\(x,isCur,todayS,K,feed\)\{/);
+  assert.match(W, /h\+=pfRelay\(x,isCur,todayS,K,feed\);/);
   assert.match(W, /who\(b\)\+'<small>Handed over '\+fmtDateS\(b\.off\)\+'<\/small>/);
   assert.match(W, /<span>No reliever yet<\/span><small>Earmark one on the Keyman board<\/small>/);
   assert.match(W, /onclick="openCrew\(this\.dataset\.sc\);return false"/);

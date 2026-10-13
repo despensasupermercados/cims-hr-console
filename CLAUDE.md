@@ -492,6 +492,26 @@ the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned 
   "Bonus paid" only when something was paid, a "please check" note naming Rita when it fits, and the same line in the
   footer of every page. One page for a normal career. Still crew-facing only (no notes, intel, feedback, status word).
 
+**13 Oct 2026, later — said once, one line, the emergency contact.**
+- **Time at sea is said ONCE, in months and days** (Miguel: "X months at sea .. perhaps is more valuable .. u repeat it in
+  the crew tab few times .. 1 is enough"). The header has three numbers: completed contracts, **Time at sea**
+  (`pfSeaTime`: each contract's calendar span to its sign-off or today, added up — "8 mo 13 d", the day total under it) and
+  the bonus count. Gone: the Aboard / Ashore tile, the header's "Off in" chip for a running contract (the card's To go
+  says it; only "Past the sign-off" stays as a chip), "aboard so far" under To go (now "of a 7-month contract"), and the
+  day count on the career bar. How far into THIS contract is the card's state pill ("Aboard · day N of M").
+- **One line, not two** (Miguel, the Career box and the card's track: "u can merge these 2 into 1"): the career line
+  (`pfCareer(K, feed, today, hiOn)`) is drawn INSIDE the contract card under who handed over and who takes over
+  (`pfRelay`, `.pf3relay2`): every contract on one axis, this one bright and the earlier ones soft (`.pf2cb.dim`), a pin per
+  note / intel / feedback, today, the planned end dashed. The separate Career section is gone.
+- **The emergency contact** (Miguel: "u can add it"; Joy asked to add a next-of-kin / emergency-contact column to the
+  AdvancedQuery): `crew.emergency_name / emergency_relation / emergency_phone` + the same on `crew_override`
+  (`migrations/0022_emergency_contact.sql`, ALTERs in `ensureCrewExtras`). The import reads it from whatever header TDG uses
+  (`pickEmergency`: EMERGENCY CONTACT / NEXT OF KIN / NOK, a split first + last name, RELATIONSHIP, … NO / NUMBER / PHONE),
+  an empty cell in a column the file carries clears it, and an emergency header is NEVER read for the crew's own fields
+  (`isEmergHeader` in `pick` / `blankCell`: "EMERGENCY CONTACT NO." must not become the crew's phone). Edit crew types it
+  (Contact → Emergency contact, Reset to TDG); the profile header shows it ("Not on file" in amber until set); the crew's
+  statement PDF lists it under "Your details on file · please check" (his own data). Pinned by `test/crew_windows.test.js`.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

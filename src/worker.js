@@ -1481,7 +1481,10 @@ async function ensureCrewExtrasImpl(env) {
   // prod): the manual 'Retired' tag (Rita), and — NOTES ARE ARCHIVED, NEVER DELETED (Miguel, 12 Oct 2026: "archive";
   // "I dont wanna lose the notes") — who wrote a note and when / by whom it was archived (migrations/0020_note_archive.sql).
   const alters = ["ALTER TABLE crew_override ADD COLUMN retired INTEGER DEFAULT 0", "ALTER TABLE crew_note_log ADD COLUMN created_by TEXT",
-    "ALTER TABLE crew_note_log ADD COLUMN archived_at TEXT", "ALTER TABLE crew_note_log ADD COLUMN archived_by TEXT"];
+    "ALTER TABLE crew_note_log ADD COLUMN archived_at TEXT", "ALTER TABLE crew_note_log ADD COLUMN archived_by TEXT",
+    // the emergency contact (13 Oct 2026, migrations/0022_emergency_contact.sql): TDG's value on crew, a typed one on crew_override
+    "ALTER TABLE crew ADD COLUMN emergency_name TEXT", "ALTER TABLE crew ADD COLUMN emergency_relation TEXT", "ALTER TABLE crew ADD COLUMN emergency_phone TEXT",
+    "ALTER TABLE crew_override ADD COLUMN emergency_name TEXT", "ALTER TABLE crew_override ADD COLUMN emergency_relation TEXT", "ALTER TABLE crew_override ADD COLUMN emergency_phone TEXT"];
   await Promise.all(alters.map((q) => env.DB.prepare(q).run().catch(() => null)));
 }
 // Board legs = the live schedule: current ship_leg rows + crew aboard per the relief board
@@ -3888,11 +3891,11 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf2ac{display:grid;grid-template-columns:96px 70px minmax(0,1fr);gap:8px;font-size:12.5px;padding:4px 0}.pf2ac span:first-child,.pf2ac span:nth-child(2){color:var(--mut)}
 .pf2 .pfgrid{grid-template-columns:minmax(0,1.25fr) minmax(280px,1fr)}
 .pfact .btn:disabled{opacity:.45;cursor:not-allowed}
-.pf2nums.inhd{margin-top:0;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.pf2nums.inhd .pf2n{background:#F6F8FB;border:0;border-radius:12px;padding:10px 14px}.pf2nums.inhd .pf2n b{font-size:22px}
+.pf2nums.inhd{margin-top:0;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.pf2nums.inhd .pf2n{background:#F6F8FB;border:0;border-radius:12px;padding:10px 14px}.pf2nums.inhd .pf2n b{font-size:22px}
 .pf2hd+.pfsec,.pf2band+.pfsec,.pf2hd+.pf2band+.pfsec{margin-top:12px}
 .pf2n .pfsrc,.pf2dt .pfsrc{white-space:normal}
 @container (max-width:900px){.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}}
-@media(max-width:700px){.pf2nums.inhd{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2ax span:nth-child(even){display:none}.pf2dt th:nth-child(4),.pf2dt td:nth-child(4){display:none}.pf2dt td{vertical-align:top}.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}.pf2fg{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2fd{grid-template-columns:1fr;gap:4px}.pf2lgs{margin-left:0}}
+@media(max-width:700px){.pf2nums.inhd{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.pf2nums.inhd .pf2n{padding:10px}.pf2nums.inhd .pf2n b{font-size:18px}.pf2ax span:nth-child(even){display:none}.pf2dt th:nth-child(4),.pf2dt td:nth-child(4){display:none}.pf2dt td{vertical-align:top}.pf2top{grid-template-columns:1fr}.pf2nums,.pf2slots{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2tri{grid-template-columns:1fr}.pf2 .pfgrid{grid-template-columns:1fr}.pf2fg{grid-template-columns:repeat(2,minmax(0,1fr))}.pf2fd{grid-template-columns:1fr;gap:4px}.pf2lgs{margin-left:0}}
 /* Edit crew + Notes windows (12 Oct 2026): sections, TDG's value under a changed field, one stream of what was said. */
 .modcard.ec2,.modcard.nt2{max-width:820px;padding:0;overflow:hidden;display:flex;flex-direction:column;max-height:calc(100vh - 80px)}
 .modcard.nt2{max-width:760px}
@@ -3953,14 +3956,6 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf3p>div{min-width:0;display:flex;flex-direction:column}.pf3p .pf2who,.pf3p>div>span{font-size:13px;font-weight:700;color:var(--deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pf3p.none>div>span{color:#6B7280}.pf3p.pf3w>div>span{color:#8A5A12}
 .pf3p small{font-size:11.5px;color:var(--mut);line-height:1.35}
-.pf3mid{min-width:0}
-.pf3trk{position:relative;height:8px;border-radius:999px;background:#EEF1F5;margin-top:16px}
-.pf3trk b{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--green)}
-.pf3trk u{position:absolute;top:3px;right:0;border-top:2px dashed #C5CEDA;text-decoration:none}
-.pf3trk s{position:absolute;top:-6px;width:2px;height:20px;margin-left:-1px;background:var(--deep);border-radius:2px}
-.pf3trk s em{position:absolute;bottom:22px;left:50%;transform:translateX(-50%);font-style:normal;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--deep);white-space:nowrap}
-.pf3td{position:relative;display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;color:var(--ink);margin-top:7px;white-space:nowrap}
-.pf3td.early{min-height:17px}.pf3td .pf3off{position:absolute;top:0;transform:translateX(-100%)}.pf3td.low{min-height:34px}.pf3td.low .pf3off{top:17px;transform:none}
 .pf3facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;margin-top:16px;border:1px solid var(--line);border-radius:12px}
 .pf3f{padding:12px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}.pf3f+.pf3f{border-left:1px solid var(--line)}
 .pf3f>.pf3l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
@@ -3981,8 +3976,10 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf3step li.ok{color:var(--ink)}.pf3step li.ok>span{background:var(--green);border-color:var(--green);color:#fff}
 .pf3step li small{display:block;font-size:11px;color:var(--mut)}
 .pf3hint{font-size:12px;color:var(--mut);margin-top:8px}
+.pf3relay2{margin:16px 0 4px}.pf3ppl{display:flex;justify-content:space-between;align-items:center;gap:10px 16px;flex-wrap:wrap}.pf3ppl .pf3p.next{margin-left:auto}
+.pf3career{margin-top:4px}.pf3career .pf2tl{margin-top:2px}.pf2cb.dim{background:#A8D5B8;color:#1F5E3A}
 .pf3why{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
-.pf3wh{display:flex;align-items:baseline;gap:6px 10px;flex-wrap:wrap;font-size:13px;color:var(--ink)}.pf3wh .pf3l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.pf3wh{display:flex;align-items:baseline;gap:6px 10px;flex-wrap:wrap;font-size:13px;color:var(--ink)}.pfcontact .pf3l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}.pf3wh .pf3l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
 .pf3wh b{font-family:'Outfit';font-size:15px;color:var(--deep)}.pf3wh small{color:var(--mut);font-size:12px}.pf3wh a{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--royal);text-decoration:none}
 .pf3wh.none>span:nth-child(2){color:var(--amber);font-weight:600}
 .pf3wf{gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.pf3wf select,.pf3wf input{height:38px;box-sizing:border-box;border:1px solid var(--line-2);border-radius:10px;padding:0 10px;font:14px 'DM Sans',sans-serif;color:var(--ink);background:#fff}.pf3wf input{flex:1 1 220px;min-width:0}
@@ -5141,7 +5138,7 @@ function parseVesselFile(f){
 }
 var NOCHG='margin-top:8px;padding:10px 12px;border-radius:8px;background:#F2F8EF;border-left:3px solid var(--green);color:var(--navy);font-weight:600';
 var BADBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FDF3F1;border-left:3px solid var(--red);color:var(--navy)';
-var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last name',status:'status',rank_observed:'rank',vessel_observed:'vessel',dob:'date of birth',province:'province',phone:'phone',email:'email',med_exp:'medical expiry',sirb_exp:'seaman-book expiry',pp_exp:'passport expiry',sch_exp:'Schengen expiry',usv_exp:'US-visa expiry'};
+var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last name',status:'status',rank_observed:'rank',vessel_observed:'vessel',dob:'date of birth',province:'province',phone:'phone',email:'email',med_exp:'medical expiry',sirb_exp:'seaman-book expiry',pp_exp:'passport expiry',sch_exp:'Schengen expiry',usv_exp:'US-visa expiry',emergency_name:'emergency contact',emergency_relation:'emergency relationship',emergency_phone:'emergency phone'};
 // ===== Inline branded crew importer for the console Data tab (served form) =====
 // Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
 // Talks ONLY to the safe /api/crew/import/stage + /apply. Renders the tiered review + a live
@@ -7044,7 +7041,8 @@ async function openCrew(id){
   var ph=fmtPhone(c.phone);
   var contact=[c.email?('<a href="mailto:'+escHtml(c.email)+'">'+escHtml(c.email)+'</a>'):'',ph.txt?('<a href="tel:'+escHtml(String(ph.txt).replace(/[^0-9+]/g,''))+'">'+escHtml(ph.txt)+'</a>'):'',c.province?escHtml(c.province):'',c.dob?('Born '+fmtDateS(c.dob)):'',c.pp_no?('Passport '+escHtml(c.pp_no)):''].filter(Boolean).join('<span class=sep>·</span>');
   // the chip reads like the card (13 Oct 2026: "OFF in 159 d" beside "5 mo 8 d to go"): months and days, never a bare count
-  var stateChip=cur?(cur.off?(cur.off<todayS?'<span class="croff inrow" style="background:#F8ECEB;color:var(--red)">Past the sign-off</span>':'<span class="croff inrow" style="background:'+(dayNum(cur.off)-dayNum(todayS)<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">Off in '+spanCompact(todayS,cur.off)+'</span>'):''):(N.ashoreDays!=null&&last&&last.off?'<span class=pfchip>Ashore '+spanCompact(last.off,todayS)+'</span>':'');
+  // Off in / aboard for a running contract are said once, on its card (13 Oct 2026: "1 is enough"); only past the sign-off is flagged here
+  var stateChip=cur?(cur.off&&cur.off<todayS?'<span class="croff inrow" style="background:#F8ECEB;color:var(--red)">Past the sign-off</span>':''):(N.ashoreDays!=null&&last&&last.off?'<span class=pfchip>Ashore '+spanCompact(last.off,todayS)+'</span>':'');
   var nextEm=(RO.earmarks||[])[0];
   var h='<div class="bar noprint" style="margin-bottom:10px"><button class="btn ghost" onclick="renderCrew()">← Crew</button><span style="margin-left:auto"></span></div>';
   h+='<div class=crwrap><section class=crmain><div class="stmt pf2">';
@@ -7057,9 +7055,8 @@ async function openCrew(id){
   var cnSrc=CN&&CN.n!=null?pfSrc('count','TDG count '+fmtDateS(CN.asOf)+(CN.added?(' + '+CN.added+' since'):'')):pfSrc('counter','derived from dates');
   var NUMS='<div class="pf2nums inhd">'
     +pfNum(cnN,'Completed contracts',cnSrc)
-    +pfNum(Number(N.seaDays||0).toLocaleString(),'Days at sea',pfSrc('tdg','the schedule'))
+    +pfNum(pfSeaTime(K,todayS),'Time at sea',pfSrc('tdg',Number(N.seaDays||0).toLocaleString()+' days · the schedule'))
     +pfNum(bz&&!bz.error&&bz.count!=null?bz.count:'—','Bonus count (consecutive)','<span class=pfsrc>'+(bz&&bz.baseline_set?'baseline set':'baseline not set')+'</span>')
-    +(cur?pfNum(Number(N.aboardDays||0)+' d','Aboard',pfSrc('tdg','since '+fmtDateS(cur.on))):pfNum(N.ashoreDays!=null?(N.ashoreDays+' d'):'—','Ashore',N.ashoreDays!=null?pfSrc('tdg','since '+fmtDateS(last.off)):'<span class=pfsrc>no contract ended</span>'))
     +'</div>';
   h+='<div class=pf2hd><div class=pf2top><div class=pfid><div class=crav style="width:56px;height:56px;font-size:17px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
     +'<div class=pfnmrow><span class=pfname>'+escHtml(name)+'</span><span class=pfwho>'+escHtml(who)+'</span></div>'
@@ -7067,6 +7064,7 @@ async function openCrew(id){
     +(nextEm?'<span class=pfchip>Earmark '+escHtml(niceShip(nextEm.ship))+' · '+fmtDateS(nextEm.on)+'</span>':'<span class=pfchip>No earmark</span>')+'</div>'
     +'<div class=pfship>'+shipLine+'</div>'
     +(contact?'<div class=pfcontact>'+contact+'</div>':'')
+    +'<div class=pfcontact><span class=pf3l style="margin-right:6px">Emergency</span>'+(c.emergency_name||c.emergency_phone?escHtml([c.emergency_name,c.emergency_relation?'('+c.emergency_relation+')':''].filter(Boolean).join(' '))+(c.emergency_phone?'<span class=sep>·</span><a href="tel:'+escHtml(String(c.emergency_phone).replace(/[^0-9+]/g,''))+'">'+escHtml(c.emergency_phone)+'</a>':''):'<span style="color:var(--amber);font-weight:600">Not on file</span>')+'</div>'
     +'</div></div>';
   // The TDG file box beside the name is gone (Miguel, 12 Oct 2026: "this here .. dont think is needed"): the file's word
   // is the status chip, its dates are the contract's rows below, its count is the first number.
@@ -7087,10 +7085,10 @@ async function openCrew(id){
       +'<div class=pf2bx><button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Add note</button><button class="btn ghost" onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Change status…</button></div></div>';
   }
   // 4 · the career line
-  if(K.length)h+=pfCareer(K,PE.feed||[],todayS);
+  // the career line lives in the contract card now (13 Oct 2026: one line, not two)
   // left column: the last contract, what people said, bonus
   var left='',right='';
-  if(last)left+=pfContract(last,cur===last,todayS);
+  if(last)left+=pfContract(last,cur===last,todayS,K,PE.feed||[]);
   else left+='<div class="pfsec one"><div class=pflbl>Contracts <span>· none on file</span></div></div>';
   if(K.length>1)left+='<div class=pfsec><div class=pflbl>Earlier contracts <span>· '+(K.length-1)+'</span></div>'+K.slice(1).map(function(x){return '<div class=pf2er><b>'+escHtml(niceShip(x.ship))+'</b><span>'+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open')+'</span><span>'+spanCompact(x.on,x.off||todayS)+'</span>'+pfSrc(x.offSource==='counter'?'counter':(x.offSource==='projected'?'projected':(x.offSource==='rita'||x.offSource==='card'?'typed':'tdg')))+(x.earlyDays?'<span class="cchip red">'+x.earlyDays+' d early</span>':'')+'</div>';}).join('')+'</div>';
   left+=pfPeople(PE,c.agency_id);
@@ -7147,6 +7145,10 @@ async function openCrew(id){
 var PF_SRC={tdg:['#2E9E5B','TDG file'],tdg_embark:['#2E9E5B','TDG embark'],count:['#1E9CB2','TDG count'],typed:['#1E6FD0','Typed in the console'],rita:['#1E6FD0','Typed in the console'],card:['#1E6FD0','Reliever card'],
   intel:['#BC3B2C','Field intel'],feedback:['#7A5BC7','Feedback'],counter:['#9AA7B8','Counter · history'],projected:['#9AA7B8','Projected'],travel:['#B0741A','Travel ledger']};
 function pfSrc(k,label){var s=PF_SRC[k]||['#9AA7B8',k];return '<span class=pfsrc><i style="background:'+s[0]+'"></i>'+escHtml(label||s[1])+'</span>';}
+// Time at sea as months and days (Miguel, 13 Oct 2026: "X months at sea .. perhaps is more valuable .. u repeat it in
+// the crew tab few times .. 1 is enough"): each contract's calendar span to its sign-off or today, added up, days
+// carried into months at 30. One number, once; the contract card says how far into THIS contract they are.
+function pfSeaTime(K,todayS){var m=0,d=0;(K||[]).forEach(function(x){if(!x.on||x.on>todayS)return;var p=monthsDaysParts(x.on,x.off&&x.off<todayS?x.off:todayS);if(p){m+=p.m;d+=p.d;}});m+=Math.floor(d/30);d=d%30;return m?(m+' mo'+(d?' '+d+' d':'')):(d+' d');}
 function pfNum(n,l,src){return '<div class=pf2n><b>'+n+'</b><span>'+escHtml(l)+'</span>'+(src||'')+'</div>';}
 function pfPort(p){return String(p||'').split(',')[0].toLowerCase().replace(/(^|[ -])[a-z]/g,function(m){return m.toUpperCase();});}
 function pfIntelHead(it,n){var ps=it.parts||[];var s=ps.filter(function(p){return p.label==='Summary';})[0]||ps[0]||{text:it.text||''};var t=String(s.text||'');n=n||160;if(t.length<=n)return t;var cut=t.slice(0,n);var sp=cut.lastIndexOf(' ');return (sp>n*0.6?cut.slice(0,sp):cut).replace(/[,;:. ]+$/,'')+'…';}
@@ -7159,7 +7161,7 @@ function pfAddMo(iso,n){var y=+iso.slice(0,4),m=+iso.slice(5,7)-1+n,dd=+iso.slic
 // Where each date came from and the travel cost fold away under the card. An ended contract keeps the header, the relay
 // and the facts; its crew-change record folds away with the rest.
 var PF3_SRC={tdg:'TDG debark · final',tdg_embark:'TDG embark',rita:'Typed in the console',card:'Reliever card',projected:'Projected',counter:'Contract Counter'};
-function pfContract(x,isCur,todayS){
+function pfContract(x,isCur,todayS,K,feed){
   var off=x.off,on=x.on,T=x.travel||[],D=x.dates||[];
   var offRow=D.filter(function(r){return r.what==='Sign-off'&&r.used;})[0]||null;
   var differs=D.filter(function(r){return r.what==='Sign-off'&&!r.used&&!r.history&&!r.agrees;})[0]||null;
@@ -7175,7 +7177,7 @@ function pfContract(x,isCur,todayS){
     +'<div class=pf3top><div style="min-width:0"><div class=pf3k>'+(isCur?'Current contract':'Last contract')+' · '+x.n+'</div>'
     +'<div class=pf3ship>'+escHtml(niceShip(x.ship))+'</div><div class=pf3route>'+route+(x.brand?' · '+escHtml(x.brand):'')+'</div></div>'
     +'<span class="pf3st '+st[0]+'">'+escHtml(st[1])+'</span></div>';
-  h+=pfRelay(x,isCur,todayS);
+  h+=pfRelay(x,isCur,todayS,K,feed);
   // the four facts, each with where it comes from
   var offSrc=offRow?offRow.src:(x.offSource||'projected');
   var az=/azamara/i.test(String(x.brand||'')+' '+String(x.ship||''));
@@ -7185,7 +7187,7 @@ function pfContract(x,isCur,todayS){
   h+='<div class=pf3facts>'
     +fact('Signed on',fmtDateS(on),pfSrc('tdg',PF3_SRC[(D[0]||{}).src]||'TDG embark'))
     +fact(isCur?'Sign-off':'Signed off',off?fmtDateS(off):'Not set',pfSrc(offSrc==='rita'?'typed':offSrc,offNote)+(differs?'<em class=pf3dif>'+escHtml((PF3_SRC[differs.src]||differs.src)+' says '+fmtDateS(differs.value))+'</em>':''))
-    +(isCur?fact('To go',dLeft==null?'—':(dLeft>=0?spanCompact(todayS,off):'<span style="color:var(--red)">'+spanCompact(off,todayS)+' over</span>'),'<span class=pf3sub>'+spanCompact(on,todayS)+' aboard so far</span>')
+    +(isCur?fact('To go',dLeft==null?'—':(dLeft>=0?spanCompact(todayS,off):'<span style="color:var(--red)">'+spanCompact(off,todayS)+' over</span>'),'<span class=pf3sub>of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract</span>')
       :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):(x.days+' days'))+'</span>'))
     +fact(isCur?'Signs off at':'Signed off at',ports[1]?escHtml(ports[1]):'<span class=pf3na>Not on file</span>','<span class=pf3sub>'+(ports[0]?'joined at '+escHtml(ports[0]):'joining port not on file')+'</span>')
     +'</div>';
@@ -7227,7 +7229,7 @@ async function pfWhySave(on,clear){
 }
 // The relay: who handed the seat over, this contract between its two dates (filled to today, or to the sign-off), who
 // takes it next (Miguel, 12 Oct 2026: "show who was before he took over and who is coming after"). Names open profiles.
-function pfRelay(x,isCur,todayS){
+function pfRelay(x,isCur,todayS,K,feed){
   var H=x.handover||{},b=H.before,a=H.after;
   var who=function(p){return '<a href="#" class=pf2who data-sc="'+escHtml(p.sc)+'" onclick="openCrew(this.dataset.sc);return false">'+escHtml(p.name||p.sc)+'</a>';};
   var ini=function(n){return escHtml(String(n||'?').split(/[ ,]+/).filter(Boolean).slice(0,2).map(function(w){return w.charAt(0);}).join('').toUpperCase()||'?');};
@@ -7237,13 +7239,10 @@ function pfRelay(x,isCur,todayS){
   var R=a?'<div class="pf3p next'+(a.src==='earmark'||a.src==='tdg_earmark'?' em':'')+'"><div>'+who(a)+'<small>'+(a.on?((a.on<=todayS?'Took over ':'From ')+fmtDateS(a.on)+' · '):'')+lab+'</small></div><i>'+ini(a.name)+'</i></div>'
     :(isCur?'<div class="pf3p next none pf3w"><div><span>No reliever yet</span><small>Earmark one on the Keyman board</small></div><i>!</i></div>'
       :'<div class="pf3p next none"><div><span>After</span><small>Not on record</small></div><i>–</i></div>');
-  var end=x.planned&&x.planned>(x.off||'')?x.planned:x.off;
-  var tot=x.on&&end?Math.max(1,dayNum(end)-dayNum(x.on)):1,pc=function(d){return Math.max(0,Math.min(100,Math.round((dayNum(d)-dayNum(x.on))/tot*100)));};
-  var fill=isCur?pc(todayS):pc(x.off||todayS);
-  var trk='<div class=pf3trk><b style="width:'+fill+'%"></b>'+(x.earlyDays?'<u style="left:'+pc(x.off)+'%"></u>':'')+(isCur?'<s style="left:'+pc(todayS)+'%"><em>Today</em></s>':'')+'</div>'
-    +(x.earlyDays?'<div class="pf3td early'+(pc(x.off)<=35?' low':'')+'"><span>'+fmtDateS(x.on)+'</span><span class=pf3off style="left:'+pc(x.off)+'%">'+fmtDateS(x.off)+'</span></div>'
-      :'<div class=pf3td><span>'+fmtDateS(x.on)+'</span><span>'+(x.off?fmtDateS(x.off):'open')+'</span></div>');
-  return '<div class=pf3relay>'+L+'<div class=pf3mid>'+trk+'</div>'+R+'</div>';
+  // ONE line (Miguel, 13 Oct 2026, the Career box and the card's track: "u can merge these 2 into 1"): who handed over
+  // and who takes over above it, the whole career under them — this contract bright, the earlier ones soft, a pin per
+  // note / intel / feedback, today, the planned end dashed where a contract ended early.
+  return '<div class=pf3relay2><div class=pf3ppl>'+L+R+'</div>'+pfCareer(K&&K.length?K:[x],feed||[],todayS,x.on)+'</div>';
 }
 // The crew change as one checklist in four steps, with a count. Ticks are set in the contract on the Keyman board
 // (Readiness) and by the sign-off sends; nothing here is typed.
@@ -7362,13 +7361,13 @@ function dcRow(x,exp,k,son,soff,todayS){
 }
 // The career line: every contract on one axis, the planned end dashed where it ended early, a pin for every note,
 // intel card and feedback answer, and today. Read off the profile the page holds — no request.
-function pfCareer(K,feed,todayS){
+function pfCareer(K,feed,todayS,hiOn){
   var on=K.map(function(x){return x.on;}).sort()[0];
   var ends=K.map(function(x){return x.planned&&x.planned>(x.off||'')?x.planned:(x.off||todayS);}).concat([todayS]).sort();
   var t0=dayNum(pfAddMo(on.slice(0,8)+'01',-1)),t1=dayNum(pfAddMo(ends[ends.length-1].slice(0,8)+'01',2));
   var W=Math.max(1,t1-t0),pc=function(iso){return Math.max(0,Math.min(100,(dayNum(iso)-t0)/W*100));};
   var bars=K.map(function(x){var a=pc(x.on),b=pc(x.off||todayS),p=x.planned?pc(x.planned):b;
-    return '<div class=pf2cb style="left:'+a+'%;width:'+Math.max(0.6,b-a)+'%" title="'+escHtml(niceShip(x.ship)+' · '+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open'))+'">'+(b-a>9?escHtml(niceShip(x.ship))+' · '+x.days+' d':'')+'</div>'
+    return '<div class="pf2cb'+(hiOn&&x.on!==hiOn?' dim':'')+'" style="left:'+a+'%;width:'+Math.max(0.6,b-a)+'%" title="'+escHtml(niceShip(x.ship)+' · '+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open'))+'">'+(b-a>9?escHtml(niceShip(x.ship)):'')+'</div>'
       +(x.earlyDays?'<div class=pf2cp style="left:'+b+'%;width:'+Math.max(0,p-b)+'%"></div>':'');}).join('');
   var col={note:'#1E6FD0',comment:'#1E6FD0',intel:'#BC3B2C',feedback:'#7A5BC7',review:'#7A5BC7'};
   var pins=feed.filter(function(f){var d=String(f.at||'').slice(0,10);return d&&dayNum(d)>=t0&&dayNum(d)<=t1;}).map(function(f){var d=String(f.at).slice(0,10);
@@ -7378,8 +7377,8 @@ function pfCareer(K,feed,todayS){
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   for(var g=0;g<80&&dayNum(dt)<=t1;g++){var m=+dt.slice(5,7)-1;if((stepM===1||m%stepM===0)&&pc(dt)<=93)ticks+='<span style="left:'+pc(dt)+'%">'+(stepM===12?dt.slice(0,4):(MN[m]+(m===0||g===0?' '+dt.slice(0,4):'')))+'</span>';dt=pfAddMo(dt,1);}
   var leg='<span class=pf2lg><i style="background:#2E9E5B"></i>Aboard</span><span class=pf2lg><i class=dash></i>Was planned</span><span class=pf2lg><i style="background:#7A5BC7;border-radius:50%"></i>Feedback</span><span class=pf2lg><i style="background:#BC3B2C;border-radius:50%"></i>Intel</span><span class=pf2lg><i style="background:#1E6FD0;border-radius:50%"></i>Note</span>';
-  return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">Career</span><span class=pf2mut>'+K.length+' contract'+(K.length===1?'':'s')+'</span><span class=pf2lgs>'+leg+'</span></div>'
-    +'<div class=pf2tl>'+bars+pins+'<b class=pf2today style="left:'+pc(todayS)+'%"><em>Today</em></b><div class=pf2ax>'+ticks+'</div></div></div>';
+  return '<div class=pf3career><div class=pf2tl>'+bars+pins+'<b class=pf2today style="left:'+pc(todayS)+'%"><em>Today</em></b><div class=pf2ax>'+ticks+'</div></div>'
+    +'<div class=pf2ch style="margin:2px 0 0"><span class=pf2mut>Career · '+K.length+' contract'+(K.length===1?'':'s')+'</span><span class=pf2lgs>'+leg+'</span></div></div>';
 }
 // What people said: who has answered for this seafarer, then every note, comment, intel card, feedback answer and
 // shipboard review, newest first. Intel is narrative, never scored (§10).
@@ -7622,7 +7621,8 @@ async function editCrewModal(id){
     +'<section id=ecs_person><div class=ecsec>Name <span>· as TDG has it</span></div><div class="ecg g3">'+txt('first_name','eFirst','First name')+txt('middle_name','eMid','Middle name')+txt('last_name','eLast','Last name')+'</div>'
     +'<div class="ecg g3">'+dt('dob','eDob','Date of birth',age!==''?age+' years':'')+txt('province','eProv','Province')+'<div class=ecf><label>Crew ID</label><input value="'+iv(c.agency_id)+'" disabled><div class=echint>Locked — the agency id</div></div></div>'
     +'<div class=ecsec>Contact</div><div class="ecg g2">'+txt('phone','ePhone','Mobile',ph.txt?(ph.bad?'<span style="color:var(--amber)">Check the number</span>':'Philippine mobile ✓'):'')+txt('email','eEmail','Email')+'</div>'
-    +'<div class="ecg g2">'+txt('pp_no','ePass','Passport no.')+'<div></div></div></section>'
+    +'<div class="ecg g2">'+txt('pp_no','ePass','Passport no.')+'<div></div></div>'
+    +'<div class=ecsec>Emergency contact <span>· from TDG’s file once it carries the column</span></div><div class="ecg g3">'+txt('emergency_name','eEmName','Name')+txt('emergency_relation','eEmRel','Relationship')+txt('emergency_phone','eEmPh','Phone')+'</div></section>'
     +'<section id=ecs_status><div class=ecsec>Status &amp; ship <span>· TDG’s word, unless you set one</span></div><div class="ecg g2">'
     +fld('status','eStatus','Status',stSel,F.at?'From the TDG file of '+fmtDateS(F.at)+'. Pick another only to correct TDG.':'Pick one only to correct TDG.')
     +fld('vessel_observed','eShip','Ship',shSel,'A plan for a future ship goes on the Keyman board, not here.')+'</div>'
@@ -7664,7 +7664,7 @@ async function saveEditCrew(id){
 // outranks TDG's word (§11) and raised "your manual entry" conflicts at every upload that Rita never made.
 var CREW_EDIT_INIT=null;
 function crewEditBody(id){var v=function(x){var e=document.getElementById(x);return e?e.value:undefined;};var cnt=v('eCount');var er=document.getElementById('eRetired');var sh=document.getElementById('eShip');
-  return {agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:sh?sh.value:undefined,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===undefined?undefined:(cnt===''?null:Number(cnt)),retired:er?(er.checked?1:0):undefined};}
+  return {agency_id:id,first_name:v('eFirst'),middle_name:v('eMid'),last_name:v('eLast'),province:v('eProv'),phone:v('ePhone'),email:v('eEmail'),emergency_name:v('eEmName'),emergency_relation:v('eEmRel'),emergency_phone:v('eEmPh'),pp_no:v('ePass'),status:v('eStatus'),vessel_observed:sh?sh.value:undefined,dob:v('eDob'),med_exp:v('eMed'),sirb_exp:v('eSirb'),pp_exp:v('ePp'),usv_exp:v('eUsv'),sch_exp:v('eSch'),baseline_count:cnt===undefined?undefined:(cnt===''?null:Number(cnt)),retired:er?(er.checked?1:0):undefined};}
 // Hide (void) a crew card — reversible. Removes it from every roster via the server's redacted flag.
 async function hideCrew(id){
   if(!confirm('Hide this crew card?\\n\\nIt will be removed from all rosters (Crew, Dashboard, Keyman, Billing) AND from the timecard roster export. You can bring it back any time from "Hidden cards". Nothing is deleted.'))return;
