@@ -154,3 +154,12 @@ test("the route and the page: one wave, the board's own reads, and the page read
   const page = SRC.slice(SRC.indexOf("var OPS=null,OPS_F='all';"), SRC.indexOf("async function renderDashboard(){"));
   assert.doesNotMatch(page, /fetch\(|sendViaMailer|\/api\/ops\/tdg/, "the dashboard sends nothing");
 });
+
+// Miguel, 14 Oct 2026: "You're not utilizing the space ... you have enough space for you to not double-line". On a wide
+// screen every crew-change row is one line (the countdown beside the date, travel and kit side by side); they stack only
+// below 1180px.
+test("crew-change rows are one line on a wide screen and stack only when narrow", () => {
+  assert.match(SRC, /\.ops \.oc-tk\{display:inline-flex;flex-wrap:nowrap;gap:4px\}/);
+  assert.doesNotMatch(SRC, /\.ops \.oc-w b\{display:block/, "the date and its countdown share the line");
+  assert.match(SRC, /@media \(max-width:1180px\)\{\.ops \.oc-w small\{display:block;margin-left:0\}\.ops \.oc-tk\{flex-wrap:wrap;max-width:150px\}\}/);
+});

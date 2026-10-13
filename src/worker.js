@@ -4193,12 +4193,12 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .ops .oc-cc td{padding:9px 8px;border-bottom:1px solid #F0F3F7;vertical-align:middle;font-size:13px;white-space:nowrap}
 .ops .oc-cc tr.oc-mh td{padding:16px 8px 6px;border-bottom:0;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
 .ops .oc-cc tr.oc-mh.oc-crit td{color:#9B1C1C}.ops .oc-cc tr.oc-gap td{background:#FFF8F8}.ops .oc-cc tr:not(.oc-mh):hover td{background:#F6F8FB}
-.ops .oc-w b{display:block;font-size:13px;line-height:1.2}.ops .oc-w small{display:block;font-size:11.5px;font-weight:600;color:var(--mut);line-height:1.3}
+.ops .oc-w b{font-size:13px;line-height:1.2}.ops .oc-w small{margin-left:8px;font-size:11.5px;font-weight:600;color:var(--mut);line-height:1.3}
 .ops .oc-w small.oc-crit{color:#B42318}.ops .oc-w small.oc-warn{color:#8A5A00}
 .ops .oc-arr{color:#9AA7B8;margin:0 8px}.ops .oc-nob{color:#B42318;font-weight:700}
 .ops .oc-sp{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
 .ops .p-ok{background:#E3F3EA;color:#1F6B3A}.ops .p-bad{background:#FDE7E7;color:#9B1C1C}.ops .p-warn{background:#FDF1DC;color:#8A5A00}.ops .p-mut{background:#EEF1F6;color:var(--mut)}.ops .p-tdg{background:#FFE8D6;color:#8A3D00}
-.ops .oc-nd{color:#B9C3CF}.ops .oc-tk{display:flex;flex-wrap:wrap;gap:4px;max-width:130px}
+.ops .oc-nd{color:#B9C3CF}.ops .oc-tk{display:inline-flex;flex-wrap:nowrap;gap:4px}
 .ops .oc-cc th.act,.ops .oc-cc td.act{text-align:right}
 .ops .oc-link{all:unset;cursor:pointer;color:var(--royal);font-weight:600;font-size:12.5px}.ops .oc-link:hover{text-decoration:underline}.ops .oc-link:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
 .ops .oc-row3{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;align-items:stretch}
@@ -4212,6 +4212,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .ops .oc-item{display:flex;flex-direction:column;gap:3px;padding:11px 13px;border:1px solid var(--line);border-radius:10px}
 .ops .oc-item .t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.ops .oc-item p{margin:0;font-size:12.5px;color:#33465C}
 .ops .oc-bul{position:relative;height:18px;border-radius:5px;background:#EEF1F6}.ops .oc-bul i{position:absolute;left:0;top:3px;bottom:3px;border-radius:3px;background:#1B3A5C}.ops .oc-bul em{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--deep);border-radius:1px}
+/* one line per row on a wide screen (Miguel, 14 Oct 2026: "you have enough space for you to not double-line"); stack only when narrow */
+@media (max-width:1180px){.ops .oc-w small{display:block;margin-left:0}.ops .oc-tk{flex-wrap:wrap;max-width:150px}}
 @media (max-width:820px){.ops .oc-kpi{flex-basis:calc((100% - 12px) / 2);max-width:calc((100% - 12px) / 2)}}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
 .panel h3{font-family:'Outfit';font-size:12.5px;color:var(--navy);margin:0 0 10px;font-weight:700}
