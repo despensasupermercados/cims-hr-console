@@ -189,6 +189,8 @@ export function buildCrewProfile(input) {
       emails: { instructions: sentFor(instr, off, l.ship), link: sentFor(links, off, l.ship), review: review ? { sent: day(review.sent_at || review.created_at), status: review.status || null } : null },
       travel: travelFor(l, off),
       handover: handovers(l, { legs: I.fleetLegs, cards: I.openCards, tdgEarmarks: I.tdgEarmarks, names: I.names, sc }),
+      // why it ended, Rita's word (contract_end, 13 Oct 2026) — HR only, never the bonus
+      end: (() => { const r = A(I.ends).find((x) => x && iso(x.on_key) && near(x.on_key, l.on)); return r ? { reason: r.reason, note: r.note || null, by: whoOf(r.set_by), at: day(r.set_at), onKey: iso(r.on_key) } : null; })(),
     };
   }).reverse();
 
@@ -238,7 +240,7 @@ export function buildCrewProfile(input) {
   // ---- to check: where two sources disagree or something is missing. The console never picks.
   const checks = [];
   const latest = contracts[0] || null;
-  if (latest && latest.earlyDays && !A(I.cards).some((c) => c.end_reason && iso(c.sign_on) && near(c.sign_on, latest.on)))
+  if (latest && latest.earlyDays && !latest.end && !A(I.cards).some((c) => c.end_reason && iso(c.sign_on) && near(c.sign_on, latest.on)))
     checks.push({ key: "end_reason", text: "Why the " + latest.ship + " contract ended " + latest.earlyDays + " days early is not recorded." + (comment ? " The comment says “" + comment.replace(/[.\s]+$/, "") + "”." : "") });
   if (I.grade && count && count.position && normGrade(I.grade) !== normGrade(count.position))
     checks.push({ key: "grade", text: "The console grades " + I.grade + " (" + count.n + " completed contract" + (count.n === 1 ? "" : "s") + "); TDG’s count file says " + count.position + "." });

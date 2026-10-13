@@ -218,6 +218,7 @@ export default {
         if (p === "/api/crew/add"  && request.method === "POST") return apiCrewAdd(request, env, session, ctx);
         if (p === "/api/crew/hide" && request.method === "POST") return apiCrewHide(request, env, session);
         if (p === "/api/crew/notes") return apiCrewNotes(request, env, session, url);
+        if (p === "/api/crew/contract-end" && request.method === "POST") return apiContractEnd(request, env, session);
         if (p === "/api/crew/statement.pdf") return apiStatementPdf(env, url);
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
@@ -1473,6 +1474,8 @@ async function ensureCrewExtrasImpl(env) {
     // bare 500 — prod's activity_log held ZERO crew_add rows. Reference data, idempotent, memoized with
     // the rest of this guard; migrations/0018_agency_manual.sql carries the same row for the record.
     env.DB.prepare("INSERT OR IGNORE INTO agency (id,code,name) VALUES ('agency-man','MAN','Manual entry (CIMS console)')"),
+    // why a contract ended, Rita's word, HR only (13 Oct 2026, migrations/0021_contract_end.sql)
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_end (sc TEXT NOT NULL, on_key TEXT NOT NULL, reason TEXT NOT NULL, note TEXT, set_by TEXT, set_at TEXT NOT NULL, PRIMARY KEY (sc, on_key))"),
   ]);
   // The ALTERs leave together, each alone (a duplicate-column error would abort a batch — they are already there in
   // prod): the manual 'Retired' tag (Rita), and — NOTES ARE ARCHIVED, NEVER DELETED (Miguel, 12 Oct 2026: "archive";
@@ -1588,7 +1591,7 @@ async function apiCrewOne(env, url, session) {
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
   const today = TODAY();
   const none = () => ({ results: [] });
-  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes] = await Promise.all([
+  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes] = await Promise.all([
     env.DB.prepare("SELECT crew.*, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE crew.agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
@@ -1615,6 +1618,7 @@ async function apiCrewOne(env, url, session) {
     fetchOpenAssignments(env).catch(() => []),
     env.DB.prepare("SELECT agency_id, name, vessel FROM registry_snapshot WHERE status='Earmarked'").all().catch(none),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all().catch(none),
+    env.DB.prepare("SELECT on_key, reason, note, set_by, set_at FROM contract_end WHERE sc=?").bind(id).all().catch(none), // why it ended (13 Oct 2026)
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
@@ -1632,7 +1636,7 @@ async function apiCrewOne(env, url, session) {
     edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
     sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
     statusRows: statusRes.results, travel: travelRes.results, activity: actRes.results, instr: instrRes.results, links: linkRes.results,
-    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
+    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
   // `tdg` = the crew row as the last import wrote it, `override` = what a person typed over it: the Edit crew window
   // shows TDG's value under every field someone changed, with Reset to TDG (12 Oct 2026).
@@ -1732,6 +1736,25 @@ async function apiCrewHide(request, env, session) {
   return json({ ok: true, hidden: hide });
 }
 // Timestamped notes log, kept with the crew across every contract. GET ?id= lists; POST adds.
+// WHY A CONTRACT ENDED (Miguel, 13 Oct 2026: "Add 'Resigned' as an end reason?"). Rita picks it on the profile's
+// contract card; one row per crew + contract (on_key = the contract's sign-on), "" clears it. HR only: the bonus never
+// reads it (§1 — assignment.end_reason, which the bonus commit writes from the gates, is untouched) and the crew-facing
+// statement never prints it. Audited in activity_log.
+async function apiContractEnd(request, env, session) {
+  await ensureCrewExtras(env);
+  const b = await request.json().catch(() => ({}));
+  const sc = String(b.agency_id || "").trim(), onKey = String(b.on_key || "").slice(0, 10), reason = String(b.reason || "").trim();
+  if (!sc || !/^\d{4}-\d{2}-\d{2}$/.test(onKey)) return json({ error: "bad_request" }, 400);
+  if (reason && !CONTRACT_END_REASONS.includes(reason)) return json({ error: "unknown_reason", reasons: CONTRACT_END_REASONS }, 400);
+  if (!(await env.DB.prepare("SELECT 1 FROM crew WHERE agency_id=?").bind(sc).first())) return json({ error: "not_found" }, 404);
+  const now = new Date().toISOString(), who = (session && session.email) || null, note = String(b.note || "").trim().slice(0, 500) || null;
+  const write = reason
+    ? env.DB.prepare("INSERT INTO contract_end (sc,on_key,reason,note,set_by,set_at) VALUES (?,?,?,?,?,?) ON CONFLICT(sc,on_key) DO UPDATE SET reason=excluded.reason, note=excluded.note, set_by=excluded.set_by, set_at=excluded.set_at").bind(sc, onKey, reason, note, who, now)
+    : env.DB.prepare("DELETE FROM contract_end WHERE sc=? AND on_key=?").bind(sc, onKey);
+  await env.DB.batch([write, env.DB.prepare("INSERT INTO activity_log (id,user_id,action,detail,at) VALUES (?,?,?,?,?)").bind("act_" + crypto.randomUUID(), who, "contract_end", sc + " " + onKey + " " + (reason || "cleared"), now)]);
+  return json({ ok: true, reason: reason || null });
+}
+const CONTRACT_END_REASONS = ["Completed", "Resigned", "Medical", "Compassionate", "Emergency", "Performance", "Early relief", "Other"];
 async function apiCrewNotes(request, env, session, url) {
   await ensureCrewExtras(env);
   if (request.method === "POST") {
@@ -3958,6 +3981,11 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf3step li.ok{color:var(--ink)}.pf3step li.ok>span{background:var(--green);border-color:var(--green);color:#fff}
 .pf3step li small{display:block;font-size:11px;color:var(--mut)}
 .pf3hint{font-size:12px;color:var(--mut);margin-top:8px}
+.pf3why{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
+.pf3wh{display:flex;align-items:baseline;gap:6px 10px;flex-wrap:wrap;font-size:13px;color:var(--ink)}.pf3wh .pf3l{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
+.pf3wh b{font-family:'Outfit';font-size:15px;color:var(--deep)}.pf3wh small{color:var(--mut);font-size:12px}.pf3wh a{margin-left:auto;font-size:12.5px;font-weight:600;color:var(--royal);text-decoration:none}
+.pf3wh.none>span:nth-child(2){color:var(--amber);font-weight:600}
+.pf3wf{gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}.pf3wf select,.pf3wf input{height:38px;box-sizing:border-box;border:1px solid var(--line-2);border-radius:10px;padding:0 10px;font:14px 'DM Sans',sans-serif;color:var(--ink);background:#fff}.pf3wf input{flex:1 1 220px;min-width:0}
 .pf3mores{margin-top:14px;border-top:1px solid var(--line)}
 .pf3more{border-bottom:1px solid var(--line)}.pf3more summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:42px;cursor:pointer;font-size:13px;font-weight:600;color:var(--deep)}
 .pf3more summary::-webkit-details-marker{display:none}.pf3more summary:before{content:'›';display:inline-block;width:12px;color:var(--mut);font-size:16px;transition:transform .15s}
@@ -7048,6 +7076,7 @@ async function openCrew(id){
   if(off||(last&&last.earlyDays)){
     var why=[];
     if(last&&!last.current&&last.off)why.push('Off '+escHtml(niceShip(last.ship))+' '+fmtDateS(last.off)+(last.earlyDays?(' (planned '+fmtDateS(last.planned)+')'):'')+'.');
+    if(last&&last.end)why.push('Recorded: <b>'+escHtml(last.end.reason)+'</b>'+(last.end.note?' — '+escHtml(String(last.end.note).replace(/[.\\s]+$/,'')):'')+'.');
     var cm=(PE.feed||[]).filter(function(x){return x.kind==='note'||x.kind==='comment';})[0];
     if(cm)why.push((cm.who?escHtml(cm.who)+'’s note':'Note')+' <b>“'+escHtml(String(cm.text).slice(0,120))+'”</b> ('+fmtDateS(cm.at)+').');
     var it=(PE.feed||[]).filter(function(x){return x.kind==='intel';})[0];
@@ -7138,8 +7167,8 @@ function pfContract(x,isCur,todayS){
   if(x.held)st=['red','Past the sign-off · TDG still has them aboard'];
   else if(isCur&&off&&off<todayS)st=['red','Past the projected sign-off'];
   else if(isCur)st=['green','Aboard · day '+x.days+' of '+x.plannedDays];
-  else if(x.earlyDays)st=['red','Ended '+x.earlyDays+' days early'];
-  else st=['grey','Signed off '+fmtDateS(off)];
+  else if(x.earlyDays)st=['red','Ended '+x.earlyDays+' days early'+(x.end?' · '+x.end.reason:'')];
+  else st=['grey','Signed off '+fmtDateS(off)+(x.end?' · '+x.end.reason:'')];
   var ports=[x.embark?pfPort(x.embark):'',x.disembark?pfPort(x.disembark):''];
   var route=ports[0]||ports[1]?escHtml((ports[0]||'?')+' → '+(ports[1]||'?')):'Ports not on file';
   var h='<div class="pfsec pf3">'
@@ -7160,6 +7189,7 @@ function pfContract(x,isCur,todayS){
       :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):(x.days+' days'))+'</span>'))
     +fact(isCur?'Signs off at':'Signed off at',ports[1]?escHtml(ports[1]):'<span class=pf3na>Not on file</span>','<span class=pf3sub>'+(ports[0]?'joined at '+escHtml(ports[0]):'joining port not on file')+'</span>')
     +'</div>';
+  if(!isCur&&off&&off<=todayS)h+=pfWhy(x);
   var cc=pfCrewChange(x,isCur,todayS);
   if(isCur)h+=cc.html;
   var more=[];
@@ -7168,6 +7198,32 @@ function pfContract(x,isCur,todayS){
   var tot=T.reduce(function(s,t){return s+(+t.total||0);},0);
   more.push('<details class=pf3more><summary><span>Travel</span><em>'+(T.length?'$'+tot.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'None recorded')+'</em></summary>'+pfTravel(T)+'</details>');
   return h+'<div class=pf3mores>'+more.join('')+'</div></div>';
+}
+// WHY IT ENDED (Miguel, 13 Oct 2026: "Add 'Resigned' as an end reason?"). On an ended contract, Rita's word on why —
+// picked from one list, a note, who and when; Change / Clear. HR only: never the bonus, never the crew's statement.
+var PF_END_REASONS=['Completed','Resigned','Medical','Compassionate','Emergency','Performance','Early relief','Other'];
+function pfWhy(x){
+  var E=x.end;
+  var form='<div class=pf3wf id=pf3wf style="display:none"><select id=pf3wr aria-label="Why it ended"><option value="">Pick a reason…</option>'
+    +PF_END_REASONS.map(function(r){return '<option'+(E&&E.reason===r?' selected':'')+'>'+r+'</option>';}).join('')+'</select>'
+    +'<input id=pf3wn maxlength=500 placeholder="What happened (optional)" value="'+escHtml((E&&E.note)||'')+'">'
+    +'<button class="btn ecsave" data-on="'+escHtml(x.on)+'" onclick="pfWhySave(this.dataset.on)">Save</button>'
+    +(E?'<button class="btn ghost" data-on="'+escHtml(x.on)+'" onclick="pfWhySave(this.dataset.on,true)">Clear</button>':'')+'<span id=pf3wm class=pf3hint style="margin:0"></span></div>';
+  var head=E?'<div class=pf3wh><span class=pf3l>Why it ended</span><b>'+escHtml(E.reason)+'</b>'+(E.note?'<span>'+escHtml(E.note)+'</span>':'')
+      +'<small>'+escHtml([E.by,E.at?fmtDateS(E.at):''].filter(Boolean).join(' · '))+'</small><a href="#" onclick="pfWhyOpen();return false">Change</a></div>'
+    :'<div class="pf3wh none"><span class=pf3l>Why it ended</span><span>Not recorded'+(x.earlyDays?' · it ended '+x.earlyDays+' days early':'')+'</span><a href="#" onclick="pfWhyOpen();return false">Record why</a></div>';
+  return '<div class=pf3why>'+head+form+'</div>';
+}
+function pfWhyOpen(){var f=document.getElementById('pf3wf');if(f){f.style.display='flex';var s=document.getElementById('pf3wr');if(s)s.focus();}}
+async function pfWhySave(on,clear){
+  var r=clear?'':((document.getElementById('pf3wr')||{}).value||''),m=document.getElementById('pf3wm');
+  if(!clear&&!r){if(m)m.textContent='Pick a reason.';return;}
+  if(m)m.textContent='Saving…';
+  try{var x=await fetch('/api/crew/contract-end',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:CURRENT_CREW,on_key:on,reason:r,note:clear?'':((document.getElementById('pf3wn')||{}).value||'')})});
+    var j=await x.json().catch(function(){return {};});
+    if(!x.ok||j.error){if(m)m.textContent='Not saved: '+(j.error||('HTTP '+x.status));return;}
+    openCrew(CURRENT_CREW);
+  }catch(e){if(m)m.textContent='Could not save.';}
 }
 // The relay: who handed the seat over, this contract between its two dates (filled to today, or to the sign-off), who
 // takes it next (Miguel, 12 Oct 2026: "show who was before he took over and who is coming after"). Names open profiles.
