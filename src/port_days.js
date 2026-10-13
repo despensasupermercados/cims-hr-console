@@ -1,3 +1,4 @@
+import { shareInflight } from "./inflight.js";
 // port_days.js — the itinerary rows a board actually needs (2026-09-15).
 //
 // vessel_port_day holds one row per ship per day for ~2.5 years (40,553 rows on prod, ~5 MB as a
@@ -77,6 +78,11 @@ export async function fetchShipTurnarounds(env, ship, around) {
 
 // One flat, de-duplicated list in the shape groupPortDays()/resolveCity() expect.
 export async function fetchBoardPortDays(env) {
+  // The board and the relief board read these together: one read in flight serves both (inflight.js), rows copied.
+  const rows = await shareInflight(env.DB, "board_port_days", () => fetchBoardPortDaysUncached(env));
+  return rows.map((r) => ({ ...r }));
+}
+async function fetchBoardPortDaysUncached(env) {
   const [a, b, c] = await Promise.all([
     env.DB.prepare(PORT_DAYS_CONTRACTS_SQL).all(),
     env.DB.prepare(PORT_DAYS_ASSIGNMENTS_SQL).all(),

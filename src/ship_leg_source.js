@@ -26,9 +26,9 @@ const BRAND_SHORT = {
 // board with no error shown — boardLegs now fails loud on null instead.
 export async function boardSource(env) {
   try {
-    const r = await env.DB.prepare(
+    const r = await shareInflight(env.DB, "board_source", () => env.DB.prepare(
       "SELECT value FROM app_config WHERE key='board_source'"
-    ).first();
+    ).first());
     return r && r.value ? r.value : "ship_history";
   } catch {
     return null;
@@ -306,6 +306,7 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 // -----------------------------------------------------------------------------
 import { snapToTurnaround, turnaroundsByShip } from "./turnaround.js";
 import { fetchTurnarounds } from "./port_days.js";
+import { shareInflight } from "./inflight.js";
 export const CONTRACT_MONTHS = 7;
 export const AZAMARA_CONTRACT_MONTHS = 5;
 const SHIP_KEYS = buildShipKeys(VESSEL_REF);
@@ -481,6 +482,15 @@ export function foldCounterHistory(counterLegs, registryLegs) {
 // Board legs from the database — the file's schedule first (legsFromRegistry), the Counter folded in as
 // history, then crew aboard per the relief board. All reads fire together (one wave, CLAUDE.md §12).
 export async function boardLegsFromDb(env, today) {
+  // Two requests computing the schedule at the same moment share ONE computation (inflight.js); each gets its own copy
+  // of the array and of every leg, so a caller that annotates a leg never reaches the other (the turnarounds map,
+  // read-only, rides on the copy as before).
+  const shared = await shareInflight(env.DB, "boardLegs|" + today, () => boardLegsFromDbUncached(env, today));
+  const out = shared.map((l) => ({ ...l }));
+  Object.defineProperty(out, "turnarounds", { value: shared.turnarounds, enumerable: false });
+  return out;
+}
+async function boardLegsFromDbUncached(env, today) {
   const [legs, asg, ended, recMap, rows, edits, counter, open, vessels, taRows] = await Promise.all([
     legsFromCounter(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
     fetchRegistryRows(env), fetchContractEdits(env), fetchCounterKeys(env), fetchOpenAssignments(env), fetchVesselBrands(env),
