@@ -4586,7 +4586,13 @@ function cachedJson(url,rerender0){
 // every non-GET call to /api/ empties the cache as it completes — so any save written in future is
 // covered without anyone remembering this rule. The shim runs before the caller's own continuation,
 // which is what guarantees the re-render that follows a save reads from the network.
-function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; }
+function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; prefetchTabs(2500); }
+// PREFETCH (13 Oct 2026, Miguel: "going from tab to tab takes a lot"): once the first tab has painted, the other tabs' reads
+// leave one at a time, so a tab switch paints from the cache (cachedJson) and revalidates behind the paint instead of
+// waiting a full request. After a write empties the cache the same warm-up runs again, debounced, behind the current
+// tab's own refetch. A hidden page warms nothing.
+var PREFETCH_URLS=['/api/dashboard','/api/crew','/api/rotation','/api/relief/board','/api/contracts'];
+function prefetchTabs(delay){clearTimeout(window._pfT);window._pfT=setTimeout(function(){if(document.hidden)return;var i=0;(function next(){if(i>=PREFETCH_URLS.length)return;var u=PREFETCH_URLS[i++],e=API_CACHE[u];if(e&&(e.data||e.inflight)){next();return;}cachedJson(u).catch(function(){}).then(function(){setTimeout(next,250);});})();},delay||800);}
 (function(){
   var _f=window.fetch;
   window.fetch=function(u,o){
@@ -8330,5 +8336,6 @@ function mClose(){$('#modalRoot').innerHTML='';}
 function tgFlip(id){var c=document.getElementById(id);if(!c)return;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
 try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
 show(tabFromHash());
+prefetchTabs(1200);
 </script>
 <div id=modalRoot></div></body></html>`;
