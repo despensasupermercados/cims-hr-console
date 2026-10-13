@@ -13,32 +13,38 @@
 // run together in the board's wave. The Azamara sign-off projection in the relief board needs the
 // FUTURE turnarounds of the four Azamara hulls (relief_api.js AZAMARA_MONTHS): that is its own small
 // query. Pinned by test/port_days.test.js (real SQLite) and test/perf_invariants.test.js.
+// THE JOIN ORDER (13 Oct 2026, "it appears that is getting slower"): D1 timed each of these at ~70ms reading ~190,000
+// rows on EVERY board read — SQLite put the 40k-row itinerary in the outer loop (its primary key leads with brand,
+// which these never filter on) and probed the date list per row. The date list (a few hundred rows) is now the
+// outer loop by CROSS JOIN (SQLite never reorders one) and each date seeks idx_vpd_ship_date (ship_short,
+// berth_date) — migrations/0023: ~4ms, the same rows. The index is REQUIRED for this order (without it every date
+// would scan the table), so ensurePortDayIndexes creates it on any database that lacks it.
 const COLS = "v.brand, v.ship_short, v.berth_date, v.port_name, v.is_sea, v.is_turnaround";
 const JOIN = "ON x.s IS NOT NULL AND x.d IS NOT NULL AND v.ship_short = x.s AND v.berth_date BETWEEN date(x.d,'-1 day') AND date(x.d,'+1 day')";
 
 // Counter contracts + Rita's contract edits (ship names are the short vessel name in both).
 export const PORT_DAYS_CONTRACTS_SQL =
-  `SELECT DISTINCT ${COLS} FROM vessel_port_day v JOIN (
+  `SELECT DISTINCT ${COLS} FROM (
      SELECT ship AS s, sign_on AS d FROM keyman_contract3
      UNION SELECT ship, proj_off FROM keyman_contract3
      UNION SELECT ship, act_off FROM keyman_contract3
      UNION SELECT ship, sign_on FROM contract_edit
      UNION SELECT ship, sign_off FROM contract_edit
-   ) x ${JOIN}`;
+   ) x CROSS JOIN vessel_port_day v ${JOIN}`;
 // The relief board's assignments (open and ended) + the ship_leg snapshot (port memory / orphans).
 export const PORT_DAYS_ASSIGNMENTS_SQL =
-  `SELECT DISTINCT ${COLS} FROM vessel_port_day v JOIN (
+  `SELECT DISTINCT ${COLS} FROM (
      SELECT COALESCE(ve.name, a.vessel_name) AS s, a.sign_on AS d FROM assignment a LEFT JOIN vessel ve ON ve.id = a.vessel_id
      UNION SELECT COALESCE(ve.name, a.vessel_name), a.planned_sign_off FROM assignment a LEFT JOIN vessel ve ON ve.id = a.vessel_id
      UNION SELECT COALESCE(ve.name, a.vessel_name), a.actual_sign_off FROM assignment a LEFT JOIN vessel ve ON ve.id = a.vessel_id
      UNION SELECT ship_short, on_date FROM ship_leg
      UNION SELECT ship_short, off_date FROM ship_leg
-   ) x ${JOIN}`;
+   ) x CROSS JOIN vessel_port_day v ${JOIN}`;
 // Rita's relief overrides (leg_flags.override_off_date, keyed "<brand>|<ship>").
 export const PORT_DAYS_FLAGS_SQL =
-  `SELECT DISTINCT ${COLS} FROM vessel_port_day v JOIN (
+  `SELECT DISTINCT ${COLS} FROM (
      SELECT substr(vessel_key, instr(vessel_key, '|') + 1) AS s, override_off_date AS d FROM leg_flags
-   ) x ${JOIN}`;
+   ) x CROSS JOIN vessel_port_day v ${JOIN}`;
 // Future crew-change ports of the Azamara hulls (their printer sign-off is projected onto one).
 export const AZAMARA_TURNAROUNDS_SQL =
   `SELECT brand, ship_short, berth_date, port_name FROM vessel_port_day

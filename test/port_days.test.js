@@ -99,3 +99,22 @@ test("STATIC GUARD: no reader takes the whole itinerary table any more", () => {
     assert.doesNotMatch(src, /FROM vessel_port_day\s*["`]/, f + " reads vessel_port_day with no WHERE/JOIN — that is the 40k-row scan behind 'takes forever to save'");
   }
 });
+
+// THE JOIN ORDER (13 Oct 2026, "it appears that is getting slower"): D1 timed the two board joins at ~70ms and ~190,000
+// rows read EACH, on every board read — SQLite scanned the itinerary as the outer loop. With the date list outer
+// (CROSS JOIN) and idx_vpd_ship_date: ~3ms and ~1,000 rows on prod, the same rows.
+test("the board's itinerary joins seek the (ship, date) index from the date list, never scan the itinerary", () => {
+  const d = db();
+  const MIG = readFileSync(new URL("../migrations/0023_port_day_indexes.sql", import.meta.url), "utf8");
+  d.exec(MIG);
+  for (const sql of [PORT_DAYS_CONTRACTS_SQL, PORT_DAYS_ASSIGNMENTS_SQL, PORT_DAYS_FLAGS_SQL]) {
+    assert.match(sql, /\) x CROSS JOIN vessel_port_day v ON/, "the date list is the outer loop");
+    const plan = d.prepare("EXPLAIN QUERY PLAN " + sql).all().map((r) => r.detail).join(" | ");
+    assert.match(plan, /SEARCH v USING (COVERING )?INDEX idx_vpd_ship_date \(ship_short=\? AND berth_date>\? AND berth_date<\?\)/, plan);
+    assert.doesNotMatch(plan, /SCAN v\b/, plan);
+  }
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  assert.match(W, /CREATE INDEX IF NOT EXISTS idx_vpd_ship_date ON vessel_port_day \(ship_short, berth_date\)/, "any database that lacks the index gets it");
+  assert.match(W, /if \(session\) \{ await ensurePortDayIndexes\(env\); const rr = await handleRelief/, "the relief board, which runs the same reads, ensures it too");
+  assert.match(MIG, /CREATE INDEX IF NOT EXISTS idx_vpd_turn_date ON vessel_port_day \(berth_date\) WHERE is_turnaround = 1;/);
+});

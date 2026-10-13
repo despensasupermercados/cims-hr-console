@@ -224,7 +224,7 @@ export default {
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
-        if (session) { const rr = await handleRelief(request, url, env); if (rr) return rr; }
+        if (session) { await ensurePortDayIndexes(env); const rr = await handleRelief(request, url, env); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc, dismissed: dismissedEarmarks, markTold: (env, id) => markDeployed(env, id, null, new Date().toISOString()) }); if (ci) return ci; }
         // "Update TG" (17 Aug 2026 per-ship digest to Joy) was removed on 8 Oct 2026 (Miguel: "remove it"): it never sent
         // (TG_NOTIFY unset), and the import review now tells Joy row by row (§10d). The tg_update_run table is left as is.
@@ -1458,6 +1458,14 @@ async function apiDashboard(env) {
 // clientOf (client/brand from a vessel name) lives in ./shipname.js — pure + unit-tested.
 // Manual edits live in crew_override and ALWAYS win over the imported base row.
 // applyOverride + OVR_FIELDS now live in ./override.js (pure + unit-tested).
+// The itinerary indexes the board's port-day reads seek (migrations/0023, port_days.js THE JOIN ORDER). Without
+// idx_vpd_ship_date the CROSS JOIN order would scan the table once per date, so any database that lacks it gets it.
+const ensurePortDayIndexes = memoEnsure(async (env) => {
+  await Promise.all([
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vpd_ship_date ON vessel_port_day (ship_short, berth_date)").run().catch(() => null),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_vpd_turn_date ON vessel_port_day (berth_date) WHERE is_turnaround = 1").run().catch(() => null),
+  ]);
+});
 const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
 // crew.gender (6 Oct 2026): M / F as TDG's file states it. Its own one-statement guard, so it rides in the
 // existing ensure wave of every reader that selects it (§12) without adding a statement to ensureCrewExtras.
@@ -1823,7 +1831,7 @@ async function apiRotation(env) { return json(await rotationSections(env)); }
 async function rotationSections(env) {
   // PERF (2026-07): ensures first (concurrently), then ALL independent reads in one concurrent
   // wave instead of 7 sequential Worker->D1 round trips. Same statements, same downstream logic.
-  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureRegistrySnapshot(env)]);
+  await Promise.all([ensureKeyman(env), ensureReady(env), ensureContractEdit(env), ensureContractCount(env), ensureRegistrySnapshot(env), ensurePortDayIndexes(env)]);
   const today = TODAY();
   const normShip = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const AZ = ["journey", "onward", "quest", "pursuit"];
