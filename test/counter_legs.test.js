@@ -150,7 +150,9 @@ test("relief printers read the board schedule; the backup CSV, the roster export
   // (8 Oct 2026, §10d open item closed for the relief board) the printers are the Keyman board's seats: the ONE
   // schedule (the AdvancedQuery first, the Counter for a crew the file does not date), recorded sign-offs and the
   // held rule already applied there — read inside the relief board's one wave. Behaviour: test/relief_printers.test.js.
-  assert.match(relief, /boardLegsFromDb\(env, today \|\| new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\),\s*\n\s*fetchVesselBrands\(env\),\s*\n\s*\]\);/, "relief printers (read inside the board's one wave)");
+  assert.match(relief, /boardLegsFromDb\(env, today \|\| new Date\(\)\.toISOString\(\)\.slice\(0, 10\)\),\s*\n\s*fetchVesselBrands\(env\),\s*\n/, "relief printers (read inside the board's one wave)");
+  // 13 Oct 2026: the in-force assignments read joined the same wave (it was a second round trip)
+  assert.match(relief, /const \[cfgRow, pd, taRows, flagRes, boardRows, vessels, inForceRes\] = await Promise\.all\(\[/);
   assert.match(relief, /const legs = printerLegsFromBoard\(boardRows, vessels\);/, "the printer legs are the board's seats");
   assert.doesNotMatch(relief, /fetchCurrentCounterLegs/, "relief printers no longer read the Counter alone");
   assert.doesNotMatch(relief, /FROM ship_leg l LEFT JOIN crew c ON c\.id = l\.crew_id\s+WHERE l\.is_current = 1 AND l\.ours = 1/, "relief printers still read the snapshot");

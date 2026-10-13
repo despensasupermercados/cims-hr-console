@@ -40,7 +40,7 @@ const dayN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)
 function spanTxt(on, off) {
   const a = isoD(on), b = isoD(off); if (!a || !b || b < a) return "-";
   let m = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)); let d = +b.slice(8, 10) - +a.slice(8, 10);
-  if (d < 0) { m -= 1; d += new Date(Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, 0)).getUTCDate(); }
+  if (d < 0) { m -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); } // the days left after m whole months from a, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d, never 7 mo -2 d)
   return (m ? m + " mo" : "") + (m && d ? " " : "") + (d || !m ? d + " d" : "");
 }
 // How long a document has left, in words a seafarer reads ("in 1 yr 5 mo", "3 months ago").
@@ -59,9 +59,11 @@ function seaTime(contracts, today) {
   let m = 0, d = 0;
   for (const x of contracts || []) {
     const a = isoD(x.on); if (!a || a > today) continue;
-    const off = isoD(x.act) || (isoD(x.proj) && x.proj < today ? x.proj : null), b = off && off < today ? off : today;
+    // only a RECORDED sign-off ends the time at sea; a running / overdue / held contract (no act) is at sea to today
+    const off = isoD(x.act), b = off && off < today ? off : today;
+    if (b < a) continue; // a sign-off before the sign-on adds nothing (never subtracts)
     let mm = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)), dd = +b.slice(8, 10) - +a.slice(8, 10);
-    if (dd < 0) { mm -= 1; dd += new Date(Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, 0)).getUTCDate(); }
+    if (dd < 0) { mm -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + mm, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); dd = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); }
     m += mm; d += dd;
   }
   m += Math.floor(d / 30); d %= 30;
@@ -72,7 +74,9 @@ const fit = (s, w, size, bold) => { s = String(s == null ? "" : s); if (Pdf.widt
 // Word-wrap to a width; returns lines.
 function wrap(s, w, size, bold) {
   const out = []; let line = "";
-  for (const word of String(s || "").split(/\s+/)) { const t = line ? line + " " + word : word; if (Pdf.width(t, size, bold) > w && line) { out.push(line); line = word; } else line = t; }
+  // A word wider than the column (a URL in a field report) is cut into pieces that fit — it ran off the page (13 Oct 2026).
+  const pieces = (word) => { const p = []; let cur = ""; for (const ch of word) { if (cur && Pdf.width(cur + ch, size, bold) > w) { p.push(cur); cur = ch; } else cur += ch; } if (cur) p.push(cur); return p; };
+  for (const word0 of String(s || "").split(/\s+/)) for (const word of (Pdf.width(word0, size, bold) > w ? pieces(word0) : [word0])) { const t = line ? line + " " + word : word; if (Pdf.width(t, size, bold) > w && line) { out.push(line); line = word; } else line = t; }
   if (line) out.push(line); return out;
 }
 
@@ -103,7 +107,7 @@ export function composeStatement(data) {
   const name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ") || c.agency_id || "Crew";
   const PX = L + 300, PW = R - PX;
   let ns = 22; while (ns > 15 && Pdf.width(name, ns, true) > PX - L - 14) ns -= 1;
-  pdf.textAt(name, L, 104, { size: ns, bold: true, color: NAVY });
+  pdf.textAt(fit(name, PX - L - 14, ns, true), L, 104, { size: ns, bold: true, color: NAVY }); // never under the details box
   const pos = c.rank_override || c.rank_observed || "";
   if (pos) pdf.textAt(pos, L, 134, { size: 9.5, bold: true, color: GINK });
   pdf.textAt((c.agency_id || "") + (c.ship_crew_id ? "  ·  Ship ID " + c.ship_crew_id : ""), L + (pos ? Pdf.width(pos, 9.5, true) + 10 : 0), 134, { size: 9, color: SLATE });

@@ -176,7 +176,8 @@ export function buildCrewProfile(input) {
     const planned = (k && iso(k.proj_off)) || plusMonths(l.on, isAz(l.ship) ? 5 : 7);
     const ended = !l.is_current && !!off && off <= today;
     const earlyBy = ended && planned && offSource !== "projected" ? daysBetween(off, planned) : null;
-    const lastDay = off && off < today ? off : today;
+    // a CURRENT contract (running, overdue or held by TDG's On board) is at sea to today, whatever its passed sign-off says
+    const lastDay = l.is_current ? today : (off && off < today ? off : today);
     const r = e ? { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, on: !!e.on_conf, off: !!e.off_conf, src: "rita" }
       : (l.is_current && I.ready ? { eccr: !!I.ready.eccr, air: !!I.ready.air, hotel: !!I.ready.hotel, on: false, off: false, src: "board" } : null);
     const review = sbmReq.filter((q) => (iso(q.contract_signoff) && off && near(q.contract_signoff, off)) || (iso(q.contract_signon) && near(q.contract_signon, l.on)))
@@ -298,9 +299,11 @@ export function statementContracts(legs, sc, today) {
     .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
   let seaDays = 0;
   const contracts = rows.map((l, i) => {
-    const off = iso(l.off), projected = l.source === "registry" ? (l.offSource || "projected") === "projected" : !!l.is_current;
+    // A CURRENT contract is never "signed off" on the statement: overdue, or held because TDG still has them On board
+    // (§10d HELD) — its passed sign-off is not a recorded one, and its sea days run to today (13 Oct 2026 bug hunt).
+    const off = iso(l.off), projected = !!l.is_current || !!l.heldByFile || (l.source === "registry" && (l.offSource || "projected") === "projected");
     const actual = off && !projected && off <= t;
-    const end = off && off < t ? off : t;
+    const end = l.is_current ? t : (off && off < t ? off : t);
     if (l.on <= end) seaDays += daysBetween(l.on, end);
     const row = { seq: i + 1, ship: l.ship, on: l.on, act: actual ? off : null, proj: actual ? null : off || null };
     if (l.embark || l.disembark) Object.assign(row, { from: l.embark || null, to: l.disembark || null }); // the route, for the PDF (13 Oct 2026)
@@ -325,7 +328,7 @@ export function feedbackFile(profile, today) {
   const K = (Array.isArray(P.contracts) ? P.contracts : []).filter((k) => k && iso(k.on));
   const feed = (P.people && Array.isArray(P.people.feed)) ? P.people.feed : [];
   const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review" };
-  const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.off && k.off < t ? k.off : t)) || null;
+  const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.current ? t : (k.off && k.off < t ? k.off : t))) || null; // a running contract (overdue / held) runs to today
   const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, end: k.end || null }, items: [] }));
   const between = { key: "between", contract: null, items: [] };
   for (const f of feed) {

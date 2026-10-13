@@ -818,6 +818,40 @@ Pinned by `test/bughunt_1008.test.js`.
   the magic link is not single-use (mail scanners would burn it); a name-ladder match whose cruise-line id differs is
   kept (the count file uses PCN ids — Domingo — so a different id is not proof).
 
+## 11d. Invariants from the 13 Oct 2026 review (Miguel: "it appears that is getting slower .. find bugs and fix them right away")
+Measured, not guessed: production's `perf_log`, D1's own timings per statement, and the page in Chromium at 4x CPU.
+Pinned by `test/bughunt_1013.test.js`, `test/port_days.test.js`, `test/turnaround.test.js`.
+- **The itinerary is read by index, the date list outer.** The two board joins in `port_days.js` read ~190,000 rows (~70ms of
+  D1, which runs one query at a time) on EVERY board and relief-board load. Now `FROM (dates) x CROSS JOIN vessel_port_day v`
+  seeks `idx_vpd_ship_date (ship_short, berth_date)`; turnarounds use the partial `idx_vpd_turn_date` (migrations/0023,
+  applied in prod; `ensurePortDayIndexes` on the board and `/api/relief/board`). ~3ms, ~1,000 rows, the same rows. Never
+  drop the index: the CROSS JOIN order without it scans the table once per date.
+- **Smart Placement** (`wrangler.toml [placement] mode = "smart"`): the D1 primary is in Prague; a Worker at the user's colo
+  paid the ocean on every sequential round trip (HKG `/api/crew/get` 2.1s vs VIE 0.85s for the same reads).
+- **The board draws once per render** (the relief data already here goes into the first paint), a chevron folds its ship
+  in place, Search waits 160ms for a pause, `#rotbody>.shipsec` is `content-visibility:auto` (full draw 1,170 -> ~450ms,
+  chevron ~1,000 -> 40ms at 4x CPU). The automation switches keep their state across renders (`applyChromeToggles`).
+- **The page never lets an older answer win**: `openCrew` checks its own `VIEW_GEN` after the reads; the Crew tab's background
+  refresh repaints (`crewRefresh`) and keeps the search; one note per click (`_noteBusy`); the Notes draft survives a chip;
+  one contract modal, one relief overlay; `ganttClose` removes its Esc listener however the view closes; a relief-panel
+  save calls `apiDirty` (an iframe is outside the fetch shim); Maria, previews and dry runs keep the cache (`_ro`).
+  The relief panel saves once (`save._busy`) and the server refuses the same crew twice on one ship on INSERT too.
+- **A contract TDG still has On board is current on the statement**: never "Signed off"/"Completed" for a held or overdue
+  contract (`statementContracts`), and every current contract is at sea to today (profile, statement, crew file).
+- **A span is never negative** (Jul 31 -> Mar 1 = 7 mo 1 d): the days after m whole months, month-end clamped — the email,
+  the PDF and the page (`monthsDaysParts`). The email reads documents against the running contract like its PDF.
+- **Rita's NEXT contract on the hull a crew is aboard** (a future card >= `NEXT_CONTRACT_DAYS` = 90 after the embark) is not an
+  `embark_date` row — the default Accept deleted it.
+- **The Counter folds into the file's contract when they overlap on the hull**; a Counter contract on another hull ends on
+  TDG's embark elsewhere (`endedPerFile`) — sea time no longer counts the same months twice. Board output on 13 Oct data
+  is identical before and after.
+- **Turnarounds are keyed like legs** (`shipKey`): "Celebrity Compass" now snaps.
+- **PDF text**: a word wider than its column is cut, WinAnsi letters (Š, Ž, Œ, €, ™) print as themselves, the name is
+  fitted to its column. Imported names are escaped everywhere the review found them raw.
+- **Left as findings, not changed here** (reported to Miguel): `apiBonusCrew` / `gatherStatement` still make 3-4 sequential
+  trips — they read the bonus count, so a rewrite is his to merge (§1); the bench box vs one-tap start date when a card
+  the file contradicts is hidden; `guard_ms` overstates cold starts; `/api/crew/file.pdf` computes the board twice.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

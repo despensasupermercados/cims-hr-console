@@ -292,18 +292,25 @@ const RB=(()=>{
  function benchTab(t){BTAB=t;drawBench();}
  function drawBench(){const box=$("mbench");if(!box||!BENCH||!BENCH.ok)return;const B=BENCH;const all=(B.ready||[]).map(r=>Object.assign({},r,{out:false})).concat(BTAB==="all"?(B.outside||[]).map(r=>Object.assign({},r,{out:true})):[]);
   const docs=r=>(r.docs||[]).map(d=>d.doc+(d.when==="missing"?" missing":" "+fmtDate(d.exp))).join(", ");
-  const rows=all.map(r=>{const c=CREW.find(x=>x.agency_id===r.sc);const pct=Math.max(4,Math.min(100,Math.round((r.days-42)/140*100)));const from=r.aboardShip?("Off "+r.aboardShip+" "+fmtDate(r.homeFrom)):("Home since "+fmtDate(r.homeFrom)+(r.lastShip?" · "+r.lastShip:""));const w=docs(r);
-   return '<div class="mbr'+(r.out?" out":"")+'"><div class="mbn"><b>'+(r.name||r.sc)+'</b><span>'+from+(r.out?" · over 6 months home":"")+(w?'<em> · '+w+'</em>':"")+'</span></div><div class="mbh'+(r.out?" out":"")+'">'+spanMD(r.homeFrom,B.date)+'<i><b style="width:'+pct+'%"></b></i></div>'+(c?'<button type="button" class="mbp" onclick="RB.pick(\\''+c.id+'\\',\\''+(r.name||"").replace(/'/g,"")+'\\')">Earmark</button>':'')+'</div>';}).join("");
+  const rows=all.map(r=>{const c=CREW.find(x=>x.agency_id===r.sc);const pct=Math.max(4,Math.min(100,Math.round((r.days-42)/140*100)));const from=r.aboardShip?("Off "+rEsc(r.aboardShip)+" "+fmtDate(r.homeFrom)):("Home since "+fmtDate(r.homeFrom)+(r.lastShip?" · "+rEsc(r.lastShip):""));const w=docs(r);
+   return '<div class="mbr'+(r.out?" out":"")+'"><div class="mbn"><b>'+rEsc(r.name||r.sc)+'</b><span>'+from+(r.out?" · over 6 months home":"")+(w?'<em> · '+w+'</em>':"")+'</span></div><div class="mbh'+(r.out?" out":"")+'">'+spanMD(r.homeFrom,B.date)+'<i><b style="width:'+pct+'%"></b></i></div>'+(c?'<button type="button" class="mbp" onclick="RB.pick(\\''+c.id+'\\',\\''+(r.name||"").replace(/'/g,"")+'\\')">Earmark</button>':'')+'</div>';}).join("");
   box.innerHTML='<div class="mb"><div class="mbt"><button type="button" class="'+(BTAB==="ready"?"on":"")+'" onclick="RB.benchTab(\\'ready\\')">Most rested · '+(B.ready||[]).length+'</button><button type="button" class="'+(BTAB==="all"?"on":"")+'" onclick="RB.benchTab(\\'all\\')">Everyone available · '+((B.ready||[]).length+(B.outside||[]).length)+'</button></div><div class="mbl">'+(rows||'<div class="mbe">Nobody is home 6 weeks to 6 months by '+fmtDate(B.date)+' — search below.</div>')+'</div><div class="mbe" style="padding:6px 2px 0">Earmark runs '+fmtDate(B.date)+' → '+fmtDate(B.signOff)+' · the bar is time home on that day, 6 weeks to 6 months.</div></div>';}
- function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+(c.name||c.id)+pickMeta(c)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
+ function filter(){const q=$("mcrew").value.toLowerCase();const hits=CREW.filter(c=>(c.name||"").toLowerCase().includes(q)).slice(0,20);$("mdrop").innerHTML=hits.map(c=>'<div class="opt" onclick="RB.pick(\\''+c.id+'\\',\\''+(c.name||"").replace(/'/g,"")+'\\')">'+rEsc(c.name||c.id)+pickMeta(c)+'</div>').join("")||'<div class="opt" style="color:var(--text-muted)">no match</div>';$("mdrop").style.display="block";}
  function pick(id,name){var c=CREW.find(function(x){return x.id===id;});if(c&&c.planned&&!confirm(name+" already has a projection on "+c.planned+".\\n\\nPlan them here as well?"))return;cur.crew_id=id;if($("mreq"))$("mreq").style.display="none";var _mb=$("mbench");if(_mb){_mb.style.display="none";}docBlock(c?{med_exp:c.med_exp,sirb_exp:c.sirb_exp,pp_exp:c.pp_exp,usv_exp:c.usv_exp,sch_exp:c.sch_exp}:null);$("mcrew").style.display="none";$("mdrop").style.display="none";$("mpicked").style.display="flex";$("mpicked").innerHTML='<b>'+name+'</b>'+(c?pickMeta(c):"");}
  function close(){$("modal").classList.remove("show");if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefClose",changed:_CHG},"*");}catch(e){}}}
  function azTouch(){cur.azTouched=true;}
+ // One save at a time (13 Oct 2026: two quick taps inserted the same earmark twice). Embedded in the board, the panel
+ // closes and the board re-renders: it no longer reloads its own data on the way out.
  async function save(){
+  if(save._busy)return;save._busy=1;const sb=$("msave");if(sb)sb.disabled=true;
+  try{await save1();}finally{save._busy=0;if(sb)sb.disabled=false;}
+ }
+ const reloadIfOwnPage=async()=>{if(window.parent===window)await load();};
+ async function save1(){
   if(cur.readonly){
    const fl={vessel_key:cur.key,crew_name:cur.crewName||"",eccr:cur.tags.eccr?1:0,air:cur.tags.air?1:0,hotel:cur.tags.hotel?1:0,on_date_conf:cur.tags.on_date_conf?1:0,off_date_conf:cur.tags.off_date_conf?1:0};
    var pa=$("pazoff");if(pa&&cur.azTouched){fl.override_off_date=(pa.value==="__auto"?"":pa.value);}
-   try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){_CHG=true;close();await load();}else{alert("Save failed");}}catch(e){alert("network");}
+   try{const r=await fetch("/api/relief/leg-flags",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(fl)});const j=await r.json();if(j&&j.ok){_CHG=true;close();await reloadIfOwnPage();}else{alert("Save failed");}}catch(e){alert("network");}
    return;
   }
   const payload={sign_on:dateVal("on")||null,planned_sign_off:dateVal("off")||null,
@@ -311,13 +318,13 @@ const RB=(()=>{
   if(cur.id){payload.id=cur.id;}
   else{if(!cur.crew_id){alert("Pick a crew member first.");return;}payload.crew_id=cur.crew_id;payload.role=cur.role;payload.vessel_name=$("mship").value;}
   const res=await post(payload);
-  if(res&&res.ok){_CHG=true;close();await load();}else{alert("Save rejected: "+(res&&(res.error||(res.rejected||[]).join(","))||"error"));}
+  if(res&&res.ok){_CHG=true;close();await reloadIfOwnPage();}else{alert("Save rejected: "+(res&&(res.error||(res.rejected||[]).join(","))||"error"));}
  }
  async function post(payload){try{const r=await fetch("/api/relief/save",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});return await r.json();}catch(e){return{ok:false,error:"network"};}}
  async function remove(){
   if(!cur||!cur.id||cur.readonly||cur.role!=="reliever")return;
   if(!confirm("Remove "+(cur.crewName||"this reliever")+" from "+shipName(cur.key)+"? This clears the assignment card."))return;
-  try{const r=await fetch("/api/relief/remove",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:cur.id})});const j=await r.json();if(j&&j.ok){_CHG=true;close();await load();}else{alert("Remove failed: "+((j&&j.error)||"error"));}}catch(e){alert("network");}
+  try{const r=await fetch("/api/relief/remove",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:cur.id})});const j=await r.json();if(j&&j.ok){_CHG=true;close();await reloadIfOwnPage();}else{alert("Remove failed: "+((j&&j.error)||"error"));}}catch(e){alert("network");}
  }
  document.addEventListener("keydown",e=>{if(e.key==="Escape")close();});
  document.getElementById("modal").addEventListener("click",close);

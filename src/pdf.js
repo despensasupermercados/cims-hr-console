@@ -16,13 +16,16 @@ export const MARGIN = 54;
 // Typographic punctuation people type into notes and the AI writes into intel (13 Oct 2026: the crew file prints them)
 // has no WinAnsi byte here; each is spelled in plain Latin-1 instead of turning into "?".
 const PUNCT = { "\u2018": "'", "\u2019": "'", "\u201C": '"', "\u201D": '"', "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u2022": "\u00b7", "\u2192": "->", "\u2190": "<-", "\u2264": "<=", "\u2265": ">=" };
+// The letters and signs WinAnsiEncoding (the fonts' encoding) carries at 0x80-0x9F: written as that byte they print as
+// themselves (13 Oct 2026 bug hunt: "Šimun" printed "?imun"). Only "?" is left for what the font truly cannot print.
+const WIN = { "\u20AC": 0x80, "\u0160": 0x8A, "\u0152": 0x8C, "\u017D": 0x8E, "\u0161": 0x9A, "\u0153": 0x9C, "\u017E": 0x9E, "\u0178": 0x9F, "\u2122": 0x99, "\u2030": 0x89, "\u0192": 0x83 };
 function latin1(s) {
   let o = "";
   for (const ch0 of String(s == null ? "" : s)) {
     const ch = PUNCT[ch0] || ch0;
     if (ch.length > 1) { o += ch; continue; }
     const c = ch.codePointAt(0);
-    o += c <= 255 ? ch : "?";
+    o += c <= 255 ? ch : (WIN[ch] != null ? String.fromCharCode(WIN[ch]) : "?");
   }
   return o;
 }

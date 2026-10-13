@@ -266,7 +266,9 @@ test("a tab you have already opened paints from the last answer and revalidates 
   assert.match(fn, /return Promise\.resolve\(e\.data\);/, "the remembered answer is returned at once");
   assert.match(fn, /if\(changed&&rerender\)/, "re-render only when the fresh answer actually differs");
   assert.match(fn, /err\.status=r\.status/, "an HTTP failure keeps its status: the board banner reports it (§11)");
-  for (const t of ["renderDashboard", "renderCrew", "renderContracts", "renderFleet", "renderTravel"]) {
+  // 13 Oct 2026: the Crew tab revalidates into crewRefresh (repaints the list, keeps the search and filters) — a refresh
+  // that re-opened the tab wiped what Rita was typing.
+  for (const t of ["renderDashboard", "crewRefresh", "renderContracts", "renderFleet", "renderTravel"]) {
     assert.match(SRC, new RegExp("cachedJson\\('/api/[a-z/]+'," + t + "\\)"), t + " still refetches from scratch on every visit");
   }
 });
@@ -274,5 +276,7 @@ test("a tab you have already opened paints from the last answer and revalidates 
 test("a write empties the read cache, so a save is never answered from memory", () => {
   assert.match(SRC, /function apiDirty\(\)\{ for\(var k in API_CACHE\) delete API_CACHE\[k\]; \}/);
   // one shim instead of a list of save paths that someone has to keep in sync
-  assert.match(SRC, /if\(m!=='GET'&&typeof u==='string'&&u\.indexOf\('\/api\/'\)===0\)p\.then\(apiDirty,function\(\)\{\}\);/);
+  // 13 Oct 2026: a POST that changes nothing (Maria, a preview, a dry run) keeps the cache; every other write empties it.
+  assert.match(SRC, /if\(m!=='GET'&&!_ro&&typeof u==='string'&&u\.indexOf\('\/api\/'\)===0\)p\.then\(apiDirty,function\(\)\{\}\);/);
+  assert.match(SRC, /var _ro=typeof u==='string'&&\(\/\^\\\\\/api\\\\\/\(ask\|maria\\\\\/\|keyman\\\\\/deploy\\\\\/preview\)\//, "only Maria, previews and dry runs are read-only");
 });

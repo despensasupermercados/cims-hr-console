@@ -115,6 +115,6 @@ test("the board's itinerary joins seek the (ship, date) index from the date list
   }
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   assert.match(W, /CREATE INDEX IF NOT EXISTS idx_vpd_ship_date ON vessel_port_day \(ship_short, berth_date\)/, "any database that lacks the index gets it");
-  assert.match(W, /if \(session\) \{ await ensurePortDayIndexes\(env\); const rr = await handleRelief/, "the relief board, which runs the same reads, ensures it too");
+  assert.match(W, /if \(session\) \{ if \(p === "\/api\/relief\/board"\) await ensurePortDayIndexes\(env\); const rr = await handleRelief/, "the relief board, which runs the same reads, ensures it too");
   assert.match(MIG, /CREATE INDEX IF NOT EXISTS idx_vpd_turn_date ON vessel_port_day \(berth_date\) WHERE is_turnaround = 1;/);
 });
