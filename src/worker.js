@@ -3976,6 +3976,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf3step li.ok{color:var(--ink)}.pf3step li.ok>span{background:var(--green);border-color:var(--green);color:#fff}
 .pf3step li small{display:block;font-size:11px;color:var(--mut)}
 .pf3hint{font-size:12px;color:var(--mut);margin-top:8px}
+.pf3wide{margin-top:12px}.pf3wide .pf3relay2{margin-top:18px}.pf3wide .pf2tl{height:78px}
 .pf3relay2{margin:16px 0 4px}.pf3ppl{display:flex;justify-content:space-between;align-items:center;gap:10px 16px;flex-wrap:wrap}.pf3ppl .pf3p.next{margin-left:auto}
 .pf3career{margin-top:4px}.pf3career .pf2tl{margin-top:2px}.pf2cb.dim{background:#A8D5B8;color:#1F5E3A}
 .pf3why{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:10px 14px}
@@ -7085,11 +7086,12 @@ async function openCrew(id){
       +'<div class=pf2bx><button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Add note</button><button class="btn ghost" onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Change status…</button></div></div>';
   }
   // 4 · the career line
-  // the career line lives in the contract card now (13 Oct 2026: one line, not two)
+  // The contract card runs the FULL page width, right under the top card (Miguel, 13 Oct 2026: "the width of the page u
+  // built .. is too small. perhaps below the main or top card"); the career line lives inside it (one line, not two).
+  if(last)h+=pfContract(last,cur===last,todayS,K,PE.feed||[]).replace('class="pfsec pf3"','class="pfsec pf3 pf3wide"');
   // left column: the last contract, what people said, bonus
   var left='',right='';
-  if(last)left+=pfContract(last,cur===last,todayS,K,PE.feed||[]);
-  else left+='<div class="pfsec one"><div class=pflbl>Contracts <span>· none on file</span></div></div>';
+  if(!last)left+='<div class="pfsec one"><div class=pflbl>Contracts <span>· none on file</span></div></div>';
   if(K.length>1)left+='<div class=pfsec><div class=pflbl>Earlier contracts <span>· '+(K.length-1)+'</span></div>'+K.slice(1).map(function(x){return '<div class=pf2er><b>'+escHtml(niceShip(x.ship))+'</b><span>'+fmtDateS(x.on)+' → '+(x.off?fmtDateS(x.off):'open')+'</span><span>'+spanCompact(x.on,x.off||todayS)+'</span>'+pfSrc(x.offSource==='counter'?'counter':(x.offSource==='projected'?'projected':(x.offSource==='rita'||x.offSource==='card'?'typed':'tdg')))+(x.earlyDays?'<span class="cchip red">'+x.earlyDays+' d early</span>':'')+'</div>';}).join('')+'</div>';
   left+=pfPeople(PE,c.agency_id);
   if(bz&&!bz.error){
