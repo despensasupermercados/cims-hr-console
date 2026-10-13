@@ -874,3 +874,8 @@ The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRI
   in prod D1 before shipping (a failing one would cost a trip, not correctness). Sim at 40ms/trip: a Keyman load 38 trips /
   1.6s → 1–3 trips / ~0.2s. Pinned by `test/d1batch.test.js`. The sim harness's `batch` must answer like D1 (rows for a
   SELECT), or the fallback path is what you measure.
+- **The tabs are prefetched after boot** (PR #217, 13 Oct 2026): 1.2s after the first paint the page warms
+  `/api/dashboard`, `/api/crew`, `/api/rotation`, `/api/relief/board`, `/api/contracts` ONE AT A TIME, 250ms apart, through
+  `cachedJson` (`prefetchTabs`, `PREFETCH_URLS`), so a tab switch paints from memory and revalidates behind the paint (the
+  >2s rule). A URL cached or in flight is skipped, a hidden window warms nothing, and `apiDirty` re-arms it 2.5s after a
+  write (debounced). Sim: Crew 33ms, Keyman 47ms. Never make the prefetch a burst, and never put a write on the list.
