@@ -98,7 +98,9 @@ test("happy path: manual invite sends once, files a 'sent' row, returns recipien
   assert.equal(state.requests.length, 1);
   assert.equal(state.requests[0].status, "sent");
   assert.equal(state.requests[0].contract_signoff, "2026-08-01");
-  assert.doesNotMatch(JSON.stringify(sent[0]).toLowerCase(), /bonus|seval|gate|payout/);
+  // The GSM is never told this feeds a bonus — checked over the email's WORDS. The signed link's signature is random
+  // per run (the request id is a UUID) and once spelled "...gatep6..." (CI, 13 Oct 2026), so the token is masked first.
+  assert.doesNotMatch(JSON.stringify(sent[0]).toLowerCase().replace(/sbm\?t=[a-z0-9_.-]+/g, "sbm?t=TOKEN"), /bonus|seval|gate|payout/);
 });
 
 test("contract_edit override wins for ship + sign-off date", async () => {
