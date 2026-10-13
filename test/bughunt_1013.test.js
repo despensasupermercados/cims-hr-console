@@ -59,12 +59,20 @@ test("Rita's NEXT contract on the hull the crew is aboard is not an embark-date 
   assert.equal(earmarkDiscrepancies({ projections: misdated, registry, today, shipOf }).items[0].kind, "embark_date", "an aboard card off the embark is still one");
 });
 
-test("the Counter folds into the file's contract when they overlap on the hull, and ends where TDG has them embarked elsewhere", () => {
-  const reg = [{ sc: "SC-1", ship: "Allure", on: "2026-03-01", off: "2026-10-01", source: "registry", is_current: true }];
-  assert.deepEqual(foldCounterHistory([{ sc: "SC-1", ship: "Allure", on: "2026-03-11", off: "2026-10-11", is_current: true }], reg), [], "10 days off the embark, overlapping: the same contract");
+test("the Counter is NOT folded on overlap — only within ABSORB_DAYS (Miguel's rule); a wider overlap is shown, counted and FLAGGED", () => {
+  // 13 Oct 2026, the triple check: an overlap rule dropped Quiming's Infinity Apr-Oct Counter contract (255 -> 67 sea days)
+  // because TDG's file says embarked Aug 7 — the console reconciling TDG's two files, which §6 / §10b forbid.
+  const reg = [{ sc: "SC-1", ship: "Infinity", on: "2026-08-07", off: "2027-03-07", source: "registry", is_current: true }];
+  const out = foldCounterHistory([{ sc: "SC-1", ship: "Infinity", on: "2026-04-08", off: "2026-10-27", is_current: true }], reg);
+  assert.deepEqual(out.map((h) => [h.ship, h.on, h.off, h.is_current]), [["Infinity", "2026-04-08", "2026-10-27", false]], "kept as history, dates untouched");
+  const prof = buildCrewProfile({ today, crew: { agency_id: "SC-1" }, legs: reg.concat(out.map((h) => ({ ...h, sc: "SC-1", source: "counter" }))) });
+  assert.equal(prof.contracts.length, 2);
+  const flag = prof.checks.find((c) => c.key === "counter_overlap");
+  assert.ok(flag && /Infinity contract from Apr 8, 2026 that overlaps the file’s \(embarked Aug 7, 2026\)/.test(flag.text), flag && flag.text);
+  // a Counter contract on another hull that the file does not name keeps its own dates too (history, never re-dated)
   const reg2 = [{ sc: "SC-1", ship: "Wonder", on: "2026-08-01", off: "2027-03-01", source: "registry", is_current: true }];
   const [h] = foldCounterHistory([{ sc: "SC-1", ship: "Allure", on: "2026-03-01", off: "2026-10-30", is_current: true }], reg2);
-  assert.deepEqual([h.off, h.is_current, h.endedPerFile], ["2026-08-01", false, true]);
+  assert.deepEqual([h.off, h.is_current], ["2026-10-30", false]);
 });
 
 test("the PDF: a word wider than the column is cut, WinAnsi letters print as themselves, a long name never runs under the details box", () => {
