@@ -166,3 +166,33 @@ test("the statement PDF, rebuilt: details for the crew to check, four tiles, the
   for (const t of ["(Fort Lauderdale  to  Fort Lauderdale)", "(Completed)", "(Signed off)", "(Valid)", "(Not held \\(optional\\))", "(Please check this statement.)"]) assert.ok(s.includes(t), t);
   assert.ok(!s.includes("(Bonus paid)"), "nothing paid = no payout table");
 });
+
+// WHY A CONTRACT ENDED (Miguel, 13 Oct 2026: "Add 'Resigned' as an end reason?"): its own record, HR only.
+test("why it ended: contract_end per crew + contract, Rita's pick from one list, never the bonus, never the crew's statement", () => {
+  const b = body("async function apiContractEnd(");
+  assert.match(W, /const CONTRACT_END_REASONS = \["Completed", "Resigned", "Medical", "Compassionate", "Emergency", "Performance", "Early relief", "Other"\];/);
+  assert.match(b, /if \(reason && !CONTRACT_END_REASONS\.includes\(reason\)\) return json\(\{ error: "unknown_reason"/);
+  assert.match(b, /ON CONFLICT\(sc,on_key\) DO UPDATE SET reason=excluded\.reason/);
+  assert.match(b, /: env\.DB\.prepare\("DELETE FROM contract_end WHERE sc=\? AND on_key=\?"\)/, "an empty reason clears it");
+  assert.match(b, /"contract_end", sc \+ " " \+ onKey/, "audited");
+  assert.doesNotMatch(b, /assignment|bonus_outcome/, "the bonus's end_reason is untouched (§1)");
+  assert.match(W, /CREATE TABLE IF NOT EXISTS contract_end \(sc TEXT NOT NULL, on_key TEXT NOT NULL, reason TEXT NOT NULL/);
+  assert.match(readFileSync(new URL("../migrations/0021_contract_end.sql", import.meta.url), "utf8"), /PRIMARY KEY \(sc, on_key\)/);
+  assert.match(W, /SELECT on_key, reason, note, set_by, set_at FROM contract_end WHERE sc=\?/);
+  assert.doesNotMatch(readFileSync(new URL("../src/statement.js", import.meta.url), "utf8"), /contract_end|\.end\.reason|Resigned/, "never on the crew's PDF");
+  assert.doesNotMatch(readFileSync(new URL("../src/emails/hr.statement.v2.js", import.meta.url), "utf8"), /contract_end|Resigned/);
+  assert.doesNotMatch(readFileSync(new URL("../src/bonus.js", import.meta.url), "utf8"), /contract_end/);
+  assert.match(body("function pfContract("), /if\(!isCur&&off&&off<=todayS\)h\+=pfWhy\(x\);/);
+  assert.match(W, /var PF_END_REASONS=\['Completed','Resigned','Medical','Compassionate','Emergency','Performance','Early relief','Other'\];/, "the page's list is the server's");
+});
+
+test("the profile attaches the reason to its contract and the To-check row clears", () => {
+  const legs = [{ sc: "X", ship: "Silhouette", on: "2026-05-02", off: "2026-09-05", source: "registry", offSource: "tdg" }];
+  const counter = [{ seq: 1, ship: "Silhouette", sign_on: "2026-05-02", proj_off: "2026-11-21", act_off: null }];
+  const base = { today: "2026-10-13", crew: { agency_id: "X" }, legs, counter };
+  const before = buildCrewProfile(base);
+  assert.ok(before.checks.some((c) => c.key === "end_reason"), "ended 77 days early, nothing recorded: a row to check");
+  const after = buildCrewProfile({ ...base, ends: [{ on_key: "2026-05-02", reason: "Resigned", note: "Family reasons", set_by: "rita.berenyi@dg3.com", set_at: "2026-10-13T08:00:00Z" }] });
+  assert.deepEqual(after.contracts[0].end, { reason: "Resigned", note: "Family reasons", by: "Rita", at: "2026-10-13", onKey: "2026-05-02" });
+  assert.ok(!after.checks.some((c) => c.key === "end_reason"));
+});
