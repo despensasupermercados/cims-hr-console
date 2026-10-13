@@ -68,6 +68,8 @@ test("UTC basis is used by exactly these functions", () => {
     "apiCrew",
     // 2026-09-15: a ship on the Add-crew form is a projection (same path and day basis as a drop).
     "apiCrewAdd",
+    // 2026-10-13: the internal crew file groups Contract feedback by contract on the board's day (feedbackFile).
+    "apiCrewFilePdf",
     "apiCrewOne",
     "apiDashboard", "apiDataStatus", "apiDaysWorked",
     // 2026-10-07: rejecting a TDG earmark dates the notice to Joy by the board's day.

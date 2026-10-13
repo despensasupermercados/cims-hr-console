@@ -88,9 +88,11 @@ export function handovers(c, { legs, cards, tdgEarmarks, names, sc } = {}) {
   }
   const after = [];
   for (const l of (legs || [])) if (l && l.sc && l.sc !== sc && key(l.ship) === k && iso(l.on) && l.on > c.on && daysBetween(c.on, l.on) > 14)
-    after.push({ sc: l.sc, name: nm(l.sc, l.name), on: l.on, src: legSrc(l) });
+    after.push({ sc: l.sc, name: nm(l.sc, l.name), on: l.on, off: iso(l.off) || null, src: legSrc(l) });
   for (const a of (cards || [])) if (a && a.sc && a.sc !== sc && a.ship && key(a.ship) === k && iso(a.sign_on) && a.sign_on > c.on && daysBetween(c.on, a.sign_on) > 14 && !after.some((x) => x.sc === a.sc))
-    after.push({ sc: a.sc, name: nm(a.sc, a.crew_name), on: iso(a.sign_on), src: "earmark", told: !!a.deployed_at });
+    after.push({ sc: a.sc, name: nm(a.sc, a.crew_name), on: iso(a.sign_on), off: iso(a.planned_sign_off) || null, src: "earmark", told: !!a.deployed_at,
+      // TDG's file earmarks the same crew for this hull too: "EARMARK · TDG" on the board, so "in TDG" here (13 Oct 2026)
+      tdg: (tdgEarmarks || []).some((r) => r && r.agency_id === a.sc && r.vessel && key(r.vessel) === k) });
   after.sort((a, b) => (a.on < b.on ? -1 : 1));
   let next = after[0] || null;
   if (!next) { const t = (tdgEarmarks || []).find((r) => r && r.agency_id !== sc && r.vessel && key(r.vessel) === k); if (t) next = { sc: t.agency_id, name: nm(t.agency_id, t.name), on: null, src: "tdg_earmark" }; }
@@ -305,4 +307,48 @@ export function statementContracts(legs, sc, today) {
     return row;
   });
   return { contracts, seaDays };
+}
+
+// CONTRACT FEEDBACK for the internal crew file PDF (Miguel, 13 Oct 2026: "the PDF should include this also in a clean
+// page .. as Contract feedback .. should display the entire historical data .. not just the contract that just ended").
+// Everything said about the seafarer — notes, field intel (the full report), feedback answers (every role, superseded
+// ones kept and marked), shipboard reviews — grouped under the contract it falls in (newest contract first, items newest
+// first), the rest under "Between contracts". Archived notes are already out of the feed. Pure: (profile, today) => file.
+export const FB_LABEL = {
+  order: "Rush order", rushcause: "Rush cause", rushcost: "Rush cost (USD)", ontime: "Orders on time", acc: "Order accuracy",
+  par: "Par at handover", audit: "Failed end-of-contract audit", clean: "PROD service", pm: "MFD service",
+  unres: "Information / database knowledge", assessed: "Assessed this contract", mono: "Mono click %", inv: "Inventory",
+  tech: "Technical", overall: "Overall impression",
+};
+export function feedbackFile(profile, today) {
+  const P = profile || {}, t = iso(today) || new Date().toISOString().slice(0, 10);
+  const K = (Array.isArray(P.contracts) ? P.contracts : []).filter((k) => k && iso(k.on));
+  const feed = (P.people && Array.isArray(P.people.feed)) ? P.people.feed : [];
+  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review" };
+  const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.off && k.off < t ? k.off : t)) || null;
+  const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, end: k.end || null }, items: [] }));
+  const between = { key: "between", contract: null, items: [] };
+  for (const f of feed) {
+    const d = day(f.at); if (!d) continue;
+    const k = groupOf(d);
+    const item = { at: d, kind: f.kind, label: KIND[f.kind] || f.kind, who: f.who || null, lines: [], tags: [], superseded: !!f.superseded };
+    if (f.kind === "intel") {
+      item.lines = (Array.isArray(f.parts) && f.parts.length ? f.parts : [{ label: null, text: f.text }]).map((p) => ({ label: p.label || null, text: String(p.text || "") }));
+      item.meta = [f.via ? "by " + f.via : "", f.confidence ? f.confidence + " match" : ""].filter(Boolean).join(" · ");
+    } else if (f.kind === "feedback") {
+      const a = f.answers || {};
+      item.tags = Object.keys(a).filter((x) => x !== "note" && a[x] !== "" && a[x] != null).map((x) => [FB_LABEL[x] || x, String(a[x])]);
+      if (a.note) item.lines = [{ label: null, text: String(a.note) }];
+    } else if (f.kind === "review") {
+      item.tags = f.rating != null ? [["Rating", f.rating + "/5"]] : [];
+      if (f.ship) item.tags.push(["Ship", f.ship]);
+      if (f.text) item.lines = [{ label: null, text: String(f.text) }];
+    } else item.lines = [{ label: null, text: String(f.text || "") }];
+    (k ? groups.find((g) => g.key === k.on) : between).items.push(item);
+  }
+  for (const g of groups.concat([between])) g.items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  const out = groups.filter((g) => g.items.length || g.contract.current);
+  if (between.items.length) out.push(between);
+  const slots = (P.people && Array.isArray(P.people.slots)) ? P.people.slots.map((s) => ({ label: String(s.label || "").split(" · ")[0], state: s.state, at: day(s.at) })) : [];
+  return { groups: out, slots, total: feed.length };
 }

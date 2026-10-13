@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { statementEmail, docLines, span, fmtDate, TEMPLATE_ID } from "../src/emails/hr.statement.v2.js";
 import { composeStatement } from "../src/statement.js";
-import { buildCrewProfile } from "../src/crew_profile.js";
+import { buildCrewProfile, feedbackFile } from "../src/crew_profile.js";
 
 const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 const body = (name) => { const i = W.indexOf(name); assert.notEqual(i, -1, name); const r = W.slice(i + name.length); const j = r.search(/\n(?:async )?function \w+\(/); return r.slice(0, j); };
@@ -117,7 +117,8 @@ test("the contract card: header + state, the relay, four facts with sources, ONE
   assert.match(b, /<summary><span>Travel<\/span>/);
   const cc = body("function pfCrewChange(");
   for (const s of ["'Reliever'", "'Dates'", "'Travel'", "'Sign-off'", "'Planned'", "'In TDG'", "'Sign-on confirmed'", "'Sign-off confirmed'", "'ECCR'", "'Flight'", "'Hotel'", "'Instructions'", "'Sign-off link'", "'Ship review'"]) assert.ok(cc.includes(s), s);
-  assert.match(cc, /var inTdg=!!a&&\(a\.src==='tdg'\|\|a\.src==='tdg_earmark'\);/, "a console earmark told to Joy is not yet in TDG");
+  // a console earmark told to Joy is not yet in TDG; one TDG's file also earmarks for the hull is (13 Oct 2026, a.tdg)
+  assert.match(cc, /var inTdg=!!a&&\(a\.src==='tdg'\|\|a\.src==='tdg_earmark'\|\|!!a\.tdg\);/, "a console earmark told to Joy is not yet in TDG");
   assert.match(W, /<span>No reliever yet<\/span><small>Earmark one on the Keyman board<\/small>/);
   assert.doesNotMatch(W, /class="pf3p next none warn"/, "the page's global .warn box class is never reused");
 });
@@ -156,7 +157,7 @@ test("the status history is one span per word: the same word from upload after u
 
 test("the statement PDF, rebuilt: details for the crew to check, four tiles, the contract feature, striped tables with pills, one page", () => {
   const S = readFileSync(new URL("../src/statement.js", import.meta.url), "utf8");
-  for (const s of ['"YOUR DETAILS ON FILE  \\u00b7  PLEASE CHECK"', '"CURRENT CONTRACT" : "LAST CONTRACT"', '"Completed contracts"', '"Days at sea"', '"Documents valid"', '"Bonus count"', '"Please check this statement."', '"Bonus paid"'])
+  for (const s of ['"YOUR DETAILS ON FILE  \\u00b7  PLEASE CHECK"', '"CURRENT CONTRACT" : "LAST CONTRACT"', '"Completed contracts"', '"Time at sea"', '"Documents valid"', '"Bonus count"', '"Please check this statement."', '"Bonus paid"'])
     assert.ok(S.includes(s) || S.includes(s.replace("\\u00b7", "·")), s);
   const bytes = composeStatement({ crew: { ...JAMES, rank_observed: "Junior Printer Specialist", pp_no: "P6005315C", pp_place: "DFA - San Pablo" },
     contracts: [{ seq: 1, ship: "Silhouette", on: "2026-05-02", act: "2026-09-05", proj: null, from: "FORT LAUDERDALE, FLORIDA", to: "FORT LAUDERDALE, FLORIDA" }], daysWorked: 126,
@@ -179,7 +180,9 @@ test("why it ended: contract_end per crew + contract, Rita's pick from one list,
   assert.match(W, /CREATE TABLE IF NOT EXISTS contract_end \(sc TEXT NOT NULL, on_key TEXT NOT NULL, reason TEXT NOT NULL/);
   assert.match(readFileSync(new URL("../migrations/0021_contract_end.sql", import.meta.url), "utf8"), /PRIMARY KEY \(sc, on_key\)/);
   assert.match(W, /SELECT on_key, reason, note, set_by, set_at FROM contract_end WHERE sc=\?/);
-  assert.doesNotMatch(readFileSync(new URL("../src/statement.js", import.meta.url), "utf8"), /contract_end|\.end\.reason|Resigned/, "never on the crew's PDF");
+  // 13 Oct 2026: the INTERNAL crew file prints a contract's end reason on its Contract feedback pages; the crew's statement
+  // (no data.feedback) never does — checked on the output, below in the crew-file test.
+  assert.doesNotMatch(readFileSync(new URL("../src/statement.js", import.meta.url), "utf8"), /contract_end/, "the statement never reads the table");
   assert.doesNotMatch(readFileSync(new URL("../src/emails/hr.statement.v2.js", import.meta.url), "utf8"), /contract_end|Resigned/);
   assert.doesNotMatch(readFileSync(new URL("../src/bonus.js", import.meta.url), "utf8"), /contract_end/);
   assert.match(body("function pfContract("), /if\(!isCur&&off&&off<=todayS\)h\+=pfWhy\(x\);/);
@@ -230,4 +233,67 @@ test("emergency contact: written by the import, typed in Edit crew with Reset to
   assert.match(W, /<span class=pf3l style="margin-right:6px">Emergency<\/span>/);
   const s = Buffer.from(composeStatement({ crew: { ...JAMES, emergency_name: "Maria Agbada", emergency_relation: "Mother", emergency_phone: "+63 900 1" }, contracts: [], daysWorked: 0, bonus: null, generatedAt: "2026-10-13T10:00:00Z" })).toString("latin1");
   assert.ok(s.includes("(Maria Agbada \\(Mother\\) +63 900 1)"));
+});
+
+// THE INTERNAL CREW FILE (Miguel, 13 Oct 2026: "the PDF should include this also in a clean page .. regardless if there is
+// space on a previous one .. as Contract feedback .. should display the entire historical data .. not just the contract that
+// just ended"; "this is not needed in the PDF" — the requests strip). A separate PDF, never emailed: the crew's statement and
+// its email stay crew-facing.
+test("crew file: Contract feedback groups everything said by the contract it falls in, newest first; the rest is 'between'", () => {
+  const profile = {
+    contracts: [
+      { n: 2, ship: "Silhouette", on: "2026-05-02", off: "2026-09-05", end: { reason: "Resigned" }, earlyDays: 77 },
+      { n: 1, ship: "Apex", on: "2025-06-01", off: "2025-12-20" },
+    ],
+    people: { feed: [
+      { kind: "note", at: "2026-06-10T10:00:00Z", text: "Asked for a transfer" },
+      { kind: "feedback", at: "2025-12-18T10:00:00Z", who: "Ray", answers: { ontime: "Yes", par: "No", note: "Good handover" } },
+      { kind: "intel", at: "2026-08-01T10:00:00Z", parts: [{ label: "Summary", text: "Late on PM" }], via: "crew-reports", confidence: "high" },
+      { kind: "note", at: "2026-02-01T10:00:00Z", text: "Called, on vacation" },
+      { kind: "feedback", at: "2025-11-01T10:00:00Z", who: "Ray", answers: { ontime: "No" }, superseded: true },
+    ] },
+  };
+  const f = feedbackFile(profile, "2026-10-13");
+  assert.deepEqual(f.groups.map((g) => g.key), ["2026-05-02", "2025-06-01", "between"], "every contract with something said, the oldest too");
+  assert.deepEqual(f.groups[0].items.map((i) => i.at), ["2026-08-01", "2026-06-10"], "newest first inside a contract");
+  assert.equal(f.groups[0].contract.end.reason, "Resigned");
+  assert.deepEqual(f.groups[1].items[0].tags, [["Orders on time", "Yes"], ["Par at handover", "No"]], "answers read in words");
+  assert.deepEqual(f.groups[1].items[0].lines, [{ label: null, text: "Good handover" }]);
+  assert.equal(f.groups[1].items[1].superseded, true, "a superseded answer is kept and marked, never dropped");
+  assert.equal(f.groups[2].items[0].at, "2026-02-01");
+  assert.equal(f.total, 5);
+});
+
+test("crew file PDF: Contract feedback on a page of its own, internal on every page of it; the statement stays crew-facing", () => {
+  const base = { crew: { ...JAMES, rank_observed: "Junior Printer Specialist" },
+    contracts: [{ seq: 1, ship: "Silhouette", on: "2026-05-02", act: "2026-09-05", proj: null }], daysWorked: 126,
+    bonus: { contracts: 1, count: 0, baseline_set: true, outcomes: [] }, generatedAt: "2026-10-13T10:00:00Z", fileAt: "2026-10-10" };
+  const feedback = { groups: [{ key: "2026-05-02", contract: { n: 1, ship: "Silhouette", on: "2026-05-02", off: "2026-09-05", end: { reason: "Resigned" }, earlyDays: 77 },
+    items: [{ at: "2026-06-10", kind: "note", label: "Note", who: "Rita", lines: [{ label: null, text: "Asked for a transfer" }], tags: [] }] }], slots: [], total: 1 };
+  const file = Buffer.from(composeStatement({ ...base, feedback })).toString("latin1");
+  for (const t of ["(Crew file  -  internal)", "(Contract feedback)", "(Asked for a transfer)", "Not for the crew", "Resigned"])
+    assert.ok(file.includes(t), "the crew file carries " + t);
+  const stmt = Buffer.from(composeStatement(base)).toString("latin1");
+  for (const t of ["Contract feedback", "Asked for a transfer", "Not for the crew", "Resigned", "internal"])
+    assert.ok(!stmt.includes(t), "the crew's statement never carries " + t);
+  // the internal file speaks to HR on every page: no "please check", no "your", the red internal line on page 1 too
+  for (const t of ["Please check this statement", "PLEASE CHECK", "your current contract", "Questions: Rita"])
+    assert.ok(!file.includes(t), "the crew file never asks the crew: " + t);
+  assert.ok(stmt.includes("Please check this statement") && stmt.includes("Questions: Rita"), "the statement still does");
+  const S = readFileSync(new URL("../src/statement.js", import.meta.url), "utf8");
+  assert.match(S, /pdf\._newPage\(\); fbStart = pdf\.pages\.length - 1;/, "a clean page, whatever space is left");
+  assert.doesNotMatch(S, /Last contract's requests/, "the requests strip is gone from the PDF");
+  const b = body("async function apiCrewFilePdf(");
+  assert.match(b, /feedbackFile\(prof && prof\.profile, TODAY\(\)\)/);
+  assert.match(W, /if \(p === "\/api\/crew\/file\.pdf"\) return apiCrewFilePdf\(env, url, session\);/);
+  assert.doesNotMatch(body("async function apiStatementEmail("), /feedback/, "the email sends the crew's statement, never the file");
+});
+
+test("statement documents read against the running contract: Lapses = expires before the sign-off", () => {
+  const bytes = composeStatement({ crew: { ...JAMES, usv_exp: "2026-12-01" },
+    contracts: [{ seq: 1, ship: "Symphony", on: "2026-08-01", act: null, proj: "2027-03-01" }], daysWorked: 70,
+    bonus: { contracts: 1, count: 0, baseline_set: true, outcomes: [] }, generatedAt: "2026-10-13T10:00:00Z", fileAt: "2026-10-10", today: "2026-10-13" });
+  const s = Buffer.from(bytes).toString("latin1");
+  assert.ok(s.includes("Lapses"), "the US visa ending Dec 1 lapses inside a contract to Mar 1");
+  assert.ok(s.includes("for this contract, to Mar 1, 2027"));
 });

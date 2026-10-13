@@ -198,7 +198,10 @@ test("static: the page draws A+ — header with TDG's row, the band, the numbers
   // sea is said once, in months and days; the Aboard / Ashore tile and the separate Career box are gone — the career line
   // is drawn inside the contract card, under who handed over and who takes over.
   assert.doesNotMatch(p, /'Aboard',pfSrc|'Days at sea'|h\+=pfCareer\(/);
-  assert.match(W, /return '<div class=pf3relay2><div class=pf3ppl>'\+L\+R\+'<\/div>'\+pfCareer\(K&&K\.length\?K:\[x\],feed\|\|\[\],todayS,x\.on\)\+'<\/div>';/);
+  assert.match(W, /return '<div class=pf3relay2><div class=pf3ppl>'\+L\+R\+'<\/div>'\+pfCareer\(K&&K\.length\?K:\[x\],feed\|\|\[\],todayS,x\.on,isCur&&a&&\(a\.on\?a\.on>=x\.on:a\.src==='tdg_earmark'\)\?a:null\)\+'<\/div>';/);
+  // 13 Oct 2026 ("if u have a replacement .. projected .. so we are consistent"): the running contract's line ends in its
+  // reliever, drawn like the board — the earmark yellow, firm once TDG has it.
+  assert.match(W, /class="pf2nx/);
   assert.doesNotMatch(p, /class=pf2file/, "the TDG file box beside the name is gone (Miguel, 12 Oct 2026: \"dont think is needed\")");
   assert.doesNotMatch(p, /loadSbmCards\(/, "shipboard reviews ride in the profile's feed");
   // sign-off sends only while a contract runs
@@ -241,7 +244,11 @@ test("the contract's bar names who he relieved and who relieves him: same hull, 
   const cards = [{ sc: "SC-C", ship: "Symphony", sign_on: "2027-04-08", crew_name: "Carl C", deployed_at: null }, { sc: "SC-D", ship: "Symphony", sign_on: "2027-11-01", crew_name: "Dan D" }];
   const h = handovers(c, { legs, cards, names: { "SC-A": "Ana Alonzo", "SC-C": "Carl Cruz" }, sc: "SC-ME" });
   assert.deepEqual(h.before, { sc: "SC-A", name: "Ana Alonzo", off: "2026-09-14", src: "tdg" });
-  assert.deepEqual(h.after, { sc: "SC-C", name: "Carl Cruz", on: "2027-04-08", src: "earmark", told: false });
+  // 13 Oct 2026: the next one carries its sign-off too, so the timeline draws the replacement as the board does.
+  assert.deepEqual(h.after, { sc: "SC-C", name: "Carl Cruz", on: "2027-04-08", off: null, src: "earmark", told: false, tdg: false });
+  // TDG's file earmarks the same crew for this hull: the card is in TDG (the board's "EARMARK · TDG"), not "console only"
+  const h2 = handovers(c, { legs, cards, tdgEarmarks: [{ agency_id: "SC-C", vessel: "MV SYMPHONY OF THE SEAS" }], names: {}, sc: "SC-ME" });
+  assert.equal(h2.after.tdg, true);
   // nothing dated after: TDG's Earmarked row names the next one, without dates
   const t = handovers(c, { legs, cards: [], tdgEarmarks: [{ agency_id: "SC-E", name: "Eve E", vessel: "MV SYMPHONY OF THE SEAS" }], sc: "SC-ME" });
   assert.deepEqual(t.after, { sc: "SC-E", name: "Eve E", on: null, src: "tdg_earmark" });

@@ -514,6 +514,32 @@ the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned 
   (Contact → Emergency contact, Reset to TDG); the profile header shows it ("Not on file" in amber until set); the crew's
   statement PDF lists it under "Your details on file · please check" (his own data). Pinned by `test/crew_windows.test.js`.
 
+**13 Oct 2026, evening — the internal crew file, documents against the contract, the replacement on the line.**
+- **The crew file** (Miguel, on the profile's What people said: "the PDF should include this also in a clean page ..
+  regardless if there is space on a previous one .. as Contract feedback .. should display the entire historical data ..
+  not just the contract that just ended"). It is a SECOND PDF, `GET /api/crew/file.pdf` (`apiCrewFilePdf`: the statement's
+  wave + the profile, one `Promise.all`), the profile's "Crew file · internal" button. Pages 1+ are the statement; then
+  **Contract feedback** always starts on a NEW page: `feedbackFile(profile, today)` (`src/crew_profile.js`, pure) groups
+  every note, field intel (the full report), feedback answer (every role, in words — `FB_LABEL`; superseded ones kept and
+  marked) and shipboard review under the contract it falls in, newest contract first, items newest first, the rest
+  "Between contracts"; each contract's band prints its dates and "Ended N days early · <reason>" (`contract_end`). The
+  "requests" strip is NOT printed ("this is not needed in the PDF"). The whole file speaks to HR (`INT` in
+  `composeStatement`): no "please check", no "your", the red "Internal - CIMS HR crew file. Not for the crew." on every
+  page. **It is never emailed**: the statement email (`apiStatementEmail`) still sends the crew-facing statement only —
+  making the crew file the crew's is Miguel's call, never a default.
+- **Documents read against the contract, in the PDF too** ("also in the PDF"): with a running contract the statement's
+  Documents table and its tile read to its projected sign-off — Expired / **Lapses** (expires before the sign-off) / Valid,
+  "N of 4 · for this contract, to <date>"; with none, today and a 90-day Expiring, as before.
+- **The replacement on the line, as the board draws it** (Miguel, Infinity: "if u have a replacement .. projected .. so we
+  are consistent on how we show it elsewhere"): `pfCareer(K, feed, today, hiOn, next)` — the running contract solid to
+  today then a light dashed tail to its sign-off (`.pf2cb.live` + `.pf2ct`), the next one an amber segment from its
+  sign-on (`.pf2nx`; its sign-off, else sign-on + 7 months): dashed pale while it is the console's plan only, SOLID once TDG
+  has them — the file's own row, TDG's Earmarked row, or Rita's card for a crew TDG ALSO earmarks for that hull
+  (`handovers().after.tdg`, the board's "EARMARK · TDG"; the relay then reads "earmark · TDG has them" and the crew-change
+  "In TDG" ticks). A TDG earmark with no dates is a short orange dashed stub after the sign-off, "<name> · no dates". Earlier
+  contracts are drawn first (`.dim`), so an older bar never covers the one the card is about. Pinned by
+  `test/crew_windows.test.js`, `test/crew_profile.test.js`.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS
