@@ -45,10 +45,15 @@ down. Only then does the audit open, from the link in that report, under Dexter'
 it pre-fills Dexter's Inventory step for him to confirm on the shelf. The parts past life pre-fill the Machines step.
 
 - **Addressing** (Miguel, 14 Oct 2026: "use the ship email and his personal email, but display the ship email only;
-  his personal email gets a copy"): To = the ship's printshop mailbox (`sbm_config` `shipmail:<ship>`, the same key the
-  shipboard review uses), Cc = the crew record's personal email, Rolando and Ray. The screen and the record show the
-  ship mailbox only; the personal address is never displayed. No ship mailbox on file → sent to the personal email
-  alone and Dexter told so, Rita asked to add it; neither on file → the request is blocked, never guessed.
+  his personal email gets a copy"): To = the ship's printshop mailbox, Cc = the crew record's personal email, Rolando
+  and Ray. The screen and the record show the ship mailbox only; the personal address is never displayed.
+  **The ship mailboxes already exist** (Miguel: "the emails you have in the Brain, inside the apps we built"): the
+  fleet email directory of cims-timecard, D1 `ae52e15f-…`, table `ship_contact`, 188 rows, all 48 ships — the
+  printer-specialist mailbox per hull is role `printer_specialist` (30 Royal, @rccl.com), `printer` (14 Celebrity,
+  @celebritycruises.com), `printer_manager` (4 Azamara, @azamaraships.com) (Brain recPHlvv1wzYOEFzg). The audit reads
+  that table over a service binding, one source, never a copy typed into `sbm_config`. The record carries a caveat to
+  check first: 55 rows sit at `@celebrity.com` rather than `@celebritycruises.com`. No mailbox for the hull → sent to
+  the personal email alone and Dexter told so; neither on file → the request is blocked, never guessed.
 - **The count is blind** (Miguel, 14 Oct 2026: "display in the upload landing page all items the crew has available in
   the OBP portal, so he can enter the total; don't show him what is on hand; allow him to count blind and report").
   The sheet lists every item the ship carries in OBP (part number, description, the portal's own grouping and order,
