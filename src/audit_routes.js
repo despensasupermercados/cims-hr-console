@@ -9,7 +9,7 @@ import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso }
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 
-export const AUDIT_VERSION = "2026-10-14.c4";
+export const AUDIT_VERSION = "2026-10-14.c5";
 
 export function installAudit(deps) {
   const { json, htmlResponse, ensureAudit, rotationSections, crewProfile, TODAY } = deps;
