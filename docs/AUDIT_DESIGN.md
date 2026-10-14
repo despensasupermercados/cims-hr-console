@@ -191,6 +191,86 @@ a bottom bar. Rules the build is held to:
 - **The briefing and anchoring:** the last audit's open points come first (he checks them). Ray's window, the GSM
   review and intel are folded under "What others said", opened on tap, so they do not lead the rating. Miguel's call.
 
+## Mock-up v5 (14 Oct 2026, evening): the light pass and the missing screens
+
+Miguel: "review all the cards pixel by pixel, fresh and light; phone first, but the web version must look and feel
+similar; people don't read; then review the logic and build what is missing for us to build the app later."
+- **Lighter**: hairlines at lower contrast, shadows softer, one weight of bold, radius 14 on cards / 28 on the phone,
+  captions one line, hints one line, colour only on a finding, selection in navy. The seafarer's and assessment emails
+  cut to what a reader needs; the assessment keeps its four sections and the method footer.
+- **Added screens**: **W1** the same app on a laptop (rail: In progress · Ships · History · Open follow-ups; the phone
+  column in the middle; the pre-visit assessment and the last visit's open points on the right); **R1** Rolando
+  confirms or corrects each Pattern 43 reading from one link in the assessment (Confirm / Correct / Cannot tell, the
+  six-rule chips and a line; corrections replace the console's reading and feed the calibration set); **P1** the audit
+  card on the crew profile under What people said (ratings, To improve, Agreed, follow-up state, links; the earlier
+  audits and the open follow-up row beside it); **I1** the import review of the 61 Forms audits (settled / for Dexter /
+  dropped / files; a zip of the Forms folder; Apply holds the rows Dexter has not settled).
+- **Logic closed in this pass**: the request's 24-hour state (reminder, strip turns red, Dexter told, Resend / Extend);
+  a visit with two specialists shares the request's documents and the count; the auditor is the login; the dispatch
+  rating leaves the evaluation; the overdue follow-up shows "2nd time" on the next visit.
+
+## Build spec (what the build session needs; nothing here is built)
+
+**Where it runs.** The `cims-hr-console` Worker. Host `audit.cims.work` (added in the dashboard) and `cims.work/audit`
+serve the audit shell; `/audit/*` pages, `/api/audit/*` routes inside the fetch handler's error boundary (§11), session
+auth as today (Dexter is on the allowlist; the auditor is `session.email`). The shell is an installable PWA: manifest,
+service worker scoped to `/audit/`, IndexedDB draft, upload queue, client-side image shrink.
+
+**Bindings** (wrangler.toml): D1 `DB` (exists) · R2 `AUDIT_FILES` → the bucket Miguel names (decision 3) · service
+`HON` → `cims-hon` (worker `1eb812649e3c4bc1b9d751b2ab717ff9`, D1 `cims-hon` `7b4387c8-…`): machine register by hull
+and serial, OBP lines and on-hand per ship, open orders, Ordering Schedule due dates and POs, the Pattern 43 upload
+checks and the readings, the Management List read · service `TIMECARD` → `cims-timecard` (worker `aeb577e3…`, D1
+`ae52e15f-…`): `ship_contact` mailboxes by hull and role · `MAILER` (exists). Each cross-worker read is one request
+per wave (§12), never a chain. Both target workers need a small authenticated route for it; the HON side is a
+separate repo and needs its own session (`add_repo` cims-hon).
+
+**Tables** (migration `0024_audit.sql`, idempotent, mirrored in an `ensureAudit` under `memoEnsure`):
+- `audit_visit` (id, ship, auditor, opened_at, filed_at, status draft|filed, request_id)
+- `audit_eval` (visit_id, agency_id, r_inventory, r_technical, r_collaterals, r_overall, r_dispatch, why_inventory …,
+  strengths, improve, agreed, recommend_block 0|1, mono_pct, training_json, ppe_json, hon_in_use)
+- `audit_check` (visit_id, grp, item, state present|missing) · `audit_machine` (visit_id, serial, checks_json,
+  finding_json, state pass|finding|down) · `audit_obp` (visit_id, part_no, obp_qty, counted, source crew|dexter,
+  confirmed 0|1) · `audit_tool` (visit_id, tool, missing) · `audit_file` (visit_id, step, serial, r2_key, bytes,
+  taken_at, uploaded_at) · `audit_followup` (id, agency_id, visit_id, owner, due, text, status open|fixed,
+  closed_visit_id)
+- `audit_request` (id, visit_id, agency_id, token_hash, to_ship, cc_personal, sent_at, due_at, reminded_at, status
+  sent|complete|overdue|cancelled) · `audit_upload` (id, request_id, serial, kind p43|mgmt|count, r2_key, pages,
+  channels, ok 0|1, down_reason, at) · `audit_count` (request_id, part_no, counted, at) + `audit_count_extra`
+  (request_id, text, counted) · `audit_assessment` (request_id, verdict good|attention|critical, body_json, sent_at,
+  recipients) · `p43_confirm` (upload_id, by, verdict confirm|correct|unsure, correction_json, at) — the calibration set
+- `audit_import_row` (source_row, mapped_ship, mapped_sc, state settled|held|dropped, note) for the 61
+Append-only where it records a fact (uploads, assessments, confirmations, filed visits); a filed visit is never
+rewritten, a correction is a new row.
+
+**Routes.** Dexter (session): `GET /api/audit/ships` · `GET /api/audit/brief?ship=&sc=` · `POST /api/audit/request` ·
+`GET /api/audit/request/:id` · `POST /api/audit/request/:id/resend|extend` · `POST /api/audit/visit` (draft) ·
+`PUT /api/audit/visit/:id/step/:n` · `POST /api/audit/visit/:id/file` · `POST /api/audit/file` (R2 put, returns key) ·
+`GET /api/audit/history` · `POST /api/audit/import` (dry run / apply) · `POST /api/audit/followup/:id/close`. Public,
+token-auth like /fb and /sbm: `GET /audit/u?t=` (the upload page) · `POST /api/audit/u/upload` · `POST /api/audit/u/count`
+· `POST /api/audit/u/down` · `GET /audit/p43?t=` and `POST /api/audit/p43/confirm` (Rolando). Every page states its
+state on failure (§11).
+
+**Emails** (CIMS letterhead, through `MAILER`): `hr.audit.request.v1` (to the ship mailbox, cc personal + Rolando +
+Ray) · `hr.audit.reminder.v1` (12 h and 24 h) · `hr.audit.assessment.v1` (Ray, Rolando, Ohji, Jonathan, Miguel; cc
+Dexter) · `hr.audit.filed.v1` (Miguel; cc Rita, Ray, Rolando) · `hr.audit.dispatch.v1` (Rita). Recipients are
+configuration (`audit_config`), never guessed; a missing address is reported.
+
+**Scheduled.** The hourly `scheduled()` gains an audit sweep: reminders at 12 h, overdue at 24 h (strip red, Dexter
+told), requests cancelled when a visit is abandoned after 7 days. Idempotent by `(request_id, kind)` like
+`auto_send_log`.
+
+**Tests to pin** (`test/audit*.test.js`): the gate (no complete request → no visit); request addressing (ship mailbox
+first, personal cc, none → blocked); the blind count (page HTML never carries an on-hand quantity; completeness = every
+line numbered; 0 valid); the count diff and the 1 Oct timing rule; the parts-over-life parse from a Management List
+sample; the assessment verdict ladder; Pattern 43 readings carry a confidence and are marked provisional until a
+`p43_confirm` row; the audit module never imports `bonus.js` and the statement / crew email never print an audit;
+import mapping of the 61 (ship codes, the identity ladder, two-person rows, test rows); wrangler bindings present;
+the hot routes fire one wave (§12 static guard).
+
+**Connectors verified 14 Oct 2026.** Cloudflare (workers and D1 above, R2: `cims-audit-evidence` exists) · GitHub as
+`despensasupermercados`, scope `cims-hr-console` (the HON and timecard repos need `add_repo`) · the Brain · the mailer
+binding. Still needed from Miguel: Jonathan's address, the bucket, the zip, the phone, the offline confirmation.
+
 ## Decisions needed from Miguel
 
 1. One audit per crew within a visit (recommended) or one per ship.
