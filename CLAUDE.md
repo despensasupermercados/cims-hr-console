@@ -916,7 +916,9 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
 - **Copy quality decides** ("we dont ask people to replace items until copy quality is affected"): the assessment email
   never says "replace"; a part past life reads against that machine's Pattern 43 (clean / marks) and HON's
   Recommendation + PARTS_RULE.
-- **TEST MODE until Miguel signs off the rendered emails** (CIMS email standard §5): `AUDIT_LIVE` unset = every audit
-  email goes to the auditor alone, marked [TEST]. Setting `AUDIT_LIVE = "true"` in `[vars]` is the switch.
+- **LIVE since 14 Oct 2026** (Miguel: "i am good with the emails", after the rendered request, reminder, overdue and
+  documents-in emails; CIMS email standard §5): `AUDIT_LIVE = "true"` in production `[vars]`. Removing it falls back to
+  TEST MODE (every audit email to the auditor alone, marked [TEST]). Staging never carries it. A changed email template
+  is re-rendered and shown to Miguel before it ships, as before.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).

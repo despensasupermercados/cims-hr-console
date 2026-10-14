@@ -105,3 +105,11 @@ test("staging: a mailer only with MAIL_ONLY_TO, and no cron", () => {
   if (hasStagingMailer) assert.match(section("[env.staging.vars]"), /^MAIL_ONLY_TO = "[^"]+@[^"]+"/m, "a staging MAILER without MAIL_ONLY_TO could email real crew from copied data");
   assert.match(section("[env.staging.triggers]"), /^crons = \[\]/m, "staging inherits the hourly cron unless it is emptied here");
 });
+
+// Printshop Audit (14 Oct 2026): Miguel signed off the rendered emails, so production sends them live. Staging never
+// does: a staging AUDIT_LIVE would mail ships from a copy of production's crew (MAIL_ONLY_TO is the second lock).
+test("audit emails: live in production, never in staging", () => {
+  const prodVars = TOML.slice(TOML.search(/^\[vars\]/m)).replace(/^\[vars\]/, "").split(/^\[/m)[0];
+  assert.match(prodVars, /^AUDIT_LIVE = "true"$/m, "production [vars] carries the live switch");
+  assert.doesNotMatch(section("[env.staging.vars]"), /AUDIT_LIVE/, "staging must never send audit emails live");
+});
