@@ -540,6 +540,26 @@ the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned 
   contracts are drawn first (`.dim`), so an older bar never covers the one the card is about. Pinned by
   `test/crew_windows.test.js`, `test/crew_profile.test.js`.
 
+## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
+"redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas
+(artifact Rcd9BmKBpAxKc9d3GFgwQt). `GET /api/ops` (`apiOps`, one wave: `rotationSections`, `apiDashboard`, the score queue,
+the crew's dates, the sign-off sends) → `buildOps` (`src/ops_dashboard.js`, pure): it SORTS what the Keyman board says,
+it decides no date and no status. The page (`renderDashboard`) draws: five tiles (Past sign-off · No reliever · Can't sail
+yet · Aboard · Bench ready), each scrolling to the one place that holds its detail; **Next 7 days** (Miguel, 14 Oct 2026:
+"always the next 7 days when you open the console", option 1B "deploy"; `buildOps().week`, `opsWeek`): one lane per ship
+that changes crew drawn like the Fleet Gantt — green aboard to the sign-off, amber from the reliever's sign-on (striped
+when not in TDG yet), red while the seat is empty, a handover tick — then To do (score cards nobody asked for, the TDG
+file, the bench) and Birthdays (surname · age); every open starts today (`OPS_WK=0`), one tap shows the 7 after (the
+data holds 14 days), a "Then:" line names the next two crew changes; a phone (≤700px) gets the same days as a list; **Crew changes** (overdue + the next 90
+days, one row per seat: When, Ship, Off → on, the reliever's documents read against the contract, Travel · kit only in
+the last 30 days, a Next step that opens the ship on the board); Fleet coverage (one tile per ship); TDG (file ages, the
+held / undated seats TDG must correct); Documents aboard; the crew and travel. Rules: a held seat (§10d) or a seat with
+no embark date is TDG's to correct, never a crew change; an overdue seat is past whatever its earmark says. **Ship codes
+are the cruise lines' own** (`src/ship_codes.js`, from cims-timecard `ship_contact`: QN Quantum / QS Quest, ID
+Independence / IN Infinity, AX Apex / AT Ascent — "the first two letters" collides on six pairs); Miguel: "use the 2
+letters .. rita knows who they are". The "Email Joy · all four" send he approved is NOT built yet: an email template
+ships only after he signs off the rendered email (CIMS email standard). Pinned by `test/ops_dashboard.test.js`.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

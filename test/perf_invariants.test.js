@@ -288,7 +288,7 @@ test("a write empties the read cache, so a save is never answered from memory", 
 // from memory. One request per URL (a cached or in-flight entry is skipped), 250ms apart (never a burst that delays the
 // tab the user is on), skipped in a hidden window, and re-armed after every write.
 test("the tabs are prefetched after boot, one at a time, through the same cache", () => {
-  assert.match(SRC, /var PREFETCH_URLS=\['\/api\/dashboard','\/api\/crew','\/api\/rotation','\/api\/relief\/board','\/api\/contracts'\];/);
+  assert.match(SRC, /var PREFETCH_URLS=\['\/api\/ops','\/api\/crew','\/api\/rotation','\/api\/relief\/board','\/api\/contracts'\];/);
   const m = SRC.match(/function prefetchTabs\(delay\)\{[^\n]*\n/);
   assert.ok(m, "prefetchTabs defined");
   const fn = m[0];

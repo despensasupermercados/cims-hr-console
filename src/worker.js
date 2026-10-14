@@ -37,6 +37,7 @@ import { deployRecipient, deployCc } from "./keyman_deploy.js";
 import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID as EARMARK_TEMPLATE } from "./earmark.js";
 import { fetchShipTurnarounds, fetchBoardPortDays } from "./port_days.js";
 import { batchingDb } from "./d1batch.js";
+import { buildOps } from "./ops_dashboard.js";
 import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
@@ -216,6 +217,7 @@ export default {
         if (!session) return json({ error: "unauthorized" }, 401);
         if (p === "/api/me")        return json({ email: session.email });
         if (p === "/api/dashboard") return apiDashboard(env);
+        if (p === "/api/ops")       return apiOps(env);
         if (p === "/api/crew")      return apiCrew(env, url);
         if (p === "/api/crew/get")  return apiCrewOne(env, url, session);
         if (p === "/api/crew/save" && request.method === "POST") return apiCrewSave(request, env, session);
@@ -1366,6 +1368,31 @@ async function apiTravelImport(request, env, session) {
   return json({ ok: true, year, applied: recs.length });
 }
 
+// THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once", Miguel: "deploy"). One wave: the Keyman
+// board (rotationSections, the ONE schedule and every verdict on it), the workforce + travel figures (apiDashboard),
+// the score queue, the crew's dates (documents, birthdays) and the sign-off kit sends. buildOps (src/ops_dashboard.js,
+// pure) only sorts what the board already says into the questions Rita acts on; it decides no date and no status.
+async function apiOps(env) {
+  const none = () => ({ results: [] });
+  const [rot, dashRes, queueRes, crewRes, instrRes, linkRes] = await Promise.all([
+    rotationSections(env),
+    apiDashboard(env),
+    apiScoreQueue(env, new URL("https://ops/api/score/queue?days=14")).catch(() => null),
+    env.DB.prepare("SELECT c.agency_id sc, c.first_name first, c.last_name last, c.dob dob, COALESCE(NULLIF(o.vessel_observed,''), c.vessel_observed) vessel, " +
+      "COALESCE(NULLIF(o.med_exp,''), c.med_exp) med, COALESCE(NULLIF(o.sirb_exp,''), c.sirb_exp) sirb, COALESCE(NULLIF(o.pp_exp,''), c.pp_exp) pp, " +
+      "COALESCE(NULLIF(o.usv_exp,''), c.usv_exp) usv, COALESCE(NULLIF(o.sch_exp,''), c.sch_exp) sch " +
+      "FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id WHERE c.redacted=0").all().catch(none),
+    env.DB.prepare("SELECT sc, requested_at FROM instr_ack").all().catch(none),
+    env.DB.prepare("SELECT sc, requested_at FROM ack_request").all().catch(none),
+  ]);
+  const dash = await dashRes.json();
+  const queue = queueRes && queueRes.ok ? await queueRes.json() : {};
+  const crew = ((crewRes && crewRes.results) || []).map((c) => ({ sc: c.sc, first: c.first, last: c.last, dob: c.dob, vessel: c.vessel, docs: { med: c.med, sirb: c.sirb, pp: c.pp, usv: c.usv, sch: c.sch } }));
+  return json(buildOps({
+    today: TODAY(), sections: rot.sections || [], pool: rot.pool || [], sources: rot.sources || {}, issues: rot.issues || [],
+    dash, queue, crew, kit: { instr: (instrRes && instrRes.results) || [], link: (linkRes && linkRes.results) || [] },
+  }));
+}
 async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
   // PERF (2026-07): this route used to issue ~15 D1 queries ONE AFTER ANOTHER — each a full
@@ -4134,6 +4161,94 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .fbp.on{background:#eaf6e6;color:var(--green-d)}
 .fbp.pend{background:#fff5e6;color:var(--amber)}
 .dzone{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px;margin-bottom:6px}
+/* Operational dashboard (13 Oct 2026, mock-up B v4): each fact once; the tiles point at the one place that holds the detail. */
+.ops{display:flex;flex-direction:column;gap:18px}
+.ops .oc-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-sizing:border-box;min-width:0}
+.ops .oc-h{font-family:'Outfit';font-size:15px;font-weight:700;color:var(--ink);margin:0}
+.ops .oc-sub{font-size:12.5px;color:var(--mut);margin:2px 0 0}
+.ops .oc-lab{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.ops .oc-st{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.ops .oc-crit{color:#B42318}.ops .oc-warn{color:#8A5A00}.ops .oc-ok{color:#1F6B3A}.ops .oc-mut{color:var(--mut)}
+.ops .oc-code{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:20px;padding:0 5px;box-sizing:border-box;border-radius:5px;background:#E9EDF3;color:var(--ink);font-size:10.5px;font-weight:700;letter-spacing:.06em;flex:none}
+.ops .oc-kpis{display:flex;flex-wrap:wrap;justify-content:center;gap:12px}
+.ops .oc-kpi{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:6px;padding:15px 17px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;flex:1 1 calc((100% - 48px) / 5);min-width:150px;max-width:calc((100% - 48px) / 5)}
+.ops .oc-kpi:hover{border-color:#B9C7D8}.ops .oc-kpi:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-kh{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:2px 10px}
+.ops .oc-kpi{align-items:center;text-align:center}
+.ops .oc-kv{font-family:'Outfit';font-size:30px;font-weight:700;line-height:1;letter-spacing:-.02em}
+.ops .oc-kv small{font-size:15px;font-weight:600;color:var(--mut);letter-spacing:0}
+.ops .oc-kc{font-size:12.5px;color:var(--mut);line-height:1.4}
+.ops .oc-pg{display:inline-flex;gap:6px}
+.ops .oc-pg button{min-height:32px;padding:0 12px;border-radius:9px;border:1px solid #CFD8E4;background:#fff;color:var(--ink);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.ops .oc-pg button[disabled]{color:#A3AFBF;cursor:default}
+.ops .oc-wk{display:flex;flex-direction:column}
+.ops .oc-wr{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:stretch;min-height:42px}
+.ops .oc-wr+.oc-wr{border-top:1px solid #F0F3F7}.ops .oc-wr.two{min-height:64px}
+.ops .oc-wl{display:flex;align-items:center;padding-right:8px}
+.ops .oc-wd{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.ops .oc-dh{display:flex;align-items:baseline;justify-content:center;gap:6px;padding:6px 8px;border-radius:9px}
+.ops .oc-dh span{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.ops .oc-dh b{font-family:'Outfit';font-size:18px;line-height:1}
+.ops .oc-dh.today{background:var(--deep);color:#fff}.ops .oc-dh.today span{color:#C9D6E6}
+.ops .oc-dh.we span,.ops .oc-dh.we b{color:#8A97A8}
+.ops .oc-wt{position:relative;min-height:42px;background:repeating-linear-gradient(90deg,transparent 0 calc(100% / 7 - 1px),#EDF1F6 calc(100% / 7 - 1px) calc(100% / 7))}
+.ops .oc-wk.now .oc-wt{background:linear-gradient(90deg,#EAF0F9 0 calc(100% / 7),transparent calc(100% / 7)),repeating-linear-gradient(90deg,transparent 0 calc(100% / 7 - 1px),#EDF1F6 calc(100% / 7 - 1px) calc(100% / 7))}
+.ops .oc-b{position:absolute;top:50%;transform:translateY(-50%);height:24px;display:flex;align-items:center;gap:6px;padding:0 9px;box-sizing:border-box;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:6px}
+.ops .oc-b small{font-size:11.5px;font-weight:500;opacity:.9}
+.ops .oc-b[data-ship]{cursor:pointer}.ops .oc-b[data-ship]:hover{filter:brightness(1.06);box-shadow:0 0 0 2px rgba(20,45,72,.18)}.ops .oc-b:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-nm{color:inherit;text-decoration:none;font-weight:600}.ops .oc-nm:hover{text-decoration:underline}
+.opshl{animation:opshl 2.4s ease-out}@keyframes opshl{0%,35%{box-shadow:0 0 0 4px rgba(242,176,30,.95),0 8px 24px rgba(20,45,72,.18)}100%{box-shadow:0 0 0 0 rgba(242,176,30,0)}}
+.ops .oc-b.ab{background:#2E9E5B;color:#fff;border-radius:0 6px 6px 0}
+.ops .oc-b.em{background:#F2B01E;color:var(--ink);border-radius:6px 0 0 6px}
+.ops .oc-b.em.notdg{background:repeating-linear-gradient(135deg,#F2B01E 0 8px,#F6C65A 8px 16px)}
+.ops .oc-b.gap{background:#FDECEC;color:#B42318;border:1px dashed #E5484D;border-radius:6px}
+.ops .two .oc-b{top:calc(50% - 14px)}.ops .two .oc-b.l2{top:calc(50% + 14px)}
+.ops .oc-hd{position:absolute;top:5px;bottom:5px;width:2px;margin-left:-1px;background:var(--deep);border-radius:2px;z-index:1}
+.ops .oc-hd::after{content:"";position:absolute;left:50%;top:-3px;width:8px;height:8px;background:var(--deep);transform:translateX(-50%) rotate(45deg);border-radius:1px}
+.ops .oc-cb{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:5px;background:#E9EDF3;color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.06em}
+.ops .oc-cb:hover{background:#D9E1EB}.ops .oc-cb:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-sl{position:absolute;top:6px;bottom:6px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:4px;padding-left:5px;box-sizing:border-box;z-index:1}
+.ops .oc-pin{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
+.ops .oc-pin:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-pin.p-file{background:#E5EEFA;color:#123F70}
+.ops .oc-none{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12.5px;color:var(--mut)}
+.ops .oc-wlist .oc-none{position:static;transform:none}
+.ops .oc-lg{display:inline-flex;flex-wrap:wrap;gap:4px 14px;align-items:center}.ops .oc-lg i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.ops .oc-wlist{display:none;flex-direction:column}
+.ops .oc-li{display:grid;grid-template-columns:62px minmax(0,1fr);gap:10px;padding:9px 0;border-top:1px solid #F0F3F7;font-size:13px}.ops .oc-li:first-child{border-top:0}
+.ops .oc-lr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:2px 0}
+.ops .oc-dt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.ops .oc-dt.ab{background:#2E9E5B}.ops .oc-dt.em{background:#F2B01E}
+@media (max-width:700px){.ops .oc-wkw{display:none}.ops .oc-wlist{display:flex}}
+.ops .oc-seg{display:inline-flex;border:1px solid #CFD8E4;border-radius:9px;overflow-x:auto;max-width:100%;background:#fff}
+.ops .oc-seg button{border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);padding:0 12px;min-height:34px;cursor:pointer;border-left:1px solid var(--line);white-space:nowrap}
+.ops .oc-seg button:first-child{border-left:0}.ops .oc-seg button[aria-pressed="true"]{background:var(--deep);color:#fff}
+.ops table.oc-cc{border-collapse:collapse;width:100%;min-width:740px;font-variant-numeric:tabular-nums}
+.ops .oc-cc th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:0 8px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+.ops .oc-cc td{padding:9px 8px;border-bottom:1px solid #F0F3F7;vertical-align:middle;font-size:13px;white-space:nowrap}
+.ops .oc-cc tr.oc-mh td{padding:16px 8px 6px;border-bottom:0;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+.ops .oc-cc tr.oc-mh.oc-crit td{color:#9B1C1C}.ops .oc-cc tr.oc-gap td{background:#FFF8F8}.ops .oc-cc tr:not(.oc-mh):hover td{background:#F6F8FB}
+.ops .oc-w b{font-size:13px;line-height:1.2}.ops .oc-w small{margin-left:8px;font-size:11.5px;font-weight:600;color:var(--mut);line-height:1.3}
+.ops .oc-w small.oc-crit{color:#B42318}.ops .oc-w small.oc-warn{color:#8A5A00}
+.ops .oc-arr{color:#9AA7B8;margin:0 8px}.ops .oc-nob{color:#B42318;font-weight:700}
+.ops .oc-sp{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.ops .p-ok{background:#E3F3EA;color:#1F6B3A}.ops .p-bad{background:#FDE7E7;color:#9B1C1C}.ops .p-warn{background:#FDF1DC;color:#8A5A00}.ops .p-mut{background:#EEF1F6;color:var(--mut)}.ops .p-tdg{background:#FFE8D6;color:#8A3D00}
+.ops .oc-nd{color:#B9C3CF}.ops .oc-tk{display:inline-flex;flex-wrap:nowrap;gap:4px}
+.ops .oc-cc th.act,.ops .oc-cc td.act{text-align:right}
+.ops .oc-link{all:unset;cursor:pointer;color:var(--royal);font-weight:600;font-size:12.5px}.ops .oc-link:hover{text-decoration:underline}.ops .oc-link:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-row3{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;align-items:stretch}
+.ops .oc-wf{display:flex;flex-wrap:wrap;gap:4px}
+.ops .oc-wf span{width:30px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;letter-spacing:.04em}
+.ops .t-past{background:#9B1C1C;color:#fff}.ops .t-lt2{background:#E5484D;color:#fff}.ops .t-lt4{background:#F4A4A7;color:#5C1010}.ops .t-ok{background:#E6EBF1;color:var(--mut)}
+.ops .oc-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.ops .oc-fresh{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;padding:9px 0;border-top:1px solid #F0F3F7}
+.ops .oc-fresh:first-child{border-top:0}
+.ops .oc-bar{grid-column:1 / -1;height:6px;border-radius:3px;background:#EEF1F6;position:relative;margin-top:4px}.ops .oc-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px}
+.ops .oc-item{display:flex;flex-direction:column;gap:3px;padding:11px 13px;border:1px solid var(--line);border-radius:10px}
+.ops .oc-item .t{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.ops .oc-item p{margin:0;font-size:12.5px;color:#33465C}
+.ops .oc-bul{position:relative;height:18px;border-radius:5px;background:#EEF1F6}.ops .oc-bul i{position:absolute;left:0;top:3px;bottom:3px;border-radius:3px;background:#1B3A5C}.ops .oc-bul em{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--deep);border-radius:1px}
+/* one line per row on a wide screen (Miguel, 14 Oct 2026: "you have enough space for you to not double-line"); stack only when narrow */
+@media (max-width:1180px){.ops .oc-w small{display:block;margin-left:0}.ops .oc-tk{flex-wrap:wrap;max-width:150px}}
+@media (max-width:820px){.ops .oc-kpi{flex-basis:calc((100% - 12px) / 2);max-width:calc((100% - 12px) / 2)}}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(20,45,72,.05)}
 .panel h3{font-family:'Outfit';font-size:12.5px;color:var(--navy);margin:0 0 10px;font-weight:700}
 .panel.center{display:flex;flex-direction:column;align-items:center}
@@ -4591,7 +4706,7 @@ function apiDirty(){ for(var k in API_CACHE) delete API_CACHE[k]; prefetchTabs(2
 // leave one at a time, so a tab switch paints from the cache (cachedJson) and revalidates behind the paint instead of
 // waiting a full request. After a write empties the cache the same warm-up runs again, debounced, behind the current
 // tab's own refetch. A hidden page warms nothing.
-var PREFETCH_URLS=['/api/dashboard','/api/crew','/api/rotation','/api/relief/board','/api/contracts'];
+var PREFETCH_URLS=['/api/ops','/api/crew','/api/rotation','/api/relief/board','/api/contracts'];
 function prefetchTabs(delay){clearTimeout(window._pfT);window._pfT=setTimeout(function(){if(document.hidden)return;var i=0;(function next(){if(i>=PREFETCH_URLS.length)return;var u=PREFETCH_URLS[i++],e=API_CACHE[u];if(e&&(e.data||e.inflight)){next();return;}cachedJson(u).catch(function(){}).then(function(){setTimeout(next,250);});})();},delay||800);}
 (function(){
   var _f=window.fetch;
@@ -6470,6 +6585,7 @@ function drawRotation(){
   document.getElementById('rotbody').innerHTML=h;
   var _sd=document.getElementById('rotside');if(_sd)_sd.innerHTML=side;else document.getElementById('rotbody').insertAdjacentHTML('afterbegin',side);
   rotRail(secs.length,allSecs);
+  if(typeof opsReaim==='function')opsReaim();
   document.querySelectorAll('#rotwrap .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
   // A chevron folds ITS section in place (13 Oct 2026: each click redrew all 48 ships, ~1s of layout on a laptop).
   document.querySelectorAll('#rotwrap [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle'),sec=el.closest('.shipsec'),arw=el.querySelector('.arw');
@@ -6804,70 +6920,271 @@ function rptSbm(){
   h+='<div class=csub style="margin-top:14px;opacity:.75">Shipboard Feedback &middot; live import of the legacy survey. Next: switch the source to the CIMS-native pipeline (adds invites, response rate, reminders, and per-brand coverage).</div>';
   $('#rptbody').innerHTML=h;
 }
-var DASH=null,DASH_SH=false;
+// THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once"; Miguel: "deploy"). Read from /api/ops
+// (src/ops_dashboard.js): every date and verdict is the Keyman board's. The five tiles are the headline and each
+// scrolls to the one place that holds its detail; ships are their two-letter codes (the cruise lines' own).
+var OPS=null,OPS_F='all';
+var OPS_MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+var OPS_MONL=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function opsD(iso){if(!iso)return '';var p=String(iso).slice(0,10).split('-');return parseInt(p[2],10)+' '+OPS_MON[parseInt(p[1],10)-1];}
+function opsMoney(n){return '$'+Math.round(n||0).toLocaleString('en-US');}
+function opsCode(c,t){return c?'<span class=oc-code title="'+escHtml(t||'')+'">'+escHtml(c)+'</span>':'';}
+function opsIc(k){
+  if(k==='crit')return '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="M7 3.8v4M7 9.9v.3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>';
+  if(k==='warn')return '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.6 13 12.2H1z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"></path><path d="M7 5.6v3M7 10.2v.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>';
+  if(k==='ok')return '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle><path d="m4.3 7.2 1.9 1.9 3.6-3.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+  if(k==='cake')return '<svg width="12" height="12" viewBox="0 0 12 12" role="img" aria-label="birthday" style="flex:none"><path d="M2 6.5h8V10H2z M3.5 6.5V5h5v1.5 M6 5V3.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"></path><circle cx="6" cy="2.4" r=".8" fill="currentColor"></circle></svg>';
+  if(k==='check')return '<svg width="12" height="12" viewBox="0 0 12 12" role="img" aria-label="off date confirmed" style="margin-left:5px;vertical-align:-1px"><path d="m2.5 6.3 2.2 2.2 4.8-5" fill="none" stroke="#1F6B3A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+  return '';
+}
+function opsSt(k,word){var c=k==='crit'?'oc-crit':k==='warn'?'oc-warn':k==='ok'?'oc-ok':'oc-mut';return '<span class="oc-st '+c+'">'+opsIc(k)+escHtml(word)+'</span>';}
+function opsKpi(target,label,state,word,value,small,detail){
+  return '<button type=button class=oc-kpi data-scroll="'+target+'"><span class=oc-kh><span class=oc-lab style="white-space:nowrap">'+label+'</span>'+opsSt(state,word)+'</span>'
+    +'<span class=oc-kv>'+value+(small?' <small>'+small+'</small>':'')+'</span><span class=oc-kc>'+detail+'</span></button>';
+}
+function opsKpis(k){
+  var o=k.overdue,nr=k.noReliever,cs=k.cantSail,ab=k.aboard,b=k.bench;
+  var h='<div class=oc-kpis>';
+  h+=opsKpi('oc-changes','Past sign-off',o.n?'crit':'ok',o.n?'Act':'None',o.n,'',o.n?o.items.map(function(x){return escHtml(x.code)+' '+x.days+' d';}).join(' &middot; '):'every seat within its sign-off');
+  h+=opsKpi('oc-changes','No reliever',nr.n?'crit':'ok',nr.n?'Act':'All planned',nr.n,'of '+nr.of,'sign-offs in 90 days'+(nr.first.length?' &middot; first '+nr.first.map(function(x){return escHtml(x.code);}).join(', ')+' '+opsD(nr.first[0].off):''));
+  h+=opsKpi('oc-changes','Can&#39;t sail yet',cs.n?'warn':'ok',cs.n?'Watch':'Clear',cs.n,'of '+cs.of,'relievers with a failing document'+(cs.first?' &middot; first '+escHtml(cs.first.code)+' '+opsD(cs.first.on):''));
+  h+=opsKpi('oc-crew','Aboard','ok','Seated',ab.n,'',ab.ships+' ships'+(ab.doubled.length?' &middot; '+ab.doubled.length+' with two aboard ('+ab.doubled.map(escHtml).join(' ')+')':''));
+  var bd=b.now.length?('ready: '+b.now.map(function(x){return escHtml(x.surname);}).join(', ')):(b.next.length?('next: '+b.next.map(function(x){return escHtml(x.surname)+' '+opsD(x.ready);}).join(', ')):'nobody ashore in the window');
+  h+=opsKpi('oc-cal','Bench ready',b.ready?'ok':'warn',b.ready?'Ready':'Thin',b.ready,'of '+b.ashore,'ashore today &middot; '+bd);
+  return h+'</div>';
+}
+// The next 7 days as lanes (Miguel, 14 Oct 2026, option 1B "deploy"): one lane per ship that changes crew, drawn like
+// the Fleet Gantt (green aboard to the sign-off, amber from the reliever's sign-on, red while the seat is empty), then
+// To do and Birthdays. Always the next 7 days from today; one tap shows the 7 after. A phone gets the same days as a list.
+var OPS_WK=0;
+function opsWeek(w){
+  var n=w.size||7,o=OPS_WK*n,D=w.days.slice(o,o+n);if(!D.length){OPS_WK=0;o=0;D=w.days.slice(0,n);}
+  var ws=D[0].date,we=D[D.length-1].date,N=D.length;
+  function inP(d){return !!d&&d>=ws&&d<=we;}
+  function ix(d){return dayNum(d)-dayNum(ws);}
+  function pos(d){return Math.max(0,Math.min(N,ix(d)+0.5))/N*100;}
+  function dw(d){var x=w.days.filter(function(y){return y.date===d;})[0];return x?x.dow+' '+parseInt(d.slice(8),10):opsD(d);}
+  var ships=w.ships.filter(function(s){return (!s.off.past&&inP(s.off.date))||(s.on&&inP(s.on.date));});
+  var todo=w.todo.filter(function(x){return inP(x.date);}),bd=w.bdays.filter(function(x){return inP(x.date);});
+  var nsc=0,nfile=0,nbench=0;todo.forEach(function(x){if(x.kind==='score')nsc+=x.people.length;else if(x.kind==='bench')nbench++;else nfile++;});
+  var parts=[(ws.slice(0,7)===we.slice(0,7)?parseInt(ws.slice(8),10):opsD(ws))+' &ndash; '+opsD(we)];
+  if(ships.length)parts.push(ships.length+' crew change'+(ships.length>1?'s':''));if(nsc)parts.push(nsc+' score card'+(nsc>1?'s':''));
+  if(nfile)parts.push('TDG file');if(nbench)parts.push(nbench+' bench ready');if(bd.length)parts.push(bd.length+' birthday'+(bd.length>1?'s':''));
+  var h='<section id=oc-cal class=oc-card style="display:flex;flex-direction:column;gap:10px"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px">'
+    +'<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px"><h2 class=oc-h>'+(OPS_WK?'The 7 days after':'Next 7 days')+'</h2><p class=oc-sub style="margin:0">'+parts.join(' &middot; ')+'</p></div>'
+    +'<div class=oc-pg><button type=button data-wk=0'+(OPS_WK?'':' disabled')+' aria-label="This week">&lsaquo;</button><button type=button data-wk=1'+(OPS_WK||w.days.length<=n?' disabled':'')+'>Next 7 days &rsaquo;</button></div></div>';
+  // ---- the lanes (a wide screen)
+  h+='<div class=oc-wkw><div class="oc-wk'+(OPS_WK?'':' now')+'">';
+  h+='<div class=oc-wr><div class=oc-wl></div><div class=oc-wd>'+D.map(function(d,i){var we2=(d.dow==='Sat'||d.dow==='Sun');return '<div class="oc-dh'+(i===0&&!OPS_WK?' today':we2?' we':'')+'"><span>'+(i===0&&!OPS_WK?'Today':d.dow)+'</span><b>'+parseInt(d.date.slice(8),10)+'</b></div>';}).join('')+'</div></div>';
+  function bar(cls,l,r,txt,title,ship,sc){if(r-l<=0.01)return '';return '<span class="oc-b '+cls+'" role=button tabindex=0 data-ship="'+escHtml(ship)+'"'+(sc?' data-sc="'+escHtml(sc)+'"':'')+' style="left:'+l.toFixed(2)+'%;width:'+(r-l).toFixed(2)+'%" title="'+escHtml(title)+'">'+txt+'</span>';}
+  ships.forEach(function(s){
+    var f=s.off,r=s.on,rd=r&&r.date,b='',lane2=false,mk=[];
+    var g0=0,g1=null;
+    if(f.past)g1=(rd&&rd<=we)?(rd<ws?0:pos(rd)):100;
+    else if(f.date>=ws)g1=pos(f.date);
+    if(g1!=null)b+=bar('ab',g0,g1,'<b>'+escHtml(f.surname)+'</b><small>'+(f.past?'past sign-off':'off '+dw(f.date))+'</small>',f.surname+(f.past?' is past the sign-off ('+opsD(f.date)+')':' signs off '+s.ship+' '+opsD(f.date))+' - open the card',s.ship,f.sc);
+    if(!f.past&&inP(f.date))mk.push(pos(f.date));
+    if(r&&rd&&rd<=we){
+      lane2=!f.past&&rd<f.date&&f.date>=ws;
+      var a0=rd<ws?0:pos(rd);if(inP(rd))mk.push(a0);
+      b+='<span class="oc-b em'+(r.tdg?'':' notdg')+(lane2?' l2':'')+'" role=button tabindex=0 data-ship="'+escHtml(s.ship)+'"'+(r.sc?' data-sc="'+escHtml(r.sc)+'"':'')+' style="left:'+a0.toFixed(2)+'%;width:'+(100-a0).toFixed(2)+'%" title="'+escHtml(r.surname+' signs on '+s.ship+' '+opsD(rd)+(r.tdg?'':' (not in TDG yet)')+' - open the card')+'"><b>'+escHtml(r.surname)+'</b><small>'+(r.tdg?'joins':'joins &middot; not in TDG')+'</small></span>';
+    }
+    if(!f.past){
+      var e0=f.date<ws?0:pos(f.date);
+      if(!r)b+=bar('gap',e0,100,'<b>No reliever</b>','Nobody planned after '+f.surname+' - open the ship',s.ship,null);
+      else if(!rd)b+=bar('gap',e0,100,'<b>'+escHtml(r.surname)+'</b><small>no sign-on date</small>',r.surname+' has no sign-on date - open the card',s.ship,r.sc);
+      else if(rd>f.date&&f.date<=we)b+=bar('gap',e0,rd<=we?pos(rd):100,'<small>empty '+(dayNum(rd)-dayNum(f.date))+' d</small>','The seat is empty from '+opsD(f.date)+' to '+opsD(rd),s.ship,null);
+    }
+    mk.forEach(function(p,i){if(i&&Math.abs(p-mk[0])<0.5)return;b+='<i class=oc-hd style="left:'+p.toFixed(2)+'%"></i>';});
+    h+='<div class="oc-wr'+(lane2?' two':'')+'"><div class=oc-wl><button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'" title="Open '+escHtml(s.ship)+' on the board">'+escHtml(s.code)+'</button></div><div class=oc-wt>'+b+'</div></div>';
+  });
+  if(!ships.length)h+='<div class=oc-wr><div class="oc-wl oc-lab">Crew changes</div><div class=oc-wt><span class=oc-none>No crew change in these 7 days</span></div></div>';
+  // a pin may run into the empty days after it, never into the next day that has one
+  function slots(items,pin){var by={};items.forEach(function(x){(by[x.date]=by[x.date]||[]).push(x);});var ks=Object.keys(by).sort();return ks.map(function(d,i){var e=i+1<ks.length?ix(ks[i+1]):N;return '<div class=oc-sl style="left:'+(ix(d)/N*100).toFixed(2)+'%;width:'+((e-ix(d))/N*100).toFixed(2)+'%">'+by[d].map(pin).join('')+'</div>';}).join('');}
+  function todoPin(x){
+    if(x.kind==='score')return '<button type=button class="oc-pin p-bad" data-score=1 title="'+escHtml('Feedback not asked: '+x.people.map(function(p){return p.surname+' ('+p.code+', off '+opsD(p.off)+')';}).join(', '))+'">Score cards &middot; '+x.people.map(function(p){return escHtml(p.code);}).join(' ')+'</button>';
+    if(x.kind==='bench')return '<button type=button class="oc-pin p-ok" data-crew="'+escHtml(x.sc)+'" title="Home six weeks: ready for a seat">'+escHtml(x.surname)+' &middot; bench</button>';
+    return '<button type=button class="oc-pin p-file" data-up=1 title="The last AdvancedQuery is from '+opsD(x.last)+'">TDG file '+(x.kind==='late'?'late':'due')+'</button>';
+  }
+  function bdPin(x){return '<button type=button class="oc-pin p-mut" data-crew="'+escHtml(x.sc)+'" title="'+escHtml(x.surname+' ('+x.code+') turns '+x.age)+'">'+opsIc('cake')+escHtml(x.surname)+' &middot; '+x.age+'</button>';}
+  function stack(items){var by={};items.forEach(function(x){by[x.date]=(by[x.date]||0)+1;});var m=0;for(var k in by)m=Math.max(m,by[k]);return m;}
+  if(todo.length)h+='<div class=oc-wr style="min-height:'+(14+30*stack(todo))+'px"><div class="oc-wl oc-lab">To do</div><div class=oc-wt>'+slots(todo,todoPin)+'</div></div>';
+  if(bd.length)h+='<div class=oc-wr style="min-height:'+(14+30*stack(bd))+'px"><div class="oc-wl oc-lab">Birthdays</div><div class=oc-wt>'+slots(bd,bdPin)+'</div></div>';
+  h+='</div></div>';
+  // ---- the same days as a list (a phone)
+  var L='';
+  D.forEach(function(d,i){
+    var it=[];
+    ships.forEach(function(s){
+      if(!s.off.past&&s.off.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><a href="#" class=oc-nm data-ship="'+escHtml(s.ship)+'" data-sc="'+escHtml(s.off.sc||'')+'"><i class="oc-dt ab"></i>'+escHtml(s.off.surname)+'</a> off'+(s.on&&s.on.date===d.date?' &middot; <a href="#" class=oc-nm data-ship="'+escHtml(s.ship)+'" data-sc="'+escHtml(s.on.sc||'')+'"><i class="oc-dt em"></i>'+escHtml(s.on.surname)+'</a> on':s.on?'':' &middot; <b class=oc-crit>no reliever</b>')+'</span>');
+      else if(s.on&&s.on.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><a href="#" class=oc-nm data-ship="'+escHtml(s.ship)+'" data-sc="'+escHtml(s.on.sc||'')+'"><i class="oc-dt em"></i>'+escHtml(s.on.surname)+'</a> joins'+(s.off.past?' &middot; '+escHtml(s.off.surname)+' past sign-off':'')+'</span>');
+    });
+    todo.filter(function(x){return x.date===d.date;}).forEach(function(x){it.push(todoPin(x));});
+    var b2=bd.filter(function(x){return x.date===d.date;});if(b2.length)it.push('<span class=oc-mut style="display:inline-flex;align-items:center;gap:5px">'+opsIc('cake')+b2.map(function(x){return escHtml(x.surname)+' '+x.age;}).join(', ')+'</span>');
+    if(!it.length)return;
+    L+='<div class=oc-li><b>'+(i===0&&!OPS_WK?'Today':dw(d.date))+'</b><div>'+it.map(function(x){return '<div class=oc-lr>'+x+'</div>';}).join('')+'</div></div>';
+  });
+  h+='<div class=oc-wlist>'+(L||'<span class=oc-none>Nothing in these 7 days</span>')+'</div>';
+  var then=(w.later||[]).filter(function(x){return x.off>we;}).slice(0,2);
+  h+='<div class=oc-sub style="font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:space-between;align-items:center;border-top:1px solid #F0F3F7;padding-top:10px;margin:0">'
+    +'<span>'+(then.length?'Then: '+then.map(function(x){return '<b style="color:var(--ink)">'+opsD(x.off)+'</b> '+escHtml(x.code)+' '+escHtml(x.surname)+(x.on?' &rarr; '+escHtml(x.on):' &rarr; <b class=oc-crit>nobody</b>');}).join(' &nbsp;&middot;&nbsp; '):'')+'</span>'
+    +'<span class=oc-lg><span><i style="background:#2E9E5B"></i>aboard</span><span><i style="background:#F2B01E"></i>joining</span><span><i style="background:#E5484D"></i>seat empty</span><span>a name opens the crew&#39;s card on the board</span></span></div>';
+  return h+'</section>';
+}
+function opsRows(rows){
+  var keep=rows.filter(function(r){
+    if(OPS_F==='overdue')return r.overdue;if(OPS_F==='nobody')return !r.reliever;
+    if(OPS_F==='docs')return r.reliever&&r.reliever.docs;if(OPS_F==='soon')return r.soon;return true;});
+  if(!keep.length)return '<tr><td colspan=6 class=oc-sub style="padding:16px 8px">Nothing in this view.</td></tr>';
+  var h='',group=null;
+  keep.forEach(function(r){
+    if(r.group!==group){group=r.group;
+      var n=keep.filter(function(x){return x.group===group;}).length;
+      h+='<tr class="oc-mh'+(group==='overdue'?' oc-crit':'')+'"><td colspan=6>'+(group==='overdue'?'Past the sign-off':OPS_MONL[parseInt(group.slice(5,7),10)-1])+' &middot; '+n+'</td></tr>';}
+    var cls=r.overdue||r.days<=14?'oc-crit':r.days<=30?'oc-warn':'';
+    var when='<b>'+(r.mark==='proj'?'~':'')+opsD(r.off)+(r.mark==='ok'?opsIc('check'):'')+'</b><small class="'+cls+'">'+(r.overdue?(-r.days)+' d over':'in '+r.days+' d')+'</small>';
+    var rel=r.reliever,chg='<span style="color:#33465C">'+escHtml(r.surname)+'</span><span class=oc-arr aria-hidden=true>&rarr;</span>';
+    if(!rel)chg+='<span class=oc-nob>nobody planned</span>';
+    else{chg+='<b>'+escHtml(rel.surname)+'</b>';
+      if(!rel.tdg)chg+=' <span class="oc-sp p-mut" style="margin-left:4px">'+(rel.told?'told Joy':'not in TDG')+'</span>';
+      if(rel.passed&&rel.signOn)chg+=' <span class="oc-sp p-tdg" style="margin-left:4px">was due '+opsD(rel.signOn)+'</span>';}
+    var docs=!rel?'<span class=oc-nd>&mdash;</span>':rel.docs?'<span class="oc-sp '+(rel.docs.kind==='bad'?'p-bad':'p-warn')+'">'+escHtml(rel.docs.label)+'</span>':'<span class="oc-sp p-ok">valid</span>';
+    var tk='<span class=oc-nd title="not yet due">&mdash;</span>';
+    if(r.soon){var tv=r.travel,k=r.kit,got=[],p='';
+      if(tv.eccr)got.push('ECCR');if(tv.air)got.push('flight');if(tv.hotel)got.push('hotel');
+      p+=got.length===3?'<span class="oc-sp p-ok">travel booked</span>':got.length?'<span class="oc-sp p-warn">'+got.join(' + ')+' only</span>':'<span class="oc-sp p-bad">nothing booked</span>';
+      p+=(k.instructions&&k.link)?'<span class="oc-sp p-ok">kit sent</span>':'<span class="oc-sp '+(k.instructions||k.link?'p-warn':'p-bad')+'">kit not sent</span>';
+      tk='<span class=oc-tk>'+p+'</span>';}
+    h+='<tr'+(r.overdue||!rel?' class=oc-gap':'')+'><td class=oc-w>'+when+'</td><td>'+opsCode(r.code,r.ship)+'</td><td>'+chg+'</td><td>'+docs+'</td><td>'+tk+'</td>'
+      +'<td class=act>'+(r.next?'<button type=button class=oc-link data-ship="'+escHtml(r.ship)+'">'+escHtml(r.next)+'</button>':'')+'</td></tr>';
+  });
+  return h;
+}
+function opsChanges(ch){
+  var c=ch.counts,F=[['all','All '+c.all],['overdue','Overdue '+c.overdue],['nobody','Nobody '+c.nobody],['docs','Documents '+c.docs],['soon','30 days '+c.soon]];
+  var h='<section id=oc-changes class=oc-card style="display:flex;flex-direction:column;gap:14px"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:10px 16px">'
+    +'<div><h2 class=oc-h>Crew changes</h2><p class=oc-sub>Overdue and the next 90 days &middot; '+c.all+' seats &middot; read from each card, never typed here</p></div>'
+    +'<div class=oc-seg role=group aria-label="Show">'+F.map(function(f){return '<button type=button data-f="'+f[0]+'" aria-pressed="'+(OPS_F===f[0])+'">'+f[1]+'</button>';}).join('')+'</div></div>';
+  h+='<div style="overflow-x:auto;margin:0 -8px"><table class=oc-cc><thead><tr><th>When</th><th>Ship</th><th>Off &rarr; on</th><th>Reliever&#39;s documents</th><th>Travel &middot; kit</th><th class=act>Next step</th></tr></thead><tbody id=oc-rows>'+opsRows(ch.rows)+'</tbody></table></div>';
+  h+='<div class=oc-sub style="font-size:11.5px;display:flex;gap:4px 16px;flex-wrap:wrap"><span>Relievers are TDG&#39;s earmarks unless marked</span><span>&#10003; off date confirmed &middot; ~ projected</span><span>Travel = ECCR, flight, hotel &middot; Kit = instructions and sign-off link &middot; both due in the last 30 days</span><span>&mdash; = not yet due</span></div></section>';
+  return h;
+}
+function opsCoverage(cv){
+  var BR={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'},T={past:'past the sign-off',lt2:'under 2 months',lt4:'under 4 months',ok:'4+ months'};
+  var h='<section class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>Fleet coverage</h2><p class=oc-sub>One tile per ship: how long until nobody is aboard or dated.</p></div>';
+  cv.brands.forEach(function(b){
+    h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;justify-content:space-between;font-size:12.5px"><b>'+escHtml(BR[b.brand]||b.brand)+'</b><span class=oc-mut>'+b.tiles.length+'</span></div><div class=oc-wf>'
+      +b.tiles.map(function(x){return '<span class="t-'+x.tier+'" title="'+escHtml(x.ship)+(x.until?' &middot; '+opsD(x.until):'')+'">'+escHtml(x.code)+'</span>';}).join('')+'</div></div>';
+  });
+  h+='<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px;font-size:12px;border-top:1px solid #F0F3F7;padding-top:10px">'
+    +['past','lt2','lt4','ok'].map(function(k){return '<span><i class="oc-dot t-'+k+'"></i>'+T[k]+' <b>'+cv.tiers[k]+'</b></span>';}).join('')+'</div>';
+  return h+'<button type=button class=oc-link data-gantt=1 style="margin-top:auto;align-self:flex-start">Open the Fleet Gantt &rarr;</button></section>';
+}
+function opsTdg(t){
+  var h='<section class=oc-card style="display:flex;flex-direction:column;gap:12px"><div><h2 class=oc-h>TDG</h2><p class=oc-sub>The files the board reads, and what TDG has to correct.</p></div><div>';
+  if(t.advq){var late=t.advq.age>t.advq.every;h+='<div class=oc-fresh><b style="font-size:13px">AdvancedQuery</b>'+opsSt(late?'warn':'ok',t.advq.age+' of '+t.advq.every+' days')+'<span class=oc-mut style="font-size:12px;grid-column:1 / -1">'+opsD(t.advq.at)+(t.advq.crew?' &middot; '+t.advq.crew+' crew, '+(t.advq.dated||0)+' dated':'')+' &middot; '+(late?'a newer file is due':'next due ~'+opsD(OPS_addDays(t.advq.at,7)))+'</span><div class=oc-bar><i style="width:'+Math.min(100,Math.round(t.advq.age/t.advq.every*100))+'%;background:'+(late?'#F2B01E':'#2E9E5B')+'"></i></div></div>';}
+  if(t.count){var lc=t.count.age>t.count.every;h+='<div class=oc-fresh><b style="font-size:13px">Completed-contract count</b>'+opsSt(lc?'warn':'ok',t.count.age+' of '+t.count.every+' days')+'<span class=oc-mut style="font-size:12px;grid-column:1 / -1">as of '+opsD(t.count.asOf)+'</span><div class=oc-bar><i style="width:'+Math.min(100,Math.round(t.count.age/t.count.every*100))+'%;background:'+(lc?'#F2B01E':'#2E9E5B')+'"></i></div></div>';}
+  h+='<div class=oc-fresh><b style="font-size:13px">Contract Counter</b><span class="oc-st oc-mut">history only</span><span class=oc-mut style="font-size:12px;grid-column:1 / -1">'+(t.counter.stamp?'uploaded '+opsD(t.counter.stamp):'never uploaded through the console')+'</span></div></div>';
+  h+='<div style="border-top:1px solid #F0F3F7;padding-top:12px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;justify-content:space-between;align-items:center">'+opsSt(t.fixes.length?'warn':'ok','To correct in TDG')+'<b>'+t.fixes.length+'</b></div>';
+  if(t.fixes.length)h+='<div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">'+t.fixes.map(function(f){
+    var txt=f.kind==='held'?' still On board &middot; relieved'+(f.by?' by '+escHtml(f.by):'')+(f.byOn?' '+opsD(f.byOn):''):' On board, no embark date';
+    return '<div style="display:flex;gap:8px;align-items:baseline">'+opsCode(f.code,f.ship)+'<span><b>'+escHtml(f.surname)+'</b>'+txt+'</span></div>';}).join('')+'</div>';
+  else h+='<p class=oc-sub>Nothing: the file agrees with the board.</p>';
+  h+='<p class=oc-sub style="font-size:11.5px">Earmarks TDG agrees with: '+t.earmarks.agree+' of '+t.earmarks.total+' &middot; &quot;TDG says otherwise&quot; rows: '+t.issues+'</p></div></section>';
+  return h;
+}
+function OPS_addDays(iso,n){var d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
+function opsDocs(da){
+  var h='<section class=oc-card style="display:flex;flex-direction:column;gap:12px"><div><h2 class=oc-h>Documents aboard</h2><p class=oc-sub>Crew at sea whose document ends before their sign-off. Relievers&#39; documents are in the table.</p></div>';
+  var items=da.expired.map(function(x){return [x,'crit'];}).concat(da.lapses.map(function(x){return [x,'warn'];}));
+  if(!items.length)h+='<p class=oc-sub>Nothing lapses aboard.</p>';
+  items.forEach(function(p){var x=p[0];
+    h+='<div class=oc-item><div class=t>'+opsCode(x.code,x.ship)+escHtml(x.surname)+'</div><p>'+escHtml(x.doc)+(p[1]==='crit'?' expired '+opsD(x.exp):' ends '+opsD(x.exp))+(x.off?'; signs off '+opsD(x.off):'')+'.</p><button type=button class=oc-link data-crew="'+escHtml(x.sc)+'" style="align-self:flex-start">Open the crew file</button></div>';});
+  return h+'<p class=oc-sub style="font-size:11.5px;margin-top:auto">'+(da.expired.length?da.expired.length+' expired aboard':'Nothing expired aboard today')+' &middot; Schengen (optional) left out.</p></section>';
+}
+function opsCrewCard(w){
+  var tot=w.total||0,seg=[['Aboard',w.on_board,'#2E9E5B'],['Earmarked',w.earmarked,'#F2B01E'],['Ashore',(w.on_vacation||0)+(w.reserved||0),'#2A78D6'],['Inactive',w.inactive,'#C3CCD8'],['Not for rehire',w.not_for_rehire,'#5B6B80']];
+  if(w.not_in_file)seg.push(['Not in TDG file',w.not_in_file,'#B42318']);
+  var bc=w.byClient||{};
+  var h='<section id=oc-crew class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>The '+tot+' crew</h2><p class=oc-sub>Where everyone is today, per TDG&#39;s word.</p></div>';
+  h+='<div style="display:flex;height:16px;gap:2px;border-radius:4px;overflow:hidden" role=img aria-label="'+seg.map(function(s){return (s[1]||0)+' '+s[0];}).join(', ')+'">'+seg.filter(function(s){return s[1];}).map(function(s){return '<span style="width:'+(tot?s[1]/tot*100:0)+'%;background:'+s[2]+'"></span>';}).join('')+'</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 14px;font-size:12.5px">'+seg.map(function(s){return '<span><i class=oc-dot style="background:'+s[2]+'"></i>'+s[0]+' <b>'+(s[1]||0)+'</b></span>';}).join('')+'</div>';
+  h+='<div style="border-top:1px solid #F0F3F7;padding-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;text-align:center">'
+    +[['Royal Caribbean','Royal'],['Celebrity','Celebrity'],['Azamara','Azamara']].map(function(b){return '<div><div style="font-family:Outfit;font-size:20px;font-weight:700">'+(bc[b[0]]||0)+'</div><div class=oc-mut style="font-size:11.5px">'+b[1]+'</div></div>';}).join('')+'</div>';
+  return h+'<p class=oc-sub style="font-size:11.5px">In the rotation = aboard, earmarked or ashore (On Vacation, Reserved).</p></section>';
+}
+function opsTravel(tv){
+  if(!tv||!tv.year)return '<section class=oc-card><h2 class=oc-h>Crew travel</h2><p class=oc-sub>No travel on file yet.</p></section>';
+  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crew||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo||12)/12*100);
+  var h='<section class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>Crew travel &middot; '+tv.year+'</h2><p class=oc-sub>Against the '+opsMoney(ann)+' budget. Reference only, never an invoice source.</p></div>';
+  h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crew)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget to date')+'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="position:relative;height:14px;font-size:11px"><span style="position:absolute;left:'+yearPct+'%;transform:translateX(-50%);font-weight:600;white-space:nowrap">'+(tv.elapsedMo||12)+' of 12 months</span></div>'
+    +'<div class=oc-bul role=img aria-label="'+used+' percent of the budget used"><i style="width:'+Math.min(100,used)+'%"></i><em style="left:'+yearPct+'%"></em></div>'
+    +'<div style="display:flex;justify-content:space-between;font-size:11px" class=oc-mut><span>$0</span><span>'+opsMoney(ann)+'</span></div></div>';
+  var c=tv.cats||{},L=[['Air',c.air],['Medical',c.medical],['Visa',c.visa],['Transport',c.transport],['Hotel + food',(c.hotel||0)+(c.food||0)],['Other',c.other]].filter(function(x){return x[1];});
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px 28px;font-size:12px;border-top:1px solid #F0F3F7;padding-top:10px">'
+    +L.map(function(x){return '<span style="display:flex;justify-content:space-between;gap:8px"><span>'+x[0]+'</span><b>'+opsMoney(x[1])+'</b></span>';}).join('')
+    +(tv.shoreside?'<span class=oc-mut style="display:flex;justify-content:space-between;gap:8px"><span>Shoreside</span><b style="color:var(--ink)">'+opsMoney(tv.shoreside)+'</b></span>':'')+'</div>';
+  return h+'</section>';
+}
+// A ship code opens the ship on the Keyman board; a crew name opens that crew's own card on it (Miguel, 14 Oct 2026:
+// "when I click here on the crew, it should take me automatically to the keyman tab and display that particular card").
+// Then, same day, on Safari: "it is sending me to the wrong person". Three causes, all closed here:
+// (1) a Keyman search, tile or facet left from before hid the ship (opening Keyman from a crew profile leaves the search
+//     on that profile's ship), so the board showed other people: a jump clears them, the way Clear filters does;
+// (2) the crew id is also on the card's toggles, its Remove button and its "Contract completed" history card: only the
+//     card itself (.rcard) is matched;
+// (3) the board draws a ship only as it nears the screen (content-visibility) and refreshes behind the first paint: the
+//     ships above the target are laid out for real before the scroll, and the target is re-aimed after any redraw for a
+//     few seconds, until the person scrolls or touches the page.
+var OPS_TARGET=null;
+function opsGoShip(ship,sc){Promise.resolve(show('rotation')).then(function(){
+  try{ROT_F='';ROT_BRANDS=[];ROT_SHIPS=[];ROT_FIND='';ROT_YEAR='';ROT_MONTHS=[];var f=document.getElementById('rfind');if(f)f.value='';
+    ROT_CLOSED[ship]=false;OPS_TARGET={ship:ship,sc:sc||null,until:Date.now()+6000};drawRotation();}catch(_){}
+  setTimeout(function(){try{opsFind(ship,sc);}catch(_){}},120);});}
+['wheel','touchstart','keydown','mousedown'].forEach(function(ev){window.addEventListener(ev,function(){OPS_TARGET=null;},{passive:true});});
+function opsReaim(){var t=OPS_TARGET;if(t&&Date.now()<t.until)setTimeout(function(){if(OPS_TARGET===t)try{opsFind(t.ship,t.sc);}catch(_){}},60);}
+function opsFind(ship,sc,n){
+  n=n||0;
+  var hd=document.querySelector('#rotbody .shiphdr[data-toggle="'+String(ship).replace(/"/g,'')+'"]'),sec=hd&&hd.closest('.shipsec');
+  if(!sec)return;
+  // lay the ships above (and this one) out for real, so the scroll lands where the card actually is
+  var all=document.querySelectorAll('#rotbody>.shipsec');for(var i=0;i<all.length;i++){all[i].style.contentVisibility='visible';if(all[i]===sec)break;}
+  var q=sc?'.rcard[data-crew="'+String(sc).replace(/"/g,'')+'"]':null,card=q?(sec.querySelector('.shipbody '+q)||sec.querySelector(q)):null;
+  var t=card||hd;
+  t.scrollIntoView({block:card?'center':'start'});
+  var r=t.getBoundingClientRect(),ok=card?(r.top>=0&&r.bottom<=innerHeight+1):Math.abs(r.top)<4;
+  if(!ok&&n<8){setTimeout(function(){opsFind(ship,sc,n+1);},90);return;}
+  if(card&&!card.classList.contains('opshl')){card.classList.add('opshl');setTimeout(function(){card.classList.remove('opshl');},2600);}
+}
+function opsBind(){
+  var v=document.getElementById('view');if(!v)return;
+  v.querySelectorAll('[data-scroll]').forEach(function(b){b.onclick=function(){var t=document.getElementById(b.getAttribute('data-scroll'));if(t&&t.scrollIntoView)t.scrollIntoView({behavior:'smooth',block:'start'});};});
+  v.querySelectorAll('[data-f]').forEach(function(b){b.onclick=function(){OPS_F=b.getAttribute('data-f');v.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',String(x===b));});var tb=document.getElementById('oc-rows');if(tb&&OPS)tb.innerHTML=opsRows(OPS.changes.rows);opsBindRows();};});
+  v.querySelectorAll('[data-gantt]').forEach(function(b){b.onclick=function(){Promise.resolve(show('rotation')).then(function(){setTimeout(function(){try{fleetGantt();}catch(_){}},150);});};});
+  v.querySelectorAll('[data-crew]').forEach(function(b){b.onclick=function(){openCrew(b.getAttribute('data-crew'));};});
+  opsBindWeek();opsBindRows();
+}
+function opsBindWeek(){
+  var v=document.getElementById('oc-cal');if(!v)return;
+  v.querySelectorAll('[data-wk]').forEach(function(b){b.onclick=function(){if(b.disabled||!OPS)return;OPS_WK=+b.getAttribute('data-wk');v.outerHTML=opsWeek(OPS.week);opsBindWeek();opsBindRows();};});
+  v.querySelectorAll('[data-score]').forEach(function(b){b.onclick=function(){openScoreWindow();};});
+  v.querySelectorAll('[data-up]').forEach(function(b){b.onclick=function(){show('data');};});
+  v.querySelectorAll('[data-crew]').forEach(function(b){b.onclick=function(){openCrew(b.getAttribute('data-crew'));};});
+}
+function opsBindRows(){var v=document.getElementById('view');if(!v)return;v.querySelectorAll('[data-ship]').forEach(function(b){b.onclick=function(e){if(e)e.preventDefault();opsGoShip(b.getAttribute('data-ship'),b.getAttribute('data-sc'));};if(b.getAttribute('role')==='button')b.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();b.click();}};});}
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
-  var d;try{d=await cachedJson('/api/dashboard',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
-  DASH=d;var w=d.workforce,c=d.compliance,bd=d.birthdays||[],bz=d.bonus||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var statusSegs=[{label:'On board',value:w.on_board,color:'#5FB946'},{label:'On vacation',value:w.on_vacation,color:'#B0741A'},{label:'Earmarked',value:w.earmarked,color:'#1E6FD0'}];
-  if(w.reserved)statusSegs.push({label:'Reserved',value:w.reserved,color:'#C9A46A'});
-  if(w.not_in_file)statusSegs.push({label:'Not in TDG file',value:w.not_in_file,color:'#B0342F'});
-  var bc=w.byClient||{},clientSegs=[{label:'Royal Caribbean',value:bc['Royal Caribbean']||0,color:'#1E6FD0'},{label:'Celebrity',value:bc['Celebrity']||0,color:'#0C8C8C'},{label:'Azamara',value:bc['Azamara']||0,color:'#7A5AA8'},{label:'NCL',value:bc['NCL']||0,color:'#E0962B'},{label:'Unassigned',value:bc['Unassigned']||0,color:'#9AA7B6'}].filter(function(s){return s.label!=='Unassigned'||s.value>0;});
-  var compBars=[{label:'Medical',value:c.med_exp_90,color:'#BC3B2C'},{label:'Seaman bk',value:c.sirb_exp_90,color:'#B0741A'},{label:'Passport',value:c.pp_exp_90,color:'#B0741A'},{label:'US visa',value:c.usv_exp_90,color:'#B0741A'},{label:'Schengen',value:c.sch_exp_90,color:'#7A5AA8'}];
-  var compTot=compBars.reduce(function(a,b){return a+(b.value||0);},0);
-  var h='<div class=bar><h2>Operational dashboard</h2><span class=csub style="margin-left:auto">as of '+d.today+' · '+w.total+' crew</span></div>';
-  if(bd.length)h+='<div class="card" style="max-width:none;border-left:3px solid var(--green);margin:0 0 14px"><b style="color:var(--green-d)">🎂 Birthday today:</b> '+bd.map(function(b){return b.name+(b.vessel?(' · '+b.vessel):'');}).join(' &nbsp;•&nbsp; ')+'</div>';
-  // ZONE 1 — WORKFORCE
-  h+='<div class=zlabel>Workforce</div><div class=dzone>'
-   +'<div class="panel center"><h3>Status mix</h3>'+donutSVG(statusSegs)+legendH(statusSegs)+'</div>'
-   +'<div class="panel center"><h3>By client</h3>'+donutSVG(clientSegs)+legendH(clientSegs)+'</div>'
-   +'<div class=panel><h3>At a glance</h3><div class=tiles style="grid-template-columns:1fr 1fr">'
-     +tile(w.total,'Total crew','','crew')+tile(w.vessels,'Vessels','','fleet')
-     +tile(w.inactive||0,'Inactive','gray','crew')+tile((d.dryDockNow||0),'In dry dock',(d.dryDockNow?'red':'green'),'fleet')
-   +'</div></div></div>';
-  // ZONE 2 — COMPLIANCE
-  h+='<div class=zlabel>Compliance — documents expiring within 90 days</div><div class=dzone>'
-   +'<div class="panel" style="grid-column:span 2"><h3>Expiring documents by type</h3>'+(compTot?barSVG(compBars):'<div class=muted style="padding:16px">All documents valid beyond 90 days.</div>')+'</div>'
-   +'<div class=panel><h3>Action needed</h3><div class=tiles style="grid-template-columns:1fr 1fr">'
-     +tile(compTot,'Total flagged',(compTot?'amber':'green'),'compliance')+tile(c.med_exp_90,'Medical','red','compliance')
-   +'</div><p class=hint style="margin-top:10px">Open the Compliance tab for the crew list and CSV export.</p></div></div>';
-  // ZONE 3 — COST & BONUS
-  h+='<div class=zlabel>Cost &amp; bonus</div><div class=dzone>'
-   +'<div class=panel style="grid-column:span 2"><h3>Travel spend by month'+(d.travel&&d.travel.year?(' · '+d.travel.year):'')+'</h3><div id=trvline></div><div id=trvmom class=csub style="margin-top:4px"></div></div>'
-   +'<div class=panel><h3>Travel budget</h3><div id=trv class=tiles style="grid-template-columns:1fr 1fr"></div><div id=trvcat style="margin-top:12px"></div></div></div>'
-   +'<p class=muted style="text-align:left;padding:10px 2px">Live from Cloudflare D1 · tip: tiles are clickable</p>';
-  $('#view').innerHTML=h;
-  document.querySelectorAll('#view .tile[data-go]').forEach(function(el){el.onclick=function(){show(el.getAttribute('data-go'));};});
-  var bt=document.getElementById('shtog');if(bt)bt.onclick=function(){DASH_SH=!DASH_SH;paintDashCost();};
-  paintDashCost();
-}
-function paintDashCost(){
-  var d=DASH;if(!d)return;var tv=d.travel||{},mn=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var bt=document.getElementById('shtog');if(bt)bt.textContent=DASH_SH?'Show shoreside':'Hide shoreside';
-  // line: total spend by month (shoreside is annual-only in source, so the toggle adjusts headline tiles)
-  var ms=tv.months||[],lineEl=document.getElementById('trvline');
-  if(lineEl)lineEl.innerHTML=lineSVG(ms.map(function(x){return {x:mn[x.m],y:x.t};}));
-  var momEl=document.getElementById('trvmom');
-  if(momEl&&ms.length){var last=ms[ms.length-1],prev=ms.length>1?ms[ms.length-2]:null;var mom=(prev&&prev.t)?((last.t-prev.t)/prev.t*100):null;var arrow=mom==null?'':(mom>=0?'▲':'▼');var col=mom==null?'var(--mut)':(mom>=0?'var(--red)':'var(--green-d)');var air=tv.air||0,share=tv.all?Math.round(air/tv.all*100):0;
-    momEl.innerHTML='Latest: <b style="color:var(--navy)">'+mn[last.m]+'</b> $'+Math.round(last.t).toLocaleString()+(mom!=null?(' · <span style="color:'+col+'">'+arrow+' '+Math.abs(mom).toFixed(0)+'% vs '+mn[prev.m]+'</span>'):'')+' · air '+share+'% of spend';}
-  var trv=document.getElementById('trv');
-  if(trv){
-    var annualBud=(tv.budgetMo||15000)*12;                  // actual budget $180k/yr
-    var crew=tv.crew||0;                                    // crew travel = what the budget governs (shoreside is separate, unbudgeted)
-    var pct=annualBud?Math.round(crew/annualBud*100):0;
-    trv.innerHTML=
-      tile('<span style="font-size:22px;color:'+(pct<=100?'var(--green-d)':'var(--red)')+'">'+pct+'%</span>','of $'+Number(annualBud).toLocaleString()+' annual budget used','','travel')
-      +tile('<span style="font-size:22px">$'+Math.round(crew).toLocaleString()+'</span>','crew travel '+(tv.year||''),'','travel');
-    trv.querySelectorAll('.tile[data-go]').forEach(function(x){x.onclick=function(){show(x.getAttribute('data-go'));};});
-  }
-  var catEl=document.getElementById('trvcat');
-  if(catEl&&tv.cats){
-    var order=['air','hotel','transport','medical','visa','food','other'];
-    var labs={air:'Air',hotel:'Hotel',transport:'Transport',medical:'Medical',visa:'Visa',food:'Food',other:'Other'};
-    var mx=0;order.forEach(function(k){if((tv.cats[k]||0)>mx)mx=tv.cats[k];});
-    var rh=order.filter(function(k){return (tv.cats[k]||0)>0;}).map(function(k){var v=tv.cats[k]||0,w=mx?Math.round(v/mx*100):0;return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0"><div style="width:62px;font-size:11px;color:var(--mut)">'+labs[k]+'</div><div style="flex:1;background:#eef1f5;border-radius:4px;height:13px"><div style="width:'+w+'%;height:13px;background:var(--navy);border-radius:4px"></div></div><div style="width:64px;text-align:right;font-size:11px;font-weight:700">$'+Math.round(v).toLocaleString()+'</div></div>';}).join('');
-    catEl.innerHTML='<div class=csub style="margin-bottom:4px">Crew spend by category'+(tv.year?(' · '+tv.year):'')+'</div>'+rh+'<div class=csub style="margin-top:8px;color:var(--mut)">+ $'+Math.round(tv.shoreside||0).toLocaleString()+' shoreside travel · tracked separately (no budget)</div>';
-  }
+  var d;try{d=await cachedJson('/api/ops',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load the dashboard'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
+  OPS=d;OPS_WK=0;var w=d.crew||{};
+  var h='<div class=ops><div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px"><div><h2 style="margin:0;font-family:Outfit;font-size:24px">Operational dashboard</h2>'
+    +'<p class=oc-sub style="font-size:13px">'+escHtml(fmtDateS(d.today))+(d.tdg.advq?' &middot; reads the TDG file of <b style="color:var(--ink)">'+opsD(d.tdg.advq.at)+'</b>, '+d.tdg.advq.age+' days old':'')+' &middot; '+d.kpis.aboard.ships+' ships</p></div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type=button class="btn ghost" data-gantt=1>Fleet Gantt</button><button type=button class=btn onclick="show(&#39;data&#39;)">Upload TDG file</button></div></div>';
+  h+=opsKpis(d.kpis)+opsWeek(d.week)+opsChanges(d.changes);
+  h+='<div class=oc-row3>'+opsCoverage(d.coverage)+opsTdg(d.tdg)+opsDocs(d.docsAboard)+'</div>';
+  h+='<div class=oc-row3>'+opsCrewCard(w)+opsTravel(d.travel)+'</div>';
+  h+='<p class=oc-sub style="font-size:11.5px">Live from Cloudflare D1 &middot; ship codes are the cruise lines&#39; own &middot; every tile and row opens the screen that acts on it.</p></div>';
+  $('#view').innerHTML=h;opsBind();
 }
 function tile(n,l,cls,go){return '<div class="tile '+(cls||'')+'"'+(go?(' data-go="'+go+'" style="cursor:pointer"'):'')+'><div class=n>'+n+'</div><div class=l>'+l+'</div></div>';}
 function crewTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-st="'+st+'" style="cursor:pointer"><div class=n>'+(n!=null?n:'—')+'</div><div class=l>'+l+'</div></div>';}
