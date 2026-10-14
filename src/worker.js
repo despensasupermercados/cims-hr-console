@@ -6585,6 +6585,7 @@ function drawRotation(){
   document.getElementById('rotbody').innerHTML=h;
   var _sd=document.getElementById('rotside');if(_sd)_sd.innerHTML=side;else document.getElementById('rotbody').insertAdjacentHTML('afterbegin',side);
   rotRail(secs.length,allSecs);
+  if(typeof opsReaim==='function')opsReaim();
   document.querySelectorAll('#rotwrap .tile[data-rf]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-rf');ROT_F=(s===''||ROT_F===s)?'':s;drawRotation();};});
   // A chevron folds ITS section in place (13 Oct 2026: each click redrew all 48 ships, ~1s of layout on a laptop).
   document.querySelectorAll('#rotwrap [data-toggle]').forEach(function(el){el.onclick=function(){var s=el.getAttribute('data-toggle'),sec=el.closest('.shipsec'),arw=el.querySelector('.arw');
@@ -7128,18 +7129,33 @@ function opsTravel(tv){
 }
 // A ship code opens the ship on the Keyman board; a crew name opens that crew's own card on it (Miguel, 14 Oct 2026:
 // "when I click here on the crew, it should take me automatically to the keyman tab and display that particular card").
-function opsGoShip(ship,sc){Promise.resolve(show('rotation')).then(function(){try{ROT_CLOSED[ship]=false;drawRotation();}catch(_){}setTimeout(function(){try{opsFind(ship,sc);}catch(_){}},150);});}
+// Then, same day, on Safari: "it is sending me to the wrong person". Three causes, all closed here:
+// (1) a Keyman search, tile or facet left from before hid the ship (opening Keyman from a crew profile leaves the search
+//     on that profile's ship), so the board showed other people: a jump clears them, the way Clear filters does;
+// (2) the crew id is also on the card's toggles, its Remove button and its "Contract completed" history card: only the
+//     card itself (.rcard) is matched;
+// (3) the board draws a ship only as it nears the screen (content-visibility) and refreshes behind the first paint: the
+//     ships above the target are laid out for real before the scroll, and the target is re-aimed after any redraw for a
+//     few seconds, until the person scrolls or touches the page.
+var OPS_TARGET=null;
+function opsGoShip(ship,sc){Promise.resolve(show('rotation')).then(function(){
+  try{ROT_F='';ROT_BRANDS=[];ROT_SHIPS=[];ROT_FIND='';ROT_YEAR='';ROT_MONTHS=[];var f=document.getElementById('rfind');if(f)f.value='';
+    ROT_CLOSED[ship]=false;OPS_TARGET={ship:ship,sc:sc||null,until:Date.now()+6000};drawRotation();}catch(_){}
+  setTimeout(function(){try{opsFind(ship,sc);}catch(_){}},120);});}
+['wheel','touchstart','keydown','mousedown'].forEach(function(ev){window.addEventListener(ev,function(){OPS_TARGET=null;},{passive:true});});
+function opsReaim(){var t=OPS_TARGET;if(t&&Date.now()<t.until)setTimeout(function(){if(OPS_TARGET===t)try{opsFind(t.ship,t.sc);}catch(_){}},60);}
 function opsFind(ship,sc,n){
-  // The board draws a ship's cards only as they near the screen (content-visibility), so the ships above grow while we
-  // travel and push the card down: jump, then re-aim until it holds still, and only then flash it.
   n=n||0;
-  var hd=document.querySelector('.shiphdr[data-toggle="'+String(ship).replace(/"/g,'')+'"]'),sec=hd&&hd.closest('.shipsec');
-  var q=sc?'[data-crew="'+String(sc).replace(/"/g,'')+'"]':null,card=q&&sec?sec.querySelector(q):null;
-  var t=card||hd;if(!t||!t.scrollIntoView)return;
+  var hd=document.querySelector('#rotbody .shiphdr[data-toggle="'+String(ship).replace(/"/g,'')+'"]'),sec=hd&&hd.closest('.shipsec');
+  if(!sec)return;
+  // lay the ships above (and this one) out for real, so the scroll lands where the card actually is
+  var all=document.querySelectorAll('#rotbody>.shipsec');for(var i=0;i<all.length;i++){all[i].style.contentVisibility='visible';if(all[i]===sec)break;}
+  var q=sc?'.rcard[data-crew="'+String(sc).replace(/"/g,'')+'"]':null,card=q?(sec.querySelector('.shipbody '+q)||sec.querySelector(q)):null;
+  var t=card||hd;
   t.scrollIntoView({block:card?'center':'start'});
   var r=t.getBoundingClientRect(),ok=card?(r.top>=0&&r.bottom<=innerHeight+1):Math.abs(r.top)<4;
   if(!ok&&n<8){setTimeout(function(){opsFind(ship,sc,n+1);},90);return;}
-  if(card){card.classList.remove('opshl');void card.offsetWidth;card.classList.add('opshl');setTimeout(function(){card.classList.remove('opshl');},2600);}
+  if(card&&!card.classList.contains('opshl')){card.classList.add('opshl');setTimeout(function(){card.classList.remove('opshl');},2600);}
 }
 function opsBind(){
   var v=document.getElementById('view');if(!v)return;
