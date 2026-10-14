@@ -60,6 +60,7 @@ import { installSeval } from "./seval.js";
 import { apiRosterExport } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
+import { isAuditHost } from "./audit.js";
 import { ensureAuditTables } from "./audit_store.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -203,11 +204,11 @@ export default {
       if (p === "/icon-512.png")         return assetResponse(PNG512_B64, "image/png");
 
       // ---- auth endpoints ----
-      if (p === "/login")                return htmlResponse(LOGIN_HTML);
+      if (p === "/login")                return htmlResponse(isAuditHost(url.hostname) ? AUDIT_LOGIN_HTML : LOGIN_HTML);
       if (p === "/api/auth/request" && request.method === "POST") return authRequest(request, env, url);
       if (p === "/auth/verify")          return authVerify(request, env, url);
       if (p === "/auth/dev")             return authDev(request, env, url);
-      if (p === "/api/auth/logout")      return logout();
+      if (p === "/api/auth/logout")      return logout(url);
 
       // ---- public contributor feedback (token-authenticated, no login) ----
       if (p === "/fb")                   return htmlResponse(FB_HTML);
@@ -314,7 +315,12 @@ if (p === "/api/health/send" && request.method === "POST") { await ensureRegistr
         return new Response("Recruitment link not configured (set the RECRUITMENT_FORM_URL secret).", { status: 503 });
       }
 
-      return htmlResponse(APP_HTML);
+      // A session signed in before 14 Oct 2026 carries a host-only cookie; opening the console re-issues the same token on
+      // cims.work, so audit.cims.work sees it without a second sign-in.
+      const shell = htmlResponse(APP_HTML);
+      const tok = getCookie(request, COOKIE);
+      if (tok && cookieDomain(url.hostname)) shell.headers.append("Set-Cookie", sessionCookie(tok, url.hostname));
+      return shell;
       })();
       // PERF instrumentation: stamp total server time on every API response so per-request cost
       // is visible in browser devtools (Network -> Timing -> Server Timing). Read-only; on any
@@ -433,8 +439,17 @@ async function ensureUsersImpl(env) {
   await env.DB.batch(ALLOWLIST_SEED.map(([email, name]) =>
     stmt.bind("u_" + email.toLowerCase().replace(/[^a-z0-9]/g, ""), email, name)));
 }
-function sessionCookie(token) {
-  return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`;
+// ONE sign-in for cims.work and audit.cims.work (Miguel, 14 Oct 2026: "why cant [I] enter to the site?" — he was signed in
+// on cims.work at 13:51 and audit.cims.work sent him to a login page, because the cookie was host-only). On any
+// *.cims.work host the session cookie is scoped to the parent domain; elsewhere (workers.dev, local) it stays host-only.
+// It is still HttpOnly + Secure, and only a worker holding SESSION_SECRET can read meaning into it.
+function cookieDomain(host) {
+  const h = String(host || "").toLowerCase().split(":")[0];
+  return h === "cims.work" || h.endsWith(".cims.work") ? "cims.work" : null;
+}
+function sessionCookie(token, host) {
+  const d = cookieDomain(host);
+  return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}` + (d ? `; Domain=${d}` : "");
 }
 // perf_log: created once per isolate (memoEnsure below), written only from waitUntil — never on the
 // request path. Read it with: SELECT path, dur, colo, at FROM perf_log ORDER BY at DESC.
@@ -879,7 +894,7 @@ async function authVerify(request, env, url) {
   }
   const sess = await signToken({ email: p.email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
   await logActivity(env, p.email, "login", "verify");
-  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": sessionCookie(sess) } });
+  return new Response(null, { status: 302, headers: { "Location": url.origin + "/", "Set-Cookie": sessionCookie(sess, url.hostname) } });
 }
 
 // POST /auth/dev {key, email} -> bootstrap session (until email is wired).
@@ -894,11 +909,16 @@ async function authDev(request, env, url) {
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
   await logActivity(env, email, "login", "bootstrap");
-  const cookie = sessionCookie(sess);
+  const cookie = sessionCookie(sess, url.hostname);
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Set-Cookie": cookie, "Content-Type": "application/json" } });
 }
-function logout() {
-  return new Response(null, { status: 302, headers: { "Location": "/login", "Set-Cookie": `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0` } });
+function logout(url) {
+  // Clears both: the host-only cookie a sign-in before 14 Oct 2026 left, and the cims.work one.
+  const h = new Headers({ "Location": "/login" });
+  h.append("Set-Cookie", `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`);
+  const d = cookieDomain(url && url.hostname);
+  if (d) h.append("Set-Cookie", `${COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0; Domain=${d}`);
+  return new Response(null, { status: 302, headers: h });
 }
 
 /* ----------------------- data API ----------------------- */
@@ -4550,6 +4570,10 @@ async function keyLogin(){
 }
 document.getElementById('email').addEventListener('keydown',e=>{if(e.key==='Enter')req();});
 </script></body></html>`;
+// audit.cims.work's sign-in: the same page and the same allowlist, saying where you are (it read "HR Operational Console",
+// which looked like the wrong site).
+const AUDIT_LOGIN_HTML = LOGIN_HTML.replace("<title>DG3 CIMS · Sign in</title>", "<title>Printshop Audit · Sign in</title>")
+  .replace("<h1>HR Operational Console</h1>", "<h1>Printshop Audit</h1>");
 
 const FB_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>CIMS Crew Feedback</title>
