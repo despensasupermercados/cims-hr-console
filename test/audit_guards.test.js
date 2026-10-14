@@ -31,7 +31,7 @@ test("the audit's routes run inside the fetch handler's error boundary (§11)", 
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const wrap = W.indexOf("const res = await (async () => {");
   const hook = W.indexOf("const _au = await _audit(p, request, env, url, session)");
-  const end = W.indexOf("return htmlResponse(APP_HTML);");
+  const end = W.indexOf("const shell = htmlResponse(APP_HTML);");
   assert.ok(wrap > 0 && hook > wrap && hook < end, "the audit hook must sit inside the wrapper, before the console shell");
   assert.ok(hook > W.indexOf("const session = await getSession(request, env);"), "the hook needs the session");
 });

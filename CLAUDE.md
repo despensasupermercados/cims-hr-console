@@ -74,6 +74,10 @@ what was proven and what could not be — never ask Miguel to open the site to c
   `policy.js`). Do NOT widen `@dg3.com` into role 'full'. Crew never log in.
 - Auth: magic-link (stateless HMAC token) + bootstrap dev-login; 30-day signed-cookie session (Miguel, 9 Oct 2026:
   "30 days" — it read 12h here while the code said 30 days); the allowlist is re-checked on every request (§11c).
+  **One sign-in for every *.cims.work host** (14 Oct 2026, Miguel could not enter audit.cims.work while signed in on
+  cims.work): the session cookie carries `Domain=cims.work` there (`cookieDomain`), an older host-only session is re-issued
+  when the console opens, logout clears both; audit.cims.work's login reads "Printshop Audit". Pinned by
+  `test/audit_signin.test.js`.
 - DB: Cloudflare D1 `cims-hr-console` (id f0ac8b6a-deac-4214-8f42-e22b202d7d7d).
 - Bonus count is event-sourced from `bonus_outcome` (append-only); never overwrite history.
 
