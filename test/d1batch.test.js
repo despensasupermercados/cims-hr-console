@@ -61,7 +61,7 @@ test("env.DB.batch() still takes the wrapped statements (they are unwrapped), an
   await w.batch([st.bind(1), st.bind(2)]);
   assert.deepEqual(calls, ["batch INSERT INTO k VALUES (?) | INSERT INTO k VALUES (?)"]);
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /async fetch\(request, env, ctx\) \{\n[\s\S]{0,400}env = Object\.assign\(\{\}, env, \{ DB: batchingDb\(env\.DB\) \}\);/);
+  assert.match(W, /async fetch\(request, env, ctx\) \{\n[\s\S]{0,400}env = Object\.assign\(\{\}, env, \{ DB: batchingDb\(env\.DB\)(, MAILER: guardMailer\(env\.MAILER, env\.MAIL_ONLY_TO\))? \}\);/);
   const plain = { prepare() {} };
   assert.equal(batchingDb(plain), plain, "a binding without batch is handed back as it is");
 });

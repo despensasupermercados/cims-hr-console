@@ -53,7 +53,12 @@ configuration does not carry; a write to any table of another app.
 
 ## 2. Two architecture choices round 1 makes (say no now if you disagree)
 
-**A. Other apps' data is read through D1 bindings, never through their code.** The machine register and the OBP
+**A. Other apps' data is read without writing to them.** Revised while building PR A (14 Oct 2026): HON's press
+register is a code constant (`machineRegistry.js`, "the sole source of every serial the crew see") and its OBP readers
+carry HON's own rule on which snapshot is truth, so everything from HON (presses, OBP lines and on-hand, open orders,
+the Ordering Schedule) comes through HON's `AuditReader` entrypoint (choice C) — one reader, never a second copy that
+can disagree. Only the timecard's one table is bound directly (`TIMECARD_DB`). The original wording follows.
+**Originally: other apps' data is read through D1 bindings, never through their code.** The machine register and the OBP
 lines live in `cims-hon`'s D1; the ship mailboxes in `cims-timecard`'s D1. A Worker may bind any D1 in the account,
 so `wrangler.toml` gains two more D1 bindings (`HON_DB`, `TIMECARD_DB`). D1 has no read-only flag: the bindings are
 read-only by discipline — the audit code issues SELECT only, pinned by a static guard in the `sqlsafety` style (any

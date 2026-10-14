@@ -1,0 +1,12 @@
+-- PRINTSHOP AUDIT (14 Oct 2026). The same statements as src/audit_store.js AUDIT_DDL, which is what reaches
+-- production (ensureAuditTables under memoEnsure). test/audit.test.js keeps the two identical.
+CREATE TABLE IF NOT EXISTS audit_request (id TEXT PRIMARY KEY, ship TEXT NOT NULL, agency_id TEXT NOT NULL, crew_name TEXT, contract_label TEXT, auditor TEXT NOT NULL, to_ship TEXT, cc_personal TEXT, token_hash TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','sent','complete','cancelled')), machines_json TEXT, lines_json TEXT, created_at TEXT NOT NULL, sent_at TEXT, due_at TEXT, reminded_at TEXT, overdue_at TEXT, complete_at TEXT, cancelled_at TEXT, cancelled_by TEXT);
+CREATE INDEX IF NOT EXISTS idx_audit_request_ship ON audit_request (ship, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_request_sc ON audit_request (agency_id, created_at);
+CREATE TABLE IF NOT EXISTS audit_upload (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, serial TEXT, kind TEXT NOT NULL CHECK (kind IN ('p43','mgmt','photo')), r2_key TEXT NOT NULL, filename TEXT, content_type TEXT, bytes INTEGER, at TEXT NOT NULL, read_state TEXT NOT NULL DEFAULT 'pending' CHECK (read_state IN ('pending','ok','wrong_doc','unreadable','failed')), read_json TEXT, read_at TEXT, read_version INTEGER, superseded_at TEXT);
+CREATE INDEX IF NOT EXISTS idx_audit_upload_req ON audit_upload (request_id, serial, kind);
+CREATE TABLE IF NOT EXISTS audit_count (request_id TEXT NOT NULL, part_no TEXT NOT NULL, counted INTEGER NOT NULL CHECK (counted >= 0), at TEXT NOT NULL, PRIMARY KEY (request_id, part_no));
+CREATE TABLE IF NOT EXISTS audit_count_extra (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, text TEXT NOT NULL, counted INTEGER CHECK (counted >= 0), at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS audit_down (request_id TEXT NOT NULL, serial TEXT NOT NULL, reason TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (request_id, serial));
+CREATE TABLE IF NOT EXISTS audit_send_log (request_id TEXT NOT NULL, kind TEXT NOT NULL, sent_at TEXT NOT NULL, to_json TEXT, ok INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (request_id, kind));
+CREATE TABLE IF NOT EXISTS audit_visit (id TEXT PRIMARY KEY, request_id TEXT UNIQUE, ship TEXT NOT NULL, agency_id TEXT NOT NULL, auditor TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','filed')), opened_at TEXT NOT NULL, filed_at TEXT);
