@@ -74,11 +74,28 @@ it pre-fills Dexter's Inventory step for him to confirm on the shelf. The parts 
   says so, and the audit's Machines step marks it "verify on board" — Dexter must touch it.
 - **The gate**: no request, no audit. Resend and Extend 24 h are Dexter's; "start anyway" does not exist. At 24 hours
   with gaps: a reminder to the crew and Dexter told; the audit stays locked.
-- **Pattern 43 is attached, not graded.** Miguel asked for Rolando's reading of item 43 to be applied. The Brain's
-  decision of 1 Oct 2026 (recnTfj9bYmsGruys) stands: the automated vision read failed on 3 of 7 fleet bundles
-  (Navigator missed the cyan banding; Anthem invented a line on six pages; Odyssey missed, misplaced and invented)
-  and nothing from it reaches a record until the reader is calibrated on Rolando's labelled bundles. The report reads
-  the Management List percentages, which are deterministic, and attaches Pattern 43 for Rolando's eye.
+- **The email is a whole assessment, not a table** (Miguel, 14 Oct 2026: "what I need is YOUR assessment of reading
+  the Pattern 43 and the Management List, as well look at the inventory and due dates for that ship; I need a whole
+  assessment on that email"). Shape: one verdict band (Good / Attention / Critical) and a paragraph that says what
+  matters most; then **1 · Machines**, a card per machine with the Pattern 43 reading in Rolando's grammar (white
+  dots, lines, short density, mix-page channel isolation; feed direction derived, never assumed; fidelity stated,
+  never guessed) with a stated confidence, the Management List reading, and each part past life as a row with a life
+  bar, on board / on order chips and a verdict sentence; **2 · Inventory**, the blind count against the OBP export of
+  the same night, each gap with its reading (timing per the 1 Oct rule, OBP lagging, unrecorded receipt, item outside
+  the system) and an assessment of the OBP discipline; **3 · Ordering and due dates**, the Ordering Schedule slot
+  missed (no PO, Ray's rule), the next due date and what belongs on it, run-out before the next container from the
+  fleet burn rate, and the parts that cannot wait (a rush there is a crew ordering failure under Ray's window, said
+  as a fact); **4 · For the visit**, a numbered list of what Dexter walks in to do with the owner of each item; the
+  audit button; and a method footer that says, per source, how it was read and how sure it is.
+- **Pattern 43 is assessed, provisionally — this reverses the 1 Oct decision on Miguel's word.** The Brain's record
+  of 1 Oct 2026 (recnTfj9bYmsGruys) says the automated vision read failed on 3 of 7 fleet bundles (Navigator missed
+  the cyan banding; Anthem invented a line on six pages; Odyssey missed, misplaced and invented) and nothing from it
+  reaches a record until the reader is calibrated on Rolando's labelled bundles. Miguel's ask of 14 Oct puts the
+  reading in the email. The way through: every Pattern 43 reading is labelled provisional with its confidence,
+  Rolando confirms it before anyone acts on it, and his confirmations and corrections ARE the calibration set (the
+  HON four-loop learning architecture, recE6buLC658S1lkA: capture, store with evidence, retrieve similar cases,
+  human-gated promotion). The Management List percentages are read as text, deterministic, and need no such caveat.
+  To be written to the Brain as Miguel's call once he confirms.
 - **Where the reading runs: HON** (recommended). The machine register (247 machines, serials), the nightly OBP
   export, the open-orders list (intransititems), the Ordering Schedule due dates and the Pattern 43 upload checks all
   live in cims-hon today. The HR console owns the request, the gate and the audit; HON owns the upload page and the

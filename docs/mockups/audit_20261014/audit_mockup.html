@@ -184,6 +184,41 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
 .mail .mfoot b{display:block;font-family:var(--fh);font-size:12px;letter-spacing:3px;color:var(--navy);margin-bottom:6px}
 .pct{font-family:var(--fh);font-weight:700}
 .pct.r{color:var(--red)}.pct.a{color:var(--amber)}
+/* assessment email */
+.verdict{display:flex;gap:14px;align-items:center;background:var(--panel);border-radius:12px;padding:14px 16px}
+.verdict .vb{font-family:var(--fh);font-weight:800;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;border-radius:9px;flex:none}
+.verdict .vb.att{background:var(--amberbg);color:var(--amber)}.verdict .vb.crit{background:var(--redbg);color:var(--red)}.verdict .vb.good{background:var(--greenbg);color:var(--green-d)}
+.verdict p{margin:0;font-size:13.5px}
+.sec{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:2px solid var(--navy);padding-bottom:4px;margin-top:6px}
+.sec h3{font-size:16px}
+.sec span{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+.mcard{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mcard .mh2{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);font-weight:700;font-size:14px}
+.mcard .mh2 .sn{font-family:var(--fm);font-weight:400;font-size:11px;color:var(--mut);margin-left:8px}
+.mcard .mb2{padding:10px 14px;display:flex;flex-direction:column;gap:10px}
+.read{display:grid;grid-template-columns:92px 1fr;gap:4px 12px;font-size:13px}
+.read b{color:var(--mut);font-weight:600;font-size:11.5px;letter-spacing:.5px;text-transform:uppercase;padding-top:2px}
+.part{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.part:first-child{border-top:0}
+.part .pn{font-weight:600;font-size:13.5px}
+.part .pn .sn{font-family:var(--fm);font-weight:400;font-size:11px;color:var(--mut);margin-left:6px}
+.part .pv{font-family:var(--fh);font-weight:700;font-size:18px;text-align:right;line-height:1}
+.part .pv.r{color:var(--red)}.part .pv.a{color:var(--amber)}
+.life{grid-column:1/-1;height:6px;border-radius:3px;background:var(--line);position:relative;overflow:hidden}
+.life i{position:absolute;left:0;top:0;bottom:0;background:var(--green)}
+.life i.over{background:var(--red)}.life i.near{background:var(--amber)}
+.life:after{content:"";position:absolute;left:25%;top:0;bottom:0;width:1px;background:var(--surface)}
+.part .pm{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px}
+.part .pm .pill{font-size:10px}
+.part .pm .vt{font-weight:600}
+.part .pm .vt.r{color:var(--red)}
+.note2{font-size:12px;color:var(--mut)}
+.act2{display:grid;grid-template-columns:22px 1fr;gap:6px 10px;font-size:13.5px}
+.act2 i{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-style:normal;font-weight:700;font-size:11px;background:var(--navybg);color:var(--navy)}
+.act2 i.r{background:var(--redbg);color:var(--red)}
+.act2 .who{color:var(--mut);font-size:12px}
+.method{font-size:11.5px;color:var(--mut);display:grid;grid-template-columns:auto 1fr;gap:3px 10px}
+.method b{color:var(--fg);font-weight:600;white-space:nowrap}
 .wide{grid-column:1/-1;max-width:680px}
 .lock{display:flex;gap:10px;align-items:center;background:var(--panel);border-radius:12px;padding:12px 14px;font-size:13.5px}
 .lock .ic{width:34px;height:34px;border-radius:10px;background:var(--navybg);color:var(--navy);display:grid;place-items:center;font-size:16px;flex:none}
@@ -415,32 +450,84 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
 
   <!-- A7 Pre-visit report email -->
   <div class="step wide">
-    <div class="cap"><div class="n">A7</div><div><h3>The pre-visit report</h3><p>Sent when the request is complete, to Ray, Rolando, Ohji, Jonathan and Miguel, Dexter in copy. Life percentages are read from the Management List, deterministically. Pattern 43 is attached for Rolando's eye: the Brain's 1 Oct decision stands, no automated verdict on it until the reader is calibrated on his labelled bundles.</p></div></div>
+    <div class="cap"><div class="n">A7</div><div><h3>The pre-visit assessment</h3><p>Sent when the request is complete, to Ray, Rolando, Ohji, Jonathan and Miguel, Dexter in copy. One verdict, then the console's own assessment of each thing it read: Pattern 43 in Rolando's grammar, the Management List's life percentages, the blind count against OBP, the ship's ordering dates. Every reading says how it was made and how sure it is.</p></div></div>
     <div class="mail">
       <div class="mtop"></div>
-      <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Pre-visit report<span>Oasis of the Seas · Oct 15</span></div></div>
-      <div class="env"><b>To</b><span>Ray Guerra · Rolando Abellan · Ohji Miranda · Jonathan · Miguel San Martin</span><b>Cc</b><span>Dexter Lawrence</span><b>Subject</b><span>Oasis of the Seas · before Dexter's visit on Oct 16 · 4 parts past life, 1 ordering date missed, 1 machine down</span></div>
+      <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Pre-visit assessment<span>Oasis of the Seas · Oct 15</span></div></div>
+      <div class="env"><b>To</b><span>Ray Guerra · Rolando Abellan · Ohji Miranda · Jonathan · Miguel San Martin</span><b>Cc</b><span>Dexter Lawrence</span><b>Subject</b><span>Oasis of the Seas · assessment before Dexter's visit Oct 16 · ATTENTION: drum K will be missing, one order date missed</span></div>
       <div class="mb">
-        <p>John Gorre sent everything asked on Oct 15 at 11:20, 19 hours after the request. Dexter's audit is now open.</p>
-        <h3>Parts past life · from the Management Lists</h3>
-        <div style="overflow-x:auto"><table style="min-width:560px"><thead><tr><th>Machine</th><th>Part</th><th>Life</th><th>On board</th><th>On order</th><th>Verdict</th></tr></thead><tbody>
-          <tr><td>PROD 1</td><td>Drum K · DR-616K</td><td><span class="pct r">412 %</span></td><td>0</td><td>none</td><td><b style="color:var(--red)">Will be missing</b> · nothing ordered</td></tr>
-          <tr><td>PROD 1</td><td>Developer C · DV-616C</td><td><span class="pct r">180 %</span></td><td>1</td><td>none</td><td>Replace on the visit</td></tr>
-          <tr><td>PROD 1</td><td>Transfer belt</td><td><span class="pct a">104 %</span></td><td>0</td><td>1 · PO 48812, due Oct 29</td><td>Ordered · arrives after the visit</td></tr>
-          <tr><td>PROD 2</td><td>Fusing belt assy</td><td><span class="pct r">131 %</span></td><td>1</td><td>none</td><td>Replace on the visit</td></tr>
-        </tbody></table></div>
-        <h3>Ordering dates</h3>
-        <p><b style="color:var(--red)">Missed:</b> the Oct 9 order for voyage 1019 has no PO on file (Ordering Schedule, Ray's rule). Next due Oct 23.</p>
-        <h3>Machines</h3>
-        <p><b>MFD deck 5 reported down</b> by John: "paper jam error, KM ticket open". No documents for it; Dexter checks it on board. The other four printed and scanned.</p>
-        <h3>Pattern 43</h3>
-        <p>Attached for every machine that printed, for Rolando's read. The console does not grade the test pattern.</p>
-        <h3>Inventory count · counted blind</h3>
-        <p>47 lines counted, 1 item found that OBP does not list (fusing gears ×2). Against the OBP export of Oct 15, 3 lines differ: developer black 4 → 2, waste toner box 11 → 9, filter box 1 → 2. Not graded here; Dexter checks them on the shelf. A one-unit gap on a part just consumed is timing until tomorrow's export says otherwise (Miguel, 1 Oct).</p>
+        <div class="verdict"><div class="vb att">Attention</div><p><b>PROD 1 needs a drum K it does not have.</b> The drum is at 412 % of life, nothing is on board and nothing is ordered; the cyan banding on its Pattern 43 says the transfer belt (104 %) is already printing it. Developer C and PROD 2's fusing belt are past life but on board: Dexter replaces them on the visit. The Oct 9 order for voyage 1019 was never placed, so the Nov 2 container carries nothing for this ship. The blind count is close to OBP: two one-unit gaps on parts consumed this week, one unrecorded receipt. One MFD is down with a KM ticket open.</p></div>
+        <p>John Gorre sent everything asked on Oct 15 at 11:20, 19 hours after the request, one re-scan needed. Dexter's audit is now open.</p>
+
+        <div class="sec"><h3>1 · Machines</h3><span>Pattern 43 · Management List · each machine</span></div>
+        <div class="mcard">
+          <div class="mh2"><span>PROD 1 · AccurioPress C4070<span class="sn">S011021355</span></span><span class="pill r">2 to replace · 1 missing</span></div>
+          <div class="mb2">
+            <div class="read"><b>Pattern 43</b><span><b style="color:var(--red)">Cyan banding</b>, pages 3–7, across the feed (feed direction derived from the edge marks, not assumed). No white dots on any page. Density short on the magenta page 9, mild. Channel isolation on the mix page: cyan only. Reading: transfer belt, consistent with its 104 %. <span class="note2">Reader confidence: medium; Rolando to confirm on the attached scan.</span></span></div>
+            <div class="read"><b>Management List</b><span>Read from the third document, 38 counters. Four parts past life, listed below; everything else under 85 %.</span></div>
+            <div>
+              <div class="part"><span class="pn">Drum K<span class="sn">DR-616K</span></span><span class="pv r">412 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill r">On board 0</span><span class="pill r">On order none</span><span class="vt r">Will be missing on the visit · nothing ordered, nothing in transit</span></div></div>
+              <div class="part"><span class="pn">Developer C<span class="sn">DV-616C</span></span><span class="pv r">180 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill g">On board 1</span><span class="pill m">On order none</span><span class="vt">Replace on the visit · reorder after</span></div></div>
+              <div class="part"><span class="pn">Transfer belt<span class="sn">A50U-R703</span></span><span class="pv a">104 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill r">On board 0</span><span class="pill n">On order 1 · PO 48812 · due Oct 29</span><span class="vt">Arrives after the visit · banding until then</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="mcard">
+          <div class="mh2"><span>PROD 2 · AccurioPress C4070<span class="sn">S011021356</span></span><span class="pill a">1 to replace</span></div>
+          <div class="mb2">
+            <div class="read"><b>Pattern 43</b><span>Clean on all 12 pages after the re-scan: no dots, no lines, density even, channels isolated. <span class="note2">Reader confidence: high.</span></span></div>
+            <div class="read"><b>Management List</b><span>One part past life. The developer counters all read 0 on the same date; only yellow was replaced per OBP. Same pattern as Brilliance, Feb 2025: counters reset without the part.</span></div>
+            <div><div class="part"><span class="pn">Fusing belt assy<span class="sn">A50U-R801</span></span><span class="pv r">131 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill g">On board 1</span><span class="pill m">On order none</span><span class="vt">Replace on the visit</span></div></div></div>
+          </div>
+        </div>
+        <div class="mcard">
+          <div class="mh2"><span>MFD · bizhub ×3<span class="sn">deck 4 ×2 · deck 5</span></span><span class="pill r">1 down</span></div>
+          <div class="mb2">
+            <div class="read"><b>Deck 5</b><span><b>Reported down</b> by John: "paper jam error, KM ticket open". No documents. Dexter checks it on board.</span></div>
+            <div class="read"><b>Deck 4 ×2</b><span>Pattern 43 clean on both; Management Lists show nothing past 70 %.</span></div>
+          </div>
+        </div>
+
+        <div class="sec"><h3>2 · Inventory</h3><span>blind count vs OBP export of Oct 15</span></div>
+        <p>47 lines counted blind. 44 match OBP. Three differ, and one item was found that OBP does not list:</p>
+        <div class="mcard"><div class="mb2">
+          <div class="part"><span class="pn">Developer black<span class="sn">DV-616K</span></span><span class="pv r">−2</span><div class="pm"><span class="pill m">OBP 4</span><span class="pill n">Counted 2</span><span class="vt">Two used, not booked. Not a one-unit timing gap. OBP lagging.</span></div></div>
+          <div class="part"><span class="pn">Waste toner box<span class="sn">WX-105</span></span><span class="pv r">−2</span><div class="pm"><span class="pill m">OBP 11</span><span class="pill n">Counted 9</span><span class="vt">Below the par of 12 either way. No order open.</span></div></div>
+          <div class="part"><span class="pn">Filter box<span class="sn">A50U-R701</span></span><span class="pv a">+1</span><div class="pm"><span class="pill m">OBP 1</span><span class="pill n">Counted 2</span><span class="vt">A receipt not booked, or a transfer. Dexter asks.</span></div></div>
+          <div class="part"><span class="pn">Fusing gears ×2<span class="sn">not in OBP</span></span><span class="pv a">+2</span><div class="pm"><span class="vt">Found on the shelf, no OBP line. Repair items outside the system.</span></div></div>
+        </div></div>
+        <p class="note2">Assessment: the count is honest and the shelf is in order; the OBP is three updates behind. Two of the three gaps are on parts replaced this week, so the one-day timing rule (Miguel, 1 Oct) does not excuse them: the Oct 16 export will show whether John books them before Dexter arrives. John was not shown this comparison.</p>
+
+        <div class="sec"><h3>3 · Ordering and due dates</h3><span>Ordering Schedule · open orders · OBP</span></div>
+        <div class="act2">
+          <i class="r">!</i><span><b>Missed: Oct 9, voyage 1019.</b> No PO on file for the slot (Ray's rule: a voyage with no PO is an issue even in a usual skip slot). The Nov 2 Miami container carries nothing for Oasis.</span>
+          <i>→</i><span><b>Next due: Oct 23, voyage 1026.</b> Drum K, two waste toner boxes to par, and the developer C reorder belong on it. Developer C is on board for the visit; the reorder is for the shelf.</span>
+          <i>→</i><span><b>Run-out before the next container:</b> toner K 3 on board at 1.1 a week, fine to Nov 20; waste toner boxes at 9 against par 12 and 0.8 a week, fine but below par; nothing else within 60 days.</span>
+          <i class="r">!</i><span><b>Drum K cannot wait for Oct 23.</b> At 412 % the drum is past any stated life; with the transfer belt also past life the press is printing on two worn parts. Options for Ray: UPS to Nassau before Oct 16, or Dexter carries one. A rush order here would be a crew ordering failure under Ray's window, not a supply gap.</span>
+        </div>
+
+        <div class="sec"><h3>4 · For the visit</h3><span>what Dexter walks in to do</span></div>
+        <div class="act2">
+          <i>1</i><span>Replace developer C on PROD 1 and the fusing belt on PROD 2 (both on board). <span class="who">Dexter</span></span>
+          <i>2</i><span>Drum K: decide before Oct 16 whether a drum travels to Nassau. <span class="who">Ray · Miguel</span></span>
+          <i>3</i><span>PROD 2 developer counters reset without the parts: confirm on the machine, show John the reset rule. <span class="who">Dexter · Rolando</span></span>
+          <i>4</i><span>MFD deck 5: check the jam, read the KM ticket, decide if it waits for KM. <span class="who">Dexter</span></span>
+          <i>5</i><span>The three OBP gaps and the fusing gears: confirm on the shelf, then the OBP discipline conversation. <span class="who">Dexter</span></span>
+          <i>6</i><span>Voyage 1019 miss: why no PO, and the Oct 23 order placed before Dexter leaves. <span class="who">Dexter · Ray</span></span>
+        </div>
+
         <p><span class="btnm">Dexter: open the audit</span></p>
-        <p class="src">Only Dexter's login opens it. Everyone else sees the report.</p>
+        <p class="src">Only Dexter's login opens it. Everyone else sees the assessment. The findings above are already on the audit's steps as items to confirm.</p>
       </div>
-      <div class="mfoot"><b>CIMS</b>Life % read from the Management List's third document. On board and on order from the OBP export of Oct 15 and the open-orders list. Nothing on this page is money.</div>
+      <div class="mfoot"><b>CIMS</b>
+        <div class="method">
+          <b>Pattern 43</b><span>read by the console against Rolando's six rules (white dots, lines, short density, mix-page channel isolation; feed direction derived, never assumed; fidelity stated, never guessed). The reader is not yet calibrated on Rolando's labelled bundles: every Pattern 43 reading above is provisional and Rolando confirms it before anyone acts on it. Scans attached.</span>
+          <b>Management List</b><span>life % read from the third document, as text, deterministic. 38 counters on each C4070.</span>
+          <b>Inventory</b><span>counted blind by the crew, compared with the OBP export of Oct 15; on board and on order from the same export and the open-orders list.</span>
+          <b>Ordering</b><span>Ordering Schedule due dates and POs on file, Ray's rule; run-out from the fleet burn rate.</span>
+          <b>Money</b><span>nothing on this page is money. It is read by people; the bonus never reads it.</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -457,7 +544,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
           <div class="lrow"><div class="tx"><div class="nm" style="color:var(--amber)">1 ordering date missed</div><div class="sm">Oct 9 · voyage 1019 · no PO</div></div></div>
           <div class="lrow"><div class="tx"><div class="nm">MFD deck 5 down</div><div class="sm">Reported by John · verify on board</div></div></div>
           <div class="lrow"><div class="tx"><div class="nm">Count: 3 lines differ · 1 not in OBP</div><div class="sm">Counted blind by John · verify on the shelf</div></div></div>
-          <div class="lrow"><div class="tx"><div class="nm">Pattern 43 ×4</div><div class="sm">Attached to the audit · Rolando reads the patterns</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm">Pattern 43: PROD 1 cyan banding · 3 clean</div><div class="sm">Provisional reading · Rolando confirms</div></div></div>
         </div>
         <div class="hint">These land in the steps as findings to confirm, not as answers. Dexter still touches every machine.</div>
       </div>
@@ -748,7 +835,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     <div class="d"><div><b>A crew the TDG file does not have aboard</b><p>Jewel and Xcel read empty per the file today, and a new joiner can be aboard before the next upload. The audit must still file: "not in the file for this hull → pick from all crew", and the row is listed for Rita like any other file disagreement (§6). The console never moves the crew.</p></div></div>
     <div class="d"><div><b>Offline, and the phone it runs on</b><p>Ship Wi-Fi is the constraint. The app is an installable PWA that files offline and syncs later; that is more build than a page, and it is the difference between a tool Dexter uses in the printshop and one he fills in from the cabin afterwards. <em>Confirm the offline requirement; and whether the phone is a DG3 iPhone or his own.</em></p></div></div>
     <div class="d"><div><b>Who runs the pre-visit analysis: HON</b><p>The machine register (247 machines, serials), the nightly OBP export, the open-orders list, the Ordering Schedule due dates and the Pattern 43 upload checks all live in cims-hon today. The HR console owns the request, the gate and the audit; HON owns the upload page and the reading and hands the result back over a service binding. Building it twice in the HR console is the alternative. <em>Note: HON's assessment email has never fired in production (zero signed handovers); this would be its first live use.</em></p></div></div>
-    <div class="d"><div><b>Pattern 43 is attached, not graded</b><p>Miguel asked for Rolando's way of reading item 43 to be applied. The Brain's 1 Oct 2026 decision (recnTfj9bYmsGruys) stands: the automated vision read failed on 3 of 7 bundles and nothing from it reaches a record until the reader is calibrated on Rolando's labelled bundles. So the report reads the Management List percentages, which are deterministic, and attaches Pattern 43 for Rolando. <em>Automated Pattern 43 verdicts are a later, separate decision.</em></p></div></div>
+    <div class="d"><div><b>Pattern 43 is assessed, provisionally</b><p>Miguel, 14 Oct: "I need YOUR assessment of reading the Pattern 43 and the Management List". So the email carries the console's reading of Pattern 43 in Rolando's grammar. The Brain's 1 Oct 2026 record (recnTfj9bYmsGruys) says the vision read failed on 3 of 7 bundles and nothing from it reaches a record until calibrated on Rolando's labelled bundles; the way through is: every Pattern 43 reading is labelled provisional with its confidence, Rolando confirms before anyone acts, and his confirmations are the calibration set. <em>This reverses the 1 Oct decision on Miguel's word; it goes to the Brain as his call.</em></p></div></div>
     <div class="d"><div><b>Recipients and the 24 hours</b><p>Jonathan is not on the console's allowlist; the report's recipient list is configuration, not code, and needs his address. At 24 hours with gaps: a reminder to the crew, Dexter told, Resend / Extend his; the audit stays locked. <em>Need: Jonathan's email; confirm "due date missed" means an Ordering Schedule date with no PO, Ray's rule; confirm no override exists.</em></p></div></div>
   </div>
 </section>
