@@ -130,6 +130,11 @@ Rough effort: A two days, B one, C three, G three, D three, E one, F half. Order
 between C/D and the merge of each. If Dexter's next visit lands before D is merged, the request phase (C) can run
 alone and the audit on paper, once.
 
+## 3b. Progress
+
+- 14 Oct 2026: PR A + B merged and proven live (#221); HON `AuditReader` merged and proven in HON's deployed code (cims-hon #113).
+- 14 Oct 2026: PR C built with the reads of G wired in (request, upload page, HON reads at upload, blind count, gate, documents-in email, 12 h reminder, 24 h overdue, read retries). Emails in TEST MODE until Miguel signs off the renders. Still to do in G: Ordering Schedule due dates in the assessment, OBP `update_date` from HON for the 1 Oct timing rule, Rolando's confirm page (R1).
+
 ## 4. Checklist before PR A can merge (what I need, and from whom)
 
 **Miguel / dashboard**

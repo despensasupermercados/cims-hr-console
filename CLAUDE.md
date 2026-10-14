@@ -899,3 +899,24 @@ The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRI
   `cachedJson` (`prefetchTabs`, `PREFETCH_URLS`), so a tab switch paints from memory and revalidates behind the paint (the
   >2s rule). A URL cached or in flight is skipped, a hidden window warms nothing, and `apiDirty` re-arms it 2.5s after a
   write (debounced). Sim: Crew 33ms, Keyman 47ms. Never make the prefetch a burst, and never put a write on the list.
+
+## 10i. THE PRINTSHOP AUDIT — audit.cims.work (Miguel, 14 Oct 2026)
+Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUDIT_BUILD_PLAN.md`, mock-up
+`docs/mockups/audit_20261014/`. Rules, in his words where he gave them:
+- **The gate** ("without that completion, I don't want him to start the audit"): `audit.js gateState` opens only when every
+  press has Pattern 43 AND the MACHINE Management List read OK by HON, or is down with a reason, and every OBP line is
+  counted. No override, not even his.
+- **Addressing** ("display the ship email only .. his personal email gets a copy"): `addressFor` — cims-timecard
+  `ship_contact` (`TIMECARD_DB`, SELECT only), the personal address in copy, Rolando + Ray in copy (`AUDIT_REQUEST_CC`).
+- **The blind count** ("dont show him what is on hand"): the crew's page and its API carry `blindLines` only; OBP's on-hand
+  stays server-side for the team's diff. Pinned by `test/audit_request.test.js`.
+- **The files are read by HON, never a copy of HON** ("remember the reading of the files is important"): the `HON`
+  binding is cims-hon's named entrypoint `AuditReader` (ship / pattern43 / managementList; stores nothing). The read
+  runs on the crew's page right after the upload; the hourly sweep retries what did not finish.
+- **Copy quality decides** ("we dont ask people to replace items until copy quality is affected"): the assessment email
+  never says "replace"; a part past life reads against that machine's Pattern 43 (clean / marks) and HON's
+  Recommendation + PARTS_RULE.
+- **TEST MODE until Miguel signs off the rendered emails** (CIMS email standard §5): `AUDIT_LIVE` unset = every audit
+  email goes to the auditor alone, marked [TEST]. Setting `AUDIT_LIVE = "true"` in `[vars]` is the switch.
+- **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
+  (`src/mail_guard.js`).

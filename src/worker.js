@@ -78,7 +78,7 @@ const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections
 // Printshop Audit (audit.cims.work, 14 Oct 2026): src/audit_routes.js. Nothing in it is money (§1); its tables reach
 // production through ensureAudit (memoEnsure), like ensureSbm.
 const ensureAudit = memoEnsure(ensureAuditTables);
-const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections, TODAY: () => TODAY(),
+const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections, sendViaMailer, logActivity, applyOverride, TODAY: () => TODAY(),
   crewProfile: async (env, sc, session) => (await apiCrewOne(env, new URL("https://cims.work/api/crew/get?id=" + encodeURIComponent(sc)), session)).json() });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
@@ -376,6 +376,8 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
+    // Printshop Audit sweep: 12-hour reminder, 24-hour overdue note to the auditor, reads that did not finish (audit_request.js).
+    if (ctx && ctx.waitUntil) ctx.waitUntil(_audit.sweep(env).catch(function (e) { console.error("audit_sweep", (e && e.stack) || e); }));
     if (ctx && ctx.waitUntil) ctx.waitUntil(projectFutureLegs(env, { today: nyDateStr() }).catch(function (e) { console.error("leg_projection", (e && e.stack) || e); }));
   }
 };

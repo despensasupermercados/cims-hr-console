@@ -121,6 +121,13 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
       return r.json().then(function (j) { if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status)); return j; });
     });
   }
+  function post(u, body) {
+    return fetch(u, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
+      .then(function (r) { if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); } return r.json().then(function (j) { j._status = r.status; return j; }); });
+  }
+  var WHY = { no_ship_mailbox: "No printshop mailbox for this ship in the ship contacts.", hon_unavailable: "HON did not answer. The machines and the OBP list come from it; try again in a minute.",
+    no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console." };
+  function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
   function fail(e) { $("main").innerHTML = '<div class="err">Could not load: ' + esc(e && e.message || e) + '. Pull down or reopen to try again.</div>'; bar(""); }
 
   /* ---------------- A1 · Ships ---------------- */
@@ -142,7 +149,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
     if (!list.length) h += '<div class="empty">No ship matches.</div>';
     list.forEach(function (s) {
       var who = s.aboard.length ? s.aboard.map(function (c) { return esc(c.name); }).join(" · ") + " aboard" : "Nobody aboard per the TDG file";
-      var rt = s.last ? fmtD(s.last.at) + '<br><span class="pill ' + (s.last.status === "complete" ? "g" : "n") + '">' + esc(s.last.status === "sent" ? "requested" : s.last.status) + "</span>" : '<span class="pill m">No request yet</span>';
+      var rt = s.last ? fmtD(s.last.at) + '<br><span class="pill ' + (s.last.status === "complete" ? "g" : "n") + '">' + esc(s.last.status === "sent" ? "waiting" : s.last.status === "complete" ? "docs in" : s.last.status) + "</span>" : '<span class="pill m">No request yet</span>';
       h += '<button class="lrow" data-ship="' + esc(s.ship) + '"' + (s.aboard.length ? "" : ' style="opacity:.55"') + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + who + '</div></div><div class="rt">' + rt + '</div><span class="chev">›</span></button>';
     });
     h += "</div><div class=\"hint\">Who is aboard comes from the TDG file, as on the Keyman board. Earlier audits from Microsoft Forms arrive with the import.</div>";
@@ -205,9 +212,85 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
       }
       h += '<div class="lock"><span>🔒</span><span>The audit opens only when the documents are in: Pattern 43 and the Management List for every machine, and the inventory counted blind.</span></div>';
       $("main").innerHTML = h;
-      bar('<button class="btn navy" disabled>Request the documents</button><div class="note">Requests open with the next update. Nothing is sent from this screen yet.</div>');
+      S.lastBrief = b;
+      if (b.open) bar('<button class="btn navy" data-go="q=' + esc(b.open) + '">Open the request</button>');
+      else bar('<button class="btn navy" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">Request the documents</button>');
     }).catch(fail);
   }
+
+  /* ---------------- A3 · The request ---------------- */
+  function requestView(ship, sc) {
+    head("Request documents", ship, "Setup", true); bar("");
+    $("main").innerHTML = '<div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>';
+    var key = "r" + ship + "|" + sc; S.view = key;
+    api("/api/audit/request/preview?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc)).then(function (p) {
+      if (S.view !== key) return;
+      head("Request documents", ship + " · " + p.crew.name, "Setup", true);
+      if (p.open) { go("q=" + p.open.id); return; }
+      var n = p.machines ? p.machines.length : 0;
+      var h = '<div class="q">' + esc(p.crew.name.split(" ")[0]) + " uploads before you arrive</div>";
+      if (!p.live) h += '<div class="lock" style="background:var(--amberbg);color:var(--amber)"><span>⚑</span><span>Test mode. The email goes to you only, marked TEST. Nothing reaches the ship until Miguel switches it live.</span></div>';
+      if (!p.hon) h += '<div class="err">' + esc(WHY.hon_unavailable) + "</div>";
+      h += '<div class="card">';
+      h += '<div class="kv"><span>Pattern 43</span><span class="v">' + n + ' <span class="sm">· one per machine</span></span></div>';
+      h += '<div class="kv"><span>Machine Management List</span><span class="v">' + n + ' <span class="sm">· one per machine</span></span></div>';
+      h += '<div class="kv"><span>Inventory count</span><span class="v">' + (p.lines == null ? "?" : p.lines) + ' <span class="sm">· lines, blind</span></span></div></div>';
+      if (p.machines && p.machines.length) h += '<div class="card"><div class="h">Machines <span class="r">from HON\'s register</span></div>' + p.machines.map(function (m) { return '<div class="kv"><span>' + esc(m.label) + '</span><span class="v"><span class="sm">' + esc(m.serial) + "</span></span></div>"; }).join("") + "</div>";
+      h += '<div class="card">';
+      h += '<div class="kv"><span>To</span><span class="v">' + (p.shown ? esc(p.shown) + ' <span class="sm">· ship mailbox</span>' : '<span class="pill r">no ship mailbox</span>') + (p.noPersonal ? '<br><span class="sm">no personal email on file</span>' : '<br><span class="sm">+ a copy to his personal email</span>') + "</span></div>";
+      h += '<div class="kv"><span>Due</span><span class="v">24 h <span class="sm">· ' + esc(whenUtc(p.dueAt)) + "</span></span></div>";
+      h += '<div class="kv"><span>Copy</span><span class="v"><span class="sm">Rolando · Ray</span></span></div></div>';
+      h += '<div class="lock"><span>🔒</span><span>The audit opens when everything is in. No "start anyway".</span></div>';
+      $("main").innerHTML = h;
+      var can = p.hon && n > 0 && (p.shown || !p.live);
+      bar('<button class="btn" id="sendreq"' + (can ? "" : " disabled") + ">" + (p.live ? "Send request" : "Send test request to me") + "</button>" + (can ? "" : '<div class="note">' + esc(!p.hon ? WHY.hon_unavailable : n === 0 ? WHY.no_presses : WHY.no_ship_mailbox) + "</div>"));
+      var btn = $("sendreq");
+      if (btn) btn.onclick = function () {
+        btn.disabled = true; btn.textContent = "Sending…";
+        var contract = S.lastBrief && S.lastBrief.contract ? S.lastBrief.contract.label : null;
+        post("/api/audit/request", { ship: ship, sc: sc, contract: contract }).then(function (r) {
+          if (r.ok || r.error === "already_open") { S.brief = {}; S.ships = null; reloadShips(); go("q=" + r.id); }
+          else { btn.disabled = false; btn.textContent = "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + esc(WHY[r.error] || r.detail || r.error) + "</div>"); }
+        }).catch(fail);
+      };
+    }).catch(fail);
+  }
+
+  /* ---------------- A6 / A8 · Waiting, then unlocked ---------------- */
+  var STATE = { ok: ["ok", "Read"], pending: ["", "Reading"], failed: ["", "Reading"], wrong_doc: ["bad", "Wrong document"], unreadable: ["bad", "Scan again"] };
+  function requestDetail(id) {
+    head("Request", "", "Waiting", true); bar("");
+    var key = "q" + id; S.view = key;
+    api("/api/audit/request?id=" + encodeURIComponent(id)).then(function (d) {
+      if (S.view !== key) return;
+      var done = d.status === "complete";
+      head(d.ship, d.crew, done ? "Unlocked" : d.status === "cancelled" ? "Cancelled" : "Waiting", true);
+      var h = "";
+      if (d.test) h += '<div class="lock" style="background:var(--amberbg);color:var(--amber)"><span>⚑</span><span>Test request. Every email went to you only.</span></div>';
+      if (done) h += '<div class="lock" style="background:var(--greenbg);color:var(--green-d)"><span>✓</span><span><b>Everything is in</b> · ' + esc(whenUtc(d.completeAt)) + ". The assessment email went to " + (d.test ? "you" : "Ray, Rolando, Ohji, Jonathan and Miguel") + ".</span></div>";
+      else if (d.status === "sent") h += '<div class="lock"><span>🔒</span><span>Due ' + esc(whenUtc(d.dueAt)) + (d.overdueAt ? ' · <b style="color:var(--red)">overdue</b>' : "") + ". Sent to " + esc(d.test ? "you (test)" : d.to) + ".</span></div>";
+      h += '<div class="card"><div class="h">Machines</div>';
+      d.machines.forEach(function (m) {
+        var cell = function (s, label) { if (!s) return '<span class="pill m">' + label + " · not sent</span>"; var st = STATE[s.read_state] || ["", s.read_state]; return '<span class="pill ' + (st[0] === "ok" ? "g" : st[0] === "bad" ? "r" : "n") + '">' + label + " · " + st[1] + "</span>"; };
+        h += '<div class="lrow" style="cursor:default;align-items:flex-start"><div class="tx"><div class="nm">' + esc(m.label) + '</div><div class="sm">' + esc(m.serial) + "</div>" +
+          (m.down ? '<div class="sm" style="color:var(--red);font-weight:600;margin-top:4px">Down · ' + esc(m.down) + "</div>" : '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + cell(m.p43, "Pattern 43") + cell(m.mgmt, "Mgmt list") + "</div>" +
+          ((m.p43 && m.p43.read_state !== "ok" && m.p43.say) ? '<div class="sm" style="margin-top:4px">' + esc(m.p43.say) + "</div>" : "") + ((m.mgmt && m.mgmt.read_state !== "ok" && m.mgmt.say) ? '<div class="sm" style="margin-top:4px">' + esc(m.mgmt.say) + "</div>" : "")) + "</div></div>";
+      });
+      h += "</div>";
+      h += '<div class="card"><div class="kv"><span>Inventory count</span><span class="v">' + d.count.done + " of " + d.count.total + (d.extras ? ' <span class="sm">· ' + d.extras + " not on the list</span>" : "") + "</span></div></div>";
+      if (!done && d.gate && d.gate.missing && d.gate.missing.length && d.status === "sent") h += '<details class="card fold"><summary class="lrow"><div class="tx"><div class="nm">Still missing</div><div class="sm">' + d.gate.missing.length + ' items</div></div><span class="chev">›</span></summary>' + d.gate.missing.map(function (x) { return '<div class="feed">' + esc(x.say) + "</div>"; }).join("") + "</details>";
+      $("main").innerHTML = h;
+      if (done) bar('<button class="btn" disabled>Start the audit</button><div class="note">The audit steps on the ship arrive with the next update.</div>');
+      else if (d.status === "sent") {
+        bar('<div style="display:flex;gap:8px"><button class="btn navy" id="rs">Resend</button><button class="btn navy" id="ex">+24 hours</button></div><button class="btn" style="background:none;color:var(--red);min-height:40px" id="cx">Cancel request</button>');
+        var act = function (what, confirmText) { return function () { if (confirmText && !confirm(confirmText)) return; post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(r.error || "Not done"); requestDetail(id); }); }; };
+        $("rs").onclick = act("resend", "Send the request again? The old link stops working.");
+        $("ex").onclick = act("extend");
+        $("cx").onclick = act("cancel", "Cancel this request? The upload link closes.");
+      } else bar("");
+    }).catch(fail);
+  }
+  function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
 
   /* ---------------- router ---------------- */
   function go(h) { location.hash = h; }
@@ -216,11 +299,15 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
     var h = decodeURIComponent(location.hash.replace(/^#/, ""));
     if (h.indexOf("s=") === 0) return shipView(h.slice(2));
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
+    if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }
+    if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
     shipsView();
   }
   window.addEventListener("hashchange", route);
   $("bk").addEventListener("click", function () { history.length > 1 ? history.back() : go(""); });
   document.addEventListener("click", function (e) {
+    var g = e.target.closest("[data-go]");
+    if (g) { go(g.getAttribute("data-go")); return; }
     var t = e.target.closest("[data-brand],[data-sc],[data-ship]");
     if (!t) return;
     if (t.hasAttribute("data-brand")) { S.brand = t.getAttribute("data-brand"); shipsView(); return; }
