@@ -122,9 +122,9 @@ test("the gate: reads by HON, the count, then complete once and ONE documents-in
   assert.equal(docs.length, 1, "the documents-in email goes once");
   assert.equal(docs[0].templateId, "hr.audit.docsin.v1");
   assert.deepEqual(docs[0].to, ["dexter.lawrence@dg3.com"], "test mode: the auditor only");
-  assert.match(docs[0].html, /Drum Unit\/K/); assert.match(docs[0].html, /on board 2 · on order 1/);
+  assert.match(docs[0].html, /Drum Unit\/K/); assert.match(docs[0].html.replace(/<[^>]+>/g, ""), /on board 2 · on order 1/); // the figures read as one phrase (each part kept whole)
   assert.match(docs[0].html, /copy reads clean/); assert.doesNotMatch(docs[0].html, /\breplace\b/i);
-  assert.match(docs[0].html, /Toner C[\s\S]*OBP 5 · counted 0/, "the team sees the gap against OBP");
+  assert.match(docs[0].html.replace(/<[^>]+>/g, ""), /Toner C[\s\S]*OBP 5 · counted 0/, "the team sees the gap against OBP");
   // a second gate check after completion sends nothing more
   await t.R._internal.maybeComplete(t.env, id);
   assert.equal(t.sent.length, before + 1);
@@ -191,7 +191,7 @@ test("the read mapping: clean / marks / failed / wrong document", () => {
   assert.equal(coverFor("ZZ", [{ part_number: "A0XX", on_hand: 3 }], []), null);
 });
 
-test("the emails keep the CIMS standard: letterhead, no rgba or gradient, the link as plain text, no 'replace'", () => {
+test("the emails keep the CIMS standard: letterhead, no rgba or gradient, a button plus the address as plain text, no 'replace'", () => {
   const req = auditRequestEmail({ first: "John", ship: "Oasis", auditor: "Dexter Lawrence", dueAt: "2026-10-15T16:40:00Z", link: "https://audit.cims.work/audit/u/abc", machines: [{}, {}], lines: 47 });
   const docs = docsInEmail({ ship: "Oasis", crew: "John Gorre", auditor: "Dexter", completeAt: "2026-10-15T10:00:00Z", machines: [{ serial: "S1", label: "M1", p43: { state: "findings", legend: { items: [{ head: "LINES ALONG THE FEED IN YELLOW", line: "x", pointsTo: "yellow charging pole" }] } }, mml: { kind: "machine-list", lifeOver: [{ name: "Developer K", partNo: "A1", pct: 237, cover: "on board 0 · on order 0" }], recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." } }], count: { total: 2, diff: [] } });
   const od = overdueEmail({ ship: "Oasis", crew: "John", dueAt: "2026-10-15T16:40:00Z", missing: [{ say: "Machine # 1 · Pattern 43 not sent" }] });
@@ -201,7 +201,10 @@ test("the emails keep the CIMS standard: letterhead, no rgba or gradient, the li
     assert.match(m.html, /name="viewport"/);
     assert.ok(m.text && m.subject);
   }
-  assert.match(req.html, /audit\.cims\.work\/audit\/u\/abc/); assert.doesNotMatch(req.html, /href="https:\/\/audit/, "the address is plain text: Mimecast rewrites links");
+  // a button for one tap, AND the address as plain text outside any link: Mimecast rewrites links, a typed address it cannot
+  assert.match(req.html, /<a href="https:\/\/audit\.cims\.work\/audit\/u\/abc"[^>]*>Open my upload page<\/a>/);
+  assert.match(req.html.replace(/<a [\s\S]*?<\/a>/g, ""), /audit\.cims\.work\/audit\/u\/abc/, "the address must also stand as plain text");
+  assert.match(req.text, /https:\/\/audit\.cims\.work\/audit\/u\/abc/);
   assert.match(req.html, /MACHINE Management List/);
   assert.doesNotMatch(docs.html, /\breplace\b/i); assert.match(docs.html, /copy shows marks above/);
 });
