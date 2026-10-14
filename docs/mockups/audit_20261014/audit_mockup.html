@@ -145,6 +145,50 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
 .done .ckm{width:56px;height:56px;border-radius:50%;background:var(--greenbg);color:var(--green-d);display:grid;place-items:center;font-size:28px;font-weight:700}
 .legend{font-size:11px;color:var(--mut);padding:0 14px 8px;display:flex;gap:6px;align-items:center}
 .src{font-size:11px;color:var(--mut)}
+/* seafarer web page + emails */
+.web{background:var(--surface);border:1px solid var(--line2);border-radius:16px;overflow:hidden;box-shadow:0 10px 30px rgba(20,45,72,.10)}
+.web .wtop{background:var(--navy);color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:4px solid var(--green)}
+.web .wtop .wm{font-size:16px;letter-spacing:4px}
+.web .wtop .wm small{font-size:7px;margin-top:4px}
+.web .wtop .tag{font-size:9px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--green);text-align:right}
+.web .wtop .tag span{display:block;font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.85);letter-spacing:0;text-transform:none;margin-top:4px}
+.web .wb{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.due{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--amberbg);border:1px solid #E6C98F;border-radius:12px;padding:10px 14px;font-size:13.5px}
+.due b{font-family:var(--fh);font-size:16px;color:var(--amber)}
+.up{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;border-top:1px solid var(--line)}
+.up:first-child{border-top:0}
+.up .tx{flex:1;min-width:0}
+.up .nm{font-weight:600;font-size:14.5px}
+.up .sm{font-size:12.5px;color:var(--mut)}
+.up .act{flex:none;min-height:40px;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid var(--navy);color:var(--navy);font-weight:600;font-size:13.5px;background:var(--surface)}
+.up .act.ok{border-color:#BFE0B2;background:var(--greenbg);color:var(--green-d)}
+.up .act.dn{border-color:#E7B4AC;background:var(--redbg);color:var(--red)}
+.mail{background:var(--surface);border:1px solid var(--line2);border-radius:12px;overflow:hidden;font-size:13.5px}
+.mail .mtop{height:4px;background:linear-gradient(90deg,var(--navy) 60%,var(--green) 60%)}
+.mail .mhead{background:var(--navy);color:#fff;padding:18px 22px 16px;display:flex;justify-content:space-between;align-items:flex-start}
+.mail .mhead .wm{font-size:18px;letter-spacing:4px}
+.mail .mhead .wm i{display:block;width:40px;height:2px;background:var(--green);margin:7px 0 5px}
+.mail .mhead .wm small{font-size:7px;margin-top:0}
+.mail .mhead .tag{font-size:8.5px;font-weight:700;letter-spacing:2.4px;text-transform:uppercase;color:var(--green);text-align:right}
+.mail .mhead .tag span{display:block;font-family:var(--fm);font-size:12px;color:rgba(255,255,255,.85);letter-spacing:0;text-transform:none;margin-top:6px}
+.mail .mb{padding:18px 22px;display:flex;flex-direction:column;gap:12px;line-height:1.5}
+.mail .mb h3{font-size:18px;font-weight:700}
+.mail .mb p{margin:0}
+.mail .env{font-size:12px;color:var(--mut);padding:10px 22px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.mail .env b{font-weight:600;color:var(--fg)}
+.mail .btnm{display:inline-block;background:var(--green);color:#fff;font-family:var(--fh);font-weight:700;padding:12px 22px;border-radius:10px;font-size:14px}
+.mail table{width:100%;border-collapse:collapse;font-size:12.5px}
+.mail th{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line2);font-weight:700}
+.mail td{padding:7px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:top}
+.mail .mfoot{padding:14px 22px 20px;font-size:10.5px;color:var(--mut);border-top:1px solid var(--line)}
+.mail .mfoot b{display:block;font-family:var(--fh);font-size:12px;letter-spacing:3px;color:var(--navy);margin-bottom:6px}
+.pct{font-family:var(--fh);font-weight:700}
+.pct.r{color:var(--red)}.pct.a{color:var(--amber)}
+.wide{grid-column:1/-1;max-width:680px}
+.lock{display:flex;gap:10px;align-items:center;background:var(--panel);border-radius:12px;padding:12px 14px;font-size:13.5px}
+.lock .ic{width:34px;height:34px;border-radius:10px;background:var(--navybg);color:var(--navy);display:grid;place-items:center;font-size:16px;flex:none}
+.cnt{font-family:var(--fh);font-weight:700;font-size:28px;line-height:1;color:var(--navy)}
+.cnt small{display:block;font-family:var(--ff);font-weight:500;font-size:12px;color:var(--mut);margin-top:3px}
 /* review page blocks */
 .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .rule{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
@@ -182,21 +226,21 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
   <div>
     <div class="wm">CIMS<small>Cruise Industry Managed Services</small></div>
     <h1>Printshop Audit · audit.cims.work</h1>
-    <div class="meta">Mock-up of the audit Dexter fills on every ship visit, rebuilt on the HR console's crew, ship and contract data. Mobile first: one step per screen, nothing smaller than a thumb, the next action always at the bottom. Crew placements and console facts shown here are examples; the history table holds Dexter's real rows from the Forms export.</div>
+    <div class="meta">Mock-up of the audit Dexter runs on every ship visit, rebuilt on the HR console's crew, ship and contract data. Two phases: before the visit, the seafarer is asked for the machine documents and the console reads them; on the ship, Dexter audits from his phone, one step per screen. Crew placements and console facts shown here are examples; the history table holds Dexter's real rows from the Forms export.</div>
   </div>
-  <div style="text-align:right"><div class="eyebrow">Mock-up v3 · 14 Oct 2026</div><div style="font-size:12px;opacity:.8;margin-top:6px">Nothing built yet · for Miguel's review</div></div>
+  <div style="text-align:right"><div class="eyebrow">Mock-up v4 · 14 Oct 2026</div><div style="font-size:12px;opacity:.8;margin-top:6px">Nothing built yet · for Miguel's review</div></div>
 </div></div>
 
 <div class="wrap">
 
 <section class="blk">
-  <h2>The flow on a phone</h2>
-  <p class="lead">Nine screens, one per step. A clean printshop is one tap per step; only what is wrong takes typing. Tap the controls, they respond.</p>
+  <h2>A · Before the visit</h2>
+  <p class="lead">Dexter picks the ship and the specialist, reads what the console knows, and sends one request. The seafarer uploads Pattern 43 and the Management List for every machine and a full inventory count, within 24 hours. The console reads the Management Lists, writes the pre-visit report to Ray, Rolando, Ohji, Jonathan and Miguel, and only then unlocks the audit. Nobody starts an audit without it.</p>
   <div class="flow">
 
-  <!-- 1 Home -->
+  <!-- A1 Home -->
   <div class="step">
-    <div class="cap"><div class="n">1</div><div><h3>Ships</h3><p>A draft to resume comes first. Ships from the vessel table, who is aboard per the TDG file, when it was last audited. The four dots are the four ratings.</p></div></div>
+    <div class="cap"><div class="n">A1</div><div><h3>Ships</h3><p>A draft to resume comes first. Ships from the vessel table, who is aboard per the TDG file, when it was last audited. The four dots are the four ratings.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk off">‹</div><div><div class="t">Printshop audit</div><div class="s">Dexter Lawrence · Wed, Oct 14</div></div><div class="k">New</div></div>
       <div class="scr">
@@ -218,9 +262,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 2 Briefing -->
+  <!-- A2 Briefing -->
   <div class="step">
-    <div class="cap"><div class="n">2</div><div><h3>Before you walk in</h3><p>Who is aboard, the contract, the last visit's open points as Fixed / Open rows. Ray, the GSM and intel stay folded until tapped, so they do not lead the rating.</p></div></div>
+    <div class="cap"><div class="n">A2</div><div><h3>Read the crew, then request</h3><p>Who is aboard, the contract, the last visit's open points as Fixed / Open rows. Ray, the GSM and intel stay folded until tapped. The button is not "Start audit" any more: it is the request.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Oasis of the Seas</div><div class="s">Royal Caribbean · Oasis class · today Nassau</div></div><div class="k">Setup</div></div>
       <div class="scr">
@@ -240,13 +284,169 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
         <div class="card"><div class="lrow"><div class="tx"><div class="nm">What others said</div><div class="sm">Ray · Rolando · GSM review · field intel · 4 items</div></div><span class="chev">›</span></div></div>
         <div class="src">Facts only. No score, no bonus figure on this page.</div>
       </div>
+      <div class="bar"><button class="btn navy">Request the documents</button></div>
+    </div>
+  </div>
+
+  <!-- A3 Request -->
+  <div class="step">
+    <div class="cap"><div class="n">A3</div><div><h3>The request</h3><p>What the seafarer will be asked, machine by machine, from the machine register. The email on file comes from the crew record; none on file blocks the request and tells Rita. One tap sends it.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Request documents</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">Setup</div></div>
+      <div class="scr">
+        <div class="q">Before you arrive, John uploads:</div>
+        <div class="card">
+          <div class="up"><div class="tx"><div class="nm">Pattern 43 · every machine</div><div class="sm">The 12-page test pattern, scanned · PROD 1, PROD 2, 3 MFDs</div></div><span class="pill n">5</span></div>
+          <div class="up"><div class="tx"><div class="nm">Management List · every machine</div><div class="sm">The machine's own report, three documents · life % read from the third</div></div><span class="pill n">5</span></div>
+          <div class="up"><div class="tx"><div class="nm">Full inventory count</div><div class="sm">The OBP sheet with today's counted quantity per line</div></div><span class="pill n">1</span></div>
+        </div>
+        <div class="card">
+          <div class="kv2"><span>To</span><span style="font-weight:500;font-size:13.5px">j.gorre@… · crew record</span></div>
+          <div class="kv2"><span>Due</span><span style="font-weight:500;font-size:13.5px">24 h · Oct 15, 16:40 ship time</span></div>
+          <div class="kv2"><span>Copy</span><span style="font-weight:500;font-size:13.5px">Rolando · Ray</span></div>
+        </div>
+        <div class="lock"><div class="ic">🔒</div><div>The audit stays locked until everything is in or every gap is explained by the crew. There is no "start anyway".</div></div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn">Send request</button></div>
+    </div>
+  </div>
+
+  <!-- A4 Seafarer email -->
+  <div class="step wide">
+    <div class="cap"><div class="n">A4</div><div><h3>The email the seafarer gets</h3><p>CIMS letterhead, one link, the three things, how to print each, the deadline. Same mechanics as the sign-off link and the shipboard review: a signed single-use link, no login, the crew never sees the console.</p></div></div>
+    <div class="mail">
+      <div class="mtop"></div>
+      <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Printshop audit<span>Oasis of the Seas</span></div></div>
+      <div class="env"><b>To</b><span>John Gorre</span><b>Cc</b><span>Rolando Abellan · Ray Guerra</span><b>Subject</b><span>Dexter visits Oasis of the Seas on Oct 16 · three things to upload by Oct 15, 16:40</span></div>
+      <div class="mb">
+        <h3>Hi John, Dexter visits Oasis of the Seas on Thursday.</h3>
+        <p>Before he arrives, please upload three things for every machine in the printshop. It takes about twenty minutes. The link below is yours only and works until <b>Thursday, Oct 15 at 16:40 ship time</b>.</p>
+        <table><thead><tr><th>Upload</th><th>How</th></tr></thead><tbody>
+          <tr><td><b>Pattern 43</b><br><span class="src">PROD 1 · PROD 2 · MFD ×3</span></td><td>Print the 12-page test pattern from the machine (Service → Test → Pattern 43), scan it on the MFD as one PDF, upload. The page checks it is 12 pages with all four colours.</td></tr>
+          <tr><td><b>Management List</b><br><span class="src">PROD 1 · PROD 2 · MFD ×3</span></td><td>Print the machine's Management List (all three documents), scan as one PDF, upload. We read the parts life from the third document.</td></tr>
+          <tr><td><b>Inventory count</b></td><td>Open the count sheet in the link (your OBP lines are already there), type today's counted quantity per line, submit.</td></tr>
+        </tbody></table>
+        <p><span class="btnm">Open my upload page</span></p>
+        <p><b>A machine will not print?</b> Mark it "Machine down" on the page and say why. Dexter will check it himself on board.</p>
+        <p class="src">If you have a question, reply to this email; it reaches Rolando.</p>
+      </div>
+      <div class="mfoot"><b>CIMS</b>Sent by the CIMS HR console on behalf of Dexter Lawrence · audit.cims.work</div>
+    </div>
+  </div>
+
+  <!-- A5 Seafarer upload page -->
+  <div class="step wide">
+    <div class="cap"><div class="n">A5</div><div><h3>The seafarer's upload page</h3><p>Web, at the printshop PC or the phone. One row per document per machine; the page checks each file as it lands (size, 12 pages, four channels) and asks for a re-scan on the spot. Files are shrunk before upload: a 64 MB scan does not cross a satellite link.</p></div></div>
+    <div class="web">
+      <div class="wtop"><div class="wm">CIMS<small>Printshop audit</small></div><div class="tag">Oasis of the Seas<span>John Gorre · for Dexter's visit</span></div></div>
+      <div class="wb">
+        <div class="due"><span>Due <b>Thu Oct 15, 16:40</b> ship time</span><span class="cnt">18 h<small>left</small></span></div>
+        <div class="card">
+          <div class="h">PROD 1 · AccurioPress C4070 <span class="r">S011021355</span></div>
+          <div class="up"><div class="tx"><div class="nm">Pattern 43</div><div class="sm">12 pages · 4 channels · 2.8 MB · received 09:12</div></div><span class="act ok">✓ Uploaded</span></div>
+          <div class="up"><div class="tx"><div class="nm">Management List</div><div class="sm">3 documents · life % read from the third</div></div><span class="act">Upload PDF</span></div>
+        </div>
+        <div class="card">
+          <div class="h">PROD 2 · AccurioPress C4070 <span class="r">S011021356</span></div>
+          <div class="up"><div class="tx"><div class="nm">Pattern 43</div><div class="sm">Last upload had 9 pages. Please scan all 12 as one PDF.</div></div><span class="act dn">Re-scan</span></div>
+          <div class="up"><div class="tx"><div class="nm">Management List</div><div class="sm">3 documents</div></div><span class="act">Upload PDF</span></div>
+          <div class="up"><div class="tx"><div class="sm">Machine will not print? <u>Report it down</u> and say why. Dexter checks it on board.</div></div></div>
+        </div>
+        <div class="card">
+          <div class="h">MFD · 3 units <span class="r">bizhub, deck 4 and 5</span></div>
+          <div class="up"><div class="tx"><div class="nm">Pattern 43 · Management List · each unit</div><div class="sm">0 of 6 uploaded</div></div><span class="act">Open</span></div>
+        </div>
+        <div class="card">
+          <div class="h">Inventory count <span class="r">47 OBP lines · from last night's export</span></div>
+          <div class="up"><div class="tx"><div class="nm">Count sheet</div><div class="sm">Type today's counted quantity per line. 47 of 47 filled · submitted 10:05</div></div><span class="act ok">✓ Submitted</span></div>
+        </div>
+        <div class="hint">Each upload saves on its own. You can close this page and come back with the same link. Dexter is told when everything is in.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A6 Dexter waiting -->
+  <div class="step">
+    <div class="cap"><div class="n">A6</div><div><h3>Dexter waits · the audit is locked</h3><p>What is in and what is not, per machine. Resend and extend are his; "start anyway" does not exist. A machine the crew reports down counts as explained and is flagged for Dexter to touch.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Oasis of the Seas</div><div class="s">John Gorre · request sent Oct 14, 16:40</div></div><div class="k">Waiting</div></div>
+      <div class="scr">
+        <div class="due"><span>Due <b>Oct 15, 16:40</b></span><span class="cnt">18 h<small>left</small></span></div>
+        <div class="card">
+          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">PROD 1</div><div class="sm">Pattern 43 ✓ · Management List ✓</div></div></div>
+          <div class="lrow"><div class="cb" style="border-color:#E6C98F;background:var(--amberbg)"></div><div class="tx"><div class="nm">PROD 2</div><div class="sm">Pattern 43: re-scan asked · Management List: not yet</div></div></div>
+          <div class="lrow"><div class="cb no"></div><div class="tx"><div class="nm">MFD deck 5</div><div class="sm">Reported down by John: "paper jam error, KM ticket open" · <b>you check it on board</b></div></div></div>
+          <div class="lrow"><div class="cb"></div><div class="tx"><div class="nm">MFD deck 4 ×2</div><div class="sm">Nothing yet</div></div></div>
+          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">Inventory count</div><div class="sm">47 lines · submitted 10:05</div></div></div>
+        </div>
+        <div class="lock"><div class="ic">🔒</div><div><b>Audit locked.</b> It opens when every machine has its documents or a reason, and the pre-visit report has gone out.</div></div>
+        <div style="display:flex;gap:8px"><button class="btn ghost sm">Resend</button><button class="btn ghost sm">Extend 24 h</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A7 Pre-visit report email -->
+  <div class="step wide">
+    <div class="cap"><div class="n">A7</div><div><h3>The pre-visit report</h3><p>Sent when the request is complete, to Ray, Rolando, Ohji, Jonathan and Miguel, Dexter in copy. Life percentages are read from the Management List, deterministically. Pattern 43 is attached for Rolando's eye: the Brain's 1 Oct decision stands, no automated verdict on it until the reader is calibrated on his labelled bundles.</p></div></div>
+    <div class="mail">
+      <div class="mtop"></div>
+      <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Pre-visit report<span>Oasis of the Seas · Oct 15</span></div></div>
+      <div class="env"><b>To</b><span>Ray Guerra · Rolando Abellan · Ohji Miranda · Jonathan · Miguel San Martin</span><b>Cc</b><span>Dexter Lawrence</span><b>Subject</b><span>Oasis of the Seas · before Dexter's visit on Oct 16 · 4 parts past life, 1 ordering date missed, 1 machine down</span></div>
+      <div class="mb">
+        <p>John Gorre sent everything asked on Oct 15 at 11:20, 19 hours after the request. Dexter's audit is now open.</p>
+        <h3>Parts past life · from the Management Lists</h3>
+        <div style="overflow-x:auto"><table style="min-width:560px"><thead><tr><th>Machine</th><th>Part</th><th>Life</th><th>On board</th><th>On order</th><th>Verdict</th></tr></thead><tbody>
+          <tr><td>PROD 1</td><td>Drum K · DR-616K</td><td><span class="pct r">412 %</span></td><td>0</td><td>none</td><td><b style="color:var(--red)">Will be missing</b> · nothing ordered</td></tr>
+          <tr><td>PROD 1</td><td>Developer C · DV-616C</td><td><span class="pct r">180 %</span></td><td>1</td><td>none</td><td>Replace on the visit</td></tr>
+          <tr><td>PROD 1</td><td>Transfer belt</td><td><span class="pct a">104 %</span></td><td>0</td><td>1 · PO 48812, due Oct 29</td><td>Ordered · arrives after the visit</td></tr>
+          <tr><td>PROD 2</td><td>Fusing belt assy</td><td><span class="pct r">131 %</span></td><td>1</td><td>none</td><td>Replace on the visit</td></tr>
+        </tbody></table></div>
+        <h3>Ordering dates</h3>
+        <p><b style="color:var(--red)">Missed:</b> the Oct 9 order for voyage 1019 has no PO on file (Ordering Schedule, Ray's rule). Next due Oct 23.</p>
+        <h3>Machines</h3>
+        <p><b>MFD deck 5 reported down</b> by John: "paper jam error, KM ticket open". No documents for it; Dexter checks it on board. The other four printed and scanned.</p>
+        <h3>Pattern 43</h3>
+        <p>Attached for every machine that printed, for Rolando's read. The console does not grade the test pattern.</p>
+        <h3>Inventory count</h3>
+        <p>47 lines received. Not graded here; Dexter compares it with the shelf during the audit.</p>
+        <p><span class="btnm">Dexter: open the audit</span></p>
+        <p class="src">Only Dexter's login opens it. Everyone else sees the report.</p>
+      </div>
+      <div class="mfoot"><b>CIMS</b>Life % read from the Management List's third document. On board and on order from the OBP export of Oct 15 and the open-orders list. Nothing on this page is money.</div>
+    </div>
+  </div>
+
+  <!-- A8 Unlocked -->
+  <div class="step">
+    <div class="cap"><div class="n">A8</div><div><h3>Unlocked</h3><p>The report's findings ride into the audit: the Machines step opens with the four parts past life already listed, the Inventory step opens with John's own count, and the down machine is marked "verify on board".</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Oasis of the Seas</div><div class="s">John Gorre · documents in Oct 15, 11:20</div></div><div class="k g">Open</div></div>
+      <div class="scr">
+        <div class="card">
+          <div class="h">Before the visit <span class="r">report sent 11:24</span></div>
+          <div class="lrow"><div class="tx"><div class="nm" style="color:var(--red)">4 parts past life</div><div class="sm">PROD 1 drum K 412 %, developer C 180 %, transfer belt 104 % · PROD 2 fusing belt 131 %</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm" style="color:var(--red)">1 will be missing</div><div class="sm">Drum K · nothing on board, nothing ordered</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm" style="color:var(--amber)">1 ordering date missed</div><div class="sm">Oct 9 · voyage 1019 · no PO</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm">MFD deck 5 down</div><div class="sm">Reported by John · verify on board</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm">Pattern 43 ×4 · count 47 lines</div><div class="sm">Attached to the audit · Rolando reads the patterns</div></div></div>
+        </div>
+        <div class="hint">These land in the steps as findings to confirm, not as answers. Dexter still touches every machine.</div>
+      </div>
       <div class="bar"><button class="btn">Start audit</button></div>
     </div>
   </div>
 
-  <!-- 3 Workstation -->
+  </div>
+</section>
+
+<section class="blk">
+  <h2>B · On the ship</h2>
+  <p class="lead">Seven steps on the phone, one per screen. A clean printshop is one tap per step; only what is wrong takes typing. Tap the controls, they respond.</p>
+  <div class="flow">
+
+  <!-- B1 Workstation -->
   <div class="step">
-    <div class="cap"><div class="n">3</div><div><h3>Workstation</h3><p>Sixteen items the desktop should have. One tap when all is there; otherwise untick what is missing, group by group.</p></div></div>
+    <div class="cap"><div class="n">B1</div><div><h3>Workstation</h3><p>Sixteen items the desktop should have. One tap when all is there; otherwise untick what is missing, group by group.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Workstation</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">1 / 7</div></div>
       <div class="prog"><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
@@ -269,9 +469,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 4 Machines -->
+  <!-- B2 Machines -->
   <div class="step">
-    <div class="cap"><div class="n">4</div><div><h3>Machines &amp; tools</h3><p>One row per machine, from the ship's serial list. A row opens to its four checks; a failed check asks for the number. Tools missing open a picker sheet.</p></div></div>
+    <div class="cap"><div class="n">B2</div><div><h3>Machines &amp; tools</h3><p>One row per machine, from the machine register. The parts past life from the pre-visit report are already on the row for Dexter to confirm; the machine the crew reported down is marked to verify. Tools missing open a picker sheet.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Machines &amp; tools</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">2 / 7</div></div>
       <div class="prog"><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
@@ -283,11 +483,12 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
               <div class="ck"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Test pattern</div></div>
               <div class="ck"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Scan to email</div></div>
               <div class="ck"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Machine collaboration</div></div>
-              <div class="ck"><div class="cb no" style="width:22px;height:22px"></div><div class="tx">Parts counter life</div><span class="in">Drum K · 412 %</span></div>
+              <div class="ck"><div class="cb no" style="width:22px;height:22px"></div><div class="tx">Parts counter life<div class="src">from the Management List · confirm on the machine</div></div><span class="in">Drum K 412 % · Dev C 180 %</span></div>
             </div>
           </div>
-          <div class="mach"><div class="mh"><div class="nm">PROD 2 · C4070<span class="sn">S011021356</span></div><span class="pill g">Pass</span><span class="chev">›</span></div></div>
-          <div class="mach"><div class="mh"><div class="nm">MFD · 3 units<span class="sn">bizhub, deck 4 and 5</span></div><span class="pill g">Pass</span><span class="chev">›</span></div></div>
+          <div class="mach"><div class="mh"><div class="nm">PROD 2 · C4070<span class="sn">S011021356</span></div><span class="pill a">1 finding</span><span class="chev">›</span></div></div>
+          <div class="mach"><div class="mh"><div class="nm">MFD deck 5<span class="sn">reported down by John · verify</span></div><span class="pill r">Down</span><span class="chev">›</span></div></div>
+          <div class="mach"><div class="mh"><div class="nm">MFD deck 4 · 2 units<span class="sn">bizhub</span></div><span class="pill g">Pass</span><span class="chev">›</span></div></div>
         </div>
         <div class="card"><div class="lrow"><div class="tx"><div class="nm">Tools missing</div><div class="sm">2-Fiery back-up HDD · Head lamp</div></div><span class="pill a">2</span><span class="chev">›</span></div></div>
         <div class="hint">A machine with no finding stays "Pass" untouched. Tap a row only when something is wrong.</div>
@@ -296,15 +497,16 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 5 Inventory -->
+  <!-- B3 Inventory -->
   <div class="step">
-    <div class="cap"><div class="n">5</div><div><h3>Inventory</h3><p>OBP against the shelf: a line per discrepancy, the camera as the main evidence tool. The ship's Wi-Fi is poor, so the draft lives on the phone and photos upload when there is signal.</p></div></div>
+    <div class="cap"><div class="n">B3</div><div><h3>Inventory</h3><p>OBP against the shelf. John's own count from the request is already here; Dexter confirms or corrects line by line, the camera as the evidence tool. The ship's Wi-Fi is poor, so the draft lives on the phone and photos upload when there is signal.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Inventory</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">3 / 7</div></div>
       <div class="prog"><i></i><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
       <div class="off">⚠ Offline · saved on this phone · 1 photo uploads when the ship has signal</div>
       <div class="scr">
         <div class="q">Does the OBP match the shelf?</div>
+        <div class="hint">John counted 47 lines on Oct 15 · 3 differ from the OBP. Confirm them on the shelf.</div>
         <div class="seg"><span>Yes, accurate</span><span class="on bad">No, discrepancies</span></div>
         <div class="card">
           <div class="line"><div class="nm">Black developer</div><div class="num">OBP <b>4</b> · counted <b>2</b></div><span class="d">−2</span></div>
@@ -323,9 +525,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 6 Ratings -->
+  <!-- B4 Ratings -->
   <div class="step">
-    <div class="cap"><div class="n">6</div><div><h3>Ratings</h3><p>Three cards about the specialist. Each says what 5 and 3 mean. A 3 or below opens the comment and will not file without it. The HR dispatch question moved to its own step and goes to Rita.</p></div></div>
+    <div class="cap"><div class="n">B4</div><div><h3>Ratings</h3><p>Three cards about the specialist. Each says what 5 and 3 mean. A 3 or below opens the comment and will not file without it. The HR dispatch question moved to its own step and goes to Rita.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Ratings</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">4 / 7</div></div>
       <div class="prog"><i></i><i></i><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
@@ -352,9 +554,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 7 Crew -->
+  <!-- B5 Crew -->
   <div class="step">
-    <div class="cap"><div class="n">7</div><div><h3>Crew</h3><p>Miguel's asks of Sep 2024: training needed, uniform and PPE, HON app. Plus the dispatch question, asked face to face and sent to Rita, not filed as the crew's rating.</p></div></div>
+    <div class="cap"><div class="n">B5</div><div><h3>Crew</h3><p>Miguel's asks of Sep 2024: training needed, uniform and PPE, HON app. Plus the dispatch question, asked face to face and sent to Rita, not filed as the crew's rating.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Crew</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">5 / 7</div></div>
       <div class="prog"><i></i><i></i><i></i><i></i><i></i><i class="off"></i><i class="off"></i></div>
@@ -383,9 +585,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 8 Overall -->
+  <!-- B6 Overall -->
   <div class="step">
-    <div class="cap"><div class="n">8</div><div><h3>Overall</h3><p>The rating, then three short boxes instead of one long one: strengths, to improve, agreed with the crew. The keyboard's mic dictates. Follow-up names an owner and a date.</p></div></div>
+    <div class="cap"><div class="n">B6</div><div><h3>Overall</h3><p>The rating, then three short boxes instead of one long one: strengths, to improve, agreed with the crew. The keyboard's mic dictates. Follow-up names an owner and a date.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Overall</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">6 / 7</div></div>
       <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i><i class="off"></i></div>
@@ -408,9 +610,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     </div>
   </div>
 
-  <!-- 9 Review & filed -->
+  <!-- B7 Review & filed -->
   <div class="step">
-    <div class="cap"><div class="n">9</div><div><h3>Review and file</h3><p>What is missing blocks the button and says so. Filing works offline; the record syncs and the photos follow. Then: where it went, and what stays open.</p></div></div>
+    <div class="cap"><div class="n">B7</div><div><h3>Review and file</h3><p>What is missing blocks the button and says so. Filing works offline; the record syncs and the photos follow. Then: where it went, and what stays open.</p></div></div>
     <div class="ph">
       <div class="top"><div class="bk">‹</div><div><div class="t">Review</div><div class="s">Oasis of the Seas · John Gorre · Oct 12–14</div></div><div class="k g">7 / 7</div></div>
       <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -429,7 +631,8 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
             <i>✓</i><span>Follow-up to Rolando · by Nov 15 · its own record, shown on the profile</span>
             <i>✓</i><span>Dispatch note to Rita · 5, no remark</span>
             <i>✓</i><span>3 files · audit bucket · oasis / 2026-10-14 / AUD-2026-031</span>
-            <i>✓</i><span>Summary email to Miguel · Rita, Ray, Rolando in copy</span>
+            <i>✓</i><span>Summary email to Miguel · Rita, Ray, Rolando in copy · the pre-visit report linked</span>
+            <i>✓</i><span>Pattern 43 ×4 and the Management Lists kept with the audit, by machine</span>
             <i>–</i><span>Not sent to the crew. Not read by the bonus.</span>
           </div>
         </div>
@@ -454,7 +657,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     <div class="rule"><b>One tap when nothing is wrong</b><p>Every checklist step starts in its clean state: All present, Pass, Accurate, Nothing missing. A clean ship is seven taps plus three ratings and three short sentences. Typing is only ever about what is wrong.</p></div>
     <div class="rule"><b>Thumb sizes</b><p>Every control is at least 44px tall: rows 52px, chips 40px, rating squares 54px, the bottom buttons 52px. Text inputs are 16px so iOS does not zoom. Back is top-left, the next action is in the bottom bar, always the same place.</p></div>
     <div class="rule"><b>One step per screen</b><p>Seven steps, a progress line, the step name in the header. Back and Next never lose anything. A step with a required comment or a required answer says so under the field and holds Next, with the reason, instead of failing at the end.</p></div>
-    <div class="rule"><b>The phone is Dexter's, the data is the console's</b><p>Nothing is typed that the console already knows: ship, crew, contract, serials, parts names, the last visit. The laptop view is the same single column, 560px wide, centred; nothing else to design.</p></div>
+    <div class="rule"><b>The phone is Dexter's, the data is the console's</b><p>Nothing is typed that the console already knows: ship, crew, contract, serials, parts names, the last visit, the crew's own count and the life percentages from the Management Lists. The laptop view is the same single column, 560px wide, centred; nothing else to design.</p></div>
+    <div class="rule"><b>The audit is gated</b><p>No request, no audit. The Start button exists only once every machine has its Pattern 43 and Management List or a "machine down" reason from the crew, the count is in, and the pre-visit report has gone out. Resend and extend are Dexter's; "start anyway" is nobody's. <em>Miguel, 14 Oct 2026: "without that completion, I don't want him to start the audit."</em></p></div>
+    <div class="rule"><b>The seafarer's page is the HON upload, reused</b><p>Same single-use signed link as the sign-off and shipboard-review pages, no login. Each file is checked as it lands (size above zero, 12 pages, four channels for Pattern 43) and a bad scan is asked for again on the spot; scans are shrunk client-side to 2–5 MB because a 64 MB scan does not cross a satellite link (Brain, recp1N5c3hEqQ7wTW). Every upload saves on its own; the link keeps working until the deadline.</p></div>
   </div>
 </section>
 
@@ -513,6 +718,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
     <div class="d"><div><b>What Dexter sees before he rates</b><p>Miguel asked for the past to be preloaded. The last audit's open points must come first (he checks them). Ray's window, the GSM review and intel are a different matter: read before rating, they anchor the rating. Proposed: shown folded under "What others said", opened on tap, so the file is there without leading the score. <em>Miguel's call.</em></p></div></div>
     <div class="d"><div><b>A crew the TDG file does not have aboard</b><p>Jewel and Xcel read empty per the file today, and a new joiner can be aboard before the next upload. The audit must still file: "not in the file for this hull → pick from all crew", and the row is listed for Rita like any other file disagreement (§6). The console never moves the crew.</p></div></div>
     <div class="d"><div><b>Offline, and the phone it runs on</b><p>Ship Wi-Fi is the constraint. The app is an installable PWA that files offline and syncs later; that is more build than a page, and it is the difference between a tool Dexter uses in the printshop and one he fills in from the cabin afterwards. <em>Confirm the offline requirement; and whether the phone is a DG3 iPhone or his own.</em></p></div></div>
+    <div class="d"><div><b>Who runs the pre-visit analysis: HON</b><p>The machine register (247 machines, serials), the nightly OBP export, the open-orders list, the Ordering Schedule due dates and the Pattern 43 upload checks all live in cims-hon today. The HR console owns the request, the gate and the audit; HON owns the upload page and the reading and hands the result back over a service binding. Building it twice in the HR console is the alternative. <em>Note: HON's assessment email has never fired in production (zero signed handovers); this would be its first live use.</em></p></div></div>
+    <div class="d"><div><b>Pattern 43 is attached, not graded</b><p>Miguel asked for Rolando's way of reading item 43 to be applied. The Brain's 1 Oct 2026 decision (recnTfj9bYmsGruys) stands: the automated vision read failed on 3 of 7 bundles and nothing from it reaches a record until the reader is calibrated on Rolando's labelled bundles. So the report reads the Management List percentages, which are deterministic, and attaches Pattern 43 for Rolando. <em>Automated Pattern 43 verdicts are a later, separate decision.</em></p></div></div>
+    <div class="d"><div><b>Recipients and the 24 hours</b><p>Jonathan is not on the console's allowlist; the report's recipient list is configuration, not code, and needs his address. At 24 hours with gaps: a reminder to the crew, Dexter told, Resend / Extend his; the audit stays locked. <em>Need: Jonathan's email; confirm "due date missed" means an Ordering Schedule date with no PO, Ray's rule; confirm no override exists.</em></p></div></div>
   </div>
 </section>
 

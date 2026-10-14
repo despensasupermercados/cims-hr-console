@@ -31,7 +31,42 @@ Nothing in this note is built. The Forms survey itself could not be fetched from
 - Miguel's own note in row 2 (10 Sep 2024): "remove ERGO, add list of missing training, uniforms, coveralls, DG3
   shirt, perhaps HON" — never added to the form.
 
-## The design
+## Phase A · before the visit (Miguel, 14 Oct 2026: "without that completion, I don't want him to start the audit")
+
+Miguel's addition, in his order: Dexter picks the ship, picks the person, reads everything the console holds, then
+**creates a request**. The request emails the seafarer to upload, within 24 hours, for every machine in the printshop:
+**Pattern 43** (the 12-page test pattern the C4070 prints, scanned as one PDF), the **Management List** (the machine's
+own report, three documents; the life percentages are read from the third — Brain rec0kJ0u8LI0pePrd,
+recXWOTyJnXS923Wc), and a **full inventory count** (the OBP lines, today's counted quantity typed per line). When the
+seafarer has sent everything, Dexter is told; the console writes the **pre-visit report** to Ray, Rolando, Ohji,
+Jonathan and Miguel (Dexter in copy): every part over 100 % life from the Management Lists, with on-board and on-order
+against it ("will be missing" when neither), any Ordering Schedule due date missed, every machine the crew reported
+down. Only then does the audit open, from the link in that report, under Dexter's login. The count is not graded:
+it pre-fills Dexter's Inventory step for him to confirm on the shelf. The parts past life pre-fill the Machines step.
+
+- **The seafarer's page is the HON upload, reused**: a signed single-use link, no login (like /fb and /sbm), one row
+  per document per machine from the machine register, each file checked as it lands (size above zero, 12 pages, four
+  channels for Pattern 43; a bad scan asked for again on the spot), scans shrunk client-side to 2–5 MB because a 64 MB
+  scan does not cross a satellite link (Brain recp1N5c3hEqQ7wTW). Each upload saves on its own; the link keeps working
+  to the deadline. **Machine down**: the crew marks the machine with a reason; that counts as explained, the report
+  says so, and the audit's Machines step marks it "verify on board" — Dexter must touch it.
+- **The gate**: no request, no audit. Resend and Extend 24 h are Dexter's; "start anyway" does not exist. At 24 hours
+  with gaps: a reminder to the crew and Dexter told; the audit stays locked.
+- **Pattern 43 is attached, not graded.** Miguel asked for Rolando's reading of item 43 to be applied. The Brain's
+  decision of 1 Oct 2026 (recnTfj9bYmsGruys) stands: the automated vision read failed on 3 of 7 fleet bundles
+  (Navigator missed the cyan banding; Anthem invented a line on six pages; Odyssey missed, misplaced and invented)
+  and nothing from it reaches a record until the reader is calibrated on Rolando's labelled bundles. The report reads
+  the Management List percentages, which are deterministic, and attaches Pattern 43 for Rolando's eye.
+- **Where the reading runs: HON** (recommended). The machine register (247 machines, serials), the nightly OBP
+  export, the open-orders list (intransititems), the Ordering Schedule due dates and the Pattern 43 upload checks all
+  live in cims-hon today. The HR console owns the request, the gate and the audit; HON owns the upload page and the
+  reading and hands the result back over a service binding. Building it twice in the HR console is the alternative.
+  Caveat: HON's assessment email has never fired in production (zero signed handovers, recf2jsHwZYKMGeJZ); this
+  would be its first live use.
+- **A visit on a ship with two specialists**: one request per visit, addressed to the specialist Dexter audits; the
+  machine documents are the ship's, the count is the ship's, so a second audit on the same visit reuses them.
+
+## Phase B · on the ship
 
 1. **Pick the ship** — vessel table, by brand, with who is aboard per the TDG file and the last audit date/ratings.
 2. **Before you walk in** — crew aboard (contract number from the console's count, day N of the contract, projected
@@ -129,3 +164,8 @@ a bottom bar. Rules the build is held to:
 8. Phase 2 (Dexter's window pre-filled from the audit) scheduled right after phase 1, or Dexter enters twice.
 9. Offline: confirm the app must file without signal (installable PWA, upload queue), and whether the phone is a
    DG3 iPhone or Dexter's own.
+10. Jonathan's email address: he is not on the console's allowlist; the report's recipients are configuration.
+11. Pattern 43 attached for Rolando, not graded by the console, until the reader is calibrated (Brain, 1 Oct 2026).
+12. The reading runs in HON over a service binding (recommended), or is rebuilt inside the HR console.
+13. "Due date missed" = an Ordering Schedule date with no PO on file (Ray's rule in HON); confirm. And confirm there is
+    no override of the gate at all, not even Miguel's.
