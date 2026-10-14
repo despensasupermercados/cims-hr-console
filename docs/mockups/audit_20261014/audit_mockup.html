@@ -324,7 +324,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
         <table><thead><tr><th>Upload</th><th>How</th></tr></thead><tbody>
           <tr><td><b>Pattern 43</b><br><span class="src">PROD 1 · PROD 2 · MFD ×3</span></td><td>Print the 12-page test pattern from the machine (Service → Test → Pattern 43), scan it on the MFD as one PDF, upload. The page checks it is 12 pages with all four colours.</td></tr>
           <tr><td><b>Management List</b><br><span class="src">PROD 1 · PROD 2 · MFD ×3</span></td><td>Print the machine's Management List (all three documents), scan as one PDF, upload. We read the parts life from the third document.</td></tr>
-          <tr><td><b>Inventory count</b></td><td>Open the count sheet in the link (your OBP lines are already there), type today's counted quantity per line, submit.</td></tr>
+          <tr><td><b>Inventory count</b></td><td>Open the count sheet in the link: every item your ship carries in OBP is listed. Count the shelf and type the total per line, including 0. Add anything you find that is not on the list.</td></tr>
         </tbody></table>
         <p><span class="btnm">Open my upload page</span></p>
         <p><b>A machine will not print?</b> Mark it "Machine down" on the page and say why. Dexter will check it himself on board.</p>
@@ -357,11 +357,39 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
           <div class="up"><div class="tx"><div class="nm">Pattern 43 · Management List · each unit</div><div class="sm">0 of 6 uploaded</div></div><span class="act">Open</span></div>
         </div>
         <div class="card">
-          <div class="h">Inventory count <span class="r">47 OBP lines · from last night's export</span></div>
-          <div class="up"><div class="tx"><div class="nm">Count sheet</div><div class="sm">Type today's counted quantity per line. 47 of 47 filled · submitted 10:05</div></div><span class="act ok">✓ Submitted</span></div>
+          <div class="h">Inventory count <span class="r">47 lines · every item this ship carries in OBP</span></div>
+          <div class="up"><div class="tx"><div class="nm">Count sheet · blind</div><div class="sm">The list shows what to count, never what OBP says is on hand. 31 of 47 counted · saved 10:05</div></div><span class="act">Continue</span></div>
         </div>
         <div class="hint">Each upload saves on its own. You can close this page and come back with the same link. Dexter is told when everything is in.</div>
       </div>
+    </div>
+  </div>
+
+  <!-- A5b Blind count -->
+  <div class="step">
+    <div class="cap"><div class="n">A5b</div><div><h3>The count sheet, blind</h3><p>Every item the ship carries in OBP, in the portal's own order, with no on-hand figure anywhere on the page. The crew counts the shelf and types the total; zero is an answer, blank is not. Found something not on the list? Add it. Saves line by line; the phone works in the store.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Count sheet</div><div class="s">Oasis of the Seas · for Dexter's visit</div></div><div class="k">31 / 47</div></div>
+      <div class="prog"><i></i><i></i><i></i><i class="off"></i><i class="off"></i></div>
+      <div class="scr tight">
+        <div class="hint">Count what is on the shelf and type the total. What OBP says is on hand is not shown, on purpose.</div>
+        <div class="card">
+          <div class="h">Developers <span class="r">4 of 4 counted</span></div>
+          <div class="line"><div class="nm">DV-616K · Developer black</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:700;padding:8px">2</div></div>
+          <div class="line"><div class="nm">DV-616C · Developer cyan</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:700;padding:8px">3</div></div>
+          <div class="line"><div class="nm">DV-616M · Developer magenta</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:700;padding:8px">3</div></div>
+          <div class="line"><div class="nm">DV-616Y · Developer yellow</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:700;padding:8px">0</div></div>
+        </div>
+        <div class="card">
+          <div class="h">Waste &amp; filters <span class="r">1 of 3 counted</span></div>
+          <div class="line"><div class="nm">WX-105 · Waste toner box</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:700;padding:8px">9</div></div>
+          <div class="line"><div class="nm">A50U-R701 · Filter box</div><div class="ta" style="min-height:44px;width:72px;text-align:center;color:var(--mut);padding:8px">–</div></div>
+          <div class="line"><div class="nm">A50U-R702 · Ozone filter</div><div class="ta" style="min-height:44px;width:72px;text-align:center;color:var(--mut);padding:8px">–</div></div>
+        </div>
+        <div class="card soft"><div class="lrow"><div class="tx"><div class="nm" style="color:var(--navy)">+ Found something not on the list</div><div class="sm">Fusing gears ×2 · added 09:58</div></div><span class="chev">›</span></div></div>
+        <div class="card"><div class="lrow"><div class="tx"><div class="nm">Drums · Rollers · Toner · Paper</div><div class="sm">16 lines still to count</div></div><span class="chev">›</span></div></div>
+      </div>
+      <div class="bar"><button class="btn ghost">Save</button><button class="btn navy">Next uncounted</button></div>
     </div>
   </div>
 
@@ -407,8 +435,8 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
         <p><b>MFD deck 5 reported down</b> by John: "paper jam error, KM ticket open". No documents for it; Dexter checks it on board. The other four printed and scanned.</p>
         <h3>Pattern 43</h3>
         <p>Attached for every machine that printed, for Rolando's read. The console does not grade the test pattern.</p>
-        <h3>Inventory count</h3>
-        <p>47 lines received. Not graded here; Dexter compares it with the shelf during the audit.</p>
+        <h3>Inventory count · counted blind</h3>
+        <p>47 lines counted, 1 item found that OBP does not list (fusing gears ×2). Against the OBP export of Oct 15, 3 lines differ: developer black 4 → 2, waste toner box 11 → 9, filter box 1 → 2. Not graded here; Dexter checks them on the shelf. A one-unit gap on a part just consumed is timing until tomorrow's export says otherwise (Miguel, 1 Oct).</p>
         <p><span class="btnm">Dexter: open the audit</span></p>
         <p class="src">Only Dexter's login opens it. Everyone else sees the report.</p>
       </div>
@@ -428,7 +456,8 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
           <div class="lrow"><div class="tx"><div class="nm" style="color:var(--red)">1 will be missing</div><div class="sm">Drum K · nothing on board, nothing ordered</div></div></div>
           <div class="lrow"><div class="tx"><div class="nm" style="color:var(--amber)">1 ordering date missed</div><div class="sm">Oct 9 · voyage 1019 · no PO</div></div></div>
           <div class="lrow"><div class="tx"><div class="nm">MFD deck 5 down</div><div class="sm">Reported by John · verify on board</div></div></div>
-          <div class="lrow"><div class="tx"><div class="nm">Pattern 43 ×4 · count 47 lines</div><div class="sm">Attached to the audit · Rolando reads the patterns</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm">Count: 3 lines differ · 1 not in OBP</div><div class="sm">Counted blind by John · verify on the shelf</div></div></div>
+          <div class="lrow"><div class="tx"><div class="nm">Pattern 43 ×4</div><div class="sm">Attached to the audit · Rolando reads the patterns</div></div></div>
         </div>
         <div class="hint">These land in the steps as findings to confirm, not as answers. Dexter still touches every machine.</div>
       </div>
@@ -506,7 +535,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="off">⚠ Offline · saved on this phone · 1 photo uploads when the ship has signal</div>
       <div class="scr">
         <div class="q">Does the OBP match the shelf?</div>
-        <div class="hint">John counted 47 lines on Oct 15 · 3 differ from the OBP. Confirm them on the shelf.</div>
+        <div class="hint">John counted 47 lines blind on Oct 15 · 3 differ from the OBP · 1 item not in OBP. Confirm them on the shelf.</div>
         <div class="seg"><span>Yes, accurate</span><span class="on bad">No, discrepancies</span></div>
         <div class="card">
           <div class="line"><div class="nm">Black developer</div><div class="num">OBP <b>4</b> · counted <b>2</b></div><span class="d">−2</span></div>
@@ -514,7 +543,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
           <div class="line"><div class="nm">Filter box</div><div class="num">OBP <b>1</b> · counted <b>2</b></div><span class="d p">+1</span></div>
           <div class="lrow"><div class="tx"><div class="nm" style="color:var(--navy)">+ Add line</div><div class="sm">part from the ship's parts list · two numbers</div></div></div>
         </div>
-        <div class="card"><div class="lrow"><div class="tx"><div class="nm">Repair items found, not in OBP</div><div class="sm">Fusing gears ×2</div></div><span class="pill a">1</span><span class="chev">›</span></div></div>
+        <div class="card"><div class="lrow"><div class="tx"><div class="nm">Repair items found, not in OBP</div><div class="sm">Fusing gears ×2 · from John's count · confirm</div></div><span class="pill a">1</span><span class="chev">›</span></div></div>
         <div>
           <div class="lab">Evidence · 3</div>
           <div class="files"><div class="thumb">OBP export<br>PDF</div><div class="thumb">IMG_0380<br>shelf</div><div class="thumb">IMG_0381<br>counter<span class="q"></span></div></div>

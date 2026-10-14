@@ -49,6 +49,18 @@ it pre-fills Dexter's Inventory step for him to confirm on the shelf. The parts 
   shipboard review uses), Cc = the crew record's personal email, Rolando and Ray. The screen and the record show the
   ship mailbox only; the personal address is never displayed. No ship mailbox on file → sent to the personal email
   alone and Dexter told so, Rita asked to add it; neither on file → the request is blocked, never guessed.
+- **The count is blind** (Miguel, 14 Oct 2026: "display in the upload landing page all items the crew has available in
+  the OBP portal, so he can enter the total; don't show him what is on hand; allow him to count blind and report").
+  The sheet lists every item the ship carries in OBP (part number, description, the portal's own grouping and order,
+  from the nightly OBP export in cims-hon) and nothing else: no on-hand figure anywhere on the page, before or after
+  submission. The crew counts the shelf and types the total per line; 0 is an answer, blank is not, and the sheet is
+  complete only when every line has a number. "Found something not on the list" adds a line (part and count) — those
+  become the audit's "repair items not in OBP" for Dexter to confirm. Saves line by line, resumes on the same link,
+  works on the phone in the store (numeric keypad, "next uncounted"). After submission the console diffs counted vs
+  the OBP export of the same night: the lines that differ pre-fill Dexter's Inventory step and go into the pre-visit
+  report as facts, with Miguel's 1 Oct rule noted (a one-unit gap on a part just consumed is timing until the next
+  export says otherwise). The crew never sees the diff: showing it would let OBP be "fixed" before Dexter arrives,
+  and the audit is about the real state. The count is the ship's: one per visit, reused for a second specialist.
 - **The seafarer's page is the HON upload, reused**: a signed single-use link, no login (like /fb and /sbm), one row
   per document per machine from the machine register, each file checked as it lands (size above zero, 12 pages, four
   channels for Pattern 43; a bad scan asked for again on the spot), scans shrunk client-side to 2–5 MB because a 64 MB
