@@ -4185,7 +4185,7 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .ops .oc-wr+.oc-wr{border-top:1px solid #F0F3F7}.ops .oc-wr.two{min-height:64px}
 .ops .oc-wl{display:flex;align-items:center;padding-right:8px}
 .ops .oc-wd{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
-.ops .oc-dh{display:flex;align-items:baseline;gap:6px;padding:6px 8px;border-radius:9px}
+.ops .oc-dh{display:flex;align-items:baseline;justify-content:center;gap:6px;padding:6px 8px;border-radius:9px}
 .ops .oc-dh span{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
 .ops .oc-dh b{font-family:'Outfit';font-size:18px;line-height:1}
 .ops .oc-dh.today{background:var(--deep);color:#fff}.ops .oc-dh.today span{color:#C9D6E6}
