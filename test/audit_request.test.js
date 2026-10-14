@@ -122,9 +122,9 @@ test("the gate: reads by HON, the count, then complete once and ONE documents-in
   assert.equal(docs.length, 1, "the documents-in email goes once");
   assert.equal(docs[0].templateId, "hr.audit.docsin.v1");
   assert.deepEqual(docs[0].to, ["dexter.lawrence@dg3.com"], "test mode: the auditor only");
-  assert.match(docs[0].html, /Drum Unit\/K/); assert.match(docs[0].html.replace(/<[^>]+>/g, ""), /on board 2 · on order 1/); // the figures read as one phrase (each part kept whole)
+  assert.match(docs[0].html, /Drum Unit\/K/); assert.match(docs[0].html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /on board 2 on order 1/); // what OBP holds for the part, beside its %
   assert.match(docs[0].html, /copy reads clean/); assert.doesNotMatch(docs[0].html, /\breplace\b/i);
-  assert.match(docs[0].html.replace(/<[^>]+>/g, ""), /Toner C[\s\S]*OBP 5 · counted 0/, "the team sees the gap against OBP");
+  assert.match(docs[0].html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " "), /Toner C[^]*? 5 0 \u22125 /, "the team sees the gap against OBP: part, OBP, counted, off");
   // a second gate check after completion sends nothing more
   await t.R._internal.maybeComplete(t.env, id);
   assert.equal(t.sent.length, before + 1);

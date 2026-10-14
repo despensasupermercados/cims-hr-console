@@ -19,7 +19,7 @@ export function fmtDate(v) { const d = String(v || "").slice(0, 10); return /^\d
 export function fmtWhen(v) { const t = Date.parse(v); if (isNaN(t)) return ""; const d = new Date(t); return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0") + " UTC"; }
 
 export const pill = (txt, tone) => {
-  const [bg, fg] = tone === "red" ? [T.redTint, T.red] : tone === "amber" ? [T.amberTint, T.amberInk] : tone === "green" ? [T.greenTint, T.greenInk] : [T.cloud, T.slate];
+  const [bg, fg] = tone === "red" ? [T.redTint, T.red] : tone === "amber" ? [T.amberTint, T.amberInk] : tone === "green" ? [T.greenTint, "#2F6B22"] /* green-ink is 4.2:1 on its tint; this is 5.5:1 */ : [T.cloud, T.slate];
   return `<span style="display:inline-block;font-family:${FB};font-size:12px;font-weight:700;padding:6px 11px;border-radius:999px;background:${bg};color:${fg};white-space:nowrap;">${esc(txt)}</span>`;
 };
 
