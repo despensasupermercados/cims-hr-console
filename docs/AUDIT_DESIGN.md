@@ -51,6 +51,28 @@ Nothing in this note is built. The Forms survey itself could not be fetched from
    files in the bucket under ship / date / audit id, summary email to Miguel with Rita, Ray, Rolando in copy,
    open points carried to the next audit of that ship or crew. Never sent to the crew; never read by the bonus.
 
+## Mobile first (v3, 14 Oct 2026, after a render review at 390px)
+
+The v2 mock-up failed its own phone render: the audit was one 3,000px scroll with the File button at the end, chips
+28px tall in a cloud of twelve, machine checks as 10px tags, and a CSS bug that drew the scale anchors as two empty
+boxes. v3 is a stepper: seven steps, one per screen, the step name in the header, a progress line, Back and Next in
+a bottom bar. Rules the build is held to:
+- **Works without signal.** Ship Wi-Fi drops. The draft is saved on the phone at every tap (IndexedDB), photos queue,
+  the audit can be FILED offline and syncs when the phone sees the server; a strip at the top says which state the
+  phone is in. This makes the app an installable PWA with a service worker and an upload queue, not a plain page.
+- **Photos are the evidence.** A full-width Take photo button on every step that takes evidence; photos shrunk on
+  the phone before upload (longest side 1600px, ~300 KB); each tagged with its step and machine.
+- **One tap when nothing is wrong.** Every checklist step starts clean (All present / Pass / Accurate / Nothing
+  missing). A clean ship is seven taps, three ratings and three short sentences.
+- **Thumb sizes.** Rows 52px, chips 40px, rating squares 54px, bottom buttons 52px, text inputs 16px (no iOS zoom).
+  Back top-left, the next action in the bottom bar, always the same place.
+- **A required answer holds Next with the reason under the field**, never a failure at the end.
+- **The reviewer feedback is three short boxes** (strengths · to improve · agreed with the crew), not one long one;
+  the keyboard's mic dictates.
+- **The dispatch / arrival question lives on the Crew step** and goes to Rita; the Ratings step holds the three
+  ratings about the specialist.
+- **The laptop view is the same column**, 560px wide, centred. Nothing else to design.
+
 ## Architecture (recommendation)
 
 - **Same worker.** `audit.cims.work` as a second custom domain on `cims-hr-console`, the page chosen by hostname and
@@ -105,3 +127,5 @@ Nothing in this note is built. The Forms survey itself could not be fetched from
 6. Readers: Miguel, Rita, Ray, Rolando read; the crew never. Any console user may file an audit (auditor recorded).
 7. The briefing: Ray / GSM / intel folded until tapped (recommended), or open on the screen.
 8. Phase 2 (Dexter's window pre-filled from the audit) scheduled right after phase 1, or Dexter enters twice.
+9. Offline: confirm the app must file without signal (installable PWA, upload queue), and whether the phone is a
+   DG3 iPhone or Dexter's own.
