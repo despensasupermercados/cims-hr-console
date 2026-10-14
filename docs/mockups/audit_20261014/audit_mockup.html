@@ -103,6 +103,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
 .cell{border:1px solid var(--line);border-radius:10px;padding:8px 4px 7px;display:grid;justify-items:center;gap:5px;font-size:10.5px;font-weight:500;color:var(--mut);text-align:center;line-height:1.15;cursor:pointer;background:var(--surface)}
 .cell .si{width:20px;height:20px}
 .cell.bad{border-color:#EFC0B8;background:var(--redbg);color:var(--red);font-weight:600}
+.cell.warn{border-color:#E9D4A3;background:var(--amberbg);color:var(--amber);font-weight:600}
 .cell.ok{color:var(--fg)}
 .mrow{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;border-top:1px solid var(--line);cursor:pointer}
 .mrow:first-child{border-top:0}
@@ -475,30 +476,30 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
     <div class="mail">
       <div class="mtop"></div>
       <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Pre-visit assessment<span>Oasis of the Seas · Oct 15</span></div></div>
-      <div class="env"><b>To</b><span>Ray Guerra · Rolando Abellan · Ohji Miranda · Jonathan · Miguel San Martin</span><b>Cc</b><span>Dexter Lawrence</span><b>Subject</b><span>Oasis of the Seas · before Dexter's visit Oct 16 · ATTENTION: drum K will be missing, one order date missed</span></div>
+      <div class="env"><b>To</b><span>Ray Guerra · Rolando Abellan · Ohji Miranda · Jonathan · Miguel San Martin</span><b>Cc</b><span>Dexter Lawrence</span><b>Subject</b><span>Oasis of the Seas · before Dexter's visit Oct 16 · ATTENTION: PROD 1 copy quality affected, no belt on board; one order date missed</span></div>
       <div class="mb">
-        <div class="verdict"><div class="vb att">Attention</div><p><b>PROD 1 needs a drum K it does not have.</b> 412 % of life, none on board, none ordered; its Pattern 43 shows the cyan banding of a worn transfer belt (104 %). Developer C and PROD 2's fusing belt are past life but on board. The Oct 9 order was never placed. The count is honest and three updates behind OBP. One MFD down, KM ticket open.</p></div>
+        <div class="verdict"><div class="vb att">Attention</div><p><b>PROD 1 is printing cyan banding.</b> The transfer belt is past life (104 %), none is on board, one is ordered for Oct 29. Three other parts are past life with copy quality fine: keep them running, have the replacement on board. Drum K has none. The Oct 9 order was never placed. The count is honest and three updates behind OBP. One MFD down, KM ticket open.</p></div>
         <p class="note2">John Gorre sent everything in 19 hours, one re-scan. Dexter's audit is open.</p>
 
         <div class="sec"><h3>1 · Machines</h3><span>Pattern 43 · Management List</span></div>
         <div class="mcard">
-          <div class="mh2"><span>PROD 1 · AccurioPress C4070<span class="sn">S011021355</span></span><span class="pill r">2 to replace · 1 missing</span></div>
+          <div class="mh2"><span>PROD 1 · AccurioPress C4070<span class="sn">S011021355</span></span><span class="pill r">Copy quality affected</span></div>
           <div class="mb2">
-            <div class="read"><b>Pattern 43</b><span><b style="color:var(--red)">Cyan banding</b>, pages 3–7, across the feed (direction derived from the edge marks). No white dots. Density short on magenta, page 9, mild. Mix page isolates cyan. Reading: transfer belt. <span class="note2">Confidence medium · Rolando confirms.</span></span></div>
-            <div class="read"><b>Management List</b><span>38 counters read from the third document. Three past life; the rest under 85 %.</span></div>
+            <div class="read"><b>Pattern 43</b><span><b style="color:var(--red)">Cyan banding</b>, pages 3–7, across the feed (direction derived from the edge marks). No white dots. Density even on K. Mix page isolates cyan. Reading: transfer belt. <span class="note2">Confidence medium · Rolando confirms.</span></span></div>
+            <div class="read"><b>Management List</b><span>38 counters read from the third document. Three past life; the rest under 85 %. Past life is information; copy quality decides.</span></div>
             <div>
-              <div class="part"><span class="pn">Drum K<span class="sn">DR-616K</span></span><span class="pv r">412 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill r">On board 0</span><span class="pill r">On order none</span><span class="vt r">Will be missing on the visit</span></div></div>
-              <div class="part"><span class="pn">Developer C<span class="sn">DV-616C</span></span><span class="pv r">180 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill g">On board 1</span><span class="pill m">On order none</span><span class="vt">Replace on the visit · reorder</span></div></div>
-              <div class="part"><span class="pn">Transfer belt<span class="sn">A50U-R703</span></span><span class="pv a">104 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill r">On board 0</span><span class="pill n">On order 1 · PO 48812 · Oct 29</span><span class="vt">Arrives after the visit</span></div></div>
+              <div class="part"><span class="pn">Transfer belt<span class="sn">A50U-R703</span></span><span class="pv r">104 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill r">Copy affected</span><span class="pill r">On board 0</span><span class="pill n">On order 1 · PO 48812 · Oct 29</span><span class="vt r">Replace · nothing on board to do it with</span></div></div>
+              <div class="part"><span class="pn">Drum K<span class="sn">DR-616K</span></span><span class="pv a">412 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill g">Copy fine</span><span class="pill r">On board 0</span><span class="pill r">On order none</span><span class="vt">Keep running · none on board for when it goes</span></div></div>
+              <div class="part"><span class="pn">Developer C<span class="sn">DV-616C</span></span><span class="pv a">180 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill g">Copy fine</span><span class="pill g">On board 1</span><span class="vt">Keep running · one on board</span></div></div>
             </div>
           </div>
         </div>
         <div class="mcard">
-          <div class="mh2"><span>PROD 2 · AccurioPress C4070<span class="sn">S011021356</span></span><span class="pill a">1 to replace</span></div>
+          <div class="mh2"><span>PROD 2 · AccurioPress C4070<span class="sn">S011021356</span></span><span class="pill g">Copy fine</span></div>
           <div class="mb2">
             <div class="read"><b>Pattern 43</b><span>Clean on 12 pages after the re-scan. <span class="note2">Confidence high.</span></span></div>
             <div class="read"><b>Management List</b><span>Developer counters all reset to 0 on one date; only yellow was replaced per OBP. Counters reset without the part, as on Brilliance, Feb 2025.</span></div>
-            <div><div class="part"><span class="pn">Fusing belt assy<span class="sn">A50U-R801</span></span><span class="pv r">131 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill g">On board 1</span><span class="pill m">On order none</span><span class="vt">Replace on the visit</span></div></div></div>
+            <div><div class="part"><span class="pn">Fusing belt assy<span class="sn">A50U-R801</span></span><span class="pv a">131 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill g">Copy fine</span><span class="pill g">On board 1</span><span class="vt">Keep running · one on board</span></div></div></div>
           </div>
         </div>
         <div class="mcard">
@@ -522,19 +523,20 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
         <div class="sec"><h3>3 · Ordering and due dates</h3><span>schedule · open orders · OBP</span></div>
         <div class="act2">
           <i class="r">!</i><span><b>Missed: Oct 9, voyage 1019.</b> No PO on file. The Nov 2 container carries nothing for Oasis.</span>
-          <i>→</i><span><b>Next: Oct 23, voyage 1026.</b> Drum K, two waste boxes to par, developer C reorder.</span>
+          <i>→</i><span><b>Next: Oct 23, voyage 1026.</b> Drum K (none on board), two waste boxes to par.</span>
           <i>→</i><span><b>Run-out:</b> toner K fine to Nov 20; waste boxes below par, not out; nothing else within 60 days.</span>
-          <i class="r">!</i><span><b>Drum K cannot wait for Oct 23.</b> Two worn parts on one press. Ray: UPS to Nassau before Oct 16, or Dexter carries one. A rush here is a crew ordering failure, not a supply gap.</span>
+          <i class="r">!</i><span><b>The transfer belt cannot wait for Oct 29.</b> Copy quality is affected now and nothing is on board. Ray: pull PO 48812 forward to Nassau before Oct 16, or the ship prints banding for two weeks. A rush here is a crew ordering failure, not a supply gap.</span>
         </div>
 
         <div class="sec"><h3>4 · For the visit</h3><span>who does what</span></div>
         <div class="act2">
-          <i>1</i><span>Replace developer C (PROD 1) and the fusing belt (PROD 2). <span class="who">Dexter</span></span>
-          <i>2</i><span>Drum K to Nassau before Oct 16, or not. <span class="who">Ray · Miguel</span></span>
-          <i>3</i><span>PROD 2 counters reset without parts: confirm, show John the rule. <span class="who">Dexter · Rolando</span></span>
-          <i>4</i><span>MFD deck 5: the jam and the KM ticket. <span class="who">Dexter</span></span>
-          <i>5</i><span>Three OBP gaps and the fusing gears on the shelf, then OBP discipline. <span class="who">Dexter</span></span>
-          <i>6</i><span>Voyage 1019: why no PO; place Oct 23 before Dexter leaves. <span class="who">Dexter · Ray</span></span>
+          <i>1</i><span>PROD 1 banding: confirm on the machine; replace the transfer belt if it reaches Nassau. <span class="who">Dexter · Rolando</span></span>
+          <i>2</i><span>Belt to Nassau before Oct 16, or not. <span class="who">Ray · Miguel</span></span>
+          <i>3</i><span>Drum K, developer C, PROD 2 fusing belt: past life, copy fine, leave them; check a drum K is ordered. <span class="who">Dexter · Ray</span></span>
+          <i>4</i><span>PROD 2 counters reset without parts: confirm, show John the rule. <span class="who">Dexter · Rolando</span></span>
+          <i>5</i><span>MFD deck 5: the jam and the KM ticket. <span class="who">Dexter</span></span>
+          <i>6</i><span>Three OBP gaps and the fusing gears on the shelf, then OBP discipline. <span class="who">Dexter</span></span>
+          <i>7</i><span>Voyage 1019: why no PO; place Oct 23 before Dexter leaves. <span class="who">Dexter · Ray</span></span>
         </div>
 
         <p><span class="btnm">Dexter: open the audit</span> &nbsp; <span class="src">Rolando: <u>confirm the Pattern 43 readings</u></span></p>
@@ -542,7 +544,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
       <div class="mfoot"><b>CIMS</b>
         <div class="method">
           <b>Pattern 43</b><span>read against Rolando's six rules; the reader is not yet calibrated on his labelled bundles, so every reading is provisional until he confirms. Scans attached.</span>
-          <b>Management List</b><span>life % from the third document, as text.</span>
+          <b>Management List</b><span>life % from the third document, as text. A part past life is reported, never a replacement by itself: the decision is made when copy quality is affected (Miguel). "Keep running" means have the replacement on board.</span>
           <b>Inventory</b><span>counted blind by the crew, compared with the OBP export of Oct 15 and the open-orders list.</span>
           <b>Ordering</b><span>Ordering Schedule and POs on file, Ray's rule; run-out from the fleet burn rate.</span>
           <b>Money</b><span>nothing here is money. The bonus never reads it.</span>
@@ -559,8 +561,8 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
       <div class="scr">
         <div class="card">
           <div class="h">Before the visit <span class="r">assessment sent 11:24</span></div>
-          <div class="itm"><div class="tx" style="color:var(--red);font-weight:600">4 parts past life<div class="sm">PROD 1 drum K, developer C, transfer belt · PROD 2 fusing belt</div></div><span class="si bad"></span></div>
-          <div class="itm"><div class="tx" style="color:var(--red);font-weight:600">Drum K will be missing<div class="sm">None on board, none ordered</div></div><span class="si bad"></span></div>
+          <div class="itm"><div class="tx" style="color:var(--red);font-weight:600">PROD 1 copy quality affected<div class="sm">Cyan banding · transfer belt 104 % · none on board, PO due Oct 29</div></div><span class="si bad"></span></div>
+          <div class="itm"><div class="tx" style="color:var(--amber);font-weight:600">3 parts past life, copy fine<div class="sm">Drum K (none on board), developer C, PROD 2 fusing belt · keep running</div></div><span class="si warn"></span></div>
           <div class="itm"><div class="tx" style="color:var(--amber);font-weight:600">Order date missed<div class="sm">Oct 9 · voyage 1019 · no PO</div></div><span class="si warn"></span></div>
           <div class="itm"><div class="tx">MFD deck 5 down<div class="sm">Per John · verify on board</div></div><span class="si warn"></span></div>
           <div class="itm"><div class="tx">Count: 3 differ · 1 not in OBP<div class="sm">Counted blind · verify on the shelf</div></div><span class="si warn"></span></div>
@@ -617,15 +619,16 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
       <div class="scr">
         <div class="card"><div class="kv2"><span>All hardware labeled</span><div class="seg half"><span class="on">Yes</span><span>No</span></div></div></div>
         <div class="card">
-          <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw warn">1 finding</span><span class="chev">˅</span></div>
+          <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw bad">Copy affected</span><span class="chev">˅</span></div>
           <div class="cells">
-            <div class="cell ok"><span class="si ok"></span>Test pattern</div>
+            <div class="cell bad"><span class="si bad"></span>Test pattern</div>
             <div class="cell ok"><span class="si ok"></span>Scan to email</div>
             <div class="cell ok"><span class="si ok"></span>Collaboration</div>
-            <div class="cell bad"><span class="si bad"></span>Counter life</div>
+            <div class="cell warn"><span class="si warn"></span>Past life</div>
           </div>
-          <div class="finding"><span class="si warn" style="margin-top:1px"></span><div><b>Drum K 412 % · Developer C 180 %</b><span class="src">Management List, Oct 15 · confirm, then replace</span></div></div>
-          <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">1 finding</span><span class="chev">›</span></div>
+          <div class="finding" style="background:var(--redbg)"><span class="si bad" style="margin-top:1px"></span><div><b style="color:var(--red)">Cyan banding · transfer belt 104 %</b><span class="src">Pattern 43, Oct 15 · confirm on the machine · belt not on board</span></div></div>
+          <div class="finding"><span class="si warn" style="margin-top:1px"></span><div><b>Drum K 412 % · Developer C 180 % · copy fine</b><span class="src">Past life, keep running · a drum K is not on board</span></div></div>
+          <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">Past life</span><span class="chev">›</span></div>
           <div class="mrow"><div class="tx"><div class="nm">MFD · deck 5</div><div class="sn">down per John · verify</div></div><span class="stw bad">Down</span><span class="chev">›</span></div>
           <div class="mrow"><div class="tx"><div class="nm">MFD · deck 4, 2 units</div><div class="sn">bizhub</div></div><span class="stw ok">Pass</span><span class="chev">›</span></div>
         </div>
@@ -813,10 +816,10 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
           <div class="prog" style="border-radius:3px;overflow:hidden"><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
           <div class="card"><div class="kv2"><span>All hardware labeled</span><div class="seg half"><span class="on">Yes</span><span>No</span></div></div></div>
           <div class="card">
-            <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw warn">1 finding</span><span class="chev">˅</span></div>
-            <div class="cells"><div class="cell ok"><span class="si ok"></span>Test pattern</div><div class="cell ok"><span class="si ok"></span>Scan to email</div><div class="cell ok"><span class="si ok"></span>Collaboration</div><div class="cell bad"><span class="si bad"></span>Counter life</div></div>
-            <div class="finding"><span class="si warn" style="margin-top:1px"></span><div><b>Drum K 412 % · Developer C 180 %</b><span class="src">Management List, Oct 15 · confirm, then replace</span></div></div>
-            <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">1 finding</span><span class="chev">›</span></div>
+            <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw bad">Copy affected</span><span class="chev">˅</span></div>
+            <div class="cells"><div class="cell bad"><span class="si bad"></span>Test pattern</div><div class="cell ok"><span class="si ok"></span>Scan to email</div><div class="cell ok"><span class="si ok"></span>Collaboration</div><div class="cell warn"><span class="si warn"></span>Past life</div></div>
+            <div class="finding" style="background:var(--redbg)"><span class="si bad" style="margin-top:1px"></span><div><b style="color:var(--red)">Cyan banding · transfer belt 104 %</b><span class="src">Pattern 43, Oct 15 · confirm on the machine · belt not on board</span></div></div>
+            <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">Past life</span><span class="chev">›</span></div>
             <div class="mrow"><div class="tx"><div class="nm">MFD · deck 5</div><div class="sn">down per John · verify</div></div><span class="stw bad">Down</span><span class="chev">›</span></div>
             <div class="mrow"><div class="tx"><div class="nm">MFD · deck 4, 2 units</div><div class="sn">bizhub</div></div><span class="stw ok">Pass</span><span class="chev">›</span></div>
           </div>
@@ -825,8 +828,8 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
         <div class="side">
           <div class="grp" style="padding:0 0 4px">Before the visit</div>
           <div class="card">
-            <div class="itm"><div class="tx" style="font-size:13.5px;color:var(--red);font-weight:600">Drum K will be missing<div class="sm">PROD 1 · none on board</div></div><span class="si bad"></span></div>
-            <div class="itm"><div class="tx" style="font-size:13.5px">4 parts past life<div class="sm">2 on board to replace</div></div><span class="si warn"></span></div>
+            <div class="itm"><div class="tx" style="font-size:13.5px;color:var(--red);font-weight:600">PROD 1 copy affected<div class="sm">transfer belt · none on board</div></div><span class="si bad"></span></div>
+            <div class="itm"><div class="tx" style="font-size:13.5px">3 parts past life, copy fine<div class="sm">keep running · drum K not on board</div></div><span class="si warn"></span></div>
             <div class="itm"><div class="tx" style="font-size:13.5px">Order date missed<div class="sm">Oct 9 · no PO</div></div><span class="si warn"></span></div>
             <div class="itm"><div class="tx" style="font-size:13.5px">MFD deck 5 down<div class="sm">verify</div></div><span class="si warn"></span></div>
           </div>
@@ -919,6 +922,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.
     <div class="rule"><b>The audit is gated</b><p>No request, no audit. Resend and Extend are Dexter's; "start anyway" is nobody's.</p></div>
     <div class="rule"><b>The count is blind</b><p>Every OBP line, no on-hand figure, 0 is an answer. The crew never sees the comparison.</p></div>
     <div class="rule"><b>Colour is a finding</b><p>Red and amber appear only on what is wrong. Selection is navy. Present is quiet.</p></div>
+    <div class="rule"><b>Copy quality decides, not the counter</b><p>A part past life is reported, never a replacement by itself. The decision to replace is made when copy quality is affected. "Keep running" means: have the replacement on board for when it goes. <em>Miguel, 14 Oct 2026.</em></p></div>
     <div class="rule"><b>The web is the phone</b><p>Same column, a rail and the assessment beside it. One codebase, one set of screens.</p></div>
     <div class="rule"><b>Nothing here is money</b><p>Profile card only. The Score Card pre-fill is phase 2, Miguel's merge. The supervisor evaluation never.</p></div>
   </div>

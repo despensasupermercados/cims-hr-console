@@ -87,6 +87,16 @@ it pre-fills Dexter's Inventory step for him to confirm on the shelf. The parts 
   fleet burn rate, and the parts that cannot wait (a rush there is a crew ordering failure under Ray's window, said
   as a fact); **4 · For the visit**, a numbered list of what Dexter walks in to do with the owner of each item; the
   audit button; and a method footer that says, per source, how it was read and how sure it is.
+- **Copy quality decides, not the counter** (Miguel, 14 Oct 2026: "we don't ask people to replace items until copy
+  quality is affected; we tell them when it is happening; the decision is made when copy quality is affected"). A part
+  past 100 % on the Management List is reported as information, never as a replacement by itself. The assessment
+  joins it to the Pattern 43 reading of the same machine: a defect that points to the part (banding → transfer belt,
+  white dots → drum, short density → developer) makes it "Copy affected · replace"; no defect makes it "Copy fine ·
+  keep running", and the only question then is whether the replacement is on board or ordered for when it goes.
+  "Will be missing" is retired: the phrase is "none on board for when it goes". In the audit's Machines step the
+  Test pattern cell carries the finding and a Past life cell carries the information, amber. A first cut of the
+  assessment told Dexter to replace three parts on counters alone; that was the console deciding what Miguel's rule
+  reserves for copy quality, and it is corrected in v5.
 - **Pattern 43 is assessed, provisionally — this reverses the 1 Oct decision on Miguel's word.** The Brain's record
   of 1 Oct 2026 (recnTfj9bYmsGruys) says the automated vision read failed on 3 of 7 fleet bundles (Navigator missed
   the cyan banding; Anthem invented a line on six pages; Odyssey missed, misplaced and invented) and nothing from it
