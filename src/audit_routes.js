@@ -7,11 +7,14 @@
 // gate arrive in the next PR (C), the reading of the files through HON in PR G.
 import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
+import { installAuditRequest, isLive } from "./audit_request.js";
 
-export const AUDIT_VERSION = "2026-10-14.a1";
+export const AUDIT_VERSION = "2026-10-14.c1";
 
 export function installAudit(deps) {
   const { json, htmlResponse, ensureAudit, rotationSections, crewProfile, TODAY } = deps;
+  // PR C: the request, the seafarer's page, the reads, the count, the gate, the sweep (src/audit_request.js)
+  const R = installAuditRequest(deps);
 
   async function health(env) {
     let tables = false, r2 = null, timecard = null;
@@ -24,6 +27,7 @@ export function installAudit(deps) {
     return json({
       ok: tables === true, version: AUDIT_VERSION, host: AUDIT_HOST,
       bindings: { AUDIT_FILES: !!env.AUDIT_FILES, TIMECARD_DB: !!env.TIMECARD_DB, MAILER: !!env.MAILER, HON: !!env.HON },
+      live: isLive(env),
       tables, r2, shipContacts: timecard,
       recipients: String(env.AUDIT_TO || "").split(",").map((s) => s.trim()).filter(Boolean).length,
     });
@@ -61,7 +65,7 @@ export function installAudit(deps) {
     await ensureAudit(env);
     const [prof, reqs] = await Promise.all([
       crewProfile(env, sc, session),
-      env.DB.prepare("SELECT id, ship, status, created_at, sent_at, complete_at, auditor FROM audit_request WHERE agency_id=? ORDER BY created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
+      env.DB.prepare("SELECT id, ship, status, created_at, sent_at, complete_at, due_at, auditor, test_mode FROM audit_request WHERE agency_id=? ORDER BY created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
     ]);
     if (!prof || prof.error) return json({ error: (prof && prof.error) || "not_found" }, 404);
     const P = prof.profile || {}, crew = prof.crew || {};
@@ -83,7 +87,8 @@ export function installAudit(deps) {
       },
       slots: (P.people && P.people.slots) || [],
       feed, checks: (P.checks || []).map((c) => c.text),
-      audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), by: r.auditor })),
+      audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode })),
+      open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "complete" || r.status === "draft") || {}).id || null,
     });
   }
 
@@ -99,8 +104,9 @@ export function installAudit(deps) {
   }
 
   // Returns a Response, or null when the path is not the audit's.
-  return async function handleAudit(p, request, env, url, session) {
+  const handleAudit = async function handleAudit(p, request, env, url, session) {
     const host = url.hostname;
+    { const r = await R.handle(p, request, env, url, session); if (r) return r; }
     if (p === "/audit/manifest.webmanifest") {
       return new Response(AUDIT_MANIFEST(isAuditHost(host)), { headers: { "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" } });
     }
@@ -120,4 +126,6 @@ export function installAudit(deps) {
     }
     return null;
   };
+  handleAudit.sweep = (env) => R.sweep(env);
+  return handleAudit;
 }

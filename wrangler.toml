@@ -68,6 +68,11 @@ DEPLOY_TO = "maryjoy.manzanares@dg3.com"
 # Printshop Audit (14 Oct 2026): who receives the pre-visit assessment and the filed audit. Miguel's list, verbatim
 # ("he can go to Ray, Rolando, Ogi, Jonathan, and myself"). Never guessed in code; unset = the email is not sent.
 AUDIT_TO = "Ray.Guerra@dg3.com, Rolando.Abellan@dg3.com, Ohji.Miranda@dg3.com, Jonathan.Alonzo@dg3.com, Miguel.Sanmartin@dg3.com"
+# The request to the ship copies Rolando and Ray (the design's A4: "Cc John's personal email · Rolando · Ray"); replies
+# reach Rolando, the first name here.
+AUDIT_REQUEST_CC = "Rolando.Abellan@dg3.com, Ray.Guerra@dg3.com"
+# AUDIT_LIVE is deliberately ABSENT: until Miguel signs off the rendered emails (CIMS email standard §5) every audit email
+# goes to the auditor alone, marked [TEST]. Add AUDIT_LIVE = "true" here to send to the ships.
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,
@@ -75,6 +80,14 @@ AUDIT_TO = "Ray.Guerra@dg3.com, Rolando.Abellan@dg3.com, Ohji.Miranda@dg3.com, J
 [[services]]
 binding = "MAILER"
 service = "cims-mailer"
+
+# Printshop Audit (14 Oct 2026): HON's own readers — the press register, OBP lines (the fresher copy), Pattern 43
+# measured, the Machine Management List read — through HON's named entrypoint (cims-hon PR #113). Reachable only by
+# this binding, never over HTTP; it stores nothing.
+[[services]]
+binding = "HON"
+service = "cims-hon"
+entrypoint = "AuditReader"
 
 # DEPRECATED: the RESEND_API_KEY secret is no longer read by this worker — email
 # delivery moved to the MAILER binding above. Delete the secret after verifying
@@ -142,6 +155,11 @@ AUDIT_TO = "Miguel.Sanmartin@dg3.com"
 [[env.staging.services]]
 binding = "MAILER"
 service = "cims-mailer"
+
+[[env.staging.services]]
+binding = "HON"
+service = "cims-hon"
+entrypoint = "AuditReader"
 
 [[env.staging.r2_buckets]]
 binding = "AUDIT_FILES"

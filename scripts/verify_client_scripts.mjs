@@ -44,6 +44,8 @@ export const RENDERED = [
     signoff: "2026-11-20", rid: "rq_sample",
   }]],
   ["SBM_CLOSED_HTML", new URL("../src/sbm.js", import.meta.url), "sbmClosedHtml", ["expired"]],
+  // Printshop Audit, the seafarer's upload page (public, token in the URL) and its closed page (14 Oct 2026)
+  ["AUDIT_UPLOAD_HTML", new URL("../src/audit_upload_ui.js", import.meta.url), "auditUploadHtml", [{ token: "sample-token-0123456789", ship: "Oasis", crew: "John Gorre" }]],
 ];
 
 // Evaluate the real src/worker.js (a temp copy next to it with the page constants exported, so
