@@ -74,3 +74,34 @@ test("the Keyman Deploy recipient is pinned in [vars] to a dg3.com address", () 
   const nextTable = TOML.slice(vars + 1).search(/^\[/m) + vars + 1;
   assert.ok(vars !== -1 && setting > vars && setting < nextTable, "DEPLOY_TO must sit inside [vars]");
 });
+
+// PRINTSHOP AUDIT (14 Oct 2026). The audit's bindings are declared, the timecard database is bound with no
+// migrations_dir (no migration in this repo can ever target another app's database), and STAGING never emails or
+// runs a timer against its copy of production's crew: a staging MAILER must come with MAIL_ONLY_TO and no cron.
+const section = (name) => {
+  const i = TOML.indexOf(name);
+  if (i < 0) return "";
+  const rest = TOML.slice(i + name.length);
+  const j = rest.search(/^\[/m);
+  return j < 0 ? rest : rest.slice(0, j);
+};
+test("the audit's production bindings are declared", () => {
+  assert.match(TOML, /\[\[r2_buckets\]\]\s*\nbinding = "AUDIT_FILES"\s*\nbucket_name = "cims-audit-files"/);
+  assert.match(TOML, /\[\[d1_databases\]\]\s*\nbinding = "TIMECARD_DB"\s*\ndatabase_name = "cims-timecard"\s*\ndatabase_id = "ae52e15f-38f6-4969-ba0c-d94de9ecd8bd"\s*\n(?!migrations_dir)/);
+  const vars = TOML.search(/^\[vars\]/m), audit = TOML.search(/^AUDIT_TO\s*=/m), next = TOML.slice(vars + 6).search(/^\[/m) + vars + 6;
+  assert.ok(vars !== -1 && audit > vars && audit < next, "AUDIT_TO must sit inside [vars]");
+  for (const who of ["Ray.Guerra", "Rolando.Abellan", "Ohji.Miranda", "Jonathan.Alonzo", "Miguel.Sanmartin"]) assert.match(TOML, new RegExp("^AUDIT_TO = .*" + who.replace(".", "\\.") + "@dg3\\.com", "m"));
+});
+test("no migration can target another app's database", () => {
+  const blocks = TOML.split(/^\[\[(?:env\.staging\.)?d1_databases\]\]/m).slice(1);
+  for (const b of blocks) {
+    const body = b.split(/^\[/m)[0];
+    if (/binding = "DB"/.test(body)) continue;
+    assert.doesNotMatch(body, /migrations_dir/, "only the console's own DB may carry migrations_dir");
+  }
+});
+test("staging: a mailer only with MAIL_ONLY_TO, and no cron", () => {
+  const hasStagingMailer = /\[\[env\.staging\.services\]\]\s*\nbinding = "MAILER"/.test(TOML);
+  if (hasStagingMailer) assert.match(section("[env.staging.vars]"), /^MAIL_ONLY_TO = "[^"]+@[^"]+"/m, "a staging MAILER without MAIL_ONLY_TO could email real crew from copied data");
+  assert.match(section("[env.staging.triggers]"), /^crons = \[\]/m, "staging inherits the hourly cron unless it is emptied here");
+});

@@ -65,6 +65,9 @@ AUTO_SEND_DRY_RUN = "false"
 # flights). Unset = the Deploy button refuses (`no_recipient`); it never defaults. DEPLOY_CC
 # defaults to Rita in code. Lives here, not the dashboard, so it survives every deploy.
 DEPLOY_TO = "maryjoy.manzanares@dg3.com"
+# Printshop Audit (14 Oct 2026): who receives the pre-visit assessment and the filed audit. Miguel's list, verbatim
+# ("he can go to Ray, Rolando, Ogi, Jonathan, and myself"). Never guessed in code; unset = the email is not sent.
+AUDIT_TO = "Ray.Guerra@dg3.com, Rolando.Abellan@dg3.com, Ohji.Miranda@dg3.com, Jonathan.Alonzo@dg3.com, Miguel.Sanmartin@dg3.com"
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,
@@ -96,6 +99,20 @@ migrations_dir = "migrations"
 binding = "EXPORTS"
 bucket_name = "cims-hr-exports"
 
+# Printshop Audit files (14 Oct 2026): Pattern 43 bundles, Management Lists, audit photos. Created for the audit by
+# Miguel's decision ("rather u create a cims audit file"); never mixed with the backups above.
+[[r2_buckets]]
+binding = "AUDIT_FILES"
+bucket_name = "cims-audit-files"
+
+# The ship mailboxes (cims-timecard's ship_contact, Brain recPHlvv1wzYOEFzg). READ ONLY by rule: the audit issues
+# SELECT only against this binding (test/audit_guards.test.js) and it carries no migrations_dir, so no migration
+# command in this repo can ever point at another app's database.
+[[d1_databases]]
+binding = "TIMECARD_DB"
+database_name = "cims-timecard"
+database_id = "ae52e15f-38f6-4969-ba0c-d94de9ecd8bd"
+
 # ---- Staging: a separate Worker + separate D1 copy. Nothing reaches prod data
 # that has not run green here first. Create the staging DB once with:
 #   wrangler d1 create cims-hr-console-staging
@@ -108,3 +125,29 @@ binding = "DB"
 database_name = "cims-hr-console-staging"
 database_id = "84ad4352-9979-4cd8-9bd2-fec887591257"
 migrations_dir = "migrations"
+
+# Staging gets a mailer for the audit's emails (14 Oct 2026) — and two locks with it, because wrangler INHERITS the
+# hourly cron into this environment and the database here is a copy of production's crew:
+#   1. no cron on staging at all (nothing runs on a timer against copied crew);
+#   2. MAIL_ONLY_TO: every email to anyone else is dropped before it reaches the mailer (src/mail_guard.js).
+# Pinned by test/wrangler_config.test.js: a staging MAILER without MAIL_ONLY_TO fails the suite.
+[env.staging.triggers]
+crons = []
+
+[env.staging.vars]
+MAIL_FROM = "CIMS <cims@cims.work>"
+MAIL_ONLY_TO = "Miguel.Sanmartin@dg3.com"
+AUDIT_TO = "Miguel.Sanmartin@dg3.com"
+
+[[env.staging.services]]
+binding = "MAILER"
+service = "cims-mailer"
+
+[[env.staging.r2_buckets]]
+binding = "AUDIT_FILES"
+bucket_name = "cims-audit-files-staging"
+
+[[env.staging.d1_databases]]
+binding = "TIMECARD_DB"
+database_name = "cims-timecard"
+database_id = "ae52e15f-38f6-4969-ba0c-d94de9ecd8bd"

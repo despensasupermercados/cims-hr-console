@@ -32,6 +32,7 @@ export const EXTRA = [
   ["DEPLOY_HTML", new URL("../src/relief_deploy.js", import.meta.url)],
   ["ACK_HTML", new URL("../src/signoff_ack.js", import.meta.url)],
   ["INSTR_HTML", new URL("../src/signoff_instructions.js", import.meta.url)],
+  ["AUDIT_HTML", new URL("../src/audit_ui.js", import.meta.url)], // Printshop Audit, 14 Oct 2026 (audit.cims.work)
 ];
 
 // Pages BUILT per request rather than stored as a constant. They still serve an inline script, so

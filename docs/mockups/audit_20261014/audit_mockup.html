@@ -1,0 +1,1010 @@
+<title>Printshop Audit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=DM+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: the HR console's tokens (navy / green / Outfit + DM Sans), set lighter: hairlines, soft fills, one weight of
+   bold, colour only on a finding. Phone frames are the app; the web is the same column with a rail beside it. */
+:root{
+  --navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--green-d:#3E8E2A;--amber:#B0741A;--red:#BC3B2C;
+  --bg:#EEF1F6;--surface:#FFFFFF;--panel:#F5F7FA;--line:#EBEFF4;--line2:#DCE3EC;--mut:#718096;--fg:#1B2B3F;
+  --greenbg:#EDF6E9;--amberbg:#FBF3E4;--redbg:#FCECE9;--navybg:#E9EFF6;
+  --fh:'Outfit',Arial,Helvetica,sans-serif;--ff:'DM Sans',Arial,Helvetica,sans-serif;--fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:14px;--sh:0 8px 28px rgba(20,45,72,.08);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1A27;--surface:#172536;--panel:#1C2B3D;--line:#263649;--line2:#33465C;--mut:#9AAAC0;--fg:#E8EEF5;
+  --navy:#22446B;--deep:#172F4C;--greenbg:#1C3324;--amberbg:#3A2C12;--redbg:#3C1F1B;--navybg:#1C2F47;--sh:0 8px 28px rgba(0,0,0,.35);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1A27;--surface:#172536;--panel:#1C2B3D;--line:#263649;--line2:#33465C;--mut:#9AAAC0;--fg:#E8EEF5;
+  --navy:#22446B;--deep:#172F4C;--greenbg:#1C3324;--amberbg:#3A2C12;--redbg:#3C1F1B;--navybg:#1C2F47;--sh:0 8px 28px rgba(0,0,0,.35);color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--ff);font-size:14px;line-height:1.45;margin:0;padding-block:0 56px;padding-inline:16px}
+h1,h2,h3{font-family:var(--fh);text-wrap:balance;margin:0;font-weight:600}
+.wrap{max-width:1600px;margin:0 auto}
+.band{background:var(--navy);color:#fff;margin:0 -16px;padding:22px 16px 20px;border-top:4px solid var(--green)}
+.band .in{max-width:1600px;margin:0 auto;display:flex;flex-wrap:wrap;gap:16px 32px;align-items:flex-end;justify-content:space-between}
+.wm{font-family:var(--fh);font-weight:600;font-size:22px;letter-spacing:5px;line-height:1}
+.wm small{display:block;font-family:var(--ff);font-weight:500;font-size:8px;letter-spacing:2.4px;text-transform:uppercase;opacity:.6;margin-top:6px}
+.band h1{font-size:24px;margin-top:10px}
+.band .meta{font-size:12.5px;opacity:.8;max-width:520px}
+.eyebrow{font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--green)}
+section.blk{margin-top:40px}
+section.blk>h2{font-size:18px;margin-bottom:2px}
+section.blk>p.lead{color:var(--mut);margin:0 0 18px;max-width:64ch;font-size:13.5px}
+.flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:30px 24px;align-items:start}
+.step{min-width:0}
+.step .cap{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:start;margin-bottom:10px}
+.step .cap .n{width:30px;height:24px;border-radius:7px;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;display:grid;place-items:center;font-size:11.5px;letter-spacing:.3px}
+.step .cap h3{font-size:14.5px}
+.step .cap p{margin:1px 0 0;color:var(--mut);font-size:12.5px}
+.wide{grid-column:1/-1;max-width:680px}
+.wider{grid-column:1/-1;max-width:1140px}
+/* phone */
+.ph{background:var(--surface);border-radius:28px;overflow:hidden;box-shadow:var(--sh);max-width:400px}
+.top{background:var(--navy);color:#fff;padding:12px 14px 11px;display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center}
+.top .bk{width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,.12);display:grid;place-items:center;font-size:18px;line-height:1}
+.top .bk.off{visibility:hidden}
+.top .t{font-family:var(--fh);font-weight:600;font-size:16px;line-height:1.15;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top .s{font-size:11px;opacity:.72;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .k{font-family:var(--fh);font-weight:600;font-size:12px;background:rgba(255,255,255,.14);padding:5px 9px;border-radius:999px;white-space:nowrap}
+.top .k.g{background:var(--green)}
+.prog{height:3px;background:var(--line);display:flex}
+.prog i{flex:1;background:var(--green)}
+.prog i.off{background:transparent}
+.scr{padding:14px 14px 16px;display:flex;flex-direction:column;gap:12px}
+.scr.tight{gap:10px}
+.title{font-family:var(--fh);font-size:20px;font-weight:600;line-height:1.15}
+.sub{font-size:13px;color:var(--mut)}
+.q{font-size:17px;font-weight:600;line-height:1.25;font-family:var(--fh)}
+.hint{font-size:12.5px;color:var(--mut)}
+.search{min-height:48px;border:1px solid var(--line2);border-radius:12px;padding:0 14px;color:var(--mut);font-size:16px;background:var(--panel);display:flex;align-items:center;gap:8px}
+.hs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none;margin:0 -14px;padding-inline:14px}
+.hs::-webkit-scrollbar{display:none}
+.chip{flex:none;min-height:40px;display:inline-flex;align-items:center;border:1px solid var(--line2);border-radius:999px;padding:0 14px;font-size:14px;font-weight:500;background:var(--surface);cursor:pointer;user-select:none;white-space:nowrap}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips .chip{white-space:normal}
+.chip.need{background:var(--amberbg);border-color:#E9D4A3;color:var(--amber);font-weight:600}
+.card{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden}
+.card.soft{background:var(--panel);border-color:transparent}
+.card .h{padding:12px 14px 6px;font-family:var(--fh);font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.card .h .r{font-family:var(--ff);font-weight:500;font-size:12px;color:var(--mut)}
+.lrow{display:flex;align-items:center;gap:12px;min-height:52px;padding:8px 14px;border-top:1px solid var(--line);cursor:pointer}
+.lrow:first-child{border-top:0}
+.lrow .tx{flex:1;min-width:0}
+.lrow .nm{font-weight:600;font-size:15px;line-height:1.25}
+.lrow .sm{font-size:12.5px;color:var(--mut);margin-top:1px}
+.lrow .rt{text-align:right;font-size:12px;color:var(--mut);white-space:nowrap}
+.chev{color:var(--line2);font-size:18px;line-height:1}
+.dots{display:inline-flex;gap:3px;vertical-align:middle}
+.dots i{width:9px;height:9px;border-radius:3px;background:var(--line2);display:inline-block}
+.dots i.g{background:var(--green)}.dots i.a{background:#E0B457}.dots i.r{background:var(--red)}
+.pill{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;padding:3px 8px;border-radius:999px;line-height:1.4;white-space:nowrap}
+.pill.g{background:var(--greenbg);color:var(--green-d)}.pill.a{background:var(--amberbg);color:var(--amber)}.pill.r{background:var(--redbg);color:var(--red)}.pill.n{background:var(--navybg);color:var(--navy)}.pill.m{background:var(--panel);color:var(--mut)}
+.grp{display:flex;justify-content:space-between;align-items:baseline;padding:14px 14px 6px;font-size:10.5px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--mut)}
+.grp em{font-style:normal;font-weight:500;letter-spacing:0;text-transform:none;font-size:12px}
+.grp em.bad{color:var(--red);font-weight:600}
+.itm{display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 14px;border-top:1px solid var(--line)}
+.itm .tx{flex:1;min-width:0;font-size:15px}
+.itm .tx .sm{font-size:12.5px;color:var(--mut);margin-top:1px}
+.itm.miss .tx{color:var(--red);font-weight:600}
+.si{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line2);display:grid;place-items:center;flex:none;font-size:12px;font-weight:600;line-height:1;color:var(--mut)}
+.si.ok{border-color:var(--green);color:var(--green-d)}
+.si.ok:after{content:"";width:5px;height:9px;border:solid var(--green-d);border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.si.bad{border-color:var(--red);color:var(--red);background:var(--redbg)}
+.si.bad:after{content:"×";font-size:15px;line-height:1;margin-top:-1px}
+.si.warn{border-color:#E9D4A3;color:var(--amber);background:var(--amberbg)}
+.si.warn:after{content:"!";font-size:12px}
+.si.sel{border-color:var(--navy);background:var(--navy)}
+.si.sel:after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.si.lg{width:26px;height:26px}
+.stw{font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap}
+.stw.bad{color:var(--red)}.stw.warn{color:var(--amber)}.stw.ok{color:var(--green-d)}
+.cells{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px 14px 12px}
+.cell{border:1px solid var(--line);border-radius:10px;padding:8px 4px 7px;display:grid;justify-items:center;gap:5px;font-size:10.5px;font-weight:500;color:var(--mut);text-align:center;line-height:1.15;cursor:pointer;background:var(--surface)}
+.cell .si{width:20px;height:20px}
+.cell.bad{border-color:#EFC0B8;background:var(--redbg);color:var(--red);font-weight:600}
+.cell.warn{border-color:#E9D4A3;background:var(--amberbg);color:var(--amber);font-weight:600}
+.cell.ok{color:var(--fg)}
+.mrow{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;border-top:1px solid var(--line);cursor:pointer}
+.mrow:first-child{border-top:0}
+.mrow .tx{flex:1;min-width:0}
+.mrow .nm{font-weight:600;font-size:15px}
+.mrow .sn{font-family:var(--fm);font-size:11.5px;color:var(--mut);margin-top:1px}
+.finding{display:flex;gap:10px;align-items:flex-start;margin:0 14px 12px;padding:10px 12px;background:var(--amberbg);border-radius:10px;font-size:13px}
+.finding b{color:var(--amber)}
+.finding .src{display:block;margin-top:2px}
+.btn{display:flex;align-items:center;justify-content:center;min-height:52px;background:var(--green);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;border-radius:12px;padding:0 16px;border:0;width:100%;cursor:pointer}
+.btn.ghost{background:var(--surface);color:var(--navy);border:1px solid var(--line2)}
+.btn.navy{background:var(--navy)}
+.btn.sm{min-height:44px;font-size:14px}
+.bar{display:flex;gap:10px;padding:10px 14px 14px;border-top:1px solid var(--line);background:var(--surface);margin-top:2px}
+.bar .btn.ghost{flex:0 0 110px}
+.seg{display:flex;border:1px solid var(--line2);border-radius:12px;overflow:hidden;font-size:14px;font-weight:600;min-height:44px}
+.seg span{flex:1;display:grid;place-items:center;padding:0 10px;cursor:pointer;background:var(--surface);color:var(--mut);text-align:center}
+.seg span.on{background:var(--navy);color:#fff}
+.seg.half{max-width:200px;flex:none}
+.kv2{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px;padding:6px 14px;border-top:1px solid var(--line);font-size:15px;font-weight:600}
+.kv2:first-child{border-top:0}
+.kv2 .v{font-weight:500;font-size:13.5px;text-align:right}
+.tog{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:48px;padding:4px 14px;border-top:1px solid var(--line);font-size:15px;font-weight:600}
+.sw{width:50px;height:30px;border-radius:15px;background:var(--line2);position:relative;flex:none;cursor:pointer}
+.sw.on{background:var(--green)}.sw:after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2)}.sw.on:after{left:23px}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.scale span{min-height:54px;border:1px solid var(--line2);border-radius:12px;display:grid;place-items:center;font-family:var(--fh);font-weight:600;font-size:20px;cursor:pointer;color:var(--mut);background:var(--surface)}
+.scale span.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+.scale span.on.lo{background:var(--amber);border-color:var(--amber)}
+.anch{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut);margin-top:-4px}
+.ta{border:1px solid var(--line2);border-radius:12px;padding:10px 12px;font-size:15px;min-height:52px;background:var(--surface);color:var(--fg);line-height:1.4}
+.ta.req{border-color:#E9D4A3;background:var(--amberbg)}
+.lab{font-size:12.5px;font-weight:600;color:var(--mut);margin-bottom:4px}
+.lab b{color:var(--red);font-weight:600}
+.line{display:flex;align-items:center;gap:10px;min-height:52px;padding:6px 14px;border-top:1px solid var(--line)}
+.line:first-child{border-top:0}
+.line .nm{flex:1;font-weight:600;font-size:15px}
+.line .num{font-variant-numeric:tabular-nums;font-size:14px;color:var(--mut)}
+.line .num b{color:var(--fg);font-size:16px;font-weight:600}
+.d{font-family:var(--fh);font-weight:600;font-size:14px;padding:3px 8px;border-radius:8px;background:var(--redbg);color:var(--red);min-width:40px;text-align:center}
+.d.p{background:var(--amberbg);color:var(--amber)}
+.files{display:flex;gap:8px}
+.thumb{width:72px;height:72px;border-radius:10px;background:var(--panel);border:1px solid var(--line);display:grid;place-items:center;font-size:10px;color:var(--mut);text-align:center;padding:4px;position:relative}
+.thumb .qd{position:absolute;right:5px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--amber)}
+.off{background:var(--amberbg);color:var(--amber);font-size:12.5px;font-weight:600;padding:8px 14px;display:flex;gap:8px;align-items:center;border-bottom:1px solid #EFDFB5}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.tile{background:var(--panel);border-radius:10px;padding:10px 4px;text-align:center}
+.tile b{display:block;font-family:var(--fh);font-size:22px;line-height:1;font-weight:600}
+.tile small{font-size:9.5px;color:var(--mut);letter-spacing:.5px;text-transform:uppercase}
+.tile.main{background:var(--navy);color:#fff}.tile.main small{color:rgba(255,255,255,.7)}
+.went{display:grid;grid-template-columns:20px 1fr;gap:8px 10px;font-size:13.5px;padding:4px 14px 12px}
+.went i{width:20px;height:20px;border-radius:50%;background:var(--greenbg);color:var(--green-d);display:grid;place-items:center;font-style:normal;font-size:12px;font-weight:600;margin-top:1px}
+.legend{font-size:11px;color:var(--mut);padding:0 14px 8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.src{font-size:11px;color:var(--mut)}
+.lock{display:flex;gap:10px;align-items:center;background:var(--panel);border-radius:12px;padding:12px 14px;font-size:13.5px}
+.lock .ic{width:34px;height:34px;border-radius:10px;background:var(--navybg);color:var(--navy);display:grid;place-items:center;font-size:16px;flex:none}
+.cnt{font-family:var(--fh);font-weight:600;font-size:28px;line-height:1;color:var(--navy)}
+.cnt small{display:block;font-family:var(--ff);font-weight:500;font-size:12px;color:var(--mut);margin-top:3px}
+.due{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--amberbg);border:1px solid #EFDFB5;border-radius:12px;padding:10px 14px;font-size:13.5px}
+.due b{font-family:var(--fh);font-size:16px;color:var(--amber);font-weight:600}
+.due.over{background:var(--redbg);border-color:#EFC0B8}.due.over b,.due.over .cnt{color:var(--red)}
+/* web frames + emails */
+.web{background:var(--surface);border-radius:16px;overflow:hidden;box-shadow:var(--sh)}
+.web .wtop{background:var(--navy);color:#fff;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:4px solid var(--green)}
+.web .wtop .wm{font-size:16px;letter-spacing:4px}
+.web .wtop .wm small{font-size:7px;margin-top:4px}
+.web .wtop .tag{font-size:9px;font-weight:600;letter-spacing:2px;text-transform:uppercase;color:var(--green);text-align:right}
+.web .wtop .tag span{display:block;font-family:var(--fm);font-size:11px;color:rgba(255,255,255,.85);letter-spacing:0;text-transform:none;margin-top:4px}
+.web .wb{padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.up{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;border-top:1px solid var(--line)}
+.up:first-child{border-top:0}
+.up .tx{flex:1;min-width:0}
+.up .nm{font-weight:600;font-size:14.5px}
+.up .sm{font-size:12.5px;color:var(--mut)}
+.up .act{flex:none;min-height:40px;display:inline-flex;align-items:center;padding:0 14px;border-radius:10px;border:1px solid var(--navy);color:var(--navy);font-weight:600;font-size:13.5px;background:var(--surface)}
+.up .act.ok{border-color:#C9E4BF;background:var(--greenbg);color:var(--green-d)}
+.up .act.dn{border-color:#EFC0B8;background:var(--redbg);color:var(--red)}
+.app{display:grid;grid-template-columns:230px minmax(0,1fr) 300px;min-height:640px}
+.app .rail{border-right:1px solid var(--line);padding:16px 10px;display:flex;flex-direction:column;gap:4px;background:var(--panel)}
+.app .rail .ri{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-radius:10px;font-size:14px;font-weight:500;color:var(--fg)}
+.app .rail .ri.on{background:var(--surface);font-weight:600;box-shadow:0 1px 3px rgba(20,45,72,.08)}
+.app .rail .ri span{font-size:11.5px;color:var(--mut)}
+.app .rail .rl{font-size:10.5px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--mut);padding:14px 12px 4px}
+.app .main{padding:18px 22px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.app .side{border-left:1px solid var(--line);padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:var(--panel)}
+.app .side .card{background:var(--surface)}
+@media (max-width:900px){.app{grid-template-columns:1fr}.app .rail,.app .side{border:0}}
+.mail{background:var(--surface);border-radius:14px;overflow:hidden;font-size:13.5px;box-shadow:var(--sh)}
+.mail .mtop{height:4px;background:linear-gradient(90deg,var(--navy) 60%,var(--green) 60%)}
+.mail .mhead{background:var(--navy);color:#fff;padding:18px 22px 16px;display:flex;justify-content:space-between;align-items:flex-start}
+.mail .mhead .wm{font-size:18px;letter-spacing:4px}
+.mail .mhead .wm i{display:block;width:40px;height:2px;background:var(--green);margin:7px 0 5px}
+.mail .mhead .wm small{font-size:7px;margin-top:0}
+.mail .mhead .tag{font-size:8.5px;font-weight:600;letter-spacing:2.4px;text-transform:uppercase;color:var(--green);text-align:right}
+.mail .mhead .tag span{display:block;font-family:var(--fm);font-size:12px;color:rgba(255,255,255,.85);letter-spacing:0;text-transform:none;margin-top:6px}
+.mail .mb{padding:18px 22px;display:flex;flex-direction:column;gap:12px;line-height:1.5}
+.mail .mb h3{font-size:17px}
+.mail .mb p{margin:0}
+.mail .env{font-size:12px;color:var(--mut);padding:10px 22px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.mail .env b{font-weight:600;color:var(--fg)}
+.mail .btnm{display:inline-block;background:var(--green);color:#fff;font-family:var(--fh);font-weight:600;padding:12px 22px;border-radius:10px;font-size:14px}
+.mail table{width:100%;border-collapse:collapse;font-size:12.5px}
+.mail th{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line2);font-weight:600}
+.mail td{padding:7px 8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:top}
+.mail .mfoot{padding:14px 22px 20px;font-size:10.5px;color:var(--mut);border-top:1px solid var(--line)}
+.mail .mfoot>b{display:block;font-family:var(--fh);font-size:12px;letter-spacing:3px;color:var(--navy);margin-bottom:6px;font-weight:600}
+.verdict{display:flex;gap:14px;align-items:center;background:var(--panel);border-radius:12px;padding:14px 16px}
+.verdict .vb{font-family:var(--fh);font-weight:600;font-size:12.5px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;border-radius:9px;flex:none}
+.verdict .vb.att{background:var(--amberbg);color:var(--amber)}.verdict .vb.crit{background:var(--redbg);color:var(--red)}.verdict .vb.good{background:var(--greenbg);color:var(--green-d)}
+.verdict p{margin:0;font-size:13.5px}
+.sec{display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line2);padding-bottom:5px;margin-top:6px}
+.sec h3{font-size:15px}
+.sec span{font-size:10.5px;color:var(--mut);font-weight:600;letter-spacing:.6px;text-transform:uppercase}
+.mcard{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mcard .mh2{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;background:var(--panel);font-weight:600;font-size:14px}
+.mcard .mh2 .sn{font-family:var(--fm);font-weight:400;font-size:11px;color:var(--mut);margin-left:8px}
+.mcard .mb2{padding:10px 14px;display:flex;flex-direction:column;gap:10px}
+.read{display:grid;grid-template-columns:92px 1fr;gap:4px 12px;font-size:13px}
+.read b{color:var(--mut);font-weight:600;font-size:11px;letter-spacing:.5px;text-transform:uppercase;padding-top:2px}
+.part{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.part:first-child{border-top:0}
+.part .pn{font-weight:600;font-size:13.5px}
+.part .pn .sn{font-family:var(--fm);font-weight:400;font-size:11px;color:var(--mut);margin-left:6px}
+.part .pv{font-family:var(--fh);font-weight:600;font-size:18px;text-align:right;line-height:1}
+.part .pv.r{color:var(--red)}.part .pv.a{color:var(--amber)}
+.life{grid-column:1/-1;height:5px;border-radius:3px;background:var(--line);position:relative;overflow:hidden}
+.life i{position:absolute;left:0;top:0;bottom:0;background:var(--green)}
+.life i.over{background:var(--red)}.life i.near{background:var(--amber)}
+.part .pm{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px}
+.part .pm .pill{font-size:10px}
+.part .pm .vt{font-weight:600}
+.part .pm .vt.r{color:var(--red)}
+.note2{font-size:12px;color:var(--mut)}
+.act2{display:grid;grid-template-columns:22px 1fr;gap:6px 10px;font-size:13.5px}
+.act2 i{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-style:normal;font-weight:600;font-size:11px;background:var(--navybg);color:var(--navy)}
+.act2 i.r{background:var(--redbg);color:var(--red)}
+.act2 .who{color:var(--mut);font-size:12px}
+.method{font-size:11.5px;color:var(--mut);display:grid;grid-template-columns:auto 1fr;gap:3px 10px}
+.method b{color:var(--fg);font-weight:600;white-space:nowrap}
+/* review-page blocks */
+.rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.rule{background:var(--surface);border-radius:var(--r);padding:12px 14px;box-shadow:0 1px 3px rgba(20,45,72,.06)}
+.rule b{display:block;font-family:var(--fh);font-size:14px;margin-bottom:3px;font-weight:600}
+.rule p{margin:0;font-size:13px;color:var(--mut)}
+.rule p em{color:var(--fg);font-style:normal;font-weight:600}
+.dt{overflow-x:auto;background:var(--surface);border-radius:var(--r);padding:12px 14px;box-shadow:var(--sh)}
+.dt table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:900px}
+.dt th{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);text-align:left;padding:8px 8px;border-bottom:1px solid var(--line2);font-weight:600}
+.dt td{padding:8px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:middle}
+.dt td.c{text-align:center}
+.sq{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:6px;font-weight:600;font-size:12px;background:var(--greenbg);color:var(--green-d)}
+.sq.a{background:var(--amberbg);color:var(--amber)}.sq.r{background:var(--redbg);color:var(--red)}.sq.x{background:var(--panel);color:var(--mut);font-weight:500}
+.dt .filt{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+.dt .filt .chip{min-height:34px;font-size:13px}
+.cmp{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.cmp .it{background:var(--surface);border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(20,45,72,.06)}
+.cmp .it .t{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--mut);font-weight:600;margin-bottom:6px}
+.cmp .it .now{color:var(--mut);font-size:12.5px;text-decoration:line-through;text-decoration-color:var(--line2)}
+.cmp .it .new{font-size:13px;margin-top:4px}
+.cmp .it .new b{color:var(--green-d)}
+.dec{display:grid;gap:10px;counter-reset:d}
+.dec .d{background:var(--surface);border-left:3px solid var(--amber);border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:26px 1fr;gap:10px;color:var(--fg);font-family:var(--ff);font-weight:400;font-size:14px;min-width:0;text-align:left;box-shadow:0 1px 3px rgba(20,45,72,.06)}
+.dec .d:before{counter-increment:d;content:counter(d);font-family:var(--fh);font-weight:600;color:var(--amber)}
+.dec .d b{display:block;font-size:13.5px;font-weight:600}
+.dec .d p{margin:3px 0 0;font-size:12.5px;color:var(--mut)}
+.dec .d p em{color:var(--fg);font-style:normal;font-weight:600}
+.dec .d.ok{border-left-color:var(--green)}
+.dec .d.ok:before{color:var(--green-d)}
+.note{font-size:12px;color:var(--mut);margin-top:10px}
+.pf{background:var(--surface);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--line)}
+.pf .ph1{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px}
+.pf .ph1 b{font-family:var(--fh);font-size:14px;font-weight:600}
+.pf .pr{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.pf .pr .sq{width:22px;height:22px;font-size:11px}
+.pf p{margin:0;font-size:13px}
+@media (prefers-reduced-motion:no-preference){.chip,.scale span,.seg span,.si,.sw,.cell{transition:background .12s,color .12s,border-color .12s}}
+:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+</style>
+
+<div class="band"><div class="in">
+  <div>
+    <div class="wm">CIMS<small>Cruise Industry Managed Services</small></div>
+    <h1>Printshop Audit · audit.cims.work</h1>
+    <div class="meta">Dexter's ship audit on the HR console. Phase A: the seafarer sends the machine documents, the console assesses them. Phase B: Dexter audits from his phone. Example data throughout; the history rows are real.</div>
+  </div>
+  <div style="text-align:right"><div class="eyebrow">Mock-up v5 · 14 Oct 2026</div><div style="font-size:12px;opacity:.8;margin-top:6px">Nothing built yet</div></div>
+</div></div>
+
+<div class="wrap">
+
+<section class="blk">
+  <h2>A · Before the visit</h2>
+  <p class="lead">Pick the ship and the specialist, read, send one request. The seafarer uploads within 24 hours, the console assesses, the audit unlocks. No completion, no audit.</p>
+  <div class="flow">
+
+  <!-- A1 -->
+  <div class="step">
+    <div class="cap"><div class="n">A1</div><div><h3>Ships</h3><p>A draft first. Who is aboard, when last audited. Four dots, four ratings.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk off">‹</div><div><div class="t">Printshop audit</div><div class="s">Dexter Lawrence · Wed, Oct 14</div></div><div class="k">New</div></div>
+      <div class="scr">
+        <div class="card" style="border-color:var(--green)">
+          <div class="lrow"><div class="tx"><div class="nm">Resume · Liberty of the Seas</div><div class="sm">Yesterday · 4 of 7 steps</div></div><span class="pill g">Resume</span></div>
+        </div>
+        <div class="search">⌕ <span>Search ship, crew or port</span></div>
+        <div class="hs"><span class="chip on">All</span><span class="chip">Royal Caribbean</span><span class="chip">Celebrity</span><span class="chip">Azamara</span><span class="chip">Not audited in 12 mo · 9</span></div>
+        <div class="card">
+          <div class="legend">Last audit · <span class="dots"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i></span> Inventory · Technical · Collaterals · HR</div>
+          <div class="lrow"><div class="tx"><div class="nm">Oasis of the Seas</div><div class="sm">John Gorre · Edward Guazon aboard</div></div><div class="rt">Jan 2025<br><span class="dots"><i class="g"></i><i class="a"></i><i class="g"></i><i class="g"></i></span></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Anthem of the Seas</div><div class="sm">Haziel aboard · <span class="pill a">follow-up open</span></div></div><div class="rt">Sep 30<br><span class="dots"><i class="g"></i><i class="r"></i><i class="r"></i><i class="g"></i></span></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Star of the Seas</div><div class="sm">Rica Murillo aboard</div></div><div class="rt">Sep 13<br><span class="dots"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i></span></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Celebrity Apex</div><div class="sm">Dan Belhida aboard</div></div><div class="rt"><span class="pill r">Never</span></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Azamara Journey</div><div class="sm">Manuel Vicedo aboard</div></div><div class="rt">May 2026<br><span class="dots"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i></span></div><span class="chev">›</span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Explorer of the Seas</div><div class="sm">Jaramiz Tuazon aboard</div></div><div class="rt">Dec 2024<br><span class="dots"><i class="r"></i><i class="r"></i><i class="g"></i><i class="g"></i></span></div><span class="chev">›</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A2 -->
+  <div class="step">
+    <div class="cap"><div class="n">A2</div><div><h3>Read, then request</h3><p>Who is aboard, the last visit's open points, the rest folded.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Oasis of the Seas</div><div class="s">Royal Caribbean · Oasis class · today Nassau</div></div><div class="k">Setup</div></div>
+      <div class="scr">
+        <div class="q">Who are you auditing?</div>
+        <div class="card">
+          <div class="lrow" style="background:var(--navybg)"><div class="tx"><div class="nm">John Gorre</div><div class="sm">3 completed, on contract 4 · day 134 · off ~Jan 3</div></div><span class="si sel lg"></span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Edward Guazon</div><div class="sm">5 completed, on contract 6 · day 57 · <span class="pill a">medical lapses Dec</span></div></div><span class="si lg"></span></div>
+          <div class="lrow"><div class="tx"><div class="sm">Someone else aboard? Pick from all crew · Rita is told</div></div><span class="chev">›</span></div>
+        </div>
+        <div class="card">
+          <div class="h">Last visit · Jan 21, 2025 <span class="r">John Gorre</span></div>
+          <div class="legend"><span class="dots"><i class="g"></i><i class="a"></i><i class="g"></i><i class="g"></i></span> 5 · 3 · 4 · 5 · HDD missing</div>
+          <div class="kv2"><span style="font-weight:500;font-size:14px">Machines dirty, waste toner leaking</span><div class="seg half"><span class="on">Fixed</span><span>Open</span></div></div>
+          <div class="kv2"><span style="font-weight:500;font-size:14px">Parts past counter life, all four</span><div class="seg half"><span>Fixed</span><span class="on">Open</span></div></div>
+          <div class="kv2"><span style="font-weight:500;font-size:14px">MFD training not retained</span><div class="seg half"><span>Fixed</span><span>Open</span></div></div>
+        </div>
+        <div class="card"><div class="lrow"><div class="tx"><div class="nm">What others said</div><div class="sm">Ray · Rolando · GSM review · intel · 4</div></div><span class="chev">›</span></div></div>
+      </div>
+      <div class="bar"><button class="btn navy">Request the documents</button></div>
+    </div>
+  </div>
+
+  <!-- A3 -->
+  <div class="step">
+    <div class="cap"><div class="n">A3</div><div><h3>The request</h3><p>Three things per machine. Ship mailbox shown, personal in copy. One tap.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Request documents</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">Setup</div></div>
+      <div class="scr">
+        <div class="q">John uploads before you arrive</div>
+        <div class="card">
+          <div class="up"><div class="tx"><div class="nm">Pattern 43</div><div class="sm">12-page test pattern · PROD 1, PROD 2, 3 MFDs</div></div><span class="pill n">5</span></div>
+          <div class="up"><div class="tx"><div class="nm">Management List</div><div class="sm">The machine's report · life % from the third document</div></div><span class="pill n">5</span></div>
+          <div class="up"><div class="tx"><div class="nm">Inventory count</div><div class="sm">Every OBP line, counted blind</div></div><span class="pill n">47</span></div>
+        </div>
+        <div class="card">
+          <div class="kv2"><span>To</span><span class="v">printshop.oasis@… <span class="src">· ship mailbox</span><br><span class="src">+ a copy to John's personal email</span></span></div>
+          <div class="kv2"><span>Due</span><span class="v">24 h · Oct 15, 16:40 ship time</span></div>
+          <div class="kv2"><span>Copy</span><span class="v">Rolando · Ray</span></div>
+        </div>
+        <div class="lock"><div class="ic">🔒</div><div>The audit opens when everything is in. No "start anyway".</div></div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn">Send request</button></div>
+    </div>
+  </div>
+
+  <!-- A4 email -->
+  <div class="step wide">
+    <div class="cap"><div class="n">A4</div><div><h3>The seafarer's email</h3><p>One link, three things, how to print each, the deadline.</p></div></div>
+    <div class="mail">
+      <div class="mtop"></div>
+      <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Printshop audit<span>Oasis of the Seas</span></div></div>
+      <div class="env"><b>To</b><span>Oasis of the Seas printshop · John Gorre</span><b>Cc</b><span>John's personal email · Rolando Abellan · Ray Guerra</span><b>Subject</b><span>Dexter visits Oasis on Oct 16 · three things to upload by Oct 15, 16:40</span></div>
+      <div class="mb">
+        <h3>Hi John, Dexter is on board Thursday.</h3>
+        <p>Before he arrives, upload three things. About twenty minutes. Your link works until <b>Oct 15, 16:40 ship time</b>.</p>
+        <table><thead><tr><th style="width:34%">Upload</th><th>How</th></tr></thead><tbody>
+          <tr><td><b>Pattern 43</b><br><span class="src">each machine</span></td><td>Service → Test → Pattern 43. Scan the 12 pages as one PDF on the MFD. Upload.</td></tr>
+          <tr><td><b>Management List</b><br><span class="src">each machine</span></td><td>Print all three documents. Scan as one PDF. Upload.</td></tr>
+          <tr><td><b>Inventory count</b></td><td>Count the shelf, type the total per line. Add anything not on the list.</td></tr>
+        </tbody></table>
+        <p><span class="btnm">Open my upload page</span></p>
+        <p><b>A machine will not print?</b> Mark it down on the page and say why.</p>
+      </div>
+      <div class="mfoot"><b>CIMS</b>Sent on behalf of Dexter Lawrence · reply reaches Rolando · audit.cims.work</div>
+    </div>
+  </div>
+
+  <!-- A5 upload page -->
+  <div class="step wide">
+    <div class="cap"><div class="n">A5</div><div><h3>The seafarer's upload page</h3><p>Web or phone. Each file checked as it lands; a bad scan asked for again on the spot.</p></div></div>
+    <div class="web">
+      <div class="wtop"><div class="wm">CIMS<small>Printshop audit</small></div><div class="tag">Oasis of the Seas<span>John Gorre · for Dexter's visit</span></div></div>
+      <div class="wb">
+        <div class="due"><span>Due <b>Thu Oct 15, 16:40</b> ship time</span><span class="cnt">18 h<small>left</small></span></div>
+        <div class="card">
+          <div class="h">PROD 1 · AccurioPress C4070 <span class="r">S011021355</span></div>
+          <div class="up"><div class="tx"><div class="nm">Pattern 43</div><div class="sm">12 pages · 4 channels · 2.8 MB · 09:12</div></div><span class="act ok">✓ Uploaded</span></div>
+          <div class="up"><div class="tx"><div class="nm">Management List</div><div class="sm">3 documents</div></div><span class="act">Upload PDF</span></div>
+        </div>
+        <div class="card">
+          <div class="h">PROD 2 · AccurioPress C4070 <span class="r">S011021356</span></div>
+          <div class="up"><div class="tx"><div class="nm">Pattern 43</div><div class="sm">9 pages received. Scan all 12 as one PDF.</div></div><span class="act dn">Re-scan</span></div>
+          <div class="up"><div class="tx"><div class="nm">Management List</div><div class="sm">3 documents</div></div><span class="act">Upload PDF</span></div>
+          <div class="up"><div class="tx"><div class="sm">Will not print? <u>Report it down</u></div></div></div>
+        </div>
+        <div class="card">
+          <div class="h">MFD · bizhub ×3 <span class="r">deck 4 ×2 · deck 5</span></div>
+          <div class="up"><div class="tx"><div class="nm">Pattern 43 · Management List</div><div class="sm">0 of 6</div></div><span class="act">Open</span></div>
+        </div>
+        <div class="card">
+          <div class="h">Inventory count <span class="r">47 lines</span></div>
+          <div class="up"><div class="tx"><div class="nm">Count sheet · blind</div><div class="sm">31 of 47 counted · saved 10:05</div></div><span class="act">Continue</span></div>
+        </div>
+        <div class="hint">Every upload saves on its own. Come back with the same link.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A5b blind count -->
+  <div class="step">
+    <div class="cap"><div class="n">A5b</div><div><h3>The count, blind</h3><p>Every OBP line, no on-hand figure. 0 is an answer, blank is not.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Count sheet</div><div class="s">Oasis of the Seas · for Dexter's visit</div></div><div class="k">31 / 47</div></div>
+      <div class="prog"><i></i><i></i><i></i><i class="off"></i><i class="off"></i></div>
+      <div class="scr tight">
+        <div class="hint">Count the shelf, type the total.</div>
+        <div class="card">
+          <div class="grp"><span>Developers</span><em>4 of 4</em></div>
+          <div class="line"><div class="nm">DV-616K · Developer black</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:600;padding:8px">2</div></div>
+          <div class="line"><div class="nm">DV-616C · Developer cyan</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:600;padding:8px">3</div></div>
+          <div class="line"><div class="nm">DV-616M · Developer magenta</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:600;padding:8px">3</div></div>
+          <div class="line"><div class="nm">DV-616Y · Developer yellow</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:600;padding:8px">0</div></div>
+          <div class="grp"><span>Waste &amp; filters</span><em>1 of 3</em></div>
+          <div class="line"><div class="nm">WX-105 · Waste toner box</div><div class="ta" style="min-height:44px;width:72px;text-align:center;font-weight:600;padding:8px">9</div></div>
+          <div class="line"><div class="nm">A50U-R701 · Filter box</div><div class="ta" style="min-height:44px;width:72px;text-align:center;color:var(--mut);padding:8px">–</div></div>
+          <div class="line"><div class="nm">A50U-R702 · Ozone filter</div><div class="ta" style="min-height:44px;width:72px;text-align:center;color:var(--mut);padding:8px">–</div></div>
+        </div>
+        <div class="card soft"><div class="lrow"><div class="tx"><div class="nm" style="color:var(--navy)">+ Not on the list</div><div class="sm">Fusing gears ×2 · 09:58</div></div><span class="chev">›</span></div></div>
+        <div class="card"><div class="lrow"><div class="tx"><div class="nm">Drums · Rollers · Toner · Paper</div><div class="sm">16 to count</div></div><span class="chev">›</span></div></div>
+      </div>
+      <div class="bar"><button class="btn ghost">Save</button><button class="btn navy">Next uncounted</button></div>
+    </div>
+  </div>
+
+  <!-- A6 waiting -->
+  <div class="step">
+    <div class="cap"><div class="n">A6</div><div><h3>Waiting · locked</h3><p>What is in, per machine. At 24 h the strip turns red, the crew is reminded, Dexter is told.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Oasis of the Seas</div><div class="s">John Gorre · sent Oct 14, 16:40</div></div><div class="k">Waiting</div></div>
+      <div class="scr">
+        <div class="due"><span>Due <b>Oct 15, 16:40</b></span><span class="cnt">18 h<small>left</small></span></div>
+        <div class="card">
+          <div class="itm"><div class="tx">PROD 1<div class="sm">Pattern 43 · Management List</div></div><span class="stw ok">In</span><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">PROD 2<div class="sm">Re-scan asked · Management List not yet</div></div><span class="stw warn">1 of 2</span><span class="si warn"></span></div>
+          <div class="itm"><div class="tx">MFD deck 5<div class="sm">Down per John: "paper jam, KM ticket open"</div></div><span class="stw bad">Down</span><span class="si bad"></span></div>
+          <div class="itm"><div class="tx">MFD deck 4 ×2<div class="sm">Nothing yet</div></div><span class="stw">0 of 4</span><span class="si"></span></div>
+          <div class="itm"><div class="tx">Inventory count<div class="sm">47 lines · 10:05</div></div><span class="stw ok">In</span><span class="si ok"></span></div>
+        </div>
+        <div class="lock"><div class="ic">🔒</div><div><b>Audit locked</b> until every machine has its documents or a reason.</div></div>
+        <div style="display:flex;gap:8px"><button class="btn ghost sm">Resend</button><button class="btn ghost sm">Extend 24 h</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A7 assessment email -->
+  <div class="step wide">
+    <div class="cap"><div class="n">A7</div><div><h3>The pre-visit assessment</h3><p>To Ray, Rolando, Ohji, Jonathan, Miguel; Dexter in copy. One verdict, then each source read and judged.</p></div></div>
+    <div class="mail">
+      <div class="mtop"></div>
+      <div class="mhead"><div class="wm">CIMS<i></i><small>Cruise Industry Managed Services</small></div><div class="tag">Pre-visit assessment<span>Oasis of the Seas · Oct 15</span></div></div>
+      <div class="env"><b>To</b><span>Ray Guerra · Rolando Abellan · Ohji Miranda · Jonathan · Miguel San Martin</span><b>Cc</b><span>Dexter Lawrence</span><b>Subject</b><span>Oasis of the Seas · before Dexter's visit Oct 16 · ATTENTION: PROD 1 copy quality affected, no belt on board; one order date missed</span></div>
+      <div class="mb">
+        <div class="verdict"><div class="vb att">Attention</div><p><b>PROD 1 is printing cyan banding.</b> The transfer belt is past life (104 %), none is on board, one is ordered for Oct 29. Three other parts are past life with copy quality fine: keep them running, have the replacement on board. Drum K has none. The Oct 9 order was never placed. The count is honest and three updates behind OBP. One MFD down, KM ticket open.</p></div>
+        <p class="note2">John Gorre sent everything in 19 hours, one re-scan. Dexter's audit is open.</p>
+
+        <div class="sec"><h3>1 · Machines</h3><span>Pattern 43 · Management List</span></div>
+        <div class="mcard">
+          <div class="mh2"><span>PROD 1 · AccurioPress C4070<span class="sn">S011021355</span></span><span class="pill r">Copy quality affected</span></div>
+          <div class="mb2">
+            <div class="read"><b>Pattern 43</b><span><b style="color:var(--red)">Cyan banding</b>, pages 3–7, across the feed (direction derived from the edge marks). No white dots. Density even on K. Mix page isolates cyan. Reading: transfer belt. <span class="note2">Confidence medium · Rolando confirms.</span></span></div>
+            <div class="read"><b>Management List</b><span>38 counters read from the third document. Three past life; the rest under 85 %. Past life is information; copy quality decides.</span></div>
+            <div>
+              <div class="part"><span class="pn">Transfer belt<span class="sn">A50U-R703</span></span><span class="pv r">104 %</span><div class="life"><i class="over" style="width:100%"></i></div><div class="pm"><span class="pill r">Copy affected</span><span class="pill r">On board 0</span><span class="pill n">On order 1 · PO 48812 · Oct 29</span><span class="vt r">Replace · nothing on board to do it with</span></div></div>
+              <div class="part"><span class="pn">Drum K<span class="sn">DR-616K</span></span><span class="pv a">412 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill g">Copy fine</span><span class="pill r">On board 0</span><span class="pill r">On order none</span><span class="vt">Keep running · none on board for when it goes</span></div></div>
+              <div class="part"><span class="pn">Developer C<span class="sn">DV-616C</span></span><span class="pv a">180 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill g">Copy fine</span><span class="pill g">On board 1</span><span class="vt">Keep running · one on board</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="mcard">
+          <div class="mh2"><span>PROD 2 · AccurioPress C4070<span class="sn">S011021356</span></span><span class="pill g">Copy fine</span></div>
+          <div class="mb2">
+            <div class="read"><b>Pattern 43</b><span>Clean on 12 pages after the re-scan. <span class="note2">Confidence high.</span></span></div>
+            <div class="read"><b>Management List</b><span>Developer counters all reset to 0 on one date; only yellow was replaced per OBP. Counters reset without the part, as on Brilliance, Feb 2025.</span></div>
+            <div><div class="part"><span class="pn">Fusing belt assy<span class="sn">A50U-R801</span></span><span class="pv a">131 %</span><div class="life"><i class="near" style="width:100%"></i></div><div class="pm"><span class="pill g">Copy fine</span><span class="pill g">On board 1</span><span class="vt">Keep running · one on board</span></div></div></div>
+          </div>
+        </div>
+        <div class="mcard">
+          <div class="mh2"><span>MFD · bizhub ×3<span class="sn">deck 4 ×2 · deck 5</span></span><span class="pill r">1 down</span></div>
+          <div class="mb2">
+            <div class="read"><b>Deck 5</b><span><b>Down</b> per John: "paper jam error, KM ticket open". Dexter checks it on board.</span></div>
+            <div class="read"><b>Deck 4 ×2</b><span>Pattern 43 clean; nothing past 70 %.</span></div>
+          </div>
+        </div>
+
+        <div class="sec"><h3>2 · Inventory</h3><span>blind count vs OBP of Oct 15</span></div>
+        <p>47 lines. 44 match. Three differ, one not in OBP:</p>
+        <div class="mcard"><div class="mb2">
+          <div class="part"><span class="pn">Developer black<span class="sn">DV-616K</span></span><span class="pv r">−2</span><div class="pm"><span class="pill m">OBP 4</span><span class="pill n">Counted 2</span><span class="vt">Two used, not booked.</span></div></div>
+          <div class="part"><span class="pn">Waste toner box<span class="sn">WX-105</span></span><span class="pv r">−2</span><div class="pm"><span class="pill m">OBP 11</span><span class="pill n">Counted 9</span><span class="vt">Below par 12. No order open.</span></div></div>
+          <div class="part"><span class="pn">Filter box<span class="sn">A50U-R701</span></span><span class="pv a">+1</span><div class="pm"><span class="pill m">OBP 1</span><span class="pill n">Counted 2</span><span class="vt">A receipt not booked. Dexter asks.</span></div></div>
+          <div class="part"><span class="pn">Fusing gears ×2<span class="sn">not in OBP</span></span><span class="pv a">+2</span><div class="pm"><span class="vt">On the shelf, outside the system.</span></div></div>
+        </div></div>
+        <p class="note2">Shelf in order, OBP three updates behind. Two gaps are on parts replaced this week; the one-day timing rule (Miguel, 1 Oct) does not cover them. John did not see this comparison.</p>
+
+        <div class="sec"><h3>3 · Ordering and due dates</h3><span>schedule · open orders · OBP</span></div>
+        <div class="act2">
+          <i class="r">!</i><span><b>Missed: Oct 9, voyage 1019.</b> No PO on file. The Nov 2 container carries nothing for Oasis.</span>
+          <i>→</i><span><b>Next: Oct 23, voyage 1026.</b> Drum K (none on board), two waste boxes to par.</span>
+          <i>→</i><span><b>Run-out:</b> toner K fine to Nov 20; waste boxes below par, not out; nothing else within 60 days.</span>
+          <i class="r">!</i><span><b>The transfer belt cannot wait for Oct 29.</b> Copy quality is affected now and nothing is on board. Ray: pull PO 48812 forward to Nassau before Oct 16, or the ship prints banding for two weeks. A rush here is a crew ordering failure, not a supply gap.</span>
+        </div>
+
+        <div class="sec"><h3>4 · For the visit</h3><span>who does what</span></div>
+        <div class="act2">
+          <i>1</i><span>PROD 1 banding: confirm on the machine; replace the transfer belt if it reaches Nassau. <span class="who">Dexter · Rolando</span></span>
+          <i>2</i><span>Belt to Nassau before Oct 16, or not. <span class="who">Ray · Miguel</span></span>
+          <i>3</i><span>Drum K, developer C, PROD 2 fusing belt: past life, copy fine, leave them; check a drum K is ordered. <span class="who">Dexter · Ray</span></span>
+          <i>4</i><span>PROD 2 counters reset without parts: confirm, show John the rule. <span class="who">Dexter · Rolando</span></span>
+          <i>5</i><span>MFD deck 5: the jam and the KM ticket. <span class="who">Dexter</span></span>
+          <i>6</i><span>Three OBP gaps and the fusing gears on the shelf, then OBP discipline. <span class="who">Dexter</span></span>
+          <i>7</i><span>Voyage 1019: why no PO; place Oct 23 before Dexter leaves. <span class="who">Dexter · Ray</span></span>
+        </div>
+
+        <p><span class="btnm">Dexter: open the audit</span> &nbsp; <span class="src">Rolando: <u>confirm the Pattern 43 readings</u></span></p>
+      </div>
+      <div class="mfoot"><b>CIMS</b>
+        <div class="method">
+          <b>Pattern 43</b><span>read against Rolando's six rules; the reader is not yet calibrated on his labelled bundles, so every reading is provisional until he confirms. Scans attached.</span>
+          <b>Management List</b><span>life % from the third document, as text. A part past life is reported, never a replacement by itself: the decision is made when copy quality is affected (Miguel). "Keep running" means have the replacement on board.</span>
+          <b>Inventory</b><span>counted blind by the crew, compared with the OBP export of Oct 15 and the open-orders list.</span>
+          <b>Ordering</b><span>Ordering Schedule and POs on file, Ray's rule; run-out from the fleet burn rate.</span>
+          <b>Money</b><span>nothing here is money. The bonus never reads it.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- A8 unlocked -->
+  <div class="step">
+    <div class="cap"><div class="n">A8</div><div><h3>Unlocked</h3><p>The findings ride into the steps as items to confirm.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Oasis of the Seas</div><div class="s">John Gorre · documents in Oct 15, 11:20</div></div><div class="k g">Open</div></div>
+      <div class="scr">
+        <div class="card">
+          <div class="h">Before the visit <span class="r">assessment sent 11:24</span></div>
+          <div class="itm"><div class="tx" style="color:var(--red);font-weight:600">PROD 1 copy quality affected<div class="sm">Cyan banding · transfer belt 104 % · none on board, PO due Oct 29</div></div><span class="si bad"></span></div>
+          <div class="itm"><div class="tx" style="color:var(--amber);font-weight:600">3 parts past life, copy fine<div class="sm">Drum K (none on board), developer C, PROD 2 fusing belt · keep running</div></div><span class="si warn"></span></div>
+          <div class="itm"><div class="tx" style="color:var(--amber);font-weight:600">Order date missed<div class="sm">Oct 9 · voyage 1019 · no PO</div></div><span class="si warn"></span></div>
+          <div class="itm"><div class="tx">MFD deck 5 down<div class="sm">Per John · verify on board</div></div><span class="si warn"></span></div>
+          <div class="itm"><div class="tx">Count: 3 differ · 1 not in OBP<div class="sm">Counted blind · verify on the shelf</div></div><span class="si warn"></span></div>
+          <div class="itm"><div class="tx">Pattern 43: PROD 1 banding · 3 clean<div class="sm">Provisional · Rolando confirms</div></div><span class="si warn"></span></div>
+        </div>
+      </div>
+      <div class="bar"><button class="btn">Start audit</button></div>
+    </div>
+  </div>
+
+  </div>
+</section>
+
+<section class="blk">
+  <h2>B · On the ship</h2>
+  <p class="lead">Seven steps on the phone, one per screen. A clean printshop is one tap per step.</p>
+  <div class="flow">
+
+  <!-- B1 -->
+  <div class="step">
+    <div class="cap"><div class="n">B1</div><div><h3>Workstation</h3><p>Starts full. Tap what is missing.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Workstation</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">1 / 7</div></div>
+      <div class="prog"><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
+      <div class="scr">
+        <div class="q">Is everything on the desktop?</div>
+        <div class="seg"><span>All present</span><span class="on">Something missing</span></div>
+        <div class="card">
+          <div class="grp"><span>DG3 folder</span><em class="bad">1 missing</em></div>
+          <div class="itm"><div class="tx">Service manuals <span class="sm" style="display:inline">· Prod</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Parts manual <span class="sm" style="display:inline">· Prod</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Maintenance manual <span class="sm" style="display:inline">· Prod</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Service, Parts, Maintenance <span class="sm" style="display:inline">· MFD</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Consumables list <span class="sm" style="display:inline">· MFD</span></div><span class="si ok"></span></div>
+          <div class="itm miss"><div class="tx">SOPs · ordering &amp; transfers</div><span class="stw bad">Missing</span><span class="si bad"></span></div>
+          <div class="grp"><span>OneNote</span><em>2 of 2</em></div>
+          <div class="itm"><div class="tx">Machine &amp; controller IPs</div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Shoreside contacts</div><span class="si ok"></span></div>
+          <div class="grp"><span>Browser bookmarks</span><em>6 of 6</em></div>
+          <div class="itm"><div class="tx">Onboard Print · Zendesk · Crunchtime</div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Fleet Visitor · ECCR · Master Loading</div><span class="si ok"></span></div>
+        </div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Machines</button></div>
+    </div>
+  </div>
+
+  <!-- B2 -->
+  <div class="step">
+    <div class="cap"><div class="n">B2</div><div><h3>Machines &amp; tools</h3><p>Findings from the assessment are on the row. Dexter confirms on the machine.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Machines &amp; tools</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">2 / 7</div></div>
+      <div class="prog"><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
+      <div class="scr">
+        <div class="card"><div class="kv2"><span>All hardware labeled</span><div class="seg half"><span class="on">Yes</span><span>No</span></div></div></div>
+        <div class="card">
+          <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw bad">Copy affected</span><span class="chev">˅</span></div>
+          <div class="cells">
+            <div class="cell bad"><span class="si bad"></span>Test pattern</div>
+            <div class="cell ok"><span class="si ok"></span>Scan to email</div>
+            <div class="cell ok"><span class="si ok"></span>Collaboration</div>
+            <div class="cell warn"><span class="si warn"></span>Past life</div>
+          </div>
+          <div class="finding" style="background:var(--redbg)"><span class="si bad" style="margin-top:1px"></span><div><b style="color:var(--red)">Cyan banding · transfer belt 104 %</b><span class="src">Pattern 43, Oct 15 · confirm on the machine · belt not on board</span></div></div>
+          <div class="finding"><span class="si warn" style="margin-top:1px"></span><div><b>Drum K 412 % · Developer C 180 % · copy fine</b><span class="src">Past life, keep running · a drum K is not on board</span></div></div>
+          <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">Past life</span><span class="chev">›</span></div>
+          <div class="mrow"><div class="tx"><div class="nm">MFD · deck 5</div><div class="sn">down per John · verify</div></div><span class="stw bad">Down</span><span class="chev">›</span></div>
+          <div class="mrow"><div class="tx"><div class="nm">MFD · deck 4, 2 units</div><div class="sn">bizhub</div></div><span class="stw ok">Pass</span><span class="chev">›</span></div>
+        </div>
+        <div class="card"><div class="mrow"><div class="tx"><div class="nm">Tools not on inventory</div><div class="sm" style="font-size:12.5px;color:var(--mut)">2-Fiery back-up HDD · Head lamp</div></div><span class="stw warn">2 missing</span><span class="chev">›</span></div></div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Inventory</button></div>
+    </div>
+  </div>
+
+  <!-- B3 -->
+  <div class="step">
+    <div class="cap"><div class="n">B3</div><div><h3>Inventory</h3><p>John's count is here. Confirm on the shelf, camera for evidence. Works offline.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Inventory</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">3 / 7</div></div>
+      <div class="prog"><i></i><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
+      <div class="off">⚠ Offline · saved on this phone · 1 photo waits for signal</div>
+      <div class="scr">
+        <div class="q">Does the OBP match the shelf?</div>
+        <div class="hint">John counted 47 blind · 3 differ · 1 not in OBP</div>
+        <div class="seg"><span>Yes, accurate</span><span class="on">No, discrepancies</span></div>
+        <div class="card">
+          <div class="line"><div class="nm">Black developer</div><div class="num">OBP <b>4</b> · counted <b>2</b></div><span class="d">−2</span></div>
+          <div class="line"><div class="nm">Waste toner box</div><div class="num">OBP <b>11</b> · counted <b>9</b></div><span class="d">−2</span></div>
+          <div class="line"><div class="nm">Filter box</div><div class="num">OBP <b>1</b> · counted <b>2</b></div><span class="d p">+1</span></div>
+          <div class="lrow"><div class="tx"><div class="nm" style="color:var(--navy)">+ Add line</div></div></div>
+        </div>
+        <div class="card"><div class="lrow"><div class="tx"><div class="nm">Repair items not in OBP</div><div class="sm">Fusing gears ×2 · from John's count</div></div><span class="stw warn">1</span><span class="chev">›</span></div></div>
+        <div>
+          <div class="lab">Evidence · 3</div>
+          <div class="files"><div class="thumb">OBP export<br>PDF</div><div class="thumb">IMG_0380<br>shelf</div><div class="thumb">IMG_0381<br>counter<span class="qd"></span></div></div>
+        </div>
+        <div style="display:flex;gap:8px"><button class="btn navy sm">📷 Take photo</button><button class="btn ghost sm" style="flex:0 0 120px">Add file</button></div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Ratings</button></div>
+    </div>
+  </div>
+
+  <!-- B4 -->
+  <div class="step">
+    <div class="cap"><div class="n">B4</div><div><h3>Ratings</h3><p>Three, about the specialist. A 3 or below needs one sentence.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Ratings</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">4 / 7</div></div>
+      <div class="prog"><i></i><i></i><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
+      <div class="scr">
+        <div>
+          <div class="q">Inventory management</div>
+          <div class="hint" style="margin:2px 0 8px">5 OBP live, counts match · 3 updated late · 1 not maintained</div>
+          <div class="scale rate"><span>1</span><span>2</span><span class="on lo">3</span><span>4</span><span>5</span></div>
+          <div class="lab" style="margin-top:8px">Say why <b>· required</b></div>
+          <div class="ta req">OBP not updated after the developer change; he counts from the printer, not the shelf.</div>
+        </div>
+        <div>
+          <div class="q">Technical services</div>
+          <div class="hint" style="margin:2px 0 8px">5 break-fix without the manual · 3 relies on it, parts late</div>
+          <div class="scale rate"><span>1</span><span>2</span><span>3</span><span class="on">4</span><span>5</span></div>
+        </div>
+        <div>
+          <div class="q">Customer collaterals</div>
+          <div class="hint" style="margin:2px 0 8px">5 no incident · 3 incidents, handled · 1 complaints reached the GSM</div>
+          <div class="scale rate"><span>1</span><span>2</span><span>3</span><span>4</span><span class="on">5</span></div>
+        </div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Crew</button></div>
+    </div>
+  </div>
+
+  <!-- B5 -->
+  <div class="step">
+    <div class="cap"><div class="n">B5</div><div><h3>Crew</h3><p>Training, uniform, HON. Dispatch goes to Rita.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Crew</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">5 / 7</div></div>
+      <div class="prog"><i></i><i></i><i></i><i></i><i></i><i class="off"></i><i class="off"></i></div>
+      <div class="scr">
+        <div>
+          <div class="q">Training needed</div>
+          <div class="chips" style="margin-top:8px"><span class="chip need">MFD refresher</span><span class="chip">Statistic report</span><span class="chip">Zendesk</span><span class="chip need">HON app</span><span class="chip">Fiery</span><span class="chip">Break-fix PROD</span><span class="chip">+ other</span></div>
+        </div>
+        <div class="card">
+          <div class="grp"><span>Uniform &amp; PPE</span><em class="bad">1 missing</em></div>
+          <div class="itm"><div class="tx">DG3 shirt</div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Coveralls</div><span class="si ok"></span></div>
+          <div class="itm miss"><div class="tx">Safety shoes</div><span class="stw bad">Missing</span><span class="si bad"></span></div>
+          <div class="kv2"><span>HON app in use</span><div class="seg half" style="max-width:170px"><span class="on">Yes</span><span>No</span><span>N/A</span></div></div>
+        </div>
+        <div>
+          <div class="q">Dispatch and arrival</div>
+          <div class="hint" style="margin:2px 0 8px">As the crew tells it. Goes to Rita.</div>
+          <div class="scale rate"><span>1</span><span>2</span><span>3</span><span>4</span><span class="on">5</span></div>
+        </div>
+        <div>
+          <div class="lab">Mono click % · optional</div>
+          <div class="ta" style="color:var(--mut)">e.g. 14</div>
+        </div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Overall</button></div>
+    </div>
+  </div>
+
+  <!-- B6 -->
+  <div class="step">
+    <div class="cap"><div class="n">B6</div><div><h3>Overall</h3><p>One rating, three short boxes, a follow-up with an owner.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Overall</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">6 / 7</div></div>
+      <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i><i class="off"></i></div>
+      <div class="scr">
+        <div>
+          <div class="q">Overall, this contract</div>
+          <div class="scale rate" style="margin-top:8px"><span>1</span><span>2</span><span>3</span><span class="on">4</span><span>5</span></div>
+          <div class="anch" style="margin-top:4px"><span>Needs intervention</span><span>Runs itself</span></div>
+        </div>
+        <div><div class="lab">Strengths</div><div class="ta">Solid break-and-fix. Good with the team and the GSM.</div></div>
+        <div><div class="lab">To improve</div><div class="ta">OBP lags part changes; counts from the printer, not the shelf. Drum K past life on PROD 1.</div></div>
+        <div><div class="lab">Agreed with the crew</div><div class="ta">Physical count every Monday, OBP the same day. MFD refresher with Rolando.</div></div>
+        <div class="card">
+          <div class="tog"><span>Recommend for Oasis / Icon class</span><div class="sw on"></div></div>
+          <div class="tog"><span>Needs follow-up</span><div class="sw on"></div></div>
+          <div class="lrow"><div class="tx"><div class="nm">Rolando · by Nov 15</div><div class="sm">MFD refresher · OBP discipline</div></div><span class="chev">›</span></div>
+        </div>
+      </div>
+      <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Review</button></div>
+    </div>
+  </div>
+
+  <!-- B7 -->
+  <div class="step">
+    <div class="cap"><div class="n">B7</div><div><h3>Review and file</h3><p>What is missing blocks the button. Filing works offline.</p></div></div>
+    <div class="ph">
+      <div class="top"><div class="bk">‹</div><div><div class="t">Review</div><div class="s">Oasis of the Seas · John Gorre · Oct 12–14</div></div><div class="k g">7 / 7</div></div>
+      <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="scr">
+        <div class="tiles"><div class="tile main"><b>4</b><small>Overall</small></div><div class="tile"><b>3</b><small>Inventory</small></div><div class="tile"><b>4</b><small>Technical</small></div><div class="tile"><b>5</b><small>Collaterals</small></div><div class="tile"><b>5</b><small>Dispatch</small></div></div>
+        <div class="card">
+          <div class="itm"><div class="tx">Every step answered<div class="sm">1 missing item · 2 findings · 3 OBP lines · 2 tools</div></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Comment on the 3<div class="sm">Inventory management</div></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">3 photos · 1 waits for signal<div class="sm">The audit files now.</div></div><span class="si warn"></span></div>
+        </div>
+        <button class="btn">File audit</button>
+        <div class="card soft">
+          <div class="h">Where it goes</div>
+          <div class="went">
+            <i>✓</i><span>John's profile · What people said</span>
+            <i>✓</i><span>Follow-up to Rolando · by Nov 15</span>
+            <i>✓</i><span>Dispatch note to Rita</span>
+            <i>✓</i><span>Files · audit bucket · oasis / 2026-10-14</span>
+            <i>✓</i><span>Summary to Miguel · Rita, Ray, Rolando in copy</span>
+            <i>–</i><span>Never to the crew. Never read by the bonus.</span>
+          </div>
+        </div>
+        <div class="card soft">
+          <div class="h">Still open on this ship</div>
+          <div class="lrow"><div class="tx"><div class="nm">Parts past counter life · PROD 1</div><div class="sm">Since Jan 2025</div></div><span class="pill r">2nd time</span></div>
+          <div class="lrow"><div class="tx"><div class="nm">SOPs folder missing</div><div class="sm">Ray to resend</div></div><span class="pill a">Open</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </div>
+</section>
+
+<section class="blk">
+  <h2>C · Around the audit</h2>
+  <p class="lead">The web view, Rolando's confirmation, the card on the crew profile, the import of the 61 old audits.</p>
+  <div class="flow">
+
+  <!-- W1 web -->
+  <div class="step wider">
+    <div class="cap"><div class="n">W1</div><div><h3>The same app on a laptop</h3><p>The phone column in the middle, a rail on the left, the assessment on the right. Nothing new to learn.</p></div></div>
+    <div class="web">
+      <div class="wtop"><div class="wm">CIMS<small>Printshop audit</small></div><div class="tag">Dexter Lawrence<span>audit.cims.work</span></div></div>
+      <div class="app">
+        <div class="rail">
+          <div class="ri on">In progress <span>2</span></div>
+          <div class="ri">Ships <span>48</span></div>
+          <div class="ri">History <span>51</span></div>
+          <div class="ri">Open follow-ups <span>6</span></div>
+          <div class="rl">In progress</div>
+          <div class="ri" style="font-size:13px">Oasis · John Gorre <span>2 / 7</span></div>
+          <div class="ri" style="font-size:13px">Liberty · draft <span>4 / 7</span></div>
+          <div class="rl">Waiting on crew</div>
+          <div class="ri" style="font-size:13px">Anthem · Haziel <span>18 h</span></div>
+        </div>
+        <div class="main">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><div><div class="title">Machines &amp; tools</div><div class="sub">Oasis of the Seas · John Gorre · step 2 of 7</div></div><span class="pill n">Saved</span></div>
+          <div class="prog" style="border-radius:3px;overflow:hidden"><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
+          <div class="card"><div class="kv2"><span>All hardware labeled</span><div class="seg half"><span class="on">Yes</span><span>No</span></div></div></div>
+          <div class="card">
+            <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw bad">Copy affected</span><span class="chev">˅</span></div>
+            <div class="cells"><div class="cell bad"><span class="si bad"></span>Test pattern</div><div class="cell ok"><span class="si ok"></span>Scan to email</div><div class="cell ok"><span class="si ok"></span>Collaboration</div><div class="cell warn"><span class="si warn"></span>Past life</div></div>
+            <div class="finding" style="background:var(--redbg)"><span class="si bad" style="margin-top:1px"></span><div><b style="color:var(--red)">Cyan banding · transfer belt 104 %</b><span class="src">Pattern 43, Oct 15 · confirm on the machine · belt not on board</span></div></div>
+            <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">Past life</span><span class="chev">›</span></div>
+            <div class="mrow"><div class="tx"><div class="nm">MFD · deck 5</div><div class="sn">down per John · verify</div></div><span class="stw bad">Down</span><span class="chev">›</span></div>
+            <div class="mrow"><div class="tx"><div class="nm">MFD · deck 4, 2 units</div><div class="sn">bizhub</div></div><span class="stw ok">Pass</span><span class="chev">›</span></div>
+          </div>
+          <div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn ghost sm" style="width:auto;padding:0 22px">Back</button><button class="btn navy sm" style="width:auto;padding:0 22px">Next · Inventory</button></div>
+        </div>
+        <div class="side">
+          <div class="grp" style="padding:0 0 4px">Before the visit</div>
+          <div class="card">
+            <div class="itm"><div class="tx" style="font-size:13.5px;color:var(--red);font-weight:600">PROD 1 copy affected<div class="sm">transfer belt · none on board</div></div><span class="si bad"></span></div>
+            <div class="itm"><div class="tx" style="font-size:13.5px">3 parts past life, copy fine<div class="sm">keep running · drum K not on board</div></div><span class="si warn"></span></div>
+            <div class="itm"><div class="tx" style="font-size:13.5px">Order date missed<div class="sm">Oct 9 · no PO</div></div><span class="si warn"></span></div>
+            <div class="itm"><div class="tx" style="font-size:13.5px">MFD deck 5 down<div class="sm">verify</div></div><span class="si warn"></span></div>
+          </div>
+          <div class="grp" style="padding:8px 0 4px">Last visit · Jan 2025</div>
+          <div class="card">
+            <div class="itm"><div class="tx" style="font-size:13.5px">Parts past life, all four</div><span class="stw bad">Open</span></div>
+            <div class="itm"><div class="tx" style="font-size:13.5px">Machines dirty</div><span class="stw ok">Fixed</span></div>
+          </div>
+          <div class="card soft"><div class="lrow"><div class="tx"><div class="nm" style="font-size:13.5px">Pre-visit assessment</div><div class="sm">Oct 15 · open</div></div><span class="chev">›</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- R1 Rolando -->
+  <div class="step wide">
+    <div class="cap"><div class="n">R1</div><div><h3>Rolando confirms the Pattern 43 readings</h3><p>One link from the assessment. Confirm or correct per machine. His answers are the calibration set.</p></div></div>
+    <div class="web">
+      <div class="wtop"><div class="wm">CIMS<small>Printshop audit</small></div><div class="tag">Pattern 43 · confirm<span>Oasis of the Seas · Oct 15</span></div></div>
+      <div class="wb">
+        <div class="card">
+          <div class="h">PROD 1 · S011021355 <span class="r">12 pages · scan attached</span></div>
+          <div class="up"><div class="thumb" style="width:56px;height:56px">p. 3–7</div><div class="tx"><div class="nm">Console read: cyan banding, pages 3–7, across the feed · transfer belt</div><div class="sm">Confidence medium</div></div></div>
+          <div class="up" style="gap:8px"><div class="seg" style="flex:1"><span class="on">Confirm</span><span>Correct</span><span>Cannot tell</span></div></div>
+        </div>
+        <div class="card">
+          <div class="h">PROD 2 · S011021356 <span class="r">12 pages</span></div>
+          <div class="up"><div class="thumb" style="width:56px;height:56px">clean</div><div class="tx"><div class="nm">Console read: clean on 12 pages</div><div class="sm">Confidence high</div></div></div>
+          <div class="up" style="gap:8px"><div class="seg" style="flex:1"><span>Confirm</span><span class="on">Correct</span><span>Cannot tell</span></div></div>
+          <div class="up" style="display:block"><div class="lab">What you see</div><div class="chips"><span class="chip need">White dots</span><span class="chip">Lines</span><span class="chip">Short density</span><span class="chip">Channel</span></div><div class="ta" style="margin-top:8px">Faint white dots on page 11, drum K side. Not banding.</div></div>
+        </div>
+        <div class="card">
+          <div class="h">MFD deck 4 ×2 <span class="r">clean · high</span></div>
+          <div class="up" style="gap:8px"><div class="seg" style="flex:1"><span class="on">Confirm both</span><span>Correct</span></div></div>
+        </div>
+        <button class="btn" style="max-width:260px">Save · 3 of 4 confirmed</button>
+        <div class="hint">Corrections go back to the assessment as Rolando's reading, and into the reader's calibration set with the scan.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P1 profile card -->
+  <div class="step">
+    <div class="cap"><div class="n">P1</div><div><h3>On the crew profile</h3><p>What people said, in the HR console. The tie-in. Not on the Score Card.</p></div></div>
+    <div class="pf">
+      <div class="ph1"><b>Audit · Oasis of the Seas</b><span class="src">Oct 12–14, 2026 · Dexter</span></div>
+      <div class="pr"><span class="sq" style="background:var(--navy);color:#fff">4</span><span>Overall</span><span class="sq a">3</span><span>Inv</span><span class="sq">4</span><span>Tech</span><span class="sq">5</span><span>Coll</span><span class="pill a" style="margin-left:auto">follow-up open</span></div>
+      <p><b>To improve:</b> OBP lags part changes; counts from the printer, not the shelf.</p>
+      <p><b>Agreed:</b> physical count every Monday, OBP the same day. MFD refresher with Rolando by Nov 15.</p>
+      <div class="pr" style="font-size:12px;color:var(--mut)">Pre-visit: drum K missing · 4 parts past life · 1 order date missed &nbsp;·&nbsp; <u>Open audit</u> · <u>Assessment</u> · 3 files</div>
+    </div>
+    <div class="note">Also on the profile: the earlier audits (Oasis Jan 2025 · 5·3·4·5), and a follow-up row until it closes at the next visit.</div>
+  </div>
+
+  <!-- I1 import -->
+  <div class="step wide">
+    <div class="cap"><div class="n">I1</div><div><h3>Importing the 61 Forms audits</h3><p>Dry run first, like every import. Ship codes mapped, names matched, the rest for Dexter.</p></div></div>
+    <div class="web">
+      <div class="wtop"><div class="wm">CIMS<small>Printshop audit</small></div><div class="tag">Import · Forms export<span>Printshop_Audit1-61.xlsx · dry run</span></div></div>
+      <div class="wb">
+        <div class="tiles" style="grid-template-columns:repeat(4,1fr)"><div class="tile"><b>51</b><small>Audits</small></div><div class="tile"><b>10</b><small>Test rows</small></div><div class="tile main"><b>14</b><small>For Dexter</small></div><div class="tile"><b>52</b><small>With files</small></div></div>
+        <div class="card">
+          <div class="grp"><span>Settled</span><em>37</em></div>
+          <div class="up"><div class="tx"><div class="nm">Nov 20, 2024 · Navigator of the Seas · Don Feliciano</div><div class="sm">ship typed as "Navigator of the Seas" · crew matched SC-00… · 3 files</div></div><span class="si ok"></span></div>
+          <div class="up"><div class="tx"><div class="nm">Feb 8, 2025 · Celebrity Constellation · Ida Bagus</div><div class="sm">"CEL - Consellation" → Constellation · matched</div></div><span class="si ok"></span></div>
+          <div class="grp"><span>For Dexter</span><em class="bad">14</em></div>
+          <div class="up"><div class="tx"><div class="nm">Sep 25, 2026 · Rhapsody · "Ryan"</div><div class="sm">2 crew named Ryan</div></div><div class="seg half" style="max-width:260px;flex:0 0 260px"><span class="on">Ryan Marto</span><span>Ryan …</span></div></div>
+          <div class="up"><div class="tx"><div class="nm">Oct 13, 2024 · Vision · "Sharene \ Karl"</div><div class="sm">two people on one row</div></div><span class="act">Split in two</span></div>
+          <div class="up"><div class="tx"><div class="nm">Sep 21, 2024 · Celebrity Summit · blank</div><div class="sm">"Rolly" in the text · no schedule for 2024</div></div><span class="act">Pick crew</span></div>
+          <div class="grp"><span>Dropped</span><em>10</em></div>
+          <div class="up"><div class="tx"><div class="nm">"ABC Test", "asasa", pasted news text ×2 …</div><div class="sm">named in the log, never imported</div></div><span class="si bad"></span></div>
+          <div class="grp"><span>Files</span><em class="bad">zip needed</em></div>
+          <div class="up"><div class="tx"><div class="nm">52 SharePoint links under Miguel's OneDrive</div><div class="sm">Upload the Forms folder as a zip; files match by name, 38 are machine exports (serial + timestamp)</div></div><span class="act">Upload zip</span></div>
+        </div>
+        <div style="display:flex;gap:10px"><button class="btn ghost sm" style="width:auto;padding:0 22px">Dry run again</button><button class="btn navy sm" style="width:auto;padding:0 22px">Apply 37 · hold 14</button></div>
+      </div>
+    </div>
+  </div>
+
+  </div>
+</section>
+
+<section class="blk">
+  <h2>Rules the build keeps</h2>
+  <div class="rules">
+    <div class="rule"><b>Works without signal</b><p>Draft saved on the phone at every tap, photos queued, filing offline, sync later. <em>An installable PWA with a service worker, not a page.</em></p></div>
+    <div class="rule"><b>Photos are the evidence</b><p>Take photo on every step that needs it, shrunk on the phone (1600px, ~300 KB), tagged with step and machine.</p></div>
+    <div class="rule"><b>One tap when nothing is wrong</b><p>Every step starts clean. Typing is only ever about what is wrong.</p></div>
+    <div class="rule"><b>Thumb sizes</b><p>Rows 48–56px, chips 40, squares 54, buttons 52, inputs 16px. Back top-left, Next bottom-right, always.</p></div>
+    <div class="rule"><b>The audit is gated</b><p>No request, no audit. Resend and Extend are Dexter's; "start anyway" is nobody's.</p></div>
+    <div class="rule"><b>The count is blind</b><p>Every OBP line, no on-hand figure, 0 is an answer. The crew never sees the comparison.</p></div>
+    <div class="rule"><b>Colour is a finding</b><p>Red and amber appear only on what is wrong. Selection is navy. Present is quiet.</p></div>
+    <div class="rule"><b>Copy quality decides, not the counter</b><p>A part past life is reported, never a replacement by itself. The decision to replace is made when copy quality is affected. "Keep running" means: have the replacement on board for when it goes. <em>Miguel, 14 Oct 2026.</em></p></div>
+    <div class="rule"><b>The web is the phone</b><p>Same column, a rail and the assessment beside it. One codebase, one set of screens.</p></div>
+    <div class="rule"><b>Nothing here is money</b><p>Profile card only. The Score Card pre-fill is phase 2, Miguel's merge. The supervisor evaluation never.</p></div>
+  </div>
+</section>
+
+<section class="blk">
+  <h2>History</h2>
+  <p class="lead">Every audit by ship, crew and date. Real rows from the Forms export.</p>
+  <div class="dt">
+    <div class="filt"><span class="chip on">All ships</span><span class="chip">Royal Caribbean</span><span class="chip">Celebrity</span><span class="chip">Azamara</span><span class="chip">Follow-up open</span><span class="chip">Unmatched · 14</span><span style="margin-left:auto" class="src">51 audits · Sep 2024 → Sep 2026</span></div>
+    <table>
+      <thead><tr><th>Date</th><th>Ship</th><th>Crew</th><th>Contract</th><th>Inv</th><th>Tech</th><th>Coll</th><th>HR</th><th>Overall</th><th>Tools missing</th><th>Files</th><th>Match</th></tr></thead>
+      <tbody>
+        <tr><td>Sep 30, 2026</td><td>Anthem of the Seas <span class="src">· "AN"</span></td><td>Haziel <span class="src">· typed</span></td><td class="c">2</td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq r">2</span></td><td class="c"><span class="sq r">2</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq a">3</span></td><td>2-Fiery back-up HDD</td><td class="c">2</td><td><span class="pill a">Name only</span></td></tr>
+        <tr><td>Sep 25, 2026</td><td>Rhapsody of the Seas <span class="src">· "RH"</span></td><td>Ryan <span class="src">· typed</span></td><td class="c">2</td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td>2-Fiery back-up HDD</td><td class="c">1</td><td><span class="pill a">2 candidates</span></td></tr>
+        <tr><td>Sep 13, 2026</td><td>Star of the Seas <span class="src">· "ST"</span></td><td>Rica Murillo</td><td class="c">4</td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td>—</td><td class="c">4</td><td><span class="pill g">SC id</span></td></tr>
+        <tr><td>Feb 20, 2025</td><td>Brilliance of the Seas <span class="src">· "BR"</span></td><td>Jomar Mangulabnan</td><td class="c">4</td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq x">–</span></td><td>Magnetizer · thumb drive</td><td class="c">1</td><td><span class="pill g">SC id</span></td></tr>
+        <tr><td>Feb 8, 2025</td><td>Celebrity Constellation <span class="src">· "CEL - Consellation"</span></td><td>Ida Bagus</td><td class="c">2</td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq x">–</span></td><td>2-Fiery back-up HDD</td><td class="c">2</td><td><span class="pill g">SC id</span></td></tr>
+        <tr><td>Jan 21, 2025</td><td>Oasis of the Seas</td><td>John Gorre</td><td class="c">2</td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq x">–</span></td><td>2-Fiery back-up HDD</td><td class="c">4</td><td><span class="pill g">SC id</span></td></tr>
+        <tr><td>Dec 11, 2024</td><td>Mariner of the Seas</td><td>James Abutin</td><td class="c">1</td><td class="c"><span class="sq r">2</span></td><td class="c"><span class="sq r">2</span></td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq x">–</span></td><td>Print driver thumb drive</td><td class="c">1</td><td><span class="pill g">SC id</span></td></tr>
+        <tr><td>Nov 20, 2024</td><td>Navigator of the Seas</td><td>Don Feliciano</td><td class="c">1</td><td class="c"><span class="sq r">2</span></td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq x">–</span></td><td>2-Fiery back-up HDD</td><td class="c">3</td><td><span class="pill g">SC id</span></td></tr>
+        <tr><td>Oct 13, 2024</td><td>Vision of the Seas <span class="src">· "RCG - Vision of the Seas"</span></td><td>Sharene \ Karl <span class="src">· two people</span></td><td class="c">—</td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq">4</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq">5</span></td><td class="c"><span class="sq x">–</span></td><td>—</td><td class="c">1</td><td><span class="pill r">Split: 2 crew</span></td></tr>
+        <tr><td>Sep 21, 2024</td><td>Celebrity Summit <span class="src">· "CEL-SUMMIT"</span></td><td><span class="src">blank · "Rolly" in the text</span></td><td class="c">—</td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq a">3</span></td><td class="c"><span class="sq">5</span></td><td class="c">—</td><td class="c"><span class="sq x">–</span></td><td>—</td><td class="c">1</td><td><span class="pill a">Name only</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="blk">
+  <h2>What changes from the Forms survey</h2>
+  <div class="cmp">
+    <div class="it"><div class="t">Ship · crew · contract</div><div class="now">Typed. 52 spellings, 12 blank names, counts missing.</div><div class="new"><b>Picked.</b> Vessel table, TDG file, the console's count ("3 completed, on contract 4").</div></div>
+    <div class="it"><div class="t">Date</div><div class="now">Typed, drifting.</div><div class="new"><b>Stamped</b> opened and filed: "Visit Oct 12–14".</div></div>
+    <div class="it"><div class="t">16 checkboxes</div><div class="now">Always all ticked. Only the SOPs folder varied.</div><div class="new"><b>Start full, tap what is missing.</b> The record stores the gaps.</div></div>
+    <div class="it"><div class="t">OBP count</div><div class="now">"See attachment" on 46 of 61.</div><div class="new"><b>Counted blind by the crew before the visit</b>, confirmed on the shelf by Dexter, line by line.</div></div>
+    <div class="it"><div class="t">Machine status</div><div class="now">Four boxes, always ticked.</div><div class="new"><b>Per machine, pass or finding</b>, pre-filled from the Management List.</div></div>
+    <div class="it"><div class="t">Four ratings + comments</div><div class="now">Comments "NA" on most rows.</div><div class="new"><b>Three ratings about the specialist</b>; a 3 or below needs one sentence. Each card says what 5 and 3 mean.</div></div>
+    <div class="it"><div class="t">HR dispatch / arrival</div><div class="now">Filed as the crew's rating.</div><div class="new"><b>Asked, sent to Rita.</b> Not the specialist's evaluation.</div></div>
+    <div class="it"><div class="t">Overall rating</div><div class="now">Added late, 16 of 61.</div><div class="new"><b>Required, on the crew profile.</b> Score Card pre-fill is phase 2. Never the supervisor evaluation.</div></div>
+    <div class="it"><div class="t">Reviewer feedback</div><div class="now">One long cell.</div><div class="new"><b>Three short boxes</b>, carried to the next visit as Fixed / Open.</div></div>
+    <div class="it"><div class="t">Miguel's asks of Sep 2024</div><div class="now">Never added.</div><div class="new"><b>Training needed, uniform &amp; PPE, HON app.</b></div></div>
+    <div class="it"><div class="t">Files</div><div class="now">SharePoint links in Miguel's OneDrive.</div><div class="new"><b>R2 bucket</b>, by ship / date / audit, behind the login.</div></div>
+    <div class="it"><div class="t">Before the visit</div><div class="now">Nothing.</div><div class="new"><b>The request, the assessment, the gate.</b></div></div>
+  </div>
+</section>
+
+<section class="blk">
+  <h2>Decisions</h2>
+  <p class="lead">Green: Miguel's word, in the Brain or in this thread. Amber: still his to take.</p>
+  <div class="dec">
+    <div class="d ok"><div><b>No completion, no audit</b><p>14 Oct: "without that completion, I don't want him to start the audit."</p></div></div>
+    <div class="d ok"><div><b>Ship mailbox shown, personal in copy</b><p>14 Oct. Mailboxes from the timecard's fleet directory (48 ships).</p></div></div>
+    <div class="d ok"><div><b>The count is blind</b><p>14 Oct: "don't show him what is on hand."</p></div></div>
+    <div class="d ok"><div><b>The email is a whole assessment</b><p>14 Oct: Pattern 43, Management List, inventory, due dates, in the console's own words.</p></div></div>
+    <div class="d"><div><b>One audit per crew within a visit, or per ship?</b><p><em>Recommend: per crew; the ship documents and the count are shared.</em></p></div></div>
+    <div class="d"><div><b>Phase 2: the audit pre-fills Dexter's contributor window</b><p>A bonus input, Miguel's merge. Until then Dexter enters twice. <em>Never the supervisor evaluation.</em></p></div></div>
+    <div class="d"><div><b>The bucket</b><p><em>cims-audit-evidence</em> exists since 8 Jul 2026, owner unknown. Reuse or create <em>cims-audit-files</em>?</p></div></div>
+    <div class="d"><div><b>Same worker, domain in the dashboard</b><p>audit.cims.work added under Domains &amp; Routes, the way cims.work was. Nothing in wrangler.toml.</p></div></div>
+    <div class="d"><div><b>The 61 and the zip</b><p>Dry run, 10 test rows dropped, 14 rows for Dexter. <em>Need the Forms folder as a zip.</em></p></div></div>
+    <div class="d"><div><b>Readers and auditors</b><p>Miguel, Rita, Ray, Rolando read; crew never. Any console login may audit; the auditor is recorded.</p></div></div>
+    <div class="d"><div><b>Briefing folded until tapped</b><p>Last visit's open points first; Ray / GSM / intel behind a tap, so they do not lead the rating.</p></div></div>
+    <div class="d"><div><b>Offline, and whose phone</b><p>Installable PWA, files offline. <em>DG3 iPhone or Dexter's own?</em></p></div></div>
+    <div class="d"><div><b>HON runs the reading</b><p>Machine register, OBP, orders, due dates and the Pattern 43 checks already live there; result back over a service binding. <em>Its assessment email has never fired in production.</em></p></div></div>
+    <div class="d"><div><b>Pattern 43 assessed, provisionally</b><p>Reverses the 1 Oct decision on Miguel's word. Every reading labelled with its confidence; Rolando confirms (R1); his answers calibrate the reader. <em>To the Brain as his call once confirmed.</em></p></div></div>
+    <div class="d"><div><b>Jonathan · "due date missed" · no override</b><p><em>His address; confirm "missed" = Ordering Schedule date with no PO; confirm the gate has no override at all.</em></p></div></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function(){
+  document.querySelectorAll('.chips .chip').forEach(function(c){ c.addEventListener('click', function(){ if (c.classList.contains('on')) { c.classList.remove('on'); return; } c.classList.toggle('need'); }); });
+  document.querySelectorAll('.hs .chip').forEach(function(c){ c.addEventListener('click', function(){ c.parentNode.querySelectorAll('.chip').forEach(function(x){ x.classList.remove('on'); }); c.classList.add('on'); }); });
+  document.querySelectorAll('.itm').forEach(function(r){ var si = r.querySelector('.si'); if (!si || si.classList.contains('warn') || r.closest('.side') || r.closest('.card.h')) return; if (!si.classList.contains('ok') && !si.classList.contains('bad')) return; r.addEventListener('click', function(){ var miss = r.classList.toggle('miss'); si.classList.toggle('bad', miss); si.classList.toggle('ok', !miss); var w = r.querySelector('.stw'); if (w) { w.textContent = miss ? 'Missing' : ''; w.className = 'stw' + (miss ? ' bad' : ''); } else if (miss) { var s = document.createElement('span'); s.className = 'stw bad'; s.textContent = 'Missing'; r.insertBefore(s, si); } }); });
+  document.querySelectorAll('.si.lg').forEach(function(s){ s.addEventListener('click', function(e){ e.stopPropagation(); s.classList.toggle('sel'); }); });
+  document.querySelectorAll('.cell').forEach(function(c){ c.addEventListener('click', function(){ var bad = c.classList.toggle('bad'); c.classList.toggle('ok', !bad); var si = c.querySelector('.si'); si.classList.toggle('bad', bad); si.classList.toggle('ok', !bad); }); });
+  document.querySelectorAll('.rate').forEach(function(sc){
+    var sq = sc.querySelectorAll('span');
+    sq.forEach(function(s, i){ s.addEventListener('click', function(){ sq.forEach(function(x){ x.classList.remove('on','lo'); }); s.classList.add('on'); if (i < 3) s.classList.add('lo'); var p = sc.parentNode; var ta = p.querySelector('.ta'); if (ta) ta.classList.toggle('req', i < 3); }); });
+  });
+  document.querySelectorAll('.seg').forEach(function(seg){ var o = seg.querySelectorAll('span'); o.forEach(function(s){ s.addEventListener('click', function(){ o.forEach(function(x){ x.classList.remove('on'); }); s.classList.add('on'); }); }); });
+  document.querySelectorAll('.sw').forEach(function(s){ s.addEventListener('click', function(){ s.classList.toggle('on'); }); });
+})();
+</script>

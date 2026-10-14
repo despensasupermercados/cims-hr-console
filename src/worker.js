@@ -58,6 +58,9 @@ import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
 import { apiRosterExport } from './roster_export.js';
+import { guardMailer } from "./mail_guard.js";
+import { installAudit } from "./audit_routes.js";
+import { ensureAuditTables } from "./audit_store.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -72,6 +75,11 @@ const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstr
 // Score Card / sEval integration is a separate human-approved Phase B PR.
 const _seval = installSeval({});
 const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections, VESSEL_REF, ORIGIN: "https://cims.work", onReviewStored: _seval.sevalAutoApply });
+// Printshop Audit (audit.cims.work, 14 Oct 2026): src/audit_routes.js. Nothing in it is money (§1); its tables reach
+// production through ensureAudit (memoEnsure), like ensureSbm.
+const ensureAudit = memoEnsure(ensureAuditTables);
+const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections, TODAY: () => TODAY(),
+  crewProfile: async (env, sc, session) => (await apiCrewOne(env, new URL("https://cims.work/api/crew/get?id=" + encodeURIComponent(sc)), session)).json() });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 async function autoSendBoardLegs(env) {
@@ -174,7 +182,9 @@ export default {
   async fetch(request, env, ctx) {
     // One trip per wave of reads (d1batch.js): the same binding wrapped once per isolate, so the guard and
     // in-flight memos keyed by env.DB keep their identity.
-    env = Object.assign({}, env, { DB: batchingDb(env.DB) });
+    env = Object.assign({}, env, { DB: batchingDb(env.DB), MAILER: guardMailer(env.MAILER, env.MAIL_ONLY_TO) });
+    // MAILER is guarded once, above (src/mail_guard.js): with MAIL_ONLY_TO set (staging) no email leaves for anyone
+    // else; unset (production) it is the binding itself, untouched.
     const url = new URL(request.url);
     const p = url.pathname;
     const t0 = Date.now(); // PERF: request start, for the Server-Timing header on /api responses
@@ -210,6 +220,9 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
+      // Printshop Audit: the shell on audit.cims.work (and cims.work/audit), its manifest and service worker, and
+      // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
+      { const _au = await _audit(p, request, env, url, session); if (_au) return _au; }
       { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_a) return _a; }
       { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_i) return _i; }
       if (p === '/api/roster/export') return apiRosterExport(request, env);
@@ -342,6 +355,7 @@ if (p === "/api/health/send" && request.method === "POST") { await ensureRegistr
   // AI processing immediately (on arrival) so a card appears within seconds. ctx.waitUntil keeps the
   // SMTP accept fast and lets the summarise+file run in the background. Defensive: never throw (that bounces).
   async email(message, env, ctx) {
+    env = Object.assign({}, env, { MAILER: guardMailer(env.MAILER, env.MAIL_ONLY_TO) });
     try {
       await ensureIntel(env);
       let raw = "";
@@ -355,6 +369,7 @@ if (p === "/api/health/send" && request.method === "POST") { await ensureRegistr
   // Hourly safety-net sweep: catches any email that arrived while the AI engine was briefly
   // unavailable (left in 'new'). Configured by [triggers] crons in wrangler.toml.
   async scheduled(event, env, ctx) {
+    env = Object.assign({}, env, { MAILER: guardMailer(env.MAILER, env.MAIL_ONLY_TO) }); // staging emails nobody but MAIL_ONLY_TO
     if (ctx && ctx.waitUntil) ctx.waitUntil(processIntelInbox(env, 25));
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
 if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => maybeSendDocRadar(env, event, { boardLegs }))); // the radar's crew read joins registry_snapshot
