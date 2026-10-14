@@ -152,6 +152,8 @@ test("the week is drawn as lanes on a wide screen and as a list on a phone, and 
   assert.match(SRC, /data-wk=1/); assert.match(SRC, /class=oc-wlist/);
   assert.match(SRC, /@media \(max-width:700px\)\{\.ops \.oc-wkw\{display:none\}\.ops \.oc-wlist\{display:flex\}\}/);
   assert.match(SRC, /\.ops \.oc-b\.ab\{background:#2E9E5B/, "the Fleet Gantt's aboard green");
+  assert.match(SRC, /\.ops \.oc-kpi\{align-items:center;text-align:center\}/, "the five tiles read centred (Miguel, 14 Oct 2026: \"also center this\")");
+  assert.match(SRC, /\.ops \.oc-dh\{display:flex;align-items:baseline;justify-content:center;/, "day names centred over their columns (Miguel, 14 Oct 2026: \"just center them\")");
   assert.match(SRC, /\.ops \.oc-b\.em\{background:#F2B01E/, "the Fleet Gantt's earmark amber");
 });
 
