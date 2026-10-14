@@ -545,8 +545,12 @@ the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned 
 (artifact Rcd9BmKBpAxKc9d3GFgwQt). `GET /api/ops` (`apiOps`, one wave: `rotationSections`, `apiDashboard`, the score queue,
 the crew's dates, the sign-off sends) → `buildOps` (`src/ops_dashboard.js`, pure): it SORTS what the Keyman board says,
 it decides no date and no status. The page (`renderDashboard`) draws: five tiles (Past sign-off · No reliever · Can't sail
-yet · Aboard · Bench ready), each scrolling to the one place that holds its detail; Next 14 days (crew changes, the TDG
-file due, a score card nobody asked for, the bench, birthdays of the rotation); **Crew changes** (overdue + the next 90
+yet · Aboard · Bench ready), each scrolling to the one place that holds its detail; **Next 7 days** (Miguel, 14 Oct 2026:
+"always the next 7 days when you open the console", option 1B "deploy"; `buildOps().week`, `opsWeek`): one lane per ship
+that changes crew drawn like the Fleet Gantt — green aboard to the sign-off, amber from the reliever's sign-on (striped
+when not in TDG yet), red while the seat is empty, a handover tick — then To do (score cards nobody asked for, the TDG
+file, the bench) and Birthdays (surname · age); every open starts today (`OPS_WK=0`), one tap shows the 7 after (the
+data holds 14 days), a "Then:" line names the next two crew changes; a phone (≤700px) gets the same days as a list; **Crew changes** (overdue + the next 90
 days, one row per seat: When, Ship, Off → on, the reliever's documents read against the contract, Travel · kit only in
 the last 30 days, a Next step that opens the ship on the board); Fleet coverage (one tile per ship); TDG (file ages, the
 held / undated seats TDG must correct); Documents aboard; the crew and travel. Rules: a held seat (§10d) or a seat with

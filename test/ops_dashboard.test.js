@@ -110,17 +110,49 @@ test("the headline tiles count the board, once", () => {
   assert.deepEqual(ops().changes.counts, { all: 5, overdue: 1, nobody: 1, docs: 1, soon: 2 });
 });
 
-test("the 14-day calendar: changes by ship code, the TDG file, a score card not asked, the bench, birthdays of the rotation", () => {
-  const c = ops().calendar, day = (d) => c.days.find((x) => x.date === d).items.map((i) => i.kind + ":" + (i.code || i.label));
-  assert.equal(c.days.length, 14); assert.equal(c.days[0].date, TODAY); assert.equal(c.days[0].dow, "Tue");
-  assert.deepEqual(day("2026-10-13"), ["score:CS"], "Ramos signed off 5 Oct and nobody was asked for feedback");
-  assert.deepEqual(day("2026-10-14"), ["bday:GR"]);
-  assert.deepEqual(day("2026-10-15"), ["file:TDG file"], "weekly AdvancedQuery, 7 days after 8 Oct");
-  assert.deepEqual(day("2026-10-20"), ["bday:SY"], "an ashore crew's birthday carries the last ship");
-  assert.deepEqual(day("2026-10-22"), ["off:QN", "on:QN"]);
-  assert.deepEqual(day("2026-10-24"), ["bench:SY"]);
-  assert.equal(c.days.some((d) => d.items.some((i) => /Rotation/.test(i.title))), false, "a crew outside the rotation has no birthday chip");
-  assert.deepEqual(c.after, [{ code: "ON", off: "2026-11-11" }, { code: "AL", off: "2026-11-29" }], "the next two after the window");
+test("the next 7 days: one lane per ship changing crew, To do, birthdays of the rotation; two weeks of data for one page turn", () => {
+  const w = ops().week;
+  assert.equal(w.size, 7); assert.equal(w.days.length, 14, "this week and the next, the page shows 7 at a time");
+  assert.equal(w.days[0].date, TODAY); assert.equal(w.days[0].dow, "Tue");
+  assert.deepEqual(w.ships.map((s) => [s.code, s.off.surname, s.off.date, s.off.past, s.on && s.on.surname, s.on && s.on.date, s.on && s.on.tdg]),
+    [["QN", "Marto", "2026-10-22", false, "Cedilla", "2026-10-22", true]],
+    "GR is overdue and Corpin's sign-on (8 Oct) has passed: the Past sign-off tile holds it, not the week");
+  assert.deepEqual(w.todo.map((x) => [x.kind, x.date]), [["score", "2026-10-13"], ["file", "2026-10-15"], ["bench", "2026-10-24"]]);
+  assert.deepEqual(w.todo[0].people, [{ sc: null, code: "CS", surname: "Ramos", off: "2026-10-05" }], "Ramos signed off 5 Oct and nobody was asked for feedback");
+  assert.equal(w.todo[1].last, "2026-10-08", "weekly AdvancedQuery, 7 days after 8 Oct");
+  assert.deepEqual([w.todo[2].surname, w.todo[2].code, w.todo[2].sc], ["Alonzo", "SY", "N"]);
+  assert.deepEqual(w.bdays.map((b) => [b.date, b.surname, b.code, b.age]), [["2026-10-14", "Dela Rosa", "GR", 41], ["2026-10-20", "Alonzo", "SY", 38]],
+    "the roster's surname and the age they turn; an ashore crew carries the last ship; a crew outside the rotation has none");
+  assert.deepEqual(w.later.map((x) => [x.code, x.off, x.surname, x.on]),
+    [["QN", "2026-10-22", "Marto", "Cedilla"], ["ON", "2026-11-11", "Medidas", "Domingo"], ["AL", "2026-11-29", "Gorre", null], ["ST", "2026-11-29", "Murillo", "Person"]],
+    "the crew changes after the first 7 days, for the page's Then line");
+});
+
+test("the week lanes: a seat without a reliever, an empty seat between two crew, an overdue seat whose reliever joins this week", () => {
+  const S = [
+    { ship: "Legend", brand: "Royal", crew: [seat({ agency_id: "P", name: "Pat Nobody", signOn: "2026-03-16", signOff: "2026-10-16", offSource: "rita" })], projections: [] },
+    { ship: "Wonder", brand: "Royal", crew: [seat({ agency_id: "Q", name: "Quin Early", signOn: "2026-03-15", signOff: "2026-10-15", offSource: "rita", reliever: { sc: "R" } })],
+      projections: [card({ agency_id: "R", name: "Rae Late", signOn: "2026-10-18", signOff: "2027-05-18", registry: null })] },
+    { ship: "Odyssey", brand: "Royal", crew: [seat({ agency_id: "S", name: "Sam Over", signOn: "2026-03-01", signOff: "2026-10-01", offSource: "projected", reliever: { sc: "T" } })],
+      projections: [card({ agency_id: "T", name: "Tia Joins", signOn: "2026-10-17", signOff: "2027-05-17" })] },
+  ];
+  const w = buildOps({ today: TODAY, sections: S, crew: [], queue: {}, sources: {} }).week;
+  const by = Object.fromEntries(w.ships.map((s) => [s.code, s]));
+  assert.deepEqual(w.ships.map((s) => s.code), ["WN", "LE", "OY"], "ordered by the first thing that happens in the window");
+  assert.equal(by.LE.on, null, "no reliever: the page draws the seat empty after the sign-off");
+  assert.deepEqual([by.WN.off.date, by.WN.on.date, by.WN.on.tdg], ["2026-10-15", "2026-10-18", false], "three days empty, and the reliever is not in TDG yet");
+  assert.deepEqual([by.OY.off.past, by.OY.on.date], [true, "2026-10-17"], "past its sign-off, the reliever joins this week");
+});
+
+test("the week is drawn as lanes on a wide screen and as a list on a phone, and pages once", () => {
+  assert.match(SRC, /function opsWeek\(w\)\{/);
+  assert.doesNotMatch(SRC, /function opsCal\(/, "the 14-day strip is gone");
+  assert.match(SRC, /opsKpis\(d\.kpis\)\+opsWeek\(d\.week\)/);
+  assert.match(SRC, /OPS=d;OPS_WK=0;/, "every open starts on the next 7 days from today");
+  assert.match(SRC, /data-wk=1/); assert.match(SRC, /class=oc-wlist/);
+  assert.match(SRC, /@media \(max-width:700px\)\{\.ops \.oc-wkw\{display:none\}\.ops \.oc-wlist\{display:flex\}\}/);
+  assert.match(SRC, /\.ops \.oc-b\.ab\{background:#2E9E5B/, "the Fleet Gantt's aboard green");
+  assert.match(SRC, /\.ops \.oc-b\.em\{background:#F2B01E/, "the Fleet Gantt's earmark amber");
 });
 
 test("TDG: held crew and an undated seat are to correct; the files say their age", () => {
