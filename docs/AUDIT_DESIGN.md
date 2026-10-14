@@ -44,6 +44,11 @@ against it ("will be missing" when neither), any Ordering Schedule due date miss
 down. Only then does the audit open, from the link in that report, under Dexter's login. The count is not graded:
 it pre-fills Dexter's Inventory step for him to confirm on the shelf. The parts past life pre-fill the Machines step.
 
+- **Addressing** (Miguel, 14 Oct 2026: "use the ship email and his personal email, but display the ship email only;
+  his personal email gets a copy"): To = the ship's printshop mailbox (`sbm_config` `shipmail:<ship>`, the same key the
+  shipboard review uses), Cc = the crew record's personal email, Rolando and Ray. The screen and the record show the
+  ship mailbox only; the personal address is never displayed. No ship mailbox on file → sent to the personal email
+  alone and Dexter told so, Rita asked to add it; neither on file → the request is blocked, never guessed.
 - **The seafarer's page is the HON upload, reused**: a signed single-use link, no login (like /fb and /sbm), one row
   per document per machine from the machine register, each file checked as it lands (size above zero, 12 pages, four
   channels for Pattern 43; a bad scan asked for again on the spot), scans shrunk client-side to 2–5 MB because a 64 MB
