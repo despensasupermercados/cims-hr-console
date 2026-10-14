@@ -45,16 +45,22 @@ Nothing in this note is built. The Forms survey itself could not be fetched from
    needs one sentence), Crew (training needed, uniform & PPE, HON app in use, optional mono click %), Overall
    (rating, reviewer feedback as strengths / to improve / agreed, recommend for Oasis/Icon, follow-up to a named
    person by a date). Autosaved draft; date stamped on filing.
-4. **Filed** — audit card on the crew profile ("What people said"), follow-up as a dated crew note to its owner,
+4. **Filed** — audit card on the crew profile ("What people said"), follow-up as its own record (owner, due date,
+   fixed / still open at the next visit) mirrored as a line in the profile — not a `crew_note_log` row, which has
+   no owner or due date,
    files in the bucket under ship / date / audit id, summary email to Miguel with Rita, Ray, Rolando in copy,
    open points carried to the next audit of that ship or crew. Never sent to the crew; never read by the bonus.
 
 ## Architecture (recommendation)
 
-- **Same worker.** `audit.cims.work` as a custom domain on `cims-hr-console` (wrangler.toml `routes`, custom
-  domain; the next deploy creates the DNS record), the page chosen by hostname and also served at `cims.work/audit`.
-  Same D1, same magic-link login (Dexter is on the allowlist), same mailer. A separate worker would need a service
-  binding plus copies of the crew / ship / contract readers, for one user and ~50 records a year.
+- **Same worker.** `audit.cims.work` as a second custom domain on `cims-hr-console`, the page chosen by hostname and
+  also served at `cims.work/audit`. Same D1, same magic-link login (the link is built on `url.origin`, so a login
+  asked from audit.cims.work lands there; Dexter is on the allowlist), same mailer. A separate worker would need a
+  service binding plus copies of the crew / ship / contract readers, for one user and ~50 records a year.
+  **The domain is added in the dashboard, not in wrangler.toml** (self-review, 14 Oct): cims.work is attached in the
+  dashboard and wrangler.toml declares no routes; a deploy that declares custom domains replaces the worker's
+  domain list with what it declares, so a config carrying only audit.cims.work would detach cims.work. Dashboard:
+  Workers & Pages → cims-hr-console → Settings → Domains & Routes → Add → Custom domain → `audit.cims.work`.
 - **Modules, not inline:** `src/audit.js` (pure: the question set, scoring none, the import mapping), routes inside
   the error boundary (§11), reads in one wave (§12), `test/audit.test.js` pins it.
 - **Storage:** D1 tables `audit_visit` / `audit_item` / `audit_file` (append-only, edits versioned); files in an R2
@@ -63,17 +69,39 @@ Nothing in this note is built. The Forms survey itself could not be fetched from
   record of its owner — reuse it only once Miguel says it is this project's.
 - **Import of the 61:** dry-run review like every other import — test rows dropped and named, ship codes mapped
   to the vessel table, names through the identity ladder (`keymanimport.buildBridge`), ambiguous rows listed for
-  Dexter, two-person rows split. The SharePoint files need a one-time zip export of the Forms folder.
-- **Money (§1):** the audit is qualitative, like intel (§10). Phase 1 shows the overall rating on the profile and
-  in the Score Card's evidence list as a fact. Phase 2, if Miguel wants it, pre-fills Dexter's contributor window
-  (mono click %, inventory, technical, overall) the way the shipboard review pre-fills sEval (`src/seval.js`:
-  auto pre-fills, manual wins, never commits). Phase 2 touches a bonus input and is a money PR for Miguel.
+  Dexter, two-person rows split. First-name-only rows (Ryan, Sandra, Kevin, Raymond, Haziel) stay "name only"
+  until Dexter picks: the console's schedule does not reach back to 2024, so it cannot suggest who was aboard.
+  The SharePoint files need a one-time zip export of the Forms folder; most are named by machine serial and
+  timestamp (`S011021355_2510231514000…`), the machines' own counter / inventory exports, so each can be attached
+  to its machine where the console knows the serial.
+- **Money (§1):** the audit is qualitative, like intel (§10). Phase 1 shows the overall rating on the profile as a
+  fact and touches nothing on the Score Card page. Phase 2 pre-fills Dexter's contributor window
+  (`feedback_response2`, role dexter: mono click %, inventory, technical, overall) the way the shipboard review
+  pre-fills sEval (`src/seval.js`: auto pre-fills, manual wins, never commits). Phase 2 writes a bonus input and is
+  a money PR for Miguel — and it should follow phase 1 within the fortnight, because until it ships Dexter enters
+  the same facts twice (the audit, then his window for the scoring queue). **Never sEval:** the overall rating must
+  not become the supervisor evaluation — a 2 there is a bonus gate (`eval_below_3`), and the GSM review already
+  feeds it; double-counting one visit into a gate is the wrong design.
+- **HR · TDG dispatch / arrival** is feedback on the dispatch (travel, hotel, joining), not on the specialist: it
+  files on the contract's travel record and reaches Rita; it stays out of the crew's evaluation.
+- **Dates:** stamped twice (opened, filed) — a visit often runs two or three days; the record reads "Visit Oct 12–14".
+- **Contract number** is shown as both numbers ("3 completed, on contract 4"): the typed field mixed them (Vivien
+  Medidas, Harmony Nov 2024: typed 1, text says "now on her second contract"; Allen Cedilla, Liberty: typed 2,
+  text says "second contract").
+- **Auditor = the logged-in user**, recorded on the record; nothing assumes Dexter. The Brain names the single
+  auditor as a structural risk (rec4pbllraTBMDEdI).
+- **A crew the file does not have aboard** (Jewel, Xcel, a joiner before the next upload): "pick from all crew",
+  and the row is listed for Rita like any other file disagreement (§6). The console never moves the crew.
+- **The briefing and anchoring:** the last audit's open points come first (he checks them). Ray's window, the GSM
+  review and intel are folded under "What others said", opened on tap, so they do not lead the rating. Miguel's call.
 
 ## Decisions needed from Miguel
 
 1. One audit per crew within a visit (recommended) or one per ship.
 2. Overall rating: profile card only (phase 1) now; Score Card pre-fill (phase 2) later, or never.
 3. The bucket: reuse `cims-audit-evidence` or create `cims-audit-files`.
-4. audit.cims.work on the HR console worker (recommended) or a separate worker.
+4. audit.cims.work on the HR console worker (recommended) or a separate worker; the domain added in the dashboard.
 5. The zip export of the Forms files for the import.
-6. Readers: Dexter files; Miguel, Rita, Ray, Rolando read; the crew never.
+6. Readers: Miguel, Rita, Ray, Rolando read; the crew never. Any console user may file an audit (auditor recorded).
+7. The briefing: Ray / GSM / intel folded until tapped (recommended), or open on the screen.
+8. Phase 2 (Dexter's window pre-filled from the audit) scheduled right after phase 1, or Dexter enters twice.
