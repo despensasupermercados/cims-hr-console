@@ -6,7 +6,9 @@ import { mastRows } from "../cims-mast.js";
 
 export const T = { navy: "#1B3A5C", deep: "#142D48", green: "#5FB946", greenInk: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6",
   border: "#E5E7EB", body: "#374151", red: "#96281B", amber: "#B7791F", grey: "#9CA3AF", redTint: "#F4E5E3", amberTint: "#F6EEE1",
-  greenTint: "#E6F1E1", page: "#EEF1F6" };
+  greenTint: "#E6F1E1", page: "#EEF1F6",
+  // amber TEXT (the token amber is a mark colour: 3.3:1 on white fails for text). HON's --amber-ink, same value.
+  amberInk: "#8A5B12" };
 export const FH = "'Outfit',Helvetica,Arial,sans-serif";
 export const FB = "'DM Sans',Helvetica,Arial,sans-serif";
 export const FM = "ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace";
@@ -17,7 +19,7 @@ export function fmtDate(v) { const d = String(v || "").slice(0, 10); return /^\d
 export function fmtWhen(v) { const t = Date.parse(v); if (isNaN(t)) return ""; const d = new Date(t); return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0") + " UTC"; }
 
 export const pill = (txt, tone) => {
-  const [bg, fg] = tone === "red" ? [T.redTint, T.red] : tone === "amber" ? [T.amberTint, T.amber] : tone === "green" ? [T.greenTint, T.greenInk] : [T.cloud, T.slate];
+  const [bg, fg] = tone === "red" ? [T.redTint, T.red] : tone === "amber" ? [T.amberTint, T.amberInk] : tone === "green" ? [T.greenTint, T.greenInk] : [T.cloud, T.slate];
   return `<span style="display:inline-block;font-family:${FB};font-size:12px;font-weight:700;padding:6px 11px;border-radius:999px;background:${bg};color:${fg};white-space:nowrap;">${esc(txt)}</span>`;
 };
 
@@ -36,7 +38,8 @@ ${mastRows()}
 <tr><td class="px" style="padding:14px 32px 0;"><div class="hl" style="font-family:${FH};font-size:36px;font-weight:600;letter-spacing:-0.6px;color:${T.navy};line-height:1.1;">${esc(head)}${head2 ? `<br><span style="color:${T.grey};">${esc(head2)}</span>` : ""}</div>
 ${lead ? `<div style="font-family:${FB};font-size:15px;color:${T.body};line-height:1.5;padding-top:12px;">${lead}</div>` : ""}</td></tr>
 ${rows || ""}
-<tr><td class="px" style="padding:28px 32px 24px;font-family:${FB};font-size:12px;color:${T.slate};line-height:1.5;border-top:1px solid ${T.border};">${footer || ""}</td></tr>
+<tr><td height="28" style="height:28px;font-size:0;line-height:0;">&nbsp;</td></tr>
+<tr><td class="px" style="padding:24px 32px 24px;font-family:${FB};font-size:12px;color:${T.slate};line-height:1.5;border-top:1px solid ${T.border};">${footer || ""}</td></tr>
 </table></td></tr></table></body></html>`;
   return html;
 }

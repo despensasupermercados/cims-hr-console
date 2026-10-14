@@ -44,8 +44,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--nfg:#1B3A5C;--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--green-d:#2F7A22;--greenbg:#EEF7EA;--red:#B4382A;--redbg:#FCEDEA;--amber:#9A6412;--amberbg:#FBF3E4;--navybg:#E9EFF6;
---ink:#14243A;--ink2:#46566B;--mut:#7A889A;--line:#E6EBF1;--line2:#D3DCE6;--bg:#F2F5F9;--card:#FFFFFF;--fh:'Outfit',Helvetica,Arial,sans-serif;--ff:'DM Sans',Helvetica,Arial,sans-serif;--fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--r:16px}
+:root{--nfg:#1B3A5C;--fill:#2F7A22;--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--green-d:#2F7A22;--greenbg:#EEF7EA;--red:#B4382A;--redbg:#FCEDEA;--amber:#9A6412;--amberbg:#FBF3E4;--navybg:#E9EFF6;
+--ink:#14243A;--ink2:#46566B;--mut:#5B6A7D;--line:#E6EBF1;--line2:#D3DCE6;--bg:#F2F5F9;--card:#FFFFFF;--fh:'Outfit',Helvetica,Arial,sans-serif;--ff:'DM Sans',Helvetica,Arial,sans-serif;--fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--r:16px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#E9EEF5;--ink2:#B6C2D2;--mut:#8C9AAE;--line:#24344A;--line2:#2F4259;--bg:#0D1828;--card:#14233A;--greenbg:#16301F;--redbg:#3A1C18;--amberbg:#352812;--navybg:#1C2F47;--green-d:#7CCB66;--red:#F08A7C;--amber:#E2AE5A;--navy:#2B5A8C;--nfg:#9CC0E8;color-scheme:dark}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
@@ -60,7 +60,7 @@ button{font:inherit;color:inherit}
 .tt{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ts{font-size:12.5px;color:#B9C6D6;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px;white-space:nowrap}
-.tk:empty{display:none}.tk.late{background:#B4382A}.tk.done{background:var(--green-d)}
+.tk:empty{display:none}.tk.late{background:#B4382A}.tk.done{background:var(--fill)}
 .hero{background:var(--deep);color:#fff;padding:4px 16px 22px}
 .hero .in{max-width:640px;margin:0 auto}
 .hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:6px 0 2px;line-height:1.1}
@@ -74,7 +74,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .offl[hidden]{display:none}
 .chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px 2px}
 .chips::-webkit-scrollbar{display:none}
-.chip{flex:none;min-height:36px;padding:0 14px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink2);font-size:13.5px;font-weight:600;cursor:pointer}
+.chip{flex:none;min-height:40px;padding:0 14px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink2);font-size:13.5px;font-weight:600;cursor:pointer}
 .chip.on{background:var(--navy);color:#fff;box-shadow:none}
 .sh{display:flex;justify-content:space-between;align-items:baseline;margin:8px 2px -4px;font-family:var(--fh);font-weight:600;font-size:16px}
 .sh span{font-family:var(--ff);font-weight:500;font-size:13px;color:var(--mut)}
@@ -87,6 +87,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .row:first-child,.ch+.row{border-top:0}
 .row:active{background:var(--bg)}
 .row.off{opacity:.5}
+.stl{margin-top:8px}
 .row .tx{flex:1;min-width:0}
 .nm{font-family:var(--fh);font-weight:600;font-size:16px;line-height:1.25}
 .sm{font-size:13px;color:var(--mut);margin-top:2px}
@@ -154,9 +155,9 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .dock .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 18px;border-radius:14px;border:0;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;cursor:pointer;width:100%;transition:transform .12s,opacity .2s}
 .btn:active{transform:scale(.98)}.btn .ic{width:20px;height:20px}
-.btn.green{background:var(--green-d)}
+.btn.green{background:var(--fill)}
 .btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line2);min-height:46px;font-size:15px}
-.btn.txt{background:none;color:var(--red);min-height:36px;font-size:14px;font-family:var(--ff);font-weight:600}
+.btn.txt{background:none;color:var(--red);min-height:44px;font-size:14px;font-family:var(--ff);font-weight:600}
 .btn[disabled]{opacity:.45;cursor:default;transform:none}
 .note{font-size:12.5px;color:var(--mut);text-align:center}
 .err{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:var(--redbg);color:var(--red);border-radius:14px;font-size:13.5px;font-weight:500}
@@ -232,7 +233,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function shipRow(s, openReq) {
     var who = s.aboard.length ? ic("user") + s.aboard.map(function (c) { return esc(c.name); }).join(", ") : "Nobody aboard per the TDG file";
     var go = openReq && s.last ? ' data-go="q=' + esc(s.last.id) + '"' : ' data-ship="' + esc(s.ship) + '"';
-    return '<button class="row' + (s.aboard.length || openReq ? "" : " off") + '"' + go + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + (openReq && s.last ? ic("user") + esc(s.last.crew) : who) + "</div></div>" + (s.last && (s.last.status === "sent" || s.last.status === "complete") ? reqStatus(s.last) : "") + ic("caret-right", "go") + "</button>";
+    return '<button class="row' + (s.aboard.length || openReq ? "" : " off") + '"' + go + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + (openReq && s.last ? ic("user") + esc(s.last.crew) : who) + "</div>" + (openReq ? '<div class="stl">' + reqStatus(s.last) + "</div>" : "") + "</div>" + ic("caret-right", "go") + "</button>";
   }
   function shipsView() {
     top("", "", "", "", false); dock("");
@@ -304,14 +305,14 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       if (S.view !== key) return;
       top(ship, "Briefing", "", "", true);
       var c = b.contract || {}, cur = c.current;
-      var h = '<div class="card"><div class="pad"><div class="big"><span class="av lg">' + initials(b.crew.name) + '</span><div style="min-width:0"><h2>' + esc(b.crew.name) + '</h2><div class="sm">' + esc(b.crew.position || "Printer Specialist") + "</div></div></div>";
+      var h = '<div class="card"><div class="pad"><div class="big"><span class="av lg">' + initials(b.crew.name) + '</span><div style="min-width:0"><h2>' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "") + "</div></div>";
       if (cur && cur.on && cur.off) {
         var late = cur.of && cur.day > cur.of;
         h += '<div class="prog"><div class="lb"><span>Contract</span><b>Day ' + esc(cur.day) + (cur.of ? " of " + esc(cur.of) : "") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
       }
       h += "</div>";
       var done = (String(c.label || "").match(/^(\d+)/) || [])[1]; if (done == null && /^ongoing/i.test(String(c.label || ""))) done = 0;
-      h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + esc(cur ? cur.ship : ship) + '</b><span>aboard</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
+      h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + (cur && cur.day != null ? esc(cur.day) : "?") + '</b><span>days aboard</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
       if (c.source) h += '<div class="note" style="text-align:left;margin:-6px 4px 0">Contracts: ' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</div>";
 
       h += needCard(first(b.crew.name), b.machines, b.lines);
@@ -359,7 +360,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       h += '<div class="kv"><span class="k">Inventory</span><span class="v">' + (p.lines == null ? "?" : esc(p.lines)) + ' parts<div class="sm">OBP list' + (p.obpAsOf ? " of " + fmtD(p.obpAsOf, true) : "") + ", on-hand hidden</div></span></div></div>";
       $("main").innerHTML = h;
       var can = p.hon && n > 0 && (p.shown || !p.live);
-      dock('<button class="btn green" id="sendreq"' + (can ? "" : " disabled") + ">" + ic("paper-plane-tilt") + (p.live ? "Send request" : "Send test request to me") + "</button>" + (can ? "" : '<div class="note">' + esc(!p.hon ? WHY.hon_unavailable : n === 0 ? WHY.no_presses : WHY.no_ship_mailbox) + "</div>"));
+      dock('<button class="btn green" id="sendreq"' + (can ? "" : " disabled") + ">" + ic("paper-plane-tilt") + (p.live ? "Send request" : "Send test request to me") + "</button>" + (can || !p.hon ? "" : '<div class="note">' + esc(n === 0 ? WHY.no_presses : WHY.no_ship_mailbox) + "</div>"));
       var btn = $("sendreq");
       if (btn) btn.onclick = function () {
         btn.disabled = true; btn.innerHTML = ic("paper-plane-tilt") + "Sending";
@@ -415,7 +416,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       $("main").innerHTML = h;
       if (done) dock('<button class="btn green" disabled>' + ic("clipboard-text") + 'Start the audit</button><div class="note">The on-ship audit steps arrive with the next update.</div>');
       else if (sent) {
-        dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + '24 more hours</button></div><button class="btn txt" id="cx">Cancel request</button>');
+        dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + 'Add 24 h</button></div><button class="btn txt" id="cx">Cancel request</button>');
         var act = function (what, confirmText) { return function () { if (confirmText && !confirm(confirmText)) return; post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(WHY[r.error] || r.error || "Not done"); reloadShips(); requestDetail(id); }); }; };
         $("rs").onclick = act("resend", "Send the request again? The old link stops working.");
         $("ex").onclick = act("extend");
