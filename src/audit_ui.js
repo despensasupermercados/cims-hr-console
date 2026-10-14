@@ -87,14 +87,13 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .row:first-child,.ch+.row{border-top:0}
 .row:active{background:var(--bg)}
 .row.off{opacity:.5}
+.sq{width:40px;height:40px;border-radius:12px;background:var(--bg);color:var(--ink2);display:grid;place-items:center;flex:none}.sq .ic{width:20px;height:20px}.sq.a{background:var(--amberbg);color:var(--amber)}
 .stl{margin-top:8px}
 .row .tx{flex:1;min-width:0}
 .nm{font-family:var(--fh);font-weight:600;font-size:16px;line-height:1.25}
 .sm{font-size:13px;color:var(--mut);margin-top:2px}
 .sm .ic{width:14px;height:14px;margin-right:4px}
 .go{color:var(--line2);width:20px;height:20px}
-.av{width:42px;height:42px;border-radius:50%;background:var(--navybg);color:var(--nfg);display:grid;place-items:center;font-family:var(--fh);font-weight:600;font-size:15px;flex:none}
-.av.lg{width:52px;height:52px;font-size:18px}
 .st{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap}
 .st .ic{width:14px;height:14px}
 .st.n{background:var(--navybg);color:var(--nfg)}.st.g{background:var(--greenbg);color:var(--green-d)}.st.r{background:var(--redbg);color:var(--red)}.st.a{background:var(--amberbg);color:var(--amber)}.st.m{background:var(--bg);color:var(--mut)}
@@ -127,7 +126,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .big .ib{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;flex:none}
 .big .ib .ic{width:28px;height:28px}
 .big .ib.n{background:var(--navybg);color:var(--nfg)}.big .ib.g{background:var(--greenbg);color:var(--green-d)}.big .ib.r{background:var(--redbg);color:var(--red)}.big .ib.m{background:var(--bg);color:var(--mut)}
-.big h2{margin:0;font-family:var(--fh);font-weight:600;font-size:20px;line-height:1.2}
+.big h2,h2.who{margin:0;font-family:var(--fh);font-weight:600;font-size:20px;line-height:1.2}
 .mach{padding:14px 16px;border-top:1px solid var(--line)}
 .ch+.mach{border-top:0}
 .mh{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
@@ -187,7 +186,6 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function todayLong() { var t = S.today ? new Date(S.today + "T12:00:00") : new Date(); return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][t.getDay()] + ", " + MON[t.getMonth()] + " " + t.getDate(); }
   function nameOf(email) { var e = String(email || "").split("@")[0].split("."); return e.map(function (w) { return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""; }).join(" "); }
   function first(n) { return String(n || "").split(" ")[0]; }
-  function initials(n) { var w = String(n || "").trim().split(/\s+/); return esc(((w[0] || "").charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : "")).toUpperCase()); }
   function days(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
   function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }
   function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
@@ -280,7 +278,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     if (!s.aboard.length) h += '<div class="empty">' + ic("user") + "The TDG file has nobody aboard " + esc(s.ship) + ".</div>";
     s.aboard.forEach(function (c) {
       var day = c.signOn ? Math.max(0, days(c.signOn, S.today)) : null;
-      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><span class="av">' + initials(c.name) + '</span><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (day != null ? " · day " + day : "") + "</div>" + contractBar(c) + "</div>" + ic("caret-right", "go") + "</button>";
+      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (day != null ? " · day " + day : "") + "</div>" + contractBar(c) + "</div>" + ic("caret-right", "go") + "</button>";
     });
     $("main").innerHTML = h + "</div>";
   }
@@ -305,7 +303,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       if (S.view !== key) return;
       top(ship, "Briefing", "", "", true);
       var c = b.contract || {}, cur = c.current;
-      var h = '<div class="card"><div class="pad"><div class="big"><span class="av lg">' + initials(b.crew.name) + '</span><div style="min-width:0"><h2>' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "") + "</div></div>";
+      var h = '<div class="card"><div class="pad"><h2 class="who">' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "");
       if (cur && cur.on && cur.off) {
         var late = cur.of && cur.day > cur.of;
         h += '<div class="prog"><div class="lb"><span>Contract</span><b>Day ' + esc(cur.day) + (cur.of ? " of " + esc(cur.of) : "") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
@@ -323,11 +321,11 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
         h += "</div>";
       }
       var feed = b.feed || [];
-      h += '<details class="card fold"><summary class="row"><span class="av" style="background:var(--bg);color:var(--ink2)">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
+      h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
       feed.forEach(function (f) { h += '<div class="feed"><div class="w">' + esc(KIND[f.kind] || f.kind) + (f.who ? " · " + esc(f.who) : "") + " · " + fmtD(f.at, true) + (f.rating != null ? " · " + esc(f.rating) + "/5" : "") + "</div>" + esc(f.text) + "</div>"; });
       h += "</details>";
       if (b.checks && b.checks.length) {
-        h += '<details class="card fold"><summary class="row"><span class="av" style="background:var(--amberbg);color:var(--amber)">' + ic("warning-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">To check on the crew record</div><div class="sm">' + b.checks.length + " open</div></div>" + ic("caret-right", "go") + "</summary>";
+        h += '<details class="card fold"><summary class="row"><span class="sq a">' + ic("warning-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">To check on the crew record</div><div class="sm">' + b.checks.length + " open</div></div>" + ic("caret-right", "go") + "</summary>";
         b.checks.forEach(function (t) { h += '<div class="feed">' + esc(t) + "</div>"; });
         h += "</details>";
       }

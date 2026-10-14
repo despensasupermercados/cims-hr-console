@@ -3661,7 +3661,7 @@ nav button{white-space:nowrap}
 .rcard .rleg i{width:8px;height:8px;border-radius:50%;display:inline-block}
 .rcard .rleg2{font-size:11.5px;color:#3a4a5e;display:flex;align-items:center;gap:6px;margin-top:2px}
 .rcard .rleg2 i{width:7px;height:7px;border-radius:50%;display:inline-block}
-.rcard .rleg2 i.ondot{background:var(--green)}.rcard .rleg2 i.offdot{background:var(--amber)}.rcard{padding:12px 14px}.rhead{display:flex;align-items:center;gap:10px}.ravatar{width:36px;height:36px;border-radius:50%;background:#eef2f7;color:var(--mut);display:flex;align-items:center;justify-content:center;font-family:'Outfit';font-weight:700;font-size:12.5px;flex:0 0 auto}.ravatar.cur{background:#e3f5e8;color:var(--green)}.rhcol{min-width:0}.rrank{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.04em;border:.5px solid var(--line-2);border-radius:4px;padding:1px 5px;vertical-align:1px}.notedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);vertical-align:middle;margin-left:2px}.rrot{margin-top:10px;padding-top:9px;border-top:.5px solid var(--line);display:flex;flex-direction:column;gap:6px}.rrow{display:flex;align-items:baseline;gap:8px;font-size:12.5px;line-height:1.3}.rlbl{flex:0 0 auto;width:22px;color:var(--mut);text-transform:uppercase;font-size:10px;letter-spacing:.04em;font-weight:700}.rcity{min-width:0;color:#3a4a5e}.rdate{margin-left:auto;white-space:nowrap;color:var(--mut);font-size:11.5px}.rtags{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px}
+.rcard .rleg2 i.ondot{background:var(--green)}.rcard .rleg2 i.offdot{background:var(--amber)}.rcard{padding:12px 14px}.rhead{display:flex;align-items:center;gap:10px}.rhcol{min-width:0}.rrank{color:var(--navy);font-weight:800;font-size:9px;letter-spacing:.04em;border:.5px solid var(--line-2);border-radius:4px;padding:1px 5px;vertical-align:1px}.notedot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);vertical-align:middle;margin-left:2px}.rrot{margin-top:10px;padding-top:9px;border-top:.5px solid var(--line);display:flex;flex-direction:column;gap:6px}.rrow{display:flex;align-items:baseline;gap:8px;font-size:12.5px;line-height:1.3}.rlbl{flex:0 0 auto;width:22px;color:var(--mut);text-transform:uppercase;font-size:10px;letter-spacing:.04em;font-weight:700}.rcity{min-width:0;color:#3a4a5e}.rdate{margin-left:auto;white-space:nowrap;color:var(--mut);font-size:11.5px}.rtags{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px}
 .rcard .rdur{display:inline-block;margin-top:6px;background:#eef2f7;color:var(--mut);font-size:10.5px;padding:2px 8px;border-radius:20px}.rcard{position:relative}.rcard .offchip{position:absolute;top:9px;right:9px;font-size:10px;font-weight:800;letter-spacing:.02em;padding:2px 8px;border-radius:20px;background:#eef2f7;color:var(--mut)}.rcard .offchip.crit{background:#fbe7e6;color:var(--danger)}.rcard .offchip.due{background:#fbeed6;color:#9a6410}.rcard.cur .rnm{padding-right:62px}
 .rtags{margin-top:7px;display:flex;flex-wrap:wrap;align-items:center;gap:4px}
 .rtag{font-size:9px;font-weight:800;letter-spacing:.03em;padding:2px 6px;border-radius:6px;border:1px solid var(--line-2);color:var(--mut);background:#fff}
@@ -4031,7 +4031,6 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .ntlist{overflow:auto;flex:1;padding:0 22px 8px}
 .ntgrp{display:flex;align-items:baseline;gap:10px;padding:14px 0 8px;border-bottom:1px solid #EEF1F5;flex-wrap:wrap}.ntgrp b{font-family:'Outfit';font-weight:600;font-size:15px;color:var(--deep)}.ntgrp span{font-size:12.5px;color:var(--mut)}
 .ntitem{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid #EEF1F5}.ntitem.ntarch{opacity:.6}.ntitem.ntarch .nttext{text-decoration:line-through}
-.ntav{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font:700 11px 'Outfit',sans-serif;flex:none}
 .nthead{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.nthead b{font-size:13.5px;color:var(--ink)}.ntwhen{font-size:12px;color:var(--mut);margin-left:auto}
 .nttext{font-size:14px;margin-top:4px;line-height:1.5;color:var(--ink);overflow-wrap:anywhere}
 .ntacts{display:flex;gap:14px;margin-top:6px;font-size:12px;color:var(--mut);flex-wrap:wrap}.ntacts a{color:var(--royal);font-weight:600}
@@ -4047,9 +4046,6 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .pf3st.green{background:#EAF5E4;color:var(--green-d)}.pf3st.red{background:#FBEAE8;color:var(--red)}.pf3st.grey{background:#EEF1F5;color:#4B5563}
 .pf3relay{display:grid;grid-template-columns:minmax(0,180px) minmax(0,1fr) minmax(0,180px);gap:14px;align-items:center;margin:18px 0 6px}
 .pf3p{display:flex;align-items:center;gap:9px;min-width:0}.pf3p.next{justify-content:flex-end;text-align:right}
-.pf3p i{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font:700 11.5px 'Outfit',sans-serif;font-style:normal;background:#EEF1F5;color:#4B5563}
-.pf3p.next i{background:#EAF5E4;color:var(--green-d)}.pf3p.next.em i{background:#FFF3D6;color:#8A5A12;border:1.5px dashed #E8B64A}
-.pf3p.none i{background:#F6F8FB;color:#9AA7B8;border:1.5px dashed #D5DCE5}.pf3p.pf3w i{background:#FFF3D6;color:#8A5A12;border:0}
 .pf3p>div{min-width:0;display:flex;flex-direction:column}.pf3p .pf2who,.pf3p>div>span{font-size:13px;font-weight:700;color:var(--deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pf3p.none>div>span{color:#6B7280}.pf3p.pf3w>div>span{color:#8A5A12}
 .pf3p small{font-size:11.5px;color:var(--mut);line-height:1.35}
@@ -4157,7 +4153,6 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crid .crsub{margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .crid .crsub a{color:var(--mut)}
 .crid .crids{font-size:11.5px;color:#93A1B2;margin-top:6px}
-.crav{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'Outfit';font-weight:700;font-size:14px;flex:0 0 auto}
 .crnm{font-family:'Outfit';font-weight:700;font-size:17px;color:var(--navy);line-height:1.2}
 .crsub{font-size:12.5px;color:var(--mut);margin-top:3px}
 .crsub a{color:var(--mut)}
@@ -7464,7 +7459,7 @@ async function openCrew(id){
   var P=d.profile||{},todayS=new Date().toISOString().slice(0,10);
   var K=P.contracts||[],last=K[0]||null,cur=K.filter(function(x){return x.current&&x.on<=todayS;})[0]||null;
   var F=P.file||null,CN=P.count||null,N=P.numbers||{},PE=P.people||{slots:[],feed:[]},RO=P.rotation||{earmarks:[],dismissed:[],joy:[]};
-  var stc=crStyle(c.status),ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
+  var stc=crStyle(c.status);
   var age=ageOf(c.dob),who=[c.agency_id,(P.identity&&P.identity.km)?('TDG '+P.identity.km):'',age!==''?(age+' yrs'):'',c.gender||''].filter(Boolean).join(' · ');
   var rank=c.rank_override||c.rank_observed||'';
   var ph=fmtPhone(c.phone);
@@ -7487,7 +7482,7 @@ async function openCrew(id){
     +pfNum(pfSeaTime(K,todayS),'Time at sea',pfSrc('tdg',Number(N.seaDays||0).toLocaleString()+' days · the schedule'))
     +pfNum(bz&&!bz.error&&bz.count!=null?bz.count:'—','Bonus count (consecutive)','<span class=pfsrc>'+(bz&&bz.baseline_set?'baseline set':'baseline not set')+'</span>')
     +'</div>';
-  h+='<div class=pf2hd><div class=pf2top><div class=pfid><div class=crav style="width:56px;height:56px;font-size:17px;background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+  h+='<div class=pf2hd><div class=pf2top><div class=pfid><div style="min-width:0">'
     +'<div class=pfnmrow><span class=pfname>'+escHtml(name)+'</span><span class=pfwho>'+escHtml(who)+'</span></div>'
     +'<div class=pfchips><span class=crchip style="background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(c.status||'')+'</span>'+(rank?'<span class=crrank>'+escHtml(rankTag(rank,null).toUpperCase())+'</span>':'')+stateChip
     +(nextEm?'<span class=pfchip>Earmark '+escHtml(niceShip(nextEm.ship))+' · '+fmtDateS(nextEm.on)+'</span>':'<span class=pfchip>No earmark</span>')+'</div>'
@@ -7663,13 +7658,12 @@ async function pfWhySave(on,clear){
 function pfRelay(x,isCur,todayS,K,feed){
   var H=x.handover||{},b=H.before,a=H.after;
   var who=function(p){return '<a href="#" class=pf2who data-sc="'+escHtml(p.sc)+'" onclick="openCrew(this.dataset.sc);return false">'+escHtml(p.name||p.sc)+'</a>';};
-  var ini=function(n){return escHtml(String(n||'?').split(/[ ,]+/).filter(Boolean).slice(0,2).map(function(w){return w.charAt(0);}).join('').toUpperCase()||'?');};
-  var L=b?'<div class="pf3p prev"><i>'+ini(b.name)+'</i><div>'+who(b)+'<small>Handed over '+fmtDateS(b.off)+'</small></div></div>'
-    :'<div class="pf3p prev none"><i>–</i><div><span>Before</span><small>Not on record</small></div></div>';
+  var L=b?'<div class="pf3p prev"><div>'+who(b)+'<small>Handed over '+fmtDateS(b.off)+'</small></div></div>'
+    :'<div class="pf3p prev none"><div><span>Before</span><small>Not on record</small></div></div>';
   var lab=a?(a.src==='earmark'?(a.tdg?'earmark · TDG has them':(a.told?'earmark · told Joy':'earmark · console only')):(a.src==='tdg_earmark'?'TDG earmark · no dates yet':(a.src==='card'?'aboard per relief board':'in the TDG file'))):'';
-  var R=a?'<div class="pf3p next'+(a.src==='earmark'||a.src==='tdg_earmark'?' em':'')+'"><div>'+who(a)+'<small>'+(a.on?((a.on<=todayS?'Took over ':'From ')+fmtDateS(a.on)+' · '):'')+lab+'</small></div><i>'+ini(a.name)+'</i></div>'
-    :(isCur?'<div class="pf3p next none pf3w"><div><span>No reliever yet</span><small>Earmark one on the Keyman board</small></div><i>!</i></div>'
-      :'<div class="pf3p next none"><div><span>After</span><small>Not on record</small></div><i>–</i></div>');
+  var R=a?'<div class="pf3p next'+(a.src==='earmark'||a.src==='tdg_earmark'?' em':'')+'"><div>'+who(a)+'<small>'+(a.on?((a.on<=todayS?'Took over ':'From ')+fmtDateS(a.on)+' · '):'')+lab+'</small></div></div>'
+    :(isCur?'<div class="pf3p next none pf3w"><div><span>No reliever yet</span><small>Earmark one on the Keyman board</small></div></div>'
+      :'<div class="pf3p next none"><div><span>After</span><small>Not on record</small></div></div>');
   // ONE line (Miguel, 13 Oct 2026, the Career box and the card's track: "u can merge these 2 into 1"): who handed over
   // and who takes over above it, the whole career under them — this contract bright, the earlier ones soft, a pin per
   // note / intel / feedback, today, the planned end dashed where a contract ended early.
@@ -7727,8 +7721,8 @@ function openSheet(kind){
   return w;
 }
 function sheetHead(c,title,sub){
-  var st=crStyle(c&&c.status),ini=c?(((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?'):'?';
-  return '<div class=echd><div class=crav style="width:44px;height:44px;font-size:15px;flex:none;background:'+st[0]+';color:'+st[1]+'">'+escHtml(ini)+'</div><div style="flex:1;min-width:0">'
+  var st=crStyle(c&&c.status);
+  return '<div class=echd><div style="flex:1;min-width:0">'
     +'<div class=ectitle>'+title+'</div><div class=ecsub>'+sub+'</div></div><button class="btn ghost ecx" aria-label="Close" onclick="closeCrewModal()">✕</button></div>';
 }
 
@@ -7944,7 +7938,6 @@ function contractPass(on,off,o){
 function passDate(iso){var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=String(iso||'').split('-');if(p.length!==3||!m[parseInt(p[1],10)-1])return escHtml(iso||'');return parseInt(p[2],10)+' '+m[parseInt(p[1],10)-1]+' '+p[0];}
 function card(c){
   var name=[c.first_name,c.last_name].filter(Boolean).join(' ');
-  var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?';
   var stc=crStyle(c.status);
   var age=ageOf(c.dob);
   // The identity column (Miguel, 6 Oct 2026): name, then age · M/F and the SC id on the same row; the ship, the
@@ -7979,7 +7972,7 @@ function card(c){
     edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>'};
   var id=escHtml(c.agency_id);
   return '<div class="crew-card crcard" data-crew="'+id+'">'
-   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+   +'<div class=crid><div style="min-width:0">'
    +'<div class=crnmrow><span class=crnm>'+escHtml(name)+'</span>'+(who?'<span class=crwho>'+escHtml(who)+'</span>':'')+'</div>'
    +shipLine
    +(mail?'<div class=crsub>'+mail+'</div>':'')
@@ -8048,7 +8041,7 @@ async function editCrewModal(id){
   var txt=function(k,el,label,hint){return fld(k,el,label,'<input id='+el+' value="'+iv(c[k])+'" data-k='+k+'>',hint);};
   var dt=function(k,el,label,hint){return fld(k,el,label,'<input id='+el+' type=date value="'+iv(c[k])+'" data-k='+k+'>',hint);};
   var name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
-  var ini=((c.first_name||'').charAt(0)+(c.last_name||'').charAt(0)).toUpperCase()||'?',st=crStyle(c.status);
+  var st=crStyle(c.status);
   var age=ageOf(c.dob),ph=fmtPhone(c.phone);
   var docLeft=function(e){if(!e)return '';var n=dUntil(e);return n<0?'<span style="color:var(--red);font-weight:600">Expired</span>':(n<=90?'<span style="color:var(--amber);font-weight:600">'+n+' days left</span>':fmtDateS(e));};
   var docRow=function(lab,k,el,no,place,opt){
@@ -8057,7 +8050,7 @@ async function editCrewModal(id){
   };
   var stSel='<select id=eStatus data-k=status><option value="">TDG: '+escHtml(F.status||c.status||'—')+'</option>'+['On board','On Vacation','Reserved','Earmarked','Inactive','Not for Rehire'].map(function(s){return '<option'+(O.status===s?' selected':'')+'>'+s+'</option>';}).join('')+'</select>';
   var shSel='<select id=eShip data-k=vessel_observed>'+shipOptions(O.vessel_observed||'').replace('<option value="">—</option>','<option value="">TDG: '+escHtml(F.ship?niceShip(F.ship):(c.vessel_observed?niceShip(c.vessel_observed):'—'))+'</option>')+'</select>';
-  var h='<div class="modcard sheet ec2"><div class=echd><div class=crav style="width:44px;height:44px;font-size:15px;background:'+st[0]+';color:'+st[1]+'">'+ini+'</div><div style="flex:1;min-width:0">'
+  var h='<div class="modcard sheet ec2"><div class=echd><div style="flex:1;min-width:0">'
     +'<div class=ectitle>Edit crew · '+escHtml(name)+'</div><div class=ecsub>'+escHtml(id)+(P.identity&&P.identity.km?' · TDG '+escHtml(P.identity.km):'')+' · Each field starts as TDG’s value. What you change here stays until you reset it.</div></div>'
     +'<button class="btn ghost ecx" aria-label="Close" onclick="closeCrewModal()">✕</button></div>'
     +'<nav class=ecnav><a href="#" onclick="ecGo(\\'ecs_person\\');return false" class=cur>Person</a><a href="#" onclick="ecGo(\\'ecs_status\\');return false">Status &amp; ship</a><a href="#" onclick="ecGo(\\'ecs_docs\\');return false">Documents</a><a href="#" onclick="ecGo(\\'ecs_bonus\\');return false">Bonus</a></nav>'
@@ -8190,7 +8183,6 @@ function ntDraw(){
 var NT_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontime:'On time',acc:'Accuracy',par:'PAR',audit:'Audit'};
 function ntItem(it){
   var when=fmtDateS(String(it.at||'').slice(0,10))+(it.kind==='note'&&it.at&&String(it.at).length>10?' · '+new Date(it.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'');
-  var ini=String(it.who||'?').split(/[ ·]+/).filter(Boolean).slice(0,2).map(function(x){return x.charAt(0);}).join('').toUpperCase()||'?';
   var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6']}[it.kind];
   var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review'}[it.kind];
   var body='',acts='';
@@ -8200,7 +8192,7 @@ function ntItem(it){
     acts='<div class=ntacts><span>'+escHtml([it.confidence?it.confidence+' match':'',it.contractNo!=null?'contract '+it.contractNo:'','never scored',it.edited?'edited':''].filter(Boolean).join(' · '))+'</span><a href="#" onclick="intelEdit(NOTES_STATE.id,\\''+escHtml(it.id)+'\\');return false">Edit summary</a></div>';}
   else if(it.kind==='feedback'){var a=it.answers||{};body='<div class=pf2tk style="margin-top:6px">'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((NT_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div class=nttext>“'+escHtml(a.note)+'”</div>':'')+(it.superseded?'<div class=echint>Earlier answer · kept, not used</div>':'');}
   else body='<div class=nttext><b>'+(it.rating!=null?it.rating+'/5':'')+'</b>'+(it.ship?' · '+escHtml(niceShip(it.ship)):'')+(it.text?' — “'+escHtml(it.text)+'”':'')+'</div>';
-  return '<div class="ntitem'+(it.archived?' ntarch':'')+'"><div class=ntav style="background:'+col[0]+';color:'+col[1]+'">'+escHtml(ini)+'</div><div style="flex:1;min-width:0">'
+  return '<div class="ntitem'+(it.archived?' ntarch':'')+'"><div style="flex:1;min-width:0">'
     +'<div class=nthead><b>'+escHtml(it.who||'Author not recorded')+'</b><span class=pfsrc><i style="background:'+col[1]+'"></i>'+tag+'</span><span class=ntwhen>'+when+'</span></div>'+body+acts+'</div></div>';
 }
 async function ntArchive(nid,restore){
@@ -8372,8 +8364,6 @@ function paintContracts(){
 // One ledger card per crew: the same shape as the Crew tab's card, carrying every column the table had
 // (ship · client, Contracts, Consec. + rank, Salary, Next bonus, Last outcome, Paid, PDF / Inputs / Score).
 function ledgerCard(r){
-  var nm=(r.name||'').split(' ').filter(Boolean);
-  var ini=((nm[0]||'').charAt(0)+(nm[nm.length-1]||'').charAt(0)).toUpperCase()||'?';
   var stc=crStyle(r.status);
   var id=escHtml(r.agency_id);
   var pass=r.active_on?contractPass(r.active_on,r.active_off||null):{html:'<div class=csub style="margin-top:0;font-size:13px">No active contract on file</div>',chip:''};
@@ -8385,7 +8375,7 @@ function ledgerCard(r){
     inputs:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10l-6 6H6a2 2 0 0 1-2-2z"></path><path d="M14 21v-6h6"></path></svg>',
     score:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>'};
   return '<div class="crew-card crcard ledger" data-crew="'+id+'">'
-   +'<div class=crid><div class=crav style="background:'+stc[0]+';color:'+stc[1]+'">'+ini+'</div><div style="min-width:0">'
+   +'<div class=crid><div style="min-width:0">'
    +'<div class=crnmrow><span class=crnm>'+escHtml(r.name)+'</span><span class=crscid>'+id+'</span></div>'
    +(r.status?'<div style="margin-top:5px"><span class=crchip style="height:22px;font-size:12px;background:'+stc[0]+';color:'+stc[1]+'"><i style="background:'+stc[2]+'"></i>'+escHtml(r.status)+'</span></div>':'')
    +shipLine
