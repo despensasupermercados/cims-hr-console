@@ -4177,14 +4177,44 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .ops .oc-kv{font-family:'Outfit';font-size:30px;font-weight:700;line-height:1;letter-spacing:-.02em}
 .ops .oc-kv small{font-size:15px;font-weight:600;color:var(--mut);letter-spacing:0}
 .ops .oc-kc{font-size:12.5px;color:var(--mut);line-height:1.4}
-.ops .oc-cal{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:5px;min-width:980px}
-.ops .oc-day{display:flex;flex-direction:column;gap:5px;padding:8px 6px;border-radius:10px;background:#F7F9FC;min-height:96px;min-width:0}
-.ops .oc-day.we{background:#FBFCFD}.ops .oc-day.today{background:#fff;border:2px solid var(--deep);padding:6px 4px}
-.ops .oc-day.hot{background:#FFF7F7;border:1px solid #F3C2C2}
-.ops .oc-dn{font-size:11.5px;font-weight:700;display:flex;justify-content:space-between}.ops .oc-dn span{color:var(--mut);font-weight:600}
-.ops .oc-chip{display:flex;align-items:flex-start;gap:5px;padding:3px 6px;border-radius:6px;font-size:11px;font-weight:600;line-height:1.3;background:#EEF1F6;color:var(--ink)}
-.ops .oc-chip b{letter-spacing:.05em;flex:none}
-.ops .oc-chip.bd{background:transparent;color:var(--mut);font-weight:500;padding:1px 2px;align-items:center}
+.ops .oc-pg{display:inline-flex;gap:6px}
+.ops .oc-pg button{min-height:32px;padding:0 12px;border-radius:9px;border:1px solid #CFD8E4;background:#fff;color:var(--ink);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.ops .oc-pg button[disabled]{color:#A3AFBF;cursor:default}
+.ops .oc-wk{display:flex;flex-direction:column}
+.ops .oc-wr{display:grid;grid-template-columns:96px minmax(0,1fr);align-items:stretch;min-height:42px}
+.ops .oc-wr+.oc-wr{border-top:1px solid #F0F3F7}.ops .oc-wr.two{min-height:64px}
+.ops .oc-wl{display:flex;align-items:center;padding-right:8px}
+.ops .oc-wd{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+.ops .oc-dh{display:flex;align-items:baseline;gap:6px;padding:6px 8px;border-radius:9px}
+.ops .oc-dh span{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--mut)}
+.ops .oc-dh b{font-family:'Outfit';font-size:18px;line-height:1}
+.ops .oc-dh.today{background:var(--deep);color:#fff}.ops .oc-dh.today span{color:#C9D6E6}
+.ops .oc-dh.we span,.ops .oc-dh.we b{color:#8A97A8}
+.ops .oc-wt{position:relative;min-height:42px;background:repeating-linear-gradient(90deg,transparent 0 calc(100% / 7 - 1px),#EDF1F6 calc(100% / 7 - 1px) calc(100% / 7))}
+.ops .oc-wk.now .oc-wt{background:linear-gradient(90deg,#EAF0F9 0 calc(100% / 7),transparent calc(100% / 7)),repeating-linear-gradient(90deg,transparent 0 calc(100% / 7 - 1px),#EDF1F6 calc(100% / 7 - 1px) calc(100% / 7))}
+.ops .oc-b{position:absolute;top:50%;transform:translateY(-50%);height:24px;display:flex;align-items:center;gap:6px;padding:0 9px;box-sizing:border-box;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:6px}
+.ops .oc-b small{font-size:11.5px;font-weight:500;opacity:.9}
+.ops .oc-b.ab{background:#2E9E5B;color:#fff;border-radius:0 6px 6px 0}
+.ops .oc-b.em{background:#F2B01E;color:var(--ink);border-radius:6px 0 0 6px}
+.ops .oc-b.em.notdg{background:repeating-linear-gradient(135deg,#F2B01E 0 8px,#F6C65A 8px 16px)}
+.ops .oc-b.gap{background:#FDECEC;color:#B42318;border:1px dashed #E5484D;border-radius:6px}
+.ops .two .oc-b{top:calc(50% - 14px)}.ops .two .oc-b.l2{top:calc(50% + 14px)}
+.ops .oc-hd{position:absolute;top:5px;bottom:5px;width:2px;margin-left:-1px;background:var(--deep);border-radius:2px;z-index:1}
+.ops .oc-hd::after{content:"";position:absolute;left:50%;top:-3px;width:8px;height:8px;background:var(--deep);transform:translateX(-50%) rotate(45deg);border-radius:1px}
+.ops .oc-cb{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:22px;padding:0 5px;box-sizing:border-box;border-radius:5px;background:#E9EDF3;color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.06em}
+.ops .oc-cb:hover{background:#D9E1EB}.ops .oc-cb:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-sl{position:absolute;top:6px;bottom:6px;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:4px;padding-left:5px;box-sizing:border-box;z-index:1}
+.ops .oc-pin{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;max-width:calc(100% - 4px);overflow:hidden;text-overflow:ellipsis;box-sizing:border-box}
+.ops .oc-pin:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-pin.p-file{background:#E5EEFA;color:#123F70}
+.ops .oc-none{position:absolute;left:10px;top:50%;transform:translateY(-50%);font-size:12.5px;color:var(--mut)}
+.ops .oc-wlist .oc-none{position:static;transform:none}
+.ops .oc-lg{display:inline-flex;flex-wrap:wrap;gap:4px 14px;align-items:center}.ops .oc-lg i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.ops .oc-wlist{display:none;flex-direction:column}
+.ops .oc-li{display:grid;grid-template-columns:62px minmax(0,1fr);gap:10px;padding:9px 0;border-top:1px solid #F0F3F7;font-size:13px}.ops .oc-li:first-child{border-top:0}
+.ops .oc-lr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:2px 0}
+.ops .oc-dt{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}.ops .oc-dt.ab{background:#2E9E5B}.ops .oc-dt.em{background:#F2B01E}
+@media (max-width:700px){.ops .oc-wkw{display:none}.ops .oc-wlist{display:flex}}
 .ops .oc-seg{display:inline-flex;border:1px solid #CFD8E4;border-radius:9px;overflow-x:auto;max-width:100%;background:#fff}
 .ops .oc-seg button{border:0;background:transparent;font:inherit;font-size:12.5px;font-weight:600;color:var(--mut);padding:0 12px;min-height:34px;cursor:pointer;border-left:1px solid var(--line);white-space:nowrap}
 .ops .oc-seg button:first-child{border-left:0}.ops .oc-seg button[aria-pressed="true"]{background:var(--deep);color:#fff}
@@ -6918,28 +6948,83 @@ function opsKpis(k){
   h+=opsKpi('oc-cal','Bench ready',b.ready?'ok':'warn',b.ready?'Ready':'Thin',b.ready,'of '+b.ashore,'ashore today &middot; '+bd);
   return h+'</div>';
 }
-function opsCal(c){
-  var s=c.summary,parts=[];
-  if(s.change)parts.push(s.change+' crew change'+(s.change>1?'s':''));if(s.file)parts.push(s.file+' TDG file');if(s.score)parts.push(s.score+' score card'+(s.score>1?'s':''));
-  if(s.bench)parts.push(s.bench+' bench arrival'+(s.bench>1?'s':''));if(s.bday)parts.push(s.bday+' birthday'+(s.bday>1?'s':''));
-  if(c.after.length)parts.push('then '+c.after.map(function(a){return escHtml(a.code)+' off '+opsD(a.off);}).join(', '));
-  var STY={off:'background:#E5484D;color:#fff',on:'background:#F2B01E;color:var(--ink)',score:'background:#FDE7E7;color:#9B1C1C',file:'background:#E5EEFA;color:#123F70',bench:'background:#E3F3EA;color:#1F6B3A'};
-  var WORD={off:'off',on:'on',score:'score card',bench:'bench'};
-  var h='<section id=oc-cal class=oc-card style="display:flex;flex-direction:column;gap:12px"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px 16px"><h2 class=oc-h>Next 14 days</h2><p class=oc-sub>'+(parts.join(' &middot; ')||'Nothing on the calendar')+'</p></div>';
-  h+='<div style="overflow-x:auto"><div class=oc-cal>';
-  c.days.forEach(function(d,i){
-    var hot=d.items.some(function(x){return x.kind==='off'||x.kind==='on';}),we=(d.dow==='Sat'||d.dow==='Sun');
-    h+='<div class="oc-day'+(i===0?' today':hot?' hot':we?' we':'')+'"><div class=oc-dn>'+d.dow+' <span>'+parseInt(d.date.slice(8),10)+'</span></div>';
-    if(i===0)h+='<span class=oc-chip style="background:var(--deep);color:#fff">Today</span>';
-    d.items.forEach(function(x){
-      if(x.kind==='bday'){h+='<span class="oc-chip bd" title="'+escHtml(x.title)+'"><b style="color:var(--ink)">'+escHtml(x.code)+'</b>'+opsIc('cake')+'</span>';return;}
-      if(x.kind==='file'){h+='<span class=oc-chip title="'+escHtml(x.title)+'" style="'+STY.file+'">'+escHtml(x.label)+'</span>';return;}
-      h+='<span class=oc-chip title="'+escHtml(x.title)+'" style="'+(STY[x.kind]||'')+'"><b>'+escHtml(x.code)+'</b><span>'+WORD[x.kind]+'</span></span>';
-    });
-    h+='</div>';
+// The next 7 days as lanes (Miguel, 14 Oct 2026, option 1B "deploy"): one lane per ship that changes crew, drawn like
+// the Fleet Gantt (green aboard to the sign-off, amber from the reliever's sign-on, red while the seat is empty), then
+// To do and Birthdays. Always the next 7 days from today; one tap shows the 7 after. A phone gets the same days as a list.
+var OPS_WK=0;
+function opsWeek(w){
+  var n=w.size||7,o=OPS_WK*n,D=w.days.slice(o,o+n);if(!D.length){OPS_WK=0;o=0;D=w.days.slice(0,n);}
+  var ws=D[0].date,we=D[D.length-1].date,N=D.length;
+  function inP(d){return !!d&&d>=ws&&d<=we;}
+  function ix(d){return dayNum(d)-dayNum(ws);}
+  function pos(d){return Math.max(0,Math.min(N,ix(d)+0.5))/N*100;}
+  function dw(d){var x=w.days.filter(function(y){return y.date===d;})[0];return (x?x.dow+' ':'')+parseInt(d.slice(8),10);}
+  var ships=w.ships.filter(function(s){return (!s.off.past&&inP(s.off.date))||(s.on&&inP(s.on.date));});
+  var todo=w.todo.filter(function(x){return inP(x.date);}),bd=w.bdays.filter(function(x){return inP(x.date);});
+  var nsc=0,nfile=0,nbench=0;todo.forEach(function(x){if(x.kind==='score')nsc+=x.people.length;else if(x.kind==='bench')nbench++;else nfile++;});
+  var parts=[(ws.slice(0,7)===we.slice(0,7)?parseInt(ws.slice(8),10):opsD(ws))+' &ndash; '+opsD(we)];
+  if(ships.length)parts.push(ships.length+' crew change'+(ships.length>1?'s':''));if(nsc)parts.push(nsc+' score card'+(nsc>1?'s':''));
+  if(nfile)parts.push('TDG file');if(nbench)parts.push(nbench+' bench ready');if(bd.length)parts.push(bd.length+' birthday'+(bd.length>1?'s':''));
+  var h='<section id=oc-cal class=oc-card style="display:flex;flex-direction:column;gap:10px"><div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 16px">'
+    +'<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px"><h2 class=oc-h>'+(OPS_WK?'The 7 days after':'Next 7 days')+'</h2><p class=oc-sub style="margin:0">'+parts.join(' &middot; ')+'</p></div>'
+    +'<div class=oc-pg><button type=button data-wk=0'+(OPS_WK?'':' disabled')+' aria-label="This week">&lsaquo;</button><button type=button data-wk=1'+(OPS_WK||w.days.length<=n?' disabled':'')+'>Next 7 days &rsaquo;</button></div></div>';
+  // ---- the lanes (a wide screen)
+  h+='<div class=oc-wkw><div class="oc-wk'+(OPS_WK?'':' now')+'">';
+  h+='<div class=oc-wr><div class=oc-wl></div><div class=oc-wd>'+D.map(function(d,i){var we2=(d.dow==='Sat'||d.dow==='Sun');return '<div class="oc-dh'+(i===0&&!OPS_WK?' today':we2?' we':'')+'"><span>'+(i===0&&!OPS_WK?'Today':d.dow)+'</span><b>'+parseInt(d.date.slice(8),10)+'</b></div>';}).join('')+'</div></div>';
+  function bar(cls,l,r,txt,title){if(r-l<=0.01)return '';return '<span class="oc-b '+cls+'" style="left:'+l.toFixed(2)+'%;width:'+(r-l).toFixed(2)+'%" title="'+escHtml(title)+'">'+txt+'</span>';}
+  ships.forEach(function(s){
+    var f=s.off,r=s.on,rd=r&&r.date,b='',lane2=false,mk=[];
+    var g0=0,g1=null;
+    if(f.past)g1=(rd&&rd<=we)?(rd<ws?0:pos(rd)):100;
+    else if(f.date>=ws)g1=pos(f.date);
+    if(g1!=null)b+=bar('ab',g0,g1,'<b>'+escHtml(f.surname)+'</b><small>'+(f.past?'past sign-off':'off '+dw(f.date))+'</small>',f.surname+(f.past?' is past the sign-off ('+opsD(f.date)+')':' signs off '+s.ship+' '+opsD(f.date)));
+    if(!f.past&&inP(f.date))mk.push(pos(f.date));
+    if(r&&rd&&rd<=we){
+      lane2=!f.past&&rd<f.date&&f.date>=ws;
+      var a0=rd<ws?0:pos(rd);if(inP(rd))mk.push(a0);
+      b+='<span class="oc-b em'+(r.tdg?'':' notdg')+(lane2?' l2':'')+'" style="left:'+a0.toFixed(2)+'%;width:'+(100-a0).toFixed(2)+'%" title="'+escHtml(r.surname+' signs on '+s.ship+' '+opsD(rd)+(r.tdg?'':' (not in TDG yet)'))+'"><b>'+escHtml(r.surname)+'</b><small>'+(r.tdg?'joins':'joins &middot; not in TDG')+'</small></span>';
+    }
+    if(!f.past){
+      var e0=f.date<ws?0:pos(f.date);
+      if(!r)b+=bar('gap',e0,100,'<b>No reliever</b>','Nobody planned after '+f.surname);
+      else if(!rd)b+=bar('gap',e0,100,'<b>'+escHtml(r.surname)+'</b><small>no sign-on date</small>',r.surname+' has no sign-on date');
+      else if(rd>f.date&&f.date<=we)b+=bar('gap',e0,rd<=we?pos(rd):100,'<small>empty '+(dayNum(rd)-dayNum(f.date))+' d</small>','The seat is empty from '+opsD(f.date)+' to '+opsD(rd));
+    }
+    mk.forEach(function(p,i){if(i&&Math.abs(p-mk[0])<0.5)return;b+='<i class=oc-hd style="left:'+p.toFixed(2)+'%"></i>';});
+    h+='<div class="oc-wr'+(lane2?' two':'')+'"><div class=oc-wl><button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'" title="Open '+escHtml(s.ship)+' on the board">'+escHtml(s.code)+'</button></div><div class=oc-wt>'+b+'</div></div>';
   });
-  h+='</div></div><div class=oc-sub style="font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center"><span>Ship codes &middot; hover a chip for the name</span><span>off / on = crew change</span><span style="display:inline-flex;align-items:center;gap:5px">'+opsIc('cake')+' birthday</span><span>bench = home six weeks, ready for a seat</span></div></section>';
-  return h;
+  if(!ships.length)h+='<div class=oc-wr><div class="oc-wl oc-lab">Crew changes</div><div class=oc-wt><span class=oc-none>No crew change in these 7 days</span></div></div>';
+  // a pin may run into the empty days after it, never into the next day that has one
+  function slots(items,pin){var by={};items.forEach(function(x){(by[x.date]=by[x.date]||[]).push(x);});var ks=Object.keys(by).sort();return ks.map(function(d,i){var e=i+1<ks.length?ix(ks[i+1]):N;return '<div class=oc-sl style="left:'+(ix(d)/N*100).toFixed(2)+'%;width:'+((e-ix(d))/N*100).toFixed(2)+'%">'+by[d].map(pin).join('')+'</div>';}).join('');}
+  function todoPin(x){
+    if(x.kind==='score')return '<button type=button class="oc-pin p-bad" data-score=1 title="'+escHtml('Feedback not asked: '+x.people.map(function(p){return p.surname+' ('+p.code+', off '+opsD(p.off)+')';}).join(', '))+'">Score cards &middot; '+x.people.map(function(p){return escHtml(p.code);}).join(' ')+'</button>';
+    if(x.kind==='bench')return '<button type=button class="oc-pin p-ok" data-crew="'+escHtml(x.sc)+'" title="Home six weeks: ready for a seat">'+escHtml(x.surname)+' &middot; bench</button>';
+    return '<button type=button class="oc-pin p-file" data-up=1 title="The last AdvancedQuery is from '+opsD(x.last)+'">TDG file '+(x.kind==='late'?'late':'due')+'</button>';
+  }
+  function bdPin(x){return '<button type=button class="oc-pin p-mut" data-crew="'+escHtml(x.sc)+'" title="'+escHtml(x.surname+' ('+x.code+') turns '+x.age)+'">'+opsIc('cake')+escHtml(x.surname)+' &middot; '+x.age+'</button>';}
+  function stack(items){var by={};items.forEach(function(x){by[x.date]=(by[x.date]||0)+1;});var m=0;for(var k in by)m=Math.max(m,by[k]);return m;}
+  if(todo.length)h+='<div class=oc-wr style="min-height:'+(14+30*stack(todo))+'px"><div class="oc-wl oc-lab">To do</div><div class=oc-wt>'+slots(todo,todoPin)+'</div></div>';
+  if(bd.length)h+='<div class=oc-wr style="min-height:'+(14+30*stack(bd))+'px"><div class="oc-wl oc-lab">Birthdays</div><div class=oc-wt>'+slots(bd,bdPin)+'</div></div>';
+  h+='</div></div>';
+  // ---- the same days as a list (a phone)
+  var L='';
+  D.forEach(function(d,i){
+    var it=[];
+    ships.forEach(function(s){
+      if(!s.off.past&&s.off.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><i class="oc-dt ab"></i>'+escHtml(s.off.surname)+' off'+(s.on&&s.on.date===d.date?' &middot; <i class="oc-dt em"></i>'+escHtml(s.on.surname)+' on':s.on?'':' &middot; <b class=oc-crit>no reliever</b>')+'</span>');
+      else if(s.on&&s.on.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><i class="oc-dt em"></i>'+escHtml(s.on.surname)+' joins'+(s.off.past?' &middot; '+escHtml(s.off.surname)+' past sign-off':'')+'</span>');
+    });
+    todo.filter(function(x){return x.date===d.date;}).forEach(function(x){it.push(todoPin(x));});
+    var b2=bd.filter(function(x){return x.date===d.date;});if(b2.length)it.push('<span class=oc-mut style="display:inline-flex;align-items:center;gap:5px">'+opsIc('cake')+b2.map(function(x){return escHtml(x.surname)+' '+x.age;}).join(', ')+'</span>');
+    if(!it.length)return;
+    L+='<div class=oc-li><b>'+(i===0&&!OPS_WK?'Today':dw(d.date))+'</b><div>'+it.map(function(x){return '<div class=oc-lr>'+x+'</div>';}).join('')+'</div></div>';
+  });
+  h+='<div class=oc-wlist>'+(L||'<span class=oc-none>Nothing in these 7 days</span>')+'</div>';
+  var then=(w.later||[]).filter(function(x){return x.off>we;}).slice(0,2);
+  h+='<div class=oc-sub style="font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:space-between;align-items:center;border-top:1px solid #F0F3F7;padding-top:10px;margin:0">'
+    +'<span>'+(then.length?'Then: '+then.map(function(x){return '<b style="color:var(--ink)">'+opsD(x.off)+'</b> '+escHtml(x.code)+' '+escHtml(x.surname)+(x.on?' &rarr; '+escHtml(x.on):' &rarr; <b class=oc-crit>nobody</b>');}).join(' &nbsp;&middot;&nbsp; '):'')+'</span>'
+    +'<span class=oc-lg><span><i style="background:#2E9E5B"></i>aboard</span><span><i style="background:#F2B01E"></i>joining</span><span><i style="background:#E5484D"></i>seat empty</span><span>a ship code opens it on the board</span></span></div>';
+  return h+'</section>';
 }
 function opsRows(rows){
   var keep=rows.filter(function(r){
@@ -7044,17 +7129,24 @@ function opsBind(){
   v.querySelectorAll('[data-f]').forEach(function(b){b.onclick=function(){OPS_F=b.getAttribute('data-f');v.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',String(x===b));});var tb=document.getElementById('oc-rows');if(tb&&OPS)tb.innerHTML=opsRows(OPS.changes.rows);opsBindRows();};});
   v.querySelectorAll('[data-gantt]').forEach(function(b){b.onclick=function(){Promise.resolve(show('rotation')).then(function(){setTimeout(function(){try{fleetGantt();}catch(_){}},150);});};});
   v.querySelectorAll('[data-crew]').forEach(function(b){b.onclick=function(){openCrew(b.getAttribute('data-crew'));};});
-  opsBindRows();
+  opsBindWeek();opsBindRows();
+}
+function opsBindWeek(){
+  var v=document.getElementById('oc-cal');if(!v)return;
+  v.querySelectorAll('[data-wk]').forEach(function(b){b.onclick=function(){if(b.disabled||!OPS)return;OPS_WK=+b.getAttribute('data-wk');v.outerHTML=opsWeek(OPS.week);opsBindWeek();opsBindRows();};});
+  v.querySelectorAll('[data-score]').forEach(function(b){b.onclick=function(){openScoreWindow();};});
+  v.querySelectorAll('[data-up]').forEach(function(b){b.onclick=function(){show('data');};});
+  v.querySelectorAll('[data-crew]').forEach(function(b){b.onclick=function(){openCrew(b.getAttribute('data-crew'));};});
 }
 function opsBindRows(){var v=document.getElementById('view');if(!v)return;v.querySelectorAll('[data-ship]').forEach(function(b){b.onclick=function(){opsGoShip(b.getAttribute('data-ship'));};});}
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var d;try{d=await cachedJson('/api/ops',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load the dashboard'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
-  OPS=d;var w=d.crew||{};
+  OPS=d;OPS_WK=0;var w=d.crew||{};
   var h='<div class=ops><div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px"><div><h2 style="margin:0;font-family:Outfit;font-size:24px">Operational dashboard</h2>'
     +'<p class=oc-sub style="font-size:13px">'+escHtml(fmtDateS(d.today))+(d.tdg.advq?' &middot; reads the TDG file of <b style="color:var(--ink)">'+opsD(d.tdg.advq.at)+'</b>, '+d.tdg.advq.age+' days old':'')+' &middot; '+d.kpis.aboard.ships+' ships</p></div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type=button class="btn ghost" data-gantt=1>Fleet Gantt</button><button type=button class=btn onclick="show(&#39;data&#39;)">Upload TDG file</button></div></div>';
-  h+=opsKpis(d.kpis)+opsCal(d.calendar)+opsChanges(d.changes);
+  h+=opsKpis(d.kpis)+opsWeek(d.week)+opsChanges(d.changes);
   h+='<div class=oc-row3>'+opsCoverage(d.coverage)+opsTdg(d.tdg)+opsDocs(d.docsAboard)+'</div>';
   h+='<div class=oc-row3>'+opsCrewCard(w)+opsTravel(d.travel)+'</div>';
   h+='<p class=oc-sub style="font-size:11.5px">Live from Cloudflare D1 &middot; ship codes are the cruise lines&#39; own &middot; every tile and row opens the screen that acts on it.</p></div>';

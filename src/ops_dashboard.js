@@ -3,7 +3,7 @@
 // console already computes (rotationSections) plus a few small reads, and returns what the page draws. It decides
 // nothing about a contract: every date, status and verdict is the board's (§10d, §11); this module only sorts them
 // into the questions Rita asks — which seat is past its sign-off, who has no reliever, whose reliever cannot sail,
-// what happens in the next 14 days, what TDG has to correct. Each fact is said ONCE on the page; the top tiles are
+// what happens in the next 7 days, what TDG has to correct. Each fact is said ONCE on the page; the top tiles are
 // the headline and point at the one place that holds the detail. Nothing here is money (§1) or billing (§10b).
 import { shipCode } from "./ship_codes.js";
 
@@ -16,7 +16,8 @@ const surname = (name) => { const p = String(name || "").trim().split(/\s+/); re
 
 export const WINDOW_CHANGES = 90;  // the crew-change list (Miguel: "the crew change is the next 90 days")
 export const WINDOW_DUE = 30;      // travel and the sign-off kit are due in the last 30 days
-export const WINDOW_AGENDA = 14;   // the calendar strip
+export const WINDOW_AGENDA = 14;   // the week view's data: this week and the next
+export const WEEK = 7;             // the days the page shows at once
 export const BENCH_MIN = 42, BENCH_MAX = 183; // home six weeks to six months (the earmark bench, §10d)
 const REQUIRED_DOCS = [["med", "Medical"], ["sirb", "Seaman's book"], ["pp", "Passport"], ["usv", "US visa"]]; // Schengen is optional
 const DOC_NAMES = { "seaman's book": "Seaman's book", "us c1/d visa": "US visa", "us visa": "US visa", medical: "Medical", passport: "Passport", schengen: "Schengen" };
@@ -141,37 +142,45 @@ export function buildOps(input) {
   const wf = dash.workforce || {};
   const ashore = (wf.on_vacation || 0) + (wf.reserved || 0);
 
-  // ---- the next 14 days
+  // ---- the next 7 days, as lanes (Miguel, 14 Oct 2026: "you can display 7 days: always the next 7 days when you open the
+  // console"; option 1B "deploy"): one lane per ship that changes crew, drawn like the Fleet Gantt (who is aboard to the
+  // sign-off, who joins from the sign-on), then To do and Birthdays. The data covers two weeks so the page can page once.
   const end = addDays(today, WINDOW_AGENDA - 1), inWin = (d) => d && d >= today && d <= end;
   const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const days = []; for (let i = 0; i < WINDOW_AGENDA; i++) { const d = addDays(today, i); days.push({ date: d, dow: DOW[new Date(t(d)).getUTCDay()], items: [] }); }
-  const put = (d, item) => { const day = days.find((x) => x.date === d); if (day) day.items.push(item); };
-  const summary = { change: 0, file: 0, score: 0, bench: 0, bday: 0 };
+  const days = []; for (let i = 0; i < WINDOW_AGENDA; i++) { const d = addDays(today, i); days.push({ date: d, dow: DOW[new Date(t(d)).getUTCDay()] }); }
+  const ships = [];
   for (const r of rows) {
-    if (r.overdue) continue;
-    if (inWin(r.off)) { put(r.off, { kind: "off", code: r.code, title: r.name + " signs off " + r.ship }); summary.change++; }
-    if (r.reliever && inWin(r.reliever.signOn)) put(r.reliever.signOn, { kind: "on", code: r.code, title: r.reliever.name + " signs on " + r.ship });
+    const on = r.reliever && r.reliever.signOn;
+    if (!((!r.overdue && inWin(r.off)) || inWin(on))) continue;
+    ships.push({
+      code: r.code, ship: r.ship,
+      off: { surname: r.surname, date: r.off, past: r.overdue },
+      on: r.reliever ? { surname: r.reliever.surname, date: on || null, tdg: r.reliever.tdg } : null,
+      first: [r.overdue ? null : r.off, on].filter(inWin).sort()[0],
+    });
   }
-  for (const q of (queue.recent || [])) {
-    const fb = q.feedback || {}; const asked = Object.values(fb).some((v) => v && v !== "none");
-    if (!asked) { put(today, { kind: "score", code: shipCode(q.ship || q.vessel), title: q.name + " signed off " + (q.ship || "") + " " + (q.signOff || "") + ": feedback not asked" }); summary.score++; }
-  }
+  ships.sort((a, b) => a.first.localeCompare(b.first) || a.code.localeCompare(b.code));
+  const todo = [];
+  const unasked = (queue.recent || []).filter((q) => !Object.values(q.feedback || {}).some((v) => v && v !== "none"));
+  if (unasked.length) todo.push({ kind: "score", date: today, people: unasked.map((q) => ({ sc: q.agency_id || null, code: shipCode(q.ship || q.vessel), surname: sn(q.name, q.agency_id), off: iso(q.signOff) })) });
   const advq = sources.registry && iso(sources.registry.at);
   if (advq) {
     const due = addDays(advq, 7);
-    if (due < today) { put(today, { kind: "file", code: "", label: "TDG file late", title: "The last AdvancedQuery is from " + advq }); summary.file++; }
-    else if (inWin(due)) { put(due, { kind: "file", code: "", label: "TDG file", title: "AdvancedQuery due (weekly; the last one is from " + advq + ")" }); summary.file++; }
+    if (due < today) todo.push({ kind: "late", date: today, last: advq });
+    else if (inWin(due)) todo.push({ kind: "file", date: due, last: advq });
   }
-  for (const b of benchList) if (inWin(b.ready)) { put(b.ready, { kind: "bench", code: b.code, title: b.name + ": six weeks home, ready for a seat" }); summary.bench++; }
+  for (const b of benchList) if (inWin(b.ready)) todo.push({ kind: "bench", date: b.ready, sc: b.sc, surname: b.surname, code: b.code });
+  todo.sort((a, b) => a.date.localeCompare(b.date));
+  const bdays = [];
   for (const c of crew) {
     if (!c.dob || !people[c.sc]) continue;
     const md = String(c.dob).slice(5, 10); if (md.length !== 5) continue;
     const y = +today.slice(0, 4), cand = [y + "-" + md, (y + 1) + "-" + md].find(inWin);
-    if (cand) { put(cand, { kind: "bday", code: people[c.sc], title: [c.first, c.last].filter(Boolean).join(" ") + " · birthday" }); summary.bday++; }
+    if (cand) bdays.push({ date: cand, sc: c.sc, surname: c.last || surname(c.first), code: people[c.sc], age: +cand.slice(0, 4) - +String(c.dob).slice(0, 4) });
   }
-  const ORDER = { off: 0, on: 1, score: 2, file: 3, bench: 4, bday: 5 };
-  for (const d of days) d.items.sort((a, b) => ORDER[a.kind] - ORDER[b.kind]);
-  const after = rows.filter((r) => !r.overdue && r.off > end).slice(0, 2).map((r) => ({ code: r.code, off: r.off }));
+  bdays.sort((a, b) => a.date.localeCompare(b.date) || a.surname.localeCompare(b.surname));
+  const later = rows.filter((r) => !r.overdue && r.off > addDays(today, WEEK - 1)).slice(0, 6)
+    .map((r) => ({ code: r.code, off: r.off, surname: r.surname, on: r.reliever ? r.reliever.surname : null }));
 
   // ---- the headline tiles: each points at the one place that holds the detail
   const overdueRows = rows.filter((r) => r.overdue), coming = rows.filter((r) => !r.overdue);
@@ -207,7 +216,7 @@ export function buildOps(input) {
 
   return {
     today, kpis,
-    calendar: { days, summary, after },
+    week: { days, size: WEEK, ships, todo, bdays, later },
     changes: { rows, counts },
     coverage: { brands, tiers },
     tdg, docsAboard,
