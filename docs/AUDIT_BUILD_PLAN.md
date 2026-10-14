@@ -16,12 +16,13 @@ builds that and nothing else. Anything not in those two files is a question for 
 4. The import of the 61 Forms audits (rows now; files when the zip arrives).
 5. The web rail (W1): the same column with a rail, nothing more.
 
-**Not in round 1** (round 2, after Miguel's decisions, mostly in HON):
-- The automated assessment: Pattern 43 reading, Management List parsing, parts-past-life against on-board / on-order,
-  Ordering Schedule due dates, the verdict email (A7), Rolando's confirmation page (R1).
-- In its place, round 1 sends a plain **"documents in"** email to the same recipients: what came in, per machine, the
-  machines reported down, the blind count's lines that differ from OBP, links to every file. No verdict, no reading.
-  The gate works exactly as designed; only the automated judgment is missing.
+6. **Reading the files (PR G, moved INTO round 1 on Miguel's word, 14 Oct 2026: "remember the reading of the files is
+   important so u cant forget this").** See §2 C. Pattern 43 is MEASURED and the Management List is READ by HON's own
+   readers, called through a service binding; the assessment email (A7) is built from those reads, the OBP lines, the
+   open orders and the Ordering Schedule; Rolando confirms a Pattern 43 finding (R1) before it is a record.
+
+**Round 2**: anything the reads cannot yet carry — Rolando's rule 3 (one-side density) and full-tone marks, which HON
+does not measure yet, and a reader for the hand-filled condition form beyond what HON transcribes.
 
 **Never in this project without Miguel's own merge** (§1): the audit feeding Dexter's contributor window or any bonus
 input; anything on the Score Card page; the supervisor evaluation. **Never at all**: an automated Pattern 43 verdict
@@ -63,9 +64,30 @@ table degrades to "register unavailable" on the page, never a 500. Round 2 may m
 these reads behind HON routes if HON wants to own them.
 
 **B. The seafarer's upload page is this Worker's, built on the /sbm pattern, not HON's page.** Same token mechanics,
-same bucket, same mailer. HON's upload checks (12 pages, four channels, client-side shrink) are re-implemented here
-in a pure module with the same rules, pinned by tests. HON's assessment pipeline has never fired in production;
-round 1 does not depend on it.
+same mailer, files in `cims-audit-files`. The checks that need no reader (file present, not empty, a PDF or image,
+under the size ceiling) run here.
+
+**C. The files are read by HON, never by a copy of HON** (decided 14 Oct 2026, "do what is best"). HON already holds
+the two readers, tested and calibrated: `p43Measure.js` (Pattern 43 decoded page by page in the Worker and measured
+against Rolando's six rules — no model guesses a part; version 5) and `mmlRead.js` (the Management List transcribed:
+which of the THREE documents it is, every life % row with its part number and reset count; version 4), plus
+`PARTS_RULE` and `recommendationFor` ("Recommendation: have this machine looked at. Parts are changed on copy quality,
+not on a count."). Copying 1,200 lines that are still being calibrated would fork the reader the day Rolando moves a
+limit. So:
+- HON gains a **named RPC entrypoint** (`AuditReader`, a `WorkerEntrypoint` with `measurePattern43(bytes)` and
+  `readManagementList(bytes, type)`), stores nothing, returns HON's own state, legend and findings. A named entrypoint
+  is reachable ONLY through a service binding, never from the internet — no secret to share, nothing for anyone to
+  paste. One small PR in `cims-hon`, its own tests, proven by `/api/health` there.
+- This worker binds it (`[[services]] binding = "HON" service = "cims-hon" entrypoint = "AuditReader"`).
+- **Read at upload, on the crew's page.** The crew sees what the reader found right away: "12 pages, every colour
+  found" or "this is the User Management List — the settings listing. It carries no part life. Print the Machine
+  Management List." A wrong document is caught while he is still at the press, not by Dexter on the ship. A read that
+  did not finish (page closed, timeout) is picked up by the hourly sweep. The gate needs every file READ, not just
+  sent.
+- What reaches the assessment is labelled with its source and version ("measured by HON, ruler v5"; "read from the
+  Machine management list of 8 Oct"). Pattern 43 findings stay "measured, Rolando to confirm" until he does.
+- Cost, stated: the Management List read is a vision call on HON's key (one per machine per audit); Pattern 43 is
+  pure measurement, no model.
 
 ## 3. The PRs, in order (each small, green, proven live before the next starts)
 
@@ -79,6 +101,7 @@ sends mail or writes crew-facing records (§4) → merge → **prove live throug
 | C | **Request, upload, count, gate, sweep** | `src/audit_request.js` (install pattern like `installSbm`): request create/resend/extend, token page `/audit/u`, uploads to R2 with checks, the blind count (OBP lines from `HON_DB`, no on-hand served), machine-down, the "documents in" email, reminders at 12 h / 24 h in `scheduled()`; `src/emails/hr.audit.request.v1.js`, `hr.audit.reminder.v1.js`, `hr.audit.docsin.v1.js` | token tests (sign, expiry, single use), upload checks (size, 12 pages, 4 channels), count completeness, addressing (ship mailbox + personal cc; none → blocked), gate (no complete request → no visit), sweep idempotence | On **staging** with Miguel's test address as the ship mailbox: request sent, upload page works from a phone, count saves line by line, gate opens; then prod with one real ship Miguel names |
 | D | **The audit, filing, profile, follow-ups, history** | `src/audit.js`, `src/audit_ui.js` (B1–B7, review, offline file-and-sync), `src/worker.js` (visit routes, `apiAuditFile`, history), `src/crew_profile.js` (the audit card in the feed), `src/emails/hr.audit.filed.v1.js`, `hr.audit.dispatch.v1.js` (Rita) | step validation (3 or below needs a sentence), filing writes once (append-only), profile feed shape, follow-up open/close, the crew-facing statement and email exclude the audit | File one audit on staging; see the card on the profile; files in the bucket; follow-up row; history row; then prod |
 | E | **Import of the 61** | `src/audit_import.js` (pure mapping: ship codes → vessel, names through `buildBridge`, two-person rows, test rows), `src/worker.js` (dry run / apply), the zip loader for files | mapping tests on the real export (51 settled / held / dropped counts pinned) | Dry run shows 37 settled, 14 held, 10 dropped; apply writes only settled rows; files land by name |
+| G | **Reading the files + the assessment** (right after C) | `cims-hon`: `src/worker.js` exports `AuditReader` (named entrypoint, stores nothing), its test. This repo: `wrangler.toml` (`HON` service with `entrypoint`), `src/audit_read.js` (calls HON, stores the read on `audit_upload`, the gate counts a file only once read), `src/audit_assess.js` (pure: parts past life × on board × on order, copy quality decides; the blind count against OBP with the 1 Oct timing rule; Ordering Schedule due dates without a PO; the For-the-visit list), `src/emails/hr.audit.assessment.v1.js`, Rolando's confirm page `/audit/p43?t=` | assessment shape on fixtures taken from real HON reads; "replace" never appears; a settings listing asks for the Machine Management List; an unread file keeps the gate shut; HON down = "read pending", never a clean machine | On staging: a real bundle and a real 52-page Machine Management List uploaded through the crew page, the read shown on the page, the assessment email to Miguel only |
 | F | **Web rail** | `src/audit_ui.js` only | none beyond render guards | The same page at 1200px shows the rail and the side panel |
 
 ### 3a. Staging cannot send an email today (found 14 Oct 2026, fixed in PR A)
@@ -98,32 +121,33 @@ its own session: Dexter asks for one magic link there, built on the request's or
 same. The seafarer's upload link is built on the origin of the request that created it, never on the `ORIGIN` constant
 `installSbm` carries.
 
-Rough effort: A two days, B one, C three, D three, E one, F half. Staging validation and the first live audit sit
+Rough effort: A two days, B one, C three, G three, D three, E one, F half. Order: A, B, C, G, D, E, F. Staging validation and the first live audit sit
 between C/D and the merge of each. If Dexter's next visit lands before D is merged, the request phase (C) can run
 alone and the audit on paper, once.
 
 ## 4. Checklist before PR A can merge (what I need, and from whom)
 
 **Miguel / dashboard**
-- [ ] Add `audit.cims.work` as a custom domain on `cims-hr-console` (Workers & Pages → cims-hr-console → Settings →
-      Domains & Routes → Add → Custom domain). Nothing in the repo does this.
-- [ ] The bucket: reuse `cims-audit-evidence` (say whose it is) or let me create `cims-audit-files` (+ `-staging`). It
-      must exist before PR A deploys, or the deploy fails on the binding.
-- [ ] The five recipients of the "documents in" and "filed" emails (Ray, Rolando, Ohji, Jonathan, you) as one `AUDIT_TO`
-      line in `[vars]`, like `DEPLOY_TO`. Jonathan's address is the one I do not have; without it the list ships with
-      four and the email says so.
-- [ ] Confirm the two D1 read bindings (choice A above): the audit reads HON's machine register and OBP lines and the
-      timecard's ship mailboxes directly, read-only.
-- [ ] The phone: a DG3 iPhone or Dexter's own (changes nothing in code, changes the install instructions).
-- [ ] The first ship for the live run, and which address stands in for the ship mailbox on staging.
+- [ ] Add `audit.cims.work` as a custom domain on `cims-hr-console`. Miguel does it in Chrome with the prompt given on
+      14 Oct 2026 (Workers & Pages → cims-hr-console → Settings → Domains & Routes → Add → Custom domain). Until PR A is
+      live the address simply shows the console's login.
+- [x] The bucket: `cims-audit-files` and `cims-audit-files-staging`, created 14 Oct 2026 (Miguel: "rather u create a cims
+      audit file"). `cims-audit-evidence` is left alone.
+- [x] The five recipients as one `AUDIT_TO` line in `[vars]`: Ray.Guerra, Rolando.Abellan, Ohji.Miranda,
+      Jonathan.Alonzo, Miguel.Sanmartin (all @dg3.com). Staging: Miguel only.
+- [x] The two D1 read bindings (choice A) and the HON reader binding (choice C): "do what is best".
+- [x] The phone: iPhone 17 (Safari, Add to Home Screen; the offline store is IndexedDB, which iOS keeps for an
+      installed app).
+- [ ] The first ship for the live run (needed by C's prod step, not by A).
 
 **Data (Rita / Ray)**
-- [ ] The timecard's `ship_contact` rows at `@celebrity.com`: confirm or fix before the first Celebrity request.
+- [x] The timecard's `ship_contact` rows at `@celebrity.com`: Miguel, 14 Oct 2026, "celebrity emails are ok".
 - [ ] The zip of the Forms "Printshop Audit" folder (PR E; rows import without it).
 
 **Decisions still open, needed by round 2, not by round 1**
-- [ ] "Due date missed" = Ordering Schedule date with no PO · no override of the gate at all · HON as the reader ·
-      the Pattern 43 reversal to the Brain.
+- [ ] "Due date missed" = an Ordering Schedule `due_date` passed with no PO on it (`schedule_order.po_number` empty) —
+      PR G uses this and the email says the definition; Miguel corrects it if wrong. No override of the gate at all —
+      as designed.
 
 ## 5. How each PR stays on the rails
 
