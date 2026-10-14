@@ -154,7 +154,11 @@ test("the week is drawn as lanes on a wide screen and as a list on a phone, and 
   assert.match(SRC, /@media \(max-width:700px\)\{\.ops \.oc-wkw\{display:none\}\.ops \.oc-wlist\{display:flex\}\}/);
   assert.match(SRC, /\.ops \.oc-b\.ab\{background:#2E9E5B/, "the Fleet Gantt's aboard green");
   assert.match(SRC, /function opsGoShip\(ship,sc\)/, "a crew name opens that crew's card on the Keyman board (Miguel, 14 Oct 2026)");
-  assert.match(SRC, /card=q&&sec\?sec\.querySelector\(q\):null/, "the card is found on that ship by its data-crew id");
+  assert.match(SRC, /q=sc\?'\.rcard\[data-crew="'/, "only the card itself (.rcard) is matched, never its toggles, Remove button or a history card (Safari, 14 Oct 2026: 'the wrong person')");
+  assert.match(SRC, /function opsGoShip\(ship,sc\)\{Promise\.resolve\(show\('rotation'\)\)\.then\(function\(\)\{\s*try\{ROT_F='';ROT_BRANDS=\[\];ROT_SHIPS=\[\];ROT_FIND='';ROT_YEAR='';ROT_MONTHS=\[\];/,
+    "a jump clears a Keyman search / tile / facet left from before (a crew profile's Keyman link leaves the search on its ship)");
+  assert.match(SRC, /rotRail\(secs\.length,allSecs\);\n  if\(typeof opsReaim==='function'\)opsReaim\(\);/, "a board redraw right after the jump re-aims at the card");
+  assert.match(SRC, /all\[i\]\.style\.contentVisibility='visible';if\(all\[i\]===sec\)break;/, "the ships above are laid out for real before the scroll");
   assert.match(SRC, /role=button tabindex=0 data-ship="'\+escHtml\(s\.ship\)\+'"'\+\(r\.sc\?' data-sc=/, "the reliever's bar carries the ship and the crew");
   assert.match(SRC, /return x\?x\.dow\+' '\+parseInt\(d\.slice\(8\),10\):opsD\(d\);/, "a date outside the two weeks reads '31 Oct', never a bare '31'");
   assert.match(SRC, /\.ops \.oc-kpi\{align-items:center;text-align:center\}/, "the five tiles read centred (Miguel, 14 Oct 2026: \"also center this\")");
