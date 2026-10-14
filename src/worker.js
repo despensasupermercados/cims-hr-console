@@ -4195,6 +4195,9 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .ops .oc-wk.now .oc-wt{background:linear-gradient(90deg,#EAF0F9 0 calc(100% / 7),transparent calc(100% / 7)),repeating-linear-gradient(90deg,transparent 0 calc(100% / 7 - 1px),#EDF1F6 calc(100% / 7 - 1px) calc(100% / 7))}
 .ops .oc-b{position:absolute;top:50%;transform:translateY(-50%);height:24px;display:flex;align-items:center;gap:6px;padding:0 9px;box-sizing:border-box;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:6px}
 .ops .oc-b small{font-size:11.5px;font-weight:500;opacity:.9}
+.ops .oc-b[data-ship]{cursor:pointer}.ops .oc-b[data-ship]:hover{filter:brightness(1.06);box-shadow:0 0 0 2px rgba(20,45,72,.18)}.ops .oc-b:focus-visible{outline:2px solid var(--royal);outline-offset:2px}
+.ops .oc-nm{color:inherit;text-decoration:none;font-weight:600}.ops .oc-nm:hover{text-decoration:underline}
+.opshl{animation:opshl 2.4s ease-out}@keyframes opshl{0%,35%{box-shadow:0 0 0 4px rgba(242,176,30,.95),0 8px 24px rgba(20,45,72,.18)}100%{box-shadow:0 0 0 0 rgba(242,176,30,0)}}
 .ops .oc-b.ab{background:#2E9E5B;color:#fff;border-radius:0 6px 6px 0}
 .ops .oc-b.em{background:#F2B01E;color:var(--ink);border-radius:6px 0 0 6px}
 .ops .oc-b.em.notdg{background:repeating-linear-gradient(135deg,#F2B01E 0 8px,#F6C65A 8px 16px)}
@@ -6959,7 +6962,7 @@ function opsWeek(w){
   function inP(d){return !!d&&d>=ws&&d<=we;}
   function ix(d){return dayNum(d)-dayNum(ws);}
   function pos(d){return Math.max(0,Math.min(N,ix(d)+0.5))/N*100;}
-  function dw(d){var x=w.days.filter(function(y){return y.date===d;})[0];return (x?x.dow+' ':'')+parseInt(d.slice(8),10);}
+  function dw(d){var x=w.days.filter(function(y){return y.date===d;})[0];return x?x.dow+' '+parseInt(d.slice(8),10):opsD(d);}
   var ships=w.ships.filter(function(s){return (!s.off.past&&inP(s.off.date))||(s.on&&inP(s.on.date));});
   var todo=w.todo.filter(function(x){return inP(x.date);}),bd=w.bdays.filter(function(x){return inP(x.date);});
   var nsc=0,nfile=0,nbench=0;todo.forEach(function(x){if(x.kind==='score')nsc+=x.people.length;else if(x.kind==='bench')nbench++;else nfile++;});
@@ -6972,24 +6975,24 @@ function opsWeek(w){
   // ---- the lanes (a wide screen)
   h+='<div class=oc-wkw><div class="oc-wk'+(OPS_WK?'':' now')+'">';
   h+='<div class=oc-wr><div class=oc-wl></div><div class=oc-wd>'+D.map(function(d,i){var we2=(d.dow==='Sat'||d.dow==='Sun');return '<div class="oc-dh'+(i===0&&!OPS_WK?' today':we2?' we':'')+'"><span>'+(i===0&&!OPS_WK?'Today':d.dow)+'</span><b>'+parseInt(d.date.slice(8),10)+'</b></div>';}).join('')+'</div></div>';
-  function bar(cls,l,r,txt,title){if(r-l<=0.01)return '';return '<span class="oc-b '+cls+'" style="left:'+l.toFixed(2)+'%;width:'+(r-l).toFixed(2)+'%" title="'+escHtml(title)+'">'+txt+'</span>';}
+  function bar(cls,l,r,txt,title,ship,sc){if(r-l<=0.01)return '';return '<span class="oc-b '+cls+'" role=button tabindex=0 data-ship="'+escHtml(ship)+'"'+(sc?' data-sc="'+escHtml(sc)+'"':'')+' style="left:'+l.toFixed(2)+'%;width:'+(r-l).toFixed(2)+'%" title="'+escHtml(title)+'">'+txt+'</span>';}
   ships.forEach(function(s){
     var f=s.off,r=s.on,rd=r&&r.date,b='',lane2=false,mk=[];
     var g0=0,g1=null;
     if(f.past)g1=(rd&&rd<=we)?(rd<ws?0:pos(rd)):100;
     else if(f.date>=ws)g1=pos(f.date);
-    if(g1!=null)b+=bar('ab',g0,g1,'<b>'+escHtml(f.surname)+'</b><small>'+(f.past?'past sign-off':'off '+dw(f.date))+'</small>',f.surname+(f.past?' is past the sign-off ('+opsD(f.date)+')':' signs off '+s.ship+' '+opsD(f.date)));
+    if(g1!=null)b+=bar('ab',g0,g1,'<b>'+escHtml(f.surname)+'</b><small>'+(f.past?'past sign-off':'off '+dw(f.date))+'</small>',f.surname+(f.past?' is past the sign-off ('+opsD(f.date)+')':' signs off '+s.ship+' '+opsD(f.date))+' - open the card',s.ship,f.sc);
     if(!f.past&&inP(f.date))mk.push(pos(f.date));
     if(r&&rd&&rd<=we){
       lane2=!f.past&&rd<f.date&&f.date>=ws;
       var a0=rd<ws?0:pos(rd);if(inP(rd))mk.push(a0);
-      b+='<span class="oc-b em'+(r.tdg?'':' notdg')+(lane2?' l2':'')+'" style="left:'+a0.toFixed(2)+'%;width:'+(100-a0).toFixed(2)+'%" title="'+escHtml(r.surname+' signs on '+s.ship+' '+opsD(rd)+(r.tdg?'':' (not in TDG yet)'))+'"><b>'+escHtml(r.surname)+'</b><small>'+(r.tdg?'joins':'joins &middot; not in TDG')+'</small></span>';
+      b+='<span class="oc-b em'+(r.tdg?'':' notdg')+(lane2?' l2':'')+'" role=button tabindex=0 data-ship="'+escHtml(s.ship)+'"'+(r.sc?' data-sc="'+escHtml(r.sc)+'"':'')+' style="left:'+a0.toFixed(2)+'%;width:'+(100-a0).toFixed(2)+'%" title="'+escHtml(r.surname+' signs on '+s.ship+' '+opsD(rd)+(r.tdg?'':' (not in TDG yet)')+' - open the card')+'"><b>'+escHtml(r.surname)+'</b><small>'+(r.tdg?'joins':'joins &middot; not in TDG')+'</small></span>';
     }
     if(!f.past){
       var e0=f.date<ws?0:pos(f.date);
-      if(!r)b+=bar('gap',e0,100,'<b>No reliever</b>','Nobody planned after '+f.surname);
-      else if(!rd)b+=bar('gap',e0,100,'<b>'+escHtml(r.surname)+'</b><small>no sign-on date</small>',r.surname+' has no sign-on date');
-      else if(rd>f.date&&f.date<=we)b+=bar('gap',e0,rd<=we?pos(rd):100,'<small>empty '+(dayNum(rd)-dayNum(f.date))+' d</small>','The seat is empty from '+opsD(f.date)+' to '+opsD(rd));
+      if(!r)b+=bar('gap',e0,100,'<b>No reliever</b>','Nobody planned after '+f.surname+' - open the ship',s.ship,null);
+      else if(!rd)b+=bar('gap',e0,100,'<b>'+escHtml(r.surname)+'</b><small>no sign-on date</small>',r.surname+' has no sign-on date - open the card',s.ship,r.sc);
+      else if(rd>f.date&&f.date<=we)b+=bar('gap',e0,rd<=we?pos(rd):100,'<small>empty '+(dayNum(rd)-dayNum(f.date))+' d</small>','The seat is empty from '+opsD(f.date)+' to '+opsD(rd),s.ship,null);
     }
     mk.forEach(function(p,i){if(i&&Math.abs(p-mk[0])<0.5)return;b+='<i class=oc-hd style="left:'+p.toFixed(2)+'%"></i>';});
     h+='<div class="oc-wr'+(lane2?' two':'')+'"><div class=oc-wl><button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'" title="Open '+escHtml(s.ship)+' on the board">'+escHtml(s.code)+'</button></div><div class=oc-wt>'+b+'</div></div>';
@@ -7012,8 +7015,8 @@ function opsWeek(w){
   D.forEach(function(d,i){
     var it=[];
     ships.forEach(function(s){
-      if(!s.off.past&&s.off.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><i class="oc-dt ab"></i>'+escHtml(s.off.surname)+' off'+(s.on&&s.on.date===d.date?' &middot; <i class="oc-dt em"></i>'+escHtml(s.on.surname)+' on':s.on?'':' &middot; <b class=oc-crit>no reliever</b>')+'</span>');
-      else if(s.on&&s.on.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><i class="oc-dt em"></i>'+escHtml(s.on.surname)+' joins'+(s.off.past?' &middot; '+escHtml(s.off.surname)+' past sign-off':'')+'</span>');
+      if(!s.off.past&&s.off.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><a href="#" class=oc-nm data-ship="'+escHtml(s.ship)+'" data-sc="'+escHtml(s.off.sc||'')+'"><i class="oc-dt ab"></i>'+escHtml(s.off.surname)+'</a> off'+(s.on&&s.on.date===d.date?' &middot; <a href="#" class=oc-nm data-ship="'+escHtml(s.ship)+'" data-sc="'+escHtml(s.on.sc||'')+'"><i class="oc-dt em"></i>'+escHtml(s.on.surname)+'</a> on':s.on?'':' &middot; <b class=oc-crit>no reliever</b>')+'</span>');
+      else if(s.on&&s.on.date===d.date)it.push('<button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'">'+escHtml(s.code)+'</button><span><a href="#" class=oc-nm data-ship="'+escHtml(s.ship)+'" data-sc="'+escHtml(s.on.sc||'')+'"><i class="oc-dt em"></i>'+escHtml(s.on.surname)+'</a> joins'+(s.off.past?' &middot; '+escHtml(s.off.surname)+' past sign-off':'')+'</span>');
     });
     todo.filter(function(x){return x.date===d.date;}).forEach(function(x){it.push(todoPin(x));});
     var b2=bd.filter(function(x){return x.date===d.date;});if(b2.length)it.push('<span class=oc-mut style="display:inline-flex;align-items:center;gap:5px">'+opsIc('cake')+b2.map(function(x){return escHtml(x.surname)+' '+x.age;}).join(', ')+'</span>');
@@ -7024,7 +7027,7 @@ function opsWeek(w){
   var then=(w.later||[]).filter(function(x){return x.off>we;}).slice(0,2);
   h+='<div class=oc-sub style="font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 16px;justify-content:space-between;align-items:center;border-top:1px solid #F0F3F7;padding-top:10px;margin:0">'
     +'<span>'+(then.length?'Then: '+then.map(function(x){return '<b style="color:var(--ink)">'+opsD(x.off)+'</b> '+escHtml(x.code)+' '+escHtml(x.surname)+(x.on?' &rarr; '+escHtml(x.on):' &rarr; <b class=oc-crit>nobody</b>');}).join(' &nbsp;&middot;&nbsp; '):'')+'</span>'
-    +'<span class=oc-lg><span><i style="background:#2E9E5B"></i>aboard</span><span><i style="background:#F2B01E"></i>joining</span><span><i style="background:#E5484D"></i>seat empty</span><span>a ship code opens it on the board</span></span></div>';
+    +'<span class=oc-lg><span><i style="background:#2E9E5B"></i>aboard</span><span><i style="background:#F2B01E"></i>joining</span><span><i style="background:#E5484D"></i>seat empty</span><span>a name opens the crew&#39;s card on the board</span></span></div>';
   return h+'</section>';
 }
 function opsRows(rows){
@@ -7123,7 +7126,21 @@ function opsTravel(tv){
     +(tv.shoreside?'<span class=oc-mut style="display:flex;justify-content:space-between;gap:8px"><span>Shoreside</span><b style="color:var(--ink)">'+opsMoney(tv.shoreside)+'</b></span>':'')+'</div>';
   return h+'</section>';
 }
-function opsGoShip(ship){Promise.resolve(show('rotation')).then(function(){try{ROT_CLOSED[ship]=false;drawRotation();}catch(_){}setTimeout(function(){try{rotJump({getAttribute:function(){return ship;}});}catch(_){}},150);});}
+// A ship code opens the ship on the Keyman board; a crew name opens that crew's own card on it (Miguel, 14 Oct 2026:
+// "when I click here on the crew, it should take me automatically to the keyman tab and display that particular card").
+function opsGoShip(ship,sc){Promise.resolve(show('rotation')).then(function(){try{ROT_CLOSED[ship]=false;drawRotation();}catch(_){}setTimeout(function(){try{opsFind(ship,sc);}catch(_){}},150);});}
+function opsFind(ship,sc,n){
+  // The board draws a ship's cards only as they near the screen (content-visibility), so the ships above grow while we
+  // travel and push the card down: jump, then re-aim until it holds still, and only then flash it.
+  n=n||0;
+  var hd=document.querySelector('.shiphdr[data-toggle="'+String(ship).replace(/"/g,'')+'"]'),sec=hd&&hd.closest('.shipsec');
+  var q=sc?'[data-crew="'+String(sc).replace(/"/g,'')+'"]':null,card=q&&sec?sec.querySelector(q):null;
+  var t=card||hd;if(!t||!t.scrollIntoView)return;
+  t.scrollIntoView({block:card?'center':'start'});
+  var r=t.getBoundingClientRect(),ok=card?(r.top>=0&&r.bottom<=innerHeight+1):Math.abs(r.top)<4;
+  if(!ok&&n<8){setTimeout(function(){opsFind(ship,sc,n+1);},90);return;}
+  if(card){card.classList.remove('opshl');void card.offsetWidth;card.classList.add('opshl');setTimeout(function(){card.classList.remove('opshl');},2600);}
+}
 function opsBind(){
   var v=document.getElementById('view');if(!v)return;
   v.querySelectorAll('[data-scroll]').forEach(function(b){b.onclick=function(){var t=document.getElementById(b.getAttribute('data-scroll'));if(t&&t.scrollIntoView)t.scrollIntoView({behavior:'smooth',block:'start'});};});
@@ -7139,7 +7156,7 @@ function opsBindWeek(){
   v.querySelectorAll('[data-up]').forEach(function(b){b.onclick=function(){show('data');};});
   v.querySelectorAll('[data-crew]').forEach(function(b){b.onclick=function(){openCrew(b.getAttribute('data-crew'));};});
 }
-function opsBindRows(){var v=document.getElementById('view');if(!v)return;v.querySelectorAll('[data-ship]').forEach(function(b){b.onclick=function(){opsGoShip(b.getAttribute('data-ship'));};});}
+function opsBindRows(){var v=document.getElementById('view');if(!v)return;v.querySelectorAll('[data-ship]').forEach(function(b){b.onclick=function(e){if(e)e.preventDefault();opsGoShip(b.getAttribute('data-ship'),b.getAttribute('data-sc'));};if(b.getAttribute('role')==='button')b.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();b.click();}};});}
 async function renderDashboard(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var d;try{d=await cachedJson('/api/ops',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load the dashboard'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}

@@ -154,8 +154,8 @@ export function buildOps(input) {
     if (!((!r.overdue && inWin(r.off)) || inWin(on))) continue;
     ships.push({
       code: r.code, ship: r.ship,
-      off: { surname: r.surname, date: r.off, past: r.overdue },
-      on: r.reliever ? { surname: r.reliever.surname, date: on || null, tdg: r.reliever.tdg } : null,
+      off: { sc: r.sc || null, surname: r.surname, date: r.off, past: r.overdue },
+      on: r.reliever ? { sc: r.reliever.sc, surname: r.reliever.surname, date: on || null, tdg: r.reliever.tdg } : null,
       first: [r.overdue ? null : r.off, on].filter(inWin).sort()[0],
     });
   }

@@ -117,6 +117,7 @@ test("the next 7 days: one lane per ship changing crew, To do, birthdays of the 
   assert.deepEqual(w.ships.map((s) => [s.code, s.off.surname, s.off.date, s.off.past, s.on && s.on.surname, s.on && s.on.date, s.on && s.on.tdg]),
     [["QN", "Marto", "2026-10-22", false, "Cedilla", "2026-10-22", true]],
     "GR is overdue and Corpin's sign-on (8 Oct) has passed: the Past sign-off tile holds it, not the week");
+  assert.deepEqual([w.ships[0].off.sc, w.ships[0].on.sc], ["C", "D"], "each name carries its crew id: a click opens that crew's card on the board");
   assert.deepEqual(w.todo.map((x) => [x.kind, x.date]), [["score", "2026-10-13"], ["file", "2026-10-15"], ["bench", "2026-10-24"]]);
   assert.deepEqual(w.todo[0].people, [{ sc: null, code: "CS", surname: "Ramos", off: "2026-10-05" }], "Ramos signed off 5 Oct and nobody was asked for feedback");
   assert.equal(w.todo[1].last, "2026-10-08", "weekly AdvancedQuery, 7 days after 8 Oct");
@@ -152,6 +153,10 @@ test("the week is drawn as lanes on a wide screen and as a list on a phone, and 
   assert.match(SRC, /data-wk=1/); assert.match(SRC, /class=oc-wlist/);
   assert.match(SRC, /@media \(max-width:700px\)\{\.ops \.oc-wkw\{display:none\}\.ops \.oc-wlist\{display:flex\}\}/);
   assert.match(SRC, /\.ops \.oc-b\.ab\{background:#2E9E5B/, "the Fleet Gantt's aboard green");
+  assert.match(SRC, /function opsGoShip\(ship,sc\)/, "a crew name opens that crew's card on the Keyman board (Miguel, 14 Oct 2026)");
+  assert.match(SRC, /card=q&&sec\?sec\.querySelector\(q\):null/, "the card is found on that ship by its data-crew id");
+  assert.match(SRC, /role=button tabindex=0 data-ship="'\+escHtml\(s\.ship\)\+'"'\+\(r\.sc\?' data-sc=/, "the reliever's bar carries the ship and the crew");
+  assert.match(SRC, /return x\?x\.dow\+' '\+parseInt\(d\.slice\(8\),10\):opsD\(d\);/, "a date outside the two weeks reads '31 Oct', never a bare '31'");
   assert.match(SRC, /\.ops \.oc-kpi\{align-items:center;text-align:center\}/, "the five tiles read centred (Miguel, 14 Oct 2026: \"also center this\")");
   assert.match(SRC, /\.ops \.oc-dh\{display:flex;align-items:baseline;justify-content:center;/, "day names centred over their columns (Miguel, 14 Oct 2026: \"just center them\")");
   assert.match(SRC, /\.ops \.oc-b\.em\{background:#F2B01E/, "the Fleet Gantt's earmark amber");
