@@ -1,9 +1,12 @@
-// PRINTSHOP AUDIT — the page (14 Oct 2026). Phone first (Dexter's iPhone 17, Safari, Add to Home Screen); the web is
-// the same column. Tokens and classes are the approved mock-up's (docs/mockups/audit_20261014/audit_mockup.html, v12).
+// PRINTSHOP AUDIT — Dexter's page, v2 (14 Oct 2026; Miguel: "the idea behind is ok, but the UI and UX is horrible ..
+// design it better"). Phone first (Dexter's iPhone 17, Safari, Add to Home Screen); the web is the same column.
+// The same design language as the seafarer's upload page (src/audit_upload_ui.js): a deep navy header that says where
+// you are, white cards on a grey page, Phosphor icons (src/audit_icons.js, generated, never hand-drawn), status said in
+// sentence case with an icon and a colour, a progress bar wherever there is a "N of M", one primary button at the
+// bottom. Screens: Ships (open requests first) -> who -> the briefing -> the request -> waiting / everything is in.
 // String.raw keeps the client script's backslashes literal; nothing in it may use a backtick or a dollar-brace —
 // scripts/verify_client_scripts.mjs parses this script on every build and test run.
-//
-// PR A + B: Ships (A1) and Read, then request (A2). The request button says when it opens; it never pretends.
+import { ICONS } from "./audit_icons.js";
 
 export const AUDIT_MANIFEST = (onAuditHost) => JSON.stringify({
   name: "CIMS Printshop Audit", short_name: "Audit", start_url: onAuditHost ? "/" : "/audit", scope: onAuditHost ? "/" : "/audit",
@@ -31,7 +34,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Printshop Audit</title>
-<meta name="theme-color" content="#1B3A5C">
+<meta name="theme-color" content="#142D48">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Audit">
@@ -39,82 +42,167 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 <link rel="icon" href="/favicon.ico">
 <link rel="manifest" id="mf" href="/audit/manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Outfit:wght@500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--navy:#1B3A5C;--green:#5FB946;--green-d:#3E8E2A;--amber:#B0741A;--red:#BC3B2C;--bg:#EEF1F6;--surface:#FFFFFF;--panel:#F5F7FA;--line:#EBEFF4;--line2:#DCE3EC;--mut:#718096;--fg:#1B2B3F;--greenbg:#EDF6E9;--amberbg:#FBF3E4;--redbg:#FCECE9;--navybg:#E9EFF6;--fh:'Outfit',Arial,Helvetica,sans-serif;--ff:'DM Sans',Arial,Helvetica,sans-serif;--r:14px}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0F1A27;--surface:#172536;--panel:#1C2B3D;--line:#263649;--line2:#33465C;--mut:#9AAAC0;--fg:#E8EEF5;--navy:#22446B;--greenbg:#1C3324;--amberbg:#3A2C12;--redbg:#3C1F1B;--navybg:#1C2F47;color-scheme:dark}}
+:root{--nfg:#1B3A5C;--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--green-d:#2F7A22;--greenbg:#EEF7EA;--red:#B4382A;--redbg:#FCEDEA;--amber:#9A6412;--amberbg:#FBF3E4;--navybg:#E9EFF6;
+--ink:#14243A;--ink2:#46566B;--mut:#7A889A;--line:#E6EBF1;--line2:#D3DCE6;--bg:#F2F5F9;--card:#FFFFFF;--fh:'Outfit',Helvetica,Arial,sans-serif;--ff:'DM Sans',Helvetica,Arial,sans-serif;--fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--r:16px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#E9EEF5;--ink2:#B6C2D2;--mut:#8C9AAE;--line:#24344A;--line2:#2F4259;--bg:#0D1828;--card:#14233A;--greenbg:#16301F;--redbg:#3A1C18;--amberbg:#352812;--navybg:#1C2F47;--green-d:#7CCB66;--red:#F08A7C;--amber:#E2AE5A;--navy:#2B5A8C;--nfg:#9CC0E8;color-scheme:dark}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);font-size:15px;line-height:1.45}
-.app{max-width:560px;margin:0 auto;min-height:100vh;min-height:100dvh;background:var(--surface);display:flex;flex-direction:column}
-@media (min-width:600px){body{padding:24px 16px}.app{min-height:auto;border-radius:24px;overflow:hidden;box-shadow:0 8px 28px rgba(20,45,72,.08)}}
-.top{position:sticky;top:0;z-index:5;background:var(--navy);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 14px 11px;display:grid;grid-template-columns:36px 1fr auto;gap:8px;align-items:center}
-.bk{width:36px;height:36px;border-radius:10px;background:rgba(255,255,255,.12);display:grid;place-items:center;font-size:22px;line-height:1;border:0;color:#fff;cursor:pointer}
-.bk[hidden]{display:grid;visibility:hidden}
-.t{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.s{font-size:12px;opacity:.75;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.k{font-family:var(--fh);font-weight:600;font-size:12px;background:rgba(255,255,255,.14);padding:5px 10px;border-radius:999px;white-space:nowrap}
-.scr{padding:14px 14px 24px;display:flex;flex-direction:column;gap:12px;flex:1}
-.q{font-size:18px;font-weight:600;line-height:1.25;font-family:var(--fh)}
-.hint{font-size:13px;color:var(--mut)}
-.search{width:100%;min-height:48px;border:1px solid var(--line2);border-radius:12px;padding:0 14px;font-size:16px;background:var(--panel);color:var(--fg);font-family:var(--ff)}
-.hs{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -14px;padding:0 14px 2px}
-.hs::-webkit-scrollbar{display:none}
-.chip{flex:none;min-height:40px;display:inline-flex;align-items:center;border:1px solid var(--line2);border-radius:999px;padding:0 14px;font-size:14px;font-weight:500;background:var(--surface);color:var(--fg);cursor:pointer;font-family:var(--ff)}
-.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
-.card{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden}
-.card.soft{background:var(--panel);border-color:transparent}
-.h{padding:12px 14px 6px;font-family:var(--fh);font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.h .r{font-family:var(--ff);font-weight:500;font-size:12px;color:var(--mut)}
-.lrow{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;border-top:1px solid var(--line);cursor:pointer;width:100%;background:none;border-left:0;border-right:0;border-bottom:0;text-align:left;color:inherit;font:inherit}
-.card>.lrow:first-child,.card>.h+.lrow{border-top:0}
-.lrow .tx{flex:1;min-width:0}
-.nm{font-weight:600;font-size:15px;line-height:1.25}
-.sm{font-size:12.5px;color:var(--mut);margin-top:1px}
-.rt{text-align:right;font-size:12px;color:var(--mut);white-space:nowrap}
-.chev{color:var(--line2);font-size:20px;line-height:1}
-.pill{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;padding:3px 8px;border-radius:999px;line-height:1.4;white-space:nowrap}
-.pill.g{background:var(--greenbg);color:var(--green-d)}.pill.a{background:var(--amberbg);color:var(--amber)}.pill.r{background:var(--redbg);color:var(--red)}.pill.n{background:var(--navybg);color:var(--navy)}.pill.m{background:var(--panel);color:var(--mut)}
-.grp{display:flex;justify-content:space-between;align-items:baseline;padding:14px 14px 6px;font-size:10.5px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--mut)}
-.kv{display:flex;justify-content:space-between;align-items:center;gap:10px;min-height:46px;padding:6px 14px;border-top:1px solid var(--line);font-size:14px}
-.kv:first-child{border-top:0}.kv .v{font-weight:600;text-align:right}.kv .v .sm{font-weight:400}
-.feed{padding:8px 14px 10px;border-top:1px solid var(--line);font-size:13.5px}
-.feed .w{font-size:11.5px;color:var(--mut);font-weight:600;letter-spacing:.3px;margin-bottom:2px}
-.fold>summary{list-style:none;cursor:pointer}.fold>summary::-webkit-details-marker{display:none}
-.fold[open] .chev{transform:rotate(90deg)}
-.si{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--line2);flex:none}
-.si.sel{border-color:var(--navy);background:var(--navy);position:relative}
-.si.sel:after{content:"";position:absolute;left:8px;top:4px;width:5px;height:10px;border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
-.bar{position:sticky;bottom:0;display:flex;flex-direction:column;gap:6px;padding:10px 14px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--surface)}
-.btn{display:flex;align-items:center;justify-content:center;min-height:52px;background:var(--green);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;border-radius:12px;padding:0 16px;border:0;width:100%;cursor:pointer}
-.btn.navy{background:var(--navy)}.btn[disabled]{opacity:.45;cursor:default}
-.note{font-size:12.5px;color:var(--mut);text-align:center}
-.lock{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:var(--navybg);border-radius:12px;font-size:13px;color:var(--navy)}
-.empty{padding:28px 14px;text-align:center;color:var(--mut);font-size:14px}
-.err{padding:12px 14px;background:var(--redbg);color:var(--red);border-radius:12px;font-size:13.5px}
-.offl{background:var(--amberbg);color:var(--amber);font-size:12.5px;font-weight:600;padding:8px 14px}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit}
+.ic{width:1.15em;height:1.15em;flex:none;vertical-align:-.18em}
+.top{position:sticky;top:0;z-index:6;background:var(--deep);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 12px}
+.top .in{max-width:640px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;min-height:40px}
+.bk{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.1);display:grid;place-items:center;border:0;color:#fff;cursor:pointer;transition:transform .12s}
+.bk:active{transform:scale(.95)}.bk .ic{width:20px;height:20px}
+.bk[hidden]{display:none}
+.brand{font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:4px;opacity:.9}
+.tt{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ts{font-size:12.5px;color:#B9C6D6;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px;white-space:nowrap}
+.tk:empty{display:none}.tk.late{background:#B4382A}.tk.done{background:var(--green-d)}
+.hero{background:var(--deep);color:#fff;padding:4px 16px 22px}
+.hero .in{max-width:640px;margin:0 auto}
+.hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:6px 0 2px;line-height:1.1}
+.hero .who{color:#B9C6D6;font-size:14px}
+.sbox{position:relative;margin-top:16px}
+.sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
+.search{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 14px 0 42px;font-size:16px;background:#fff;color:#14243A;font-family:var(--ff)}
+.search:focus{outline:2px solid var(--green);outline-offset:1px}
+main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-direction:column;gap:14px}
+.offl{max-width:640px;margin:12px auto 0;padding:0 16px}.offl div{display:flex;gap:8px;align-items:center;background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
 .offl[hidden]{display:none}
-.sk{height:56px;border-top:1px solid var(--line);background:linear-gradient(90deg,var(--panel),var(--surface),var(--panel));background-size:200% 100%;animation:sk 1.2s infinite}
+.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px 2px}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;min-height:36px;padding:0 14px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink2);font-size:13.5px;font-weight:600;cursor:pointer}
+.chip.on{background:var(--navy);color:#fff;box-shadow:none}
+.sh{display:flex;justify-content:space-between;align-items:baseline;margin:8px 2px -4px;font-family:var(--fh);font-weight:600;font-size:16px}
+.sh span{font-family:var(--ff);font-weight:500;font-size:13px;color:var(--mut)}
+.card{background:var(--card);border-radius:var(--r);box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line);overflow:hidden}
+.pad{padding:16px}
+.ch{display:flex;align-items:center;gap:10px;padding:14px 16px 4px;font-family:var(--fh);font-weight:600;font-size:15px}
+.ch .ic{width:20px;height:20px;color:var(--nfg)}
+.ch .r{margin-left:auto;font-family:var(--ff);font-weight:500;font-size:13px;color:var(--mut)}
+.row{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 16px;border:0;border-top:1px solid var(--line);width:100%;background:none;text-align:left;cursor:pointer;color:inherit;transition:background .15s}
+.row:first-child,.ch+.row{border-top:0}
+.row:active{background:var(--bg)}
+.row.off{opacity:.5}
+.row .tx{flex:1;min-width:0}
+.nm{font-family:var(--fh);font-weight:600;font-size:16px;line-height:1.25}
+.sm{font-size:13px;color:var(--mut);margin-top:2px}
+.sm .ic{width:14px;height:14px;margin-right:4px}
+.go{color:var(--line2);width:20px;height:20px}
+.av{width:42px;height:42px;border-radius:50%;background:var(--navybg);color:var(--nfg);display:grid;place-items:center;font-family:var(--fh);font-weight:600;font-size:15px;flex:none}
+.av.lg{width:52px;height:52px;font-size:18px}
+.st{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.st .ic{width:14px;height:14px}
+.st.n{background:var(--navybg);color:var(--nfg)}.st.g{background:var(--greenbg);color:var(--green-d)}.st.r{background:var(--redbg);color:var(--red)}.st.a{background:var(--amberbg);color:var(--amber)}.st.m{background:var(--bg);color:var(--mut)}
+.prog{margin-top:12px}
+.prog .lb{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mut);margin-bottom:6px}.prog .lb b{color:var(--ink);font-weight:600}
+.track{height:6px;border-radius:99px;background:var(--line);overflow:hidden}.track i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .5s cubic-bezier(.16,1,.3,1)}
+.track.navy i{background:var(--navy)}.track.late i{background:var(--red)}
+.hero .track{background:rgba(255,255,255,.14)}.hero .prog .lb{color:#B9C6D6}.hero .prog .lb b{color:#fff}
+.bars{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
+.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:6px}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
+.facts div{padding:12px 16px}.facts div+div{border-left:1px solid var(--line)}
+.facts b{display:block;font-family:var(--fh);font-weight:600;font-size:16px}.facts span{font-size:12px;color:var(--mut)}
+.need{display:flex;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
+.ch+.need{border-top:0}
+.need .ib{width:40px;height:40px;border-radius:12px;background:var(--navybg);color:var(--nfg);display:grid;place-items:center;flex:none}
+.need .ib .ic{width:20px;height:20px}
+.need .tx{flex:1;min-width:0}.need .t{font-weight:600;font-size:14.5px}.need .s{font-size:12.5px;color:var(--mut)}
+.need .q{font-family:var(--fh);font-weight:600;font-size:20px;min-width:34px;text-align:right}
+.foot{display:flex;gap:8px;align-items:flex-start;padding:12px 16px;background:var(--bg);font-size:13px;color:var(--ink2)}
+.foot .ic{width:16px;height:16px;margin-top:2px;color:var(--nfg)}
+.kv{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
+.ch+.kv,.kv:first-child{border-top:0}
+.kv .k{color:var(--mut);flex:none}.kv .v{text-align:right;font-weight:600;min-width:0;overflow-wrap:anywhere}.kv .v .sm{font-weight:400}
+.mono,.kv .v.mono{font-family:var(--fm);font-size:12.5px;color:var(--mut);font-weight:400}
+.ban{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;font-size:13.5px;font-weight:500}
+.ban .ic{width:18px;height:18px;margin-top:1px}
+.ban.a{background:var(--amberbg);color:var(--amber)}.ban.r{background:var(--redbg);color:var(--red)}.ban.g{background:var(--greenbg);color:var(--green-d)}.ban.n{background:var(--navybg);color:var(--nfg)}
+.big{display:flex;gap:14px;align-items:center}
+.big .ib{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;flex:none}
+.big .ib .ic{width:28px;height:28px}
+.big .ib.n{background:var(--navybg);color:var(--nfg)}.big .ib.g{background:var(--greenbg);color:var(--green-d)}.big .ib.r{background:var(--redbg);color:var(--red)}.big .ib.m{background:var(--bg);color:var(--mut)}
+.big h2{margin:0;font-family:var(--fh);font-weight:600;font-size:20px;line-height:1.2}
+.mach{padding:14px 16px;border-top:1px solid var(--line)}
+.ch+.mach{border-top:0}
+.mh{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.mh b{font-family:var(--fh);font-weight:600;font-size:15.5px}
+.docs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.doc{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;background:var(--bg);font-size:13px;min-width:0}
+.doc .ic{width:18px;height:18px}
+.doc .tx{min-width:0}.doc .t{font-weight:600;font-size:13px;line-height:1.2}.doc .s{font-size:12px;color:var(--mut)}
+.doc.ok{background:var(--greenbg)}.doc.ok .ic{color:var(--green-d)}.doc.ok .s{color:var(--green-d)}
+.doc.bad{background:var(--redbg)}.doc.bad .ic,.doc.bad .s{color:var(--red)}
+.doc.wait .ic{color:var(--nfg)}.doc.none .ic{color:var(--mut)}
+.fix{margin-top:8px;font-size:13px;color:var(--red);display:flex;gap:8px}.fix .ic{width:16px;height:16px;margin-top:2px}
+.dwn{margin-top:10px;display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:var(--amberbg);color:var(--amber);font-size:13.5px}
+.dwn .ic{width:18px;height:18px;margin-top:1px}
+.miss{padding:10px 16px 10px 46px;border-top:1px solid var(--line);font-size:14px}
+.ch+.miss{border-top:0}
+.fold>summary{list-style:none;cursor:pointer}.fold>summary::-webkit-details-marker{display:none}
+.fold .go{transition:transform .2s}.fold[open] .go{transform:rotate(90deg)}
+.feed{padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
+.feed .w{font-size:12px;color:var(--mut);font-weight:600;margin-bottom:3px}
+.empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;text-align:center;color:var(--mut);font-size:14px}
+.empty .ic{width:28px;height:28px;color:var(--line2)}
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:5;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06)}
+.dock .in{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+.dock .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 18px;border-radius:14px;border:0;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;cursor:pointer;width:100%;transition:transform .12s,opacity .2s}
+.btn:active{transform:scale(.98)}.btn .ic{width:20px;height:20px}
+.btn.green{background:var(--green-d)}
+.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line2);min-height:46px;font-size:15px}
+.btn.txt{background:none;color:var(--red);min-height:36px;font-size:14px;font-family:var(--ff);font-weight:600}
+.btn[disabled]{opacity:.45;cursor:default;transform:none}
+.note{font-size:12.5px;color:var(--mut);text-align:center}
+.err{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:var(--redbg);color:var(--red);border-radius:14px;font-size:13.5px;font-weight:500}
+.err .ic{width:18px;height:18px;margin-top:1px}
+.sk{height:64px;border-top:1px solid var(--line);background:linear-gradient(90deg,var(--card),var(--bg),var(--card));background-size:200% 100%;animation:sk 1.2s infinite}
+.sk:first-child{border-top:0}
 @keyframes sk{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}.track i,.btn,.row,.bk{transition:none}}
 </style>
 </head><body>
-<div class="app">
-  <header class="top"><button class="bk" id="bk" hidden aria-label="Back">‹</button><div style="min-width:0"><div class="t" id="tt">Printshop audit</div><div class="s" id="ts"></div></div><div class="k" id="tk">Ships</div></header>
-  <div class="offl" id="offl" hidden>No signal. What you see was loaded earlier.</div>
-  <main class="scr" id="main"><div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
-  <div id="barslot"></div>
-</div>
+<header class="top"><div class="in"><button class="bk" id="bk" hidden aria-label="Back"></button><div style="min-width:0"><div class="tt" id="tt"><span class="brand">CIMS</span></div><div class="ts" id="ts"></div></div><span class="tk" id="tk"></span></div></header>
+<div id="heroslot"></div>
+<div class="offl" id="offl" hidden><div>No signal. What you see was loaded earlier.</div></div>
+<main id="main"><div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
+<div id="dockslot"></div>
+<script>window.__IC=` + JSON.stringify(ICONS) + String.raw`;</script>
 <script>
 (function () {
   "use strict";
   var S = { me: null, today: null, ships: null, brand: "All", q: "", brief: {} };
+  var IC = window.__IC || {};
   var $ = function (id) { return document.getElementById(id); };
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function ic(n, cls) { return (IC[n] || "").replace("<svg ", '<svg class="ic' + (cls ? " " + cls : "") + '" '); }
   var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   function fmtD(d, withYear) { if (!d) return ""; var p = String(d).slice(0, 10).split("-"); if (p.length < 3) return esc(d); var s = MON[Number(p[1]) - 1] + " " + Number(p[2]); return withYear || p[0] !== String(S.today || "").slice(0, 4) ? s + ", " + p[0] : s; }
   function todayLong() { var t = S.today ? new Date(S.today + "T12:00:00") : new Date(); return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][t.getDay()] + ", " + MON[t.getMonth()] + " " + t.getDate(); }
   function nameOf(email) { var e = String(email || "").split("@")[0].split("."); return e.map(function (w) { return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""; }).join(" "); }
-  function head(t, s, k, back) { $("tt").textContent = t; $("ts").textContent = s || ""; $("tk").textContent = k || ""; $("bk").hidden = !back; }
-  function bar(html) { $("barslot").innerHTML = html ? '<div class="bar">' + html + "</div>" : ""; }
+  function first(n) { return String(n || "").split(" ")[0]; }
+  function initials(n) { var w = String(n || "").trim().split(/\s+/); return esc(((w[0] || "").charAt(0) + (w.length > 1 ? w[w.length - 1].charAt(0) : "")).toUpperCase()); }
+  function days(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
+  function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }
+  function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
+  function left(v) { var ms = Date.parse(v) - Date.now(); if (isNaN(ms)) return ""; if (ms <= 0) return "past due"; var h = Math.floor(ms / 3600000); return h >= 1 ? h + " h left" : Math.max(1, Math.round(ms / 60000)) + " min left"; }
+
+  function top(t, s, k, kcls, back) {
+    $("tt").innerHTML = t ? esc(t) : '<span class="brand">CIMS</span>';
+    $("ts").textContent = s || ""; $("ts").hidden = !s;
+    var tk = $("tk"); tk.className = "tk" + (kcls ? " " + kcls : ""); tk.innerHTML = k || "";
+    $("bk").hidden = !back;
+  }
+  function hero(html) { $("heroslot").innerHTML = html ? '<section class="hero"><div class="in">' + html + "</div></section>" : ""; }
+  function dock(html) { $("dockslot").innerHTML = html ? '<div class="dock"><div class="in">' + html + "</div></div>" : ""; }
+  function skel(n) { var h = '<div class="card">'; for (var i = 0; i < (n || 3); i++) h += '<div class="sk"></div>'; return h + "</div>"; }
+  function prog(label, a, b, cls) { return '<div class="prog"><div class="lb"><span>' + label + "</span><b>" + a + " of " + b + '</b></div><div class="track' + (cls ? " " + cls : "") + '"><i style="width:' + pct(a, b) + '%"></i></div></div>'; }
+
   function api(u) {
     return fetch(u, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
       if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); }
@@ -127,167 +215,212 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
   }
   var WHY = { no_ship_mailbox: "No printshop mailbox for this ship in the ship contacts.", hon_unavailable: "HON did not answer. The machines and the OBP list come from it; try again in a minute.",
     no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console." };
-  function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
-  function fail(e) { $("main").innerHTML = '<div class="err">Could not load: ' + esc(e && e.message || e) + '. Pull down or reopen to try again.</div>'; bar(""); }
+  function fail(e) { hero(""); $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(e && e.message || e) + ". Reopen to try again.</span></div>"; dock(""); }
+
+  // One status word per request, said the same way on every screen.
+  function reqStatus(r) {
+    if (!r) return "";
+    if (r.status === "complete") return '<span class="st g">' + ic("f:seal-check") + "Docs in</span>";
+    if (r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()))) return '<span class="st r">' + ic("f:warning-circle") + "Overdue</span>";
+    if (r.status === "sent") return '<span class="st n">' + ic("hourglass-medium") + "Waiting" + (r.due ? " · " + esc(left(r.due)) : "") + "</span>";
+    if (r.status === "draft") return '<span class="st m">Draft</span>';
+    return "";
+  }
 
   /* ---------------- A1 · Ships ---------------- */
   function brandOf(s) { return s.brand === "Royal" ? "Royal Caribbean" : (s.brand || ""); }
+  function shipRow(s, openReq) {
+    var who = s.aboard.length ? ic("user") + s.aboard.map(function (c) { return esc(c.name); }).join(", ") : "Nobody aboard per the TDG file";
+    var go = openReq && s.last ? ' data-go="q=' + esc(s.last.id) + '"' : ' data-ship="' + esc(s.ship) + '"';
+    return '<button class="row' + (s.aboard.length || openReq ? "" : " off") + '"' + go + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + (openReq && s.last ? ic("user") + esc(s.last.crew) : who) + "</div></div>" + (s.last && (s.last.status === "sent" || s.last.status === "complete") ? reqStatus(s.last) : "") + ic("caret-right", "go") + "</button>";
+  }
   function shipsView() {
-    head("Printshop audit", (S.me ? nameOf(S.me) + " · " : "") + todayLong(), "Ships", false); bar("");
-    if (!S.ships) { $("main").innerHTML = '<div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>'; return; }
+    top("", "", "", "", false); dock("");
+    hero('<h1>Printshop audit</h1><div class="who">' + (S.me ? esc(nameOf(S.me)) + " · " : "") + esc(todayLong()) + '</div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"></div>');
+    var qi = $("q");
+    qi.addEventListener("input", function () { S.q = qi.value; shipsList(); });
+    shipsList();
+  }
+  function shipsList() {
+    if (!S.ships) { $("main").innerHTML = skel(4); return; }
     var brands = ["All", "Royal Caribbean", "Celebrity", "Azamara"];
-    var q = S.q.toLowerCase();
+    var q = S.q.toLowerCase().trim();
     var list = S.ships.filter(function (s) {
       if (S.brand !== "All" && brandOf(s) !== S.brand) return false;
       if (!q) return true;
-      var hay = (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase();
-      return hay.indexOf(q) >= 0;
+      return (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase().indexOf(q) >= 0;
     });
-    var h = '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '">';
-    h += '<div class="hs">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" data-brand="' + esc(b) + '">' + esc(b) + "</button>"; }).join("") + "</div>";
+    var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || s.last.status === "complete"); });
+    var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
+    var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" data-brand="' + esc(b) + '">' + esc(b) + "</button>"; }).join("") + "</div>";
+    if (open.length) {
+      h += '<div class="sh">Open requests<span>' + open.length + "</span></div>";
+      h += '<div class="card">' + open.map(function (s) { return shipRow(s, true); }).join("") + "</div>";
+    }
+    h += '<div class="sh">' + (open.length ? "All ships" : "Ships") + "<span>" + rest.length + "</span></div>";
     h += '<div class="card">';
-    if (!list.length) h += '<div class="empty">No ship matches.</div>';
-    list.forEach(function (s) {
-      var who = s.aboard.length ? s.aboard.map(function (c) { return esc(c.name); }).join(" · ") + " aboard" : "Nobody aboard per the TDG file";
-      var rt = s.last ? fmtD(s.last.at) + '<br><span class="pill ' + (s.last.status === "complete" ? "g" : "n") + '">' + esc(s.last.status === "sent" ? "waiting" : s.last.status === "complete" ? "docs in" : s.last.status) + "</span>" : '<span class="pill m">No request yet</span>';
-      h += '<button class="lrow" data-ship="' + esc(s.ship) + '"' + (s.aboard.length ? "" : ' style="opacity:.55"') + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + who + '</div></div><div class="rt">' + rt + '</div><span class="chev">›</span></button>';
-    });
-    h += "</div><div class=\"hint\">Who is aboard comes from the TDG file, as on the Keyman board. Earlier audits from Microsoft Forms arrive with the import.</div>";
-    $("main").innerHTML = h;
-    var qi = $("q");
-    qi.addEventListener("input", function () { S.q = qi.value; var pos = qi.selectionStart; shipsView(); var n = $("q"); n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} });
-  }
-
-  /* ---------------- pick the person ---------------- */
-  function shipView(ship) {
-    var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0];
-    if (!s) { go(""); return; }
-    head(s.ship, brandOf(s), "Setup", true); bar("");
-    var h = '<div class="q">Who are you auditing?</div><div class="card">';
-    if (!s.aboard.length) h += '<div class="empty">The TDG file has nobody aboard ' + esc(s.ship) + '.</div>';
-    s.aboard.forEach(function (c) {
-      var day = c.signOn ? Math.max(0, Math.round((Date.parse(S.today) - Date.parse(c.signOn)) / 86400000)) : null;
-      h += '<button class="lrow" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (day != null ? " · day " + day : "") + (c.signOff ? " · off " + (c.heldByFile ? "past " : "~") + fmtD(c.signOff) : "") + '</div></div><span class="si"></span></button>';
-    });
+    if (!rest.length) h += '<div class="empty">' + ic("boat") + "No ship matches " + (q ? "“" + esc(S.q) + "”" : "this filter") + ".</div>";
+    h += rest.map(function (s) { return shipRow(s, false); }).join("");
     h += "</div>";
     $("main").innerHTML = h;
   }
 
-  /* ---------------- A2 · Read, then request ---------------- */
+  /* ---------------- Who ---------------- */
+  function contractBar(c) {
+    if (!c.signOn || !c.signOff) return "";
+    var tot = Math.max(1, days(c.signOn, c.signOff)), d = Math.max(0, days(c.signOn, S.today));
+    return '<div class="prog"><div class="track' + (d > tot ? " late" : "") + '"><i style="width:' + pct(d, tot) + '%"></i></div><div class="ends"><span>' + fmtD(c.signOn) + "</span><span>" + (c.heldByFile ? "past " : "") + fmtD(c.signOff) + "</span></div></div>";
+  }
+  function shipView(ship) {
+    var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0];
+    if (!s) { go(""); return; }
+    top(s.ship, brandOf(s), "", "", true); hero(""); dock("");
+    var h = '<div class="sh">Who are you auditing?</div><div class="card">';
+    if (!s.aboard.length) h += '<div class="empty">' + ic("user") + "The TDG file has nobody aboard " + esc(s.ship) + ".</div>";
+    s.aboard.forEach(function (c) {
+      var day = c.signOn ? Math.max(0, days(c.signOn, S.today)) : null;
+      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><span class="av">' + initials(c.name) + '</span><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (day != null ? " · day " + day : "") + "</div>" + contractBar(c) + "</div>" + ic("caret-right", "go") + "</button>";
+    });
+    $("main").innerHTML = h + "</div>";
+  }
+
+  /* ---------------- A2 · The briefing ---------------- */
   var KIND = { feedback: "Feedback", intel: "Field intel", review: "Shipboard review", note: "Note", comment: "Comment" };
+  function needCard(fn, machines, lines) {
+    var m = machines == null ? "" : machines;
+    return '<div class="card"><div class="ch">' + ic("list-checks") + "What " + esc(fn) + ' sends before you arrive</div>' +
+      '<div class="need"><span class="ib">' + ic("printer") + '</span><div class="tx"><div class="t">Pattern 43</div><div class="s">12 pages, one per machine</div></div><span class="q">' + m + "</span></div>" +
+      '<div class="need"><span class="ib">' + ic("files") + '</span><div class="tx"><div class="t">Machine Management List</div><div class="s">The long report with the life %, one per machine</div></div><span class="q">' + m + "</span></div>" +
+      '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div><span class="q">' + (lines == null ? "" : lines) + "</span></div>" +
+      '<div class="foot">' + ic("lock-simple") + "<span>The audit opens only when all of it is in. 24 hours to upload.</span></div></div>";
+  }
   function briefView(ship, sc) {
-    head(ship, "Loading the briefing…", "Setup", true);
-    $("main").innerHTML = '<div class="card"><div class="sk"></div><div class="sk"></div></div>';
-    bar("");
+    top(ship, "Loading the briefing", "", "", true); hero(""); dock("");
+    $("main").innerHTML = skel(3);
     var key = ship + "|" + sc; S.view = key;
     var p = S.brief[key] ? Promise.resolve(S.brief[key]) : api("/api/audit/brief?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc));
     p.then(function (b) {
-      S.brief[key] = b;
+      S.brief[key] = b; if (!S.today) S.today = b.today;
       if (S.view !== key) return;
-      head(ship, b.crew.name, "Setup", true);
+      top(ship, "Briefing", "", "", true);
       var c = b.contract || {}, cur = c.current;
-      var h = '<div class="card"><div class="lrow" style="cursor:default;background:var(--navybg)"><div class="tx"><div class="nm">' + esc(b.crew.name) + '</div><div class="sm">' + esc(c.label) + (b.crew.position ? " · " + esc(b.crew.position) : "") + '</div></div><span class="si sel"></span></div>';
-      if (cur) {
-        h += '<div class="kv"><span>Aboard</span><span class="v">' + esc(cur.ship) + ' <span class="sm">· since ' + fmtD(cur.on) + "</span></span></div>";
-        h += '<div class="kv"><span>Contract</span><span class="v">day ' + esc(cur.day) + (cur.of ? " of " + esc(cur.of) : "") + "</span></div>";
-        if (cur.off) h += '<div class="kv"><span>Sign-off</span><span class="v">' + (cur.held ? '<span class="pill a">past · TDG has them aboard</span> ' : "") + fmtD(cur.off, true) + (cur.offSource === "projected" ? ' <span class="sm">· projected</span>' : "") + "</span></div>";
+      var h = '<div class="card"><div class="pad"><div class="big"><span class="av lg">' + initials(b.crew.name) + '</span><div style="min-width:0"><h2>' + esc(b.crew.name) + '</h2><div class="sm">' + esc(b.crew.position || "Printer Specialist") + "</div></div></div>";
+      if (cur && cur.on && cur.off) {
+        var late = cur.of && cur.day > cur.of;
+        h += '<div class="prog"><div class="lb"><span>Contract</span><b>Day ' + esc(cur.day) + (cur.of ? " of " + esc(cur.of) : "") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
       }
-      if (c.source) h += '<div class="kv"><span class="sm">Count</span><span class="v"><span class="sm">' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</span></span></div>";
       h += "</div>";
+      var done = (String(c.label || "").match(/^(\d+)/) || [])[1]; if (done == null && /^ongoing/i.test(String(c.label || ""))) done = 0;
+      h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + esc(cur ? cur.ship : ship) + '</b><span>aboard</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
+      if (c.source) h += '<div class="note" style="text-align:left;margin:-6px 4px 0">Contracts: ' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</div>";
 
-      h += '<div class="card"><div class="h">Earlier audits <span class="r">' + (b.audits.length ? b.audits.length : "") + "</span></div>";
-      if (!b.audits.length) h += '<div class="feed"><span class="sm">None in the console yet. The 61 Forms audits arrive with the import.</span></div>';
-      b.audits.forEach(function (a) { h += '<div class="kv"><span>' + esc(a.ship) + ' <span class="sm">· ' + fmtD(a.at, true) + '</span></span><span class="v"><span class="pill ' + (a.status === "complete" ? "g" : "n") + '">' + esc(a.status) + "</span></span></div>"; });
-      h += "</div>";
+      h += needCard(first(b.crew.name), b.machines, b.lines);
 
+      if (b.audits.length) {
+        h += '<div class="card"><div class="ch">' + ic("clipboard-text") + "Earlier audits</div>";
+        b.audits.forEach(function (a) { h += '<button class="row" data-go="q=' + esc(a.id) + '"><div class="tx"><div class="nm" style="font-size:15px">' + esc(a.ship) + '</div><div class="sm">' + fmtD(a.at, true) + (a.test ? " · test" : "") + "</div></div>" + reqStatus(a) + ic("caret-right", "go") + "</button>"; });
+        h += "</div>";
+      }
       var feed = b.feed || [];
-      h += '<details class="card fold"><summary class="lrow"><div class="tx"><div class="nm">What others said</div><div class="sm">' + (feed.length ? feed.length + " · newest " + fmtD(feed[0].at, true) : "Nothing on record") + '</div></div><span class="chev">›</span></summary>';
+      h += '<details class="card fold"><summary class="row"><span class="av" style="background:var(--bg);color:var(--ink2)">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
       feed.forEach(function (f) { h += '<div class="feed"><div class="w">' + esc(KIND[f.kind] || f.kind) + (f.who ? " · " + esc(f.who) : "") + " · " + fmtD(f.at, true) + (f.rating != null ? " · " + esc(f.rating) + "/5" : "") + "</div>" + esc(f.text) + "</div>"; });
       h += "</details>";
-
       if (b.checks && b.checks.length) {
-        h += '<details class="card fold"><summary class="lrow"><div class="tx"><div class="nm">To check</div><div class="sm">' + b.checks.length + ' open on the crew record</div></div><span class="chev">›</span></summary>';
+        h += '<details class="card fold"><summary class="row"><span class="av" style="background:var(--amberbg);color:var(--amber)">' + ic("warning-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">To check on the crew record</div><div class="sm">' + b.checks.length + " open</div></div>" + ic("caret-right", "go") + "</summary>";
         b.checks.forEach(function (t) { h += '<div class="feed">' + esc(t) + "</div>"; });
         h += "</details>";
       }
-      h += '<div class="lock"><span>🔒</span><span>The audit opens only when the documents are in: Pattern 43 and the Management List for every machine, and the inventory counted blind.</span></div>';
       $("main").innerHTML = h;
       S.lastBrief = b;
-      if (b.open) bar('<button class="btn navy" data-go="q=' + esc(b.open) + '">Open the request</button>');
-      else bar('<button class="btn navy" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">Request the documents</button>');
+      if (b.open) dock('<button class="btn" data-go="q=' + esc(b.open) + '">' + ic("hourglass-medium") + "Open the request</button>");
+      else dock('<button class="btn green" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">' + ic("paper-plane-tilt") + "Request the documents</button>");
     }).catch(fail);
   }
 
   /* ---------------- A3 · The request ---------------- */
   function requestView(ship, sc) {
-    head("Request documents", ship, "Setup", true); bar("");
-    $("main").innerHTML = '<div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>';
+    top("Request documents", ship, "", "", true); hero(""); dock("");
+    $("main").innerHTML = skel(4);
     var key = "r" + ship + "|" + sc; S.view = key;
     api("/api/audit/request/preview?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc)).then(function (p) {
       if (S.view !== key) return;
-      head("Request documents", ship + " · " + p.crew.name, "Setup", true);
       if (p.open) { go("q=" + p.open.id); return; }
+      top("Request documents", ship + " · " + p.crew.name, "", "", true);
       var n = p.machines ? p.machines.length : 0;
-      var h = '<div class="q">' + esc(p.crew.name.split(" ")[0]) + " uploads before you arrive</div>";
-      if (!p.live) h += '<div class="lock" style="background:var(--amberbg);color:var(--amber)"><span>⚑</span><span>Test mode. The email goes to you only, marked TEST. Nothing reaches the ship until Miguel switches it live.</span></div>';
-      if (!p.hon) h += '<div class="err">' + esc(WHY.hon_unavailable) + "</div>";
-      h += '<div class="card">';
-      h += '<div class="kv"><span>Pattern 43</span><span class="v">' + n + ' <span class="sm">· one per machine</span></span></div>';
-      h += '<div class="kv"><span>Machine Management List</span><span class="v">' + n + ' <span class="sm">· one per machine</span></span></div>';
-      h += '<div class="kv"><span>Inventory count</span><span class="v">' + (p.lines == null ? "?" : p.lines) + ' <span class="sm">· lines, blind</span></span></div></div>';
-      if (p.machines && p.machines.length) h += '<div class="card"><div class="h">Machines <span class="r">from HON\'s register</span></div>' + p.machines.map(function (m) { return '<div class="kv"><span>' + esc(m.label) + '</span><span class="v"><span class="sm">' + esc(m.serial) + "</span></span></div>"; }).join("") + "</div>";
-      h += '<div class="card">';
-      h += '<div class="kv"><span>To</span><span class="v">' + (p.shown ? esc(p.shown) + ' <span class="sm">· ship mailbox</span>' : '<span class="pill r">no ship mailbox</span>') + (p.noPersonal ? '<br><span class="sm">no personal email on file</span>' : '<br><span class="sm">+ a copy to his personal email</span>') + "</span></div>";
-      h += '<div class="kv"><span>Due</span><span class="v">24 h <span class="sm">· ' + esc(whenUtc(p.dueAt)) + "</span></span></div>";
-      h += '<div class="kv"><span>Copy</span><span class="v"><span class="sm">Rolando · Ray</span></span></div></div>';
-      h += '<div class="lock"><span>🔒</span><span>The audit opens when everything is in. No "start anyway".</span></div>';
+      var h = "";
+      if (!p.live) h += '<div class="ban a">' + ic("f:warning-circle") + "<span>Test mode. The email goes to you only, marked TEST. Nothing reaches the ship until Miguel switches it live.</span></div>";
+      if (!p.hon) h += '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY.hon_unavailable) + "</span></div>";
+      h += needCard(first(p.crew.name), n, p.lines);
+      if (n) h += '<div class="card"><div class="ch">' + ic("printer") + 'Machines<span class="r">from HON\'s register</span></div>' + p.machines.map(function (m) { return '<div class="kv"><span>' + esc(m.label) + (m.model ? ' <span class="sm">· ' + esc(m.model) + "</span>" : "") + '</span><span class="v mono">' + esc(m.serial) + "</span></div>"; }).join("") + "</div>";
+      h += '<div class="card"><div class="ch">' + ic("envelope-simple") + "The email</div>";
+      h += '<div class="kv"><span class="k">To</span><span class="v">' + (p.live ? (p.shown ? esc(p.shown) : '<span class="st r">No ship mailbox</span>') : "You, as a test") + (p.live && !p.noPersonal ? '<div class="sm">and a copy to the personal email</div>' : p.live ? '<div class="sm">no personal email on file</div>' : p.shown ? '<div class="sm">live, it goes to ' + esc(p.shown) + "</div>" : "") + "</span></div>";
+      h += '<div class="kv"><span class="k">Copy</span><span class="v">' + (p.live ? "Rolando, Ray" : '<span class="sm">nobody in test mode</span>') + "</span></div>";
+      h += '<div class="kv"><span class="k">Due</span><span class="v">' + esc(whenUtc(p.dueAt)) + '<div class="sm">24 hours from sending</div></span></div>';
+      h += '<div class="kv"><span class="k">Inventory</span><span class="v">' + (p.lines == null ? "?" : esc(p.lines)) + ' parts<div class="sm">OBP list' + (p.obpAsOf ? " of " + fmtD(p.obpAsOf, true) : "") + ", on-hand hidden</div></span></div></div>";
       $("main").innerHTML = h;
       var can = p.hon && n > 0 && (p.shown || !p.live);
-      bar('<button class="btn" id="sendreq"' + (can ? "" : " disabled") + ">" + (p.live ? "Send request" : "Send test request to me") + "</button>" + (can ? "" : '<div class="note">' + esc(!p.hon ? WHY.hon_unavailable : n === 0 ? WHY.no_presses : WHY.no_ship_mailbox) + "</div>"));
+      dock('<button class="btn green" id="sendreq"' + (can ? "" : " disabled") + ">" + ic("paper-plane-tilt") + (p.live ? "Send request" : "Send test request to me") + "</button>" + (can ? "" : '<div class="note">' + esc(!p.hon ? WHY.hon_unavailable : n === 0 ? WHY.no_presses : WHY.no_ship_mailbox) + "</div>"));
       var btn = $("sendreq");
       if (btn) btn.onclick = function () {
-        btn.disabled = true; btn.textContent = "Sending…";
+        btn.disabled = true; btn.innerHTML = ic("paper-plane-tilt") + "Sending";
         var contract = S.lastBrief && S.lastBrief.contract ? S.lastBrief.contract.label : null;
         post("/api/audit/request", { ship: ship, sc: sc, contract: contract }).then(function (r) {
-          if (r.ok || r.error === "already_open") { S.brief = {}; S.ships = null; reloadShips(); go("q=" + r.id); }
-          else { btn.disabled = false; btn.textContent = "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + esc(WHY[r.error] || r.detail || r.error) + "</div>"); }
+          if (r.ok || r.error === "already_open") { S.brief = {}; reloadShips(); go("q=" + r.id); }
+          else { btn.disabled = false; btn.innerHTML = ic("arrow-clockwise") + "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY[r.error] || r.detail || r.error) + "</span></div>"); }
         }).catch(fail);
       };
     }).catch(fail);
   }
 
-  /* ---------------- A6 / A8 · Waiting, then unlocked ---------------- */
-  var STATE = { ok: ["ok", "Read"], pending: ["", "Reading"], failed: ["", "Reading"], wrong_doc: ["bad", "Wrong document"], unreadable: ["bad", "Scan again"] };
+  /* ---------------- A6 / A8 · Waiting, then everything is in ---------------- */
+  function docCell(s, label) {
+    if (!s) return '<div class="doc none">' + ic("cloud-arrow-up") + '<div class="tx"><div class="t">' + label + '</div><div class="s">Not sent</div></div></div>';
+    var st = s.read_state;
+    if (st === "ok") return '<div class="doc ok">' + ic("f:check-circle") + '<div class="tx"><div class="t">' + label + '</div><div class="s">Read</div></div></div>';
+    if (st === "wrong_doc" || st === "unreadable") return '<div class="doc bad">' + ic("f:warning-circle") + '<div class="tx"><div class="t">' + label + '</div><div class="s">' + (st === "wrong_doc" ? "Wrong document" : "Scan again") + "</div></div></div>";
+    return '<div class="doc wait">' + ic("hourglass-medium") + '<div class="tx"><div class="t">' + label + '</div><div class="s">Reading</div></div></div>';
+  }
+  function machDone(m) { return !!m.down || (m.p43 && m.p43.read_state === "ok" && m.mgmt && m.mgmt.read_state === "ok"); }
   function requestDetail(id) {
-    head("Request", "", "Waiting", true); bar("");
+    top("Request", "", "", "", true); hero(""); dock("");
+    $("main").innerHTML = skel(4);
     var key = "q" + id; S.view = key;
     api("/api/audit/request?id=" + encodeURIComponent(id)).then(function (d) {
       if (S.view !== key) return;
-      var done = d.status === "complete";
-      head(d.ship, d.crew, done ? "Unlocked" : d.status === "cancelled" ? "Cancelled" : "Waiting", true);
+      var done = d.status === "complete", sent = d.status === "sent", cancelled = d.status === "cancelled";
+      var late = sent && (d.overdueAt || Date.parse(d.dueAt) < Date.now());
+      top(d.ship, d.crew, done ? ic("f:seal-check") + "Docs in" : late ? "Overdue" : sent ? ic("clock") + esc(left(d.dueAt)) : cancelled ? "Cancelled" : "", done ? "done" : late ? "late" : "", true);
+      var md = d.machines.filter(machDone).length, mt = d.machines.length;
+      var big = done ? ["g", "f:seal-check", "Everything is in", "Since " + whenUtc(d.completeAt) + ". The assessment went to " + (d.test ? "you (test)." : "Ray, Rolando, Ohji, Jonathan and Miguel.")]
+        : cancelled ? ["m", "x", "Request cancelled", "The upload link is closed."]
+        : late ? ["r", "f:warning-circle", "Past the deadline", "Was due " + whenUtc(d.dueAt) + ". Resend or give " + first(d.crew) + " 24 more hours."]
+        : ["n", "hourglass-medium", "Waiting for " + first(d.crew), "Due " + whenUtc(d.dueAt) + " · sent to " + (d.test ? "you (test)" : d.to)];
       var h = "";
-      if (d.test) h += '<div class="lock" style="background:var(--amberbg);color:var(--amber)"><span>⚑</span><span>Test request. Every email went to you only.</span></div>';
-      if (done) h += '<div class="lock" style="background:var(--greenbg);color:var(--green-d)"><span>✓</span><span><b>Everything is in</b> · ' + esc(whenUtc(d.completeAt)) + ". The assessment email went to " + (d.test ? "you" : "Ray, Rolando, Ohji, Jonathan and Miguel") + ".</span></div>";
-      else if (d.status === "sent") h += '<div class="lock"><span>🔒</span><span>Due ' + esc(whenUtc(d.dueAt)) + (d.overdueAt ? ' · <b style="color:var(--red)">overdue</b>' : "") + ". Sent to " + esc(d.test ? "you (test)" : d.to) + ".</span></div>";
-      h += '<div class="card"><div class="h">Machines</div>';
+      if (d.test) h += '<div class="ban a">' + ic("f:warning-circle") + "<span>Test request. Every email went to you only.</span></div>";
+      h += '<div class="card pad"><div class="big"><span class="ib ' + big[0] + '">' + ic(big[1]) + '</span><div style="min-width:0"><h2>' + esc(big[2]) + '</h2><div class="sm">' + esc(big[3]) + '</div></div></div><div class="bars">' + prog("Machines", md, mt, done ? "" : "navy") + prog("Count", d.count.done, d.count.total, done ? "" : "navy") + "</div></div>";
+      var miss = (d.gate && d.gate.missing) || [];
+      if (sent && miss.length) h += '<div class="card"><div class="ch">' + ic("list-checks") + 'Still missing<span class="r">' + miss.length + "</span></div>" + miss.map(function (x) { return '<div class="miss">' + esc(x.say) + "</div>"; }).join("") + "</div>";
+      h += '<div class="card"><div class="ch">' + ic("printer") + 'Machines<span class="r">' + md + " of " + mt + " in</span></div>";
       d.machines.forEach(function (m) {
-        var cell = function (s, label) { if (!s) return '<span class="pill m">' + label + " · not sent</span>"; var st = STATE[s.read_state] || ["", s.read_state]; return '<span class="pill ' + (st[0] === "ok" ? "g" : st[0] === "bad" ? "r" : "n") + '">' + label + " · " + st[1] + "</span>"; };
-        h += '<div class="lrow" style="cursor:default;align-items:flex-start"><div class="tx"><div class="nm">' + esc(m.label) + '</div><div class="sm">' + esc(m.serial) + "</div>" +
-          (m.down ? '<div class="sm" style="color:var(--red);font-weight:600;margin-top:4px">Down · ' + esc(m.down) + "</div>" : '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + cell(m.p43, "Pattern 43") + cell(m.mgmt, "Mgmt list") + "</div>" +
-          ((m.p43 && m.p43.read_state !== "ok" && m.p43.say) ? '<div class="sm" style="margin-top:4px">' + esc(m.p43.say) + "</div>" : "") + ((m.mgmt && m.mgmt.read_state !== "ok" && m.mgmt.say) ? '<div class="sm" style="margin-top:4px">' + esc(m.mgmt.say) + "</div>" : "")) + "</div></div>";
+        h += '<div class="mach"><div class="mh"><b>' + esc(m.label) + '</b><span class="mono">' + esc(m.serial) + "</span></div>";
+        if (m.down) h += '<div class="dwn">' + ic("wrench") + "<span><b>Reported down.</b> " + esc(m.down) + "</span></div>";
+        else {
+          h += '<div class="docs">' + docCell(m.p43, "Pattern 43") + docCell(m.mgmt, "Mgmt List") + "</div>";
+          [m.p43, m.mgmt].forEach(function (s) { if (s && s.read_state !== "ok" && s.read_state !== "pending" && s.say) h += '<div class="fix">' + ic("warning-circle") + "<span>" + esc(s.say) + "</span></div>"; });
+        }
+        h += "</div>";
       });
       h += "</div>";
-      h += '<div class="card"><div class="kv"><span>Inventory count</span><span class="v">' + d.count.done + " of " + d.count.total + (d.extras ? ' <span class="sm">· ' + d.extras + " not on the list</span>" : "") + "</span></div></div>";
-      if (!done && d.gate && d.gate.missing && d.gate.missing.length && d.status === "sent") h += '<details class="card fold"><summary class="lrow"><div class="tx"><div class="nm">Still missing</div><div class="sm">' + d.gate.missing.length + ' items</div></div><span class="chev">›</span></summary>' + d.gate.missing.map(function (x) { return '<div class="feed">' + esc(x.say) + "</div>"; }).join("") + "</details>";
+      h += '<div class="card"><div class="ch">' + ic("package") + 'Blind count<span class="r">' + d.count.done + " of " + d.count.total + '</span></div><div class="pad" style="padding-top:4px">' + '<div class="track' + (done ? "" : " navy") + '"><i style="width:' + pct(d.count.done, d.count.total) + '%"></i></div>' + (d.extras ? '<div class="sm" style="margin-top:8px">' + d.extras + (d.extras === 1 ? " item found that is" : " items found that are") + " not on the OBP list</div>" : "") + "</div></div>";
       $("main").innerHTML = h;
-      if (done) bar('<button class="btn" disabled>Start the audit</button><div class="note">The audit steps on the ship arrive with the next update.</div>');
-      else if (d.status === "sent") {
-        bar('<div style="display:flex;gap:8px"><button class="btn navy" id="rs">Resend</button><button class="btn navy" id="ex">+24 hours</button></div><button class="btn" style="background:none;color:var(--red);min-height:40px" id="cx">Cancel request</button>');
-        var act = function (what, confirmText) { return function () { if (confirmText && !confirm(confirmText)) return; post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(r.error || "Not done"); requestDetail(id); }); }; };
+      if (done) dock('<button class="btn green" disabled>' + ic("clipboard-text") + 'Start the audit</button><div class="note">The on-ship audit steps arrive with the next update.</div>');
+      else if (sent) {
+        dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + '24 more hours</button></div><button class="btn txt" id="cx">Cancel request</button>');
+        var act = function (what, confirmText) { return function () { if (confirmText && !confirm(confirmText)) return; post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(WHY[r.error] || r.error || "Not done"); reloadShips(); requestDetail(id); }); }; };
         $("rs").onclick = act("resend", "Send the request again? The old link stops working.");
         $("ex").onclick = act("extend");
         $("cx").onclick = act("cancel", "Cancel this request? The upload link closes.");
-      } else bar("");
+      }
     }).catch(fail);
   }
   function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
@@ -295,7 +428,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
   /* ---------------- router ---------------- */
   function go(h) { location.hash = h; }
   function route() {
-    S.view = null;
+    S.view = null; window.scrollTo(0, 0);
     var h = decodeURIComponent(location.hash.replace(/^#/, ""));
     if (h.indexOf("s=") === 0) return shipView(h.slice(2));
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
@@ -303,14 +436,15 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
     if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
     shipsView();
   }
+  $("bk").innerHTML = ic("caret-left");
   window.addEventListener("hashchange", route);
   $("bk").addEventListener("click", function () { history.length > 1 ? history.back() : go(""); });
   document.addEventListener("click", function (e) {
     var g = e.target.closest("[data-go]");
-    if (g) { go(g.getAttribute("data-go")); return; }
+    if (g) { if (g.disabled) return; go(g.getAttribute("data-go")); return; }
     var t = e.target.closest("[data-brand],[data-sc],[data-ship]");
     if (!t) return;
-    if (t.hasAttribute("data-brand")) { S.brand = t.getAttribute("data-brand"); shipsView(); return; }
+    if (t.hasAttribute("data-brand")) { S.brand = t.getAttribute("data-brand"); shipsList(); return; }
     if (t.hasAttribute("data-sc")) { go("b=" + encodeURIComponent(t.getAttribute("data-ship")) + "|" + encodeURIComponent(t.getAttribute("data-sc"))); return; }
     if (t.hasAttribute("data-ship")) go("s=" + encodeURIComponent(t.getAttribute("data-ship")));
   });
@@ -320,7 +454,9 @@ html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--ff);fo
 
   route();
   Promise.all([api("/api/me"), api("/api/audit/ships")]).then(function (r) {
-    S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships; route();
+    S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships;
+    var h = location.hash.replace(/^#/, ""); if (!h) shipsList(); else if (h.indexOf("s=") === 0) route();
+    if (!h) { var w = $("heroslot").querySelector(".who"); if (w) w.textContent = nameOf(S.me) + " · " + todayLong(); }
   }).catch(fail);
 })();
 </script>

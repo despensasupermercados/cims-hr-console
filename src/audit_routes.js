@@ -9,7 +9,7 @@ import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso }
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 
-export const AUDIT_VERSION = "2026-10-14.c1";
+export const AUDIT_VERSION = "2026-10-14.c2";
 
 export function installAudit(deps) {
   const { json, htmlResponse, ensureAudit, rotationSections, crewProfile, TODAY } = deps;
@@ -38,7 +38,7 @@ export function installAudit(deps) {
     await ensureAudit(env);
     const [board, reqs] = await Promise.all([
       rotationSections(env),
-      env.DB.prepare("SELECT ship, agency_id, crew_name, status, created_at, sent_at, complete_at FROM audit_request WHERE status != 'cancelled' ORDER BY created_at DESC").all().catch(() => ({ results: [] })),
+      env.DB.prepare("SELECT id, ship, agency_id, crew_name, status, created_at, sent_at, due_at, overdue_at, complete_at, test_mode FROM audit_request WHERE status != 'cancelled' ORDER BY created_at DESC").all().catch(() => ({ results: [] })),
     ]);
     const lastBy = {};
     for (const r of reqs.results || []) { const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r; }
@@ -49,7 +49,7 @@ export function installAudit(deps) {
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
-      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, last: last ? { at: iso(last.created_at), status: last.status, crew: last.crew_name } : null });
+      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
     return json({ today: TODAY(), auditor: session.email, ships: out });
