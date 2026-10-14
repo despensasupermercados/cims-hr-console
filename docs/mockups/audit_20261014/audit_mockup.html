@@ -86,6 +86,40 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
 .cb.ok:after{content:"";position:absolute;left:8px;top:3px;width:6px;height:12px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
 .cb.no{background:var(--redbg);border-color:var(--red)}
 .cb.no:after{content:"×";position:absolute;inset:0;display:grid;place-items:center;color:var(--red);font-weight:700;font-size:18px;line-height:1}
+/* v5 polish: thin status glyphs at the right of a row, no boxes; group labels in small caps; status cells per machine */
+.grp{display:flex;justify-content:space-between;align-items:baseline;padding:14px 14px 6px;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--mut)}
+.grp em{font-style:normal;font-weight:600;letter-spacing:0;text-transform:none;font-size:12px}
+.grp em.bad{color:var(--red)}
+.itm{display:flex;align-items:center;gap:12px;min-height:48px;padding:6px 14px;border-top:1px solid var(--line)}
+.itm .tx{flex:1;min-width:0;font-size:15px}
+.itm .tx .sm{font-size:12.5px;color:var(--mut);margin-top:1px}
+.itm.miss .tx{color:var(--red);font-weight:600}
+.si{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line2);display:grid;place-items:center;flex:none;font-size:12px;font-weight:700;line-height:1;color:var(--mut)}
+.si.ok{border-color:var(--green);color:var(--green-d)}
+.si.ok:after{content:"";width:5px;height:9px;border:solid var(--green-d);border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.si.bad{border-color:var(--red);color:var(--red);background:var(--redbg)}
+.si.bad:after{content:"×";font-size:15px;line-height:1;margin-top:-1px}
+.si.warn{border-color:#E6C98F;color:var(--amber);background:var(--amberbg)}
+.si.warn:after{content:"!";font-size:12px}
+.si.sel{border-color:var(--navy);background:var(--navy)}
+.si.sel:after{content:"";width:5px;height:9px;border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.si.lg{width:26px;height:26px}
+.stw{font-size:12.5px;font-weight:600;color:var(--mut);white-space:nowrap}
+.stw.bad{color:var(--red)}.stw.warn{color:var(--amber)}.stw.ok{color:var(--green-d)}
+.cells{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px 14px 12px}
+.cell{border:1px solid var(--line);border-radius:10px;padding:8px 4px 7px;display:grid;justify-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--mut);text-align:center;line-height:1.15;cursor:pointer;background:var(--surface)}
+.cell .si{width:20px;height:20px}
+.cell.bad{border-color:#E7B4AC;background:var(--redbg);color:var(--red)}
+.cell.ok{color:var(--fg)}
+.mrow{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 14px;border-top:1px solid var(--line);cursor:pointer}
+.mrow:first-child{border-top:0}
+.mrow .tx{flex:1;min-width:0}
+.mrow .nm{font-weight:600;font-size:15px}
+.mrow .sn{font-family:var(--fm);font-size:11.5px;color:var(--mut);margin-top:1px}
+.finding{display:flex;gap:10px;align-items:flex-start;margin:0 14px 12px;padding:10px 12px;background:var(--amberbg);border-radius:10px;font-size:13px}
+.finding b{color:var(--amber)}
+.finding .src{display:block;margin-top:2px}
+.seg.soft span.on{background:var(--navy)}
 .btn{display:flex;align-items:center;justify-content:center;min-height:52px;background:var(--green);color:#fff;font-family:var(--fh);font-weight:700;font-size:16px;border-radius:12px;padding:0 16px;border:0;width:100%;cursor:pointer}
 .btn.ghost{background:var(--surface);color:var(--navy);border:1px solid var(--line2)}
 .btn.navy{background:var(--navy)}
@@ -305,8 +339,8 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="scr">
         <div class="q">Who are you auditing?</div>
         <div class="card">
-          <div class="lrow" style="background:var(--navybg)"><div class="cb on"></div><div class="tx"><div class="nm">John Gorre</div><div class="sm">3 completed, on contract 4 · aboard day 134 · off ~Jan 3</div></div></div>
-          <div class="lrow"><div class="cb"></div><div class="tx"><div class="nm">Edward Guazon</div><div class="sm">5 completed, on contract 6 · aboard day 57 · <span class="pill a">medical lapses Dec</span></div></div></div>
+          <div class="lrow" style="background:var(--navybg)"><div class="tx"><div class="nm">John Gorre</div><div class="sm">3 completed, on contract 4 · aboard day 134 · off ~Jan 3</div></div><span class="si sel lg"></span></div>
+          <div class="lrow"><div class="tx"><div class="nm">Edward Guazon</div><div class="sm">5 completed, on contract 6 · aboard day 57 · <span class="pill a">medical lapses Dec</span></div></div><span class="si lg"></span></div>
           <div class="lrow"><div class="tx"><div class="sm">Someone else is aboard? Pick from all crew · Rita is told the file disagrees</div></div><span class="chev">›</span></div>
         </div>
         <div class="card">
@@ -436,11 +470,11 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="scr">
         <div class="due"><span>Due <b>Oct 15, 16:40</b></span><span class="cnt">18 h<small>left</small></span></div>
         <div class="card">
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">PROD 1</div><div class="sm">Pattern 43 ✓ · Management List ✓</div></div></div>
-          <div class="lrow"><div class="cb" style="border-color:#E6C98F;background:var(--amberbg)"></div><div class="tx"><div class="nm">PROD 2</div><div class="sm">Pattern 43: re-scan asked · Management List: not yet</div></div></div>
-          <div class="lrow"><div class="cb no"></div><div class="tx"><div class="nm">MFD deck 5</div><div class="sm">Reported down by John: "paper jam error, KM ticket open" · <b>you check it on board</b></div></div></div>
-          <div class="lrow"><div class="cb"></div><div class="tx"><div class="nm">MFD deck 4 ×2</div><div class="sm">Nothing yet</div></div></div>
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">Inventory count</div><div class="sm">47 lines · submitted 10:05</div></div></div>
+          <div class="itm"><div class="tx">PROD 1<div class="sm">Pattern 43 · Management List</div></div><span class="stw ok">In</span><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">PROD 2<div class="sm">Pattern 43 re-scan asked · Management List not yet</div></div><span class="stw warn">1 of 2</span><span class="si warn"></span></div>
+          <div class="itm"><div class="tx">MFD deck 5<div class="sm">Down per John: "paper jam error, KM ticket open" · you check it on board</div></div><span class="stw bad">Down</span><span class="si bad"></span></div>
+          <div class="itm"><div class="tx">MFD deck 4 ×2<div class="sm">Nothing yet</div></div><span class="stw">0 of 4</span><span class="si"></span></div>
+          <div class="itm"><div class="tx">Inventory count<div class="sm">47 lines · submitted 10:05</div></div><span class="stw ok">In</span><span class="si ok"></span></div>
         </div>
         <div class="lock"><div class="ic">🔒</div><div><b>Audit locked.</b> It opens when every machine has its documents or a reason, and the pre-visit report has gone out.</div></div>
         <div style="display:flex;gap:8px"><button class="btn ghost sm">Resend</button><button class="btn ghost sm">Extend 24 h</button></div>
@@ -567,18 +601,22 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="top"><div class="bk">‹</div><div><div class="t">Workstation</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">1 / 7</div></div>
       <div class="prog"><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
       <div class="scr">
-        <div class="q">Is everything on the desktop?</div>
-        <div class="seg"><span>All present</span><span class="on bad">Something missing</span></div>
+        <div><div class="q">Is everything on the desktop?</div><div class="hint" style="margin-top:3px">16 items · tap one to mark it missing</div></div>
+        <div class="seg soft"><span>All present</span><span class="on">Something missing</span></div>
         <div class="card">
-          <div class="lrow"><div class="cb no"></div><div class="tx"><div class="nm">DG3 folder</div><div class="sm">7 of 8</div></div><span class="chev">˅</span></div>
-          <div class="ck" style="padding:0 14px 0 52px"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Prod · Service manuals</div></div>
-          <div class="ck" style="padding:0 14px 0 52px"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Prod · Parts manual</div></div>
-          <div class="ck" style="padding:0 14px 0 52px"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Prod · Maintenance manual</div></div>
-          <div class="ck" style="padding:0 14px 0 52px"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">MFD · Service, Parts, Maintenance</div></div>
-          <div class="ck" style="padding:0 14px 0 52px"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">MFD · Consumables list</div></div>
-          <div class="ck" style="padding:0 14px 0 52px"><div class="cb no" style="width:22px;height:22px"></div><div class="tx" style="color:var(--red);font-weight:600">SOPs · ordering &amp; transfers</div></div>
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">OneNote</div><div class="sm">IPs · shoreside contacts · 2 of 2</div></div><span class="chev">›</span></div>
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">Browser bookmarks</div><div class="sm">6 of 6</div></div><span class="chev">›</span></div>
+          <div class="grp"><span>DG3 folder</span><em class="bad">1 missing</em></div>
+          <div class="itm"><div class="tx">Service manuals <span class="sm" style="display:inline">· Prod</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Parts manual <span class="sm" style="display:inline">· Prod</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Maintenance manual <span class="sm" style="display:inline">· Prod</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Service, Parts, Maintenance <span class="sm" style="display:inline">· MFD</span></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Consumables list <span class="sm" style="display:inline">· MFD</span></div><span class="si ok"></span></div>
+          <div class="itm miss"><div class="tx">SOPs · ordering &amp; transfers</div><span class="stw bad">Missing</span><span class="si bad"></span></div>
+          <div class="grp"><span>OneNote</span><em>2 of 2</em></div>
+          <div class="itm"><div class="tx">Machine &amp; controller IPs</div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Shoreside contacts</div><span class="si ok"></span></div>
+          <div class="grp"><span>Browser bookmarks</span><em>6 of 6</em></div>
+          <div class="itm"><div class="tx">Onboard Print · Zendesk · Crunchtime</div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Fleet Visitor · ECCR · Master Loading</div><span class="si ok"></span></div>
         </div>
       </div>
       <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Machines</button></div>
@@ -592,22 +630,22 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="top"><div class="bk">‹</div><div><div class="t">Machines &amp; tools</div><div class="s">Oasis of the Seas · John Gorre</div></div><div class="k">2 / 7</div></div>
       <div class="prog"><i></i><i></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i><i class="off"></i></div>
       <div class="scr">
-        <div class="card"><div class="kv2"><span>All hardware labeled</span><div class="seg half"><span class="on good">Yes</span><span>No</span></div></div></div>
+        <div class="card"><div class="kv2"><span>All hardware labeled</span><div class="seg half soft"><span class="on">Yes</span><span>No</span></div></div></div>
         <div class="card">
-          <div class="mach"><div class="mh"><div class="nm">PROD 1 · C4070<span class="sn">S011021355</span></div><span class="pill a">1 finding</span><span class="chev">˅</span></div>
-            <div class="mb">
-              <div class="ck"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Test pattern</div></div>
-              <div class="ck"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Scan to email</div></div>
-              <div class="ck"><div class="cb ok" style="width:22px;height:22px"></div><div class="tx">Machine collaboration</div></div>
-              <div class="ck"><div class="cb no" style="width:22px;height:22px"></div><div class="tx">Parts counter life<div class="src">from the Management List · confirm on the machine</div></div><span class="in">Drum K 412 % · Dev C 180 %</span></div>
-            </div>
+          <div class="mrow"><div class="tx"><div class="nm">PROD 1 · AccurioPress C4070</div><div class="sn">S011021355</div></div><span class="stw warn">1 finding</span><span class="chev">˅</span></div>
+          <div class="cells">
+            <div class="cell ok"><span class="si ok"></span>Test pattern</div>
+            <div class="cell ok"><span class="si ok"></span>Scan to email</div>
+            <div class="cell ok"><span class="si ok"></span>Collaboration</div>
+            <div class="cell bad"><span class="si bad"></span>Counter life</div>
           </div>
-          <div class="mach"><div class="mh"><div class="nm">PROD 2 · C4070<span class="sn">S011021356</span></div><span class="pill a">1 finding</span><span class="chev">›</span></div></div>
-          <div class="mach"><div class="mh"><div class="nm">MFD deck 5<span class="sn">reported down by John · verify</span></div><span class="pill r">Down</span><span class="chev">›</span></div></div>
-          <div class="mach"><div class="mh"><div class="nm">MFD deck 4 · 2 units<span class="sn">bizhub</span></div><span class="pill g">Pass</span><span class="chev">›</span></div></div>
+          <div class="finding"><span class="si warn" style="margin-top:1px"></span><div><b>Drum K 412 % · Developer C 180 %</b><span class="src">From the Management List of Oct 15 · confirm on the machine, then replace</span></div></div>
+          <div class="mrow"><div class="tx"><div class="nm">PROD 2 · AccurioPress C4070</div><div class="sn">S011021356</div></div><span class="stw warn">1 finding</span><span class="chev">›</span></div>
+          <div class="mrow"><div class="tx"><div class="nm">MFD · deck 5</div><div class="sn">reported down by John · verify on board</div></div><span class="stw bad">Down</span><span class="chev">›</span></div>
+          <div class="mrow"><div class="tx"><div class="nm">MFD · deck 4, 2 units</div><div class="sn">bizhub</div></div><span class="stw ok">Pass</span><span class="chev">›</span></div>
         </div>
-        <div class="card"><div class="lrow"><div class="tx"><div class="nm">Tools missing</div><div class="sm">2-Fiery back-up HDD · Head lamp</div></div><span class="pill a">2</span><span class="chev">›</span></div></div>
-        <div class="hint">A machine with no finding stays "Pass" untouched. Tap a row only when something is wrong.</div>
+        <div class="card"><div class="mrow"><div class="tx"><div class="nm">Tools not on inventory</div><div class="sm" style="font-size:12.5px;color:var(--mut)">2-Fiery back-up HDD · Head lamp</div></div><span class="stw warn">2 missing</span><span class="chev">›</span></div></div>
+        <div class="hint">A machine with no finding stays "Pass" untouched. Tap a cell to turn a check into a finding.</div>
       </div>
       <div class="bar"><button class="btn ghost">Back</button><button class="btn navy">Next · Inventory</button></div>
     </div>
@@ -623,7 +661,7 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="scr">
         <div class="q">Does the OBP match the shelf?</div>
         <div class="hint">John counted 47 lines blind on Oct 15 · 3 differ from the OBP · 1 item not in OBP. Confirm them on the shelf.</div>
-        <div class="seg"><span>Yes, accurate</span><span class="on bad">No, discrepancies</span></div>
+        <div class="seg soft"><span>Yes, accurate</span><span class="on">No, discrepancies</span></div>
         <div class="card">
           <div class="line"><div class="nm">Black developer</div><div class="num">OBP <b>4</b> · counted <b>2</b></div><span class="d">−2</span></div>
           <div class="line"><div class="nm">Waste toner box</div><div class="num">OBP <b>11</b> · counted <b>9</b></div><span class="d">−2</span></div>
@@ -682,10 +720,11 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
           <div class="chips" style="margin-top:8px"><span class="chip need">MFD refresher</span><span class="chip">Statistic report</span><span class="chip">Zendesk</span><span class="chip need">HON app</span><span class="chip">Fiery</span><span class="chip">Break-fix PROD</span><span class="chip">+ other</span></div>
         </div>
         <div class="card">
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">DG3 shirt</div></div></div>
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">Coveralls</div></div></div>
-          <div class="lrow"><div class="cb no"></div><div class="tx"><div class="nm" style="color:var(--red)">Safety shoes</div><div class="sm">missing</div></div></div>
-          <div class="kv2"><span>HON app in use</span><div class="seg half" style="max-width:170px"><span class="on good">Yes</span><span>No</span><span>N/A</span></div></div>
+          <div class="grp"><span>Uniform &amp; PPE</span><em class="bad">1 missing</em></div>
+          <div class="itm"><div class="tx">DG3 shirt</div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Coveralls</div><span class="si ok"></span></div>
+          <div class="itm miss"><div class="tx">Safety shoes</div><span class="stw bad">Missing</span><span class="si bad"></span></div>
+          <div class="kv2"><span>HON app in use</span><div class="seg half soft" style="max-width:170px"><span class="on">Yes</span><span>No</span><span>N/A</span></div></div>
         </div>
         <div>
           <div class="q">Dispatch and arrival, as the crew tells it</div>
@@ -735,9 +774,9 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
       <div class="scr">
         <div class="tiles"><div class="tile main"><b>4</b><small>Overall</small></div><div class="tile"><b>3</b><small>Inventory</small></div><div class="tile"><b>4</b><small>Technical</small></div><div class="tile"><b>5</b><small>Collaterals</small></div><div class="tile"><b>5</b><small>Dispatch</small></div></div>
         <div class="card">
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">Every step answered</div><div class="sm">1 missing item · 1 machine finding · 3 OBP lines · 2 tools</div></div></div>
-          <div class="lrow"><div class="cb ok"></div><div class="tx"><div class="nm">Comment on the 3</div><div class="sm">Inventory management</div></div></div>
-          <div class="lrow"><div class="cb" style="border-color:#E6C98F;background:var(--amberbg)"></div><div class="tx"><div class="nm">3 photos · 1 waiting for signal</div><div class="sm">Files when the phone is online. The audit files now.</div></div></div>
+          <div class="itm"><div class="tx">Every step answered<div class="sm">1 missing item · 2 machine findings · 3 OBP lines · 2 tools</div></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">Comment on the 3<div class="sm">Inventory management</div></div><span class="si ok"></span></div>
+          <div class="itm"><div class="tx">3 photos · 1 waiting for signal<div class="sm">Uploads when the phone is online. The audit files now.</div></div><span class="si warn"></span></div>
         </div>
         <button class="btn">File audit</button>
         <div class="card soft">
@@ -847,7 +886,10 @@ section.blk>p.lead{color:var(--mut);margin:0 0 16px;max-width:70ch}
   // chips: plain toggle; amber "need" chips toggle their state
   document.querySelectorAll('.chips .chip').forEach(function(c){ c.addEventListener('click', function(){ if (c.classList.contains('on')) { c.classList.remove('on'); return; } c.classList.toggle('need'); }); });
   document.querySelectorAll('.hs .chip').forEach(function(c){ c.addEventListener('click', function(){ c.parentNode.querySelectorAll('.chip').forEach(function(x){ x.classList.remove('on'); }); c.classList.add('on'); }); });
-  // checkboxes cycle ok -> no -> ok (and plain on/off)
+  // status glyphs: a row toggles present <-> missing; a selection glyph toggles; a machine cell toggles pass <-> finding
+  document.querySelectorAll('.itm').forEach(function(r){ var si = r.querySelector('.si'); if (!si || si.classList.contains('warn')) return; r.addEventListener('click', function(){ var miss = r.classList.toggle('miss'); si.classList.toggle('bad', miss); si.classList.toggle('ok', !miss); var w = r.querySelector('.stw'); if (w) { w.textContent = miss ? 'Missing' : ''; w.className = 'stw' + (miss ? ' bad' : ''); } else if (miss) { var s = document.createElement('span'); s.className = 'stw bad'; s.textContent = 'Missing'; r.insertBefore(s, si); } }); });
+  document.querySelectorAll('.si.lg').forEach(function(s){ s.addEventListener('click', function(e){ e.stopPropagation(); s.classList.toggle('sel'); }); });
+  document.querySelectorAll('.cell').forEach(function(c){ c.addEventListener('click', function(){ var bad = c.classList.toggle('bad'); c.classList.toggle('ok', !bad); var si = c.querySelector('.si'); si.classList.toggle('bad', bad); si.classList.toggle('ok', !bad); }); });
   document.querySelectorAll('.cb').forEach(function(b){ b.addEventListener('click', function(e){ e.stopPropagation(); if (b.classList.contains('ok') || b.classList.contains('no')) { b.classList.toggle('ok'); b.classList.toggle('no'); } else { b.classList.toggle('on'); } }); });
   // rating squares; a 1-3 opens / requires the comment that follows
   document.querySelectorAll('.rate').forEach(function(sc){
