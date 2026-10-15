@@ -16,12 +16,12 @@ const SECTIONS = { sections: [
   { ship: "Allure", brand: "Royal", crew: [{ agency_id: "SC-3", name: "A B", current: true, aboard: true, signOn: "2026-09-01", contracts: 0 }] },
 ] };
 let ensured = 0;
-const H = installAudit({ json, htmlResponse, ensureAudit: async () => { ensured++; }, rotationSections: async () => SECTIONS, TODAY: () => "2026-10-14",
-  crewProfile: async (env, sc) => (sc === "SC-1" ? { crew: { first_name: "John", last_name: "Gorre", email: "j@x.com" }, profile: {
+const H_PROFILE = async (env, sc) => (sc === "SC-1" ? { crew: { first_name: "John", last_name: "Gorre", email: "j@x.com" }, profile: {
     count: { n: 3, asOf: "2026-10-08", added: 0, position: "Senior PS" },
     contracts: [{ current: true, ship: "Oasis", on: "2026-06-02", off: "2027-01-03", offSource: "projected", days: 134, plannedDays: 215 }],
     people: { feed: [{ at: "2026-09-01", kind: "feedback", role: "inventory", who: "Ray", answers: { mono: 4, note: "ok" } }, { at: "2026-08-01", kind: "feedback", superseded: true, answers: {} }], slots: [] },
-    checks: [{ text: "check me" }] } } : { error: "not found" }) });
+    checks: [{ text: "check me" }] } } : { error: "not found" });
+const H = installAudit({ json, htmlResponse, ensureAudit: async () => { ensured++; }, rotationSections: async () => SECTIONS, TODAY: () => "2026-10-14", crewProfile: H_PROFILE });
 const S = { email: "dexter.lawrence@dg3.com" };
 const call = (url, session = S, env = { DB: fakeDb() }) => { const u = new URL(url); return H(u.pathname, new Request(u), env, u, session); };
 
@@ -119,20 +119,20 @@ test("a POST from another site or another *.cims.work app is refused (the shared
   assert.notEqual((await post("https://audit.cims.work")).status, 403, "the audit's own page passes");
 });
 
-test("the briefing: what reached the ship this contract, from OBP's received ledger in HON's D1 (Miguel, 16 Oct 2026)", async () => {
+test("the briefing: rush orders this contract, the portal's misses on this hull from the sign-on (Miguel, 16 Oct 2026)", async () => {
   const seen = [];
-  const HON_DB = { prepare: (sql) => { const s = { bind: (...a) => { seen.push({ sql, a }); return s; }, all: async () => ({ results: [
-    { d: "2026-05-01", c: "Parts", t: "TN619C CYAN TONER", v: 845.1, q: 10, s: "2026-10-15" },
-    { d: "2026-07-01", c: "Supplies", t: "20 LBS 8.5 x 11 DG3 PAPER", v: 364.8, q: 10, s: "2026-10-15" },
-    { d: "2026-05-20", c: "Parts", t: "DR620 COLOR DRUM", v: 0, q: 1, s: "2026-10-15" },
-    { d: "2026-01-01", c: "Parts", t: "TN634K BLACK TONER", v: 999, q: 30, s: "2026-10-15" },
-  ] }) }; return s; } };
-  const b = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1", S, { DB: fakeDb(), HON_DB })).json();
-  assert.equal(seen.length, 1, "one read, in the briefing's wave");
-  assert.match(seen[0].sql, /^SELECT\b/);
-  assert.deepEqual(seen[0].a, ["oasis", "2025-07-11", "2026-10-14"], "OBP's ship name, a lower bound wide enough for any contract, to today");
-  assert.equal(b.supply.from, "2026-06-02", "cut to this contract's sign-on");
-  assert.deepEqual(b.supply.products.map((p) => [p.key, p.value]), [["paper", 364.8]], "the May toner predates the sign-on; a $0 drum is not shown");
+  const rushOrders = {
+    read: async (env, from, to) => { seen.push([from, to]); return [{ order_ref: "CIMS-1", ship: "Oasis", submitted_at: "2026-09-01T10:00:00Z", miss_reason: "equipment", requester: "John Gorre", subtotal: 50, freight: 90, clearance: 10, grand_total: 150, items: "[]" },
+      { order_ref: "CIMS-0", ship: "Oasis", submitted_at: "2026-05-01T10:00:00Z", miss_reason: "vessel", requester: "John Gorre", subtotal: 10, freight: 90, clearance: 10, grand_total: 110, items: "[]" }]; },
+    summarize: async (env, rows, args) => { seen.push(args); return (await import("../src/rush_orders.js")).rushSummary(rows, args); },
+  };
+  const H2 = installAudit({ json, htmlResponse, ensureAudit: async () => {}, rotationSections: async () => SECTIONS, TODAY: () => "2026-10-14", crewProfile: H_PROFILE, rushOrders });
+  const u = new URL("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1");
+  const b = await (await H2(u.pathname, new Request(u), { DB: fakeDb() }, u, S)).json();
+  assert.deepEqual(seen[0], ["2025-07-11", "2026-10-14"], "one read in the briefing's wave, wide enough for any contract");
+  assert.deepEqual(seen[1], { sc: "SC-1", ship: "Oasis", from: "2026-06-02", to: "2026-10-14" }, "cut to the contract: sign-on to today while it runs");
+  assert.deepEqual(b.rush.orders.map((o) => o.ref), ["CIMS-1"], "May is before the sign-on");
+  assert.equal(b.rush.total, 150); assert.equal(b.rush.rush, 100);
   const none = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1")).json();
-  assert.equal(none.supply, null, "no HON binding: no card, never a zero");
+  assert.equal(none.rush, null, "no portal read: no card, never a zero");
 });
