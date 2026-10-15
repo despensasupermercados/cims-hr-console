@@ -938,5 +938,8 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   summary does not (`numbersKept`) or names a day the summary does not (`datesKept`: "early October" never becomes
   "October 8", which the first live rewrite did); no engine / refused → the summary's first sentence. The stored report stays under
   "Full report". A brand chip clears a search left in the box ("qu" + Azamara showed Quest alone). `test/audit_plain.test.js`.
+  **One incident, one entry** (Miguel, same day: "if you see that it's the same problem, just merge them into one"):
+  `mergeIntel` folds field-intel reports with the same text, or the same dollar amount ($100+) within 14 days; the newer
+  leads, the header names every reporter, the others stay whole under "Full report". Deterministic, no model.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).

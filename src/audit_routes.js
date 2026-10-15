@@ -8,10 +8,10 @@
 import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
-import { feedbackPlain, intelFallback, plainKey, rewritePlain } from "./audit_plain.js";
+import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-15.c8";
+export const AUDIT_VERSION = "2026-10-15.c9";
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
@@ -77,11 +77,12 @@ export function installAudit(deps) {
     const cur = contracts.find((c) => c.current) || null;
     const count = P.count || null;
     const completed = count && count.n != null ? count.n : null;
-    const feed = ((P.people && P.people.feed) || []).filter((f) => f && !f.superseded).slice(0, 12).map((f) => ({
+    const feed = mergeIntel(((P.people && P.people.feed) || []).filter((f) => f && !f.superseded).slice(0, 12).map((f) => ({
       at: iso(f.at), kind: f.kind, who: f.who || null, role: f.role || null, rating: f.rating != null ? f.rating : null,
       text: f.kind === "feedback" ? feedbackPlain(f.answers) : String(f.text || "").slice(0, 2000),
       full: f.kind === "intel" ? String(f.text || "") : null,
-    }));
+    })));
+    for (const f of feed) if (f.kind === "intel") { if (f.whoAll) f.who = f.whoAll; delete f.whoAll; if (!f.others.length) delete f.others; }
     await plainIntel(env, feed);
     return json({
       today: TODAY(), auditor: session.email,

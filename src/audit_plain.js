@@ -141,3 +141,32 @@ export async function rewritePlain(env, text, { engine, claudeModel, workersMode
   const p = parsePlain(out);
   return p && numbersKept(p, text) && datesKept(p, text) ? p : null;
 }
+
+// ONE INCIDENT, ONE ENTRY (Miguel, 15 Oct 2026: "if you find the same identical report ... or if you see that it's the same
+// problem, just merge them into one"). Two field-intel reports are the same incident when their text is the same, or when
+// they carry the same dollar amount (a rush cost, $100 or more) within 14 days of each other. The newer report leads; the
+// others ride on it (`others`: who, when, full text) so nothing anyone wrote is lost — the page shows them under
+// "Full report" and the header names every reporter. Deterministic: no model decides what is a duplicate.
+const dollars = (s) => new Set((String(s).match(/\$\s?\d[\d,]*(?:\.\d+)?/g) || []).map((x) => Number(x.replace(/[$,\s]/g, ""))).filter((n) => n >= 100));
+const dayNo = (iso) => Math.floor(Date.parse(String(iso || "").slice(0, 10) + "T00:00:00Z") / 86400000);
+export function sameIncident(a, b) {
+  const ta = clean(a.full || a.text).toLowerCase(), tb = clean(b.full || b.text).toLowerCase();
+  if (ta && ta === tb) return true;
+  const gap = Math.abs(dayNo(a.at) - dayNo(b.at));
+  if (!(gap <= 14)) return false;
+  const da = dollars(ta), db = dollars(tb);
+  for (const x of da) if (db.has(x)) return true;
+  return false;
+}
+export function mergeIntel(feed) {
+  const out = [];
+  for (const f of feed) {
+    if (f.kind !== "intel") { out.push(f); continue; }
+    const lead = out.find((g) => g.kind === "intel" && sameIncident(g, f));
+    if (!lead) { out.push({ ...f, others: [] }); continue; }
+    lead.others.push({ who: f.who || null, at: f.at, full: f.full || f.text });
+    const names = [lead.who].concat(lead.others.map((o) => o.who)).filter(Boolean);
+    lead.whoAll = [...new Set(names)].join(" and ");
+  }
+  return out;
+}
