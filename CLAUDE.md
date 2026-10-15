@@ -782,7 +782,29 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   which the connector's text dump never showed: `excelSerialToISO` in `sga.js` turns it into `2026-02-04`; TDG's own text
   ("May 04, 2026") is kept as written. Pinned by `test/sga.test.js`. These older workbooks carry no TRAINREL sheet, so they
   write no `training_cost` row (September's TRAINREL already holds Jan–Sep 2026) and, being older bills, never replace the
-  September file's `sga_summary` rows (the later period wins — the values are identical anyway).
+  September file's `sga_summary` rows (the later period wins — the values are identical anyway). Batch 2, the same evening:
+  December 2025 and June–September 2026 (SGA 30-A, 36-A, 37-A REVISED, 38-A, 39-A; 65 / 64 / 67 / 62 / 76 lines; $72,159.79 /
+  $79,782.31 / $78,050.32 / $78,650.47 / $76,061.94); July–September carry TRAINREL, so `training_cost` holds the category
+  detail for Jan–Sep 2026; December 2025's refs read `ADV-2026-01-30-01` and its period is still DECEMBER — the file's name
+  (§10c), never the ref.
+- **THE ORIGINAL WORKBOOKS ARE KEPT — Miguel, 15 Oct 2026: "keep this [the files] somewhere in a bucket in the database or u
+  will figure out where .. I dont wanna lose this .. so is accessible to the brain when need it."** `src/sga_archive.js` (pure)
+  + `archiveSourceFile` in worker.js: every workbook the Worker receives goes to the **EXPORTS R2 bucket** (`cims-hr-exports`,
+  under its own prefix `sga-archive/<kind>/<year>/<MM>/<sha16>-<name>`, never mixed with the Keyman backups under `keyman/`) and
+  one row to `sga_source_file` keyed by the file's SHA-256 (migrations/0029, the same CREATE in `ensureSga`'s wave) — the same
+  identity as the inbox (`file_key mail:<sha16>@<sha16>`) and `sga_file.file_hash`, so a bill on file, its inbox rows and its
+  original are one thing. Two writers, both the Worker: the **mail intake** archives every attachment it took (held and
+  already-loaded ones too — keeping costs nothing, loading is the gate), and the **Upload page** sends the raw file to
+  `POST /api/sga/archive` after a successful Apply (`keepSgaOriginal`, "Original kept" chip). `GET /api/sga/file?hash=` returns
+  the original; `/api/sga` carries `sources`; the Travel tab's Bills on file table says "kept · download" / "not kept" / "no
+  record" per bill. **A mail whose file is already loaded (same bytes → same key, status ok) is archived and receipted, never
+  queued again** (`already_loaded`) — so re-sending a bill to sga@cims.work is the way to archive an original without
+  re-applying the month. A failed archive is reported on the result and never blocks a load; a row that already holds the
+  bytes is never downgraded. **The ten workbooks Miguel uploaded on 15 Oct 2026 are loaded but their bytes are NOT in the
+  bucket**: this session parsed them outside the Worker, and neither the Microsoft 365 connector (1 MB upload cap) nor the D1
+  tool can carry a 2 MB binary — their `sga_source_file` rows say so (`r2_key` NULL, note). To keep them, drag each once on
+  Upload data (Replace → identical lines, then the archive) or email them to sga@cims.work once the Email Routing rule exists.
+  Pinned by `test/sga_archive.test.js`, `test/mail_intake.test.js`.
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").

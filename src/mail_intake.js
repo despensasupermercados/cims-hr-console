@@ -89,11 +89,12 @@ export async function intakeMail(env, rawMessage, meta, deps) {
     const buf = t.att.content;
     const hash = await sha256Hex(buf);
     const sheets = deps.sheetsOf(deps.XLSX, buf, t.kind === "sga" ? deps.wantSga : deps.wantTravel);
-    if (!Object.keys(sheets).length) { files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status: "no_sheets", parts: 0, rows: 0 }); continue; }
+    // `bytes` rides on the entry for the archive (src/sga_archive.js) and is never written to the receipt
+    if (!Object.keys(sheets).length) { files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status: "no_sheets", parts: 0, rows: 0, bytes: buf }); continue; }
     const key = inboxFileKey("mail:" + hash.slice(0, 16), hash.slice(0, 16));
     const parts = inboxParts(sheets);
     const status = allowed ? "pending" : "held";
-    files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status, parts: parts.length, rows: Object.values(sheets).reduce((a, r) => a + r.length, 0),
+    files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status, parts: parts.length, rows: Object.values(sheets).reduce((a, r) => a + r.length, 0), bytes: buf,
       inbox: parts.map((p, i) => ({ id: "inb_mail_" + hash.slice(0, 24) + "_" + String(i).padStart(2, "0"), file_key: key, kind: t.kind, year: t.year, month: t.month, item_id: "mail:" + hash.slice(0, 16), name: t.att.filename, path: "email:" + from, modified: hash.slice(0, 16), sheet: p.sheet, part: p.part, parts: p.parts, file_parts: p.file_parts, rows_json: p.rows_json, written_by: "email:" + from, at, status })) });
   }
   return { from, allowed, subject: mail.subject || meta.subject || null, messageId: mail.messageId || null, files, ignored, at };
