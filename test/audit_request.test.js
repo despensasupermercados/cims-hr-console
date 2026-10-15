@@ -34,11 +34,12 @@ function fakeHon(reads = {}) {
 const R2 = () => { const m = new Map(); return { m, put: async (k, b) => { m.set(k, new Uint8Array(b)); }, head: async (k) => (m.has(k) ? { size: m.get(k).length } : null), get: async (k) => (m.has(k) ? { arrayBuffer: async () => m.get(k).buffer } : null) }; };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
 const html = (b, status = 200) => new Response(b, { status, headers: { "Content-Type": "text/html" } });
+const BOARD = { sections: [{ ship: "Oasis", crew: [{ agency_id: "SC-1", current: true, aboard: true }] }, { ship: "Apex", crew: [] }] };
 function setup({ live = false, reads } = {}) {
   const { db, DB } = d1();
   const sent = [];
   const env = { DB, TIMECARD_DB: TC, HON: fakeHon(reads), AUDIT_FILES: R2(), AUDIT_TO: "ray@dg3.com, rolando@dg3.com, miguel@dg3.com", AUDIT_REQUEST_CC: "rolando@dg3.com, ray@dg3.com", AUDIT_LIVE: live ? "true" : undefined };
-  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {},
+  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => BOARD,
     sendViaMailer: async (e, env2) => { sent.push(env2 || e); return { ok: true }; } });
   // sendViaMailer(env, envelope): keep the envelope
   R._sent = sent;
@@ -215,6 +216,12 @@ test("Dexter's grade: only once the documents are in, a sentence for 3 or below,
   const g = (body) => t.call("POST", "/api/audit/request/grade", Object.assign({ id }, body));
   assert.equal((await g({ inventory: 5, technical: 5, collaterals: 5 })).status, 409, "the gate: no grade before the documents are in");
   t.db.prepare("UPDATE audit_request SET status='complete', complete_at='2026-10-15T08:00:00Z' WHERE id=?").run(id);
+  const tr = await g({ inventory: 5, technical: 5, collaterals: 5 });
+  assert.equal(tr.status, 409, "a TEST request is a rehearsal: its grade would reach a real Score Card");
+  assert.equal((await tr.json()).error, "test_request");
+  t.db.prepare("UPDATE audit_request SET test_mode=0 WHERE id=?").run(id);
+  for (const v of [true, " 5 ", "0x5", [5], 4.5, "6"]) assert.equal((await g({ inventory: v, technical: 5, collaterals: 5 })).status, 400, "not a rating: " + JSON.stringify(v));
+  assert.deepEqual((await (await g({ inventory: 2, technical: 5, collaterals: 5, note: {} })).json()).fields, ["note"], "a note is text, never [object Object]");
   const bad = await g({ inventory: 3, technical: 5, collaterals: 5 });
   assert.equal(bad.status, 400); assert.deepEqual((await bad.json()).fields, ["note"]);
   const ok = await (await g({ inventory: 3, technical: 5, collaterals: 4, overall: "", note: "OBP not updated after the drum change." })).json();
@@ -225,4 +232,23 @@ test("Dexter's grade: only once the documents are in, a sentence for 3 or below,
   assert.equal(t.db.prepare("SELECT status FROM audit_visit").get().status, "filed");
   const d = await (await t.call("GET", "/api/audit/request?id=" + id)).json();
   assert.equal(d.grade.score, 4); assert.equal(d.grade.inventory, 3); assert.match(d.grade.note, /drum/);
+});
+
+test("open site: a request only to a seafarer aboard THAT ship; no re-send inside 15 minutes; an open-site grade says so; a graded request is not 'open'", async () => {
+  const t = setup({ live: true });
+  const OPEN = { email: "Dexter.Lawrence@dg3.com", open: true };
+  const nope = await t.call("POST", "/api/audit/request", { ship: "Apex", sc: "SC-1" }, OPEN);
+  assert.equal(nope.status, 422); assert.equal((await nope.json()).error, "not_aboard");
+  const r = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" }, OPEN)).json();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const again = await t.call("POST", "/api/audit/request/resend", { id: r.id }, OPEN);
+  assert.equal(again.status, 429, "each re-send breaks the crew's link and emails the ship again");
+  const pv = await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1", undefined, OPEN)).json();
+  assert.deepEqual(pv.cc, [], "no personal address on the open site");
+  assert.equal((await (await t.call("GET", "/api/audit/request?id=" + r.id, undefined, OPEN)).json()).cc, null);
+  t.db.prepare("UPDATE audit_request SET status='complete', complete_at='2026-10-15T08:00:00Z' WHERE id=?").run(r.id);
+  assert.equal((await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json()).open.id, r.id, "in, not graded: still open");
+  assert.equal((await t.call("POST", "/api/audit/request/grade", { id: r.id, inventory: 5, technical: 4, collaterals: 5 }, OPEN)).status, 200);
+  assert.match(t.db.prepare("SELECT filed_by FROM audit_eval").get().filed_by, /open site, no sign-in/);
+  assert.equal((await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json()).open, null, "graded: the way is open for the next audit");
 });

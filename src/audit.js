@@ -175,7 +175,12 @@ export const AUDIT_RATINGS = [
   { key: "overall", label: "Overall", hint: "Leave blank to use the average of the three above", optional: true },
 ];
 export const GRADE_NOTE_MIN = 10; // a 3 or below needs a sentence (the design's rule)
-const rating = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null; };
+// A rating is a whole 1–5, sent as a number or a one-digit string; true, " 5 ", "0x5", [5] and 4.5 are not ratings.
+const rating = (v) => {
+  if (typeof v === "number") return Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
+  if (typeof v === "string" && /^[1-5]$/.test(v)) return Number(v);
+  return null;
+};
 export function auditScore(r) {
   const x = r || {};
   const o = rating(x.overall);
@@ -189,6 +194,7 @@ export function gradeProblems(r) {
   for (const k of ["inventory", "technical", "collaterals"]) if (rating(x[k]) == null) out.push(k);
   if (x.overall != null && x.overall !== "" && rating(x.overall) == null) out.push("overall");
   const low = AUDIT_RATINGS.some((a) => { const v = rating(x[a.key]); return v != null && v <= 3; });
-  if (low && String(x.note || "").trim().length < GRADE_NOTE_MIN) out.push("note");
+  if (x.note != null && typeof x.note !== "string") out.push("note");
+  else if (low && String(x.note || "").trim().length < GRADE_NOTE_MIN) out.push("note");
   return out;
 }

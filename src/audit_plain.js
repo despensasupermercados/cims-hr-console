@@ -94,25 +94,67 @@ export function parsePlain(txt) {
   return s;
 }
 
-// Every number in the plain line must already be in the source (THE ONE LAW of the fleet apps, applied here).
-const nums = (s) => (String(s).match(/\d[\d,]*(?:\.\d+)?/g) || []).map((n) => n.replace(/,/g, "").replace(/\.0+$/, ""));
+// Every number in the plain line must already be in the source (THE ONE LAW of the fleet apps, applied here). Read as
+// numbers, not as digit strings: "04" is 4, "$1.50" is $1.5, "1,240" is 1240 but "items 1,2" is 1 and 2. A dollar
+// amount must match a dollar amount ("$10 freight for 550 toners" from "10 toners plus $550 in freight" is refused), a
+// number word the source does not carry is refused ("twelve toners"), and the headline cost (the source's largest amount
+// of $100 or more) must stay in the line: a rewrite that drops the rush cost lost the point of the note.
+const normNum = (n) => {
+  let t = String(n);
+  t = /^\d{1,3}(,\d{3})+(\.\d+)?$/.test(t) ? t.replace(/,/g, "") : t;
+  if (/,/.test(t)) return null;
+  if (/\./.test(t)) t = t.replace(/0+$/, "").replace(/\.$/, "");
+  t = t.replace(/^0+(?=\d)/, "");
+  return t;
+};
+const numTokens = (s) => {
+  const out = [];
+  for (const m of String(s).matchAll(/(\$\s?)?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)/g)) {
+    const v = normNum(m[2]);
+    if (v != null) out.push({ v, cash: !!m[1] });
+  }
+  return out;
+};
+const NUM_WORDS = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100, dozen: 12, thousand: 1000 };
 export function numbersKept(plain, source) {
-  const have = new Set(nums(source));
-  return nums(plain).every((n) => have.has(n));
+  const src = numTokens(source), pl = numTokens(plain);
+  const any = new Set(src.map((x) => x.v)), cash = new Set(src.filter((x) => x.cash).map((x) => x.v));
+  for (const x of pl) {
+    if (x.cash ? !cash.has(x.v) : !any.has(x.v)) return false;
+  }
+  const srcLow = String(source).toLowerCase();
+  for (const m of String(plain).toLowerCase().matchAll(/\b([a-z]+)\b/g)) {
+    const n = NUM_WORDS[m[1]];
+    if (n != null && !new RegExp("\\b" + m[1] + "\\b").test(srcLow) && !any.has(String(n))) return false;
+  }
+  const big = src.filter((x) => x.cash && Number(x.v) >= 100).map((x) => Number(x.v));
+  if (big.length) {
+    const top = String(Math.max(...big)).replace(/\.0+$/, "");
+    if (!pl.some((x) => x.cash && x.v === normNum(top))) return false;
+  }
+  return true;
 }
 
-// A day the rewrite names ("October 8", "8 Oct") must be named that way in the source too: "early October" never becomes
-// "October 8" (the first live rewrite did exactly that, 15 Oct 2026, and every digit of it was in the note).
+// A day the rewrite names ("October 8", "8 Oct", "the 8th", "2026-10-08") must be named that way in the source too:
+// "early October" never becomes "October 8" (the first live rewrite did exactly that, 15 Oct 2026, and every digit of it
+// was in the note). An ISO date in the source counts as its month and day; a bare ordinal ("on the 5th") is a day too.
 const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+const MON3 = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const dayRefs = (s) => {
-  const out = [], t = String(s).toLowerCase();
-  for (const m of t.matchAll(new RegExp("\\b(" + MONTHS + ")\\.?\\s+(\\d{1,2})(?!\\d)", "g"))) out.push(m[1].slice(0, 3) + " " + Number(m[2]));
+  const out = [];
+  let t = String(s).toLowerCase();
+  for (const m of t.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) { const mo = Number(m[2]); if (mo >= 1 && mo <= 12) out.push(MON3[mo - 1] + " " + Number(m[3])); }
+  t = t.replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ");
+  for (const m of t.matchAll(new RegExp("\\b(" + MONTHS + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)", "g"))) out.push(m[1].slice(0, 3) + " " + Number(m[2]));
   for (const m of t.matchAll(new RegExp("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS + ")\\b", "g"))) out.push(m[2].slice(0, 3) + " " + Number(m[1]));
+  const named = t.replace(new RegExp("\\b(" + MONTHS + ")\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS + ")\\b", "g"), " ");
+  for (const m of named.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)\b/g)) out.push("day " + Number(m[1]));
   return out;
 };
 export function datesKept(plain, source) {
-  const have = new Set(dayRefs(source));
-  return dayRefs(plain).every((d) => have.has(d));
+  const have = dayRefs(source);
+  const exact = new Set(have), days = new Set(have.map((d) => d.split(" ")[1]));
+  return dayRefs(plain).every((d) => (d.startsWith("day ") ? days.has(d.slice(4)) : exact.has(d)));
 }
 
 export async function plainKey(text) {
@@ -121,12 +163,16 @@ export async function plainKey(text) {
 }
 
 // One rewrite through the intel engine (Claude when its key is set, else Workers AI). Never throws; null on failure.
-export async function rewritePlain(env, text, { engine, claudeModel, workersModel, timeoutMs = 7000 } = {}) {
+// `onRefused` hears a rewrite the guards turned down (kept as a refusal by the caller, so the same note is not paid for on
+// every open); a timeout or an engine error is not a refusal and is tried again next time.
+export async function rewritePlain(env, text, { engine, claudeModel, workersModel, timeoutMs = 7000, onRefused } = {}) {
   if (!engine || engine === "none") return null;
+  const ctl = typeof AbortController === "function" ? new AbortController() : null;
+  let timer = null;
   const run = (async () => {
     if (engine === "claude") {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+        method: "POST", signal: ctl ? ctl.signal : undefined,
         headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({ model: claudeModel, max_tokens: 160, system: PLAIN_SYSTEM, messages: [{ role: "user", content: plainPrompt(text) }] }),
       });
@@ -137,9 +183,13 @@ export async function rewritePlain(env, text, { engine, claudeModel, workersMode
     const j = await env.AI.run(workersModel, { messages: [{ role: "system", content: PLAIN_SYSTEM }, { role: "user", content: plainPrompt(text) }], max_tokens: 160 });
     return (j && (j.response || j.result || (typeof j === "string" ? j : ""))) || "";
   })().catch(() => null);
-  const out = await Promise.race([run, new Promise((res) => setTimeout(() => res(null), timeoutMs))]);
+  const out = await Promise.race([run, new Promise((res) => { timer = setTimeout(() => res(null), timeoutMs); })]);
+  if (timer) clearTimeout(timer);
+  if (out == null) { if (ctl) ctl.abort(); return null; }
   const p = parsePlain(out);
-  return p && numbersKept(p, text) && datesKept(p, text) ? p : null;
+  if (p && numbersKept(p, text) && datesKept(p, text)) return p;
+  if (typeof onRefused === "function") onRefused(p);
+  return null;
 }
 
 // ONE INCIDENT, ONE ENTRY (Miguel, 15 Oct 2026: "if you find the same identical report ... or if you see that it's the same

@@ -72,9 +72,10 @@ button{font:inherit;color:inherit}
 .hero .who{color:#B9C6D6;font-size:14px}
 .sbox{position:relative;margin-top:16px}
 .sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
+.search::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}
 .search{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 46px 0 42px;font-size:16px;background:#fff;color:#14243A;font-family:var(--ff)}
 .search:focus{outline:2px solid var(--green);outline-offset:1px}
-main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-direction:column;gap:14px}
+main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px}
 .offl{max-width:640px;margin:12px auto 0;padding:0 16px}.offl div{display:flex;gap:8px;align-items:center;background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
 .offl[hidden]{display:none}
 .chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px 2px}
@@ -158,14 +159,14 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .rate{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}
 .rate button{min-height:44px;border:0;border-radius:12px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);font-family:var(--fh);font-weight:600;font-size:16px;color:var(--ink2);cursor:pointer}
 .rate button.on{background:var(--navy);color:#fff;box-shadow:none}.rate button.on.lo{background:#B4382A}
-.gnote{width:100%;min-height:96px;border:0;border-radius:12px;padding:12px 14px;font:inherit;font-size:15px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink);resize:vertical}
+.gnote{width:100%;min-height:96px;border:0;border-radius:12px;padding:12px 14px;font:inherit;font-size:16px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink);resize:vertical}
 .gnote.err{box-shadow:inset 0 0 0 2px var(--red)}
 .gsum{display:flex;align-items:center;gap:12px}.gsum .ib{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;flex:none}.gsum .ib .ic{width:26px;height:26px}
 .gsum .ib.n{background:var(--navybg);color:var(--nfg)}.gsum .ib.g{background:var(--greenbg);color:var(--green-d)}.gsum .ib.r{background:var(--redbg);color:var(--red)}.gsum .n{font-family:var(--fh);font-weight:700;font-size:34px;line-height:1}.gsum .n small{font-size:16px;color:var(--mut);font-weight:600}
 .gline{display:flex;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--line);font-size:14px}.gline b{font-family:var(--fh)}
 .full{margin-top:6px}.full>summary{display:inline-flex;align-items:center;min-height:40px;padding-right:12px;font-size:13px;font-weight:600;color:var(--nfg);cursor:pointer}
-.full>div p.also{margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--line);font-weight:600;color:var(--fg)}
-.full>div{font-size:13px;line-height:1.5;color:var(--mut);padding-top:2px}.full>div p{margin:0 0 6px}.full>div b{color:var(--fg);font-weight:600}
+.full>div p.also{margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--line);font-weight:600;color:var(--ink)}
+.full>div{font-size:13px;line-height:1.5;color:var(--mut);padding-top:2px}.full>div p{margin:0 0 6px}.full>div b{color:var(--ink);font-weight:600}
 .sbox .clr{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;padding:0;border:0;background:none;color:var(--mut);display:flex;align-items:center;justify-content:center;border-radius:10px;cursor:pointer}
 .sbox .clr[hidden]{display:none}.sbox .clr .ic{position:static;transform:none;width:18px;height:18px}
 .empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;text-align:center;color:var(--mut);font-size:14px}
@@ -203,7 +204,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function ic(n, cls) { return (IC[n] || "").replace("<svg ", '<svg class="ic' + (cls ? " " + cls : "") + '" '); }
   var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  function fmtD(d, withYear) { if (!d) return ""; var p = String(d).slice(0, 10).split("-"); if (p.length < 3) return esc(d); var s = MON[Number(p[1]) - 1] + " " + Number(p[2]); return withYear || p[0] !== String(S.today || "").slice(0, 4) ? s + ", " + p[0] : s; }
+  function fmtD(d, withYear) { if (!d) return ""; var p = String(d).slice(0, 10).split("-"); if (p.length < 3) return esc(d); var s = MON[Number(p[1]) - 1] + " " + Number(p[2]); return withYear || p[0] !== String(S.today || "").slice(0, 4) ? s + ", " + esc(p[0]) : s; }
   function todayLong() { var t = S.today ? new Date(S.today + "T12:00:00") : new Date(); return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][t.getDay()] + ", " + MON[t.getMonth()] + " " + t.getDate(); }
   function nameOf(email) { var e = String(email || "").split("@")[0].split("."); return e.map(function (w) { return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""; }).join(" "); }
   function first(n) { return String(n || "").split(" ")[0]; }
@@ -274,9 +275,9 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       if (!q) return true;
       return (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase().indexOf(q) >= 0;
     });
-    var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || s.last.status === "complete"); });
+    var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null)); });
     var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
-    var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" data-brand="' + esc(b) + '">' + esc(b) + "</button>"; }).join("") + "</div>";
+    var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b) + "</button>"; }).join("") + "</div>";
     if (open.length) {
       h += '<div class="sh">Open requests<span>' + open.length + "</span></div>";
       h += '<div class="card">' + open.map(function (s) { return shipRow(s, true); }).join("") + "</div>";
@@ -296,8 +297,10 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     return '<div class="prog"><div class="track' + (d > tot ? " late" : "") + '"><i style="width:' + pct(d, tot) + '%"></i></div><div class="ends"><span>' + fmtD(c.signOn) + "</span><span>" + (c.heldByFile ? "past " : "") + fmtD(c.signOff) + "</span></div></div>";
   }
   function shipView(ship) {
-    var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0];
-    if (!s) { go(""); return; }
+    /* a reload on #s= arrives before the ships list: wait for it (the load re-routes), never bounce home */
+    if (!S.ships) { top(ship, "", "", "", true); hero(""); dock(""); $("main").innerHTML = skel(3); return; }
+    var s = S.ships.filter(function (x) { return x.ship === ship; })[0];
+    if (!s) { location.replace("#"); return; }
     if (s.aboard.length === 1) { location.replace("#b=" + encodeURIComponent(s.ship) + "|" + encodeURIComponent(s.aboard[0].sc)); return; }
     top(s.ship, brandOf(s), "", "", true); hero(""); dock("");
     var h = '<div class="sh">Who are you auditing?</div><div class="card">';
@@ -312,11 +315,11 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   /* ---------------- A2 · The briefing ---------------- */
   var KIND = { feedback: "Feedback", intel: "Field intel", review: "Shipboard review", note: "Note", comment: "Comment" };
   function needCard(fn, machines, lines) {
-    var m = machines == null ? "" : machines;
+    var q = function (v) { return v == null ? "" : '<span class="q">' + esc(v) + "</span>"; };
     return '<div class="card"><div class="ch">' + ic("list-checks") + "What " + esc(fn) + ' sends before you arrive</div>' +
-      '<div class="need"><span class="ib">' + ic("printer") + '</span><div class="tx"><div class="t">Pattern 43</div><div class="s">12 pages, one per machine</div></div><span class="q">' + m + "</span></div>" +
-      '<div class="need"><span class="ib">' + ic("files") + '</span><div class="tx"><div class="t">Machine Management List</div><div class="s">The long report with the life %, one per machine</div></div><span class="q">' + m + "</span></div>" +
-      '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div><span class="q">' + (lines == null ? "" : lines) + "</span></div>" +
+      '<div class="need"><span class="ib">' + ic("printer") + '</span><div class="tx"><div class="t">Pattern 43</div><div class="s">12 pages, one per machine</div></div>' + q(machines) + "</div>" +
+      '<div class="need"><span class="ib">' + ic("files") + '</span><div class="tx"><div class="t">Machine Management List</div><div class="s">The long report with the life %, one per machine</div></div>' + q(machines) + "</div>" +
+      '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div>' + q(lines) + "</div>" +
       '<div class="foot">' + ic("lock-simple") + "<span>The audit opens only when all of it is in. 24 hours to upload.</span></div></div>";
   }
   /* the stored field-intel summary ("• Summary: … • What happened: …"), one labelled paragraph per bullet */
@@ -382,7 +385,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     var key = "r" + ship + "|" + sc; S.view = key;
     api("/api/audit/request/preview?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc)).then(function (p) {
       if (S.view !== key) return;
-      if (p.open) { go("q=" + p.open.id); return; }
+      if (p.open) { location.replace("#q=" + p.open.id); return; }
       top("Request documents", ship + " · " + p.crew.name, "", "", true);
       var n = p.machines ? p.machines.length : 0;
       var h = "";
@@ -403,7 +406,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
         btn.disabled = true; btn.innerHTML = ic("paper-plane-tilt") + "Sending";
         var contract = S.lastBrief && S.lastBrief.contract ? S.lastBrief.contract.label : null;
         post("/api/audit/request", { ship: ship, sc: sc, contract: contract }).then(function (r) {
-          if (r.ok || r.error === "already_open") { S.brief = {}; reloadShips(); go("q=" + r.id); }
+          if (r.ok || r.error === "already_open") { S.brief = {}; reloadShips(); location.replace("#q=" + r.id); }
           else { btn.disabled = false; btn.innerHTML = ic("arrow-clockwise") + "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY[r.error] || r.detail || r.error) + "</span></div>"); }
         }).catch(fail);
       };
@@ -455,7 +458,14 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       if (done && !d.grade) dock('<button class="btn green" data-go="g=' + esc(id) + '">' + ic("clipboard-text") + "Grade the audit</button>");
       else if (sent) {
         dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + 'Add 24 h</button></div><button class="btn txt" id="cx">Cancel request</button>');
-        var act = function (what, confirmText) { return function () { if (confirmText && !confirm(confirmText)) return; post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(WHY[r.error] || r.error || "Not done"); reloadShips(); requestDetail(id); }); }; };
+        /* one action at a time: a double tap on Add 24 h added 48, a double Resend sent two emails */
+        var busy = false, btns = function (on) { ["rs", "ex", "cx"].forEach(function (k) { var b = $(k); if (b) b.disabled = on; }); };
+        var act = function (what, confirmText) { return function () {
+          if (busy || (confirmText && !confirm(confirmText))) return;
+          busy = true; btns(true);
+          post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(WHY[r.error] || r.detail || r.error || "Not done"); S.brief = {}; reloadShips(); requestDetail(id); })
+            .catch(function () { busy = false; btns(false); alert("No connection. Nothing was changed; try again."); });
+        }; };
         $("rs").onclick = act("resend", "Send the request again? The old link stops working.");
         $("ex").onclick = act("extend");
         $("cx").onclick = act("cancel", "Cancel this request? The upload link closes.");
@@ -480,10 +490,10 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     top("Grade the audit", "", "", "", true); hero(""); dock("");
     $("main").innerHTML = skel(4);
     var key = "g" + id; S.view = key;
-    var G = { inventory: null, technical: null, collaterals: null, overall: null, note: "" };
+    var G = { inventory: null, technical: null, collaterals: null, overall: null, note: "" }, filing = false;
     api("/api/audit/request?id=" + encodeURIComponent(id)).then(function (d) {
       if (S.view !== key) return;
-      if (d.grade || d.status !== "complete") { go("q=" + id); return; }
+      if (d.grade || d.status !== "complete") { location.replace("#q=" + id); return; }
       top(d.ship, d.crew, "", "", true);
       var h = '<div class="card">';
       RATINGS.forEach(function (r) {
@@ -498,7 +508,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       var draw = function () {
         Array.prototype.forEach.call(document.querySelectorAll(".rate"), function (row) {
           var k = row.getAttribute("data-k");
-          Array.prototype.forEach.call(row.children, function (b) { var v = +b.getAttribute("data-v"); b.className = (G[k] === v ? "on" : "") + (G[k] === v && v <= 3 ? " lo" : ""); });
+          Array.prototype.forEach.call(row.children, function (b) { var v = +b.getAttribute("data-v"); b.className = (G[k] === v ? "on" : "") + (G[k] === v && v <= 3 ? " lo" : ""); b.setAttribute("aria-pressed", String(G[k] === v)); });
         });
         var sc = scoreOf(G), low = RATINGS.some(function (r) { return G[r[0]] != null && G[r[0]] <= 3; });
         var all = G.inventory && G.technical && G.collaterals, noteOk = !low || G.note.trim().length >= 10;
@@ -507,7 +517,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
         $("gi").className = "ib " + (sc.score == null ? "n" : sc.score <= 3 ? "r" : "g");
         $("nh").textContent = low ? "Required: a rating is 3 or below. One sentence, at least 10 characters." : "Optional. Required when any rating is 3 or below.";
         $("gn").classList.toggle("err", low && !noteOk && G.note.length > 0);
-        var btn = $("gb"); if (btn) btn.disabled = !(all && noteOk);
+        var btn = $("gb"); if (btn) btn.disabled = filing || !(all && noteOk);
       };
       document.querySelectorAll(".rate").forEach(function (row) {
         row.addEventListener("click", function (e) {
@@ -521,11 +531,14 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       $("gb").onclick = function () {
         var sc = scoreOf(G);
         if (!confirm("File " + first(d.crew) + "'s audit with a score of " + sc.score + " / 5? It cannot be changed afterwards.")) return;
-        $("gb").disabled = true;
+        filing = true; $("gb").disabled = true;
+        var back = function () { filing = false; if (S.view === key) draw(); };
         post("/api/audit/request/grade", { id: id, inventory: G.inventory, technical: G.technical, collaterals: G.collaterals, overall: G.overall, note: G.note }).then(function (r) {
-          if (!r.ok) { alert(r.error === "already_filed" ? "This audit was already graded." : r.error === "invalid" ? "Check the ratings and the note." : (r.error || "Not filed")); $("gb").disabled = false; return; }
-          reloadShips(); S.brief = {}; history.replaceState(null, "", "#q=" + id); requestDetail(id);
-        }).catch(function () { alert("No connection. Nothing was filed; try again."); $("gb").disabled = false; });
+          if (!r.ok) { alert(r.error === "already_filed" ? "This audit was already graded." : r.error === "invalid" ? "Check the ratings and the note." : (r.detail || r.error || "Not filed")); if (r.error === "already_filed") { location.replace("#q=" + id); return; } back(); return; }
+          reloadShips(); S.brief = {};
+          /* back to the request this screen was opened from, without leaving a second copy of it in the history */
+          if (S.prev === "q=" + id) history.back(); else location.replace("#q=" + id);
+        }).catch(function () { alert("No connection. Nothing was filed; try again."); back(); });
       };
       draw();
     }).catch(fail);
@@ -536,7 +549,9 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function go(h) { location.hash = h; }
   function route() {
     S.view = null; window.scrollTo(0, 0);
-    var h = decodeURIComponent(location.hash.replace(/^#/, ""));
+    var raw = location.hash.replace(/^#/, ""), h;
+    try { h = decodeURIComponent(raw); } catch (e) { h = raw; }
+    S.prev = S.cur; S.cur = h;
     if (h.indexOf("s=") === 0) return shipView(h.slice(2));
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }

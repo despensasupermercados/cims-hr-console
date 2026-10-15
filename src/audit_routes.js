@@ -8,12 +8,34 @@
 import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
-import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel } from "./audit_plain.js";
+import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel, numbersKept, datesKept } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-15.d2";
+export const AUDIT_VERSION = "2026-10-15.e1";
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
+
+// A reporter is shown by name, never by address: "Ray Guerra <ray@…>" and "ray.guerra@…" both read "Ray Guerra".
+export function personName(v) {
+  const t = String(v || "").trim();
+  if (!t) return null;
+  const named = t.replace(/\s*<[^>]*>\s*/g, "").replace(/^"|"$/g, "").trim();
+  if (named && !/@/.test(named)) return named;
+  const local = t.replace(/^.*</, "").split("@")[0];
+  return local.split(/[._-]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ") || null;
+}
+export function aboardSomewhere(board, sc) {
+  for (const s of (board && board.sections) || []) for (const c of s.crew || []) if (c && c.current && c.aboard && c.agency_id === sc) return true;
+  return false;
+}
+// A POST from another site, or from another *.cims.work app carrying the shared cookie, is refused: the browser always
+// names the page that sent it (Origin), and the audit's own pages are on this host.
+export function crossSite(request, url) {
+  if (request.method !== "POST") return false;
+  const o = request.headers.get("Origin");
+  if (!o) return false;
+  try { return new URL(o).host !== url.host; } catch (e) { return true; }
+}
 
 export function installAudit(deps) {
   const { json, htmlResponse, ensureAudit, rotationSections, crewProfile, TODAY } = deps;
@@ -42,7 +64,7 @@ export function installAudit(deps) {
     await ensureAudit(env);
     const [board, reqs] = await Promise.all([
       rotationSections(env),
-      env.DB.prepare("SELECT id, ship, agency_id, crew_name, status, created_at, sent_at, due_at, overdue_at, complete_at, test_mode FROM audit_request WHERE status != 'cancelled' ORDER BY created_at DESC").all().catch(() => ({ results: [] })),
+      env.DB.prepare("SELECT r.id, r.ship, r.agency_id, r.crew_name, r.status, r.created_at, r.sent_at, r.due_at, r.overdue_at, r.complete_at, r.test_mode, e.score AS grade FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.status != 'cancelled' ORDER BY r.created_at DESC").all().catch(() => ({ results: [] })),
     ]);
     const lastBy = {};
     for (const r of reqs.results || []) { const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r; }
@@ -53,7 +75,7 @@ export function installAudit(deps) {
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
-      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode } : null });
+      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
     return json({ today: TODAY(), auditor: session.email, ships: out });
@@ -67,10 +89,14 @@ export function installAudit(deps) {
     const ship = String(url.searchParams.get("ship") || "").trim();
     if (!sc) return json({ error: "sc_required" }, 400);
     await ensureAudit(env);
-    const [prof, reqs] = await Promise.all([
+    // OPEN MODE answers only for a seafarer the audit can reach: aboard a hull per the board, or already asked for an
+    // audit. Without it the briefing is a lookup of any crew's private record by id (Inactive and Not for Rehire too).
+    const [prof, reqs, board] = await Promise.all([
       crewProfile(env, sc, session),
       env.DB.prepare("SELECT r.id, r.ship, r.status, r.created_at, r.sent_at, r.complete_at, r.due_at, r.auditor, r.test_mode, e.score AS grade, e.filed_at AS graded_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? ORDER BY r.created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
+      session.open ? rotationSections(env).catch(() => null) : null,
     ]);
+    if (session.open && !(reqs.results || []).length && !aboardSomewhere(board, sc)) return json({ error: "not_found" }, 404);
     if (!prof || prof.error) return json({ error: (prof && prof.error) || "not_found" }, 404);
     const P = prof.profile || {}, crew = prof.crew || {};
     const contracts = Array.isArray(P.contracts) ? P.contracts : [];
@@ -78,7 +104,7 @@ export function installAudit(deps) {
     const count = P.count || null;
     const completed = count && count.n != null ? count.n : null;
     const feed = mergeIntel(((P.people && P.people.feed) || []).filter((f) => f && !f.superseded).slice(0, 12).map((f) => ({
-      at: iso(f.at), kind: f.kind, who: f.who || null, role: f.role || null, rating: f.rating != null ? f.rating : null,
+      at: iso(f.at), kind: f.kind, who: personName(f.who), role: f.role || null, rating: f.rating != null ? f.rating : null,
       text: f.kind === "feedback" ? feedbackPlain(f.answers) : String(f.text || "").slice(0, 2000),
       full: f.kind === "intel" ? String(f.text || "") : null,
     })));
@@ -86,7 +112,7 @@ export function installAudit(deps) {
     await plainIntel(env, feed);
     return json({
       today: TODAY(), auditor: session.email,
-      crew: { sc, name: [crew.first_name, crew.last_name].filter(Boolean).join(" ") || sc, position: (count && count.position) || crew.rank || null, email: crew.email || null },
+      crew: { sc, name: [crew.first_name, crew.last_name].filter(Boolean).join(" ") || sc, position: (count && count.position) || crew.rank || null, email: session.open ? null : crew.email || null },
       ship: ship || (cur && cur.ship) || null,
       contract: {
         label: contractLabel(completed, !!cur), source: count && count.asOf ? "TDG count as of " + count.asOf + (count.added ? " + " + count.added + " finished since" : "") : null,
@@ -95,7 +121,8 @@ export function installAudit(deps) {
       slots: (P.people && P.people.slots) || [],
       feed, checks: (P.checks || []).map((c) => c.text),
       audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
-      open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "complete" || r.status === "draft") || {}).id || null,
+      // the request still in motion: sent, or in and not graded yet (a graded one is finished and opens the way to the next)
+      open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "draft" || (r.status === "complete" && r.grade == null)) || {}).id || null,
     });
   }
 
@@ -108,17 +135,19 @@ export function installAudit(deps) {
     for (const f of intel) { f.h = await plainKey(f.full); f.text = intelFallback(f.full); f.plain = false; }
     const hs = [...new Set(intel.map((f) => f.h))];
     const got = await env.DB.prepare("SELECT h, text FROM audit_plain WHERE h IN (" + hs.map(() => "?").join(",") + ")").bind(...hs).all().then((r) => r.results || [], () => []);
-    const kept = new Map(got.map((r) => [r.h, r.text]));
+    // a row with no text is a rewrite the guards REFUSED: kept so the same note is not paid for on every open
+    const kept = new Map(got.map((r) => [r.h, r.text || ""]));
     const engine = pickEngine(env);
     const miss = hs.filter((h) => !kept.has(h)).slice(0, 4);
+    const keep = (h, t, eng) => env.DB.prepare("INSERT OR IGNORE INTO audit_plain (h, text, engine, at) VALUES (?,?,?,?)").bind(h, t, eng, new Date().toISOString()).run().catch(() => {});
     await Promise.all(miss.map(async (h) => {
       const src = intel.find((f) => f.h === h).full;
-      const t = await rewritePlain(env, src, { engine, claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI });
-      if (!t) return;
-      kept.set(h, t);
-      await env.DB.prepare("INSERT OR IGNORE INTO audit_plain (h, text, engine, at) VALUES (?,?,?,?)").bind(h, t, engine, new Date().toISOString()).run().catch(() => {});
+      let refused = false;
+      const t = await rewritePlain(env, src, { engine, claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI, onRefused: () => { refused = true; } });
+      if (t) { kept.set(h, t); await keep(h, t, engine); } else if (refused) await keep(h, "", "refused:" + engine);
     }));
-    for (const f of intel) { if (kept.has(f.h)) { f.text = kept.get(f.h); f.plain = true; } delete f.h; }
+    // a kept line is shown only while it still passes today's guards (they tightened on 15 Oct 2026)
+    for (const f of intel) { const t = kept.get(f.h); if (t && numbersKept(t, f.full) && datesKept(t, f.full)) { f.text = t; f.plain = true; } delete f.h; }
   }
 
   // Returns a Response, or null when the path is not the audit's.
@@ -128,6 +157,7 @@ export function installAudit(deps) {
   // and the whole HR console keep their login. Remove the [vars] line to close it again.
   const handleAudit = async function handleAudit(p, request, env, url, session) {
     const host = url.hostname;
+    if ((p.startsWith("/api/audit/") || p.startsWith("/audit/")) && crossSite(request, url)) return json({ error: "cross_site" }, 403);
     if (!session && auditOpen(env, host)) {
       session = { email: String(env.AUDIT_OPEN_AS || "Dexter.Lawrence@dg3.com").trim(), open: true };
       if (p === "/api/me") return json({ email: session.email, open: true });
