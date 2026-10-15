@@ -739,6 +739,21 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   month without lines from the summary row (marked "summary") and carries a "vs <last year>" column — the bill's crew costs
   against the same month a year earlier (Miguel: "a YOY comparison is important"). Measured through the connector on 15 Oct
   2026: lines for February, March, September; totals for every month of 2025 and 2026 to September.
+- **THE MAIL INTAKE — sga@cims.work** (Miguel, 15 Oct 2026, evening: "give me an email where finance can send u this .. u
+  might get more emails .. but this will be one of them so u can pick it up and add the data where needs to be";
+  `src/mail_intake.js`, `intakeMailToInbox` in worker.js, pinned by `test/mail_intake.test.js` with a real MIME, the real
+  `postal-mime` parser and a real SheetJS workbook on real SQLite). Cloudflare Email Routing sends mail for `MAIL_SGA_TO`
+  (default `sga@cims.work`, a dashboard rule → this Worker) to `email()`, which routes it to the inbox and NEVER to the intel
+  pipeline. The handler keeps only the workbooks the console knows — `DG3 SGA EXCEL <month>.xlsx` (REVISED beats plain for
+  the same month, the month from the file name) and `UPDATED - Travel Expenses <year> ….xlsx` (the year from the name) —
+  reads their sheets with SheetJS in the Worker (`sheetsOf`, `WANT_SGA` / `WANT_TRAVEL`), writes them into `sp_inbox` keyed
+  by the attachment's SHA-256 (the same file twice is the same key; a REVISED re-send is a new one), keeps a receipt on
+  `mail_intake` (sender, subject, files, what was ignored, outcome) and applies the inbox at once (the hourly cron is the
+  safety net) through the ONE apply path each (§3). PDFs, the body and other files are ignored and listed on the receipt.
+  **Only `SGA_MAIL_SENDERS` feed the console** (addresses or domains, comma-separated, default `dg3.com`): a workbook from
+  anyone else is written `held`, loads nothing, and the receipt names the sender — Miguel adds TDG's domain to the var when
+  their first mail shows it. `/api/sharepoint/status` carries `mail` (address, senders, last receipts). `postal-mime` is the
+  Worker's second runtime dependency. Nothing here is money (§1).
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").

@@ -79,3 +79,23 @@ identity exists the Worker reads SharePoint itself and the scheduled task is del
   today. Reading it needs the actual workbook file once (attach it in the chat, or it arrives with the first sync).
 - Whether Rita's 2025 workbook should be re-read (the console's 2025 crew rows came from the June 2026 seed; the file
   on SharePoint has no December sheet — the seed has one).
+
+## The mail intake — sga@cims.work (15 Oct 2026, the same evening)
+
+Miguel: *"give me an email where finance can send u this .. u might get more emails .. but this will be one of them so
+you can pick it up and add the data where needs to be."*
+
+Finance (TDG accounting, or Rita forwarding) emails the workbook to **sga@cims.work**. The Worker's email handler
+(`intakeMailToInbox`, `src/mail_intake.js`) parses the mail, keeps only `DG3 SGA EXCEL <month>.xlsx` (REVISED beats plain)
+and `UPDATED - Travel Expenses <year> ….xlsx`, reads the sheets with SheetJS, writes them into `sp_inbox` and applies the
+inbox at once through the same paths as drag-and-drop. The PDF scans and the body are ignored and listed on the receipt
+(`mail_intake`, shown by `GET /api/sharepoint/status` under `mail`).
+
+**Setup, once, in the Cloudflare dashboard** (Email Routing has no API in the tools the agent holds): cims.work →
+Email Routing → Routing rules → Create address → `sga@cims.work` → Action *Send to a Worker* → `cims-hr-console`. The
+`crew-reports@cims.work` rule for field intel is the model; the two addresses share the handler and never cross.
+
+**Who may feed the console**: `SGA_MAIL_SENDERS` in `wrangler.toml [vars]` (default `dg3.com`). A workbook from any
+other sender is written `held` and loads nothing; the receipt names the sender, so after TDG's first mail Miguel adds
+their domain (e.g. `dg3.com, tdgcrew.com`) and the next mail loads. Until then Rita can forward TDG's mail from her
+dg3.com address and it loads at once.
