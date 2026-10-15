@@ -1098,19 +1098,21 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   **One incident, one entry** (Miguel, same day: "if you see that it's the same problem, just merge them into one"):
   `mergeIntel` folds field-intel reports with the same text, or the same dollar amount ($100+) within 14 days; the newer
   leads, the header names every reporter, the others stay whole under "Full report". Deterministic, no model.
-- **Shipped this contract** (Miguel, 16 Oct 2026: "a total parts shipped to this ship on the crew contract .. a summary by
-  product .. paper, toner and parts .. only display what has a $$ value .. before what others said"). The briefing's card
-  right before What others said: OBP's own received ledger (`weekly_obp_order` in HON's D1, the newest export only — each
-  export is the whole ledger; SELECT only, `SUPPLY_SQL` rides the briefing's wave with a 460-day bound, cut to the sign-on),
-  the ship by OBP's one-word name (`normShip`), sign-on to today. `src/ship_supply.js` (pure): paper = OBP "Supplies" (every
-  Supplies line is paper on 15 Oct 2026); toner = a cartridge by its name (TN…, TNP…, "TONER T01"), a waste toner box /
-  bottle / filter / supply unit is a part; parts = the rest. Only products with dollars are drawn; each folds open on its
-  8 biggest items. **The Parts Portal is NOT added**: its orders land in OBP's ledger once received (Edge's 4 Aug sensors =
-  EGMANUAL009, 11 Sep), so adding both double counts, and it carries no paper. No HON read = no card, never a zero.
-  **Decided, Miguel 16 Oct 2026** ("i am ok with the prices being shown" / "yes"): OBP's prices (DG3's cost) stay on the
-  card on the open audit site, no login needed; "this contract" = received in OBP since the sign-on, to today (a delivery
-  days after the sign-on, likely ordered by the predecessor, counts for the contract it arrived in). Do not re-raise.
-  Pinned by `test/ship_supply.test.js`, `test/audit_routes.test.js`.
+- **Rush orders this contract** (Miguel, 16 Oct 2026: "what I need to show is the stuff that has been tagged as 'miss'
+  from the order portal ... if I had to spend any money on any item, as in I had to rush it because he didn't pay
+  attention"). It REPLACED the same morning's OBP "Shipped this contract" card ("doesn't have any value to see what he
+  ordered throughout the entire contract" — he had said "this info is in the order app" and the first cut read OBP
+  instead: read his source). The briefing's card right before What others said: every Parts Portal order (order.cims.work,
+  `PARTS_DB`, SELECT only) with `order_type='missed'`, not voided, on this hull (`shipKey`), from the contract's sign-on to
+  its sign-off (today while it runs), with the portal's own tag (Vessel-side miss · Equipment / unexpected · Shore planning
+  miss), the parts, freight + customs (the rush money) and the total. Three facts on top: rush orders, freight & customs,
+  "<name>'s misses". **Whose miss is the Score Card's own rule** (`score_auto.js missOwnerByBoard`, never a copy): read only
+  for a vessel-side miss; equipment and shore misses are shown and never his; a vessel-side miss nobody can be charged with
+  reads "Check whose miss it is" (§6). His misses lead the list. `src/rush_orders.js` (pure `rushSummary`; the reads injected
+  by worker.js as `rushOrders`, so the audit modules never import score code); the roster and the schedule are read only
+  when a vessel-side miss needs an owner. No portal read = no card, never a zero; a clean contract says "None". Display
+  only — nothing scores, writes or pays (§1). Prices on the open audit site: Miguel's decision, 16 Oct 2026 ("i am ok with
+  the prices being shown"). Pinned by `test/rush_orders.test.js`, `test/audit_routes.test.js`.
 - **Dexter's grade** (Miguel, 15 Oct 2026: the audit replaces "Communication (Rita)" on the Score Card; "if it's not [given]
   .. make from the final scores an average"; "Round down"). Once a request's documents are in, Dexter grades Inventory,
   Technical, Customer collaterals (1–5, required) and Overall (optional); a 3 or below needs a sentence (`gradeProblems`).

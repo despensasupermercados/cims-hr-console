@@ -119,12 +119,15 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .need .ib .ic{width:20px;height:20px}
 .need .tx{flex:1;min-width:0}.need .t{font-weight:600;font-size:14.5px}.need .s{font-size:12.5px;color:var(--mut)}
 .need .q{font-family:var(--fh);font-weight:600;font-size:20px;min-width:34px;text-align:right}
-.sup details>summary{list-style:none;cursor:pointer}.sup details>summary::-webkit-details-marker{display:none}
-.sup summary .go{width:16px;height:16px;color:var(--mut);flex:none;transition:transform .15s}.sup details[open]>summary .go{transform:rotate(90deg)}
-.sup .need .q{font-size:17px;min-width:0;white-space:nowrap}.sup .ch .r{font-family:var(--fh);font-weight:600;font-size:15px;color:var(--ink)}.sup .ch+details>.need{border-top:0}
-.sup .it{display:flex;justify-content:space-between;gap:12px;padding:8px 16px 8px 68px;border-top:1px solid var(--line);font-size:13px}
-.sup .it .n{min-width:0;overflow-wrap:anywhere}.sup .it .v{flex:none;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
-.sup .it.more{color:var(--mut)}
+.rush details>summary{list-style:none;cursor:pointer}.rush details>summary::-webkit-details-marker{display:none}
+.rush summary .go{width:16px;height:16px;color:var(--mut);flex:none;transition:transform .15s}.rush details[open]>summary .go{transform:rotate(90deg)}
+.rush .need .t{overflow-wrap:anywhere}.rush .need .s b{font-weight:600}.rush .need .s .rd{color:var(--red)}.rush .need .s .am{color:var(--amber)}
+.rush .need .q{font-size:17px;min-width:0;white-space:nowrap}.rush .ch .r{font-family:var(--fh);font-weight:600;font-size:15px;color:var(--ink)}
+.rush .ib.r{background:var(--redbg);color:var(--red)}.rush .ib.g{background:var(--greenbg);color:var(--green-d)}
+.rush .facts{border-top:0}.rush .facts .bad b{color:var(--red)}.rush .facts+details>.need{border-top:1px solid var(--line)}
+.rush .it{display:flex;justify-content:space-between;gap:12px;padding:8px 16px 8px 68px;border-top:1px solid var(--line);font-size:13px}
+.rush .it .n{min-width:0;overflow-wrap:anywhere}.rush .it .v{flex:none;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+.rush .it.ref .n{color:var(--mut)}.rush .it .rd{color:var(--red)}.rush .it .am{color:var(--amber)}
 .foot{display:flex;gap:8px;align-items:flex-start;padding:12px 16px;background:var(--bg);font-size:13px;color:var(--ink2)}
 .foot .ic{width:16px;height:16px;margin-top:2px;color:var(--nfg)}
 .kv{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
@@ -328,22 +331,36 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div>' + q(lines) + "</div>" +
       '<div class="foot">' + ic("lock-simple") + "<span>The audit opens only when all of it is in. 24 hours to upload.</span></div></div>";
   }
-  /* What reached the ship this contract (src/ship_supply.js): OBP's received ledger, paper / toner / parts, only what
-     carries a dollar value. Each product folds open on its biggest items. No read = no card. */
-  var SUP_IC = { paper: "stack", toner: "drop", parts: "gear-six" };
+  /* Rush orders this contract (src/rush_orders.js): what the order portal tagged as a MISS on this ship while he was
+     aboard, and what it cost. A vessel-side miss says whose it is, by the Score Card's own rule. No read = no card. */
+  var RUSH_IC = { vessel: "f:warning-circle", equipment: "wrench", shore: "anchor" };
   function usd(v) { var n = Number(v) || 0; return n > 0 && n < 1 ? "<$1" : "$" + Math.round(n).toLocaleString("en-US"); }
-  function qty(v) { var n = Math.round(Number(v) || 0); return n.toLocaleString("en-US"); }
-  function supplyCard(sp, ship) {
-    if (!sp || !sp.from) return "";
-    var h = '<div class="card sup"><div class="ch">' + ic("truck") + "Shipped this contract" + (sp.products.length ? '<span class="r">' + usd(sp.total) + "</span>" : "") + "</div>";
-    if (!sp.products.length) h += '<div class="need"><div class="tx"><div class="s">OBP has nothing received on ' + esc(ship) + " since " + fmtD(sp.from) + ".</div></div></div>";
-    sp.products.forEach(function (p) {
-      h += '<details><summary class="need"><span class="ib">' + ic(SUP_IC[p.key] || "package") + '</span><div class="tx"><div class="t">' + esc(p.label) + '</div><div class="s">' + qty(p.qty) + " received</div></div>" + '<span class="q">' + usd(p.value) + "</span>" + ic("caret-right", "go") + "</summary>";
-      p.items.forEach(function (it) { h += '<div class="it"><span class="n">' + esc(it.name) + '</span><span class="v">' + qty(it.qty) + " · " + usd(it.value) + "</span></div>"; });
-      if (p.more) h += '<div class="it more">' + p.more + (p.more === 1 ? " more item" : " more items") + "</div>";
-      h += "</details>";
-    });
-    h += '<div class="foot">' + ic("clock") + "<span>Received in OBP since the sign-on, " + fmtD(sp.from) + (sp.asOf ? ". OBP export of " + fmtD(sp.asOf) : "") + ".</span></div></div>";
+  function rushCard(r, ship, who) {
+    if (!r || !r.from) return "";
+    var h = '<div class="card rush"><div class="ch">' + ic("truck") + "Rush orders this contract" + (r.count ? '<span class="r">' + usd(r.total) + "</span>" : "") + "</div>";
+    if (!r.count) {
+      h += '<div class="need"><span class="ib g">' + ic("f:check-circle") + '</span><div class="tx"><div class="t">None</div><div class="s">No order tagged as a miss for ' + esc(ship) + " since " + fmtD(r.from) + ".</div></div></div>";
+    } else {
+      h += '<div class="facts"><div><b>' + r.count + "</b><span>" + (r.count === 1 ? "rush order" : "rush orders") + "</span></div><div><b>" + usd(r.rush) + "</b><span>freight &amp; customs</span></div>" +
+        '<div' + (r.his.count ? ' class="bad"' : "") + "><b>" + r.his.count + "</b><span>" + esc(who) + "&#8217;s misses</span></div></div>";
+      r.orders.forEach(function (o) {
+        var names = o.items.map(function (i) { return i.name; });
+        var what = (names[0] || "Parts") + (names.length > 1 ? " +" + (names.length - 1) : "");
+        var tag = o.reason === "vessel" ? (o.his === true ? '<b class="rd">' + esc(o.tag) + "</b>" : o.his === null ? '<b class="am">' + esc(o.tag) + "</b>" : esc(o.tag)) : esc(o.tag);
+        h += '<details><summary class="need"><span class="ib ' + (o.reason === "vessel" && o.his ? "r" : "") + '">' + ic(RUSH_IC[o.reason] || "truck") + '</span><div class="tx"><div class="t">' + fmtD(o.at) + " · " + esc(what) + '</div><div class="s">' + tag + "</div></div>" + '<span class="q">' + usd(o.total) + "</span>" + ic("caret-right", "go") + "</summary>";
+        if (o.reason === "vessel") {
+          var v = o.his === true ? '<b class="rd">' + esc(who) + "&#8217;s miss</b>" + (o.why ? " · " + esc(o.why) : "")
+            : o.his === false ? "Another crew&#8217;s miss" + (o.owner ? ": " + esc(o.owner) : "") + (o.why ? " · " + esc(o.why) : "")
+            : '<b class="am">Check whose miss it is</b>';
+          h += '<div class="it vd"><span class="n">' + v + "</span></div>";
+        }
+        if (o.by) h += '<div class="it"><span class="n">Placed by ' + esc(o.by) + "</span></div>";
+        if (o.note) h += '<div class="it"><span class="n">&#8220;' + esc(o.note) + "&#8221;</span></div>";
+        o.items.forEach(function (i) { h += '<div class="it"><span class="n">' + esc(i.name) + '</span><span class="v">' + esc(i.qty) + " · " + usd(i.value) + "</span></div>"; });
+        h += '<div class="it"><span class="n">Freight &amp; customs</span><span class="v">' + usd(o.rush) + '</span></div><div class="it ref"><span class="n mono">' + esc(o.ref) + "</span></div></details>";
+      });
+    }
+    h += '<div class="foot">' + ic("clock") + "<span>Orders tagged as a miss on the order portal for " + esc(ship) + ", " + fmtD(r.from) + " to " + (r.to ? fmtD(r.to) : "today") + ". Totals include freight and customs.</span></div></div>";
     return h;
   }
   /* the stored field-intel summary ("• Summary: … • What happened: …"), one labelled paragraph per bullet */
@@ -381,7 +398,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
         b.audits.forEach(function (a) { h += '<button class="row" data-go="q=' + esc(a.id) + '"><div class="tx"><div class="nm" style="font-size:15px">' + esc(a.ship) + '</div><div class="sm">' + fmtD(a.at, true) + (a.test ? " · test" : "") + "</div></div>" + reqStatus(a) + ic("caret-right", "go") + "</button>"; });
         h += "</div>";
       }
-      h += supplyCard(b.supply, ship);
+      h += rushCard(b.rush, ship, first(b.crew.name));
       var feed = b.feed || [];
       h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
       feed.forEach(function (f) {

@@ -66,6 +66,7 @@ import { gatherAuto, listAudits } from "./score_auto.js";
 import { apiRosterExport } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
+import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 
@@ -89,6 +90,7 @@ const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections
 // production (15 Oct 2026). Pinned by test/audit_guards.test.js.
 const ensureAudit = memoEnsure(ensureAuditTables, AUDIT_DDL.join("\n"));
 const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections, sendViaMailer, logActivity, applyOverride, TODAY: () => TODAY(),
+  rushOrders: installRushOrders({ boardLegs: (env) => boardLegs(env) }),
   crewProfile: async (env, sc, session) => (await apiCrewOne(env, new URL("https://cims.work/api/crew/get?id=" + encodeURIComponent(sc)), session)).json() });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
