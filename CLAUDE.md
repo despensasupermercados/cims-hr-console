@@ -728,6 +728,17 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   (migrations/0027). **The connector's read budget varies per call** (January 2026 was cut at the manning header on three single
   reads; February and March came whole): workbooks are read one at a time, a cut read retried up to three times, a
   workbook that never comes through is a digest line — the Graph identity is what reads it. Pinned by `test/sga.test.js`, `test/sga_import.test.js`.
+- **THE BILL'S MONTHLY SUMMARY SHEET** (15 Oct 2026, PR #253; `parseSgaSummary`, `sga_summary`, migrations/0028, pinned by
+  `test/sga.test.js`, `test/sga_import.test.js`). TDG's workbook's third sheet, "2026 SUMMARY (2)", is one row per month with the
+  whole SGA by category — 2025 whole, the current year to the bill's month — and the connector delivers it whole even when
+  SUMMARY MANNING is cut (January, April, May 2026: three single reads each). Checked on September 2026: TOTAL 82,016.88 = the
+  crew lines 76,046.94 + the 15.00 bank charge + training 5,954.94, so `crew_total = total − training − settlement` = SUMMARY
+  MANNING's GRAND TOTAL (February 75,792.64 and March 72,174.30 agree; the stage reports `summaryAgrees`). Written per month,
+  the newer bill wins. A workbook WITHOUT the manning sheet loads SUMMARY ONLY (totals, no lines, the month's lines untouched,
+  `sga_file.rows = 0` so `/api/sga` never lets it hide a month's lines). The Travel tab's "TDG's bill vs the workbook" reads a
+  month without lines from the summary row (marked "summary") and carries a "vs <last year>" column — the bill's crew costs
+  against the same month a year earlier (Miguel: "a YOY comparison is important"). Measured through the connector on 15 Oct
+  2026: lines for February, March, September; totals for every month of 2025 and 2026 to September.
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").

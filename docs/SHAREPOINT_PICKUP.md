@@ -31,6 +31,10 @@ IT creates it, the Worker reads SharePoint itself every hour and this scheduled 
   DG3): February 2026's refs read `2026-09-32`. The script and the Worker take the period from the file name
   (`DG3 SGA EXCEL FEBRUARY 2026.xlsx`, `MARCH'26`) or the month folder — always pass `--name` and `--path` as they are.
   The `DATE` cell of older workbooks is a `=TODAY()` formula, so `sga_date` on those reads as the day of the read.
+- **A cut manning sheet is not a lost month.** The workbook's third sheet, `2026 SUMMARY (2)`, is one row per month with the
+  whole SGA by category and always arrives whole; the script then reports `summary_only: true` and the Worker loads the
+  month's TOTALS (no per-crew lines, the month's existing lines untouched). Load it — it is what keeps the Travel tab's
+  bill-vs-workbook and the year-over-year current. A later full read of the same file adds the lines.
 - A large tool result is also saved by the harness under `~/.claude/projects/*/<session>/tool-results/
   mcp-Microsoft_365-read_resource-<ts>.txt` — that file is the dump to use (never retype a tool result by hand).
 
