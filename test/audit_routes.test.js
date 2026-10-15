@@ -80,3 +80,17 @@ test("health reports the bindings without touching a secret", async () => {
   assert.equal(h.ok, true); assert.equal(h.r2, "ok"); assert.equal(h.shipContacts, 188); assert.equal(h.recipients, 2);
   assert.deepEqual(h.bindings, { AUDIT_FILES: true, TIMECARD_DB: true, MAILER: true, HON: false });
 });
+
+// OPEN MODE (Miguel, 15 Oct 2026: "No login on the audit site"): audit.cims.work answers without a sign-in, as Dexter;
+// cims.work/audit and the console do not.
+test("open mode: audit.cims.work needs no sign-in, acts as AUDIT_OPEN_AS; nothing else opens", async () => {
+  const env = { DB: fakeDb(), AUDIT_OPEN: "true", AUDIT_OPEN_AS: "Dexter.Lawrence@dg3.com" };
+  const shell = await call("https://audit.cims.work/", null, env);
+  assert.equal(shell.status, 200); assert.equal(shell.headers.get("X-Robots-Tag"), "noindex, nofollow");
+  assert.deepEqual(await (await call("https://audit.cims.work/api/me", null, env)).json(), { email: "Dexter.Lawrence@dg3.com", open: true });
+  const ships = await (await call("https://audit.cims.work/api/audit/ships", null, env)).json();
+  assert.equal(ships.auditor, "Dexter.Lawrence@dg3.com");
+  assert.equal((await call("https://cims.work/audit", null, env)).status, 302, "cims.work/audit keeps its login");
+  assert.equal(await call("https://cims.work/api/me", null, env), null, "the console's own routes are never answered here");
+  assert.equal((await call("https://audit.cims.work/", null, { DB: fakeDb() })).status, 302, "without the switch, the login is back");
+});

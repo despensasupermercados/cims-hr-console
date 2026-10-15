@@ -924,5 +924,11 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   documents-in emails; CIMS email standard §5): `AUDIT_LIVE = "true"` in production `[vars]`. Removing it falls back to
   TEST MODE (every audit email to the auditor alone, marked [TEST]). Staging never carries it. A changed email template
   is re-rendered and shown to Miguel before it ships, as before.
+- **NO LOGIN on audit.cims.work, for now** (Miguel, 15 Oct 2026: "remove the magic link for right now"; asked, he chose
+  "No login on the audit site" after being told it exposes crew names, ships, contracts and briefing notes and lets anyone
+  send request emails): `AUDIT_OPEN = "true"` + `AUDIT_OPEN_AS` in production `[vars]` (`auditOpen` in `audit_routes.js`).
+  Only on the audit host: cims.work and its `/audit` keep the login. Every action is recorded as `AUDIT_OPEN_AS` (Dexter);
+  the shell carries `X-Robots-Tag: noindex` and a robots meta. A real session still wins. Delete the two lines to bring
+  the login back. Pinned by `test/audit_routes.test.js` ("open mode").
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).

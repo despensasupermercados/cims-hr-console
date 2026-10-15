@@ -76,6 +76,11 @@ AUDIT_REQUEST_CC = "Rolando.Abellan@dg3.com, Ray.Guerra@dg3.com"
 # Ray, and the documents-in assessment to AUDIT_TO. Remove the line to fall back to TEST MODE (auditor only, [TEST]).
 # Production only: the staging vars block does not carry it, and staging mail is locked to MAIL_ONLY_TO regardless.
 AUDIT_LIVE = "true"
+# AUDIT_OPEN: no sign-in on audit.cims.work for now (Miguel, 15 Oct 2026: "remove the magic link for right now", then
+# "No login on the audit site", told what it exposes). Every action is recorded as AUDIT_OPEN_AS. Only audit.cims.work;
+# the HR console keeps its login. Remove both lines to put the login back.
+AUDIT_OPEN = "true"
+AUDIT_OPEN_AS = "Dexter.Lawrence@dg3.com"
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,
