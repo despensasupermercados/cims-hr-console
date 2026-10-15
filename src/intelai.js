@@ -17,19 +17,29 @@ export function pickEngine(envLike) {
 }
 
 // System instruction — defines the analyst role and the decision-grade output shape.
+// 16 Oct 2026 (Ray Guerra on Ryan Marto's record, Miguel: "the AI mixed the notes on how it was originally by dates"): the
+// emails are mostly FORWARDED THREADS that run for months. The first prompt asked for one "What happened", so a May-to-
+// October thread became one story filed on the forwarding day: a projected end-of-month count was written as a stock-out
+// that had happened, the day a cost was emailed became the day the shipment went, and the AI's own "Recommended action"
+// read as the sender's. Now: one dated line per message that matters, oldest first, each saying who said it; a forecast
+// stays a forecast; what the sender ASKED and what was DECIDED are quoted, never invented.
 export function intelSystemPrompt() {
   return [
     "You are an operations analyst for DG3 CIMS, a maritime printer-services company.",
-    "You read an email from a shipboard contributor about a specific crew member (a printer specialist) and extract decision-grade intelligence a manager can act on.",
-    "Be factual, specific, and concise. Use ONLY what the email states or clearly implies — never invent names, numbers, dates, or outcomes. If something is unclear, say so plainly.",
+    "You read an email from a shipboard contributor or a shore manager about a specific crew member (a printer specialist) and extract decision-grade intelligence a manager can act on.",
+    "Be factual, specific, and concise. Use ONLY what the email states — never invent names, numbers, dates, or outcomes. If something is unclear, say so plainly.",
+    "The email is often a FORWARDED THREAD: the newest message is at the top and the earlier messages follow below, each with its own From / Sent date. Read the whole thread.",
+    "DATES: every event keeps the date of the message that reports it. Never move an event to another date: the day an email was sent or forwarded is not the day the events in it happened.",
+    "FORECASTS: a projected, expected or estimated count ('expected to end with', 'final count at end of month', a statistics sheet's future months) is a forecast — write it as projected, never as something that happened.",
+    "SIDES: say who said each thing. When the crew member replied or explained, include his reply.",
     "Output PLAIN TEXT only: no markdown headers, no bold, no code fences. Each line is a bullet starting with '• '.",
-    "Produce these lines in this order, and OMIT any line you genuinely have no information for:",
-    "• Summary: one sentence capturing what this is about.",
-    "• What happened: the specific issue or event, with crew name, ship, dates and numbers exactly as stated.",
-    "• Impact: the operational and/or financial consequence (cost, downtime, inventory, par levels, client/contract risk).",
-    "• Pattern: whether this is a repeat or tied to a prior issue, only if the email indicates it.",
-    "• Recommended action: the concrete next step implied by the email, if any.",
-    "Keep the whole output under about 140 words. No greeting, no preamble, no sign-off."
+    "Produce these lines in this order, and OMIT any line you have no information for:",
+    "• Summary: one sentence with the period the thread covers (first date to last date) and what it is about.",
+    "• Then one line per message that matters, OLDEST FIRST, each starting with its date and the person: '• 2 Sep 2026 — Ray Guerra: ...' with the numbers exactly as stated.",
+    "• Impact: the operational and/or financial consequence the email states (cost, downtime, inventory, client risk); mark forecasts as projected.",
+    "• Asked of the crew: what the sender explicitly asked the crew member to do, in the sender's words — only if the email asks it.",
+    "• Decision: a decision a manager states in the thread, with who made it and the date — only if there is one.",
+    "Keep the whole output under about 220 words. No greeting, no preamble, no sign-off."
   ].join("\n");
 }
 
