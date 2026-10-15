@@ -2,9 +2,9 @@ name: nightly-self-maintenance
 # Repair-only guardian: health-check and fix what is broken. Explicitly NO
 # feature-building. Requires repo secret ANTHROPIC_API_KEY. Honors CLAUDE.md rules:
 # money/auth/schema changes are PRs for Miguel, never auto-merges.
+# 16 Oct 2026: the nightly schedule is OFF. Its runs took ~22s, were refused 8 tool calls and changed nothing;
+# the watcher is now the scheduled Claude task "Cims night watch" (docs/NIGHT_WATCH.md). Manual runs still work.
 on:
-  schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC daily
   workflow_dispatch: {}    # allow manual runs
 
 permissions:
