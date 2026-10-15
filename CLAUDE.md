@@ -631,6 +631,31 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
 - **The seed never re-runs on a live table**: the bundled 2025 history (`TRAVEL_2025` = crew + the 2025 CIMS sheet's 41 shoreside
   rows, $60,161.21, added 15 Oct 2026) seeds an EMPTY table or completes a legacy (pre-`kind`) one. "No shoreside rows" used to
   re-seed 2025 on every cold start (nine seeds on 25 Jun 2026). Pinned by `test/ensure_travel.test.js`.
+- **THE SGA INGEST** (PR 2, same day; `src/sga.js` pure, pinned by `test/sga.test.js` + `test/sga_import.test.js` on real SQLite).
+  Rita drops `DG3 SGA EXCEL <month>.xlsx` on Upload data (recognised by its `SUMMARY MANNING` sheet; "TDG SGA" in the
+  chooser); the page sends only that sheet and the training summary (`TRAINREL` / `TRAINING`) as 2-D arrays to
+  `POST /api/sga/import` (dry-run first: period, SGA no and date, lines, TDG's grand total and whether the lines
+  **reconcile** to it, brands, the travel categories, training months, the names the roster cannot place, and whether
+  the month is already on file). Apply **replaces the month** (`sga_line`, TDG issues REVISED workbooks) and the training
+  years the sheet names (`training_cost`), and records the load on `sga_file` (name, hash, SGA no, date, who, when,
+  source). Rules: the header row is found by `REF. NO.` and every cost column **by its header words, never by position**
+  (September 2026 gained ID NUMBER / NATIONALITY / HMO; TRANSPORTATION and CASH ADVANCE appear twice and fold into one
+  key); the hull sits under the merged `VESSELS` header or up to three cells right of it; `GRAND TOTAL` ends the table
+  (its last number is TDG's total; the rows after it are signatures); a line without a ref must name someone AND bill
+  something; `OTHERS` (the bank charge) is nobody's; the 2025 block of the training sheet is the whole SGA by category
+  and its training figure is the `TRAINING RELATED` column alone (`summary_only`), decided by the block's header. Lines
+  are placed on the roster by the same name bridge (TDG writes "CAAG, HAZIEL"; accents fold — TANGONAN / Tañgonan).
+  Measured on the real September 2026 sheet: 76 lines, $76,046.94 + $15 bank charge = TDG's $76,061.94; unplaced =
+  the NCL-prep people (TATEL, FINEZ, MANLIGAS — **TDG bills them on the same statement**, so NCL is in the SGA) and
+  Purnama, Ida (two roster rows). `GET /api/sga` serves the newest file per month, every line with `agency_id`, the
+  training rows and the files.
+- **What the Travel tab shows from it**: "TDG's bill vs the workbook" per month of the year (air / hotel / medical /
+  visa: bill, workbook, gap — amber when the workbook carries more, red when the bill does; nothing reconciled, §6) and
+  the bill's own total of all crew costs; the **Training centre** view (the kind selector's fourth option — Miguel: "another
+  filter called training center cost"): the year to date, vs last year's same months, rent + utilities per month, hotels +
+  airfare for trainees, a bar per month, the table by category with last year beside it, and the bills on file; a
+  person's page lists their lines on the bill (month, ship, TDG ref, the travel columns, allotment, fees, HMO, total
+  billed — allotment and fees are shown because TDG bills them there; they are not travel and never enter the budget).
 - Not money (§1). The Travel tab is a reference read (§10b), never an invoice source.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
