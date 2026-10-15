@@ -570,6 +570,19 @@ movable; the commit is a money user's click; committed outcomes are never touche
 - **The Score Card:** feedback links for Ray and Rolando only; Dexter is a green chip ("Dexter · audit 4/5 · date") opening
   the audit when one exists, nothing when none. The Inputs page lists every audit of the seafarer ("Not applicable · no audit
   on record" when none) instead of Dexter's old questions.
+- **The 15 Oct 2026 review** (pinned by `test/score_auto.test.js`): no ship on the card = nothing from the Parts Portal, HON or
+  the audits (a blank ship matched EVERY vessel-side miss in the fleet, armed the rush gate); no sign-on = no miss and no
+  field report (a blank start read the ship's whole history); a transfer ("Quantum, Anthem") is every ship (`shipKeys`), the
+  card defaults to the contract's own ship (`lastLeg.ship`, not where the crew was last seen) and re-reads when it changes;
+  a contract whose sign-off is still ahead keeps the window's handover value ("checked at the sign-off"); Ray's answer and a
+  field report are compared as INSTANTS (the same day, his 15:00 answer is after the 08:00 report); an audit counts only on
+  one of the contract's ships, never a TEST request's, and the chip shows the LOWEST in-contract audit (red at 3 or below);
+  an AI flag needs a real `true` and a quote of 15+ characters / 3+ words; HON's `outgoing_crew_id` decides the handover
+  before the name; reports not read yet are said on the card ("N field reports ... not read yet"); an open-site grade says
+  so. The page takes back only what the read set: a slider or gate the user moved stays, a rush gate the read armed is
+  cleared when its miss leaves the window, the read's gate-note lines are swapped by exact text. Contributor rows escape
+  names (TDG import). Still open, Miguel's: the commit does not store the evidence, and `policy_version` is still 1 though
+  `sComm` now means the audit.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
 "redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas

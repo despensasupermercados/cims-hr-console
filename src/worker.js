@@ -58,7 +58,7 @@ import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
-import { gatherAuto } from "./score_auto.js";
+import { gatherAuto, listAudits } from "./score_auto.js";
 import { apiRosterExport } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
@@ -286,6 +286,7 @@ export default {
         if (p === "/api/score/queue")    return apiScoreQueue(env, url);
         if (p === "/api/score/seval")    return _seval.apiSevalGet(env, url);
         if (p === "/api/score/auto")     return apiScoreAuto(env, url);
+        if (p === "/api/score/audits")   return json({ ok: true, audits: await listAudits(env, String(url.searchParams.get("sc") || "").trim()) });
         if (p === "/api/score/seval/override" && request.method === "POST") return _seval.apiSevalOverride(request, env, session, isMoneyUser);
         if (p === "/api/intel/inbox")    return apiIntelInbox(env);
         if (p === "/api/intel/ingest" && request.method === "POST") return apiIntelIngest(request, env, session);
@@ -8543,7 +8544,8 @@ function swList(title,arr){
 function swRow(c){
   var fb=c.feedback||{};
   var dots=['ray','rolando','dexter'].map(function(r){var ok=(fb[r]==='answered'||fb[r]==='na');return '<span class=fbdot title="'+r+'" style="background:'+(ok?'var(--green)':'#dfe5ec')+'"></span>';}).join('');
-  return '<div class=brow onclick="swPickCrew(\\''+c.agency_id+'\\')"><div><div class=cname style="font-size:14px">'+(c.name||c.agency_id)+'</div><div class=csub>'+c.agency_id+' · '+(c.ship||c.vessel||'—')+' · '+(c.signOn||'?')+' → '+(c.signOff||'?')+'</div></div><div style="margin-left:auto;display:flex;gap:5px;align-items:center" title="Ray / Rolando / Dexter">'+dots+'</div></div>';
+  // names and ships come from the TDG import: text, never HTML; the id rides on a data- attribute, not inside an onclick
+  return '<div class=brow data-sc="'+escHtml(c.agency_id)+'" onclick="swPickCrew(this.getAttribute(\\'data-sc\\'))"><div><div class=cname style="font-size:14px">'+escHtml(c.name||c.agency_id)+'</div><div class=csub>'+escHtml(c.agency_id)+' · '+escHtml(c.ship||c.vessel||'—')+' · '+escHtml(c.signOn||'?')+' → '+escHtml(c.signOff||'?')+'</div></div><div style="margin-left:auto;display:flex;gap:5px;align-items:center" title="Ray / Rolando / Dexter">'+dots+'</div></div>';
 }
 var _swt;function swSearch(){clearTimeout(_swt);_swt=setTimeout(swSearchGo,90);}
 async function swSearchGo(){
@@ -8554,32 +8556,33 @@ async function swSearchGo(){
   var arr=_SW.allCrew.filter(function(c){var nm=[c.first_name,c.last_name].filter(Boolean).join(' ').toLowerCase();return nm.indexOf(q)>=0||String(c.agency_id||'').toLowerCase().indexOf(q)>=0;})
     .slice(0,15).map(function(c){return {agency_id:c.agency_id,name:[c.first_name,c.last_name].filter(Boolean).join(' '),vessel:c.vessel_observed,ship:null,signOn:c.active_on,signOff:c.active_off,feedback:{}};});
   swIndex(arr);
-  if($('#swSearchOut'))$('#swSearchOut').innerHTML='<div class=sec>Matches ('+arr.length+')</div>'+(arr.length?arr.map(swRow).join(''):'<div class=hint>No active crew match "'+q+'".</div>');
+  if($('#swSearchOut'))$('#swSearchOut').innerHTML='<div class=sec>Matches ('+arr.length+')</div>'+(arr.length?arr.map(swRow).join(''):'<div class=hint>No active crew match "'+escHtml(q)+'".</div>');
 }
 async function swPickCrew(id){
   _SW.crew=_SW.byId[id]||{agency_id:id,name:id,feedback:{}};
   await swRoleStep();
 }
 async function swRoleStep(){
-  swRender('Contributor scoring · '+_SW.crew.name,'<div class=muted>Loading…</div>');
+  swRender('Contributor scoring · '+escHtml(_SW.crew.name),'<div class=muted>Loading…</div>');
   var d={};try{d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(_SW.crew.agency_id))).json();}catch(e){}
   var st={ray:'none',rolando:'none',dexter:'none'};(d.requests||[]).forEach(function(r){st[r.role]=r.status;});
   _SW.status=st;_SW.prefill=d.prefill||{sliders:{},gates:{}};_SW.rawAnswers=d.answers||{};
   // Dexter's window is his audit now (Miguel, 15 Oct 2026): Ray and Rolando answer here; the audits are listed below.
   var roles=[['ray','Ray — Inventory & Orders'],['rolando','Rolando — Technical']];
   var btns=roles.map(function(x){var s=st[x[0]];var done=(s==='answered'||s==='na');return '<button class="btn '+(done?'green':'ghost')+'" style="display:block;width:100%;text-align:left;margin-bottom:8px" onclick="swPickRole(\\''+x[0]+'\\')">'+(done?'✓ ':'')+x[1]+(done?' — submitted (tap to edit)':'')+'</button>';}).join('');
-  swRender('Contributor scoring · '+_SW.crew.name,
+  swRender('Contributor scoring · '+escHtml(_SW.crew.name),
    '<button class="btn ghost" onclick="swCrewStep()" style="margin-bottom:10px">← change crew</button>'
-   +'<div class=hint style="margin-bottom:10px">'+_SW.crew.agency_id+' · '+(_SW.crew.ship||_SW.crew.vessel||'—')+' · '+(_SW.crew.signOn||'?')+' → '+(_SW.crew.signOff||'?')+'</div>'
+   +'<div class=hint style="margin-bottom:10px">'+escHtml(_SW.crew.agency_id)+' · '+escHtml(_SW.crew.ship||_SW.crew.vessel||'—')+' · '+escHtml(_SW.crew.signOn||'?')+' → '+escHtml(_SW.crew.signOff||'?')+'</div>'
    +'<div class=sec>Who are you?</div>'+btns+'<div class=sec>Dexter — audits</div><div id=swAudits><div class=hint>Loading…</div></div>'+swResultBox(_SW.prefill,_SW.status));
   swAuditsLoad();
 }
 // Every audit this seafarer has had, newest first; none = Not applicable. Each opens the audit on audit.cims.work.
 async function swAuditsLoad(){
   var c=_SW.crew,box=$('#swAudits');if(!box)return;
-  var a={};try{a=await (await fetch('/api/score/auto?sc='+encodeURIComponent(c.agency_id)+'&ship='+encodeURIComponent(c.ship||c.vessel||'')+'&on='+encodeURIComponent(c.signOn||'')+'&off='+encodeURIComponent(c.signOff||''))).json();}catch(e){}
-  if(!$('#swAudits'))return;
-  var L=(a&&a.allAudits)||[];
+  var a=null;try{var rq=await fetch('/api/score/audits?sc='+encodeURIComponent(c.agency_id));if(rq.ok)a=await rq.json();}catch(e){}
+  if(!$('#swAudits')||_SW.crew!==c)return;
+  if(!a||!a.ok){$('#swAudits').innerHTML='<div class=hint style="color:var(--red)">Could not read the audits. Try again in a minute.</div>';return;}
+  var L=a.audits||[];
   $('#swAudits').innerHTML=L.length?L.map(function(x){return '<a class=brow href="https://audit.cims.work/#q='+encodeURIComponent(x.id)+'" target=_blank rel=noopener style="text-decoration:none;color:inherit"><div><div class=cname style="font-size:14px">'+escHtml(x.ship||'')+'</div><div class=csub>Audited '+fmtDateS(String(x.at||'').slice(0,10))+'</div></div><span class="sbadge '+(x.score<=3?'idle':'on')+'" style="margin-left:auto">'+escHtml(String(x.score))+' / 5</span></a>';}).join('')
     :'<div class=hint>Not applicable · no audit on record. The audit factor counts in full until there is one.</div>';
 }
@@ -8607,7 +8610,7 @@ function swQuestions(){
      +'<div class=fg><label>Technical observations</label>'+swTa('tech',a.tech)+'</div>'
      +'<div class=fg><label>Overall impression</label>'+swTa('overall',a.overall)+'</div>';
   }
-  swRender('Contributor scoring · '+_SW.crew.name,
+  swRender('Contributor scoring · '+escHtml(_SW.crew.name),
    '<button class="btn ghost" onclick="swRoleStep()" style="margin-bottom:10px">← back</button>'
    +'<div class=hint style="margin-bottom:8px"><b>'+FBLABEL[role]+'</b> · scoring '+escHtml(_SW.crew.name)+'</div>'
    +f+'<div class=mf><button class="btn ghost" onclick="swRoleStep()">Cancel</button><button class="btn green" id=swSub onclick="swSubmit()">Submit</button></div><div class=hint id=swMsg style="text-align:right"></div>');
@@ -8621,7 +8624,7 @@ async function swSubmit(){
   var res;try{res=await (await fetch('/api/feedback/score',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:_SW.crew.agency_id,role:role,answers:ans})})).json();}catch(e){res={error:'network'};}
   if(res.error){$('#swSub').disabled=false;$('#swMsg').textContent='Error: '+res.error;return;}
   _SW.prefill=res.prefill;_SW.status=res.status;_SW.rawAnswers=_SW.rawAnswers||{};_SW.rawAnswers[role]=ans;
-  swRender('Contributor scoring · '+_SW.crew.name,
+  swRender('Contributor scoring · '+escHtml(_SW.crew.name),
    '<div style="text-align:center;font-family:Outfit;font-weight:800;color:var(--green-d);font-size:18px;margin-bottom:4px">✓ '+FBLABEL[role].split(' — ')[0]+' submitted</div>'
    +'<div class=hint style="text-align:center;margin-bottom:6px">Recorded for '+escHtml(_SW.crew.name)+' — it will pre-fill the Score Card.</div>'
    +swResultBox(_SW.prefill,_SW.status)
@@ -8636,11 +8639,11 @@ function swResultBox(pf,st){
   var pending=['ray','rolando'].filter(function(r){return !(st[r]==='answered'||st[r]==='na');});
   return '<div class=scorebox style="margin-top:14px"><div class=scorerow style="font-weight:700;color:var(--navy)"><span>Accumulated contributor score</span><b>'+pts+' / 75</b></div>'+body
    +(gt.length?'<div class=gateflag>Gate armed: '+gt.join(', ')+' — would reset the bonus</div>':'')
-   +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Dexter\u2019s audit (10) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">All three contributors in. Communication + supervisor eval are finalised on the Score Card.</div>')+'</div>';
+   +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Dexter\u2019s audit (10) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">Ray and Rolando are in. Dexter\u2019s audit and the supervisor evaluation are added on the Score Card.</div>')+'</div>';
 }
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
-  _SC=d; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
+  _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,notes:[]}; _PF={sliders:{},rush:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
   var _hasHist=!!(d.outcomes&&d.outcomes.length);
   var _blockCommit=(!d.baseline_set&&!_hasHist);
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
@@ -8660,7 +8663,7 @@ async function openScore(id){
    +'<div class=sec><span class=n>1</span>Contract</div>'
    +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore();applyAuto()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore();applySeval(_SEVAL.sc);applyAuto()"></div></div>'
    +'<div class=hint id=dateEcho style="margin:-6px 0 10px"></div>'
-   +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
+   +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships onchange="applyAuto()" value="'+escHtml((d.lastLeg&&d.lastLeg.ship)||cr.vessel_observed||'')+'"></div>'
    +'<div class=sec><span class=n>2</span>Outcome &amp; gates</div>'
    +'<span class=ck style="cursor:pointer" onclick="tgFlip(\\'gComplete\\')"><input type=checkbox id=gComplete checked onchange="recalcScore()" style="pointer-events:none"> Contract completed in full</span>'
    +'<span class=ck style="cursor:pointer" onclick="tgFlip(\\'gCompassion\\')"><input type=checkbox id=gCompassion onchange="recalcScore()" style="pointer-events:none"> Not completed — approved compassionate leave (treat as completed)</span>'
@@ -8684,6 +8687,7 @@ async function openScore(id){
 async function applyFeedback(id){
   var d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(id))).json();
   if(!d||!d.ok||!document.getElementById('fbPanel'))return;
+  if(!_SC||!_SC.crew||_SC.crew.agency_id!==id)return; // another crew's card opened while this was loading
   var byRole={};(d.requests||[]).forEach(function(r){byRole[r.role]=r.status;});
   var roles=[['ray','Ray'],['rolando','Rolando']];
   var btns=roles.map(function(x){var st=byRole[x[0]]||'none';var lbl=st==='answered'?'✓ '+x[1]:st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
@@ -8692,8 +8696,9 @@ async function applyFeedback(id){
   var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10)));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
   document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'<span id=dexChip></span></div><div id=fbLink></div>'+ev+'<div id=autoPanel></div></div>';
   var pf=d.prefill||{};
+  _PF={sliders:Object.assign({},pf.sliders||{}),rush:!!(pf.gates&&pf.gates.rush)};
   if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}
-  if(pf.sliders)for(var k in pf.sliders){var e=$('#'+k);if(e)e.value=pf.sliders[k];}
+  if(pf.sliders)for(var k in pf.sliders){var e=$('#'+k);if(e&&!_TOUCHED[k])e.value=pf.sliders[k];}
   if(pf.gateNote&&pf.gateNote.length){var gn=$('#gateNote');if(gn&&!gn.value)gn.value=pf.gateNote.join(' · ');}
   recalcScore();
   applyAuto();
@@ -8701,19 +8706,35 @@ async function applyFeedback(id){
 // The automatic inputs (Miguel, 15 Oct 2026; rules in bonus.js autoScore): Parts Portal misses, HON handover, Dexter's
 // audit, field reports, mono. Pre-fills only, each with where it came from; every slider stays movable and the commit
 // is still yours. Re-read when the contract dates change.
-var _AUTO_N=0;
+// What the automatic read set is remembered (_AUTO), so a re-read after a date or ship change takes back only its own
+// values: a slider or gate the user moved (_TOUCHED) is never overwritten, a rush gate the read armed is cleared when the
+// miss no longer falls in the contract, and the gate note keeps the user's words and swaps only the read's lines.
+var _AUTO_N=0,_TOUCHED={},_AUTO={sliders:{},rush:false,notes:[]},_PF={sliders:{},rush:false};
+document.addEventListener('input',function(e){var t=e.target;if(t&&e.isTrusted&&/^(s(Order|Acc|Par|Hand|Comm|Mono)|gateNote)$/.test(t.id||''))_TOUCHED[t.id]=1;},true);
 async function applyAuto(){
   if(!_SC||!_SC.crew||!$('#autoPanel'))return;
-  var n=++_AUTO_N,on=$('#spanStart').value,off=$('#spanEnd').value,ship=(($('#ships')&&$('#ships').value)||'').split(',').pop().trim();
+  var n=++_AUTO_N,on=$('#spanStart').value,off=$('#spanEnd').value,ship=(($('#ships')&&$('#ships').value)||'').trim(),sc0=_SC.crew.agency_id;
   $('#autoPanel').innerHTML='<div class=hint style="margin-top:8px">Reading the Parts Portal, HON, audits and field reports…</div>';
   var a=null;try{a=await (await fetch('/api/score/auto?sc='+encodeURIComponent(_SC.crew.agency_id)+'&ship='+encodeURIComponent(ship)+'&on='+encodeURIComponent(on)+'&off='+encodeURIComponent(off))).json();}catch(e){}
-  if(n!==_AUTO_N||!$('#autoPanel'))return;
+  if(n!==_AUTO_N||!$('#autoPanel')||!_SC||!_SC.crew||_SC.crew.agency_id!==sc0)return;
   if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">Could not read the automatic inputs. Score from the evidence by hand.</div>';return;}
-  for(var k in (a.sliders||{})){var e=$('#'+k);if(e)e.value=a.sliders[k];}
-  if(a.gates&&a.gates.rush)$('#gRush').checked=true;
-  if(a.gateNote&&a.gateNote.length){var gn=$('#gateNote');if(gn&&gn.value.indexOf(a.gateNote[0])<0)gn.value=(gn.value?gn.value+' · ':'')+a.gateNote.join(' · ');}
-  var inC=(a.audits||[]),all=(a.allAudits||[]);
-  var dc=$('#dexChip');if(dc)dc.innerHTML=all.length?('<a class="btn green" style="padding:6px 10px;font-size:12px;text-decoration:none" target=_blank rel=noopener href="https://audit.cims.work/#q='+encodeURIComponent((inC[0]||all[0]).id)+'">Dexter · audit '+escHtml(String((inC[0]||all[0]).score))+'/5 · '+fmtDateS(String((inC[0]||all[0]).at||'').slice(0,10))+'</a>'):'';
+  var S2=a.sliders||{},prev=_AUTO.sliders,k;
+  for(k in prev){if(!(k in S2)&&!_TOUCHED[k]){var e0=$('#'+k);if(e0)e0.value=(_PF.sliders[k]!=null?_PF.sliders[k]:0);}}
+  for(k in S2){var e=$('#'+k);if(e&&!_TOUCHED[k])e.value=S2[k];}
+  _AUTO.sliders=Object.assign({},S2);
+  var gr=$('#gRush'),want=!!(a.gates&&a.gates.rush);
+  if(gr&&!_TOUCHED.gRush){if(want){gr.checked=true;_AUTO.rush=true;}else if(_AUTO.rush&&!_PF.rush){gr.checked=false;_AUTO.rush=false;}}
+  var gn=$('#gateNote');
+  if(gn&&!_TOUCHED.gateNote){
+    // the read's own lines go by their exact text (a line carries " · " itself), the user's words stay
+    var v=String(gn.value||'');_AUTO.notes.forEach(function(x){v=v.split(x).join('');});
+    v=v.replace(/(\\s*·\\s*){2,}/g,' · ').replace(/^\\s*·\\s*|\\s*·\\s*$/g,'').trim();
+    (a.gateNote||[]).forEach(function(x){if(v.indexOf(x)<0)v=v?v+' · '+x:x;});
+    gn.value=v;_AUTO.notes=(a.gateNote||[]).slice();
+  }
+  // the chip is THIS contract's audit, the lowest when several (the one the slider used); red at 3 or below
+  var inC=(a.audits||[]).slice().sort(function(x,y){return Number(x.score)-Number(y.score);}),low=inC[0];
+  var dc=$('#dexChip');if(dc)dc.innerHTML=low?('<a class="btn '+(Number(low.score)<=3?'red':'green')+'" style="padding:6px 10px;font-size:12px;text-decoration:none'+(Number(low.score)<=3?';background:var(--red);color:#fff':'')+'" target=_blank rel=noopener href="https://audit.cims.work/#q='+encodeURIComponent(low.id)+'">Dexter · audit '+escHtml(String(low.score))+'/5 · '+fmtDateS(String(low.at||'').slice(0,10))+(inC.length>1?' · lowest of '+inC.length:'')+'</a>'):'';
   var LBL={sOrder:'On-time ordering',sAcc:'Order accuracy',sPar:'Par',sHand:'Handover',sComm:'Dexter\u2019s audit',sMono:'Mono'};
   var rows=(a.evidence||[]).filter(function(x){return x.factor;}).map(function(x){return '<div style="display:grid;grid-template-columns:118px minmax(0,1fr);gap:2px 10px;padding:4px 0;border-top:1px solid var(--line)"><b style="color:var(--navy)">'+escHtml(LBL[x.factor]||x.factor)+'</b><span>'+escHtml(x.text)+'<br><span style="font-size:11px;letter-spacing:.02em;text-transform:uppercase;opacity:.75">'+escHtml(x.source)+'</span></span></div>';}).join('');
   $('#autoPanel').innerHTML='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">From the systems</b> · pre-filled below, every slider stays yours to move<br>'+rows+'</div>';
@@ -8801,7 +8822,7 @@ function mClose(){$('#modalRoot').innerHTML='';}
 // it never receives a native tap). One tap = exactly one flip + one change event, on every device —
 // avoids the iPad double-toggle where a label-associated checkbox fires twice and lands back where it
 // started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
-function tgFlip(id){var c=document.getElementById(id);if(!c)return;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
+function tgFlip(id){var c=document.getElementById(id);if(!c)return;if(typeof _TOUCHED==='object')_TOUCHED[id]=1;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
 try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
 show(tabFromHash());
 prefetchTabs(1200);

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { autoScore, auditPoints, HON_FROM, FW, computeBonus } from "../src/bonus.js";
 import { pickHandover, parseFlag, shipKey, gatherAuto } from "../src/score_auto.js";
 
-const C = { signOn: "2026-04-01", signOff: "2026-11-05" };
+const C = { signOn: "2026-04-01", signOff: "2026-11-05", today: "2026-11-10" }; // the contract has ended: its handover is due
 const BEST = { ray: { order: "No", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "No" } };
 
 test("a vessel-side miss in the contract: on-time ordering 0 AND the rush gate (no bonus, the streak resets)", () => {
@@ -92,9 +92,53 @@ test("gatherAuto: the miss on HIS ship, his handover, his audits, in one call", 
     PARTS_DB: { prepare: () => st([{ order_ref: "CIMS-1", ship: "Quantum", submitted_at: "2026-07-08T10:00:00", grand_total: 900 }, { order_ref: "CIMS-2", ship: "Anthem", submitted_at: "2026-07-09T10:00:00", grand_total: 50 }]) },
     HON_DB: { prepare: () => st([]) },
   };
-  const r = await gatherAuto(env, { sc: "SC-1", ship: "Quantum of the Seas", signOn: "2026-04-01", signOff: "2026-11-03", crewName: "Ryan Marto" }, { engine: "none" });
+  const r = await gatherAuto(env, { sc: "SC-1", ship: "Quantum of the Seas", signOn: "2026-04-01", signOff: "2026-11-03", crewName: "Ryan Marto", today: "2026-11-10" }, { engine: "none" });
   assert.equal(r.gates.rush, true);
   assert.deepEqual(r.gateNote.map((t) => /CIMS-\d/.exec(t)[0]), ["CIMS-1"], "Anthem's miss is not Ryan's");
   assert.equal(r.sliders.sComm, 8);
   assert.equal(r.sliders.sHand, 0, "ends after 1 Nov with no signed HON handover");
+});
+
+test("15 Oct review: no ship or no sign-on reads nothing; a transfer is every ship; Ray answering the same day AFTER the report stands", async () => {
+  const st = (rows) => ({ bind: () => ({ all: async () => ({ results: rows }), first: async () => rows[0] || null, run: async () => ({}) }) });
+  const MISSES = [{ order_ref: "CIMS-Q", ship: "Quantum", submitted_at: "2026-05-08T10:00:00", grand_total: 900 }, { order_ref: "CIMS-A", ship: "Anthem", submitted_at: "2026-07-09T10:00:00", grand_total: 50 }, { order_ref: "CIMS-OLD", ship: "Quantum", submitted_at: "2024-01-01T10:00:00" }];
+  const env = { DB: { prepare: (sql) => st(/audit_eval/.test(sql) ? [{ request_id: "ar_9", ship: "Oasis", score: 2, filed_at: "2026-09-02T10:00:00Z" }] : []) },
+    PARTS_DB: { prepare: (sql) => ({ bind: (a, b) => ({ all: async () => ({ results: MISSES.filter((m) => m.submitted_at >= a && m.submitted_at <= b) }) }) }) }, HON_DB: { prepare: () => st([]) } };
+  const base = { sc: "SC-1", signOn: "2026-04-01", signOff: "2026-10-01", crewName: "R M", today: "2026-10-15" };
+  const blank = await gatherAuto(env, { ...base, ship: "" }, { engine: "none" });
+  assert.ok(!blank.gates.rush, "a blank ship matched every miss in the fleet");
+  assert.match(blank.evidence.map((e) => e.text).join(" | "), /No ship on the Score Card/);
+  const noOn = await gatherAuto(env, { ...base, ship: "Quantum", signOn: "" }, { engine: "none" });
+  assert.ok(!noOn.gates.rush, "a blank sign-on read every miss in the ship's history");
+  const tr = await gatherAuto(env, { ...base, ship: "MV QUANTUM OF THE SEAS, MV ANTHEM OF THE SEAS" }, { engine: "none" });
+  assert.deepEqual(tr.gateNote.map((t) => /CIMS-\w+/.exec(t)[0]).sort(), ["CIMS-A", "CIMS-Q"], "a transfer: both ships' misses");
+  assert.equal(tr.sliders.sComm, 10, "an audit on another ship (Oasis 2/5) is not this contract's");
+  assert.equal(tr.allAudits.length, 1, "but it is still listed");
+  const r = autoScore({ ...C, answers: BEST, rayAt: "2026-08-01 15:00:00", flags: [{ at: "2026-08-01T08:00:00Z", accuracy: true, quote: "orders were wrong again" }] });
+  assert.equal(r.sliders.sAcc, 25, "Ray answered at 15:00, after the 08:00 report: his answer stands");
+  const run = autoScore({ signOn: "2026-06-01", signOff: "2027-01-05", today: "2026-10-15", handover: null, answers: { rolando: { clean: "Excellent", pm: "Excellent", unres: "Excellent" } } });
+  assert.notEqual(run.sliders.sHand, 0, "a running contract's handover is not due yet");
+});
+
+test("15 Oct review: the AI flag needs a true yes and a real quote; HON's crew id decides the handover", () => {
+  const src = "Ray says the orders were wrong again and par was not kept on the crossing.";
+  assert.equal(parseFlag('{"accuracy":"false","par":false,"quote":"the orders were wrong again"}', src).accuracy, false, "the string false is not a yes");
+  assert.equal(parseFlag('{"accuracy":true,"par":false,"quote":"the"}', src).accuracy, false, "a one-word quote is in every report");
+  assert.equal(parseFlag('{"accuracy":true,"par":false,"quote":"the orders were wrong again"}', src).accuracy, true);
+  const rows = [{ id: "h1", ship: "Wonder", outgoing_name: "Raymond Villacortes Jr.", outgoing_crew_id: null, signed_at: "2026-10-06 21:21:09" },
+    { id: "h2", ship: "Wonder", outgoing_name: "Raymond Villacortes", outgoing_crew_id: "SC-0099999", signed_at: "2026-10-07 10:00:00" }];
+  assert.equal(pickHandover(rows, { ship: "Wonder of the Seas", signOff: "2026-10-08", crewName: "Raymond Villacortes", sc: "SC-0038350" }).id, "h1", "another crew id is not his; Jr. is still his surname");
+  assert.equal(pickHandover([{ ...rows[1], outgoing_crew_id: "SC-0038350", outgoing_name: "someone else" }], { ship: "Wonder", signOff: "2026-10-08", crewName: "Raymond Villacortes", sc: "SC-0038350" }).id, "h2", "the id wins over the name");
+});
+
+test("the Score Card page as served: the gate note's regex keeps its backslashes, contributor rows escape names", async () => {
+  const { signToken } = await import("../src/auth.js");
+  const worker = (await import("../src/worker.js")).default;
+  const DB = { prepare: (sql) => { const s = { bind: () => s }; s.run = async () => ({ meta: {} }); s.first = async () => (/FROM users/i.test(sql) ? { email: "miguel.sanmartin@dg3.com" } : null); s.all = async () => ({ results: [] }); return s; }, batch: async (l) => Promise.all(l.map((x) => (x.all ? x.all() : x.run()))) };
+  const tok = await signToken({ p: "session", email: "miguel.sanmartin@dg3.com", exp: Math.floor(Date.now() / 1000) + 3600 }, "x");
+  const page = await (await worker.fetch(new Request("https://cims.work/", { headers: { Cookie: "cims_sid=" + encodeURIComponent(tok) } }), { SESSION_SECRET: "x", DB }, { waitUntil() {} })).text();
+  assert.ok(page.includes("v.replace(/(\\s*·\\s*){2,}/g"), "a template literal ate the backslashes: the regex would match the letter s");
+  const row = page.slice(page.indexOf("function swRow"), page.indexOf("var _swt"));
+  assert.match(row, /escHtml\(c\.name/); assert.doesNotMatch(row, /swPickCrew\(\\'.+c\.agency_id/);
+  assert.match(page, /id=ships onchange="applyAuto\(\)"/, "editing the ship re-reads the systems");
 });
