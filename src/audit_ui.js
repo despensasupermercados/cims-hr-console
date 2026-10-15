@@ -72,7 +72,7 @@ button{font:inherit;color:inherit}
 .hero .who{color:#B9C6D6;font-size:14px}
 .sbox{position:relative;margin-top:16px}
 .sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
-.search{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 14px 0 42px;font-size:16px;background:#fff;color:#14243A;font-family:var(--ff)}
+.search{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 46px 0 42px;font-size:16px;background:#fff;color:#14243A;font-family:var(--ff)}
 .search:focus{outline:2px solid var(--green);outline-offset:1px}
 main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-direction:column;gap:14px}
 .offl{max-width:640px;margin:12px auto 0;padding:0 16px}.offl div{display:flex;gap:8px;align-items:center;background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
@@ -110,7 +110,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .bars{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
 .ends{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:6px}
 .facts{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
-.facts div{padding:12px 16px}.facts div+div{border-left:1px solid var(--line)}
+.facts div{padding:12px 8px;text-align:center}.facts div+div{border-left:1px solid var(--line)}
 .facts b{display:block;font-family:var(--fh);font-weight:600;font-size:16px}.facts span{font-size:12px;color:var(--mut)}
 .need{display:flex;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
 .ch+.need{border-top:0}
@@ -152,6 +152,11 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .fold .go{transition:transform .2s}.fold[open] .go{transform:rotate(90deg)}
 .feed{padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
 .feed .w{font-size:12px;color:var(--mut);font-weight:600;margin-bottom:3px}
+.feed .pl{font-size:15px;line-height:1.45}
+.full{margin-top:6px}.full>summary{display:inline-flex;align-items:center;min-height:40px;padding-right:12px;font-size:13px;font-weight:600;color:var(--nfg);cursor:pointer}
+.full>div{font-size:13px;line-height:1.5;color:var(--mut);padding-top:2px}.full>div p{margin:0 0 6px}.full>div b{color:var(--fg);font-weight:600}
+.sbox .clr{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;padding:0;border:0;background:none;color:var(--mut);display:flex;align-items:center;justify-content:center;border-radius:10px;cursor:pointer}
+.sbox .clr[hidden]{display:none}.sbox .clr .ic{position:static;transform:none;width:18px;height:18px}
 .empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;text-align:center;color:var(--mut);font-size:14px}
 .empty .ic{width:28px;height:28px;color:var(--line2)}
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06)}
@@ -236,14 +241,16 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function brandOf(s) { return s.brand === "Royal" ? "Royal Caribbean" : (s.brand || ""); }
   function shipRow(s, openReq) {
     var who = s.aboard.length ? ic("user") + s.aboard.map(function (c) { return esc(c.name); }).join(", ") : "Nobody aboard per the TDG file";
-    var go = openReq && s.last ? ' data-go="q=' + esc(s.last.id) + '"' : ' data-ship="' + esc(s.ship) + '"';
+    /* one crew aboard: the row already names him, so it opens his briefing (Miguel, 15 Oct 2026) */
+    var go = openReq && s.last ? ' data-go="q=' + esc(s.last.id) + '"' : ' data-ship="' + esc(s.ship) + '"' + (s.aboard.length === 1 ? ' data-sc="' + esc(s.aboard[0].sc) + '"' : "");
     return '<button class="row' + (s.aboard.length || openReq ? "" : " off") + '"' + go + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + (openReq && s.last ? ic("user") + esc(s.last.crew) : who) + "</div>" + (openReq ? '<div class="stl">' + reqStatus(s.last) + "</div>" : "") + "</div>" + ic("caret-right", "go") + "</button>";
   }
   function shipsView() {
     top("", "", "", "", false); dock("");
-    hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="who">' + (S.me ? esc(nameOf(S.me)) + " · " : "") + esc(todayLong()) + '</div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"></div>', "home");
-    var qi = $("q");
-    qi.addEventListener("input", function () { S.q = qi.value; shipsList(); });
+    hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="who">' + (S.me ? esc(nameOf(S.me)) + " · " : "") + esc(todayLong()) + '</div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
+    var qi = $("q"), qx = $("qx");
+    qi.addEventListener("input", function () { S.q = qi.value; qx.hidden = !S.q; shipsList(); });
+    qx.addEventListener("click", function () { S.q = ""; qi.value = ""; qx.hidden = true; shipsList(); qi.focus(); });
     shipsList();
   }
   function shipsList() {
@@ -279,6 +286,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function shipView(ship) {
     var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0];
     if (!s) { go(""); return; }
+    if (s.aboard.length === 1) { location.replace("#b=" + encodeURIComponent(s.ship) + "|" + encodeURIComponent(s.aboard[0].sc)); return; }
     top(s.ship, brandOf(s), "", "", true); hero(""); dock("");
     var h = '<div class="sh">Who are you auditing?</div><div class="card">';
     if (!s.aboard.length) h += '<div class="empty">' + ic("user") + "The TDG file has nobody aboard " + esc(s.ship) + ".</div>";
@@ -299,6 +307,13 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div><span class="q">' + (lines == null ? "" : lines) + "</span></div>" +
       '<div class="foot">' + ic("lock-simple") + "<span>The audit opens only when all of it is in. 24 hours to upload.</span></div></div>";
   }
+  /* the stored field-intel summary ("• Summary: … • What happened: …"), one labelled paragraph per bullet */
+  function fullReport(t) {
+    return String(t || "").split(/\s*•\s*/).filter(function (x) { return x.trim(); }).map(function (x) {
+      var m = x.match(/^([A-Z][\w ]{2,30}):\s*([\s\S]*)$/);
+      return "<p>" + (m ? "<b>" + esc(m[1]) + ".</b> " + esc(m[2]) : esc(x)) + "</p>";
+    }).join("");
+  }
   function briefView(ship, sc) {
     top(ship, "Loading the briefing", "", "", true); hero(""); dock("");
     $("main").innerHTML = skel(3);
@@ -307,7 +322,8 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     p.then(function (b) {
       S.brief[key] = b; if (!S.today) S.today = b.today;
       if (S.view !== key) return;
-      top(ship, "Briefing", "", "", true);
+      var sh = (S.ships || []).filter(function (x) { return x.ship === ship; })[0];
+      top(ship, sh && brandOf(sh) ? brandOf(sh) : "Briefing", "", "", true);
       var c = b.contract || {}, cur = c.current;
       var h = '<div class="card"><div class="pad"><h2 class="who">' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "");
       if (cur && cur.on && cur.off) {
@@ -328,7 +344,11 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       }
       var feed = b.feed || [];
       h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
-      feed.forEach(function (f) { h += '<div class="feed"><div class="w">' + esc(KIND[f.kind] || f.kind) + (f.who ? " · " + esc(f.who) : "") + " · " + fmtD(f.at, true) + (f.rating != null ? " · " + esc(f.rating) + "/5" : "") + "</div>" + esc(f.text) + "</div>"; });
+      feed.forEach(function (f) {
+        h += '<div class="feed"><div class="w">' + esc(KIND[f.kind] || f.kind) + (f.who ? " · " + esc(f.who) : "") + " · " + fmtD(f.at, true) + (f.rating != null ? " · " + esc(f.rating) + "/5" : "") + '</div><div class="pl">' + esc(f.text) + "</div>";
+        if (f.full && f.full.trim() !== String(f.text || "").trim()) h += '<details class="full"><summary>Full report</summary><div>' + fullReport(f.full) + "</div></details>";
+        h += "</div>";
+      });
       h += "</details>";
       if (b.checks && b.checks.length) {
         h += '<details class="card fold"><summary class="row"><span class="sq a">' + ic("warning-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">To check on the crew record</div><div class="sm">' + b.checks.length + " open</div></div>" + ic("caret-right", "go") + "</summary>";
@@ -449,7 +469,8 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     if (g) { if (g.disabled) return; go(g.getAttribute("data-go")); return; }
     var t = e.target.closest("[data-brand],[data-sc],[data-ship]");
     if (!t) return;
-    if (t.hasAttribute("data-brand")) { S.brand = t.getAttribute("data-brand"); shipsList(); return; }
+    /* a brand chip browses the brand: it clears a search left in the box ("qu" + Azamara showed only Quest, 15 Oct 2026) */
+    if (t.hasAttribute("data-brand")) { S.brand = t.getAttribute("data-brand"); if (S.q) { S.q = ""; var qi = $("q"), qx = $("qx"); if (qi) qi.value = ""; if (qx) qx.hidden = true; } shipsList(); return; }
     if (t.hasAttribute("data-sc")) { go("b=" + encodeURIComponent(t.getAttribute("data-ship")) + "|" + encodeURIComponent(t.getAttribute("data-sc"))); return; }
     if (t.hasAttribute("data-ship")) go("s=" + encodeURIComponent(t.getAttribute("data-ship")));
   });
