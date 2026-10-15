@@ -14,7 +14,7 @@
 // TEST MODE until Miguel signs off the rendered emails (CIMS email standard §5): with AUDIT_LIVE unset every email goes
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
-import { addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel } from "./audit.js";
+import { addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems } from "./audit.js";
 import { p43ReadState, mmlReadState, coverFor } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
@@ -143,12 +143,41 @@ export function installAuditRequest(deps) {
     const s = await stateOf(env, req);
     const downBy = {}; for (const d of s.down) downBy[d.serial] = d.reason;
     const done = countCompleteness(s.lines, s.counted);
+    const ev = await env.DB.prepare("SELECT * FROM audit_eval WHERE request_id=?").bind(req.id).first().catch(() => null);
     return json({
+      grade: ev ? { inventory: ev.r_inventory, technical: ev.r_technical, collaterals: ev.r_collaterals, overall: ev.r_overall, score: ev.score, from: ev.score_from, note: ev.note, by: ev.filed_by, at: ev.filed_at } : null,
       id: req.id, ship: req.ship, sc: req.agency_id, crew: req.crew_name, status: req.status, test: !!req.test_mode, auditor: req.auditor,
       to: req.to_ship, cc: req.cc_personal, sentAt: req.sent_at, dueAt: req.due_at, completeAt: req.complete_at, overdueAt: req.overdue_at,
       machines: s.machines.map((m) => ({ serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43: slot(s.uploads, m.serial, "p43"), mgmt: slot(s.uploads, m.serial, "mgmt") })),
       count: { total: done.total, done: done.done }, extras: s.extras.length, gate: s.gate,
     });
+  }
+
+  // Dexter's grade (Miguel, 15 Oct 2026). Only on a request whose documents are in (the gate: "without that completion,
+  // I don't want him to start the audit"); filed ONCE — the visit and its grade go in one batch and are never rewritten.
+  async function grade(request, env, session) {
+    const b = await request.json().catch(() => ({}));
+    await ensureAudit(env);
+    const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(String(b.id || "")).first();
+    if (!req) return json({ error: "not_found" }, 404);
+    if (req.status !== "complete") return json({ ok: false, error: "not_complete" }, 409);
+    const r = { inventory: b.inventory, technical: b.technical, collaterals: b.collaterals, overall: b.overall === "" ? null : b.overall, note: b.note };
+    const bad = gradeProblems(r);
+    if (bad.length) return json({ ok: false, error: "invalid", fields: bad }, 400);
+    const sc = auditScore(r), at = now(), vid = "av_" + crypto.randomUUID();
+    const note = String(r.note || "").trim().slice(0, 2000) || null;
+    try {
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES (?,?,?,?,?,'filed',?,?)").bind(vid, req.id, req.ship, req.agency_id, session.email, at, at),
+        env.DB.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, note, filed_by, filed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+          .bind(vid, req.id, req.agency_id, req.ship, Number(r.inventory), Number(r.technical), Number(r.collaterals), r.overall == null ? null : Number(r.overall), sc.score, sc.from, note, session.email, at),
+      ]);
+    } catch (e) {
+      if (/UNIQUE/i.test(String((e && e.message) || e))) return json({ ok: false, error: "already_filed" }, 409);
+      throw e;
+    }
+    await logActivity(env, session.email, "audit_grade", req.id + " " + sc.score);
+    return json({ ok: true, score: sc.score, from: sc.from });
   }
 
   async function act(request, env, url, session, what) {
@@ -388,6 +417,7 @@ export function installAuditRequest(deps) {
       if (p === "/api/audit/request/resend" && request.method === "POST") return act(request, env, url, session, "resend");
       if (p === "/api/audit/request/extend" && request.method === "POST") return act(request, env, url, session, "extend");
       if (p === "/api/audit/request/cancel" && request.method === "POST") return act(request, env, url, session, "cancel");
+      if (p === "/api/audit/request/grade" && request.method === "POST") return grade(request, env, session);
       return json({ error: "not found" }, 404);
     }
     return null;

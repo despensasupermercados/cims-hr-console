@@ -162,3 +162,33 @@ export function gateState({ request, machines, uploads, down, lines, counted, re
   if (c.missing.length) missing.push({ what: "count", say: c.missing.length + " of " + c.total + " parts not counted" });
   return { open: missing.length === 0, missing, count: c };
 }
+
+/* --------------------------------- the audit grade --------------------------------- */
+// Miguel, 15 Oct 2026: Dexter grades the audit 1–5; the Overall rating is the audit's score, and when Overall is left
+// blank the score is the average of the other ratings, ROUNDED DOWN ("Round down"). HR dispatch is not here: it rates
+// TDG's travel, not the seafarer (docs/AUDIT_DESIGN.md). What a score is worth on the bonus is NOT decided here — that
+// is bonus.js, a money change (§1); this module only says what Dexter graded.
+export const AUDIT_RATINGS = [
+  { key: "inventory", label: "Inventory", hint: "OBP matches the shelf, par kept, parts life tracked" },
+  { key: "technical", label: "Technical", hint: "Machines, error codes, maintenance, test prints" },
+  { key: "collaterals", label: "Customer collaterals", hint: "Quality of what the ship prints for guests" },
+  { key: "overall", label: "Overall", hint: "Leave blank to use the average of the three above", optional: true },
+];
+export const GRADE_NOTE_MIN = 10; // a 3 or below needs a sentence (the design's rule)
+const rating = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null; };
+export function auditScore(r) {
+  const x = r || {};
+  const o = rating(x.overall);
+  if (o != null) return { score: o, from: "overall" };
+  const parts = ["inventory", "technical", "collaterals"].map((k) => rating(x[k])).filter((v) => v != null);
+  if (!parts.length) return { score: null, from: null };
+  return { score: Math.floor(parts.reduce((a, b) => a + b, 0) / parts.length), from: "average" };
+}
+export function gradeProblems(r) {
+  const x = r || {}, out = [];
+  for (const k of ["inventory", "technical", "collaterals"]) if (rating(x[k]) == null) out.push(k);
+  if (x.overall != null && x.overall !== "" && rating(x.overall) == null) out.push("overall");
+  const low = AUDIT_RATINGS.some((a) => { const v = rating(x[a.key]); return v != null && v <= 3; });
+  if (low && String(x.note || "").trim().length < GRADE_NOTE_MIN) out.push("note");
+  return out;
+}
