@@ -18,6 +18,7 @@ import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTr
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, summarizeSga, SGA_COL_KEYS } from "./sga.js";
 import * as XLSX from "xlsx";
 import { runSync, syncConfigured, syncAllowed } from "./sharepoint_sync.js";
+import { assembleInbox } from "./sp_inbox.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
@@ -281,6 +282,7 @@ export default {
         if (p === "/api/sga/import" && request.method === "POST") return apiSgaImport(request, env, session);
         if (p === "/api/sharepoint/status") return apiSharePointStatus(env);
         if (p === "/api/sharepoint/sync" && request.method === "POST") return apiSharePointSync(env, session);
+        if (p === "/api/sharepoint/inbox/apply" && request.method === "POST") return apiInboxApply(env, session);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
         if (p === "/api/contracts")    return apiContracts(env);
@@ -401,6 +403,9 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
     if (ctx && ctx.waitUntil) ctx.waitUntil(projectFutureLegs(env, { today: nyDateStr() }).catch(function (e) { console.error("leg_projection", (e && e.stack) || e); }));
     // SharePoint → console (15 Oct 2026): TDG's SGA workbooks and Rita's travel workbook, when the Graph identity exists.
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSyncSharePoint(env).catch(function (e) { console.error("sharepoint_sync", (e && e.stack) || e); }));
+    // The SharePoint INBOX (15 Oct 2026, src/sp_inbox.js): the sheets the morning session wrote into sp_inbox load here,
+    // through the same apply paths — this is the route that works before the Graph identity exists.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(applyInbox(env).catch(function (e) { console.error("sp_inbox", (e && e.stack) || e); }));
   }
 };
 
@@ -1574,9 +1579,68 @@ async function apiSharePointSync(env, session) {
   return json(report);
 }
 async function apiSharePointStatus(env) {
-  await ensureSpSync(env);
-  const rows = (await env.DB.prepare("SELECT path, name, kind, year, month, status, detail, at FROM sp_sync ORDER BY at DESC LIMIT 20").all()).results;
-  return json({ configured: syncConfigured(env), allowed: syncAllowed(env), drive: env.SP_DRIVE_ID || null, sgaPath: env.SP_SGA_PATH || null, travelPath: env.SP_TRAVEL_PATH || null, recent: rows });
+  await Promise.all([ensureSpSync(env), ensureSpInbox(env)]);
+  const [recentRes, inboxRes] = await Promise.all([
+    env.DB.prepare("SELECT path, name, kind, year, month, status, detail, at FROM sp_sync ORDER BY at DESC LIMIT 20").all(),
+    env.DB.prepare("SELECT status, COUNT(DISTINCT file_key) files, MAX(at) last_at FROM sp_inbox GROUP BY status").all(),
+  ]);
+  const inbox = { pending: 0, ok: 0, error: 0, last_at: null };
+  for (const r of inboxRes.results) { inbox[r.status] = r.files; if (!inbox.last_at || r.last_at > inbox.last_at) inbox.last_at = r.last_at; }
+  return json({ configured: syncConfigured(env), allowed: syncAllowed(env), drive: env.SP_DRIVE_ID || null, sgaPath: env.SP_SGA_PATH || null, travelPath: env.SP_TRAVEL_PATH || null, recent: recentRes.results, inbox });
+}
+
+// ---- The SharePoint INBOX (src/sp_inbox.js; Miguel, 15 Oct 2026: "I dont want rita to be dropping items") ----
+// The morning session (a scheduled Claude task on Miguel's Microsoft 365 connector) cannot reach this Worker and cannot
+// hand over a workbook's bytes; it writes the SHEETS it read — as the Upload page would send them — into sp_inbox, one
+// row per sheet part, keyed by the SharePoint item id + modified time. This applies them: a file whose parts are all
+// here goes through sgaStage/applySgaWorkbook or applyTravelYear (the ONE path each, §3), is recorded on sp_sync like a
+// Graph load (source "agent"), and its inbox rows are marked ok / error. A file still missing a part waits for the next
+// hour. One failure never stops the rest. Nothing here is money (§1).
+const ensureSpInbox = memoEnsure(ensureSpInboxImpl);
+async function ensureSpInboxImpl(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS sp_inbox (id TEXT PRIMARY KEY, file_key TEXT, kind TEXT, year INTEGER, month INTEGER, item_id TEXT, name TEXT, path TEXT, modified TEXT, sheet TEXT, part INTEGER, parts INTEGER, file_parts INTEGER, rows_json TEXT, written_by TEXT, at TEXT, status TEXT DEFAULT 'pending', detail TEXT, applied_at TEXT)").run();
+}
+const INBOX_FILES_PER_RUN = 12;
+async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
+  await Promise.all([ensureSpInbox(env), ensureSpSync(env), ensureSga(env), ensureTravel(env)]);
+  const pend = (await env.DB.prepare("SELECT id, file_key, kind, year, month, item_id, name, path, modified, sheet, part, parts, file_parts, rows_json, written_by, at FROM sp_inbox WHERE status='pending' ORDER BY at, file_key, sheet, part").all()).results;
+  if (!pend.length) return { files: 0, loaded: [], waiting: 0, errors: [] };
+  const byFile = new Map();
+  for (const r of pend) { if (!byFile.has(r.file_key)) byFile.set(r.file_key, []); byFile.get(r.file_key).push(r); }
+  const deps = syncDeps(env);
+  const report = { files: byFile.size, loaded: [], waiting: 0, errors: [] };
+  let done = 0;
+  for (const [fileKey, rows] of byFile) {
+    if (done >= limit) break;
+    const sheets = assembleInbox(rows);
+    if (!sheets) { report.waiting++; continue; }   // a part is still missing — the session may still be writing
+    done++;
+    const h = rows[0];
+    const now = new Date().toISOString();
+    const rec = { item_id: h.item_id, path: h.path, name: h.name, etag: h.modified, modified: h.modified, kind: h.kind, year: h.year, month: h.month || null, at: now };
+    const ids = rows.map((r) => r.id);
+    const mark = async (status, detail) => { for (let i = 0; i < ids.length; i += 50) await env.DB.prepare("UPDATE sp_inbox SET status=?, detail=?, applied_at=? WHERE id IN (" + ids.slice(i, i + 50).map(() => "?").join(",") + ")").bind(status, String(detail || "").slice(0, 2000), now, ...ids.slice(i, i + 50)).run(); };
+    try {
+      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup" };
+      const res = h.kind === "sga" ? await deps.applySga(sheets, meta) : h.kind === "travel" ? await deps.applyTravel(sheets, +h.year, meta) : { error: "unknown_kind", detail: h.kind };
+      const bad = res && res.error;
+      await deps.db.record({ ...rec, status: bad ? "error" : "ok", detail: JSON.stringify(res || null).slice(0, 2000) });
+      await mark(bad ? "error" : "ok", bad ? res.error + (res.detail ? ": " + res.detail : "") : JSON.stringify(res));
+      if (bad) report.errors.push({ file_key: fileKey, name: h.name, error: res.error, detail: res.detail || null }); else report.loaded.push({ file_key: fileKey, name: h.name, kind: h.kind, year: h.year, month: h.month || null, result: res });
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      await deps.db.record({ ...rec, status: "error", detail: msg.slice(0, 2000) }).catch(() => null);
+      await mark("error", msg).catch(() => null);
+      report.errors.push({ file_key: fileKey, name: h.name, error: msg });
+    }
+  }
+  if (report.loaded.length || report.errors.length) await logData(env, "sharepoint inbox", report.loaded.length, "loaded " + report.loaded.length + ", errors " + report.errors.length + ", waiting " + report.waiting);
+  return report;
+}
+async function apiInboxApply(env, session) {
+  const report = await applyInbox(env);
+  try { await env.DB.prepare("INSERT INTO activity_log (id, at, user_id, action, detail) VALUES (?,?,?,?,?)").bind("act_" + crypto.randomUUID(), new Date().toISOString(), (session && session.email) || "?", "sharepoint_inbox_apply", JSON.stringify({ files: report.files, loaded: report.loaded.length, waiting: report.waiting, errors: report.errors.length })).run(); } catch {}
+  return json(report);
 }
 // The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
 async function apiSga(env) {

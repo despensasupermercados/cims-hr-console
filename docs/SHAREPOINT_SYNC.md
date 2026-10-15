@@ -39,6 +39,16 @@ The Worker needs an identity in DG3's Microsoft 365 tenant. The agent never sees
 Until the secret exists the sync does nothing and says so on the Data page ("SharePoint sync: not configured");
 drag-and-drop keeps working exactly as before.
 
+## Until IT delivers: the INBOX route (15 Oct 2026, the same evening)
+
+Miguel: *"I dont want rita to be dropping items .. I want you to either pick the file and read what u need .. or we need to
+find a solution."* A scheduled Claude session ("Cims SharePoint pickup", daily) reads the folders through his Microsoft
+365 connector and writes the sheets into `sp_inbox`; the hourly cron (`applyInbox`) loads them through the same two apply
+paths and records them on `sp_sync` with `source = agent`. Runbook: `docs/SHAREPOINT_PICKUP.md`; code `src/sp_inbox.js`,
+`scripts/sp_pickup.mjs`; pinned by `test/sp_inbox.test.js`. Its limit, measured: the connector returns a workbook as
+text under a read budget — TDG's bill comes through whole, Rita's workbook only until about October. When the Graph
+identity exists the Worker reads SharePoint itself and the scheduled task is deleted; nothing else changes.
+
 ## What the Worker does — every hour (`maybeSyncSharePoint`, in `scheduled`)
 
 1. Token: `POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` (client credentials,

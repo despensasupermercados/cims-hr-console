@@ -700,6 +700,25 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET` as a Secret, `SP_DRIVE_ID`) and **never on staging** (`MAIL_ONLY_TO` set). The
   app registration, `Sites.Selected` on the one site, and the secret are Miguel's / IT's to create (§7) — the agent never
   sees them. Until then drag-and-drop is the path; nothing else changes.
+- **THE INBOX — the automatic route that works TODAY** (Miguel, 15 Oct 2026, the same evening: "I dont want rita to be
+  dropping items .. I want you to either pick the file and read what u need .. or we need to find a solution"; `src/sp_inbox.js`,
+  `scripts/sp_pickup.mjs`, runbook `docs/SHAREPOINT_PICKUP.md`, pinned by `test/sp_inbox.test.js`). The Graph identity waits
+  on DG3 IT. Meanwhile a scheduled Claude task ("Cims SharePoint pickup", daily 05:54 UTC, a fresh session on Miguel's
+  Microsoft 365 + Cloudflare connectors) lists `1. ACCOUNTING/SGA/<year>/<NN Month>/` and `Travel Expenses Crew`, reads each
+  new workbook (key = SharePoint item id @ modified time, checked against `sp_sync` / `sp_inbox`) through the connector —
+  which returns the workbook as TEXT under a read budget — turns the dump into the 2-D sheets the Upload page sends
+  (`dumpToSheets`), REFUSES any sheet the budget cut (`sgaFromDump` / `travelFromDump`: never nine months as the year, never
+  a bill that does not reconcile to TDG's GRAND TOTAL), and INSERTs them into `sp_inbox` (one row per sheet part ≤ 60 KB,
+  `file_parts` so a half-written file waits). The hourly cron's `applyInbox` loads a complete file through
+  `sgaStage`/`applySgaWorkbook` or `applyTravelYear` — the ONE path each (§3) — records it on `sp_sync` (`source = agent`),
+  marks the rows ok / error; `POST /api/sharepoint/inbox/apply` runs it now; `/api/sharepoint/status` carries `inbox`. The
+  session writes nothing else, ever. Measured: TDG's SGA workbook (230 sheets) delivers SUMMARY MANNING + TRAINREL whole,
+  the TRAINING line items never; Rita's workbook is cut inside OCT, so from October her year does not come this way —
+  stated to Miguel, with the recommendation that the bill (the audited number) carry the Travel tab and the workbook become
+  the optional comparison. When the Graph identity exists: delete the scheduled task, nothing else changes.
+- **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
+  shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
+  line on Azamara Quest stays as TDG wrote it ("leave the W as it is").
 - Not money (§1). The Travel tab is a reference read (§10b), never an invoice source.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
