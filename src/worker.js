@@ -14,7 +14,8 @@ import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
-import { annotateTravel, unmatchedTravel, travelRowsFor } from "./travel_match.js";
+import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
+import { pickSgaSheets, parseSgaManning, parseSgaTraining, summarizeSga, SGA_COL_KEYS } from "./sga.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
@@ -274,6 +275,8 @@ export default {
         if (p === "/api/billing/month") return apiBillingMonth(env);
         if (p === "/api/travel")     return apiTravel(env, url);
         if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
+        if (p === "/api/sga")        return apiSga(env);
+        if (p === "/api/sga/import" && request.method === "POST") return apiSgaImport(request, env, session);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
         if (p === "/api/contracts")    return apiContracts(env);
@@ -1212,6 +1215,8 @@ async function apiDataStatus(env) {
     { name: "Feedback responses", source: "In-app (contributors)", count: await cnt("SELECT COUNT(*) n FROM feedback_response2") },
     { name: "Bonus outcomes", source: "In-app (committed)", count: await cnt("SELECT COUNT(*) n FROM bonus_outcome") },
     { name: "Travel expenses", source: "Travel workbook (2025 history + Rita uploads)", count: await cnt("SELECT COUNT(*) n FROM travel_expense") },
+    { name: "TDG bill (SGA) lines", source: "DG3 SGA EXCEL <month>.xlsx — SUMMARY MANNING", count: await cnt("SELECT COUNT(*) n FROM sga_line") },
+    { name: "Training centre months", source: "DG3 SGA EXCEL <month>.xlsx — training summary", count: await cnt("SELECT COUNT(*) n FROM training_cost") },
   ];
   let log = [];
   try { log = (await env.DB.prepare("SELECT source,rows,status,at FROM data_log ORDER BY at DESC LIMIT 12").all()).results; } catch {}
@@ -1430,6 +1435,109 @@ async function apiTravelImport(request, env, session) {
   if (recs.length) await insertTravel(env, recs, year);
   await logData(env, "travel_expense (" + year + ", by " + ((session && session.email) || "?") + ")", recs.length, "replaced year " + year);
   return json({ ok: true, year, applied: recs.length });
+}
+
+// ---- TDG's Statement of General Account (CLAUDE.md §10j; Miguel, 15 Oct 2026: the SGA is the AUDITED number) ----
+// Rita drops "DG3 SGA EXCEL <month>.xlsx" on Upload data (or, PR 3, the Worker fetches it from SharePoint). The page sends
+// the two sheets the console reads (SUMMARY MANNING, the training summary) as 2-D arrays; src/sga.js parses them:
+//   sga_line       one row per crew per ship for the month — TDG's ref, the name, the vessel, every cost column, AMOUNT
+//   training_cost  one row per month — RENTAL / UTILITIES / HOTEL / PLANEFARE / OTHER / BANK, the TOTAL (= the training PDF)
+//   sga_file       what was loaded when, by whom, from which file (name, hash, SGA no, date) — the month's provenance
+// A month is REPLACED by its newer file (TDG issues REVISED workbooks); the training sheet carries every month of the year,
+// so the years it names are replaced whole. Nothing here is money (§1) and nothing is an invoice source (§10b).
+const ensureSga = memoEnsure(ensureSgaImpl);
+async function ensureSgaImpl(env) {
+  await Promise.all([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_file (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, sga_no TEXT, sga_date TEXT, file_name TEXT, file_hash TEXT, rows INTEGER, total REAL, grand_total REAL, training_months INTEGER, loaded_by TEXT, loaded_at TEXT, source TEXT)").run(),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_line (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, ref TEXT, ship_code TEXT, seq INTEGER, sga_no TEXT, crew_name TEXT, vessel TEXT, brand TEXT, id_number TEXT, nationality TEXT, " + SGA_COL_KEYS.map((k) => k + " REAL DEFAULT 0").join(", ") + ", amount REAL, cols_sum REAL)").run(),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS training_cost (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, rental REAL DEFAULT 0, utilities REAL DEFAULT 0, hotel REAL DEFAULT 0, air REAL DEFAULT 0, other REAL DEFAULT 0, bank_charge REAL DEFAULT 0, total REAL, summary_only INTEGER DEFAULT 0)").run(),
+  ]);
+}
+// The file's period = the (year, month) most of its refs carry; a workbook whose rows name no period is refused.
+function sgaPeriod(records) {
+  const n = {};
+  for (const r of records) if (r.year && r.month) { const k = r.year + "-" + r.month; n[k] = (n[k] || 0) + 1; }
+  const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
+  if (!best) return null;
+  const [y, m] = best[0].split("-").map(Number);
+  return { year: y, month: m, rows: best[1], of: records.length };
+}
+// What one workbook holds, parsed and judged — the dry-run and the apply share it.
+async function sgaStage(env, b) {
+  const sheets = b.sheets || {};
+  const pick = pickSgaSheets(sheets);
+  if (!pick.manning) return { error: "no_manning_sheet", detail: "The workbook has no SUMMARY MANNING sheet. Drop TDG's 'DG3 SGA EXCEL <month>.xlsx'." };
+  const manning = parseSgaManning(sheets[pick.manning]);
+  if (manning.error) return { error: "no_header", detail: "SUMMARY MANNING has no REF. NO. header row the console can read." };
+  const period = sgaPeriod(manning.records);
+  if (!period) return { error: "no_period", detail: "No row carries a TDG ref like ADV-2026-09-39-01, so the month is unknown." };
+  const training = pick.training ? parseSgaTraining(sheets[pick.training]) : [];
+  const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
+  const ix = buildCrewIndex(crew);
+  const lines = manning.records.map((r) => { const m = r.crew_name ? matchTravelName(r.crew_name, ix) : { agency_id: null, how: "none" }; return { ...r, agency_id: m.agency_id || null, match: m.how, crew_display: m.name || null }; });
+  const unmatched = lines.filter((l) => !l.agency_id).map((l) => ({ crew_name: l.crew_name, vessel: l.vessel, amount: l.amount, how: l.match }));
+  const sum = summarizeSga(lines);
+  const prior = (await env.DB.prepare("SELECT id, file_name, sga_no, loaded_at, rows, total FROM sga_file WHERE year=? AND month=? ORDER BY loaded_at DESC LIMIT 1").bind(period.year, period.month).first().catch(() => null)) || null;
+  return { period, meta: manning.meta, lines, others: manning.others, grand_total: manning.grand_total, summary: sum, training, unmatched, prior, sheets: pick,
+    // TDG's grand total against the rows: a gap is a parsing miss or a row the sheet hides — said, never silently accepted
+    reconciles: manning.grand_total == null ? null : Math.abs((sum.total + manning.others.reduce((a, o) => a + (o.amount || 0), 0)) - manning.grand_total) < 0.05 };
+}
+async function apiSgaImport(request, env, session) {
+  await ensureSga(env);
+  const b = await request.json().catch(() => ({}));
+  const st = await sgaStage(env, b);
+  if (st.error) return json({ error: st.error, detail: st.detail }, 400);
+  const trMonths = st.training.filter((t) => !t.summary_only);
+  if (b.dryRun) {
+    return json({ dryRun: true, period: st.period, meta: st.meta, rows: st.lines.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles,
+      byBrand: st.summary.byBrand, byCat: st.summary.byCat, others: st.others, training: st.training, trainingMonths: trMonths.length, unmatched: st.unmatched, prior: st.prior, sheets: st.sheets });
+  }
+  const fileId = "sga_" + st.period.year + "_" + String(st.period.month).padStart(2, "0") + "_" + crypto.randomUUID().slice(0, 8);
+  const by = (session && session.email) || "?";
+  const now = new Date().toISOString();
+  const stmts = [
+    env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=?").bind(st.period.year, st.period.month),
+  ];
+  const cols = ["id", "file_id", "year", "month", "ref", "ship_code", "seq", "sga_no", "crew_name", "vessel", "brand", "id_number", "nationality", ...SGA_COL_KEYS, "amount", "cols_sum"];
+  const ins = env.DB.prepare("INSERT INTO sga_line (" + cols.join(",") + ") VALUES (" + cols.map(() => "?").join(",") + ")");
+  st.lines.forEach((l, i) => {
+    stmts.push(ins.bind(fileId + "_" + String(i).padStart(3, "0"), fileId, l.year || st.period.year, l.month || st.period.month, l.ref, l.ship_code, l.seq, l.sga_no, l.crew_name, l.vessel, l.brand, l.id_number, l.nationality,
+      ...SGA_COL_KEYS.map((k) => l[k] || 0), l.amount, l.cols_sum));
+  });
+  const trYears = [...new Set(trMonths.map((t) => t.year))];
+  for (const y of trYears) stmts.push(env.DB.prepare("DELETE FROM training_cost WHERE year=? AND summary_only=0").bind(y));
+  const sumYears = [...new Set(st.training.filter((t) => t.summary_only).map((t) => t.year))];
+  for (const y of sumYears) stmts.push(env.DB.prepare("DELETE FROM training_cost WHERE year=? AND summary_only=1 AND year NOT IN (SELECT DISTINCT year FROM training_cost WHERE summary_only=0)").bind(y));
+  const tins = env.DB.prepare("INSERT OR REPLACE INTO training_cost (id, file_id, year, month, rental, utilities, hotel, air, other, bank_charge, total, summary_only) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+  for (const t of st.training) {
+    // a category breakdown always beats a summary-only figure for the same month (the 2025 block vs a 2025 workbook's own detail)
+    if (t.summary_only && trMonths.some((x) => x.year === t.year && x.month === t.month)) continue;
+    stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
+  }
+  stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summary.total, st.grand_total, trMonths.length, by, now, b.source || "upload"));
+  for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+  await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + ")", st.lines.length, (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", training " + trMonths.length + " months");
+  return json({ ok: true, period: st.period, applied: st.lines.length, training: trMonths.length, total: st.summary.total, replaced: !!st.prior, file_id: fileId });
+}
+// The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
+async function apiSga(env) {
+  await ensureSga(env);
+  const [linesRes, filesRes, trRes, crewRes] = await Promise.all([
+    env.DB.prepare("SELECT * FROM sga_line ORDER BY year DESC, month DESC, brand, vessel, seq").all(),
+    env.DB.prepare("SELECT * FROM sga_file ORDER BY year DESC, month DESC, loaded_at DESC").all(),
+    env.DB.prepare("SELECT * FROM training_cost ORDER BY year DESC, month").all(),
+    env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
+  ]);
+  const ix = buildCrewIndex(crewRes.results);
+  const memo = new Map();
+  const lines = linesRes.results.map((l) => {
+    let m = memo.get(l.crew_name); if (!m) { m = l.crew_name ? matchTravelName(l.crew_name, ix) : { agency_id: null, how: "none" }; memo.set(l.crew_name, m); }
+    return { ...l, agency_id: m.agency_id || null, match: m.how, crew_display: m.name || null };
+  });
+  // the newest file per month is the one that counts; older loads of the same month stay on sga_file as history
+  const latest = {}; for (const f of filesRes.results) { const k = f.year + "-" + f.month; if (!latest[k]) latest[k] = f.id; }
+  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, cols: SGA_COL_KEYS, today: TODAY() });
 }
 
 // THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once", Miguel: "deploy"). One wave: the Keyman
@@ -5128,12 +5236,14 @@ function upChoose(){
    +'<button class="btn" onclick="upForce(1)">Crew registry</button>'
    +'<button class="btn ghost" onclick="upForce(2)">Keyman</button>'
    +'<button class="btn ghost" onclick="upForce(3)">Travel</button>'
+   +'<button class="btn ghost" onclick="upForce(4)">TDG SGA</button>'
    +'<a href="#" onclick="setUploads();return false" style="color:var(--mut);font-size:12.5px;margin-left:4px">Start over</a></span></div>';
 }
 function upForce(k){
   var f=PENDF;if(!f)return;
   if(k===1){upBand('Crew registry &mdash; AdvancedQuery',0,0,f);parseCrewFile(f);}
   else if(k===2){upBand('Keyman contracts',0,0,f);parseKeymanFile(f);}
+  else if(k===4){upBand('TDG Statement of General Account (SGA)',0,0,f);parseSgaFile(f);}
   else{upBand('Travel expenses',0,0,f);parseTravelFile(f);}
 }
 function handleDrop(files){
@@ -5155,6 +5265,8 @@ function handleDrop(files){
         // TDG's completed-contract COUNT file is recognised by its two tabs, ACTIVE and INACTIVE (24 Sep 2026).
         var _tabs=wb.SheetNames.map(function(n){return String(n).trim().toUpperCase();});
         if(_tabs.indexOf('ACTIVE')>=0&&_tabs.indexOf('INACTIVE')>=0){upBand('Completed contracts (TDG count)',0,0,f);parseCountFile(f);return;}
+        // TDG's Statement of General Account workbook ("DG3 SGA EXCEL <month>.xlsx", 15 Oct 2026) is recognised by its SUMMARY MANNING sheet.
+        if(wb.SheetNames.some(function(n){return /summary manning/i.test(String(n));})){upBand('TDG Statement of General Account (SGA)',0,0,f);parseSgaFile(f);return;}
         var ws=wb.Sheets[wb.SheetNames[0]];
         var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
         for(var i=0;i<Math.min(aoa.length,15);i++){
@@ -5350,6 +5462,48 @@ async function applyTravel(){
   var r=await (await fetch('/api/travel/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:TRAVELUP.sheets,year:TRAVELUP.year})})).json();
   if(r.ok)$('#imp').innerHTML='<span class="cchip ok">Done</span> loaded '+r.applied+' travel items for '+r.year+'. <a href="#" onclick="show(\\'travel\\');return false">Open Travel</a>';
   else $('#imp').textContent='Import failed.';
+}
+// TDG's SGA workbook (15 Oct 2026, CLAUDE.md §10j): the page sends only the two sheets the console reads — SUMMARY MANNING
+// (one row per crew per ship, every cost column) and the training summary (TRAINREL / TRAINING). Raw cell values: TDG's
+// numbers are numbers; the server reads " 1,169.60 " and "(50.00)" too.
+var SGAUP=null;
+function parseSgaFile(f){
+  $('#imp').textContent='Reading '+f.name+'…';
+  loadSheetJS(function(){
+    var rd=new FileReader();
+    rd.onload=function(e){
+      try{
+        var wb=XLSX.read(e.target.result,{type:'array',raw:true});
+        var sheets={};
+        wb.SheetNames.forEach(function(sn){ var s=String(sn); if(/summary manning/i.test(s)||/trainrel/i.test(s)||/^training$/i.test(s.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        sha256buf(e.target.result).then(function(hh){ SGAUP={sheets:sheets,name:f.name,hash:hh}; previewSga(); });
+      }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+function sgaMonthName(y,m){return TMN[m]+' '+y;}
+async function previewSga(){
+  $('#imp').textContent='Analyzing…';
+  var r=await (await fetch('/api/sga/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:SGAUP.sheets,name:SGAUP.name,hash:SGAUP.hash,dryRun:true})})).json();
+  if(r.error){$('#imp').innerHTML='<div style="'+BADBOX+'">'+impEsc(r.detail||r.error)+'</div>';return;}
+  var p=r.period, brands=Object.keys(r.byBrand||{});
+  var h='<div style="margin-top:6px"><b style="color:var(--navy)">TDG bill &middot; '+sgaMonthName(p.year,p.month)+'</b>'+(r.meta&&r.meta.sgaNo?' &middot; SGA '+impEsc(r.meta.sgaNo):'')+(r.meta&&r.meta.date?' &middot; dated '+impEsc(r.meta.date):'')
+    +'<div class=csub style="margin-top:4px">'+r.rows+' crew lines &middot; $'+Number(r.total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.grand_total!=null?(' &middot; TDG grand total $'+Number(r.grand_total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.reconciles?' <span class="cchip ok">reconciles</span>':' <span class="cchip amber">does not reconcile with the lines</span>')):'')+'</div>'
+    +'<div class=csub>'+brands.map(function(b){return TCLIENT[b]||b;}).map(function(b,i){return b+' $'+Number(r.byBrand[brands[i]]).toLocaleString(undefined,{maximumFractionDigits:0});}).join(' &middot; ')+'</div>'
+    +'<div class=csub>Travel in the bill: air $'+Number((r.byCat||{}).air||0).toLocaleString()+' &middot; hotel $'+Number((r.byCat||{}).hotel||0).toLocaleString()+' &middot; medical $'+Number(((r.byCat||{}).medical||0)+((r.byCat||{}).medical_repat||0)).toLocaleString()+' &middot; visa $'+Number((r.byCat||{}).visa||0).toLocaleString()+'</div></div>';
+  var trm=(r.training||[]).filter(function(t){return !t.summary_only;});
+  h+='<div class=csub style="margin-top:6px">Training centre: '+(trm.length?(trm.length+' months with a category breakdown'+(r.training.length>trm.length?(' + '+(r.training.length-trm.length)+' earlier months as one figure'):'')+' &middot; latest '+(function(){var t=trm[trm.length-1];return sgaMonthName(t.year,t.month)+' $'+Number(t.total).toLocaleString(undefined,{maximumFractionDigits:2});})()):'no training sheet in this workbook')+'</div>';
+  if(r.unmatched&&r.unmatched.length){h+='<div class=csub style="margin-top:6px;color:var(--amber)">'+r.unmatched.length+' line'+(r.unmatched.length>1?'s':'')+' the crew registry cannot place: '+r.unmatched.slice(0,8).map(function(u){return impEsc(u.crew_name||'?')+' ('+impEsc(u.vessel||'')+')';}).join(', ')+(r.unmatched.length>8?' …':'')+'. They load anyway; the spend stays on the bill, not on a profile.</div>';}
+  if(r.prior)h+='<div class=csub style="margin-top:6px;color:var(--amber)">This month is already on file ('+impEsc(r.prior.file_name||'')+', loaded '+impEsc(String(r.prior.loaded_at||'').slice(0,10))+', '+r.prior.rows+' lines). Applying replaces it &mdash; a REVISED workbook should.</div>';
+  h+='<button class="btn" style="margin-top:10px" onclick="applySga()">'+(r.prior?'Replace':'Load')+' '+sgaMonthName(p.year,p.month)+' ('+r.rows+' lines)</button>';
+  $('#imp').innerHTML=h;
+}
+async function applySga(){
+  $('#imp').textContent='Loading the bill…';
+  var r=await (await fetch('/api/sga/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:SGAUP.sheets,name:SGAUP.name,hash:SGAUP.hash})})).json();
+  if(r.ok){apiDirty();$('#imp').innerHTML='<span class="cchip ok">Done</span> '+(r.replaced?'replaced':'loaded')+' '+sgaMonthName(r.period.year,r.period.month)+': '+r.applied+' lines, $'+Number(r.total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.training?(', training centre '+r.training+' months'):'')+'. <a href="#" onclick="show(\\'travel\\');return false">Open Travel</a>';}
+  else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.detail?(': '+impEsc(r.detail)):'')+'.</div>';
 }
 function parseVesselFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
@@ -5633,6 +5787,8 @@ async function renderTravel(){
   catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
   if(TRV.budgetMo)TBUD=TRV.budgetMo;
+  // TDG's bill (the SGA, §10j) rides beside the workbook: the comparison and the Training centre view read it.
+  try{ SGA=await cachedJson('/api/sga',renderTravel); if(SGA&&SGA.error)SGA=null; }catch(e){ SGA=null; }
   TSEL=null;
   TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};
   var years=(TRV.years||[]).slice();
@@ -5642,9 +5798,87 @@ async function renderTravel(){
     +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+TMN.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
     +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
     +'<select id=tclient onchange="TF.client=this.value;paintTravel()"><option value="">All cruise lines</option>'+['royal','celebrity','azamara','ncl'].map(function(c){return '<option value="'+c+'">'+TCLIENT[c]+'</option>';}).join('')+'</select>'
-    +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="crew" selected>Crew only</option><option value="">Crew + shoreside</option><option value="shoreside">Shoreside only</option></select>'
+    +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="crew" selected>Crew only</option><option value="">Crew + shoreside</option><option value="shoreside">Shoreside only</option><option value="training">Training centre</option></select>'
     +'</div><div id=trbody></div>';
   paintTravel();
+}
+var SGA=null;
+var TRCAT=[['rental','Rent'],['utilities','Utilities'],['hotel','Hotels'],['air','Airfare'],['other','Training fees + other'],['bank_charge','Bank']];
+// THE TRAINING CENTRE (Miguel, 15 Oct 2026: "another filter .. called training center cost"; everything on TDG's monthly
+// "Training-related costs" statement counts). Source: the SGA workbook's training summary — equal to the PDF to the cent.
+function paintTraining(){
+  var t=document.getElementById('trbody');if(!t)return;
+  var rows=(SGA&&SGA.training)||[];
+  if(!rows.length){t.innerHTML='<div class="card" style="max-width:none"><b>No training-centre costs on file yet.</b><div class=csub style="margin-top:6px">Drop TDG’s <b>DG3 SGA EXCEL &lt;month&gt;.xlsx</b> on Upload data: its training summary sheet carries every month of the year by category (rent, utilities, hotels, airfare, training fees). The monthly “Training-related costs” PDF is a scan and cannot be read.</div></div>';return;}
+  var ys=Array.from(new Set(rows.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
+  var LY=TF.year?+TF.year:ys[0], PY=LY-1;
+  var today=(SGA&&SGA.today)||(TRV&&TRV.today)||new Date().toISOString().slice(0,10),curY=+today.slice(0,4),curM=+today.slice(5,7);
+  var ly=rows.filter(function(r){return r.year===LY;}), py=rows.filter(function(r){return r.year===PY;});
+  var sum=function(rs,k){return rs.reduce(function(a,r){return a+(k?(+r[k]||0):(+r.total||0));},0);};
+  var lastMo=Math.max.apply(null,ly.map(function(r){return r.month;}).concat([0]));
+  var pySame=py.filter(function(r){return r.month<=lastMo;});
+  var fixed=ly.filter(function(r){return !r.summary_only;});
+  var fixedMo=fixed.length?(sum(fixed,'rental')+sum(fixed,'utilities'))/fixed.length:0;
+  var h='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:6px">'
+    +tile(usd0(sum(ly)),'Training centre '+LY+' · through '+(lastMo?TMN[lastMo]:'—'))
+    +tile(pySame.length?deltaCell(sum(ly),sum(pySame)):'—','vs '+PY+' same months'+(pySame.length?(' · '+usd0(sum(pySame))):''))
+    +tile(usd0(fixedMo),'rent + utilities · per month','amber')
+    +tile(usd0(sum(fixed,'hotel')+sum(fixed,'air')),'hotels + airfare for trainees · '+LY)+'</div>';
+  h+='<div class=zlabel>Training centre by month · '+LY+'</div><div class="card" style="max-width:none">';
+  var maxv=1;ly.forEach(function(r){if(r.total>maxv)maxv=r.total;});
+  h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2)">';
+  for(var m=1;m<=12;m++){var r=ly.find(function(x){return x.month===m;});var a=r?r.total:0;
+    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">'
+      +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a?usd0(a):'')+'</div>'
+      +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+(a/maxv*100).toFixed(1)+'%;background:'+(r&&r.summary_only?'var(--muted)':'var(--navy)')+'"></div>'
+      +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';}
+  h+='</div><div class=hint style="margin-top:6px">Source: TDG’s SGA workbook, training summary sheet — the same figure as the monthly “Training-related costs” statement. No budget exists for the training centre (Miguel, 15 Oct 2026).</div>';
+  h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th>'+TRCAT.map(function(c){return '<th style="text-align:right">'+c[1]+'</th>';}).join('')+'<th style="text-align:right">Total</th><th style="text-align:right">'+PY+'</th></tr></thead><tbody>';
+  for(var m2=1;m2<=12;m2++){var r2=ly.find(function(x){return x.month===m2;}),p2=py.find(function(x){return x.month===m2;});if(!r2&&!p2)continue;
+    var open=(LY===curY&&m2>=curM&&!r2);
+    h+='<tr'+(open?' style="color:var(--muted)"':'')+'><td>'+TMN[m2]+(r2&&r2.summary_only?' <span class=hint style="display:inline;margin:0">one figure</span>':'')+'</td>'
+      +TRCAT.map(function(c){return '<td style="text-align:right">'+(r2&&!r2.summary_only?usd(r2[c[0]]):'·')+'</td>';}).join('')
+      +'<td style="text-align:right"><b>'+(r2?usd(r2.total):(open?'<span class=muted style="padding:0">pending</span>':'—'))+'</b></td><td style="text-align:right">'+(p2?usd(p2.total):'—')+'</td></tr>';}
+  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td>'+TRCAT.map(function(c){return '<td style="text-align:right"><b>'+usd(sum(fixed,c[0]))+'</b></td>';}).join('')+'<td style="text-align:right"><b>'+usd(sum(ly))+'</b></td><td style="text-align:right"><b>'+usd(sum(py))+'</b></td></tr>';
+  h+='</tbody></table></div>';
+  var files=(SGA.files||[]).slice(0,6);
+  if(files.length){h+='<div class=zlabel style="margin-top:18px">Bills on file</div><table class=tbl><thead><tr><th>Month</th><th>SGA</th><th>Dated</th><th>File</th><th style="text-align:right">Lines</th><th style="text-align:right">Total</th><th>Loaded</th></tr></thead><tbody>'
+    +files.map(function(f){return '<tr><td>'+TMN[f.month]+' '+f.year+'</td><td>'+escHtml(f.sga_no||'')+'</td><td>'+escHtml(f.sga_date||'')+'</td><td class=muted style="padding:6px 8px">'+escHtml(f.file_name||'')+'</td><td style="text-align:right">'+f.rows+'</td><td style="text-align:right">'+usd(f.total)+'</td><td class=muted style="padding:6px 8px">'+escHtml(String(f.loaded_at||'').slice(0,10))+' · '+escHtml(String(f.loaded_by||'').split('@')[0])+'</td></tr>';}).join('')+'</tbody></table>';}
+  t.innerHTML=h;
+}
+// THE BILL AGAINST THE WORKBOOK (Miguel, 15 Oct 2026: "the SGA becomes the audit number, Rita's is the operational one, and
+// the console shows where they disagree"). Per month of LY: what TDG billed for air / hotel / medical / visa, what the
+// workbook typed, the gap. Nothing is reconciled here (§6) — the gap is shown, Rita and TDG settle it.
+function sgaCompareHTML(sc,LY){
+  if(!SGA||!(SGA.lines||[]).length)return '';
+  var L=SGA.lines.filter(function(l){return l.year===LY;});
+  if(!L.length)return '<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+'</div><div class=hint>No SGA month loaded for '+LY+' yet — drop TDG’s DG3 SGA EXCEL workbook on Upload data.</div>';
+  var months=Array.from(new Set(L.map(function(l){return l.month;}))).sort(function(a,b){return a-b;});
+  var cats=[['air','air','Air'],['hotel','hotel','Hotel'],['medical','medical','Medical'],['visa','visa','Visa']];
+  var sgaSum=function(m,k){return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l[k]||0)+(k==='medical'?(+l.medical_repat||0):0);},0);};
+  var wbSum=function(m,k){return sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[k]||0);},0);};
+  var gap=function(w,s){var d=w-s;if(Math.abs(d)<1)return '<span class=muted style="padding:0">=</span>';return '<span style="color:'+(d>0?'var(--amber)':'var(--red)')+';font-weight:700">'+(d>0?'+':'')+usd0(d)+'</span>';};
+  var h='<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+' · '+months.length+' month'+(months.length>1?'s':'')+' on file</div>';
+  h+='<div class=hint style="margin:-4px 0 8px">Bill = what TDG invoiced (SGA, audited). Workbook = what Rita typed. Gap = workbook − bill: amber when the workbook carries more (DG3-paid items such as US visas), red when the bill carries more (TDG-billed items the workbook missed).</div>';
+  h+='<table class=tbl><thead><tr><th>Month</th>'+cats.map(function(c){return '<th colspan=3 style="text-align:center;border-left:1px solid var(--line-2)">'+c[2]+'</th>';}).join('')+'<th style="text-align:right;border-left:1px solid var(--line-2)">Bill · all crew costs</th></tr>'
+    +'<tr><th></th>'+cats.map(function(){return '<th style="text-align:right;border-left:1px solid var(--line-2)">Bill</th><th style="text-align:right">Workbook</th><th style="text-align:right">Gap</th>';}).join('')+'<th style="text-align:right;border-left:1px solid var(--line-2)">allotment, fees, social, HMO…</th></tr></thead><tbody>';
+  var tot={};
+  months.forEach(function(m){h+='<tr><td>'+TMN[m]+'</td>';cats.forEach(function(c){var s=sgaSum(m,c[0]),w=wbSum(m,c[1]);tot[c[0]+'s']=(tot[c[0]+'s']||0)+s;tot[c[0]+'w']=(tot[c[0]+'w']||0)+w;h+='<td style="text-align:right;border-left:1px solid var(--line-2)">'+usd(s)+'</td><td style="text-align:right">'+usd(w)+'</td><td style="text-align:right">'+gap(w,s)+'</td>';});
+    var all=L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l.amount||0);},0);h+='<td style="text-align:right;border-left:1px solid var(--line-2)">'+usd(all)+'</td></tr>';});
+  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td>'+cats.map(function(c){return '<td style="text-align:right;border-left:1px solid var(--line-2)"><b>'+usd(tot[c[0]+'s'])+'</b></td><td style="text-align:right"><b>'+usd(tot[c[0]+'w'])+'</b></td><td style="text-align:right">'+gap(tot[c[0]+'w']||0,tot[c[0]+'s']||0)+'</td>';}).join('')+'<td style="text-align:right;border-left:1px solid var(--line-2)"><b>'+usd(L.reduce(function(a,l){return a+(+l.amount||0);},0))+'</b></td></tr>';
+  h+='</tbody></table>';
+  return h;
+}
+// The bill's lines for one person: the audited side of their travel, with TDG's ref per month.
+function sgaPersonHTML(k){
+  if(!SGA||!(SGA.lines||[]).length)return '';
+  var L=SGA.lines.filter(function(l){return (l.agency_id||l.crew_name)===k;}).sort(function(a,b){return b.year-a.year||b.month-a.month;});
+  if(!L.length)return '';
+  var h='<div class=zlabel style="margin-top:14px">On TDG’s bill · '+L.length+' month'+(L.length>1?'s':'')+'</div>';
+  h+='<table class=tbl><thead><tr><th>Month</th><th>Ship</th><th>TDG ref</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Medical</th><th style="text-align:right">Visa</th><th style="text-align:right">Allotment</th><th style="text-align:right">Fees + social</th><th style="text-align:right">HMO</th><th style="text-align:right">Total billed</th></tr></thead><tbody>';
+  L.forEach(function(l){var fees=(+l.agency_fee||0)+(+l.social||0)+(+l.joining_fee||0)+(+l.accounting_fee||0)+(+l.transition_fee||0);h+='<tr><td>'+TMN[l.month]+' '+l.year+'</td><td>'+escHtml(l.vessel||'')+'</td><td class=muted style="padding:6px 8px">'+escHtml(l.ref||'')+'</td><td style="text-align:right">'+usd(l.air)+'</td><td style="text-align:right">'+usd(l.hotel)+'</td><td style="text-align:right">'+usd((+l.medical||0)+(+l.medical_repat||0))+'</td><td style="text-align:right">'+usd(l.visa)+'</td><td style="text-align:right">'+usd(l.allotment)+'</td><td style="text-align:right">'+usd(fees)+'</td><td style="text-align:right">'+usd(l.hmo)+'</td><td style="text-align:right"><b>'+usd(l.amount)+'</b></td></tr>';});
+  h+='</tbody></table><div class=hint style="margin-top:6px">Allotment and fees are shown because TDG bills them on the same statement; they are not travel and never enter the travel budget.</div>';
+  return h;
 }
 
 function tScope(){return TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.client&&r.client!==TF.client)return false;if(TF.q&&(tLabel(r)+' '+(r.crew_name||'')).toLowerCase().indexOf(TF.q.toLowerCase())<0)return false;return true;});}
@@ -5654,6 +5888,7 @@ function travelDrill(i){TSEL=TLB[i];paintTravel();window.scrollTo(0,0);}
 function travelBack(){TSEL=null;paintTravel();}
 
 function paintTravel(){
+  if(TF.kind==='training')return paintTraining();
   if(TSEL)return paintTravelCrew();
   if((TF.q||'').trim())return paintTravelSearch();
   var sc=tScope();
@@ -5735,6 +5970,7 @@ function paintTravel(){
   TLB.forEach(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&tKey(r)===n;});var k=(rs[0]||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(k!=='shoreside'&&!(rs[0]||{}).agency_id?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
   lh+='</tbody></table><div class=hint style="margin-top:6px">Click a name for their full history. One person, every spelling.</div></div>';
   h+=yc+lh+'</div>';
+  if(TF.kind!=='shoreside'&&!TF.client)h+=sgaCompareHTML(sc,LY);
   // The names the registry cannot place (src/travel_match.js): Rita's clean-up list — fix the spelling in the workbook
   // and re-upload, or the spend never reaches a profile. NCL-prep people are not crew yet; they stay listed, tagged.
   var un=(TRV.unmatched||[]).filter(function(u){return !TF.year||u.years.indexOf(+TF.year)>=0;});
@@ -5780,6 +6016,7 @@ function profileHTML(k){
   h+='<div class=zlabel style="margin-top:14px">All movements</div><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>';
   rows.sort(function(a,b){return b.year-a.year||b.month-a.month;}).forEach(function(r){var oc=r.medical+r.visa+r.food+r.transport+r.other;h+='<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.leg==='shoreside'?'shore':r.leg)+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(oc)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';});
   h+='</tbody></table>';
+  h+=sgaPersonHTML(k);
   return h;
 }
 function paintTravelCrew(){document.getElementById('trbody').innerHTML='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back</div>'+profileHTML(TSEL);}

@@ -85,6 +85,8 @@ test("UTC basis is used by exactly these functions", () => {
     "apiRotationCrew",
     "apiRotationProject",
     // 2026-10-12: the statement email dates its body by the board's day (hr.statement.v2).
+    // 2026-10-15: TDG's bill (the SGA) is read on the data day, like the Travel tab it sits on.
+    "apiSga",
     "apiStatementEmail",
     // 2026-10-15: the Travel tab's closed-month YTD (closedMonths) reads the same day as the dashboard's travel card.
     "apiTravel",
