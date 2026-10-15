@@ -86,6 +86,12 @@ The intel pipeline (Session 5) lets anyone email crew-reports@cims.work; AI summ
 dated card on the crew. Hard rules:
 - **It is SEPARATE from the scored bonus.** Intel is narrative field knowledge — it must never feed,
   adjust, or be confused with `bonus_outcome`, baselines, or payout. Keep the two code paths apart.
+  **One exception, Miguel's decision of 15 Oct 2026** ("if you read that he usually sends you feedback about a problem
+  with order accuracy, automatically set it to zero ... Allow Ray to rectify that"; confirmed "yes" the same day): a field
+  report dated inside a contract that names an ORDER-ACCURACY or PAR problem PRE-FILLS that Score Card factor at 0
+  (`score_auto.js`, rule in `bonus.js autoScore`), only with the report's own words as the quote (`parseFlag`), until Ray
+  answers after it. It is a pre-fill a money user sees and can move, never a write to `bonus_outcome`; the intel pipeline
+  itself is unchanged.
 - **Identity stays deterministic.** Which crew an email is about is decided by `crewmatch.js`
   (high/med auto-file; low/none → human review queue). The LLM writes the summary only — it must
   never pick the crew. A wrong match is a false record on the wrong seafarer.
@@ -543,6 +549,27 @@ the people need to know"; proofs under `docs/mockups/proofs_20261013/`). Pinned 
   "In TDG" ticks). A TDG earmark with no dates is a short orange dashed stub after the sign-off, "<name> · no dates". Earlier
   contracts are drawn first (`.dim`), so an older bar never covers the one the card is about. Pinned by
   `test/crew_windows.test.js`, `test/crew_profile.test.js`.
+
+## 10j. THE SCORE CARD PRE-FILLS FROM THE SYSTEMS — Miguel, 15 Oct 2026 (money, §1: his merge)
+His answers, each pinned by `test/score_auto.test.js`; rules in `bonus.js` (`autoScore`, `auditPoints`, `HON_FROM`), reads
+in `src/score_auto.js` (`GET /api/score/auto`, one wave; `PARTS_DB` cims-parts-orders and `HON_DB` cims-hon READ ONLY,
+SELECT only, no migration directory). Every value is a PRE-FILL with its evidence ("From the systems"); every slider stays
+movable; the commit is a money user's click; committed outcomes are never touched.
+- **On-time ordering (20):** a Parts Portal order marked "Vessel-side miss" on his ship inside the contract = 0 AND the rush
+  gate ("if he misses an order, it goes down to zero"; the streak resets to 0, his choice). Equipment / shore misses don't count.
+- **Order accuracy (25) / Par (15):** Ray's answers, ALL OR NOTHING ("Partial doesn't really work": only Always / Accurate /
+  Maintained score); a field report in the contract naming the problem = 0 until Ray answers after it (§10 exception).
+- **Handover (10):** contracts ending on/after **1 Nov 2026** need a signed HON handover for that ship (signed within 30 days
+  before to 10 after the sign-off; HON's outgoing name must match when given) = 10, else 0; earlier contracts keep Rolando.
+- **Dexter's audit (10) replaces "Communication (Rita)":** the audit score (Overall, else the average rounded down) — 5 = 10,
+  4 = 8, 3 or below = 0; no audit in the contract (filed up to 30 days after the sign-off) = 10; several = the lowest.
+- **Mono (5):** presses only, under 20% of clicks over the contract = 5, else 0; no click data = 5. The data is OBP's clicks
+  table (ClicksDate, Color, Mono, is_mfd per machine); Jerwin is adding a daily month-to-date clicks file to the nightly
+  export to obp-csv@cims.work (Miguel asked 15 Oct 2026). The reader is not built yet: until then, full points.
+- **Supervisor evaluation (15):** unchanged (the shipboard manager review, `seval.js`).
+- **The Score Card:** feedback links for Ray and Rolando only; Dexter is a green chip ("Dexter · audit 4/5 · date") opening
+  the audit when one exists, nothing when none. The Inputs page lists every audit of the seafarer ("Not applicable · no audit
+  on record" when none) instead of Dexter's old questions.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
 "redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas

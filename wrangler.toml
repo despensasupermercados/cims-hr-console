@@ -134,6 +134,19 @@ binding = "TIMECARD_DB"
 database_name = "cims-timecard"
 database_id = "ae52e15f-38f6-4969-ba0c-d94de9ecd8bd"
 
+# The Score Card's automatic inputs (Miguel, 15 Oct 2026). READ ONLY by the same rule as TIMECARD_DB: SELECT only
+# (test/score_auto.test.js) and no migration directory. PARTS_DB = the Parts Portal's orders ("Vessel-side miss");
+# HON_DB = HON's signed handovers.
+[[d1_databases]]
+binding = "PARTS_DB"
+database_name = "cims-parts-orders"
+database_id = "8a755d27-d679-4bdf-a53b-c210a4206fa7"
+
+[[d1_databases]]
+binding = "HON_DB"
+database_name = "cims-hon"
+database_id = "7b4387c8-c611-45f8-a2e8-58061989f833"
+
 # ---- Staging: a separate Worker + separate D1 copy. Nothing reaches prod data
 # that has not run green here first. Create the staging DB once with:
 #   wrangler d1 create cims-hr-console-staging
@@ -177,3 +190,13 @@ bucket_name = "cims-audit-files-staging"
 binding = "TIMECARD_DB"
 database_name = "cims-timecard"
 database_id = "ae52e15f-38f6-4969-ba0c-d94de9ecd8bd"
+
+[[env.staging.d1_databases]]
+binding = "PARTS_DB"
+database_name = "cims-parts-orders"
+database_id = "8a755d27-d679-4bdf-a53b-c210a4206fa7"
+
+[[env.staging.d1_databases]]
+binding = "HON_DB"
+database_name = "cims-hon"
+database_id = "7b4387c8-c611-45f8-a2e8-58061989f833"

@@ -19,11 +19,15 @@ test("Ray: failed audit raises audit gate", () => {
   assert.equal(r.gates.audit, true);
 });
 
-test("Ray: on-time / accuracy / par map to sub-scores", () => {
+// SOP changed by Miguel, 15 Oct 2026 ("Partial doesn't really work"): Ray's answers are all or nothing.
+// Until then Mostly / Minor errors / Some gaps gave 14 / 17 / 9.
+test("Ray: anything short of the best answer is 0 (all or nothing)", () => {
   const r = mapFeedbackToScore({ ray: { ontime: "Mostly", acc: "Minor errors", par: "Some gaps" } });
-  assert.equal(r.sliders.sOrder, 14);
-  assert.equal(r.sliders.sAcc, 17);
-  assert.equal(r.sliders.sPar, 9);
+  assert.equal(r.sliders.sOrder, 0);
+  assert.equal(r.sliders.sAcc, 0);
+  assert.equal(r.sliders.sPar, 0);
+  const w = mapFeedbackToScore({ ray: { ontime: "Often late", acc: "Frequent errors", par: "Not maintained" } });
+  assert.deepEqual([w.sliders.sOrder, w.sliders.sAcc, w.sliders.sPar], [0, 0, 0]);
 });
 
 test("Ray: best answers map to full marks", () => {
