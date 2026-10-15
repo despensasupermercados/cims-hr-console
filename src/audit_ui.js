@@ -34,6 +34,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Printshop Audit</title>
+<meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#142D48">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -63,7 +64,11 @@ button{font:inherit;color:inherit}
 .tk:empty{display:none}.tk.late{background:#B4382A}.tk.done{background:var(--fill)}
 .hero{background:var(--deep);color:#fff;padding:4px 16px 22px}
 .hero .in{max-width:640px;margin:0 auto}
-.hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:6px 0 2px;line-height:1.1}
+.hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:0;line-height:1.1}
+.hero.home{padding-top:calc(18px + env(safe-area-inset-top))}
+.ttl{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.logo{width:40px;height:40px;border-radius:11px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.top.gone{display:none}
 .hero .who{color:#B9C6D6;font-size:14px}
 .sbox{position:relative;margin-top:16px}
 .sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
@@ -192,12 +197,13 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   function left(v) { var ms = Date.parse(v) - Date.now(); if (isNaN(ms)) return ""; if (ms <= 0) return "past due"; var h = Math.floor(ms / 3600000); return h >= 1 ? h + " h left" : Math.max(1, Math.round(ms / 60000)) + " min left"; }
 
   function top(t, s, k, kcls, back) {
-    $("tt").innerHTML = t ? esc(t) : '<span class="brand">CIMS</span>';
+    document.querySelector(".top").classList.toggle("gone", !t);
+    $("tt").textContent = t || "";
     $("ts").textContent = s || ""; $("ts").hidden = !s;
     var tk = $("tk"); tk.className = "tk" + (kcls ? " " + kcls : ""); tk.innerHTML = k || "";
     $("bk").hidden = !back;
   }
-  function hero(html) { $("heroslot").innerHTML = html ? '<section class="hero"><div class="in">' + html + "</div></section>" : ""; }
+  function hero(html, cls) { $("heroslot").innerHTML = html ? '<section class="hero' + (cls ? " " + cls : "") + '"><div class="in">' + html + "</div></section>" : ""; }
   function dock(html) { $("dockslot").innerHTML = html ? '<div class="dock"><div class="in">' + html + "</div></div>" : ""; }
   function skel(n) { var h = '<div class="card">'; for (var i = 0; i < (n || 3); i++) h += '<div class="sk"></div>'; return h + "</div>"; }
   function prog(label, a, b, cls) { return '<div class="prog"><div class="lb"><span>' + label + "</span><b>" + a + " of " + b + '</b></div><div class="track' + (cls ? " " + cls : "") + '"><i style="width:' + pct(a, b) + '%"></i></div></div>'; }
@@ -235,7 +241,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   }
   function shipsView() {
     top("", "", "", "", false); dock("");
-    hero('<h1>Printshop audit</h1><div class="who">' + (S.me ? esc(nameOf(S.me)) + " · " : "") + esc(todayLong()) + '</div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"></div>');
+    hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="who">' + (S.me ? esc(nameOf(S.me)) + " · " : "") + esc(todayLong()) + '</div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"></div>', "home");
     var qi = $("q");
     qi.addEventListener("input", function () { S.q = qi.value; shipsList(); });
     shipsList();

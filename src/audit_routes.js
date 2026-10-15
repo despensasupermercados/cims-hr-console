@@ -9,7 +9,9 @@ import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso }
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 
-export const AUDIT_VERSION = "2026-10-14.c5";
+export const AUDIT_VERSION = "2026-10-15.c6";
+
+export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
 export function installAudit(deps) {
   const { json, htmlResponse, ensureAudit, rotationSections, crewProfile, TODAY } = deps;
@@ -104,8 +106,16 @@ export function installAudit(deps) {
   }
 
   // Returns a Response, or null when the path is not the audit's.
+  // OPEN MODE (Miguel, 15 Oct 2026: "remove the magic link for right now", then, offered the choice, "No login on the
+  // audit site"). With AUDIT_OPEN = "true" the audit's own pages and routes on audit.cims.work answer without a sign-in,
+  // as AUDIT_OPEN_AS (Dexter): every request and action is recorded under that address. Only this host: cims.work/audit
+  // and the whole HR console keep their login. Remove the [vars] line to close it again.
   const handleAudit = async function handleAudit(p, request, env, url, session) {
     const host = url.hostname;
+    if (!session && auditOpen(env, host)) {
+      session = { email: String(env.AUDIT_OPEN_AS || "Dexter.Lawrence@dg3.com").trim(), open: true };
+      if (p === "/api/me") return json({ email: session.email, open: true });
+    }
     { const r = await R.handle(p, request, env, url, session); if (r) return r; }
     if (p === "/audit/manifest.webmanifest") {
       return new Response(AUDIT_MANIFEST(isAuditHost(host)), { headers: { "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" } });
@@ -122,7 +132,9 @@ export function installAudit(deps) {
     }
     if (request.method === "GET" && auditShellPath(host, p)) {
       if (!session) return Response.redirect(url.origin + "/login", 302);
-      return htmlResponse(AUDIT_HTML);
+      const page = htmlResponse(AUDIT_HTML);
+      if (session.open) page.headers.set("X-Robots-Tag", "noindex, nofollow");
+      return page;
     }
     return null;
   };
