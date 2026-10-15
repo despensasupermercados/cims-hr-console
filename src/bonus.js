@@ -43,10 +43,11 @@ export function mapFeedbackToScore(answers) {
   if (ray) {
     if (ray.order === "Yes" && ray.rushcause === "Crew ordering failure") { out.gates.rush = true; out.gateNote.push("Rush from crew ordering failure" + (ray.rushcost ? (" — $" + Number(ray.rushcost).toLocaleString()) : "") + " (Ray)"); }
     if (ray.audit === "Yes") { out.gates.audit = true; out.gateNote.push("Failed inventory audit (Ray)"); }
-    const oM = { "Always": 20, "Mostly": 14, "Often late": 6 }, aM = { "Accurate": 25, "Minor errors": 17, "Frequent errors": 8 }, pM = { "Maintained": 15, "Some gaps": 9, "Not maintained": 3 };
-    if (ray.ontime != null) out.sliders.sOrder = oM[ray.ontime] ?? 20;
-    if (ray.acc != null) out.sliders.sAcc = aM[ray.acc] ?? 25;
-    if (ray.par != null) out.sliders.sPar = pM[ray.par] ?? 15;
+    // ALL OR NOTHING (Miguel, 15 Oct 2026: "Partial doesn't really work"): only the best answer earns the factor.
+    // Until then "Mostly" gave 14 of 20, "Minor errors" 17 of 25, "Some gaps" 9 of 15.
+    if (ray.ontime != null) out.sliders.sOrder = ray.ontime === "Always" ? FW.sOrder : 0;
+    if (ray.acc != null) out.sliders.sAcc = ray.acc === "Accurate" ? FW.sAcc : 0;
+    if (ray.par != null) out.sliders.sPar = ray.par === "Maintained" ? FW.sPar : 0;
     out.evidence.push("Ray: order " + ray.order + (ray.order === "Yes" ? (" (" + ray.rushcause + ")") : "") + " · on-time " + ray.ontime + " · acc " + ray.acc + " · par " + ray.par + " · audit " + ray.audit + (ray.note ? (' · "' + ray.note + '"') : ""));
   }
   if (rol) {
@@ -72,3 +73,58 @@ export function mapFeedbackToScore(answers) {
   }
   return out;
 }
+
+// ============================ AUTOMATIC INPUTS (Miguel, 15 Oct 2026) ============================
+// The Score Card pre-fills from what the systems recorded during the contract. Every value is a PRE-FILL with its
+// evidence; the commit is still a money user's click and every slider stays movable. Rules, in his words:
+//  - On-time ordering: "if he misses an order, it goes down to zero" — a Parts Portal order marked "Vessel-side miss"
+//    on his ship during the contract zeroes it AND is the rush gate (no bonus, the streak resets to 0).
+//  - Order accuracy / Par: Ray's answers, all or nothing; a field report in the contract that names an accuracy or
+//    a par problem zeroes the factor until Ray answers after it ("allow Ray to rectify that").
+//  - Ship handover: contracts ending on or after HON_FROM need a signed HON handover (10, else 0); before, Rolando's
+//    answers as before.
+//  - Dexter's audit (the old "Communication" 10): 5 = 10, 4 = 8, 3 or below = 0; no audit in the contract = 10.
+//  - Mono (5): presses only, mono share of clicks over the contract under 20% = 5, else 0; no click data = 5.
+export const HON_FROM = "2026-11-01";
+export const MONO_LIMIT = 20;
+export function auditPoints(score) {
+  if (score == null) return FW.sComm;
+  const s = Number(score);
+  return s >= 5 ? FW.sComm : s === 4 ? Math.round(FW.sComm * 0.8) : 0;
+}
+const day = (v) => (v ? String(v).slice(0, 10) : "");
+const inSpan = (d, on, off) => { const x = day(d); return !!x && (!on || x >= on) && (!off || x <= off); };
+// in: { signOn, signOff, answers:{ray,rolando,dexter}, rayAt (ISO the answer was given), misses:[{ref,at,total}],
+//       handover:{signedAt,id}|null, audits:[{score,at,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null }
+export function autoScore(inp) {
+  const x = inp || {}, on = day(x.signOn), off = day(x.signOff);
+  const base = mapFeedbackToScore(x.answers || {});
+  const sliders = { ...base.sliders }, gates = { ...base.gates }, gateNote = [...base.gateNote], evidence = [];
+  const misses = (x.misses || []).filter((m) => inSpan(m.at, on, off));
+  if (misses.length) {
+    sliders.sOrder = 0; gates.rush = true;
+    for (const m of misses) {
+      const t = "Vessel-side miss " + (m.ref || "") + " · " + day(m.at) + (m.total ? " · $" + Number(m.total).toLocaleString() : "");
+      gateNote.push(t + " (Parts Portal)"); evidence.push({ factor: "sOrder", text: t, source: "Parts Portal" });
+    }
+  }
+  const rayAt = day(x.rayAt);
+  for (const f of (x.flags || []).filter((g) => inSpan(g.at, on, off))) {
+    const after = rayAt && rayAt > day(f.at); // Ray answered after the report: his answer stands
+    if (f.accuracy && !after) { sliders.sAcc = 0; evidence.push({ factor: "sAcc", text: "Field report " + day(f.at) + ": " + f.quote, source: "Field intel" }); }
+    if (f.par && !after) { sliders.sPar = 0; evidence.push({ factor: "sPar", text: "Field report " + day(f.at) + ": " + f.quote, source: "Field intel" }); }
+  }
+  if (off && off >= HON_FROM) {
+    sliders.sHand = x.handover ? FW.sHand : 0;
+    evidence.push({ factor: "sHand", text: x.handover ? "HON handover signed " + day(x.handover.signedAt) : "No signed HON handover for this sign-off", source: "HON" });
+  }
+  const audits = (x.audits || []).filter((a) => a.score != null && inSpan(a.at, on, off ? addDays(off, 30) : ""));
+  const worst = audits.length ? Math.min(...audits.map((a) => Number(a.score))) : null;
+  sliders.sComm = auditPoints(worst);
+  evidence.push({ factor: "sComm", text: worst == null ? "No audit in this contract: full points" : "Dexter's audit " + worst + "/5" + (audits.length > 1 ? " (lowest of " + audits.length + ")" : ""), source: "Audit" });
+  const pct = x.mono && x.mono.pct != null ? Number(x.mono.pct) : null;
+  sliders.sMono = pct == null ? FW.sMono : pct < MONO_LIMIT ? FW.sMono : 0;
+  evidence.push({ factor: "sMono", text: pct == null ? "No click data for this contract yet: full points" : "Mono " + Math.round(pct * 10) / 10 + "% of press clicks", source: "OBP clicks" });
+  return { sliders, gates, gateNote, evidence: base.evidence.map((t) => ({ factor: null, text: t, source: "Windows" })).concat(evidence), audits };
+}
+function addDays(d, n) { const t = Date.parse(d + "T00:00:00Z"); return isNaN(t) ? d : new Date(t + n * 86400000).toISOString().slice(0, 10); }

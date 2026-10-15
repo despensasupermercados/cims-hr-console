@@ -57,6 +57,7 @@ import { installInstr } from "./signoff_instructions.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
+import { gatherAuto } from "./score_auto.js";
 import { apiRosterExport } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
@@ -283,6 +284,7 @@ export default {
         if (p === "/api/sbm/invite" && request.method === "POST") return _sbm.sbmInviteRequest(request, env, session);
         if (p === "/api/score/queue")    return apiScoreQueue(env, url);
         if (p === "/api/score/seval")    return _seval.apiSevalGet(env, url);
+        if (p === "/api/score/auto")     return apiScoreAuto(env, url);
         if (p === "/api/score/seval/override" && request.method === "POST") return _seval.apiSevalOverride(request, env, session, isMoneyUser);
         if (p === "/api/intel/inbox")    return apiIntelInbox(env);
         if (p === "/api/intel/ingest" && request.method === "POST") return apiIntelIngest(request, env, session);
@@ -3031,6 +3033,21 @@ async function apiStatementEmail(request, env, session) {
   const ok = !!(out && out.ok);
   await logActivity(env, session && session.email, "statement_email", id + " -> " + to + (cc.length ? " cc " + cc.join(",") : "") + (ok ? " sent" : " send_failed") + (stored ? " stored" : ""));
   return json({ ok, stored, sent: ok, to, cc });
+}
+// The Score Card's automatic inputs (Miguel, 15 Oct 2026): src/score_auto.js reads, bonus.js autoScore decides (§1).
+// Pre-fills only; the commit stays a money user's click.
+const ensureScoreFlag = memoEnsure(async (env) => {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS score_intel_flag (h TEXT PRIMARY KEY, accuracy INTEGER NOT NULL, par INTEGER NOT NULL, quote TEXT, engine TEXT, at TEXT NOT NULL)").run();
+});
+async function apiScoreAuto(env, url) {
+  const sc = String(url.searchParams.get("sc") || "").trim();
+  if (!sc) return json({ error: "sc_required" }, 400);
+  const cr = await env.DB.prepare("SELECT first_name, last_name FROM crew WHERE agency_id=?").bind(sc).first().catch(() => null);
+  if (!cr) return json({ error: "not_found" }, 404);
+  return json(await gatherAuto(env, {
+    sc, ship: url.searchParams.get("ship") || "", signOn: url.searchParams.get("on") || "", signOff: url.searchParams.get("off") || "",
+    crewName: [cr.first_name, cr.last_name].filter(Boolean).join(" "),
+  }, { ensure: ensureScoreFlag, engine: pickEngine(env), claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI }));
 }
 async function apiBonusCommit(request, env, session) {
   // Money authority gate: committing a payout is restricted to the money users (GM/HR),
@@ -8481,12 +8498,23 @@ async function swRoleStep(){
   var d={};try{d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(_SW.crew.agency_id))).json();}catch(e){}
   var st={ray:'none',rolando:'none',dexter:'none'};(d.requests||[]).forEach(function(r){st[r.role]=r.status;});
   _SW.status=st;_SW.prefill=d.prefill||{sliders:{},gates:{}};_SW.rawAnswers=d.answers||{};
-  var roles=[['ray','Ray — Inventory & Orders'],['rolando','Rolando — Technical'],['dexter','Dexter — Field review']];
+  // Dexter's window is his audit now (Miguel, 15 Oct 2026): Ray and Rolando answer here; the audits are listed below.
+  var roles=[['ray','Ray — Inventory & Orders'],['rolando','Rolando — Technical']];
   var btns=roles.map(function(x){var s=st[x[0]];var done=(s==='answered'||s==='na');return '<button class="btn '+(done?'green':'ghost')+'" style="display:block;width:100%;text-align:left;margin-bottom:8px" onclick="swPickRole(\\''+x[0]+'\\')">'+(done?'✓ ':'')+x[1]+(done?' — submitted (tap to edit)':'')+'</button>';}).join('');
   swRender('Contributor scoring · '+_SW.crew.name,
    '<button class="btn ghost" onclick="swCrewStep()" style="margin-bottom:10px">← change crew</button>'
    +'<div class=hint style="margin-bottom:10px">'+_SW.crew.agency_id+' · '+(_SW.crew.ship||_SW.crew.vessel||'—')+' · '+(_SW.crew.signOn||'?')+' → '+(_SW.crew.signOff||'?')+'</div>'
-   +'<div class=sec>Who are you?</div>'+btns+swResultBox(_SW.prefill,_SW.status));
+   +'<div class=sec>Who are you?</div>'+btns+'<div class=sec>Dexter — audits</div><div id=swAudits><div class=hint>Loading…</div></div>'+swResultBox(_SW.prefill,_SW.status));
+  swAuditsLoad();
+}
+// Every audit this seafarer has had, newest first; none = Not applicable. Each opens the audit on audit.cims.work.
+async function swAuditsLoad(){
+  var c=_SW.crew,box=$('#swAudits');if(!box)return;
+  var a={};try{a=await (await fetch('/api/score/auto?sc='+encodeURIComponent(c.agency_id)+'&ship='+encodeURIComponent(c.ship||c.vessel||'')+'&on='+encodeURIComponent(c.signOn||'')+'&off='+encodeURIComponent(c.signOff||''))).json();}catch(e){}
+  if(!$('#swAudits'))return;
+  var L=(a&&a.allAudits)||[];
+  $('#swAudits').innerHTML=L.length?L.map(function(x){return '<a class=brow href="https://audit.cims.work/#q='+encodeURIComponent(x.id)+'" target=_blank rel=noopener style="text-decoration:none;color:inherit"><div><div class=cname style="font-size:14px">'+escHtml(x.ship||'')+'</div><div class=csub>Audited '+fmtDateS(String(x.at||'').slice(0,10))+'</div></div><span class="sbadge '+(x.score<=3?'idle':'on')+'" style="margin-left:auto">'+escHtml(String(x.score))+' / 5</span></a>';}).join('')
+    :'<div class=hint>Not applicable · no audit on record. The audit factor counts in full until there is one.</div>';
 }
 function swPickRole(role){_SW.role=role;swQuestions();}
 function swQuestions(){
@@ -8538,10 +8566,10 @@ function swResultBox(pf,st){
   var rows=[['sOrder','On-time ordering',20],['sAcc','Order accuracy',25],['sPar','Par maintenance',15],['sHand','Ship handover',10],['sMono','Mono discipline',5]];
   var pts=0;var body=rows.map(function(r){var v=(sl[r[0]]!=null)?sl[r[0]]:null;if(v!=null)pts+=v;return '<div class=scorerow><span>'+r[1]+'</span><b>'+(v!=null?v:'—')+' / '+r[2]+'</b></div>';}).join('');
   var gt=[];if(gates.rush)gt.push('RUSH');if(gates.audit)gt.push('AUDIT');
-  var pending=['ray','rolando','dexter'].filter(function(r){return !(st[r]==='answered'||st[r]==='na');});
+  var pending=['ray','rolando'].filter(function(r){return !(st[r]==='answered'||st[r]==='na');});
   return '<div class=scorebox style="margin-top:14px"><div class=scorerow style="font-weight:700;color:var(--navy)"><span>Accumulated contributor score</span><b>'+pts+' / 75</b></div>'+body
    +(gt.length?'<div class=gateflag>Gate armed: '+gt.join(', ')+' — would reset the bonus</div>':'')
-   +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Communication (Rita) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">All three contributors in. Communication + supervisor eval are finalised on the Score Card.</div>')+'</div>';
+   +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Dexter\u2019s audit (10) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">All three contributors in. Communication + supervisor eval are finalised on the Score Card.</div>')+'</div>';
 }
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
@@ -8563,7 +8591,7 @@ async function openScore(id){
    +'<div class=hint>'+cr.agency_id+' · '+d.rank+' ('+d.contracts+' completed '+ctSrc(d)+') · Bonus count <b>'+d.count+'</b> → completing makes it <b>'+(d.count+1)+'</b>. Ladder if clean &amp; ≥80%: <b>$'+d.nextRungIfClean.toLocaleString()+'</b>.</div>'
    +warn+hist+'<div id=fbPanel></div>'
    +'<div class=sec><span class=n>1</span>Contract</div>'
-   +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore();applySeval(_SEVAL.sc)"></div></div>'
+   +'<div class=f2><div class=fg><label class=req>Sign-on</label><input type=date id=spanStart onchange="recalcScore();applyAuto()"></div><div class=fg><label class=req>Sign-off</label><input type=date id=spanEnd onchange="recalcScore();applySeval(_SEVAL.sc);applyAuto()"></div></div>'
    +'<div class=hint id=dateEcho style="margin:-6px 0 10px"></div>'
    +'<div class=fg><label>Ship(s) — comma-separate for transfers</label><input type=text id=ships value="'+(cr.vessel_observed||'').replace(/"/g,'')+'"></div>'
    +'<div class=sec><span class=n>2</span>Outcome &amp; gates</div>'
@@ -8576,7 +8604,7 @@ async function openScore(id){
    +'<div class=scsec id=scoreSection><div class=gateban id=gateBan></div>'
    +'<div class=hint style="margin:-2px 0 8px">Award each factor from evidence (sliders start at 0).</div>'
    +rng('sOrder','On-time ordering',20)+rng('sAcc','Order accuracy',25)+rng('sPar','Par maintenance',15)
-   +rng('sHand','Ship-condition handover',10)+rng('sComm','Communication (manual — Rita)',10)+rng('sMono','Mono click discipline (<20%)',5)
+   +rng('sHand','Ship-condition handover',10)+rng('sComm','Dexter\u2019s audit',10)+rng('sMono','Mono click discipline (<20%)',5)
    +'<div class=fg style="margin-top:10px"><label>Supervisor evaluation (1–5) — 15%</label><select id=sEval onchange="recalcScore();sevalDirty()"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select><div id=sevalBadge class=hint style="margin-top:5px"></div><div id=sevalReview></div><div class=fg id=sevalReasonWrap style="display:none;margin-top:6px"><label class=req>Reason for overriding the review (10+ chars)</label><textarea id=sevalReason rows=2 placeholder="e.g. guest complaint substantiated on final cruise"></textarea></div><div class=hint>1–2 → bonus forfeited, count held. 3/4/5 → full 15 points.</div></div>'
    +'</div>'
    +'<div class=resultbar id=resultBar><div id=scoreOut></div><div class=rbtns><button class="btn ghost" onclick="mClose()">Cancel</button><button class="btn green" id=commitBtn onclick="commitBonus()"'+(_blockCommit?' disabled title="Baseline pending — reconcile the starting count first"':'')+'>Commit</button></div></div>';
@@ -8590,16 +8618,38 @@ async function applyFeedback(id){
   var d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(id))).json();
   if(!d||!d.ok||!document.getElementById('fbPanel'))return;
   var byRole={};(d.requests||[]).forEach(function(r){byRole[r.role]=r.status;});
-  var roles=[['ray','Ray'],['rolando','Rolando'],['dexter','Dexter']];
+  var roles=[['ray','Ray'],['rolando','Rolando']];
   var btns=roles.map(function(x){var st=byRole[x[0]]||'none';var lbl=st==='answered'?'✓ '+x[1]:st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
   var ev=(d.prefill&&d.prefill.evidence&&d.prefill.evidence.length)?('<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Evidence from windows</b><br>'+d.prefill.evidence.map(escHtml).join('<br>')+'</div>'):'';
   // Earlier windows are kept, not used (9 Oct 2026): listed so Rita can see them, never pre-filled into this contract.
   var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10)));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
-  document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'</div><div id=fbLink></div>'+ev+'</div>';
+  document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'<span id=dexChip></span></div><div id=fbLink></div>'+ev+'<div id=autoPanel></div></div>';
   var pf=d.prefill||{};
   if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}
   if(pf.sliders)for(var k in pf.sliders){var e=$('#'+k);if(e)e.value=pf.sliders[k];}
   if(pf.gateNote&&pf.gateNote.length){var gn=$('#gateNote');if(gn&&!gn.value)gn.value=pf.gateNote.join(' · ');}
+  recalcScore();
+  applyAuto();
+}
+// The automatic inputs (Miguel, 15 Oct 2026; rules in bonus.js autoScore): Parts Portal misses, HON handover, Dexter's
+// audit, field reports, mono. Pre-fills only, each with where it came from; every slider stays movable and the commit
+// is still yours. Re-read when the contract dates change.
+var _AUTO_N=0;
+async function applyAuto(){
+  if(!_SC||!_SC.crew||!$('#autoPanel'))return;
+  var n=++_AUTO_N,on=$('#spanStart').value,off=$('#spanEnd').value,ship=(($('#ships')&&$('#ships').value)||'').split(',').pop().trim();
+  $('#autoPanel').innerHTML='<div class=hint style="margin-top:8px">Reading the Parts Portal, HON, audits and field reports…</div>';
+  var a=null;try{a=await (await fetch('/api/score/auto?sc='+encodeURIComponent(_SC.crew.agency_id)+'&ship='+encodeURIComponent(ship)+'&on='+encodeURIComponent(on)+'&off='+encodeURIComponent(off))).json();}catch(e){}
+  if(n!==_AUTO_N||!$('#autoPanel'))return;
+  if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">Could not read the automatic inputs. Score from the evidence by hand.</div>';return;}
+  for(var k in (a.sliders||{})){var e=$('#'+k);if(e)e.value=a.sliders[k];}
+  if(a.gates&&a.gates.rush)$('#gRush').checked=true;
+  if(a.gateNote&&a.gateNote.length){var gn=$('#gateNote');if(gn&&gn.value.indexOf(a.gateNote[0])<0)gn.value=(gn.value?gn.value+' · ':'')+a.gateNote.join(' · ');}
+  var inC=(a.audits||[]),all=(a.allAudits||[]);
+  var dc=$('#dexChip');if(dc)dc.innerHTML=all.length?('<a class="btn green" style="padding:6px 10px;font-size:12px;text-decoration:none" target=_blank rel=noopener href="https://audit.cims.work/#q='+encodeURIComponent((inC[0]||all[0]).id)+'">Dexter · audit '+escHtml(String((inC[0]||all[0]).score))+'/5 · '+fmtDateS(String((inC[0]||all[0]).at||'').slice(0,10))+'</a>'):'';
+  var LBL={sOrder:'On-time ordering',sAcc:'Order accuracy',sPar:'Par',sHand:'Handover',sComm:'Dexter\u2019s audit',sMono:'Mono'};
+  var rows=(a.evidence||[]).filter(function(x){return x.factor;}).map(function(x){return '<div style="display:grid;grid-template-columns:118px minmax(0,1fr);gap:2px 10px;padding:4px 0;border-top:1px solid var(--line)"><b style="color:var(--navy)">'+escHtml(LBL[x.factor]||x.factor)+'</b><span>'+escHtml(x.text)+'<br><span style="font-size:11px;letter-spacing:.02em;text-transform:uppercase;opacity:.75">'+escHtml(x.source)+'</span></span></div>';}).join('');
+  $('#autoPanel').innerHTML='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">From the systems</b> · pre-filled below, every slider stays yours to move<br>'+rows+'</div>';
   recalcScore();
 }
 async function genLink(id,role){
