@@ -13,10 +13,21 @@ It replaces the GitHub Action `nightly-self-maintenance` as the watcher. That Ac
 
 ## The rules (CLAUDE.md wins on any disagreement)
 
-- **The watcher never merges.** CLAUDE.md §5 lets the nightly agent auto-merge only four kinds of change: dependency bumps, lint fixes, regenerated derived data, and documentation. A bug fix is not on that list.
-  - Every fix is a **draft PR** titled `Night watch: <what>`, assigned to Miguel.
-  - A session Miguel drives merges it, or he does himself.
-  - Anything touching money (§1: `src/bonus.js`, payout, `bonus_outcome`, baselines, the Score Card inputs), auth, schema or crew data is a PR with a written rationale. It is never merged by an agent without Miguel.
+- **The watcher merges only a SMALL fix, and only through the gate** (Miguel, 16 Oct 2026: "Merge small fixes"; CLAUDE.md §5). It may merge its own PR only when ALL of these hold:
+  - CI `test` is green on the PR head.
+  - The full suite is green locally, and the new test was proven to FAIL on the old code.
+  - `node scripts/night_merge_gate.mjs origin/main <branch>` prints `MERGE_OK`. The gate refuses:
+    - money (bonus, Score Card, supervisor evaluation);
+    - auth;
+    - migrations, and any D1 write or schema statement added or changed in `src/`;
+    - the TDG import paths;
+    - the intel pipeline;
+    - email templates;
+    - `wrangler.toml`, `.github/` and dependencies;
+    - a diff with no test, and more than 120 changed lines in `src/`.
+  - It is the first merge of the night. At most one merge a night.
+- **Everything the gate refuses is a draft PR** titled `Night watch: <what>` for Miguel, with the gate's reasons in the body. Anything touching money (§1), auth, schema or crew data is never merged by an agent without Miguel.
+- **After a merge, prove the deploy live** (CLAUDE.md §9: the deployed worker code carries the fix). If it cannot be proven, or main turns red, open a revert PR at once and flag it in the digest.
 - **A bug is a failure traced to a real input.** That means a D1 row, a real file name, or a real request, written into the PR. A style preference is not a bug, and neither is "this could be cleaner".
   - Every fix carries a test that **fails before** the fix and **passes after**.
   - Run `npm test` in full before opening the PR.
@@ -94,10 +105,12 @@ Method:
 4. **Fix the confirmed one** with a failing-first test.
    - Pin it in the test file the area already uses.
    - Update CLAUDE.md's section for the area when a rule changed.
-5. **Open the draft PR.**
+5. **Open the PR** (a draft unless step 6 merges it).
    - Title: `Night watch: <defect in plain words>`.
    - Body: the input that triggers it, what the user saw, the fix, and the test.
    - Follow the attribution rules the session gives.
+
+6. **Merge only through the gate.** Wait for CI `test` on the PR head, then run `node scripts/night_merge_gate.mjs origin/main <branch>`. `MERGE_OK` and no earlier merge tonight: mark the PR ready and squash-merge it, then prove it live. `DRAFT_ONLY`: leave it a draft and paste the gate's reasons into the PR body.
 
 ## The digest (every run, at most 8 lines)
 
@@ -107,7 +120,7 @@ End the session with this digest; it is the run's notification.
 Night watch <date> · <area>
 Health: tests <green/red> · deploy <= main / behind (<sha>) · jobs <ok / N findings>
 Findings: <one line each, with the table/row or file:line>
-PRs: <Night watch: … #N> or none
+PRs: <Night watch: … #N — merged + live / draft (gate: reason)> or none
 Flags for Miguel: <money / data / decisions only>
 ```
 
