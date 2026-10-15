@@ -366,11 +366,6 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
         h += "</div>";
       });
       h += "</details>";
-      if (b.checks && b.checks.length) {
-        h += '<details class="card fold"><summary class="row"><span class="sq a">' + ic("warning-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">To check on the crew record</div><div class="sm">' + b.checks.length + " open</div></div>" + ic("caret-right", "go") + "</summary>";
-        b.checks.forEach(function (t) { h += '<div class="feed">' + esc(t) + "</div>"; });
-        h += "</details>";
-      }
       $("main").innerHTML = h;
       S.lastBrief = b;
       if (b.open) dock('<button class="btn" data-go="q=' + esc(b.open) + '">' + ic("hourglass-medium") + "Open the request</button>");

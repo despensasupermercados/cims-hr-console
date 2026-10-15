@@ -61,7 +61,7 @@ test("ships: who is aboard per the board, earmarks left out, aboard first", asyn
   assert.ok(ensured > 0, "the tables are ensured before they are read");
 });
 
-test("the briefing: contract label with its source, the live feedback only, the checks", async () => {
+test("the briefing: contract label with its source, the live feedback only, never the crew record's To-check rows", async () => {
   const b = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1")).json();
   assert.equal(b.crew.name, "John Gorre");
   assert.equal(b.contract.label, "3 completed · on contract 4");
@@ -69,7 +69,7 @@ test("the briefing: contract label with its source, the live feedback only, the 
   assert.equal(b.contract.current.day, 134);
   assert.equal(b.feed.length, 1, "a superseded answer is not briefed");
   assert.equal(b.feed[0].text, "Mono clicks 4% (target under 20%). “ok”", "feedback answers read as sentences (audit_plain.js)");
-  assert.deepEqual(b.checks, ["check me"]);
+  assert.equal(b.checks, undefined, "HR's housekeeping is not the auditor's (Miguel, 16 Oct 2026)");
   assert.equal((await call("https://audit.cims.work/api/audit/brief?sc=SC-9")).status, 404);
   assert.equal((await call("https://audit.cims.work/api/audit/brief")).status, 400);
 });
