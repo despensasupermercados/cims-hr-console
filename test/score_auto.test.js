@@ -166,6 +166,30 @@ test("16 Oct (Miguel: 'only the one who missed the order'): a miss counts agains
   const other = await gatherAuto(env, { ...inp, sc: "SC-3", crewName: "Bernard Winzon Paqueo" }, { engine: "none" });
   assert.ok(!other.gates.rush, "the relief aboard the same hull is not charged for his colleague's miss");
   const lines = other.evidence.map((e) => e.text).join(" | ");
-  assert.match(lines, /CIMS-R .*another crew's order, not counted/);
+  assert.match(lines, /CIMS-R .*another crew's miss, not counted/);
   assert.match(lines, /CIMS-X .*not on the roster, not counted\. Check who placed it/);
+});
+
+test("16 Oct, second answer: the miss is the crew ABOARD that day; two aboard -> the one aboard 4+ weeks", async () => {
+  const { missOwnerByBoard, aboardOn } = await import("../src/score_auto.js");
+  const { buildCrewIndex } = await import("../src/travel_match.js");
+  const ix = buildCrewIndex(ROSTER);
+  // Resposo aboard Reflection since 1 Mar; Paqueo joins 1 Jul for the handover; Resposo signs off 10 Jul
+  const legs = [{ ship: "Reflection", sc: "SC-2", name: "Michael Angelo Resposo", on: "2026-03-01", off: "2026-07-10", is_current: false },
+    { ship: "Celebrity Reflection", sc: "SC-3", name: "Bernard Winzon Paqueo", on: "2026-07-01", off: "2027-02-01", is_current: true }];
+  assert.deepEqual(aboardOn(legs, "Reflection", "2026-07-05").map((a) => a.sc), ["SC-2", "SC-3"]);
+  const rescueByReliever = { order_ref: "R1", ship: "Reflection", submitted_at: "2026-07-05T10:00:00Z", requester: "Bernard Paqueo" };
+  const a = missOwnerByBoard(rescueByReliever, "SC-2", ix, legs);
+  assert.equal(a.mine, true, "the reliever typed it, but Resposo had been aboard 4+ weeks: his miss");
+  assert.match(a.why, /aboard 18 weeks, the other under 4/);
+  assert.equal(missOwnerByBoard(rescueByReliever, "SC-3", ix, legs).mine, false, "the reliever 4 days aboard is not charged");
+  const later = { order_ref: "R2", ship: "Reflection", submitted_at: "2026-07-20T10:00:00Z", requester: "michael resposo" };
+  assert.equal(missOwnerByBoard(later, "SC-3", ix, legs).mine, true, "after the sign-off only Paqueo is aboard: his, whoever typed it");
+  // two printers aboard 4+ weeks (a two-printer hull): the order's name decides; no name -> nobody, flagged
+  const two = [{ ship: "Oasis", sc: "SC-2", name: "R", on: "2026-01-01", is_current: true }, { ship: "Oasis", sc: "SC-3", name: "P", on: "2026-02-01", is_current: true }];
+  assert.equal(missOwnerByBoard({ ship: "Oasis", submitted_at: "2026-07-05", requester: "Bernard Paqueo" }, "SC-3", ix, two).mine, true);
+  const nobody = missOwnerByBoard({ ship: "Oasis", submitted_at: "2026-07-05", requester: "Ray Guerra" }, "SC-2", ix, two);
+  assert.equal(nobody.mine, false); assert.equal(nobody.owner, null); assert.ok(nobody.unplaced.length, "flagged, never picked");
+  // nobody aboard per the schedule: the typed name decides, as before
+  assert.equal(missOwnerByBoard({ ship: "Apex", submitted_at: "2026-07-05", requester: "Michael Resposo" }, "SC-2", ix, legs).rule, "name");
 });

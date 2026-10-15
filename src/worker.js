@@ -3239,22 +3239,24 @@ async function apiScoreAuto(env, url) {
   return json(await gatherAuto(env, {
     sc, ship: url.searchParams.get("ship") || "", signOn: url.searchParams.get("on") || "", signOff: url.searchParams.get("off") || "",
     crewName: [cr.first_name, cr.last_name].filter(Boolean).join(" "),
-  }, { ensure: ensureScoreFlag, engine: pickEngine(env), claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI }));
+  }, { ensure: ensureScoreFlag, engine: pickEngine(env), claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI, boardLegs: () => boardLegs(env) }));
 }
 // Policy v2 and the commit's evidence (migrations/0028; Miguel, 16 Oct 2026: "agree. both"). Memoized: the row and the
 // column exist before the first commit under v2 whatever order the migration and the deploy land in.
 const ensureBonusV2 = memoEnsure(async (env) => {
+  // v1 first, as migration 0001 seeds it: a database that never got the seed (staging until 16 Oct 2026) would copy nothing
+  await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) VALUES ('policy-v1', 1, '2026-06-05', '[0,0,250,500,750,1000,1250,1500,1750,2000]', 80, '{\"sOrder\":20,\"sAcc\":25,\"sPar\":15,\"sEval\":15,\"sHand\":10,\"sComm\":10,\"sMono\":5}', 'e>=3?15:0', '{\"precedence\":[\"not_completed\",\"rush\",\"audit\",\"eval_below_3\"],\"reset\":[\"not_completed\",\"rush\",\"audit\"],\"hold\":[\"eval_below_3\"],\"compassionate_bypass\":true}', 'worst_leg', 'Built SOP weights (locked). Aggregation worst_leg pending Miguel confirm vs average.')").run();
   await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) SELECT 'policy-v2', 2, '2026-10-15', ladder_json, floor_pct, weights_json, eval_rule, gates_json, agg_policy, 'v1 weights and gates unchanged. sComm = Dexter''s audit, not Communication. The Score Card pre-fills from the systems (bonus.js autoScore, 15-16 Oct 2026).' FROM bonus_policy WHERE version = 1").run();
   try { await env.DB.prepare("ALTER TABLE bonus_outcome ADD COLUMN evidence_json TEXT").run(); }
   catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
-}, "policy-v2");
+}, "policy-v2+v1seed");
 // The automatic read for the span and ships being committed, re-run on the server (cached AI answers only: a commit never
 // waits on a model), kept beside the outcome. Never blocks a commit: a failed read is stored as the failure.
 async function commitEvidence(env, cr, b, ships) {
   try {
     const name = await env.DB.prepare("SELECT first_name, last_name FROM crew WHERE agency_id=?").bind(cr.agency_id).first().catch(() => null);
     const a = await gatherAuto(env, { sc: cr.agency_id, ship: ships.join(", "), signOn: b.spanStart, signOff: b.spanEnd,
-      crewName: name ? [name.first_name, name.last_name].filter(Boolean).join(" ") : "" }, { ensure: ensureScoreFlag, engine: "none" });
+      crewName: name ? [name.first_name, name.last_name].filter(Boolean).join(" ") : "" }, { ensure: ensureScoreFlag, engine: "none", boardLegs: () => boardLegs(env) });
     return JSON.stringify({ at: new Date().toISOString(), inputs: { ships, on: b.spanStart, off: b.spanEnd }, suggested: { sliders: a.sliders, gates: a.gates },
       evidence: (a.evidence || []).slice(0, 80).map((x) => ({ factor: x.factor || null, text: String(x.text || "").slice(0, 600), source: x.source || null })),
       audits: (a.audits || []).map((x) => ({ id: x.id, ship: x.ship, score: x.score, at: x.at })), unread: a.unread || 0, sources: a.sources || null });

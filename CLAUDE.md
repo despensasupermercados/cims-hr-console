@@ -588,12 +588,18 @@ movable; the commit is a money user's click; committed outcomes are never touche
   gates to the character — only what `sComm` measures changed — and every commit stores **`bonus_outcome.evidence_json`**: the
   server re-runs the automatic read for the committed span and ships (`commitEvidence`, cached AI answers only, never blocks
   a commit) and keeps every evidence line with its source, the suggested sliders / gates and the audits. 0 outcomes existed
-  before v2, so nothing was ever scored under v1's old meaning. (3) **A vessel-side miss counts only against the crew who
-  placed it** (`missOwner`): the Parts Portal's typed `requester` is placed on the roster by the travel ledger's name bridge
-  (`travel_match.js`, deterministic); a joint order ("A / B") counts against each; another crew's miss on the same hull
-  (the overlap of a handover) is shown "another crew's order, not counted"; a name the roster cannot place (Ray Guerra, the
-  health-check orders, Purnama's two roster rows) is shown "not on the roster, not counted. Check who placed it" — never
-  charged on a guess (§6). Measured 16 Oct 2026: every crew requester on file places except Purnama. (4) with no miss,
+  before v2, so nothing was ever scored under v1's old meaning. (3) **A vessel-side miss counts only against the crew whose miss it is**
+  — and, his second answer the same day, **that is the crew ABOARD** ("the audit is the person who's onboard .. when u have two
+  people work with the person who is currently onboard or at least the one who has been more than 4 weeks";
+  `missOwnerByBoard`, `aboardOn`, `ESTABLISHED_DAYS` = 28, over the board's ONE schedule): one crew aboard the hull on the
+  order's day → theirs, whoever typed it; two aboard and ONE of them 4+ weeks → the 4+ weeks one (a reliever typing the rescue
+  order in his first days is not charged); both 4+ weeks (a two-printer hull) or both new → the one the order's typed name
+  (`requester`, placed by the travel ledger's name bridge `travel_match.js`) names; both new and unnamed → the longest
+  aboard; both 4+ weeks and unnamed → nobody, flagged "Check whose miss it is" (§6). Nobody aboard per the schedule (an old
+  order, a gap in the file) → the typed name decides (`missOwner`); a name the roster cannot place (Ray Guerra, the
+  health-check orders, Purnama's two roster rows — fixed in another session) is flagged, never charged on a guess. Every
+  charged line says why ("charged to this crew: aboard 18 weeks, the other under 4"). Staging got the v1 + v2 policy rows
+  the same day (it never had the 0001 seed); `ensureBonusV2` seeds v1 first on any database that lacks it. (4) with no miss,
   on-time ordering is Ray's on-time answer, all or nothing — as built. Pinned by `test/score_auto.test.js`,
   `test/bonus_policy_v2.test.js`.
 
