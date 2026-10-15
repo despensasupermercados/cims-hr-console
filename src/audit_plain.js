@@ -75,12 +75,14 @@ export function intelFallback(text, max = 220) {
 }
 
 export const PLAIN_SYSTEM = [
-  "You rewrite an internal incident note about a ship's printer specialist so an auditor understands it at a glance.",
-  "Say it the way a manager would tell a colleague: plain everyday words, short.",
-  "At most two sentences and under 35 words. Start with what happened in a few words (for example: Rush order, Ran out of toner, Machine left down).",
-  "Then what it cost and what was sent, where, and the cause, when the note states them. Use the crew member's first name.",
-  "Copy every amount, quantity, place and date exactly as written. Never add a number the note does not have.",
-  "No jargon (protocols, escalations, resulting in, failed to), no labels, no bullets, no quotes, no preamble.",
+  "Rewrite this note about a ship's printer specialist the way a manager would say it out loud to a colleague.",
+  "Two short sentences, 25 words at most in total.",
+  "First sentence: what happened and what it cost. Start with the event in two or three words (Rush order, Ran out of toner, Machine left down, Late order).",
+  "Second sentence: why, in plain words.",
+  "Do not name the ship: the reader is already on it. Use the crew member's first name only.",
+  "Copy amounts, quantities and places exactly. Keep dates worded as the note words them: 'early October' stays 'early October'; leave a date out rather than make it more exact.",
+  "Never add a number the note does not have. No jargon (protocols, escalations, resulting in, failed to), no labels, no bullets, no quotes, no preamble.",
+  "Example of the style (not of the facts): Rush order to Miami, $900 for 6 toners. Juan stopped counting stock before the crossing.",
 ].join("\n");
 
 export function plainPrompt(text) { return "NOTE:\n" + String(text || "").slice(0, 4000); }
@@ -99,8 +101,22 @@ export function numbersKept(plain, source) {
   return nums(plain).every((n) => have.has(n));
 }
 
+// A day the rewrite names ("October 8", "8 Oct") must be named that way in the source too: "early October" never becomes
+// "October 8" (the first live rewrite did exactly that, 15 Oct 2026, and every digit of it was in the note).
+const MONTHS = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+const dayRefs = (s) => {
+  const out = [], t = String(s).toLowerCase();
+  for (const m of t.matchAll(new RegExp("\\b(" + MONTHS + ")\\.?\\s+(\\d{1,2})(?!\\d)", "g"))) out.push(m[1].slice(0, 3) + " " + Number(m[2]));
+  for (const m of t.matchAll(new RegExp("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS + ")\\b", "g"))) out.push(m[2].slice(0, 3) + " " + Number(m[1]));
+  return out;
+};
+export function datesKept(plain, source) {
+  const have = new Set(dayRefs(source));
+  return dayRefs(plain).every((d) => have.has(d));
+}
+
 export async function plainKey(text) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("plain-v1|" + clean(text)));
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("plain-v2|" + clean(text)));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
 }
 
@@ -123,5 +139,5 @@ export async function rewritePlain(env, text, { engine, claudeModel, workersMode
   })().catch(() => null);
   const out = await Promise.race([run, new Promise((res) => setTimeout(() => res(null), timeoutMs))]);
   const p = parsePlain(out);
-  return p && numbersKept(p, text) ? p : null;
+  return p && numbersKept(p, text) && datesKept(p, text) ? p : null;
 }
