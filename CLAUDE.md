@@ -977,3 +977,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   no audit = 10) lives in `bonus.js` and is Miguel's to merge (§1); this module still never imports it.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
+- **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,
+  `test/audit_routes.test.js`, `test/audit_plain.test.js`). OPEN MODE limits what an anonymous visitor reaches: the briefing
+  answers only for crew the board has aboard (or already asked), without the personal address (`crew.email`, `cc`), and
+  reporters read by name (`personName`); a request goes only to a seafarer aboard THAT ship (`not_aboard`); a grade filed
+  without a sign-in says so on `filed_by` ("(open site, no sign-in)"). Everywhere: a POST whose Origin is another host is
+  refused (`crossSite`: the shared `Domain=cims.work` cookie reaches every *.cims.work app); a request is not re-sent within
+  `RESEND_MIN` = 15 minutes (each resend breaks the crew's link and emails the ship again); a TEST request cannot be graded
+  (`test_request`: a rehearsal would reach a real Score Card); a rating is a whole 1–5 (number or one-digit string, never
+  `true` / " 5 " / 4.5) and the note is text. A graded request is finished: it is no longer "open" (briefing, preview, the
+  ships list), so the next audit can be asked. The plain-words guard reads NUMBERS, not digits (`$` amounts match `$`
+  amounts, "04" = 4, "$1.50" = "$1.5", "1,2" is two numbers), refuses a number word the note lacks ("twelve"), requires the
+  note's headline cost (largest $100+) to stay, and reads ISO dates and bare ordinals as days; a REFUSED rewrite is kept as
+  an empty `audit_plain` row (`refused:<engine>`) so it is not paid for on every open, a timeout is retried, a kept line
+  that fails today's guards is not shown, and the Claude call is aborted on its 7s ceiling.

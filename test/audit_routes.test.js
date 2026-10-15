@@ -94,3 +94,27 @@ test("open mode: audit.cims.work needs no sign-in, acts as AUDIT_OPEN_AS; nothin
   assert.equal(await call("https://cims.work/api/me", null, env), null, "the console's own routes are never answered here");
   assert.equal((await call("https://audit.cims.work/", null, { DB: fakeDb() })).status, 302, "without the switch, the login is back");
 });
+
+test("open mode: the briefing answers only for crew aboard (or already asked); no personal address, reporters by name", async () => {
+  const prof = { crew: { first_name: "Any", last_name: "One", email: "private@gmail.com" }, profile: { contracts: [], people: { feed: [
+    { at: "2026-10-08", kind: "intel", who: "Ray Guerra <ray.guerra@dg3.com>", text: "• Summary: late order." },
+    { at: "2026-10-01", kind: "intel", who: "rolando.abellan@dg3.com", text: "• Summary: drum dirty." }] }, checks: [] } };
+  const H2 = installAudit({ json, htmlResponse, ensureAudit: async () => {}, rotationSections: async () => SECTIONS, TODAY: () => "2026-10-14", crewProfile: async () => prof });
+  const env = { DB: fakeDb(), AUDIT_OPEN: "true", AUDIT_OPEN_AS: "Dexter.Lawrence@dg3.com" };
+  const c = (url, session = null) => { const u = new URL(url); return H2(u.pathname, new Request(u), env, u, session); };
+  assert.equal((await c("https://audit.cims.work/api/audit/brief?sc=SC-2")).status, 404, "an earmark, not aboard: not on the open site");
+  assert.equal((await c("https://audit.cims.work/api/audit/brief?sc=SC-77")).status, 404, "any id: not on the open site");
+  const b = await (await c("https://audit.cims.work/api/audit/brief?sc=SC-3")).json();
+  assert.equal(b.crew.email, null, "no personal address on the open site");
+  assert.deepEqual(b.feed.map((f) => f.who), ["Ray Guerra", "Rolando Abellan"]);
+  const signedIn = await (await c("https://audit.cims.work/api/audit/brief?sc=SC-2", S)).json();
+  assert.equal(signedIn.crew.email, "private@gmail.com", "a signed-in user still reads the whole briefing");
+});
+
+test("a POST from another site or another *.cims.work app is refused (the shared cookie, CSRF)", async () => {
+  const env = { DB: fakeDb() };
+  const post = (origin) => { const u = new URL("https://audit.cims.work/api/audit/request/cancel"); return H(u.pathname, new Request(u, { method: "POST", headers: origin ? { Origin: origin } : {}, body: "{}" }), env, u, S); };
+  assert.equal((await post("https://hon.cims.work")).status, 403);
+  assert.equal((await post("https://evil.example")).status, 403);
+  assert.notEqual((await post("https://audit.cims.work")).status, 403, "the audit's own page passes");
+});

@@ -21,7 +21,8 @@ import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
 import { auditUploadHtml, auditClosedHtml } from "./audit_upload_ui.js";
 
-export const LINK_DAYS = 14;              // the upload page stays open this long after the request
+export const LINK_DAYS = 14;
+export const RESEND_MIN = 15;             // a request is not re-sent sooner than this              // the upload page stays open this long after the request
 const READ_SWEEP_MAX = 3;                 // reads retried per hourly run (each is a HON call; a Management List is a vision read)
 const csv = (s) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
 const now = () => new Date().toISOString();
@@ -31,7 +32,7 @@ function newToken() { const b = new Uint8Array(18); crypto.getRandomValues(b); r
 export const isLive = (env) => String(env.AUDIT_LIVE || "").toLowerCase() === "true";
 
 export function installAuditRequest(deps) {
-  const { json, htmlResponse, ensureAudit, sendViaMailer, logActivity, applyOverride } = deps;
+  const { json, htmlResponse, ensureAudit, sendViaMailer, logActivity, applyOverride, rotationSections } = deps;
 
   async function hon(env, method, ...args) {
     if (!env.HON || typeof env.HON[method] !== "function") return null;
@@ -84,14 +85,14 @@ export function installAuditRequest(deps) {
     await ensureAudit(env);
     const [crew, cts, H, open] = await Promise.all([
       crewOf(env, sc), contacts(env), hon(env, "ship", ship),
-      env.DB.prepare("SELECT id, status, sent_at, due_at FROM audit_request WHERE agency_id=? AND status IN ('draft','sent','complete') ORDER BY created_at DESC LIMIT 1").bind(sc).first(),
+      env.DB.prepare("SELECT r.id, r.status, r.sent_at, r.due_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND (r.status IN ('draft','sent') OR (r.status = 'complete' AND e.request_id IS NULL)) ORDER BY r.created_at DESC LIMIT 1").bind(sc).first(),
     ]);
     if (!crew) return json({ error: "crew_not_found" }, 404);
     const addr = addressFor({ contacts: cts, ship, personal: crew.email });
     const live = isLive(env);
     return json({
       ship, crew: { sc, name: crew.name }, live, auditor: session.email,
-      to: live ? addr.to : [session.email], cc: live ? addr.cc : [], shown: addr.shown, noPersonal: !!addr.noPersonal, blocked: addr.ok ? null : addr.reason,
+      to: live ? addr.to : [session.email], cc: live && !session.open ? addr.cc : [], shown: addr.shown, noPersonal: !!addr.noPersonal, blocked: addr.ok ? null : addr.reason,
       machines: H && H.ok ? H.presses : null, lines: H && H.ok && H.obp ? blindLines(H.obp.lines).length : null, obpAsOf: H && H.obp ? H.obp.asOf : null,
       hon: !!(H && H.ok), honError: H && !H.ok ? H.error : (H ? null : "HON did not answer"),
       dueAt: plusHours(now(), REQUEST_HOURS), open: open || null,
@@ -105,6 +106,12 @@ export function installAuditRequest(deps) {
     await ensureAudit(env);
     const open = await env.DB.prepare("SELECT id FROM audit_request WHERE agency_id=? AND normalized_ship=? AND status IN ('draft','sent') LIMIT 1").bind(sc, normShip(ship)).first().catch(() => null);
     if (open) return json({ ok: false, error: "already_open", id: open.id }, 409);
+    // OPEN MODE asks only a seafarer the board has aboard THAT ship: no request for any id to any ship's mailbox
+    if (session.open && rotationSections) {
+      const board = await rotationSections(env).catch(() => null);
+      const sec = ((board && board.sections) || []).find((x) => normShip(x.ship) === normShip(ship));
+      if (!sec || !(sec.crew || []).some((c) => c && c.current && c.aboard && c.agency_id === sc)) return json({ ok: false, error: "not_aboard", detail: "The board does not have this seafarer aboard " + ship + "." }, 422);
+    }
     const [crew, cts, H] = await Promise.all([crewOf(env, sc), contacts(env), hon(env, "ship", ship)]);
     if (!crew) return json({ error: "crew_not_found" }, 404);
     if (!H || !H.ok) return json({ ok: false, error: "hon_unavailable", detail: (H && H.error) || "HON did not answer: the presses and the OBP list come from it" }, 503);
@@ -135,7 +142,7 @@ export function installAuditRequest(deps) {
     return { ok, to, error: r && r.error };
   }
 
-  async function detail(env, url) {
+  async function detail(env, url, session) {
     const id = String(url.searchParams.get("id") || "");
     await ensureAudit(env);
     const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(id).first();
@@ -147,7 +154,7 @@ export function installAuditRequest(deps) {
     return json({
       grade: ev ? { inventory: ev.r_inventory, technical: ev.r_technical, collaterals: ev.r_collaterals, overall: ev.r_overall, score: ev.score, from: ev.score_from, note: ev.note, by: ev.filed_by, at: ev.filed_at } : null,
       id: req.id, ship: req.ship, sc: req.agency_id, crew: req.crew_name, status: req.status, test: !!req.test_mode, auditor: req.auditor,
-      to: req.to_ship, cc: req.cc_personal, sentAt: req.sent_at, dueAt: req.due_at, completeAt: req.complete_at, overdueAt: req.overdue_at,
+      to: req.to_ship, cc: session && session.open ? null : req.cc_personal, sentAt: req.sent_at, dueAt: req.due_at, completeAt: req.complete_at, overdueAt: req.overdue_at,
       machines: s.machines.map((m) => ({ serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43: slot(s.uploads, m.serial, "p43"), mgmt: slot(s.uploads, m.serial, "mgmt") })),
       count: { total: done.total, done: done.done }, extras: s.extras.length, gate: s.gate,
     });
@@ -161,22 +168,26 @@ export function installAuditRequest(deps) {
     const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(String(b.id || "")).first();
     if (!req) return json({ error: "not_found" }, 404);
     if (req.status !== "complete") return json({ ok: false, error: "not_complete" }, 409);
+    // a TEST request (emails to the auditor alone) is a rehearsal: its grade would reach a real seafarer's Score Card
+    if (req.test_mode) return json({ ok: false, error: "test_request", detail: "A test request is a rehearsal and cannot be graded." }, 409);
     const r = { inventory: b.inventory, technical: b.technical, collaterals: b.collaterals, overall: b.overall === "" ? null : b.overall, note: b.note };
     const bad = gradeProblems(r);
     if (bad.length) return json({ ok: false, error: "invalid", fields: bad }, 400);
     const sc = auditScore(r), at = now(), vid = "av_" + crypto.randomUUID();
+    // filed on the open site (no sign-in, 15 Oct 2026) says so on the record the Score Card reads
+    const by = session.open ? session.email + " (open site, no sign-in)" : session.email;
     const note = String(r.note || "").trim().slice(0, 2000) || null;
     try {
       await env.DB.batch([
-        env.DB.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES (?,?,?,?,?,'filed',?,?)").bind(vid, req.id, req.ship, req.agency_id, session.email, at, at),
+        env.DB.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES (?,?,?,?,?,'filed',?,?)").bind(vid, req.id, req.ship, req.agency_id, by, at, at),
         env.DB.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, note, filed_by, filed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-          .bind(vid, req.id, req.agency_id, req.ship, Number(r.inventory), Number(r.technical), Number(r.collaterals), r.overall == null ? null : Number(r.overall), sc.score, sc.from, note, session.email, at),
+          .bind(vid, req.id, req.agency_id, req.ship, Number(r.inventory), Number(r.technical), Number(r.collaterals), r.overall == null ? null : Number(r.overall), sc.score, sc.from, note, by, at),
       ]);
     } catch (e) {
       if (/UNIQUE/i.test(String((e && e.message) || e))) return json({ ok: false, error: "already_filed" }, 409);
       throw e;
     }
-    await logActivity(env, session.email, "audit_grade", req.id + " " + sc.score);
+    await logActivity(env, session.email, "audit_grade", req.id + " " + sc.score + (session.open ? " (open site)" : ""));
     return json({ ok: true, score: sc.score, from: sc.from });
   }
 
@@ -197,7 +208,10 @@ export function installAuditRequest(deps) {
       await logActivity(env, session.email, "audit_request_extend", req.id + " " + due);
       return json({ ok: true, dueAt: due });
     }
-    // resend: a fresh link (the old one stops working), the same deadline
+    // resend: a fresh link (the old one stops working), the same deadline. Not twice in RESEND_MIN: each one breaks the
+    // link the crew already holds and emails the ship, Rolando and Ray again (a double tap, or anyone on the open site).
+    const last = await env.DB.prepare("SELECT MAX(sent_at) AS at FROM audit_send_log WHERE request_id=? AND kind LIKE 'request%'").bind(req.id).first().catch(() => null);
+    if (last && last.at && Date.now() - Date.parse(last.at) < RESEND_MIN * 60000) return json({ ok: false, error: "too_soon", detail: "The request went less than " + RESEND_MIN + " minutes ago." }, 429);
     const [crew, cts] = await Promise.all([crewOf(env, req.agency_id), contacts(env)]);
     const token = newToken();
     await env.DB.prepare("UPDATE audit_request SET token_hash=? WHERE id=?").bind(await sha256hex(token), req.id).run();
@@ -413,7 +427,7 @@ export function installAuditRequest(deps) {
       if (!session) return json({ error: "unauthorized" }, 401);
       if (p === "/api/audit/request/preview") return preview(env, url, session);
       if (p === "/api/audit/request" && request.method === "POST") return create(request, env, url, session);
-      if (p === "/api/audit/request" && request.method === "GET") return detail(env, url);
+      if (p === "/api/audit/request" && request.method === "GET") return detail(env, url, session);
       if (p === "/api/audit/request/resend" && request.method === "POST") return act(request, env, url, session, "resend");
       if (p === "/api/audit/request/extend" && request.method === "POST") return act(request, env, url, session, "extend");
       if (p === "/api/audit/request/cancel" && request.method === "POST") return act(request, env, url, session, "cancel");
