@@ -37,8 +37,17 @@ a PR for human review, not an auto-merge.
 The nightly agent is **"Cims night watch"** (scheduled Claude task, 02:45 America/New_York, a fresh session per night;
 runbook `docs/NIGHT_WATCH.md`, Miguel 16 Oct 2026: "add a night watcher to look for bugs and fix it"): health first (the
 suite on main, deployed = main, last night's jobs from D1, read-only), then one area of the code a night by weekday;
-every fix is a draft PR "Night watch: …" with a failing-first test, never merged by the watcher. The GitHub Action
-`nightly-self-maintenance` is manual-only since that day (its nightly runs were refused 8 tool calls and changed nothing).
+every fix is a PR "Night watch: …" with a failing-first test. The GitHub Action `nightly-self-maintenance` is manual-only
+since that day (its nightly runs were refused 8 tool calls and changed nothing).
+**The night watch MAY merge its own SMALL fix** (Miguel, 16 Oct 2026, asked "draft PRs only" or "merge small fixes":
+"Merge small fixes") — a sixth line on the whitelist above, and only when ALL hold: CI `test` green on the PR head; the full
+suite green locally; its new test proven to FAIL on the old code; at most one merge a night; and
+`node scripts/night_merge_gate.mjs origin/main <branch>` prints `MERGE_OK` — the gate refuses money (bonus / Score Card /
+supervisor eval, §1), auth, migrations and any added or changed D1 write or schema statement in `src/` (crew data, schema),
+the TDG import paths, the intel pipeline (what is filed on a seafarer, and on whom), email templates (Miguel signs off a
+render), `wrangler.toml`, `.github/`, dependencies, a diff with no test, and more than 120 changed lines in `src/`. After a
+merge it proves the deploy live (§9) and names the merge in its digest; a deploy it cannot prove, or a red main, gets a
+revert PR and a flag. Everything the gate refuses stays a draft PR for Miguel. Pinned by `test/night_merge_gate.test.js`.
 
 **Interactive sessions (Miguel's standing instruction, 2026-09-15: "next time u go ahead and merge
 them"):** a session Miguel is driving may merge its OWN pull request once (a) CI is green, (b) the
