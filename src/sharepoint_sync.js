@@ -126,7 +126,7 @@ export async function runSync(env, deps) {
     try {
       const buf = await download(env, token, p.item.id, deps.fetch);
       const sheets = sheetsOf(deps.XLSX, buf, p.kind === "sga" ? WANT_SGA : WANT_TRAVEL);
-      const meta = { name: p.item.name, hash: p.item.eTag, source: "sharepoint", by: "sharepoint-sync" };
+      const meta = { name: p.item.name, hash: p.item.eTag, source: "sharepoint", by: "sharepoint-sync", path: p.path };
       const res = p.kind === "sga" ? await deps.applySga(sheets, meta) : await deps.applyTravel(sheets, p.year, meta);
       await deps.db.record({ ...rec, status: res && res.error ? "error" : "ok", detail: JSON.stringify(res || null).slice(0, 2000) });
       if (res && res.error) report.errors.push({ path: p.path, error: res.error, detail: res.detail || null }); else report.loaded.push({ path: p.path, kind: p.kind, year: p.year, month: p.month || null, result: res });

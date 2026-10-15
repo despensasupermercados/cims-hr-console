@@ -31,7 +31,27 @@ const num = (v) => {
 const txt = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
 const up = (v) => txt(v).toUpperCase();
 
+// TDG's ref: "ADV-2026-09-39-01" = ship code, year, a constant "09" (TDG's code for DG3 — NOT the month: February 2026's
+// refs read ADV-2026-09-32-01, found 15 Oct 2026 when the February workbook staged as September), the SGA number, the row.
+// The MONTH of a bill comes from the file's name ("DG3 SGA EXCEL FEBRUARY 2026.xlsx", "MARCH'26") or its month folder —
+// sgaPeriodOf — never from the ref.
 export const REF_RE = /^([A-Z]{2,4})-(\d{4})-(\d{2})-(\d+[A-Z]?)-(\d{2})$/;
+const MONTH_WORDS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, SEPT: 9, OCT: 10, NOV: 11, DEC: 12 };
+const monthWord = (w) => { const u = String(w || "").toUpperCase(); for (const [k, n] of Object.entries(MONTH_WORDS)) if (u === k || (u.length >= 3 && k.length === 3 && u.startsWith(k) && /^[A-Z]+$/.test(u))) return n; return null; };
+// "DG3 SGA EXCEL FEBRUARY 2026.xlsx" / "MARCH'26" / "MAY'2026" / "REVISED DG3 SGA EXCEL JULY'2026.xlsx" → { year, month, source: "name" }
+export function sgaPeriodFromName(name) {
+  const m = /([A-Za-z]{3,9})\s*'?\s*(\d{4}|\d{2})\b/.exec(String(name || "").replace(/\.xlsx?$/i, ""));
+  if (!m) return null;
+  const month = monthWord(m[1]); if (!month) return null;
+  const year = m[2].length === 2 ? 2000 + +m[2] : +m[2];
+  return year >= 2020 && year <= 2099 ? { year, month, source: "name" } : null;
+}
+// ".../SGA/2026/02 February 2026" → { year: 2026, month: 2, source: "path" }
+export function sgaPeriodFromPath(path) {
+  const m = /(?:^|\/)(20\d{2})\/(0[1-9]|1[0-2])\b[^/]*\/?$/.exec(String(path || "").trim());
+  return m ? { year: +m[1], month: +m[2], source: "path" } : null;
+}
+export function sgaPeriodOf(name, path) { return sgaPeriodFromName(name) || sgaPeriodFromPath(path) || null; }
 
 // The cost columns of SUMMARY MANNING, by the words TDG puts in the header row. Order = display order.
 export const SGA_COLS = [
@@ -50,11 +70,14 @@ export const SGA_COLS = [
   ["travel_insurance", /TRAVEL INSURANCE/],
   ["reimbursement", /REIMBURSEMENT/],
   ["funeral", /FUNERAL/],
-  ["transport", /^TRANSPORTATION/],
+  // TRANSPORTATION, TRANSPORTATION EXPENSE, SETTLEMENT TRANSPORTATION (February 2026: $12.50 that the first cut missed)
+  ["transport", /TRANSPORTATION/],
   ["hmo", /^HMO/],
   ["cash_advance", /CASH ADVANCE/],
   ["donation", /DONATION/],
   ["refund", /^REFUND/],
+  // OTHER / OTHER EXPENSES / PORT AGENT EXPENSE: TDG's catch-all column (added 15 Oct 2026, migrations/0027)
+  ["other", /^OTHERS?( EXPENSES?)?$|PORT AGENT/],
   ["bank_charge", /BANK CHARGE|COURIER/],
 ];
 export const SGA_COL_KEYS = SGA_COLS.map(([k]) => k);
@@ -107,9 +130,10 @@ export function sgaManningMeta(rows) {
 
 // One record per crew row of SUMMARY MANNING.
 //   { ref, ship_code, year, month, sga_no, seq, crew_name, vessel, brand, id_number, nationality, <cost keys>, amount }
-// `year` / `month` come from the ref ("ADV-2026-09-39-01" → 2026, 9); a row without a readable ref but with a name and
-// an amount is kept with the sheet's period (`fallback` = { year, month }) and ref null, so nothing billed is dropped.
-export function parseSgaManning(rows, fallback = {}) {
+// `year` / `month` are the FILE's period (`period` = { year, month } from sgaPeriodOf) on every row — the ref's "09" is not
+// the month (see REF_RE). A row without a readable ref but with a name and an amount is kept with ref null, so nothing
+// billed is dropped.
+export function parseSgaManning(rows, period = {}) {
   const h = sgaManningHeader(rows || []);
   if (!h) return { meta: sgaManningMeta(rows || []), records: [], others: [], grand_total: null, error: "no_header" };
   const meta = sgaManningMeta(rows);
@@ -139,7 +163,7 @@ export function parseSgaManning(rows, fallback = {}) {
     if (!m && !(name && (amount || lastNum(r)))) continue;
     // VESSELS is a merged header: the hull sits under it or one to three cells to its right (September 2026: one right)
     const vessel = h.vesselCol >= 0 ? txt(r.slice(h.vesselCol, h.vesselCol + 4).map(txt).find((x) => x && !isNumCell(x)) || "") || null : null;
-    const rec = { ref: m ? ref : null, ship_code: m ? m[1] : null, year: m ? +m[2] : (fallback.year || null), month: m ? +m[3] : (fallback.month || null),
+    const rec = { ref: m ? ref : null, ship_code: m ? m[1] : null, year: period.year || null, month: period.month || null,
       sga_no: m ? m[4] : (meta.sgaNo || null), seq: m ? +m[5] : null, crew_name: name || null, vessel,
       brand, id_number: h.idCol >= 0 ? txt(r[h.idCol]) || null : null, nationality: h.natCol >= 0 ? txt(r[h.natCol]) || null : null };
     let sum = 0;

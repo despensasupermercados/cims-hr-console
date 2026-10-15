@@ -54,7 +54,7 @@ test("dry-run stages the month: period, SGA no, lines placed on the roster, reco
   const env = envFor(d);
   const r = await J(await apiSgaImport(req({ sheets: { "SUMMARY MANNING": manning(), "2026 SUMMARY TRAINREL": training }, name: "DG3 SGA EXCEL SEPTEMBER'26.xlsx", dryRun: true }), env, { email: "rita@dg3.com" }));
   assert.equal(r.dryRun, true);
-  assert.deepEqual(r.period, { year: 2026, month: 9, rows: 3, of: 3 });
+  assert.deepEqual(r.period, { year: 2026, month: 9, source: "name" }, "the month is the file name's, never the ref's 09");
   assert.deepEqual(r.meta, { date: "October 01, 2026", sgaNo: "39-A" });
   assert.equal(r.rows, 3); assert.equal(r.reconciles, true, "lines + OTHERS = TDG's grand total");
   assert.equal(r.byBrand.royal, Math.round((1552.31 + 1015.07) * 100) / 100); assert.equal(r.byCat.air, 614);
@@ -84,7 +84,7 @@ test("apply loads the month, a REVISED file replaces it, an older load stays as 
   assert.equal(d.prepare("SELECT summary_only FROM training_cost WHERE year=2025").get().summary_only, 1);
   // the REVISED workbook adds a fourth crew
   const rev = { "SUMMARY MANNING": manning([row("CAP-2026-09-39-01", "SOMEBODY, NEW", "CELEBRITY APEX", { "TRAVEL /PLANEFARE": 700, "AMOUNT": 700 })]), "2026 SUMMARY TRAINREL": training };
-  const dry = await J(await apiSgaImport(req({ sheets: rev, dryRun: true }), env, null));
+  const dry = await J(await apiSgaImport(req({ sheets: rev, name: "REVISED DG3 SGA EXCEL SEPTEMBER'26.xlsx", dryRun: true }), env, null));
   assert.ok(dry.prior && dry.prior.file_name === "DG3 SGA EXCEL SEPTEMBER'26.xlsx", "the dry-run says the month is already on file");
   assert.deepEqual(dry.unmatched.map((u) => u.crew_name), ["SOMEBODY, NEW"]);
   const b = await J(await apiSgaImport(req({ sheets: rev, name: "REVISED DG3 SGA EXCEL SEPTEMBER'26.xlsx", hash: "h2" }), env, { email: "rita@dg3.com" }));
@@ -99,4 +99,29 @@ test("apply loads the month, a REVISED file replaces it, an older load stays as 
   assert.equal(read.lines.find((l) => /SOMEBODY/.test(l.crew_name)).agency_id, null);
   assert.equal(read.training.find((t) => t.year === 2026 && t.month === 9).air, 2109.03);
   assert.ok(Array.isArray(read.cols) && read.cols.includes("allotment"));
+});
+
+test("training months are replaced one at a time and a NEWER bill's figure stands (an older workbook never wipes the year)", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = envFor(d);
+  // September's workbook: Jan + Sep 2026 by category, 2025 as one figure
+  const a = await J(await apiSgaImport(req({ sheets: { "SUMMARY MANNING": manning(), "2026 SUMMARY TRAINREL": training }, name: "DG3 SGA EXCEL SEPTEMBER'26.xlsx" }), env, { email: "r" }));
+  assert.equal(a.training_written, 3);
+  // February's workbook, loaded AFTER: its TRAINREL has Jan (a different figure) and Feb
+  const febTrain = [["2026", "RENTAL FEE", "UTILITIES", "HOTEL", "PLANEFARE", "OTHER EXPENSES", "BANK CHARGES", "TOTAL"], ["JANUARY", 999, 1, "", "", "", "", 1000], ["FEBRUARY", 870.48, 97.07, 51.28, "", "", "", 1018.83], ["TOTAL", "", "", "", "", "", "", 2018.83]];
+  const febRows = [[], ["", "DATE", ":", "15-Oct-26"], ["", "SGA NO.", ":", "32-A"], H, ["", "1. ROYAL VESSELS"],
+    row("ANT-2026-09-32-01", "CAAG, HAZIEL", "ANTHEM OF THE SEAS", { "HOME ALLOTMENT": 500, "AMOUNT": 500 }),
+    ["", "", "", "", "", "", "", "", "GRAND TOTAL", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "500"]];
+  const b = await J(await apiSgaImport(req({ sheets: { "SUMMARY MANNING": febRows, "2026 SUMMARY TRAINREL": febTrain }, name: "DG3 SGA EXCEL FEBRUARY 2026.xlsx" }), env, { email: "r" }));
+  assert.deepEqual(b.period, { year: 2026, month: 2, source: "name" }, "the ref's 09 did not make it September");
+  assert.equal(b.training_written, 1, "February added; January's figure from the newer (September) bill stands");
+  const tr = d.prepare("SELECT month, total FROM training_cost WHERE year=2026 ORDER BY month").all().map((x) => ({ ...x }));
+  assert.deepEqual(tr, [{ month: 1, total: 1018.83 }, { month: 2, total: 1018.83 }, { month: 9, total: 5954.94 }], "September's months survived the older file");
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE month=2").get().n, 1); assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE month=9").get().n, 3, "September's lines untouched");
+  // a REVISED September (newer or equal period) replaces September's and January's figures
+  const rev = training.map((r) => (r[0] === "SEPTEMBER" ? ["SEPTEMBER", 1, 1, 1, 1, 1, "", 5] : r));
+  const c = await J(await apiSgaImport(req({ sheets: { "SUMMARY MANNING": manning(), "2026 SUMMARY TRAINREL": rev }, name: "REVISED DG3 SGA EXCEL SEPTEMBER'26.xlsx" }), env, { email: "r" }));
+  assert.equal(c.training_written, 3);
+  assert.equal(d.prepare("SELECT total FROM training_cost WHERE year=2026 AND month=9").get().total, 5);
+  assert.equal(d.prepare("SELECT total FROM training_cost WHERE year=2026 AND month=2").get().total, 1018.83, "February's own month, which September's sheet does not name, stays");
 });

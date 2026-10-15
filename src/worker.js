@@ -15,7 +15,7 @@ import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
-import { pickSgaSheets, parseSgaManning, parseSgaTraining, summarizeSga, SGA_COL_KEYS } from "./sga.js";
+import { pickSgaSheets, parseSgaManning, parseSgaTraining, summarizeSga, sgaPeriodOf, SGA_COL_KEYS } from "./sga.js";
 import * as XLSX from "xlsx";
 import { runSync, syncConfigured, syncAllowed } from "./sharepoint_sync.js";
 import { assembleInbox } from "./sp_inbox.js";
@@ -1467,26 +1467,21 @@ async function ensureSgaImpl(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_file (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, sga_no TEXT, sga_date TEXT, file_name TEXT, file_hash TEXT, rows INTEGER, total REAL, grand_total REAL, training_months INTEGER, loaded_by TEXT, loaded_at TEXT, source TEXT)").run(),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_line (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, ref TEXT, ship_code TEXT, seq INTEGER, sga_no TEXT, crew_name TEXT, vessel TEXT, brand TEXT, id_number TEXT, nationality TEXT, " + SGA_COL_KEYS.map((k) => k + " REAL DEFAULT 0").join(", ") + ", amount REAL, cols_sum REAL)").run(),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS training_cost (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, rental REAL DEFAULT 0, utilities REAL DEFAULT 0, hotel REAL DEFAULT 0, air REAL DEFAULT 0, other REAL DEFAULT 0, bank_charge REAL DEFAULT 0, total REAL, summary_only INTEGER DEFAULT 0)").run(),
+    // `other` (15 Oct 2026, migrations/0027): TDG's OTHER / PORT AGENT EXPENSE column. Same wave; a table that has it answers with an error we ignore.
+    env.DB.prepare("ALTER TABLE sga_line ADD COLUMN other REAL DEFAULT 0").run().catch(() => null),
   ]);
-}
-// The file's period = the (year, month) most of its refs carry; a workbook whose rows name no period is refused.
-function sgaPeriod(records) {
-  const n = {};
-  for (const r of records) if (r.year && r.month) { const k = r.year + "-" + r.month; n[k] = (n[k] || 0) + 1; }
-  const best = Object.entries(n).sort((a, b) => b[1] - a[1])[0];
-  if (!best) return null;
-  const [y, m] = best[0].split("-").map(Number);
-  return { year: y, month: m, rows: best[1], of: records.length };
 }
 // What one workbook holds, parsed and judged — the dry-run and the apply share it.
 async function sgaStage(env, b) {
   const sheets = b.sheets || {};
   const pick = pickSgaSheets(sheets);
   if (!pick.manning) return { error: "no_manning_sheet", detail: "The workbook has no SUMMARY MANNING sheet. Drop TDG's 'DG3 SGA EXCEL <month>.xlsx'." };
-  const manning = parseSgaManning(sheets[pick.manning]);
+  // The month is the FILE's (its name, else its month folder) — the ref's "09" is TDG's client code, not the month
+  // (February 2026 staged as September until 15 Oct 2026). A file that says no month is refused (the file says its own date, §10c).
+  const period = sgaPeriodOf(b.name, b.path);
+  if (!period) return { error: "no_period", detail: "The file name carries no month — expected 'DG3 SGA EXCEL <MONTH> <YEAR>.xlsx' (or the month folder's path)." };
+  const manning = parseSgaManning(sheets[pick.manning], period);
   if (manning.error) return { error: "no_header", detail: "SUMMARY MANNING has no REF. NO. header row the console can read." };
-  const period = sgaPeriod(manning.records);
-  if (!period) return { error: "no_period", detail: "No row carries a TDG ref like ADV-2026-09-39-01, so the month is unknown." };
   const training = pick.training ? parseSgaTraining(sheets[pick.training]) : [];
   const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
   const ix = buildCrewIndex(crew);
@@ -1527,21 +1522,33 @@ async function applySgaWorkbook(env, b, st, by, source) {
     stmts.push(ins.bind(fileId + "_" + String(i).padStart(3, "0"), fileId, l.year || st.period.year, l.month || st.period.month, l.ref, l.ship_code, l.seq, l.sga_no, l.crew_name, l.vessel, l.brand, l.id_number, l.nationality,
       ...SGA_COL_KEYS.map((k) => l[k] || 0), l.amount, l.cols_sum));
   });
-  const trYears = [...new Set(trMonths.map((t) => t.year))];
-  for (const y of trYears) stmts.push(env.DB.prepare("DELETE FROM training_cost WHERE year=? AND summary_only=0").bind(y));
-  const sumYears = [...new Set(st.training.filter((t) => t.summary_only).map((t) => t.year))];
-  for (const y of sumYears) stmts.push(env.DB.prepare("DELETE FROM training_cost WHERE year=? AND summary_only=1 AND year NOT IN (SELECT DISTINCT year FROM training_cost WHERE summary_only=0)").bind(y));
+  // Training months are replaced ONE MONTH AT A TIME, and a NEWER bill's figure stands (15 Oct 2026): the first cut deleted
+  // the whole year the sheet named, so loading February's workbook after September's would have wiped March–September.
+  // Rules per month: this file's own category detail beats its summary row; a summary row never replaces category detail;
+  // detail always replaces a summary; otherwise the figure written by a LATER bill (sga_file period) stands.
+  const P = st.period.year * 12 + st.period.month;
+  const existing = (await env.DB.prepare("SELECT t.year, t.month, t.summary_only, f.year fy, f.month fm FROM training_cost t LEFT JOIN sga_file f ON f.id = t.file_id").all().catch(() => ({ results: [] }))).results;
+  const exist = new Map(existing.map((e) => [e.year + "-" + e.month, e]));
+  const detailMonths = new Set(trMonths.map((t) => t.year + "-" + t.month));
   const tins = env.DB.prepare("INSERT OR REPLACE INTO training_cost (id, file_id, year, month, rental, utilities, hotel, air, other, bank_charge, total, summary_only) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+  let trWritten = 0;
   for (const t of st.training) {
-    // a category breakdown always beats a summary-only figure for the same month (the 2025 block vs a 2025 workbook's own detail)
-    if (t.summary_only && trMonths.some((x) => x.year === t.year && x.month === t.month)) continue;
+    const k = t.year + "-" + t.month;
+    if (t.summary_only && detailMonths.has(k)) continue;
+    const e = exist.get(k);
+    if (e) {
+      if (t.summary_only && !e.summary_only) continue;
+      const eP = e.fy && e.fm ? e.fy * 12 + e.fm : 0;
+      if (!(!t.summary_only && e.summary_only) && eP > P) continue;
+    }
+    trWritten++;
     stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
   }
   stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
   await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length, (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : ""));
-  return { ok: true, period: st.period, applied: st.lines.length, training: trMonths.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
+  return { ok: true, period: st.period, applied: st.lines.length, training: trMonths.length, training_written: trWritten, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
 }
 
 // ---- SharePoint → console, automatic (src/sharepoint_sync.js, docs/SHAREPOINT_SYNC.md) ----
@@ -1560,7 +1567,7 @@ function syncDeps(env) {
       seen: async (ids) => { const m = new Map(); if (!ids.length) return m; const r = await env.DB.prepare("SELECT item_id, etag FROM sp_sync WHERE status='ok' AND item_id IN (" + ids.map(() => "?").join(",") + ") ORDER BY at").bind(...ids).all(); for (const x of r.results) m.set(x.item_id, x.etag); return m; },
       record: async (r) => env.DB.prepare("INSERT INTO sp_sync (id,item_id,path,name,etag,modified,kind,year,month,status,detail,at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind("sp_" + crypto.randomUUID(), r.item_id, r.path, r.name, r.etag, r.modified, r.kind, r.year, r.month, r.status, r.detail, r.at).run(),
     },
-    applySga: async (sheets, meta) => { const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source }; const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail }; return applySgaWorkbook(env, b, st, meta.by, meta.source); },
+    applySga: async (sheets, meta) => { const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source, path: meta.path || null }; const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail }; return applySgaWorkbook(env, b, st, meta.by, meta.source); },
     applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
   };
 }
@@ -1621,7 +1628,7 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
     const ids = rows.map((r) => r.id);
     const mark = async (status, detail) => { for (let i = 0; i < ids.length; i += 50) await env.DB.prepare("UPDATE sp_inbox SET status=?, detail=?, applied_at=? WHERE id IN (" + ids.slice(i, i + 50).map(() => "?").join(",") + ")").bind(status, String(detail || "").slice(0, 2000), now, ...ids.slice(i, i + 50)).run(); };
     try {
-      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup" };
+      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup", path: h.path };
       const res = h.kind === "sga" ? await deps.applySga(sheets, meta) : h.kind === "travel" ? await deps.applyTravel(sheets, +h.year, meta) : { error: "unknown_kind", detail: h.kind };
       const bad = res && res.error;
       await deps.db.record({ ...rec, status: bad ? "error" : "ok", detail: JSON.stringify(res || null).slice(0, 2000) });

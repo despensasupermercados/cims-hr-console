@@ -3,7 +3,7 @@
 // month to month (September 2026 gained ID NUMBER / NATIONALITY / HMO).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSgaManning, parseSgaTraining, summarizeSga, pickSgaSheets, sgaManningHeader, REF_RE } from "../src/sga.js";
+import { parseSgaManning, parseSgaTraining, summarizeSga, pickSgaSheets, sgaManningHeader, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf } from "../src/sga.js";
 
 const H26 = ["", "REF. NO.", "", "ID NUMBER", "NATIONALITY", "CREW", "CREW", "VESSELS", "", "", "", "HOME ALLOTMENT", "FINAL PAY", "MANNING FEE/ AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRANSITION FEE", "TRAVEL /PLANEFARE", "MEDICAL", "MEDICAL REPAT", "VISA", "HOTEL", "TRAVEL INSURANCE", "REIMBURSEMENT", "FUNERAL EXPENSE", "TRANSPORTATION", "HMO", "CASH ADVANCE", "TRANSPORTATION EXPENSE", "REFUND", "CASH ADVANCE", "BANK CHARGE / COURIER", "AMOUNT"];
 const row = (ref, id, nat, name, vessel, vals) => { const r = new Array(H26.length).fill(""); r[1] = ref; r[3] = id; r[4] = nat; r[5] = name; r[6] = name; r[7] = vessel; Object.entries(vals).forEach(([k, v]) => { r[H26.indexOf(k)] = v; }); return r; };
@@ -25,9 +25,22 @@ const SEPT = [
   [], ["", "", "", "", "", "", "", "", "GRAND TOTAL ", "", "", "$4,664.39", "$0.00", "$281.67", "", "", "", "", "$614.00", "$132.00", "", "$213.18", "$137.00", "", "", "", "", "$352.92", "", "", "($50.00)", "", "$15.00", "$7,022.92"],
 ];
 
-test("the ref carries ship code, year, month, SGA number and sequence", () => {
+test("the ref carries ship code, year, TDG's constant 09, SGA number and sequence — the 09 is NOT the month", () => {
   const m = REF_RE.exec("SYS-2026-09-39-02");
   assert.deepEqual(m.slice(1), ["SYS", "2026", "09", "39", "02"]);
+  // 15 Oct 2026: February 2026's refs read ADV-2026-09-32-01 — the month comes from the file's name or folder
+  assert.deepEqual(sgaPeriodFromName("DG3 SGA EXCEL FEBRUARY 2026.xlsx"), { year: 2026, month: 2, source: "name" });
+  assert.deepEqual(sgaPeriodFromName("REVISED DG3 SGA EXCEL JULY'2026.xlsx"), { year: 2026, month: 7, source: "name" });
+  assert.deepEqual(sgaPeriodFromName("DG3 SGA EXCEL SEPTEMBER'26.xlsx"), { year: 2026, month: 9, source: "name" });
+  assert.deepEqual(sgaPeriodFromName("DG3 SGA EXCEL MARCH'26.xlsx"), { year: 2026, month: 3, source: "name" });
+  assert.equal(sgaPeriodFromName("DG3 SGA EXCEL.xlsx"), null); assert.equal(sgaPeriodFromName("TRAINING RELATED COSTS.pdf"), null);
+  assert.deepEqual(sgaPeriodFromPath("1. ACCOUNTING/SGA/2026/02 February 2026"), { year: 2026, month: 2, source: "path" });
+  assert.deepEqual(sgaPeriodFromPath("1. ACCOUNTING/SGA/2025/09 September/"), { year: 2025, month: 9, source: "path" });
+  assert.equal(sgaPeriodFromPath("1. ACCOUNTING/Travel Expenses Crew"), null);
+  assert.deepEqual(sgaPeriodOf("DG3 SGA EXCEL.xlsx", "1. ACCOUNTING/SGA/2026/02 February 2026"), { year: 2026, month: 2, source: "path" });
+  // the February 2026 header: SETTLEMENT TRANSPORTATION folds into transport, OTHER is its own column
+  const h = sgaManningHeader([["", "REF. NO.", "", "CREW", "CREW", "VESSELS", "", "", "", "HOME ALLOTMENT", "FINAL PAY", "MANNING FEE/ AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRANSITION FEE", "TRAVEL /PLANEFARE", "MEDICAL", "MEDICAL REPAT", "VISA", "HOTEL", "TRAVEL INSURANCE", "REIMBURSEMENT", "FUNERAL EXPENSE", "TRANSPORTATION", "SETTLEMENT TRANSPORTATION", "CASH ADVANCE", "HMO INSURANCE", "REFUND", "OTHER", "BANK CHARGE / COURIER", "AMOUNT"]]);
+  assert.deepEqual(h.cols.transport, [24, 25]); assert.deepEqual(h.cols.other, [29]); assert.deepEqual(h.cols.bank_charge, [30]);
   assert.ok(REF_RE.test("ADV-2025-09-27-01"), "a 2025 SGA number");
   assert.equal(REF_RE.test("Bank Charge"), false);
 });
@@ -46,7 +59,7 @@ test("the header row is found by text and the cost columns by their words, whate
 });
 
 test("parseSgaManning: one record per crew row with brand, every cost column, the ref split, and the OTHERS line apart", () => {
-  const { meta, records, others, grand_total } = parseSgaManning(SEPT);
+  const { meta, records, others, grand_total } = parseSgaManning(SEPT, { year: 2026, month: 9 });
   assert.deepEqual(meta, { date: "October 01, 2026", sgaNo: "39-A" });
   assert.equal(records.length, 5);
   const caag = records.find((r) => /CAAG/.test(r.crew_name));
@@ -95,7 +108,7 @@ test("parseSgaTraining reads the TRAINREL blocks: 2026 by category, 2025 as the 
 });
 
 test("summarizeSga and pickSgaSheets", () => {
-  const { records } = parseSgaManning(SEPT);
+  const { records } = parseSgaManning(SEPT, { year: 2026, month: 9 });
   const s = summarizeSga(records);
   assert.equal(s.rows, 5); assert.equal(s.crew, 5);
   assert.equal(s.byMonth["2026-09"], s.total);

@@ -116,7 +116,7 @@ test("runSync: loads what is new, skips what is on file by eTag, records one fai
   assert.equal(r.errors.length, 1); assert.match(r.errors[0].error, /graph_500/); assert.ok(r.errors[0].path.includes("AUGUST"));
   assert.deepEqual(applied.map((a) => a[0]), ["sga"]);
   assert.deepEqual(applied[0][1], ["2026 SUMMARY TRAINREL", "SUMMARY MANNING"]);
-  assert.deepEqual(applied[0][2], { name: "REVISED DG3 SGA EXCEL SEPTEMBER'26.xlsx", hash: "e2", source: "sharepoint", by: "sharepoint-sync" });
+  assert.deepEqual(applied[0][2], { name: "REVISED DG3 SGA EXCEL SEPTEMBER'26.xlsx", hash: "e2", source: "sharepoint", by: "sharepoint-sync", path: "1. ACCOUNTING/SGA/2026/09 September 2026/REVISED DG3 SGA EXCEL SEPTEMBER'26.xlsx" });
   assert.deepEqual(db.records.map((x) => [x.item_id, x.status]), [["aug-plain", "error"], ["sep-rev", "ok"]]);
   assert.equal(db.records[1].etag, "e2"); assert.equal(db.records[1].month, 9);
 });
