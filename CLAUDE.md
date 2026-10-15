@@ -1088,7 +1088,9 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   bottle / filter / supply unit is a part; parts = the rest. Only products with dollars are drawn; each folds open on its
   8 biggest items. **The Parts Portal is NOT added**: its orders land in OBP's ledger once received (Edge's 4 Aug sensors =
   EGMANUAL009, 11 Sep), so adding both double counts, and it carries no paper. No HON read = no card, never a zero.
-  OBP prices are DG3's cost data and the audit site has no login (open mode): anyone with the address sees them.
+  **Decided, Miguel 16 Oct 2026** ("i am ok with the prices being shown" / "yes"): OBP's prices (DG3's cost) stay on the
+  card on the open audit site, no login needed; "this contract" = received in OBP since the sign-on, to today (a delivery
+  days after the sign-on, likely ordered by the predecessor, counts for the contract it arrived in). Do not re-raise.
   Pinned by `test/ship_supply.test.js`, `test/audit_routes.test.js`.
 - **Dexter's grade** (Miguel, 15 Oct 2026: the audit replaces "Communication (Rita)" on the Score Card; "if it's not [given]
   .. make from the final scores an average"; "Round down"). Once a request's documents are in, Dexter grades Inventory,
