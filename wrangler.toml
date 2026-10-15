@@ -72,6 +72,11 @@ DEPLOY_TO = "maryjoy.manzanares@dg3.com"
 SP_DRIVE_ID = "b!fl3m7gvQAUWsJkPOuwz3xeG86ZS15I9Pnk3LJerabezIxjsfTdIgSY0jSMrznSmH"
 SP_SGA_PATH = "1. ACCOUNTING/SGA"
 SP_TRAVEL_PATH = "1. ACCOUNTING/Travel Expenses Crew"
+# The mail intake (15 Oct 2026, src/mail_intake.js): finance emails TDG's SGA workbook (or Rita's travel workbook) to this
+# address — an Email Routing rule sends it to this Worker — and the attachment loads through the inbox. Only these senders
+# feed the console (addresses or domains, comma-separated); anyone else's workbook is held until added here.
+MAIL_SGA_TO = "sga@cims.work"
+SGA_MAIL_SENDERS = "dg3.com"
 # Printshop Audit (14 Oct 2026): who receives the pre-visit assessment and the filed audit. Miguel's list, verbatim
 # ("he can go to Ray, Rolando, Ogi, Jonathan, and myself"). Never guessed in code; unset = the email is not sent.
 AUDIT_TO = "Ray.Guerra@dg3.com, Rolando.Abellan@dg3.com, Ohji.Miranda@dg3.com, Jonathan.Alonzo@dg3.com, Miguel.Sanmartin@dg3.com"

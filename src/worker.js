@@ -17,8 +17,10 @@ import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_B
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, SGA_COL_KEYS } from "./sga.js";
 import * as XLSX from "xlsx";
-import { runSync, syncConfigured, syncAllowed } from "./sharepoint_sync.js";
+import { runSync, syncConfigured, syncAllowed, sheetsOf, WANT_SGA, WANT_TRAVEL } from "./sharepoint_sync.js";
 import { assembleInbox } from "./sp_inbox.js";
+import PostalMime from "postal-mime";
+import { isIntakeMail, intakeMail } from "./mail_intake.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
@@ -380,6 +382,12 @@ if (p === "/api/health/send" && request.method === "POST") { await ensureRegistr
   // SMTP accept fast and lets the summarise+file run in the background. Defensive: never throw (that bounces).
   async email(message, env, ctx) {
     env = Object.assign({}, env, { MAILER: guardMailer(env.MAILER, env.MAIL_ONLY_TO) });
+    // THE MAIL INTAKE (15 Oct 2026, src/mail_intake.js): mail for sga@cims.work carries TDG's bill or Rita's workbook as an
+    // attachment; it goes to the inbox (sp_inbox) and loads through the one apply path — never to the intel pipeline.
+    if (isIntakeMail(message, env)) {
+      try { await intakeMailToInbox(env, message, ctx); } catch (e) { console.error("mail_intake_error", (e && e.stack) || e); }
+      return;
+    }
     try {
       await ensureIntel(env);
       let raw = "";
@@ -1613,14 +1621,16 @@ async function apiSharePointSync(env, session) {
   return json(report);
 }
 async function apiSharePointStatus(env) {
-  await Promise.all([ensureSpSync(env), ensureSpInbox(env)]);
-  const [recentRes, inboxRes] = await Promise.all([
+  await Promise.all([ensureSpSync(env), ensureSpInbox(env), ensureMailIntake(env)]);
+  const [recentRes, inboxRes, mailRes] = await Promise.all([
     env.DB.prepare("SELECT path, name, kind, year, month, status, detail, at FROM sp_sync ORDER BY at DESC LIMIT 20").all(),
     env.DB.prepare("SELECT status, COUNT(DISTINCT file_key) files, MAX(at) last_at FROM sp_inbox GROUP BY status").all(),
+    env.DB.prepare("SELECT from_addr, subject, allowed, files_json, ignored_json, outcome, received_at FROM mail_intake ORDER BY received_at DESC LIMIT 10").all(),
   ]);
   const inbox = { pending: 0, ok: 0, error: 0, last_at: null };
   for (const r of inboxRes.results) { inbox[r.status] = r.files; if (!inbox.last_at || r.last_at > inbox.last_at) inbox.last_at = r.last_at; }
-  return json({ configured: syncConfigured(env), allowed: syncAllowed(env), drive: env.SP_DRIVE_ID || null, sgaPath: env.SP_SGA_PATH || null, travelPath: env.SP_TRAVEL_PATH || null, recent: recentRes.results, inbox });
+  return json({ configured: syncConfigured(env), allowed: syncAllowed(env), drive: env.SP_DRIVE_ID || null, sgaPath: env.SP_SGA_PATH || null, travelPath: env.SP_TRAVEL_PATH || null, recent: recentRes.results, inbox,
+    mail: { to: env.MAIL_SGA_TO || "sga@cims.work", senders: env.SGA_MAIL_SENDERS || "dg3.com", recent: mailRes.results.map((m) => ({ ...m, files: JSON.parse(m.files_json || "[]"), ignored: JSON.parse(m.ignored_json || "[]"), files_json: undefined, ignored_json: undefined })) } });
 }
 
 // ---- The SharePoint INBOX (src/sp_inbox.js; Miguel, 15 Oct 2026: "I dont want rita to be dropping items") ----
@@ -1670,6 +1680,31 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
   }
   if (report.loaded.length || report.errors.length) await logData(env, "sharepoint inbox", report.loaded.length, "loaded " + report.loaded.length + ", errors " + report.errors.length + ", waiting " + report.waiting);
   return report;
+}
+// ---- THE MAIL INTAKE (src/mail_intake.js) ----
+// Finance emails the workbook to MAIL_SGA_TO; the attachment's sheets go into sp_inbox like the morning pickup's, the
+// receipt into mail_intake, and the inbox is applied at once (the hourly cron is the safety net). A sender not on
+// SGA_MAIL_SENDERS is written `held` — nothing loads until Miguel adds the sender (the receipt names it).
+const ensureMailIntake = memoEnsure(ensureMailIntakeImpl);
+async function ensureMailIntakeImpl(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS mail_intake (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, message_id TEXT, allowed INTEGER, files_json TEXT, ignored_json TEXT, outcome TEXT, received_at TEXT)").run();
+}
+const INBOX_COLS = ["id", "file_key", "kind", "year", "month", "item_id", "name", "path", "modified", "sheet", "part", "parts", "file_parts", "rows_json", "written_by", "at", "status"];
+async function intakeMailToInbox(env, message, ctx) {
+  await Promise.all([ensureMailIntake(env), ensureSpInbox(env)]);
+  const raw = await new Response(message.raw).arrayBuffer();
+  const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
+  const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now() });
+  const ins = env.DB.prepare("INSERT OR REPLACE INTO sp_inbox (" + INBOX_COLS.join(",") + ") VALUES (" + INBOX_COLS.map(() => "?").join(",") + ")");
+  const stmts = [];
+  for (const f of r.files) for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  const outcome = !r.files.length ? "no_workbook" : r.allowed ? "queued" : "held";
+  await env.DB.prepare("INSERT INTO mail_intake (id, from_addr, to_addr, subject, message_id, allowed, files_json, ignored_json, outcome, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
+    .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(r.files.map(({ inbox, ...f }) => f)), JSON.stringify(r.ignored), outcome, r.at).run();
+  await logData(env, "mail intake (" + r.from + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
+  if (outcome === "queued") { const run = applyInbox(env).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
+  return { outcome, files: r.files.map(({ inbox, ...f }) => f), ignored: r.ignored, from: r.from };
 }
 async function apiInboxApply(env, session) {
   const report = await applyInbox(env);
