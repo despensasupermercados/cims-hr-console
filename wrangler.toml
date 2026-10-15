@@ -65,6 +65,13 @@ AUTO_SEND_DRY_RUN = "false"
 # flights). Unset = the Deploy button refuses (`no_recipient`); it never defaults. DEPLOY_CC
 # defaults to Rita in code. Lives here, not the dashboard, so it survives every deploy.
 DEPLOY_TO = "maryjoy.manzanares@dg3.com"
+# SharePoint → console (15 Oct 2026, docs/SHAREPOINT_SYNC.md). The site's Documents drive and the two folders the Worker
+# reads every hour. The Graph identity itself is NOT here: GRAPH_TENANT_ID and GRAPH_CLIENT_ID are set in the dashboard
+# (keep_vars keeps them) and GRAPH_CLIENT_SECRET is a Secret — until all four exist the sync does nothing and the Data
+# page says "not configured". Staging never carries them.
+SP_DRIVE_ID = "b!fl3m7gvQAUWsJkPOuwz3xeG86ZS15I9Pnk3LJerabezIxjsfTdIgSY0jSMrznSmH"
+SP_SGA_PATH = "1. ACCOUNTING/SGA"
+SP_TRAVEL_PATH = "1. ACCOUNTING/Travel Expenses Crew"
 # Printshop Audit (14 Oct 2026): who receives the pre-visit assessment and the filed audit. Miguel's list, verbatim
 # ("he can go to Ray, Rolando, Ogi, Jonathan, and myself"). Never guessed in code; unset = the email is not sent.
 AUDIT_TO = "Ray.Guerra@dg3.com, Rolando.Abellan@dg3.com, Ohji.Miranda@dg3.com, Jonathan.Alonzo@dg3.com, Miguel.Sanmartin@dg3.com"

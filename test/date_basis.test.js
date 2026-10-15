@@ -49,6 +49,8 @@ test("New York (wall-clock) basis is used by exactly these functions", () => {
   assert.deepEqual(actual, [
     "apiMovementsPreview", "apiMovementsSend", "apiRotationUpcoming",
     "mariaExecTool", "maybeExportBackup", "maybeSendMovements", "scheduled",
+    // 2026-10-15: the SharePoint sync fires from the hourly cron and picks the year folders to read by the wall-clock day.
+    "syncDeps",
   ], "a function changed its date basis to New York (or stopped using it) — was that deliberate?");
 });
 

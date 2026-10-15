@@ -669,6 +669,18 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   airfare for trainees, a bar per month, the table by category with last year beside it, and the bills on file; a
   person's page lists their lines on the bill (month, ship, TDG ref, the travel columns, allotment, fees, HMO, total
   billed — allotment and fees are shown because TDG bills them there; they are not travel and never enter the budget).
+- **THE SHAREPOINT SYNC** (PR 3, same day — Miguel: "I want all this to be automatic"; `src/sharepoint_sync.js`, pinned
+  by `test/sharepoint_sync.test.js` with a fake Graph and a real SheetJS workbook; setup in `docs/SHAREPOINT_SYNC.md`).
+  Every hour (`maybeSyncSharePoint` in `scheduled`) the Worker lists `SP_SGA_PATH/<year>/<NN month>/` and `SP_TRAVEL_PATH`
+  on the site's drive through Microsoft Graph, picks the month's SGA workbook (**REVISED beats plain**, PDFs never) and the
+  year's `UPDATED - Travel Expenses` workbook, downloads what has a **new eTag**, parses it with SheetJS in the Worker
+  (`xlsx`, bundled) into the Upload page's shape, and loads it through **the same two apply paths as drag-and-drop**
+  (`applySgaWorkbook`, `applyTravelYear` — one code path each, `source = sharepoint`). Every attempt is on `sp_sync`;
+  one failure skips that file and the rest proceed. `POST /api/sharepoint/sync` runs it now, `GET /api/sharepoint/status`
+  says whether it is configured and lists the last attempts. **It runs only when the identity exists** (`GRAPH_TENANT_ID`,
+  `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET` as a Secret, `SP_DRIVE_ID`) and **never on staging** (`MAIL_ONLY_TO` set). The
+  app registration, `Sites.Selected` on the one site, and the secret are Miguel's / IT's to create (§7) — the agent never
+  sees them. Until then drag-and-drop is the path; nothing else changes.
 - Not money (§1). The Travel tab is a reference read (§10b), never an invoice source.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026

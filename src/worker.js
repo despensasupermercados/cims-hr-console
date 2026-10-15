@@ -16,6 +16,8 @@ import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, summarizeSga, SGA_COL_KEYS } from "./sga.js";
+import * as XLSX from "xlsx";
+import { runSync, syncConfigured, syncAllowed } from "./sharepoint_sync.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
@@ -277,6 +279,8 @@ export default {
         if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
         if (p === "/api/sga")        return apiSga(env);
         if (p === "/api/sga/import" && request.method === "POST") return apiSgaImport(request, env, session);
+        if (p === "/api/sharepoint/status") return apiSharePointStatus(env);
+        if (p === "/api/sharepoint/sync" && request.method === "POST") return apiSharePointSync(env, session);
         if (p === "/api/bonus/crew")   return apiBonusCrew(env, url);
         if (p === "/api/bonus/commit" && request.method === "POST") return apiBonusCommit(request, env, session);
         if (p === "/api/contracts")    return apiContracts(env);
@@ -395,6 +399,8 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
     // Printshop Audit sweep: 12-hour reminder, 24-hour overdue note to the auditor, reads that did not finish (audit_request.js).
     if (ctx && ctx.waitUntil) ctx.waitUntil(_audit.sweep(env).catch(function (e) { console.error("audit_sweep", (e && e.stack) || e); }));
     if (ctx && ctx.waitUntil) ctx.waitUntil(projectFutureLegs(env, { today: nyDateStr() }).catch(function (e) { console.error("leg_projection", (e && e.stack) || e); }));
+    // SharePoint → console (15 Oct 2026): TDG's SGA workbooks and Rita's travel workbook, when the Graph identity exists.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSyncSharePoint(env).catch(function (e) { console.error("sharepoint_sync", (e && e.stack) || e); }));
   }
 };
 
@@ -1431,10 +1437,15 @@ async function apiTravelImport(request, env, session) {
     const unmatched = unmatchedTravel(annotateTravel(recs, crew));
     return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched });
   }
+  return json(await applyTravelYear(env, recs, year, (session && session.email) || "?", "upload"));
+}
+// The ONE path that replaces a travel year — the Upload page and the SharePoint sync both come here (§10j).
+async function applyTravelYear(env, recs, year, by, source) {
+  await ensureTravel(env);
   await env.DB.prepare("DELETE FROM travel_expense WHERE year=?").bind(year).run();
   if (recs.length) await insertTravel(env, recs, year);
-  await logData(env, "travel_expense (" + year + ", by " + ((session && session.email) || "?") + ")", recs.length, "replaced year " + year);
-  return json({ ok: true, year, applied: recs.length });
+  await logData(env, "travel_expense (" + year + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", recs.length, "replaced year " + year);
+  return { ok: true, year, applied: recs.length };
 }
 
 // ---- TDG's Statement of General Account (CLAUDE.md §10j; Miguel, 15 Oct 2026: the SGA is the AUDITED number) ----
@@ -1492,8 +1503,15 @@ async function apiSgaImport(request, env, session) {
     return json({ dryRun: true, period: st.period, meta: st.meta, rows: st.lines.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles,
       byBrand: st.summary.byBrand, byCat: st.summary.byCat, others: st.others, training: st.training, trainingMonths: trMonths.length, unmatched: st.unmatched, prior: st.prior, sheets: st.sheets });
   }
+  return json(await applySgaWorkbook(env, b, st, (session && session.email) || "?", b.source || "upload"));
+}
+// The ONE path that loads a month of the bill — the Upload page and the SharePoint sync both come here (§10j).
+// `st` is sgaStage's result (staged once, applied once); `b` carries the file's name / hash for sga_file.
+async function applySgaWorkbook(env, b, st, by, source) {
+  await ensureSga(env);
+  if (!st) { st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail }; }
+  const trMonths = st.training.filter((t) => !t.summary_only);
   const fileId = "sga_" + st.period.year + "_" + String(st.period.month).padStart(2, "0") + "_" + crypto.randomUUID().slice(0, 8);
-  const by = (session && session.email) || "?";
   const now = new Date().toISOString();
   const stmts = [
     env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=?").bind(st.period.year, st.period.month),
@@ -1515,10 +1533,50 @@ async function apiSgaImport(request, env, session) {
     stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
   }
   stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summary.total, st.grand_total, trMonths.length, by, now, b.source || "upload"));
+    .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
-  await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + ")", st.lines.length, (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", training " + trMonths.length + " months");
-  return json({ ok: true, period: st.period, applied: st.lines.length, training: trMonths.length, total: st.summary.total, replaced: !!st.prior, file_id: fileId });
+  await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length, (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : ""));
+  return { ok: true, period: st.period, applied: st.lines.length, training: trMonths.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
+}
+
+// ---- SharePoint → console, automatic (src/sharepoint_sync.js, docs/SHAREPOINT_SYNC.md) ----
+// Runs in the hourly cron when the Graph identity is configured (never on staging); POST /api/sharepoint/sync runs it now.
+// A file that changed on SharePoint (new eTag) loads again through the same apply paths as drag-and-drop; a file already
+// loaded is skipped; one failure never stops the rest. Every attempt is on sp_sync; the Data page shows the last ones.
+const ensureSpSync = memoEnsure(ensureSpSyncImpl);
+async function ensureSpSyncImpl(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS sp_sync (id TEXT PRIMARY KEY, item_id TEXT, path TEXT, name TEXT, etag TEXT, modified TEXT, kind TEXT, year INTEGER, month INTEGER, status TEXT, detail TEXT, at TEXT)").run();
+}
+function syncDeps(env) {
+  return {
+    fetch: (u, o) => fetch(u, o), now: Date.now(), today: nyDateStr(), XLSX,
+    db: {
+      // the eTag of the last OK load per item — a changed file (new eTag) is loaded again, an unchanged one is skipped
+      seen: async (ids) => { const m = new Map(); if (!ids.length) return m; const r = await env.DB.prepare("SELECT item_id, etag FROM sp_sync WHERE status='ok' AND item_id IN (" + ids.map(() => "?").join(",") + ") ORDER BY at").bind(...ids).all(); for (const x of r.results) m.set(x.item_id, x.etag); return m; },
+      record: async (r) => env.DB.prepare("INSERT INTO sp_sync (id,item_id,path,name,etag,modified,kind,year,month,status,detail,at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind("sp_" + crypto.randomUUID(), r.item_id, r.path, r.name, r.etag, r.modified, r.kind, r.year, r.month, r.status, r.detail, r.at).run(),
+    },
+    applySga: async (sheets, meta) => { const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source }; const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail }; return applySgaWorkbook(env, b, st, meta.by, meta.source); },
+    applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
+  };
+}
+async function maybeSyncSharePoint(env) {
+  if (!syncAllowed(env)) return null;
+  await Promise.all([ensureSpSync(env), ensureSga(env), ensureTravel(env)]);
+  const report = await runSync(env, syncDeps(env));
+  if (report.loaded.length || report.errors.length) await logData(env, "sharepoint sync", report.loaded.length, "loaded " + report.loaded.length + ", skipped " + report.skipped + ", errors " + report.errors.length);
+  return report;
+}
+async function apiSharePointSync(env, session) {
+  if (!syncConfigured(env)) return json({ error: "not_configured", detail: "The Graph identity is not set (GRAPH_TENANT_ID / GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET / SP_DRIVE_ID) — docs/SHAREPOINT_SYNC.md." }, 400);
+  if (!syncAllowed(env)) return json({ error: "staging", detail: "The sync never runs on staging." }, 400);
+  const report = await maybeSyncSharePoint(env);
+  try { await env.DB.prepare("INSERT INTO activity_log (id, at, user_id, action, detail) VALUES (?,?,?,?,?)").bind("act_" + crypto.randomUUID(), new Date().toISOString(), (session && session.email) || "?", "sharepoint_sync", JSON.stringify({ planned: report.planned, loaded: report.loaded.length, skipped: report.skipped, errors: report.errors.length })).run(); } catch {}
+  return json(report);
+}
+async function apiSharePointStatus(env) {
+  await ensureSpSync(env);
+  const rows = (await env.DB.prepare("SELECT path, name, kind, year, month, status, detail, at FROM sp_sync ORDER BY at DESC LIMIT 20").all()).results;
+  return json({ configured: syncConfigured(env), allowed: syncAllowed(env), drive: env.SP_DRIVE_ID || null, sgaPath: env.SP_SGA_PATH || null, travelPath: env.SP_TRAVEL_PATH || null, recent: rows });
 }
 // The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
 async function apiSga(env) {

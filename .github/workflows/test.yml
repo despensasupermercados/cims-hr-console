@@ -13,4 +13,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+      # 15 Oct 2026: the Worker gained its first runtime dependency (xlsx, the SharePoint sync's parser), so the
+      # tests need node_modules — before that nothing was installed here and `npm test` ran on bare Node.
+      - run: npm ci
       - run: npm test
