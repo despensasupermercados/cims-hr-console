@@ -206,6 +206,7 @@ test("the cron calls applyInbox and the pickup script exists and refuses a usage
   assert.match(src, /const ensureSpInbox = memoEnsure\(/, "the inbox DDL is memoized like every guard (§12)");
   assert.match(src, /if \(p === "\/api\/sharepoint\/inbox\/apply" && request\.method === "POST"\) return apiInboxApply\(env, session\);/);
   const { spawnSync } = await import("node:child_process");
-  const r = spawnSync(process.execPath, [new URL("../scripts/sp_pickup.mjs", import.meta.url).pathname, "--kind", "sga"], { encoding: "utf8" });
+  const { fileURLToPath } = await import("node:url");
+  const r = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/sp_pickup.mjs", import.meta.url)), "--kind", "sga"], { encoding: "utf8" });
   assert.equal(r.status, 1); assert.equal(JSON.parse(r.stdout.trim()).reason, "usage");
 });
