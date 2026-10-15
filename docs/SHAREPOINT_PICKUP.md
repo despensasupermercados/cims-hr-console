@@ -22,6 +22,15 @@ IT creates it, the Worker reads SharePoint itself every hour and this scheduled 
   Rita's travel workbook delivers JAN–SEPT whole and is **cut inside OCT** (its SUMMARY sheet alone is ~3,800 lines) — so
   from October her year cannot come through this route. `scripts/sp_pickup.mjs` refuses any cut or missing sheet; it never
   loads nine months as the year.
+- **Read ONE workbook at a time and retry a cut one.** The budget VARIES from call to call: eight workbooks read in parallel
+  on 15 Oct 2026 came back cut after three sheets each, February and March read whole, and January 2026 was cut at the
+  `SUMMARY MANNING` header on three separate single reads. A read that stops before `SUMMARY MANNING` is retried up to
+  three times, one at a time; a workbook that never comes through is reported as refused (`manning_cut`) — it is a line
+  in the digest, and the Graph identity is what reads it.
+- **The month is the FILE's, never the ref's.** TDG's ref `ADV-2026-09-32-01` carries a constant `09` (TDG's code for
+  DG3): February 2026's refs read `2026-09-32`. The script and the Worker take the period from the file name
+  (`DG3 SGA EXCEL FEBRUARY 2026.xlsx`, `MARCH'26`) or the month folder — always pass `--name` and `--path` as they are.
+  The `DATE` cell of older workbooks is a `=TODAY()` formula, so `sga_date` on those reads as the day of the read.
 - A large tool result is also saved by the harness under `~/.claude/projects/*/<session>/tool-results/
   mcp-Microsoft_365-read_resource-<ts>.txt` — that file is the dump to use (never retype a tool result by hand).
 

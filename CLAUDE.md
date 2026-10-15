@@ -716,6 +716,18 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   the TRAINING line items never; Rita's workbook is cut inside OCT, so from October her year does not come this way —
   stated to Miguel, with the recommendation that the bill (the audited number) carry the Travel tab and the workbook become
   the optional comparison. When the Graph identity exists: delete the scheduled task, nothing else changes.
+- **THE MONTH OF A BILL IS THE FILE'S, NEVER THE REF'S** (15 Oct 2026, found reading February's workbook through the
+  connector: its refs read `ADV-2026-09-32-01` — the `09` is TDG's constant code for DG3, the `32` the SGA number; the first
+  cut had staged February as SEPTEMBER and would have replaced September's lines). `sgaPeriodOf(name, path)`: the file name
+  (`FEBRUARY 2026`, `MARCH'26`, `JULY'2026`) else the month folder; neither → `no_period`, refused (the file says its own date,
+  §10c). Every line carries the file's period. Older workbooks' `DATE` cell is `=TODAY()`, so `sga_date` there is the read
+  day. **Training months are replaced ONE AT A TIME and a NEWER bill's figure stands** (`applySgaWorkbook`: this file's
+  detail beats its summary, a summary never replaces detail, detail replaces a summary, else the later `sga_file` period
+  wins) — the first cut deleted the whole year the sheet named, so an older workbook loaded after September's would have
+  wiped March–September. `SETTLEMENT TRANSPORTATION` folds into `transport`, `OTHER` / `PORT AGENT EXPENSE` is `other`
+  (migrations/0027). **The connector's read budget varies per call** (January 2026 was cut at the manning header on three single
+  reads; February and March came whole): workbooks are read one at a time, a cut read retried up to three times, a
+  workbook that never comes through is a digest line — the Graph identity is what reads it. Pinned by `test/sga.test.js`, `test/sga_import.test.js`.
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").

@@ -140,7 +140,7 @@ test("applyInbox loads an SGA file from the inbox through the same path as drag-
   for (const p of inboxParts(sheets)) inboxRow(d, key, meta, p);
   const r = await applyInbox(env);
   assert.equal(r.files, 1); assert.equal(r.loaded.length, 1); assert.equal(r.errors.length, 0); assert.equal(r.waiting, 0);
-  assert.equal(r.loaded[0].result.ok, true); assert.deepEqual(r.loaded[0].result.period, { year: 2026, month: 9, rows: 1, of: 1 });
+  assert.equal(r.loaded[0].result.ok, true); assert.deepEqual(r.loaded[0].result.period, { year: 2026, month: 9, source: "name" });
   assert.equal(r.loaded[0].result.reconciles, true);
   // the month is on sga_line / sga_file with the agent as the source; the training month is there
   assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE year=2026 AND month=9").get().n, 1);
