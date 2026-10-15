@@ -3,7 +3,7 @@
 // month to month (September 2026 gained ID NUMBER / NATIONALITY / HMO).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSgaManning, parseSgaTraining, summarizeSga, pickSgaSheets, sgaManningHeader, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf } from "../src/sga.js";
+import { parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, pickSgaSheets, sgaManningHeader, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf } from "../src/sga.js";
 
 const H26 = ["", "REF. NO.", "", "ID NUMBER", "NATIONALITY", "CREW", "CREW", "VESSELS", "", "", "", "HOME ALLOTMENT", "FINAL PAY", "MANNING FEE/ AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRANSITION FEE", "TRAVEL /PLANEFARE", "MEDICAL", "MEDICAL REPAT", "VISA", "HOTEL", "TRAVEL INSURANCE", "REIMBURSEMENT", "FUNERAL EXPENSE", "TRANSPORTATION", "HMO", "CASH ADVANCE", "TRANSPORTATION EXPENSE", "REFUND", "CASH ADVANCE", "BANK CHARGE / COURIER", "AMOUNT"];
 const row = (ref, id, nat, name, vessel, vals) => { const r = new Array(H26.length).fill(""); r[1] = ref; r[3] = id; r[4] = nat; r[5] = name; r[6] = name; r[7] = vessel; Object.entries(vals).forEach(([k, v]) => { r[H26.indexOf(k)] = v; }); return r; };
@@ -114,6 +114,31 @@ test("summarizeSga and pickSgaSheets", () => {
   assert.equal(s.byMonth["2026-09"], s.total);
   assert.equal(s.byBrand.royal, Math.round((1290.76 + 1552.31 + 1015.07) * 100) / 100);
   assert.equal(s.byCat.air, 614); assert.equal(s.byCat.hmo, Math.round((117.64 + 123.79 + 111.49) * 100) / 100);
-  assert.deepEqual(pickSgaSheets({ "SGA SUMMARY WITH SBP ": [], "2026 SUMMARY TRAINREL": [], "SUMMARY MANNING": [], "SOA ADV1": [] }), { manning: "SUMMARY MANNING", training: "2026 SUMMARY TRAINREL" });
-  assert.deepEqual(pickSgaSheets({ TRAINING: [], "SUMMARY MANNING ": [] }), { manning: "SUMMARY MANNING ", training: "TRAINING" });
+  assert.deepEqual(pickSgaSheets({ "SGA SUMMARY WITH SBP ": [], "2026 SUMMARY TRAINREL": [], "SUMMARY MANNING": [], "SOA ADV1": [] }), { manning: "SUMMARY MANNING", training: "2026 SUMMARY TRAINREL", summary: null });
+  assert.deepEqual(pickSgaSheets({ TRAINING: [], "SUMMARY MANNING ": [] }), { manning: "SUMMARY MANNING ", training: "TRAINING", summary: null });
+});
+
+test("parseSgaSummary reads the monthly summary sheet: both year blocks, header words with a trailing 2, crew_total = total − training − settlement", () => {
+  const rows = [
+    ["2025", "HOME ALLOTMENT", "MANNING FEE/AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRAVEL/ PLANEFARE", "MEDICAL", "VISA", "HOTEL", "PORT AGENT EXPENSE", "TRAVEL INSURANCE", "HMO INSURANCE", "REFUND", "OTHER EXPENSES", "BANK CHARGE/ COURIER", "TRAINING RELATED", "", "TOTAL"],
+    ["SEPTEMBER", " 48,795.11 ", " 3,143.83 ", " 4,245.15 ", " 900.00 ", " 1,590.00 ", " 9,583.92 ", " 553.71 ", " 831.61 ", " 223.00 ", " -   ", " -   ", " 12,978.97 ", " -   ", " -   ", " 15.00 ", " 2,356.31 ", "", " 85,216.61 "],
+    ["TOTAL", " 529,503.31 ", "", "", "", "", "", "", "", "", "", "", "", "", "", "", " 25,780.54 ", "", " 837,386.38 "], [],
+    ["2026", "HOME ALLOTMENT", "FINAL PAY", "MANNING FEE/AGENCY FEE2", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRAVEL/ PLANEFARE", "MEDICAL", "VISA", "HOTEL", "DONATION", "PORT AGENT EXPENSE", "TRAVEL INSURANCE", "HMO INSURANCE", "SETTLEMENT TRANSPO", "CASH ADVANCE", "TRANSPORTATION EXPENSE", "BANK CHARGE/ COURIER", "REFUND", "TRAINING RELATED2", "SETTLEMENT PAYMENT", "TOTAL"],
+    ["JANUARY", " 49,929.71 ", " -   ", " 3,137.00 ", " 4,178.67 ", " 840.00 ", " 1,620.00 ", " 11,991.73 ", " 924.00 ", " 948.70 ", " -   ", " -   ", " -   ", " -   ", " -   ", " -   ", " -   ", " -   ", " 15.00 ", " -   ", " 1,018.83 ", " 2,700.65 ", " 77,304.29 "],
+    ["FEBRUARY", " 51,476.60 ", " -   ", " 3,160.65 ", " 4,570.49 ", " 1,080.00 ", " 1,770.00 ", " 12,331.06 ", " 780.00 ", " -   ", " 111.00 ", " -   ", " -   ", " -   ", " 485.34 ", " 12.50 ", " -   ", " -   ", " 15.00 ", " -   ", " 1,360.89 ", " -   ", " 77,153.53 "],
+    ["OCTOBER", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", " -   "],
+    ["TOTAL", " 472,218.50 ", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", " 28,324.15 ", " 2,700.65 ", " 706,388.16 "],
+  ];
+  const out = parseSgaSummary(rows);
+  assert.deepEqual(out.map((r) => r.year + "-" + r.month), ["2025-9", "2026-1", "2026-2"], "months with a total; the TOTAL rows and an empty October are not months");
+  const sep25 = out[0];
+  assert.equal(sep25.air, 9583.92); assert.equal(sep25.hmo, 12978.97); assert.equal(sep25.other, 0, "PORT AGENT EXPENSE is -"); assert.equal(sep25.training, 2356.31); assert.equal(sep25.total, 85216.61);
+  assert.equal(sep25.crew_total, Math.round((85216.61 - 2356.31) * 100) / 100);
+  const jan = out[1];
+  assert.equal(jan.agency_fee, 3137, "MANNING FEE/AGENCY FEE2"); assert.equal(jan.training, 1018.83, "TRAINING RELATED2"); assert.equal(jan.settlement, 2700.65);
+  assert.equal(jan.crew_total, Math.round((77304.29 - 1018.83 - 2700.65) * 100) / 100, "= January's GRAND TOTAL on SUMMARY MANNING");
+  const feb = out[2];
+  assert.equal(feb.transport, 12.5, "SETTLEMENT TRANSPO folds into transport"); assert.equal(feb.hmo, 485.34); assert.equal(feb.crew_total, 75792.64, "February's GRAND TOTAL");
+  assert.deepEqual(pickSgaSheets({ "2026 SUMMARY (2)": [], "2026 SUMMARY TRAINREL": [], "SUMMARY MANNING": [] }), { manning: "SUMMARY MANNING", training: "2026 SUMMARY TRAINREL", summary: "2026 SUMMARY (2)" });
+  assert.equal(pickSgaSheets({ "2025 SUMMARY": [] }).summary, "2025 SUMMARY");
 });

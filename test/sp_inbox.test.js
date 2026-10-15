@@ -83,6 +83,10 @@ test("sgaFromDump wants SUMMARY MANNING whole and takes the TRAINREL summary whe
   const cut = sgaFromDump(dumpToSheets(["Workbook: 230 worksheets.", sheetBlock("draft", [["d"]]), "## Sheet: SUMMARY MANNING — 107 rows × 37 columns (A1:AK107)", "\tDATE\t:\tOctober 01, 2026", "[Output truncated — 90 more rows in this sheet and any later sheets not shown.]"].join("\n")));
   assert.equal(cut.ok, false); assert.equal(cut.reason, "manning_cut");
   assert.equal(sgaFromDump(dumpToSheets("Workbook: 3 worksheets.\n" + sheetBlock("Sheet1", [["a"]]))).reason, "no_manning");
+  // the manning sheet cut but the monthly summary sheet whole (January, April, May 2026 on 15 Oct 2026): SUMMARY ONLY
+  const so = sgaFromDump(dumpToSheets(["Workbook: 230 worksheets.", sheetBlock("2026 SUMMARY (2)", [["2026", "HOME ALLOTMENT", "TOTAL"], ["JANUARY", "1", "1"]]), "## Sheet: SUMMARY MANNING — 107 rows × 37 columns (A1:AK107)", "\tDATE", "[Output truncated (read budget exhausted) — 90 more rows in this sheet and any later sheets not shown.]"].join("\n")));
+  assert.equal(so.ok, true); assert.equal(so.summaryOnly, true); assert.equal(so.manningCut, "SUMMARY MANNING"); assert.deepEqual(Object.keys(so.sheets), ["2026 SUMMARY (2)"]);
+  assert.equal(ok.summaryOnly, false);
 });
 
 test("travelFromDump takes a year only whole: every month sheet and CIMS complete, none missing", () => {

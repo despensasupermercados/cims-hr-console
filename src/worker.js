@@ -15,7 +15,7 @@ import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
-import { pickSgaSheets, parseSgaManning, parseSgaTraining, summarizeSga, sgaPeriodOf, SGA_COL_KEYS } from "./sga.js";
+import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, SGA_COL_KEYS } from "./sga.js";
 import * as XLSX from "xlsx";
 import { runSync, syncConfigured, syncAllowed } from "./sharepoint_sync.js";
 import { assembleInbox } from "./sp_inbox.js";
@@ -1471,19 +1471,26 @@ async function ensureSgaImpl(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS training_cost (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, rental REAL DEFAULT 0, utilities REAL DEFAULT 0, hotel REAL DEFAULT 0, air REAL DEFAULT 0, other REAL DEFAULT 0, bank_charge REAL DEFAULT 0, total REAL, summary_only INTEGER DEFAULT 0)").run(),
     // `other` (15 Oct 2026, migrations/0027): TDG's OTHER / PORT AGENT EXPENSE column. Same wave; a table that has it answers with an error we ignore.
     env.DB.prepare("ALTER TABLE sga_line ADD COLUMN other REAL DEFAULT 0").run().catch(() => null),
+    // the bill's MONTHLY SUMMARY sheet (15 Oct 2026, migrations/0028): one row per month, the whole SGA by category
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_summary (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, " + SGA_COL_KEYS.map((k) => k + " REAL DEFAULT 0").join(", ") + ", training REAL DEFAULT 0, settlement REAL DEFAULT 0, total REAL, crew_total REAL)").run(),
   ]);
 }
 // What one workbook holds, parsed and judged — the dry-run and the apply share it.
 async function sgaStage(env, b) {
   const sheets = b.sheets || {};
   const pick = pickSgaSheets(sheets);
-  if (!pick.manning) return { error: "no_manning_sheet", detail: "The workbook has no SUMMARY MANNING sheet. Drop TDG's 'DG3 SGA EXCEL <month>.xlsx'." };
+  // A workbook without SUMMARY MANNING but with the monthly summary sheet loads SUMMARY ONLY (the inbox, when the connector
+  // cut the manning sheet): the month's totals and the year-over-year, no per-crew lines, the month's lines untouched.
+  if (!pick.manning && !pick.summary) return { error: "no_manning_sheet", detail: "The workbook has no SUMMARY MANNING sheet. Drop TDG's 'DG3 SGA EXCEL <month>.xlsx'." };
   // The month is the FILE's (its name, else its month folder) — the ref's "09" is TDG's client code, not the month
   // (February 2026 staged as September until 15 Oct 2026). A file that says no month is refused (the file says its own date, §10c).
   const period = sgaPeriodOf(b.name, b.path);
   if (!period) return { error: "no_period", detail: "The file name carries no month — expected 'DG3 SGA EXCEL <MONTH> <YEAR>.xlsx' (or the month folder's path)." };
-  const manning = parseSgaManning(sheets[pick.manning], period);
+  const manning = pick.manning ? parseSgaManning(sheets[pick.manning], period) : { meta: { date: null, sgaNo: null }, records: [], others: [], grand_total: null };
   if (manning.error) return { error: "no_header", detail: "SUMMARY MANNING has no REF. NO. header row the console can read." };
+  const summaryOnly = !pick.manning;
+  const summaryRows = pick.summary ? parseSgaSummary(sheets[pick.summary]) : [];
+  const thisMonth = summaryRows.find((x) => x.year === period.year && x.month === period.month) || null;
   const training = pick.training ? parseSgaTraining(sheets[pick.training]) : [];
   const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
   const ix = buildCrewIndex(crew);
@@ -1492,8 +1499,11 @@ async function sgaStage(env, b) {
   const sum = summarizeSga(lines);
   const prior = (await env.DB.prepare("SELECT id, file_name, sga_no, loaded_at, rows, total FROM sga_file WHERE year=? AND month=? ORDER BY loaded_at DESC LIMIT 1").bind(period.year, period.month).first().catch(() => null)) || null;
   return { period, meta: manning.meta, lines, others: manning.others, grand_total: manning.grand_total, summary: sum, training, unmatched, prior, sheets: pick,
+    summaryOnly, summaryRows, summaryThisMonth: thisMonth,
     // TDG's grand total against the rows: a gap is a parsing miss or a row the sheet hides — said, never silently accepted
-    reconciles: manning.grand_total == null ? null : Math.abs((sum.total + manning.others.reduce((a, o) => a + (o.amount || 0), 0)) - manning.grand_total) < 0.05 };
+    reconciles: manning.grand_total == null ? null : Math.abs((sum.total + manning.others.reduce((a, o) => a + (o.amount || 0), 0)) - manning.grand_total) < 0.05,
+    // the summary sheet's crew total for this month against the manning sheet's GRAND TOTAL — the two sheets of one bill must agree
+    summaryAgrees: thisMonth && manning.grand_total != null ? Math.abs(thisMonth.crew_total - manning.grand_total) < 0.05 : null };
 }
 async function apiSgaImport(request, env, session) {
   await ensureSga(env);
@@ -1503,7 +1513,8 @@ async function apiSgaImport(request, env, session) {
   const trMonths = st.training.filter((t) => !t.summary_only);
   if (b.dryRun) {
     return json({ dryRun: true, period: st.period, meta: st.meta, rows: st.lines.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles,
-      byBrand: st.summary.byBrand, byCat: st.summary.byCat, others: st.others, training: st.training, trainingMonths: trMonths.length, unmatched: st.unmatched, prior: st.prior, sheets: st.sheets });
+      byBrand: st.summary.byBrand, byCat: st.summary.byCat, others: st.others, training: st.training, trainingMonths: trMonths.length, unmatched: st.unmatched, prior: st.prior, sheets: st.sheets,
+      summaryOnly: st.summaryOnly, summaryMonths: st.summaryRows.length, summaryThisMonth: st.summaryThisMonth, summaryAgrees: st.summaryAgrees });
   }
   return json(await applySgaWorkbook(env, b, st, (session && session.email) || "?", b.source || "upload"));
 }
@@ -1515,7 +1526,8 @@ async function applySgaWorkbook(env, b, st, by, source) {
   const trMonths = st.training.filter((t) => !t.summary_only);
   const fileId = "sga_" + st.period.year + "_" + String(st.period.month).padStart(2, "0") + "_" + crypto.randomUUID().slice(0, 8);
   const now = new Date().toISOString();
-  const stmts = [
+  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines
+  const stmts = st.summaryOnly ? [] : [
     env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=?").bind(st.period.year, st.period.month),
   ];
   const cols = ["id", "file_id", "year", "month", "ref", "ship_code", "seq", "sga_no", "crew_name", "vessel", "brand", "id_number", "nationality", ...SGA_COL_KEYS, "amount", "cols_sum"];
@@ -1546,11 +1558,24 @@ async function applySgaWorkbook(env, b, st, by, source) {
     trWritten++;
     stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
   }
+  // The monthly summary rows, the same per-month rule as training: the NEWER bill's figure stands, the same period replaces.
+  const existingSum = (await env.DB.prepare("SELECT s.year, s.month, f.year fy, f.month fm FROM sga_summary s LEFT JOIN sga_file f ON f.id = s.file_id").all().catch(() => ({ results: [] }))).results;
+  const existSum = new Map(existingSum.map((e) => [e.year + "-" + e.month, e]));
+  const sins = env.DB.prepare("INSERT OR REPLACE INTO sga_summary (id, file_id, year, month, " + SGA_COL_KEYS.join(", ") + ", training, settlement, total, crew_total) VALUES (?,?,?,?," + SGA_COL_KEYS.map(() => "?").join(",") + ",?,?,?,?)");
+  let smWritten = 0;
+  for (const t of st.summaryRows) {
+    const e = existSum.get(t.year + "-" + t.month);
+    if (e && e.fy && e.fm && e.fy * 12 + e.fm > P) continue;
+    smWritten++;
+    stmts.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
+  }
+  // rows = 0 marks a summary-only load: /api/sga never lets it hide a month's lines (the latest file WITH rows serves them)
   stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-    .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
+    .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summaryOnly ? null : st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
-  await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length, (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : ""));
-  return { ok: true, period: st.period, applied: st.lines.length, training: trMonths.length, training_written: trWritten, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
+  await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length,
+    (st.summaryOnly ? "SUMMARY ONLY (no manning sheet): " : (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", ") + "summary " + smWritten + " months, training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : "") + (st.summaryAgrees === false ? " — the summary sheet DISAGREES with the manning sheet" : ""));
+  return { ok: true, period: st.period, applied: st.lines.length, summary_only: st.summaryOnly, summary_written: smWritten, summary_agrees: st.summaryAgrees, training: trMonths.length, training_written: trWritten, total: st.summaryOnly ? null : st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
 }
 
 // ---- SharePoint → console, automatic (src/sharepoint_sync.js, docs/SHAREPOINT_SYNC.md) ----
@@ -1654,11 +1679,12 @@ async function apiInboxApply(env, session) {
 // The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
 async function apiSga(env) {
   await ensureSga(env);
-  const [linesRes, filesRes, trRes, crewRes] = await Promise.all([
+  const [linesRes, filesRes, trRes, crewRes, sumRes] = await Promise.all([
     env.DB.prepare("SELECT * FROM sga_line ORDER BY year DESC, month DESC, brand, vessel, seq").all(),
     env.DB.prepare("SELECT * FROM sga_file ORDER BY year DESC, month DESC, loaded_at DESC").all(),
     env.DB.prepare("SELECT * FROM training_cost ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
+    env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -1667,8 +1693,9 @@ async function apiSga(env) {
     return { ...l, agency_id: m.agency_id || null, match: m.how, crew_display: m.name || null };
   });
   // the newest file per month is the one that counts; older loads of the same month stay on sga_file as history
-  const latest = {}; for (const f of filesRes.results) { const k = f.year + "-" + f.month; if (!latest[k]) latest[k] = f.id; }
-  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, cols: SGA_COL_KEYS, today: TODAY() });
+  // (a summary-only load — rows 0 — never hides a month's lines)
+  const latest = {}; for (const f of filesRes.results) { const k = f.year + "-" + f.month; if (!latest[k] && f.rows > 0) latest[k] = f.id; }
+  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, cols: SGA_COL_KEYS, today: TODAY() });
 }
 
 // THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once", Miguel: "deploy"). One wave: the Keyman
@@ -5629,7 +5656,7 @@ function parseSgaFile(f){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
         var sheets={};
-        wb.SheetNames.forEach(function(sn){ var s=String(sn); if(/summary manning/i.test(s)||/trainrel/i.test(s)||/^training$/i.test(s.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        wb.SheetNames.forEach(function(sn){ var s=String(sn); if(/summary manning/i.test(s)||/trainrel/i.test(s)||/^training$/i.test(s.trim())||/^\\d{4} SUMMARY( \\(\\d+\\))?$/i.test(s.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
         sha256buf(e.target.result).then(function(hh){ SGAUP={sheets:sheets,name:f.name,hash:hh}; previewSga(); });
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };
@@ -6004,22 +6031,30 @@ function paintTraining(){
 // the console shows where they disagree"). Per month of LY: what TDG billed for air / hotel / medical / visa, what the
 // workbook typed, the gap. Nothing is reconciled here (§6) — the gap is shown, Rita and TDG settle it.
 function sgaCompareHTML(sc,LY){
-  if(!SGA||!(SGA.lines||[]).length)return '';
-  var L=SGA.lines.filter(function(l){return l.year===LY;});
-  if(!L.length)return '<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+'</div><div class=hint>No SGA month loaded for '+LY+' yet — drop TDG’s DG3 SGA EXCEL workbook on Upload data.</div>';
-  var months=Array.from(new Set(L.map(function(l){return l.month;}))).sort(function(a,b){return a-b;});
+  // Bill per month: the per-crew lines when the month has them, else the bill's MONTHLY SUMMARY row (the sheet the connector
+  // always delivers — 15 Oct 2026); the previous year's same month from the summary rows for the year-over-year.
+  if(!SGA)return '';
+  var L=(SGA.lines||[]).filter(function(l){return l.year===LY;}), SM=(SGA.summary||[]).filter(function(r){return r.year===LY;}), PYR=(SGA.summary||[]).filter(function(r){return r.year===LY-1;});
+  if(!L.length&&!SM.length)return '<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+'</div><div class=hint>No SGA month loaded for '+LY+' yet — the SharePoint pickup loads TDG’s DG3 SGA EXCEL workbook each morning, or drop it on Upload data.</div>';
+  var lineMonths=new Set(L.map(function(l){return l.month;}));
+  var months=Array.from(new Set(L.map(function(l){return l.month;}).concat(SM.map(function(r){return r.month;})))).sort(function(a,b){return a-b;});
   var cats=[['air','air','Air'],['hotel','hotel','Hotel'],['medical','medical','Medical'],['visa','visa','Visa']];
-  var sgaSum=function(m,k){return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l[k]||0)+(k==='medical'?(+l.medical_repat||0):0);},0);};
+  var smRow=function(m){return SM.find(function(r){return r.month===m;});};
+  var sgaSum=function(m,k){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l[k]||0)+(k==='medical'?(+l.medical_repat||0):0);},0);var r=smRow(m);return r?(+r[k]||0)+(k==='medical'?(+r.medical_repat||0):0):0;};
+  var billAll=function(m){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l.amount||0);},0);var r=smRow(m);return r?(+r.crew_total||0):0;};
+  var pyAll=function(m){var r=PYR.find(function(x){return x.month===m;});return r?(+r.crew_total||0):null;};
   var wbSum=function(m,k){return sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[k]||0);},0);};
   var gap=function(w,s){var d=w-s;if(Math.abs(d)<1)return '<span class=muted style="padding:0">=</span>';return '<span style="color:'+(d>0?'var(--amber)':'var(--red)')+';font-weight:700">'+(d>0?'+':'')+usd0(d)+'</span>';};
-  var h='<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+' · '+months.length+' month'+(months.length>1?'s':'')+' on file</div>';
-  h+='<div class=hint style="margin:-4px 0 8px">Bill = what TDG invoiced (SGA, audited). Workbook = what Rita typed. Gap = workbook − bill: amber when the workbook carries more (DG3-paid items such as US visas), red when the bill carries more (TDG-billed items the workbook missed).</div>';
-  h+='<table class=tbl><thead><tr><th>Month</th>'+cats.map(function(c){return '<th colspan=3 style="text-align:center;border-left:1px solid var(--line-2)">'+c[2]+'</th>';}).join('')+'<th style="text-align:right;border-left:1px solid var(--line-2)">Bill · all crew costs</th></tr>'
-    +'<tr><th></th>'+cats.map(function(){return '<th style="text-align:right;border-left:1px solid var(--line-2)">Bill</th><th style="text-align:right">Workbook</th><th style="text-align:right">Gap</th>';}).join('')+'<th style="text-align:right;border-left:1px solid var(--line-2)">allotment, fees, social, HMO…</th></tr></thead><tbody>';
-  var tot={};
-  months.forEach(function(m){h+='<tr><td>'+TMN[m]+'</td>';cats.forEach(function(c){var s=sgaSum(m,c[0]),w=wbSum(m,c[1]);tot[c[0]+'s']=(tot[c[0]+'s']||0)+s;tot[c[0]+'w']=(tot[c[0]+'w']||0)+w;h+='<td style="text-align:right;border-left:1px solid var(--line-2)">'+usd(s)+'</td><td style="text-align:right">'+usd(w)+'</td><td style="text-align:right">'+gap(w,s)+'</td>';});
-    var all=L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l.amount||0);},0);h+='<td style="text-align:right;border-left:1px solid var(--line-2)">'+usd(all)+'</td></tr>';});
-  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td>'+cats.map(function(c){return '<td style="text-align:right;border-left:1px solid var(--line-2)"><b>'+usd(tot[c[0]+'s'])+'</b></td><td style="text-align:right"><b>'+usd(tot[c[0]+'w'])+'</b></td><td style="text-align:right">'+gap(tot[c[0]+'w']||0,tot[c[0]+'s']||0)+'</td>';}).join('')+'<td style="text-align:right;border-left:1px solid var(--line-2)"><b>'+usd(L.reduce(function(a,l){return a+(+l.amount||0);},0))+'</b></td></tr>';
+  var yoy=function(cur,py){if(py==null)return '<span class=muted style="padding:0">—</span>';var d=cur-py,pc=py?Math.round(d/py*100):0;return '<span style="color:'+(d>0?'var(--red)':'var(--green,#2E9E5B)')+';font-weight:700">'+(d>0?'+':'')+pc+'%</span> <span class=muted style="padding:0">'+usd0(py)+'</span>';};
+  var h='<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+' · '+months.length+' month'+(months.length>1?'s':'')+' on file'+(lineMonths.size<months.length?' · '+lineMonths.size+' with per-crew lines':'')+'</div>';
+  h+='<div class=hint style="margin:-4px 0 8px">Bill = what TDG invoiced (SGA, audited). Workbook = what Rita typed. Gap = workbook − bill: amber when the workbook carries more (DG3-paid items such as US visas), red when the bill carries more (TDG-billed items the workbook missed). A month marked <i>summary</i> comes from the bill’s monthly summary sheet (totals only, no per-crew lines yet). vs '+(LY-1)+' = the bill’s crew costs against the same month a year earlier.</div>';
+  h+='<table class=tbl><thead><tr><th>Month</th>'+cats.map(function(c){return '<th colspan=3 style="text-align:center;border-left:1px solid var(--line-2)">'+c[2]+'</th>';}).join('')+'<th style="text-align:right;border-left:1px solid var(--line-2)">Bill · all crew costs</th><th style="text-align:right">vs '+(LY-1)+'</th></tr>'
+    +'<tr><th></th>'+cats.map(function(){return '<th style="text-align:right;border-left:1px solid var(--line-2)">Bill</th><th style="text-align:right">Workbook</th><th style="text-align:right">Gap</th>';}).join('')+'<th style="text-align:right;border-left:1px solid var(--line-2)">allotment, fees, social, HMO…</th><th style="text-align:right">same month</th></tr></thead><tbody>';
+  var tot={},allT=0,pyT=0,pyN=0;
+  months.forEach(function(m){h+='<tr><td>'+TMN[m]+(lineMonths.has(m)?'':' <span class=hint style="display:inline;margin:0">summary</span>')+'</td>';cats.forEach(function(c){var s=sgaSum(m,c[0]),w=wbSum(m,c[1]);tot[c[0]+'s']=(tot[c[0]+'s']||0)+s;tot[c[0]+'w']=(tot[c[0]+'w']||0)+w;h+='<td style="text-align:right;border-left:1px solid var(--line-2)">'+usd(s)+'</td><td style="text-align:right">'+usd(w)+'</td><td style="text-align:right">'+gap(w,s)+'</td>';});
+    var all=billAll(m),py=pyAll(m);allT+=all;if(py!=null){pyT+=py;pyN++;}
+    h+='<td style="text-align:right;border-left:1px solid var(--line-2)">'+usd(all)+'</td><td style="text-align:right">'+yoy(all,py)+'</td></tr>';});
+  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td>'+cats.map(function(c){return '<td style="text-align:right;border-left:1px solid var(--line-2)"><b>'+usd(tot[c[0]+'s'])+'</b></td><td style="text-align:right"><b>'+usd(tot[c[0]+'w'])+'</b></td><td style="text-align:right">'+gap(tot[c[0]+'w']||0,tot[c[0]+'s']||0)+'</td>';}).join('')+'<td style="text-align:right;border-left:1px solid var(--line-2)"><b>'+usd(allT)+'</b></td><td style="text-align:right">'+(pyN===months.length?yoy(allT,pyT):'<span class=muted style="padding:0">—</span>')+'</td></tr>';
   h+='</tbody></table>';
   return h;
 }
