@@ -68,7 +68,7 @@ test("the briefing: contract label with its source, the live feedback only, the 
   assert.equal(b.contract.source, "TDG count as of 2026-10-08");
   assert.equal(b.contract.current.day, 134);
   assert.equal(b.feed.length, 1, "a superseded answer is not briefed");
-  assert.match(b.feed[0].text, /mono: 4/);
+  assert.equal(b.feed[0].text, "Mono clicks 4% (target under 20%). “ok”", "feedback answers read as sentences (audit_plain.js)");
   assert.deepEqual(b.checks, ["check me"]);
   assert.equal((await call("https://audit.cims.work/api/audit/brief?sc=SC-9")).status, 404);
   assert.equal((await call("https://audit.cims.work/api/audit/brief")).status, 400);

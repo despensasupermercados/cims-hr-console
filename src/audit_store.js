@@ -17,6 +17,8 @@ export const AUDIT_DDL = [
   "CREATE TABLE IF NOT EXISTS audit_down (request_id TEXT NOT NULL, serial TEXT NOT NULL, reason TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (request_id, serial))",
   "CREATE TABLE IF NOT EXISTS audit_send_log (request_id TEXT NOT NULL, kind TEXT NOT NULL, sent_at TEXT NOT NULL, to_json TEXT, ok INTEGER NOT NULL DEFAULT 0, note TEXT, PRIMARY KEY (request_id, kind))",
   "CREATE TABLE IF NOT EXISTS audit_visit (id TEXT PRIMARY KEY, request_id TEXT UNIQUE, ship TEXT NOT NULL, agency_id TEXT NOT NULL, auditor TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','filed')), opened_at TEXT NOT NULL, filed_at TEXT)",
+  // migrations/0025_audit_plain.sql: the briefing's field intel in plain words, keyed by a hash of the summary (an edit re-writes it)
+  "CREATE TABLE IF NOT EXISTS audit_plain (h TEXT PRIMARY KEY, text TEXT NOT NULL, engine TEXT, at TEXT NOT NULL)",
 ];
 
 export async function ensureAuditTables(env) {

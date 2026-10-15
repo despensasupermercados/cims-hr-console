@@ -8,8 +8,10 @@
 import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
+import { feedbackPlain, intelFallback, plainKey, rewritePlain } from "./audit_plain.js";
+import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-15.c6";
+export const AUDIT_VERSION = "2026-10-15.c7";
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
@@ -77,8 +79,10 @@ export function installAudit(deps) {
     const completed = count && count.n != null ? count.n : null;
     const feed = ((P.people && P.people.feed) || []).filter((f) => f && !f.superseded).slice(0, 12).map((f) => ({
       at: iso(f.at), kind: f.kind, who: f.who || null, role: f.role || null, rating: f.rating != null ? f.rating : null,
-      text: f.kind === "feedback" ? feedbackWords(f.answers) : String(f.text || "").slice(0, 600),
+      text: f.kind === "feedback" ? feedbackPlain(f.answers) : String(f.text || "").slice(0, 2000),
+      full: f.kind === "intel" ? String(f.text || "") : null,
     }));
+    await plainIntel(env, feed);
     return json({
       today: TODAY(), auditor: session.email,
       crew: { sc, name: [crew.first_name, crew.last_name].filter(Boolean).join(" ") || sc, position: (count && count.position) || crew.rank || null, email: crew.email || null },
@@ -94,15 +98,26 @@ export function installAudit(deps) {
     });
   }
 
-  // The feedback answers as words (role windows store keyed answers). Only what a person wrote or picked.
-  function feedbackWords(ans) {
-    if (!ans || typeof ans !== "object") return "";
-    const parts = [];
-    for (const [k, v] of Object.entries(ans)) {
-      if (v == null || v === "") continue;
-      parts.push(k.replace(/_/g, " ") + ": " + (typeof v === "object" ? JSON.stringify(v) : String(v)));
-    }
-    return parts.join(" · ").slice(0, 600);
+  // Field intel in plain words (src/audit_plain.js): read the kept rewrites in one query, write the missing ones (at
+  // most 4 per open, in parallel, each bounded), and fall back to the summary's own first sentence. The full report
+  // stays on the item (`full`) for the "Full report" fold.
+  async function plainIntel(env, feed) {
+    const intel = feed.filter((f) => f.kind === "intel" && f.full);
+    if (!intel.length) return;
+    for (const f of intel) { f.h = await plainKey(f.full); f.text = intelFallback(f.full); f.plain = false; }
+    const hs = [...new Set(intel.map((f) => f.h))];
+    const got = await env.DB.prepare("SELECT h, text FROM audit_plain WHERE h IN (" + hs.map(() => "?").join(",") + ")").bind(...hs).all().then((r) => r.results || [], () => []);
+    const kept = new Map(got.map((r) => [r.h, r.text]));
+    const engine = pickEngine(env);
+    const miss = hs.filter((h) => !kept.has(h)).slice(0, 4);
+    await Promise.all(miss.map(async (h) => {
+      const src = intel.find((f) => f.h === h).full;
+      const t = await rewritePlain(env, src, { engine, claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI });
+      if (!t) return;
+      kept.set(h, t);
+      await env.DB.prepare("INSERT OR IGNORE INTO audit_plain (h, text, engine, at) VALUES (?,?,?,?)").bind(h, t, engine, new Date().toISOString()).run().catch(() => {});
+    }));
+    for (const f of intel) { if (kept.has(f.h)) { f.text = kept.get(f.h); f.plain = true; } delete f.h; }
   }
 
   // Returns a Response, or null when the path is not the audit's.

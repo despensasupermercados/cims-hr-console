@@ -930,5 +930,12 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   Only on the audit host: cims.work and its `/audit` keep the login. Every action is recorded as `AUDIT_OPEN_AS` (Dexter);
   the shell carries `X-Robots-Tag: noindex` and a robots meta. A real session still wins. Delete the two lines to bring
   the login back. Pinned by `test/audit_routes.test.js` ("open mode").
+- **The briefing, 15 Oct 2026** (Miguel: "once you select that ship, it goes straight to [the briefing]"; "It's like the AI
+  is talking to itself ... order, rush, and cost ... how a human would actually phrase it"). A ship with ONE crew aboard
+  opens his briefing directly (the row already names him); two aboard keep the picker. "What others said": feedback answers
+  become sentences in code (`feedbackPlain`, no model); field intel is rewritten by the intel engine into ≤ 2 short
+  sentences, kept in `audit_plain` (migration 0025, keyed by a hash of the summary) and REFUSED when it carries a number the
+  summary does not (`numbersKept`); no engine / refused → the summary's first sentence. The stored report stays under
+  "Full report". A brand chip clears a search left in the box ("qu" + Azamara showed Quest alone). `test/audit_plain.test.js`.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
