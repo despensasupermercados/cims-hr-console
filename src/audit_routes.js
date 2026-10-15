@@ -11,7 +11,7 @@ import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel, numbersKept, datesKept } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-15.e1";
+export const AUDIT_VERSION = "2026-10-16.e2";
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
@@ -119,7 +119,9 @@ export function installAudit(deps) {
         current: cur ? { ship: cur.ship, on: cur.on, off: cur.off, offSource: cur.offSource || null, day: cur.days, of: cur.plannedDays, held: !!cur.held } : null,
       },
       slots: (P.people && P.people.slots) || [],
-      feed, checks: (P.checks || []).map((c) => c.text),
+      // the crew record's own To-check rows are HR's housekeeping, not the auditor's (Miguel, 16 Oct 2026: "i dont think this
+      // is relevant or provide any value"): they stay on the console's crew profile and are not sent here
+      feed,
       audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
       // the request still in motion: sent, or in and not graded yet (a graded one is finished and opens the way to the next)
       open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "draft" || (r.status === "complete" && r.grade == null)) || {}).id || null,
