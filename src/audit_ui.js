@@ -119,6 +119,12 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .need .ib .ic{width:20px;height:20px}
 .need .tx{flex:1;min-width:0}.need .t{font-weight:600;font-size:14.5px}.need .s{font-size:12.5px;color:var(--mut)}
 .need .q{font-family:var(--fh);font-weight:600;font-size:20px;min-width:34px;text-align:right}
+.sup details>summary{list-style:none;cursor:pointer}.sup details>summary::-webkit-details-marker{display:none}
+.sup summary .go{width:16px;height:16px;color:var(--mut);flex:none;transition:transform .15s}.sup details[open]>summary .go{transform:rotate(90deg)}
+.sup .need .q{font-size:17px;min-width:0;white-space:nowrap}.sup .ch .r{font-family:var(--fh);font-weight:600;font-size:15px;color:var(--ink)}.sup .ch+details>.need{border-top:0}
+.sup .it{display:flex;justify-content:space-between;gap:12px;padding:8px 16px 8px 68px;border-top:1px solid var(--line);font-size:13px}
+.sup .it .n{min-width:0;overflow-wrap:anywhere}.sup .it .v{flex:none;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sup .it.more{color:var(--mut)}
 .foot{display:flex;gap:8px;align-items:flex-start;padding:12px 16px;background:var(--bg);font-size:13px;color:var(--ink2)}
 .foot .ic{width:16px;height:16px;margin-top:2px;color:var(--nfg)}
 .kv{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
@@ -322,6 +328,24 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div>' + q(lines) + "</div>" +
       '<div class="foot">' + ic("lock-simple") + "<span>The audit opens only when all of it is in. 24 hours to upload.</span></div></div>";
   }
+  /* What reached the ship this contract (src/ship_supply.js): OBP's received ledger, paper / toner / parts, only what
+     carries a dollar value. Each product folds open on its biggest items. No read = no card. */
+  var SUP_IC = { paper: "stack", toner: "drop", parts: "gear-six" };
+  function usd(v) { var n = Number(v) || 0; return n > 0 && n < 1 ? "<$1" : "$" + Math.round(n).toLocaleString("en-US"); }
+  function qty(v) { var n = Math.round(Number(v) || 0); return n.toLocaleString("en-US"); }
+  function supplyCard(sp, ship) {
+    if (!sp || !sp.from) return "";
+    var h = '<div class="card sup"><div class="ch">' + ic("truck") + "Shipped this contract" + (sp.products.length ? '<span class="r">' + usd(sp.total) + "</span>" : "") + "</div>";
+    if (!sp.products.length) h += '<div class="need"><div class="tx"><div class="s">OBP has nothing received on ' + esc(ship) + " since " + fmtD(sp.from) + ".</div></div></div>";
+    sp.products.forEach(function (p) {
+      h += '<details><summary class="need"><span class="ib">' + ic(SUP_IC[p.key] || "package") + '</span><div class="tx"><div class="t">' + esc(p.label) + '</div><div class="s">' + qty(p.qty) + " received</div></div>" + '<span class="q">' + usd(p.value) + "</span>" + ic("caret-right", "go") + "</summary>";
+      p.items.forEach(function (it) { h += '<div class="it"><span class="n">' + esc(it.name) + '</span><span class="v">' + qty(it.qty) + " · " + usd(it.value) + "</span></div>"; });
+      if (p.more) h += '<div class="it more">' + p.more + (p.more === 1 ? " more item" : " more items") + "</div>";
+      h += "</details>";
+    });
+    h += '<div class="foot">' + ic("clock") + "<span>Received in OBP since the sign-on, " + fmtD(sp.from) + (sp.asOf ? ". OBP export of " + fmtD(sp.asOf) : "") + ".</span></div></div>";
+    return h;
+  }
   /* the stored field-intel summary ("• Summary: … • What happened: …"), one labelled paragraph per bullet */
   function fullReport(t) {
     return String(t || "").split(/\s*•\s*/).filter(function (x) { return x.trim(); }).map(function (x) {
@@ -357,6 +381,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
         b.audits.forEach(function (a) { h += '<button class="row" data-go="q=' + esc(a.id) + '"><div class="tx"><div class="nm" style="font-size:15px">' + esc(a.ship) + '</div><div class="sm">' + fmtD(a.at, true) + (a.test ? " · test" : "") + "</div></div>" + reqStatus(a) + ic("caret-right", "go") + "</button>"; });
         h += "</div>";
       }
+      h += supplyCard(b.supply, ship);
       var feed = b.feed || [];
       h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
       feed.forEach(function (f) {
