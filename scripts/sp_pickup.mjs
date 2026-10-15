@@ -75,7 +75,7 @@ if (!picked.ok) {
 const fileKey = inboxFileKey(args.id, args.modified);
 const at = new Date().toISOString();
 const by = args.by || "sharepoint-pickup";
-const parts = inboxParts(picked.sheets);
+const parts = inboxParts(picked.sheets, args["part-max"] ? +args["part-max"] : undefined); // --part-max <chars>: smaller statements when the D1 tool call must stay short
 const cols = "id, file_key, kind, year, month, item_id, name, path, modified, sheet, part, parts, file_parts, rows_json, written_by, at, status";
 const sql = parts.map((p, i) => "INSERT OR REPLACE INTO sp_inbox (" + cols + ") VALUES (" + [
   "inb_" + fileKey.replace(/[^A-Za-z0-9]/g, "").slice(0, 48) + "_" + String(i).padStart(2, "0"), fileKey, args.kind, year, month, args.id, args.name, args.path, args.modified, p.sheet, p.part, p.parts, p.file_parts, p.rows_json, by, at, "pending",
