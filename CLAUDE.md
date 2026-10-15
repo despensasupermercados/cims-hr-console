@@ -935,7 +935,8 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   opens his briefing directly (the row already names him); two aboard keep the picker. "What others said": feedback answers
   become sentences in code (`feedbackPlain`, no model); field intel is rewritten by the intel engine into ≤ 2 short
   sentences, kept in `audit_plain` (migration 0025, keyed by a hash of the summary) and REFUSED when it carries a number the
-  summary does not (`numbersKept`); no engine / refused → the summary's first sentence. The stored report stays under
+  summary does not (`numbersKept`) or names a day the summary does not (`datesKept`: "early October" never becomes
+  "October 8", which the first live rewrite did); no engine / refused → the summary's first sentence. The stored report stays under
   "Full report". A brand chip clears a search left in the box ("qu" + Azamara showed Quest alone). `test/audit_plain.test.js`.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).

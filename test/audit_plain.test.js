@@ -38,3 +38,12 @@ test("a rewrite that adds a number is refused (the rush cost and toner counts ar
   assert.equal(await rewritePlain({}, MARTO, { engine: "none" }), null);
   assert.equal(parsePlain("Here is the summary: Rush order."), "Rush order.");
 });
+
+test("a rewrite that makes a date more exact than the note is refused", async () => {
+  const { datesKept } = await import("../src/audit_plain.js");
+  assert.equal(datesKept("Rush order on October 8, $1,807.75.", MARTO), false, "the note says early October");
+  assert.ok(datesKept("Rush order in early October, $1,807.75.", MARTO));
+  assert.ok(datesKept("Shipped Oct 4.", "Shipped to Brisbane on 4 October."));
+  const env = { AI: { run: async () => ({ response: "Rush order on October 8, 2026, $1,807.75." }) } };
+  assert.equal(await rewritePlain(env, MARTO + " Filed 8 2026.", { engine: "workersai" }), null);
+});
