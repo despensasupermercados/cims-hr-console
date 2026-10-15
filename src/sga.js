@@ -114,6 +114,14 @@ export function sgaManningHeader(rows) {
   return null;
 }
 
+// An Excel date serial (the workbook's DATE cell read raw by SheetJS: 46057 = 2026-02-04; the connector's text dump
+// rendered the same cell as "15-Oct-26", so this only shows on a real workbook — Miguel's uploads of 15 Oct 2026 and
+// the mail intake) → "YYYY-MM-DD". Anything else (TDG's own "October 01, 2026") is kept as written.
+export function excelSerialToISO(v) {
+  const n = typeof v === "number" ? v : /^\d{5}(\.\d+)?$/.test(txt(v)) ? +txt(v) : NaN;
+  if (!(n >= 20000 && n < 80000)) return null;   // 1954 … 2119; a bill's date, never an amount
+  return new Date(Date.UTC(1899, 11, 30) + Math.floor(n) * 86400000).toISOString().slice(0, 10);
+}
 // The month's SGA header: date and number ("DATE : October 01, 2026", "SGA NO. : 39-A").
 export function sgaManningMeta(rows) {
   let date = null, sgaNo = null;
@@ -121,7 +129,7 @@ export function sgaManningMeta(rows) {
     const r = rows[i] || [];
     for (let j = 0; j < r.length; j++) {
       const u = up(r[j]);
-      if (u === "DATE" || u === "DATE:") { const v = r.slice(j + 1).map(txt).find((x) => x && x !== ":"); if (v) date = v; }
+      if (u === "DATE" || u === "DATE:") { const raw = r.slice(j + 1).find((x) => txt(x) && txt(x) !== ":"); const v = raw instanceof Date ? raw.toISOString().slice(0, 10) : excelSerialToISO(raw) || txt(raw); if (v) date = v; }
       if (/^SGA ?NO/.test(u)) { const v = r.slice(j + 1).map(txt).find((x) => x && x !== ":"); if (v) sgaNo = v; }
     }
   }

@@ -3,7 +3,21 @@
 // month to month (September 2026 gained ID NUMBER / NATIONALITY / HMO).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, pickSgaSheets, sgaManningHeader, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf } from "../src/sga.js";
+import { parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, pickSgaSheets, sgaManningHeader, sgaManningMeta, excelSerialToISO, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf } from "../src/sga.js";
+
+// A real workbook read by SheetJS carries the DATE cell as an Excel serial (Miguel's uploads of 15 Oct 2026: January's
+// 46057 = 2026-02-04, February's 46085 = 2026-03-04, March's 46125 = 2026-04-13); the connector's text dump never did.
+test("the bill's DATE as an Excel serial becomes a calendar date; TDG's own text and the SGA number are kept as written", () => {
+  assert.equal(excelSerialToISO(46057), "2026-02-04");
+  assert.equal(excelSerialToISO("46125"), "2026-04-13");
+  assert.equal(excelSerialToISO(46085.4), "2026-03-04");
+  assert.equal(excelSerialToISO("October 01, 2026"), null);
+  assert.equal(excelSerialToISO(1428.52), null);   // an amount is never a date
+  assert.equal(excelSerialToISO(""), null);
+  assert.deepEqual(sgaManningMeta([[], ["", "DATE", ":", 46057], ["", "SGA NO.", ":", "31-A"]]), { date: "2026-02-04", sgaNo: "31-A" });
+  assert.deepEqual(sgaManningMeta([[], ["", "DATE", ":", new Date(Date.UTC(2026, 4, 4))], ["", "SGA NO.", ":", "34-A"]]), { date: "2026-05-04", sgaNo: "34-A" });
+  assert.deepEqual(sgaManningMeta([[], ["", "DATE", ":", "May 04, 2026"], ["", "SGA NO.", ":", "34-A"]]), { date: "May 04, 2026", sgaNo: "34-A" });
+});
 
 const H26 = ["", "REF. NO.", "", "ID NUMBER", "NATIONALITY", "CREW", "CREW", "VESSELS", "", "", "", "HOME ALLOTMENT", "FINAL PAY", "MANNING FEE/ AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRANSITION FEE", "TRAVEL /PLANEFARE", "MEDICAL", "MEDICAL REPAT", "VISA", "HOTEL", "TRAVEL INSURANCE", "REIMBURSEMENT", "FUNERAL EXPENSE", "TRANSPORTATION", "HMO", "CASH ADVANCE", "TRANSPORTATION EXPENSE", "REFUND", "CASH ADVANCE", "BANK CHARGE / COURIER", "AMOUNT"];
 const row = (ref, id, nat, name, vessel, vals) => { const r = new Array(H26.length).fill(""); r[1] = ref; r[3] = id; r[4] = nat; r[5] = name; r[6] = name; r[7] = vessel; Object.entries(vals).forEach(([k, v]) => { r[H26.indexOf(k)] = v; }); return r; };

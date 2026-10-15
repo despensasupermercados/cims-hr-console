@@ -49,6 +49,12 @@ paths and records them on `sp_sync` with `source = agent`. Runbook: `docs/SHAREP
 text under a read budget — TDG's bill comes through whole, Rita's workbook only until about October. When the Graph
 identity exists the Worker reads SharePoint itself and the scheduled task is deleted; nothing else changes.
 
+**Retired 15 Oct 2026, 21:29 UTC** — Miguel: *"we not gonna use this way .. we will do the email way instead"*. The scheduled
+task is disabled (not deleted), the Graph identity is not being requested from IT, and finance emails the bill once a month to
+sga@cims.work (below). The hourly `maybeSyncSharePoint` stays dormant: it runs only if `GRAPH_*` / `SP_DRIVE_ID` ever exist.
+The inbox (`sp_inbox`, `applyInbox`) stays: it is the mail intake's queue, and the session loaded the year's history into it
+from Miguel's own uploads (batches of five; CLAUDE.md §10j).
+
 ## What the Worker does — every hour (`maybeSyncSharePoint`, in `scheduled`)
 
 1. Token: `POST https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token` (client credentials,
@@ -85,7 +91,8 @@ identity exists the Worker reads SharePoint itself and the scheduled task is del
 Miguel: *"give me an email where finance can send u this .. u might get more emails .. but this will be one of them so
 you can pick it up and add the data where needs to be."*
 
-Finance (TDG accounting, or Rita forwarding) emails the workbook to **sga@cims.work**. The Worker's email handler
+**This is THE route** (Miguel, the same evening: finance sends the bill once a month; the SharePoint pickup and the Graph
+identity are dropped). Finance (TDG accounting, or Rita forwarding) emails the workbook to **sga@cims.work**. The Worker's email handler
 (`intakeMailToInbox`, `src/mail_intake.js`) parses the mail, keeps only `DG3 SGA EXCEL <month>.xlsx` (REVISED beats plain)
 and `UPDATED - Travel Expenses <year> ….xlsx`, reads the sheets with SheetJS, writes them into `sp_inbox` and applies the
 inbox at once through the same paths as drag-and-drop. The PDF scans and the body are ignored and listed on the receipt

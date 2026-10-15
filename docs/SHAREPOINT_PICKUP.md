@@ -1,4 +1,12 @@
-# The SharePoint pickup — the morning session's runbook
+# The SharePoint pickup — the morning session's runbook (RETIRED 15 Oct 2026, 21:29 UTC)
+
+> **Retired the same evening.** Miguel, 15 Oct 2026: *"we not gonna use this way .. we will do the email way instead"*.
+> Finance emails the month's SGA workbook to **sga@cims.work** once a month (`src/mail_intake.js`, CLAUDE.md §10j) and
+> the Worker loads it; the scheduled task "Cims SharePoint pickup" is **disabled** (not deleted — its run history stays),
+> and the Graph identity ticket is not being pursued. The year's history came from Miguel's own uploads, in batches of
+> five, written to the same inbox with the mail intake's identity (the file's SHA-256) and loaded by the hourly cron.
+> `scripts/sp_pickup.mjs` and `src/sp_inbox.js` stay: the inbox is the mail intake's queue. The text below is kept as
+> the record of how the connector route worked.
 
 Miguel, 15 Oct 2026: *"I dont want rita to be dropping items .. I want you to either pick the file and read what u need
 .. or we need to find a solution."*

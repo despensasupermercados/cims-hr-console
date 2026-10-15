@@ -754,6 +754,25 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   anyone else is written `held`, loads nothing, and the receipt names the sender — Miguel adds TDG's domain to the var when
   their first mail shows it. `/api/sharepoint/status` carries `mail` (address, senders, last receipts). `postal-mime` is the
   Worker's second runtime dependency. Nothing here is money (§1).
+- **THE EMAIL IS THE ROUTE — Miguel, 15 Oct 2026, later that evening: "we not gonna use this way .. we will do the email way
+  instead .. in the future .. u will get the email from the finance team once a month."** So: the scheduled task "Cims
+  SharePoint pickup" (trig_01BerujiS9nWejWvyGuKfqu9) is **DISABLED** (21:29 UTC, not deleted — its run history stays; do not
+  re-enable it), the connectors are not attached to it, and the Graph identity ticket is **not pursued** (`sharepoint_sync.js`
+  stays dormant: it runs only if the identity ever exists, nothing to remove). `docs/SHAREPOINT_PICKUP.md` is marked retired;
+  `src/sp_inbox.js` stays because the inbox is the mail intake's queue. **The year's history came from Miguel's own uploads,
+  in batches of five** ("I am gonna give u this year files .. in batches of 5 so u have the data and already display them"):
+  the session parses each workbook with the Worker's own SheetJS read (`sheetsOf`, `WANT_SGA`), checks it like the pickup
+  did (period from the file name, lines reconcile to GRAND TOTAL, the summary sheet agrees), writes `sp_inbox` rows with the
+  MAIL INTAKE's identity (`inb_mail_<sha24>_NN`, `file_key mail:<sha16>@<sha16>`, written_by `upload:<Miguel>`), and the
+  hourly cron loads them through the one path (scratchpad `sim/upload_intake.mjs` + `sim/inbox_dryrun.mjs`: the five files
+  through `applyInbox` on real SQLite BEFORE the rows go to D1). Batch 1, 15 Oct 2026: January–May 2026 (SGA 31-A … 35-A;
+  59 / 61 / 62 / 61 / 69 lines; $73,584.81 / $75,792.64 / $72,174.30 / $67,184.55 / $74,082.02 incl. the $15 bank charge;
+  every month reconciles and agrees with the summary sheet; February and March equal the connector-read rows to the cent in
+  every column, so re-loading them changed only `sga_date`). **A real workbook's DATE cell is an Excel serial** (46057),
+  which the connector's text dump never showed: `excelSerialToISO` in `sga.js` turns it into `2026-02-04`; TDG's own text
+  ("May 04, 2026") is kept as written. Pinned by `test/sga.test.js`. These older workbooks carry no TRAINREL sheet, so they
+  write no `training_cost` row (September's TRAINREL already holds Jan–Sep 2026) and, being older bills, never replace the
+  September file's `sga_summary` rows (the later period wins — the values are identical anyway).
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").
