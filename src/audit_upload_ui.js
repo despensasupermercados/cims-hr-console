@@ -26,8 +26,8 @@ const CSS = String.raw`<style>
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
 .ic{width:1.15em;height:1.15em;flex:none;vertical-align:-.18em}
 button{font:inherit;color:inherit}
-.top{background:var(--deep);color:#fff;padding:calc(16px + env(safe-area-inset-top)) 20px 18px}
-.top .in{max-width:1080px;margin:0 auto}
+.top{background:var(--deep);color:#fff;padding:calc(16px + env(safe-area-inset-top)) 16px 18px}
+.top .in{max-width:1048px;margin:0 auto}
 .brand{display:flex;justify-content:space-between;align-items:center;font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:4px;opacity:.9}
 .due{display:inline-flex;align-items:center;gap:6px;font-family:var(--ff);font-size:12.5px;letter-spacing:0;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px}
 .due.late{background:#B4382A}
@@ -48,7 +48,7 @@ main{max-width:1080px;margin:0 auto;padding:22px 16px 120px;display:grid;gap:28p
 .tile{position:relative;overflow:hidden;min-height:118px;border-radius:14px;border:1.5px dashed var(--line2);background:var(--bg);padding:12px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;text-align:left;transition:transform .12s,border-color .2s,background .2s}
 .tile:active{transform:scale(.985)}
 .tile input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
-.tile .t{font-family:var(--fh);font-weight:600;font-size:14.5px;line-height:1.2}.tile .s{font-size:12px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tile .t{font-family:var(--fh);font-weight:600;font-size:14.5px;line-height:1.2}.tile .s{font-size:12px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.tile .s.fn{display:block;white-space:nowrap;text-overflow:ellipsis}
 .tile .st{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--nfg)}
 .tile .st .ic{width:18px;height:18px}
 .tile.ok{border:1.5px solid transparent;background:var(--greenbg)}.tile.ok .st{color:var(--green-d)}
@@ -87,7 +87,7 @@ main{max-width:1080px;margin:0 auto;padding:22px 16px 120px;display:grid;gap:28p
 .add input{min-height:44px;border:1px solid var(--line2);border-radius:10px;padding:0 12px;font:inherit;background:var(--card);color:var(--ink);min-width:0}
 .xt{display:flex;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--line);font-size:14px}
 .dock{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06);z-index:5}
-.dock .in{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:12px}
+.dock .in{max-width:1048px;margin:0 auto;display:flex;align-items:center;gap:12px}
 .dock .msg{flex:1;min-width:0;font-size:14px}.dock .msg b{font-family:var(--fh);font-size:16px;display:block}
 .dock .msg span{color:var(--mut);font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dock.done{background:var(--fill);color:#fff}.dock.done .msg span{color:#E3F2DD}
@@ -161,7 +161,7 @@ const SCRIPT = String.raw`
     else if (s.read_state === "pending" || s.read_state === "failed") { cls += " busy"; st = ic("hourglass-medium") + "Reading…"; }
     else { cls += " bad"; st = ic("f:warning-circle") + "Send again"; }
     var input = (S.status === "sent" && !b && !(s && (s.read_state === "pending" || s.read_state === "failed"))) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + esc(title) + ' for ' + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
-    return '<label class="' + cls + '">' + input + '<div><div class="t">' + title + '</div><div class="s">' + (s && s.filename && !b ? esc(s.filename) : sub) + '</div></div><div class="st">' + st + "</div>" + extra + "</label>";
+    return '<label class="' + cls + '">' + input + '<div><div class="t">' + title + '</div>' + (s && s.filename && !b ? '<div class="s fn" title="' + esc(s.filename) + '">' + esc(s.filename) + "</div>" : '<div class="s">' + sub + "</div>") + '</div><div class="st">' + st + "</div>" + extra + "</label>";
   }
   function machine(m) {
     var h = '<div class="mach"><div class="mh"><b>' + esc(m.label) + '</b><span class="sn">' + esc(m.serial) + "</span></div>";
@@ -170,7 +170,7 @@ const SCRIPT = String.raw`
       if (S.status === "sent") h += '<div class="act"><button class="btn ghost" data-undown="' + esc(m.serial) + '">It prints again</button></div>';
       return h + "</div></div>";
     }
-    h += '<div class="tiles">' + tile(m, "p43", "Pattern 43", "12 pages, one PDF") + tile(m, "mgmt", "Machine Management List", "the long report with life %") + "</div>";
+    h += '<div class="tiles">' + tile(m, "p43", "Pattern 43", "12 pages, one PDF") + tile(m, "mgmt", "Machine Management List", "the long report with life\u00a0%") + "</div>";
     [m.p43, m.mgmt].forEach(function (s) { if (s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !busy[m.serial + "|" + (s === m.p43 ? "p43" : "mgmt")]) h += '<div class="fix">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>"; });
     if (S.status === "sent") {
       if (openDown[m.serial]) h += '<div class="down" style="margin-top:12px"><div class="row">' + ic("wrench") + 'Why won\'t it print?</div><textarea data-reason="' + esc(m.serial) + '" placeholder="Error code, what you tried, engineer called">' + esc(pend["r" + m.serial] || "") + '</textarea><div class="err" id="err' + esc(m.serial) + '"></div><div class="act"><button class="btn" data-savedown="' + esc(m.serial) + '">Report down</button><button class="btn ghost" data-canceldown="' + esc(m.serial) + '">Cancel</button></div></div>';

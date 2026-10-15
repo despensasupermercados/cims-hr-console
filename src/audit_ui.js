@@ -53,7 +53,7 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);f
 button{font:inherit;color:inherit}
 .ic{width:1.15em;height:1.15em;flex:none;vertical-align:-.18em}
 .top{position:sticky;top:0;z-index:6;background:var(--deep);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 12px}
-.top .in{max-width:640px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;min-height:40px}
+.top .in{max-width:608px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;min-height:40px}
 .bk{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.1);display:grid;place-items:center;border:0;color:#fff;cursor:pointer;transition:transform .12s}
 .bk:active{transform:scale(.95)}.bk .ic{width:20px;height:20px}
 .bk[hidden]{display:none}
@@ -63,7 +63,7 @@ button{font:inherit;color:inherit}
 .tk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px;white-space:nowrap}
 .tk:empty{display:none}.tk.late{background:#B4382A}.tk.done{background:var(--fill)}
 .hero{background:var(--deep);color:#fff;padding:4px 16px 22px}
-.hero .in{max-width:640px;margin:0 auto}
+.hero .in{max-width:608px;margin:0 auto}
 .hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:0;line-height:1.1}
 .hero.home{padding-top:calc(18px + env(safe-area-inset-top))}
 .ttl{display:flex;align-items:center;gap:12px;margin-bottom:4px}
@@ -78,7 +78,7 @@ button{font:inherit;color:inherit}
 main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px}
 .offl{max-width:640px;margin:12px auto 0;padding:0 16px}.offl div{display:flex;gap:8px;align-items:center;background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
 .offl[hidden]{display:none}
-.chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px 2px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;min-height:40px;padding:0 14px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink2);font-size:13.5px;font-weight:600;cursor:pointer}
 .chip.on{background:var(--navy);color:#fff;box-shadow:none}
@@ -130,7 +130,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .rush .it.ref .n{color:var(--mut)}.rush .it .rd{color:var(--red)}.rush .it .am{color:var(--amber)}
 .foot{display:flex;gap:8px;align-items:flex-start;padding:12px 16px;background:var(--bg);font-size:13px;color:var(--ink2)}
 .foot .ic{width:16px;height:16px;margin-top:2px;color:var(--nfg)}
-.kv{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
+.kv{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
 .ch+.kv,.kv:first-child{border-top:0}
 .kv .k{color:var(--mut);flex:none}.kv .v{text-align:right;font-weight:600;min-width:0;overflow-wrap:anywhere}.kv .v .sm{font-weight:400}
 .mono,.kv .v.mono{font-family:var(--fm);font-size:12.5px;color:var(--mut);font-weight:400}
@@ -181,7 +181,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;text-align:center;color:var(--mut);font-size:14px}
 .empty .ic{width:28px;height:28px;color:var(--line2)}
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06)}
-.dock .in{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
+.dock .in{max-width:608px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
 .dock .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 18px;border-radius:14px;border:0;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;cursor:pointer;width:100%;transition:transform .12s,opacity .2s}
 .btn:active{transform:scale(.98)}.btn .ic{width:20px;height:20px}
@@ -286,7 +286,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
     });
     var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null)); });
     var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
-    var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b) + "</button>"; }).join("") + "</div>";
+    var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b === "Royal Caribbean" ? "Royal" : b) + "</button>"; }).join("") + "</div>";
     if (open.length) {
       h += '<div class="sh">Open requests<span>' + open.length + "</span></div>";
       h += '<div class="card">' + open.map(function (s) { return shipRow(s, true); }).join("") + "</div>";
@@ -342,7 +342,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       h += '<div class="need"><span class="ib g">' + ic("f:check-circle") + '</span><div class="tx"><div class="t">None</div><div class="s">No order tagged as a miss for ' + esc(ship) + " since " + fmtD(r.from) + ".</div></div></div>";
     } else {
       h += '<div class="facts"><div><b>' + r.count + "</b><span>" + (r.count === 1 ? "rush order" : "rush orders") + "</span></div><div><b>" + usd(r.rush) + "</b><span>freight &amp; customs</span></div>" +
-        '<div' + (r.his.count ? ' class="bad"' : "") + "><b>" + r.his.count + "</b><span>" + esc(who) + "&#8217;s misses</span></div></div>";
+        '<div' + (r.his.count ? ' class="bad"' : "") + "><b>" + r.his.count + "</b><span>charged to " + esc(who) + "</span></div></div>";
       r.orders.forEach(function (o) {
         var names = o.items.map(function (i) { return i.name; });
         var what = (names[0] || "Parts") + (names.length > 1 ? " +" + (names.length - 1) : "");
@@ -357,7 +357,8 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
         if (o.by) h += '<div class="it"><span class="n">Placed by ' + esc(o.by) + "</span></div>";
         if (o.note) h += '<div class="it"><span class="n">&#8220;' + esc(o.note) + "&#8221;</span></div>";
         o.items.forEach(function (i) { h += '<div class="it"><span class="n">' + esc(i.name) + '</span><span class="v">' + esc(i.qty) + " · " + usd(i.value) + "</span></div>"; });
-        h += '<div class="it"><span class="n">Freight &amp; customs</span><span class="v">' + usd(o.rush) + '</span></div><div class="it ref"><span class="n mono">' + esc(o.ref) + "</span></div></details>";
+        if (o.rush > 0) h += '<div class="it"><span class="n">Freight &amp; customs</span><span class="v">' + usd(o.rush) + "</span></div>";
+        h += '<div class="it ref"><span class="n mono">' + esc(o.ref) + "</span></div></details>";
       });
     }
     h += '<div class="foot">' + ic("clock") + "<span>Orders tagged as a miss on the order portal for " + esc(ship) + ", " + fmtD(r.from) + " to " + (r.to ? fmtD(r.to) : "today") + ". Totals include freight and customs.</span></div></div>";
@@ -389,7 +390,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       h += "</div>";
       var done = (String(c.label || "").match(/^(\d+)/) || [])[1]; if (done == null && /^ongoing/i.test(String(c.label || ""))) done = 0;
       h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + (cur && cur.day != null ? esc(cur.day) : "?") + '</b><span>days aboard</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
-      if (c.source) h += '<div class="note" style="text-align:left;margin:-6px 4px 0">Contracts: ' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</div>";
+      if (c.source) h += '<div class="note" style="text-align:left;margin:-6px 16px 0">Contracts: ' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</div>";
 
       h += needCard(first(b.crew.name), b.machines, b.lines);
 
