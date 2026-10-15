@@ -21,6 +21,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
+      - run: npm ci  # the Worker has a runtime dependency since 15 Oct 2026 (xlsx); the tests import it
       - name: Run test gate (record current health)
         run: npm test || echo "TESTS_RED" >> $GITHUB_ENV
       - name: Agent health-check + repair
