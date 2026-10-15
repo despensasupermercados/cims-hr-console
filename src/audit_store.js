@@ -19,6 +19,9 @@ export const AUDIT_DDL = [
   "CREATE TABLE IF NOT EXISTS audit_visit (id TEXT PRIMARY KEY, request_id TEXT UNIQUE, ship TEXT NOT NULL, agency_id TEXT NOT NULL, auditor TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','filed')), opened_at TEXT NOT NULL, filed_at TEXT)",
   // migrations/0025_audit_plain.sql: the briefing's field intel in plain words, keyed by a hash of the summary (an edit re-writes it)
   "CREATE TABLE IF NOT EXISTS audit_plain (h TEXT PRIMARY KEY, text TEXT NOT NULL, engine TEXT, at TEXT NOT NULL)",
+  // migrations/0026_audit_eval.sql: Dexter's grade, filed once per audit (never rewritten)
+  "CREATE TABLE IF NOT EXISTS audit_eval (visit_id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, agency_id TEXT NOT NULL, ship TEXT NOT NULL, r_inventory INTEGER NOT NULL, r_technical INTEGER NOT NULL, r_collaterals INTEGER NOT NULL, r_overall INTEGER, score INTEGER NOT NULL, score_from TEXT NOT NULL, note TEXT, filed_by TEXT NOT NULL, filed_at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_eval_sc ON audit_eval (agency_id, filed_at)",
 ];
 
 export async function ensureAuditTables(env) {

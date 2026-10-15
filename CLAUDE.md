@@ -941,5 +941,12 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   **One incident, one entry** (Miguel, same day: "if you see that it's the same problem, just merge them into one"):
   `mergeIntel` folds field-intel reports with the same text, or the same dollar amount ($100+) within 14 days; the newer
   leads, the header names every reporter, the others stay whole under "Full report". Deterministic, no model.
+- **Dexter's grade** (Miguel, 15 Oct 2026: the audit replaces "Communication (Rita)" on the Score Card; "if it's not [given]
+  .. make from the final scores an average"; "Round down"). Once a request's documents are in, Dexter grades Inventory,
+  Technical, Customer collaterals (1–5, required) and Overall (optional); a 3 or below needs a sentence (`gradeProblems`).
+  The score is Overall, else the average of the three ROUNDED DOWN (`auditScore`, `src/audit.js`). Filed ONCE with its
+  visit (`audit_visit` + `audit_eval`, migration 0026, one batch, never rewritten), `POST /api/audit/request/grade`. HR
+  dispatch is not rated here (it rates TDG's travel). What a score is worth on the bonus (5 = 10 pts, 4 = 8, 3 or below = 0,
+  no audit = 10) lives in `bonus.js` and is Miguel's to merge (§1); this module still never imports it.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).

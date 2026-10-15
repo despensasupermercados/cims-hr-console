@@ -208,3 +208,21 @@ test("the emails keep the CIMS standard: letterhead, no rgba or gradient, a butt
   assert.match(req.html, /MACHINE Management List/);
   assert.doesNotMatch(docs.html, /\breplace\b/i); assert.match(docs.html, /copy shows marks above/);
 });
+
+test("Dexter's grade: only once the documents are in, a sentence for 3 or below, filed once, carried on the request", async () => {
+  const t = setup();
+  const { id } = await makeRequest(t);
+  const g = (body) => t.call("POST", "/api/audit/request/grade", Object.assign({ id }, body));
+  assert.equal((await g({ inventory: 5, technical: 5, collaterals: 5 })).status, 409, "the gate: no grade before the documents are in");
+  t.db.prepare("UPDATE audit_request SET status='complete', complete_at='2026-10-15T08:00:00Z' WHERE id=?").run(id);
+  const bad = await g({ inventory: 3, technical: 5, collaterals: 5 });
+  assert.equal(bad.status, 400); assert.deepEqual((await bad.json()).fields, ["note"]);
+  const ok = await (await g({ inventory: 3, technical: 5, collaterals: 4, overall: "", note: "OBP not updated after the drum change." })).json();
+  assert.deepEqual(ok, { ok: true, score: 4, from: "average" }, "no Overall: (3+5+4)/3 = 4");
+  assert.equal((await g({ inventory: 5, technical: 5, collaterals: 5, overall: 5 })).status, 409, "filed once, never rewritten");
+  const row = t.db.prepare("SELECT r_overall, score, score_from, filed_by FROM audit_eval").get();
+  assert.deepEqual({ ...row }, { r_overall: null, score: 4, score_from: "average", filed_by: "dexter.lawrence@dg3.com" });
+  assert.equal(t.db.prepare("SELECT status FROM audit_visit").get().status, "filed");
+  const d = await (await t.call("GET", "/api/audit/request?id=" + id)).json();
+  assert.equal(d.grade.score, 4); assert.equal(d.grade.inventory, 3); assert.match(d.grade.note, /drum/);
+});

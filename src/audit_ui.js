@@ -153,6 +153,16 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .feed{padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
 .feed .w{font-size:12px;color:var(--mut);font-weight:600;margin-bottom:3px}
 .feed .pl{font-size:15px;line-height:1.45}
+.rt{padding:14px 16px;border-top:1px solid var(--line)}.rt:first-of-type{border-top:0}
+.rt .t{font-family:var(--fh);font-weight:600;font-size:15px}.rt .s{font-size:13px;color:var(--mut);margin-top:2px}
+.rate{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}
+.rate button{min-height:44px;border:0;border-radius:12px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);font-family:var(--fh);font-weight:600;font-size:16px;color:var(--ink2);cursor:pointer}
+.rate button.on{background:var(--navy);color:#fff;box-shadow:none}.rate button.on.lo{background:#B4382A}
+.gnote{width:100%;min-height:96px;border:0;border-radius:12px;padding:12px 14px;font:inherit;font-size:15px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink);resize:vertical}
+.gnote.err{box-shadow:inset 0 0 0 2px var(--red)}
+.gsum{display:flex;align-items:center;gap:12px}.gsum .ib{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;flex:none}.gsum .ib .ic{width:26px;height:26px}
+.gsum .ib.n{background:var(--navybg);color:var(--nfg)}.gsum .ib.g{background:var(--greenbg);color:var(--green-d)}.gsum .ib.r{background:var(--redbg);color:var(--red)}.gsum .n{font-family:var(--fh);font-weight:700;font-size:34px;line-height:1}.gsum .n small{font-size:16px;color:var(--mut);font-weight:600}
+.gline{display:flex;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--line);font-size:14px}.gline b{font-family:var(--fh)}
 .full{margin-top:6px}.full>summary{display:inline-flex;align-items:center;min-height:40px;padding-right:12px;font-size:13px;font-weight:600;color:var(--nfg);cursor:pointer}
 .full>div p.also{margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--line);font-weight:600;color:var(--fg)}
 .full>div{font-size:13px;line-height:1.5;color:var(--mut);padding-top:2px}.full>div p{margin:0 0 6px}.full>div b{color:var(--fg);font-weight:600}
@@ -231,6 +241,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
   // One status word per request, said the same way on every screen.
   function reqStatus(r) {
     if (!r) return "";
+    if (r.grade != null) return '<span class="st ' + (r.grade <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + "Graded " + r.grade + "/5</span>";
     if (r.status === "complete") return '<span class="st g">' + ic("f:seal-check") + "Docs in</span>";
     if (r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()))) return '<span class="st r">' + ic("f:warning-circle") + "Overdue</span>";
     if (r.status === "sent") return '<span class="st n">' + ic("hourglass-medium") + "Waiting" + (r.due ? " · " + esc(left(r.due)) : "") + "</span>";
@@ -416,7 +427,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       if (S.view !== key) return;
       var done = d.status === "complete", sent = d.status === "sent", cancelled = d.status === "cancelled";
       var late = sent && (d.overdueAt || Date.parse(d.dueAt) < Date.now());
-      top(d.ship, d.crew, done ? ic("f:seal-check") + "Docs in" : late ? "Overdue" : sent ? ic("clock") + esc(left(d.dueAt)) : cancelled ? "Cancelled" : "", done ? "done" : late ? "late" : "", true);
+      top(d.ship, d.crew, d.grade ? ic("f:seal-check") + "Graded " + d.grade.score + "/5" : done ? ic("f:seal-check") + "Docs in" : late ? "Overdue" : sent ? ic("clock") + esc(left(d.dueAt)) : cancelled ? "Cancelled" : "", done ? "done" : late ? "late" : "", true);
       var md = d.machines.filter(machDone).length, mt = d.machines.length;
       var big = done ? ["g", "f:seal-check", "Everything is in", "Since " + whenUtc(d.completeAt) + ". The assessment went to " + (d.test ? "you (test)." : "Ray, Rolando, Ohji, Jonathan and Miguel.")]
         : cancelled ? ["m", "x", "Request cancelled", "The upload link is closed."]
@@ -439,8 +450,9 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       });
       h += "</div>";
       h += '<div class="card"><div class="ch">' + ic("package") + 'Blind count<span class="r">' + d.count.done + " of " + d.count.total + '</span></div><div class="pad" style="padding-top:4px">' + '<div class="track' + (done ? "" : " navy") + '"><i style="width:' + pct(d.count.done, d.count.total) + '%"></i></div>' + (d.extras ? '<div class="sm" style="margin-top:8px">' + d.extras + (d.extras === 1 ? " item found that is" : " items found that are") + " not on the OBP list</div>" : "") + "</div></div>";
+      if (d.grade) h = gradeCard(d.grade) + h;
       $("main").innerHTML = h;
-      if (done) dock('<button class="btn green" disabled>' + ic("clipboard-text") + 'Start the audit</button><div class="note">The on-ship audit steps arrive with the next update.</div>');
+      if (done && !d.grade) dock('<button class="btn green" data-go="g=' + esc(id) + '">' + ic("clipboard-text") + "Grade the audit</button>");
       else if (sent) {
         dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + 'Add 24 h</button></div><button class="btn txt" id="cx">Cancel request</button>');
         var act = function (what, confirmText) { return function () { if (confirmText && !confirm(confirmText)) return; post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(WHY[r.error] || r.error || "Not done"); reloadShips(); requestDetail(id); }); }; };
@@ -448,6 +460,74 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
         $("ex").onclick = act("extend");
         $("cx").onclick = act("cancel", "Cancel this request? The upload link closes.");
       }
+    }).catch(fail);
+  }
+  /* ---------------- A5 · Dexter's grade (15 Oct 2026) ---------------- */
+  var RATINGS = [["inventory", "Inventory", "OBP matches the shelf, par kept, parts life tracked"], ["technical", "Technical", "Machines, error codes, maintenance, test prints"], ["collaterals", "Customer collaterals", "Quality of what the ship prints for guests"], ["overall", "Overall", "Leave blank to use the average of the three above"]];
+  function scoreOf(g) {
+    var ok = function (v) { return v >= 1 && v <= 5 ? v : null; };
+    if (ok(g.overall)) return { score: g.overall, from: "overall" };
+    var p = [g.inventory, g.technical, g.collaterals].filter(ok);
+    return p.length ? { score: Math.floor(p.reduce(function (a, b) { return a + b; }, 0) / p.length), from: "average" } : { score: null, from: null };
+  }
+  function gradeCard(g) {
+    var h = '<div class="card"><div class="pad"><div class="gsum"><span class="ib ' + (g.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + '</span><div><div class="n">' + esc(g.score) + "<small> / 5</small></div>" + '<div class="sm">Audit score · ' + (g.from === "overall" ? "Overall rating" : "average of the ratings, rounded down") + " · filed " + fmtD(g.at, true) + "</div></div></div></div>";
+    RATINGS.forEach(function (r) { var v = g[r[0]]; h += '<div class="gline"><span>' + esc(r[1]) + "</span><b>" + (v ? esc(v) + " / 5" : "Not given") + "</b></div>"; });
+    if (g.note) h += '<div class="feed"><div class="w">What needs to improve</div><div class="pl">' + esc(g.note) + "</div></div>";
+    return h + "</div>";
+  }
+  function gradeView(id) {
+    top("Grade the audit", "", "", "", true); hero(""); dock("");
+    $("main").innerHTML = skel(4);
+    var key = "g" + id; S.view = key;
+    var G = { inventory: null, technical: null, collaterals: null, overall: null, note: "" };
+    api("/api/audit/request?id=" + encodeURIComponent(id)).then(function (d) {
+      if (S.view !== key) return;
+      if (d.grade || d.status !== "complete") { go("q=" + id); return; }
+      top(d.ship, d.crew, "", "", true);
+      var h = '<div class="card">';
+      RATINGS.forEach(function (r) {
+        h += '<div class="rt"><div class="t">' + esc(r[1]) + (r[0] === "overall" ? ' <span class="sm">· optional</span>' : "") + '</div><div class="s">' + esc(r[2]) + '</div><div class="rate" data-k="' + r[0] + '">';
+        for (var n = 1; n <= 5; n++) h += '<button type="button" data-v="' + n + '" aria-label="' + esc(r[1]) + " " + n + '">' + n + "</button>";
+        h += "</div></div>";
+      });
+      h += "</div>";
+      h += '<div class="card pad"><div class="t" style="font-family:var(--fh);font-weight:600">What needs to improve</div><div class="sm" id="nh" style="margin:2px 0 10px">Required when any rating is 3 or below.</div><textarea class="gnote" id="gn" placeholder="What you saw, and what was agreed with ' + esc(first(d.crew)) + '"></textarea></div>';
+      h += '<div class="card pad"><div class="gsum"><span class="ib n" id="gi">' + ic("clipboard-text") + '</span><div><div class="n" id="gs">–<small> / 5</small></div><div class="sm" id="gf">Rate Inventory, Technical and Customer collaterals.</div></div></div></div>';
+      $("main").innerHTML = h;
+      var draw = function () {
+        Array.prototype.forEach.call(document.querySelectorAll(".rate"), function (row) {
+          var k = row.getAttribute("data-k");
+          Array.prototype.forEach.call(row.children, function (b) { var v = +b.getAttribute("data-v"); b.className = (G[k] === v ? "on" : "") + (G[k] === v && v <= 3 ? " lo" : ""); });
+        });
+        var sc = scoreOf(G), low = RATINGS.some(function (r) { return G[r[0]] != null && G[r[0]] <= 3; });
+        var all = G.inventory && G.technical && G.collaterals, noteOk = !low || G.note.trim().length >= 10;
+        $("gs").innerHTML = (sc.score == null ? "–" : sc.score) + "<small> / 5</small>";
+        $("gf").textContent = !all ? "Rate Inventory, Technical and Customer collaterals." : sc.from === "overall" ? "Score from the Overall rating." : "No Overall: the average of the three, rounded down.";
+        $("gi").className = "ib " + (sc.score == null ? "n" : sc.score <= 3 ? "r" : "g");
+        $("nh").textContent = low ? "Required: a rating is 3 or below. One sentence, at least 10 characters." : "Optional. Required when any rating is 3 or below.";
+        $("gn").classList.toggle("err", low && !noteOk && G.note.length > 0);
+        var btn = $("gb"); if (btn) btn.disabled = !(all && noteOk);
+      };
+      document.querySelectorAll(".rate").forEach(function (row) {
+        row.addEventListener("click", function (e) {
+          var b = e.target.closest("button"); if (!b) return;
+          var k = row.getAttribute("data-k"), v = +b.getAttribute("data-v");
+          G[k] = G[k] === v && k === "overall" ? null : v; draw();
+        });
+      });
+      $("gn").addEventListener("input", function () { G.note = $("gn").value; draw(); });
+      dock('<button class="btn green" id="gb" disabled>' + ic("check") + "File the grade</button>" + '<div class="note">Filed once. It cannot be changed afterwards.</div>');
+      $("gb").onclick = function () {
+        var sc = scoreOf(G);
+        if (!confirm("File " + first(d.crew) + "'s audit with a score of " + sc.score + " / 5? It cannot be changed afterwards.")) return;
+        $("gb").disabled = true;
+        post("/api/audit/request/grade", { id: id, inventory: G.inventory, technical: G.technical, collaterals: G.collaterals, overall: G.overall, note: G.note }).then(function (r) {
+          if (!r.ok) { alert(r.error === "already_filed" ? "This audit was already graded." : r.error === "invalid" ? "Check the ratings and the note." : (r.error || "Not filed")); $("gb").disabled = false; return; }
+          reloadShips(); S.brief = {}; history.replaceState(null, "", "#q=" + id); requestDetail(id);
+        }).catch(function () { alert("No connection. Nothing was filed; try again."); $("gb").disabled = false; });
+      };
+      draw();
     }).catch(fail);
   }
   function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
@@ -461,6 +541,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }
     if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
+    if (h.indexOf("g=") === 0) return gradeView(h.slice(2));
     shipsView();
   }
   $("bk").innerHTML = ic("caret-left");

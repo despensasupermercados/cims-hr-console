@@ -11,7 +11,7 @@ import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-15.c9";
+export const AUDIT_VERSION = "2026-10-15.d1";
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
@@ -69,7 +69,7 @@ export function installAudit(deps) {
     await ensureAudit(env);
     const [prof, reqs] = await Promise.all([
       crewProfile(env, sc, session),
-      env.DB.prepare("SELECT id, ship, status, created_at, sent_at, complete_at, due_at, auditor, test_mode FROM audit_request WHERE agency_id=? ORDER BY created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
+      env.DB.prepare("SELECT r.id, r.ship, r.status, r.created_at, r.sent_at, r.complete_at, r.due_at, r.auditor, r.test_mode, e.score AS grade, e.filed_at AS graded_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? ORDER BY r.created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
     ]);
     if (!prof || prof.error) return json({ error: (prof && prof.error) || "not_found" }, 404);
     const P = prof.profile || {}, crew = prof.crew || {};
@@ -94,7 +94,7 @@ export function installAudit(deps) {
       },
       slots: (P.people && P.people.slots) || [],
       feed, checks: (P.checks || []).map((c) => c.text),
-      audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode })),
+      audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
       open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "complete" || r.status === "draft") || {}).id || null,
     });
   }
