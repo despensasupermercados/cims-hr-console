@@ -118,3 +118,21 @@ test("a POST from another site or another *.cims.work app is refused (the shared
   assert.equal((await post("https://evil.example")).status, 403);
   assert.notEqual((await post("https://audit.cims.work")).status, 403, "the audit's own page passes");
 });
+
+test("the briefing: what reached the ship this contract, from OBP's received ledger in HON's D1 (Miguel, 16 Oct 2026)", async () => {
+  const seen = [];
+  const HON_DB = { prepare: (sql) => { const s = { bind: (...a) => { seen.push({ sql, a }); return s; }, all: async () => ({ results: [
+    { d: "2026-05-01", c: "Parts", t: "TN619C CYAN TONER", v: 845.1, q: 10, s: "2026-10-15" },
+    { d: "2026-07-01", c: "Supplies", t: "20 LBS 8.5 x 11 DG3 PAPER", v: 364.8, q: 10, s: "2026-10-15" },
+    { d: "2026-05-20", c: "Parts", t: "DR620 COLOR DRUM", v: 0, q: 1, s: "2026-10-15" },
+    { d: "2026-01-01", c: "Parts", t: "TN634K BLACK TONER", v: 999, q: 30, s: "2026-10-15" },
+  ] }) }; return s; } };
+  const b = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1", S, { DB: fakeDb(), HON_DB })).json();
+  assert.equal(seen.length, 1, "one read, in the briefing's wave");
+  assert.match(seen[0].sql, /^SELECT\b/);
+  assert.deepEqual(seen[0].a, ["oasis", "2025-07-11", "2026-10-14"], "OBP's ship name, a lower bound wide enough for any contract, to today");
+  assert.equal(b.supply.from, "2026-06-02", "cut to this contract's sign-on");
+  assert.deepEqual(b.supply.products.map((p) => [p.key, p.value]), [["paper", 364.8]], "the May toner predates the sign-on; a $0 drum is not shown");
+  const none = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1")).json();
+  assert.equal(none.supply, null, "no HON binding: no card, never a zero");
+});

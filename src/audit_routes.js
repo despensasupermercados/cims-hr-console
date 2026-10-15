@@ -10,8 +10,13 @@ import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel, numbersKept, datesKept } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
+import { SUPPLY_SQL, supplySummary } from "./ship_supply.js";
 
-export const AUDIT_VERSION = "2026-10-16.e2";
+export const AUDIT_VERSION = "2026-10-16.e3";
+
+// The briefing's OBP read covers this many days back in its first wave; a longer contract reads again from its sign-on.
+export const SUPPLY_LOOKBACK_DAYS = 460;
+const shiftDays = (isoDate, n) => { const t = Date.parse(String(isoDate).slice(0, 10) + "T00:00:00Z"); return isNaN(t) ? isoDate : new Date(t + n * 86400000).toISOString().slice(0, 10); };
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
@@ -91,10 +96,15 @@ export function installAudit(deps) {
     await ensureAudit(env);
     // OPEN MODE answers only for a seafarer the audit can reach: aboard a hull per the board, or already asked for an
     // audit. Without it the briefing is a lookup of any crew's private record by id (Inactive and Not for Rehire too).
-    const [prof, reqs, board] = await Promise.all([
+    // What reached the ship (src/ship_supply.js): OBP's received ledger in HON's D1, read in the same wave with a lower
+    // bound wide enough for any contract; cut to the contract's own sign-on below. A failed read says nothing.
+    const today = TODAY(), lo = shiftDays(today, -SUPPLY_LOOKBACK_DAYS);
+    const readSupply = (s, from) => (env.HON_DB && s ? env.HON_DB.prepare(SUPPLY_SQL).bind(normShip(s), from, today).all().then((r) => r.results || [], () => null) : Promise.resolve(null));
+    const [prof, reqs, board, supplyRows] = await Promise.all([
       crewProfile(env, sc, session),
       env.DB.prepare("SELECT r.id, r.ship, r.status, r.created_at, r.sent_at, r.complete_at, r.due_at, r.auditor, r.test_mode, e.score AS grade, e.filed_at AS graded_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? ORDER BY r.created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
       session.open ? rotationSections(env).catch(() => null) : null,
+      readSupply(ship, lo),
     ]);
     if (session.open && !(reqs.results || []).length && !aboardSomewhere(board, sc)) return json({ error: "not_found" }, 404);
     if (!prof || prof.error) return json({ error: (prof && prof.error) || "not_found" }, 404);
@@ -110,6 +120,11 @@ export function installAudit(deps) {
     })));
     for (const f of feed) if (f.kind === "intel") { if (f.whoAll) f.who = f.whoAll; delete f.whoAll; if (!f.others.length) delete f.others; }
     await plainIntel(env, feed);
+    // the contract's own window: sign-on to today. A sign-on older than the wave's bound (or no ship asked) reads again.
+    const supShip = ship || (cur && cur.ship) || null, supFrom = cur && cur.on ? String(cur.on).slice(0, 10) : null;
+    let supRows = supplyRows;
+    if (supFrom && supShip && (supFrom < lo || !ship)) supRows = await readSupply(supShip, supFrom);
+    const supply = supRows && supFrom ? supplySummary(supRows, { from: supFrom, to: today }) : null;
     return json({
       today: TODAY(), auditor: session.email,
       crew: { sc, name: [crew.first_name, crew.last_name].filter(Boolean).join(" ") || sc, position: (count && count.position) || crew.rank || null, email: session.open ? null : crew.email || null },
@@ -122,6 +137,7 @@ export function installAudit(deps) {
       // the crew record's own To-check rows are HR's housekeeping, not the auditor's (Miguel, 16 Oct 2026: "i dont think this
       // is relevant or provide any value"): they stay on the console's crew profile and are not sent here
       feed,
+      supply,
       audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
       // the request still in motion: sent, or in and not graded yet (a graded one is finished and opens the way to the next)
       open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "draft" || (r.status === "complete" && r.grade == null)) || {}).id || null,
