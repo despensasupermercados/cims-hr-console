@@ -5,6 +5,9 @@ import { readFileSync } from "node:fs";
 import { autoScore, auditPoints, HON_FROM, FW, computeBonus } from "../src/bonus.js";
 import { pickHandover, parseFlag, shipKey, gatherAuto } from "../src/score_auto.js";
 
+// the roster the Parts Portal's typed names are placed on (travel_match.js, the same bridge as the travel ledger)
+const ROSTER = [{ agency_id: "SC-1", first_name: "Ryan Paolo", last_name: "Marto" }, { agency_id: "SC-2", first_name: "Michael Angelo", last_name: "Resposo" },
+  { agency_id: "SC-3", first_name: "Bernard Winzon", last_name: "Paqueo" }, { agency_id: "SC-4", first_name: "Ida Bagus Made", last_name: "Purnama" }, { agency_id: "SC-5", first_name: "Ida", last_name: "Purnama" }];
 const C = { signOn: "2026-04-01", signOff: "2026-11-05", today: "2026-11-10" }; // the contract has ended: its handover is due
 const BEST = { ray: { order: "No", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "No" } };
 
@@ -88,8 +91,8 @@ test("PARTS_DB and HON_DB are read, never written", () => {
 test("gatherAuto: the miss on HIS ship, his handover, his audits, in one call", async () => {
   const st = (rows) => ({ bind: () => ({ all: async () => ({ results: rows }), first: async () => rows[0] || null, run: async () => ({}) }) });
   const env = {
-    DB: { prepare: (sql) => st(/FROM crew WHERE/.test(sql) ? [{ id: "c1" }] : /audit_eval/.test(sql) ? [{ request_id: "ar_1", ship: "Quantum", score: 4, filed_at: "2026-09-02T10:00:00Z" }] : /feedback_response2/.test(sql) ? [{ role: "ray", answers_json: JSON.stringify(BEST.ray), submitted_at: "2026-09-10" }] : []) },
-    PARTS_DB: { prepare: () => st([{ order_ref: "CIMS-1", ship: "Quantum", submitted_at: "2026-07-08T10:00:00", grand_total: 900 }, { order_ref: "CIMS-2", ship: "Anthem", submitted_at: "2026-07-09T10:00:00", grand_total: 50 }]) },
+    DB: { prepare: (sql) => st(/FROM crew WHERE/.test(sql) ? [{ id: "c1" }] : /FROM crew$/.test(sql) ? ROSTER : /audit_eval/.test(sql) ? [{ request_id: "ar_1", ship: "Quantum", score: 4, filed_at: "2026-09-02T10:00:00Z" }] : /feedback_response2/.test(sql) ? [{ role: "ray", answers_json: JSON.stringify(BEST.ray), submitted_at: "2026-09-10" }] : []) },
+    PARTS_DB: { prepare: () => st([{ order_ref: "CIMS-1", ship: "Quantum", submitted_at: "2026-07-08T10:00:00", grand_total: 900, requester: "Ryan Marto" }, { order_ref: "CIMS-2", ship: "Anthem", submitted_at: "2026-07-09T10:00:00", grand_total: 50, requester: "Ryan Marto" }]) },
     HON_DB: { prepare: () => st([]) },
   };
   const r = await gatherAuto(env, { sc: "SC-1", ship: "Quantum of the Seas", signOn: "2026-04-01", signOff: "2026-11-03", crewName: "Ryan Marto", today: "2026-11-10" }, { engine: "none" });
@@ -101,8 +104,8 @@ test("gatherAuto: the miss on HIS ship, his handover, his audits, in one call", 
 
 test("15 Oct review: no ship or no sign-on reads nothing; a transfer is every ship; Ray answering the same day AFTER the report stands", async () => {
   const st = (rows) => ({ bind: () => ({ all: async () => ({ results: rows }), first: async () => rows[0] || null, run: async () => ({}) }) });
-  const MISSES = [{ order_ref: "CIMS-Q", ship: "Quantum", submitted_at: "2026-05-08T10:00:00", grand_total: 900 }, { order_ref: "CIMS-A", ship: "Anthem", submitted_at: "2026-07-09T10:00:00", grand_total: 50 }, { order_ref: "CIMS-OLD", ship: "Quantum", submitted_at: "2024-01-01T10:00:00" }];
-  const env = { DB: { prepare: (sql) => st(/audit_eval/.test(sql) ? [{ request_id: "ar_9", ship: "Oasis", score: 2, filed_at: "2026-09-02T10:00:00Z" }] : []) },
+  const MISSES = [{ order_ref: "CIMS-Q", ship: "Quantum", submitted_at: "2026-05-08T10:00:00", grand_total: 900, requester: "Ryan Marto" }, { order_ref: "CIMS-A", ship: "Anthem", submitted_at: "2026-07-09T10:00:00", grand_total: 50, requester: "Ryan Marto" }, { order_ref: "CIMS-OLD", ship: "Quantum", submitted_at: "2024-01-01T10:00:00", requester: "Ryan Marto" }];
+  const env = { DB: { prepare: (sql) => st(/FROM crew$/.test(sql) ? ROSTER : /audit_eval/.test(sql) ? [{ request_id: "ar_9", ship: "Oasis", score: 2, filed_at: "2026-09-02T10:00:00Z" }] : []) },
     PARTS_DB: { prepare: (sql) => ({ bind: (a, b) => ({ all: async () => ({ results: MISSES.filter((m) => m.submitted_at >= a && m.submitted_at <= b) }) }) }) }, HON_DB: { prepare: () => st([]) } };
   const base = { sc: "SC-1", signOn: "2026-04-01", signOff: "2026-10-01", crewName: "R M", today: "2026-10-15" };
   const blank = await gatherAuto(env, { ...base, ship: "" }, { engine: "none" });
@@ -141,4 +144,28 @@ test("the Score Card page as served: the gate note's regex keeps its backslashes
   const row = page.slice(page.indexOf("function swRow"), page.indexOf("var _swt"));
   assert.match(row, /escHtml\(c\.name/); assert.doesNotMatch(row, /swPickCrew\(\\'.+c\.agency_id/);
   assert.match(page, /id=ships onchange="applyAuto\(\)"/, "editing the ship re-reads the systems");
+});
+
+test("16 Oct (Miguel: 'only the one who missed the order'): a miss counts against the crew who placed it", async () => {
+  const { missOwner } = await import("../src/score_auto.js");
+  const { buildCrewIndex } = await import("../src/travel_match.js");
+  const ix = buildCrewIndex(ROSTER);
+  assert.equal(missOwner("Michael Resposo", "SC-2", ix).mine, true, "a short name is still his");
+  assert.equal(missOwner("michael resposo / bernard paqueo", "SC-3", ix).mine, true, "a joint order counts against each");
+  assert.equal(missOwner("Michael Resposo", "SC-3", ix).mine, false, "the other crew of the handover is not charged");
+  assert.deepEqual(missOwner("Ida Bagus Made Purnama", "SC-4", ix).unplaced, ["Ida Bagus Made Purnama"], "two roster rows: flagged, never picked");
+  assert.deepEqual(missOwner("", "SC-1", ix).unplaced, ["(no name on the order)"]);
+  const st = (rows) => ({ bind: () => ({ all: async () => ({ results: rows }), first: async () => rows[0] || null, run: async () => ({}) }) });
+  const env = { DB: { prepare: (sql) => st(/FROM crew$/.test(sql) ? ROSTER : []) }, HON_DB: { prepare: () => st([]) },
+    PARTS_DB: { prepare: () => st([{ order_ref: "CIMS-R", ship: "Reflection", submitted_at: "2026-07-08T19:08:50Z", grand_total: 300, requester: "Michael Resposo" },
+      { order_ref: "CIMS-X", ship: "Reflection", submitted_at: "2026-07-09T10:00:00Z", grand_total: 80, requester: "Ray Guerra" }]) } };
+  const inp = { ship: "Reflection", signOn: "2026-04-01", signOff: "2026-10-01", today: "2026-10-16" };
+  const his = await gatherAuto(env, { ...inp, sc: "SC-2", crewName: "Michael Angelo Resposo" }, { engine: "none" });
+  assert.equal(his.gates.rush, true); assert.equal(his.sliders.sOrder, 0);
+  assert.match(his.gateNote.join(" "), /CIMS-R .*placed by Michael Resposo/);
+  const other = await gatherAuto(env, { ...inp, sc: "SC-3", crewName: "Bernard Winzon Paqueo" }, { engine: "none" });
+  assert.ok(!other.gates.rush, "the relief aboard the same hull is not charged for his colleague's miss");
+  const lines = other.evidence.map((e) => e.text).join(" | ");
+  assert.match(lines, /CIMS-R .*another crew's order, not counted/);
+  assert.match(lines, /CIMS-X .*not on the roster, not counted\. Check who placed it/);
 });

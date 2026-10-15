@@ -581,8 +581,21 @@ movable; the commit is a money user's click; committed outcomes are never touche
   before the name; reports not read yet are said on the card ("N field reports ... not read yet"); an open-site grade says
   so. The page takes back only what the read set: a slider or gate the user moved stays, a rush gate the read armed is
   cleared when its miss leaves the window, the read's gate-note lines are swapped by exact text. Contributor rows escape
-  names (TDG import). Still open, Miguel's: the commit does not store the evidence, and `policy_version` is still 1 though
-  `sComm` now means the audit.
+  names (TDG import).
+- **Miguel's answers of 16 Oct 2026** ("1. is ok unlock for now. 2. agree. both .. 3. only the one who missed the order. 4. yes"):
+  (1) grading stays open on the audit site (no sign-in), stamped "(open site, no sign-in)"; (2) **policy v2** (`POLICY_VERSION`
+  in `bonus.js`, `bonus_policy` row `policy-v2`, migrations/0028, `ensureBonusV2`): v1's ladder, floor, weights, eval rule and
+  gates to the character — only what `sComm` measures changed — and every commit stores **`bonus_outcome.evidence_json`**: the
+  server re-runs the automatic read for the committed span and ships (`commitEvidence`, cached AI answers only, never blocks
+  a commit) and keeps every evidence line with its source, the suggested sliders / gates and the audits. 0 outcomes existed
+  before v2, so nothing was ever scored under v1's old meaning. (3) **A vessel-side miss counts only against the crew who
+  placed it** (`missOwner`): the Parts Portal's typed `requester` is placed on the roster by the travel ledger's name bridge
+  (`travel_match.js`, deterministic); a joint order ("A / B") counts against each; another crew's miss on the same hull
+  (the overlap of a handover) is shown "another crew's order, not counted"; a name the roster cannot place (Ray Guerra, the
+  health-check orders, Purnama's two roster rows) is shown "not on the roster, not counted. Check who placed it" — never
+  charged on a guess (§6). Measured 16 Oct 2026: every crew requester on file places except Purnama. (4) with no miss,
+  on-time ordering is Ray's on-time answer, all or nothing — as built. Pinned by `test/score_auto.test.js`,
+  `test/bonus_policy_v2.test.js`.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
 "redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas
@@ -1073,7 +1086,8 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   `test/audit_routes.test.js`, `test/audit_plain.test.js`). OPEN MODE limits what an anonymous visitor reaches: the briefing
   answers only for crew the board has aboard (or already asked), without the personal address (`crew.email`, `cc`), and
   reporters read by name (`personName`); a request goes only to a seafarer aboard THAT ship (`not_aboard`); a grade filed
-  without a sign-in says so on `filed_by` ("(open site, no sign-in)"). Everywhere: a POST whose Origin is another host is
+  without a sign-in says so on `filed_by` ("(open site, no sign-in)") — grading stays open (Miguel, 16 Oct 2026: "is ok
+  unlock for now"). Everywhere: a POST whose Origin is another host is
   refused (`crossSite`: the shared `Domain=cims.work` cookie reaches every *.cims.work app); a request is not re-sent within
   `RESEND_MIN` = 15 minutes (each resend breaks the crew's link and emails the ship again); a TEST request cannot be graded
   (`test_request`: a rehearsal would reach a real Score Card); a rating is a whole 1–5 (number or one-digit string, never

@@ -1,4 +1,4 @@
-import { ladderValue, computeBonus, mapFeedbackToScore } from "./bonus.js";
+import { ladderValue, computeBonus, mapFeedbackToScore, POLICY_VERSION } from "./bonus.js";
 import { signToken, verifyToken } from "./auth.js";
 import { magicLinkEmail } from "./emails/hr.magiclink.v2.js";
 import { crewComplianceReport } from "./compliance.js";
@@ -3241,6 +3241,25 @@ async function apiScoreAuto(env, url) {
     crewName: [cr.first_name, cr.last_name].filter(Boolean).join(" "),
   }, { ensure: ensureScoreFlag, engine: pickEngine(env), claudeModel: INTEL_MODEL_CLAUDE, workersModel: INTEL_MODEL_WORKERSAI }));
 }
+// Policy v2 and the commit's evidence (migrations/0028; Miguel, 16 Oct 2026: "agree. both"). Memoized: the row and the
+// column exist before the first commit under v2 whatever order the migration and the deploy land in.
+const ensureBonusV2 = memoEnsure(async (env) => {
+  await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) SELECT 'policy-v2', 2, '2026-10-15', ladder_json, floor_pct, weights_json, eval_rule, gates_json, agg_policy, 'v1 weights and gates unchanged. sComm = Dexter''s audit, not Communication. The Score Card pre-fills from the systems (bonus.js autoScore, 15-16 Oct 2026).' FROM bonus_policy WHERE version = 1").run();
+  try { await env.DB.prepare("ALTER TABLE bonus_outcome ADD COLUMN evidence_json TEXT").run(); }
+  catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
+}, "policy-v2");
+// The automatic read for the span and ships being committed, re-run on the server (cached AI answers only: a commit never
+// waits on a model), kept beside the outcome. Never blocks a commit: a failed read is stored as the failure.
+async function commitEvidence(env, cr, b, ships) {
+  try {
+    const name = await env.DB.prepare("SELECT first_name, last_name FROM crew WHERE agency_id=?").bind(cr.agency_id).first().catch(() => null);
+    const a = await gatherAuto(env, { sc: cr.agency_id, ship: ships.join(", "), signOn: b.spanStart, signOff: b.spanEnd,
+      crewName: name ? [name.first_name, name.last_name].filter(Boolean).join(" ") : "" }, { ensure: ensureScoreFlag, engine: "none" });
+    return JSON.stringify({ at: new Date().toISOString(), inputs: { ships, on: b.spanStart, off: b.spanEnd }, suggested: { sliders: a.sliders, gates: a.gates },
+      evidence: (a.evidence || []).slice(0, 80).map((x) => ({ factor: x.factor || null, text: String(x.text || "").slice(0, 600), source: x.source || null })),
+      audits: (a.audits || []).map((x) => ({ id: x.id, ship: x.ship, score: x.score, at: x.at })), unread: a.unread || 0, sources: a.sources || null });
+  } catch (e) { return JSON.stringify({ at: new Date().toISOString(), error: String((e && e.message) || e).slice(0, 200) }); }
+}
 async function apiBonusCommit(request, env, session) {
   // Money authority gate: committing a payout is restricted to the money users (GM/HR),
   // even though all console users are role 'full' today.
@@ -3285,9 +3304,11 @@ async function apiBonusCommit(request, env, session) {
       .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now).run();
   }
   const oid = "bo_" + crypto.randomUUID();
+  await ensureBonusV2(env);
+  const evidence = await commitEvidence(env, cr, b, ships);
   try {
-    await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(oid, cid, groupId, cr.id, 1, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now).run();
+    await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence).run();
   } catch (e) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
     // SELECT trips UNIQUE(crew_id,span_start,span_end) (migration 0004, primary outcomes only). Return the
@@ -3298,7 +3319,7 @@ async function apiBonusCommit(request, env, session) {
     throw e;
   }
   await logActivity(env, (session && session.email), "commit_outcome", groupId + " pay=" + r.pay + " gate=" + (r.gate || "none"));
-  return json({ ok: true, group: groupId, ships, result: r });
+  return json({ ok: true, group: groupId, ships, result: r, policy: POLICY_VERSION });
 }
 
 /* ----------------------- feedback windows ----------------------- */
@@ -9105,7 +9126,7 @@ async function commitBonus(){
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
   if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
-  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v1. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
 // Backdrop close, guarded against the "ghost click" on touch devices: tapping a Score/row button
 // fires a delayed synthetic click (~300ms) that lands on the freshly-mounted overlay and used to

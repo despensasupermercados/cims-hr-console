@@ -7,6 +7,7 @@
 //                                  be in the report word for word (otherwise no flag), kept in score_intel_flag.
 // No click feed exists yet (OBP's clicks table is being added to the nightly export): mono is null = full points.
 import { autoScore } from "./bonus.js";
+import { buildCrewIndex, matchTravelName } from "./travel_match.js";
 
 export const shipKey = (s) => String(s || "").toLowerCase()
   .replace(/^\s*(mv|m\/v|ms)\s+/, "").replace(/^(celebrity|azamara|royal caribbean)\s+/, "")
@@ -44,6 +45,21 @@ export const FLAG_SYSTEM = [
   "quote: the exact words from the report that show it, copied character for character; empty when both are false.",
   'Answer exactly: {"accuracy":false,"par":false,"quote":""}',
 ].join("\n");
+// WHO MISSED THE ORDER (Miguel, 16 Oct 2026: "only the one who missed the order"). The Parts Portal keeps the name the
+// requester typed ("Michael Resposo", "Andrea Joyce M. Calayag", "michael resposo / bernard paqueo"); the travel ledger's
+// name bridge (travel_match.js, deterministic, never a guess) places each name on the roster. A miss counts against this
+// crew only when one of its names is this crew (a joint order counts against each); another crew's miss on the same hull
+// (the overlap of a handover) is shown and not counted; a name the roster cannot place is shown as "check who placed it"
+// and not counted (§6: flag, never pick).
+export function missOwner(requester, sc, ix) {
+  const parts = String(requester || "").split(/\s*(?:\/|&|\band\b|;)\s*/i).map((x) => x.trim()).filter(Boolean);
+  if (!parts.length) return { mine: false, who: null, unplaced: ["(no name on the order)"], others: [] };
+  const hits = parts.map((p) => ({ p, m: matchTravelName(p, ix) }));
+  const mine = hits.some((h) => h.m.agency_id === sc);
+  return { mine, joint: parts.length > 1, who: parts.join(" / "),
+    others: hits.filter((h) => h.m.agency_id && h.m.agency_id !== sc).map((h) => h.m.name),
+    unplaced: hits.filter((h) => !h.m.agency_id).map((h) => h.p) };
+}
 export const QUOTE_MIN = 15;
 export function parseFlag(txt, source) {
   const m = String(txt || "").match(/\{[\s\S]*\}/);
@@ -90,17 +106,24 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   const none = () => ({ results: [] });
   if (deps.ensure) await deps.ensure(env);
   // ONE wave (§12). Without a sign-on nothing dated is read; without a ship no miss or handover can be his.
-  const [misses, hons, audits, intel, resp] = await Promise.all([
-    env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(none) : none(),
+  const [misses, hons, audits, intel, resp, roster] = await Promise.all([
+    env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(none) : none(),
     env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(none) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
     env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(none),
     on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
     env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
+    env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
   ]);
   const answers = {}; let rayAt = null;
   for (const r of resp.results || []) { try { answers[r.role] = JSON.parse(r.answers_json || "{}"); } catch (e) {} if (r.role === "ray") rayAt = r.submitted_at; }
-  const vm = (misses.results || []).filter((m) => keys.includes(shipKey(m.ship))).map((m) => ({ ref: m.order_ref, at: m.submitted_at, total: m.grand_total, ship: m.ship }));
+  const ix = buildCrewIndex(roster.results || []);
+  const vm = [], notMine = [];
+  for (const m of (misses.results || []).filter((x) => keys.includes(shipKey(x.ship)))) {
+    const o = missOwner(m.requester, sc, ix);
+    const row = { ref: m.order_ref, at: m.submitted_at, total: m.grand_total, ship: m.ship, by: o.who, joint: o.joint };
+    if (o.mine) vm.push(row); else notMine.push({ ...row, others: o.others, unplaced: o.unplaced });
+  }
   const handover = pickHandover(hons.results || [], { ship, signOff: offIn, crewName, sc });
   // field reports: classify each once (cached by the report's text), at most 4 new per open
   const reports = (intel.results || []).filter((r) => r.summary);
@@ -135,6 +158,12 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   const aud = keys.length ? allAud.filter((a) => keys.includes(shipKey(a.ship))) : [];
   const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: null });
   const notes = [];
+  for (const m of notMine) {
+    const head = "Vessel-side miss " + m.ref + " · " + day(m.at) + " · " + (m.ship || "") + " · placed by " + (m.by || "nobody named");
+    notes.push({ factor: "sOrder", source: "Parts Portal", text: m.unplaced.length
+      ? head + ": the name is not on the roster, not counted. Check who placed it."
+      : head + ": another crew's order, not counted." });
+  }
   if (!keys.length) notes.push({ factor: "sOrder", text: "No ship on the Score Card: the Parts Portal, HON and the audits were not checked", source: "Score Card" });
   if (!on) notes.push({ factor: "sOrder", text: "No sign-on date: misses and field reports were not checked", source: "Score Card" });
   if (unread) notes.push({ factor: "sAcc", text: unread + " field report" + (unread === 1 ? "" : "s") + " in this contract not read yet (" + (deps.engine && deps.engine !== "none" ? "read on the next open" : "no AI engine") + "): check them on the crew's Notes", source: "Field intel" });

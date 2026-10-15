@@ -8,6 +8,10 @@ export function ladderValue(n) { return n <= 1 ? 0 : n >= 9 ? 2000 : LADDER[n]; 
 
 export const FLOOR = 80;
 export const FW = { sOrder: 20, sAcc: 25, sPar: 15, sHand: 10, sComm: 10, sMono: 5 };
+// The policy every new outcome is committed under (bonus_policy.version). v2 (15 Oct 2026, Miguel: "agree. both"): the same
+// ladder, floor, weights and gates as v1; sComm is Dexter's audit (no longer Communication) and the Score Card pre-fills
+// from the systems (autoScore). An outcome records which rules it was scored under; v1 is never rewritten.
+export const POLICY_VERSION = 2;
 
 export function clampInt(v, max) {
   v = parseInt(v);
@@ -110,7 +114,7 @@ export function autoScore(inp) {
   if (misses.length) {
     sliders.sOrder = 0; gates.rush = true;
     for (const m of misses) {
-      const t = "Vessel-side miss " + (m.ref || "") + " · " + day(m.at) + (m.total ? " · $" + Number(m.total).toLocaleString() : "");
+      const t = "Vessel-side miss " + (m.ref || "") + " · " + day(m.at) + (m.total ? " · $" + Number(m.total).toLocaleString() : "") + (m.by ? " · placed by " + m.by : "");
       gateNote.push(t + " (Parts Portal)"); evidence.push({ factor: "sOrder", text: t, source: "Parts Portal" });
     }
   }
