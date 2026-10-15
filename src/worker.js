@@ -15,12 +15,13 @@ import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
-import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, SGA_COL_KEYS } from "./sga.js";
+import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, sgaPeriodFromName, SGA_COL_KEYS } from "./sga.js";
+import { archiveKey, sourceRecord, safeName, SOURCE_COLS } from "./sga_archive.js";
 import * as XLSX from "xlsx";
 import { runSync, syncConfigured, syncAllowed, sheetsOf, WANT_SGA, WANT_TRAVEL } from "./sharepoint_sync.js";
 import { assembleInbox } from "./sp_inbox.js";
 import PostalMime from "postal-mime";
-import { isIntakeMail, intakeMail } from "./mail_intake.js";
+import { isIntakeMail, intakeMail, sha256Hex, yearFromName } from "./mail_intake.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
@@ -284,6 +285,8 @@ export default {
         if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
         if (p === "/api/sga")        return apiSga(env);
         if (p === "/api/sga/import" && request.method === "POST") return apiSgaImport(request, env, session);
+        if (p === "/api/sga/archive" && request.method === "POST") return apiSgaArchive(request, env, session);
+        if (p === "/api/sga/file")   return apiSgaFile(request, env);
         if (p === "/api/sharepoint/status") return apiSharePointStatus(env);
         if (p === "/api/sharepoint/sync" && request.method === "POST") return apiSharePointSync(env, session);
         if (p === "/api/sharepoint/inbox/apply" && request.method === "POST") return apiInboxApply(env, session);
@@ -1476,6 +1479,8 @@ async function ensureSgaImpl(env) {
   await Promise.all([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_file (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, sga_no TEXT, sga_date TEXT, file_name TEXT, file_hash TEXT, rows INTEGER, total REAL, grand_total REAL, training_months INTEGER, loaded_by TEXT, loaded_at TEXT, source TEXT)").run(),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_line (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, ref TEXT, ship_code TEXT, seq INTEGER, sga_no TEXT, crew_name TEXT, vessel TEXT, brand TEXT, id_number TEXT, nationality TEXT, " + SGA_COL_KEYS.map((k) => k + " REAL DEFAULT 0").join(", ") + ", amount REAL, cols_sum REAL)").run(),
+    // the original workbooks, one row per file by SHA-256; the bytes in the EXPORTS bucket (migrations/0029, src/sga_archive.js)
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_source_file (hash TEXT PRIMARY KEY, name TEXT, kind TEXT, year INTEGER, month INTEGER, bytes INTEGER, r2_key TEXT, bucket TEXT, source TEXT, by TEXT, at TEXT, file_key TEXT, note TEXT)").run(),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS training_cost (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, rental REAL DEFAULT 0, utilities REAL DEFAULT 0, hotel REAL DEFAULT 0, air REAL DEFAULT 0, other REAL DEFAULT 0, bank_charge REAL DEFAULT 0, total REAL, summary_only INTEGER DEFAULT 0)").run(),
     // `other` (15 Oct 2026, migrations/0027): TDG's OTHER / PORT AGENT EXPENSE column. Same wave; a table that has it answers with an error we ignore.
     env.DB.prepare("ALTER TABLE sga_line ADD COLUMN other REAL DEFAULT 0").run().catch(() => null),
@@ -1690,21 +1695,77 @@ async function ensureMailIntakeImpl(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS mail_intake (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, message_id TEXT, allowed INTEGER, files_json TEXT, ignored_json TEXT, outcome TEXT, received_at TEXT)").run();
 }
 const INBOX_COLS = ["id", "file_key", "kind", "year", "month", "item_id", "name", "path", "modified", "sheet", "part", "parts", "file_parts", "rows_json", "written_by", "at", "status"];
+const XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+// THE ARCHIVE (src/sga_archive.js; Miguel, 15 Oct 2026: "keep this somewhere in a bucket .. I dont wanna lose this"): the
+// original bytes go to the EXPORTS bucket under sga-archive/, one sga_source_file row per SHA-256. Never throws — a failed
+// archive is reported on the result and never blocks a load; a row that already holds the bytes is never downgraded.
+async function archiveSourceFile(env, bytes, meta) {
+  await ensureSga(env);
+  const hash = meta.hash || await sha256Hex(bytes);
+  const rec = sourceRecord({ ...meta, hash, bytes: bytes ? bytes.byteLength : null, r2_key: null, bucket: null });
+  let kept = false, error = null;
+  if (bytes && bytes.byteLength && env.EXPORTS) {
+    const key = archiveKey({ kind: meta.kind, year: meta.year, month: meta.month, hash, name: meta.name });
+    try { await env.EXPORTS.put(key, bytes, { httpMetadata: { contentType: XLSX_MIME_TYPE }, customMetadata: { name: String(meta.name || "").slice(0, 200), sha256: hash } }); rec.r2_key = key; rec.bucket = "cims-hr-exports"; kept = true; }
+    catch (e) { error = String((e && e.message) || e); }
+  } else if (!env.EXPORTS) error = "no EXPORTS bucket bound";
+  const prev = await env.DB.prepare("SELECT r2_key, bucket FROM sga_source_file WHERE hash=?").bind(hash).first().catch(() => null);
+  if (!kept && prev && prev.r2_key) { rec.r2_key = prev.r2_key; rec.bucket = prev.bucket; kept = true; error = null; }
+  if (!kept) rec.note = rec.note || ("Bytes not kept" + (error ? ": " + error : ""));
+  await env.DB.prepare("INSERT OR REPLACE INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ")").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
+  return { hash, kept, r2_key: rec.r2_key, error };
+}
 async function intakeMailToInbox(env, message, ctx) {
-  await Promise.all([ensureMailIntake(env), ensureSpInbox(env)]);
+  await Promise.all([ensureMailIntake(env), ensureSpInbox(env), ensureSga(env)]);
   const raw = await new Response(message.raw).arrayBuffer();
   const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
   const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now() });
+  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again
+  const keys = r.files.filter((f) => f.inbox && f.inbox.length).map((f) => f.inbox[0].file_key);
+  const done = new Set(keys.length ? (await env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all()).results.map((x) => x.file_key) : []);
   const ins = env.DB.prepare("INSERT OR REPLACE INTO sp_inbox (" + INBOX_COLS.join(",") + ") VALUES (" + INBOX_COLS.map(() => "?").join(",") + ")");
   const stmts = [];
-  for (const f of r.files) for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
+  for (const f of r.files) {
+    if (f.inbox && f.inbox.length && done.has(f.inbox[0].file_key)) { f.status = "already_loaded"; continue; }
+    for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
+  }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
-  const outcome = !r.files.length ? "no_workbook" : r.allowed ? "queued" : "held";
+  // the original, kept as it arrived — a held or already-loaded file too (keeping costs nothing, loading is the gate)
+  for (const f of r.files) {
+    if (!f.bytes) continue;
+    const a = await archiveSourceFile(env, f.bytes, { hash: f.hash, name: f.name, kind: f.kind, year: f.year, month: f.month, source: "email", by: "email:" + r.from, file_key: f.inbox && f.inbox[0] ? f.inbox[0].file_key : null });
+    f.archived = a.kept; if (a.error) f.archive_error = a.error;
+  }
+  const st = new Set(r.files.map((f) => f.status));
+  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : "no_workbook";
+  const receipt = r.files.map(({ inbox, bytes, ...f }) => f);
   await env.DB.prepare("INSERT INTO mail_intake (id, from_addr, to_addr, subject, message_id, allowed, files_json, ignored_json, outcome, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-    .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(r.files.map(({ inbox, ...f }) => f)), JSON.stringify(r.ignored), outcome, r.at).run();
-  await logData(env, "mail intake (" + r.from + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
+    .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(receipt), JSON.stringify(r.ignored), outcome, r.at).run();
+  await logData(env, "mail intake (" + r.from + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
   if (outcome === "queued") { const run = applyInbox(env).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
-  return { outcome, files: r.files.map(({ inbox, ...f }) => f), ignored: r.ignored, from: r.from };
+  return { outcome, files: receipt, ignored: r.ignored, from: r.from };
+}
+// POST /api/sga/archive — the Upload page sends the raw workbook after a successful Apply (X-File-Name); any signed-in
+// user, like the upload itself. The month is the file's name (§10c) — the archive never parses the sheets.
+async function apiSgaArchive(request, env, session) {
+  let name = "workbook.xlsx"; try { name = decodeURIComponent(request.headers.get("x-file-name") || "") || name; } catch {}
+  const bytes = await request.arrayBuffer();
+  if (!bytes.byteLength) return json({ error: "empty" }, 400);
+  if (bytes.byteLength > 25 * 1024 * 1024) return json({ error: "too_large" }, 413);
+  const kind = /travel expenses/i.test(name) ? "travel" : "sga";
+  const per = kind === "sga" ? sgaPeriodFromName(name) : null;
+  const a = await archiveSourceFile(env, bytes, { name, kind, year: per ? per.year : yearFromName(name), month: per ? per.month : null, source: "upload", by: (session && session.email) || "?" });
+  return json({ ok: true, ...a });
+}
+// GET /api/sga/file?hash= — the original back from the bucket, as it arrived
+async function apiSgaFile(request, env) {
+  const hash = String(new URL(request.url).searchParams.get("hash") || "");
+  await ensureSga(env);
+  const row = hash ? await env.DB.prepare("SELECT name, r2_key FROM sga_source_file WHERE hash=?").bind(hash).first() : null;
+  if (!row || !row.r2_key || !env.EXPORTS) return json({ error: "not_kept" }, 404);
+  const obj = await env.EXPORTS.get(row.r2_key);
+  if (!obj) return json({ error: "gone" }, 404);
+  return new Response(obj.body, { headers: { "Content-Type": XLSX_MIME_TYPE, "Content-Disposition": 'attachment; filename="' + safeName(row.name) + '"', "Cache-Control": "private, no-store" } });
 }
 async function apiInboxApply(env, session) {
   const report = await applyInbox(env);
@@ -1714,12 +1775,13 @@ async function apiInboxApply(env, session) {
 // The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
 async function apiSga(env) {
   await ensureSga(env);
-  const [linesRes, filesRes, trRes, crewRes, sumRes] = await Promise.all([
+  const [linesRes, filesRes, trRes, crewRes, sumRes, srcRes] = await Promise.all([
     env.DB.prepare("SELECT * FROM sga_line ORDER BY year DESC, month DESC, brand, vessel, seq").all(),
     env.DB.prepare("SELECT * FROM sga_file ORDER BY year DESC, month DESC, loaded_at DESC").all(),
     env.DB.prepare("SELECT * FROM training_cost ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
     env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
+    env.DB.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, source, by, at, file_key, note FROM sga_source_file ORDER BY at DESC").all(),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -1730,7 +1792,7 @@ async function apiSga(env) {
   // the newest file per month is the one that counts; older loads of the same month stay on sga_file as history
   // (a summary-only load — rows 0 — never hides a month's lines)
   const latest = {}; for (const f of filesRes.results) { const k = f.year + "-" + f.month; if (!latest[k] && f.rows > 0) latest[k] = f.id; }
-  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, cols: SGA_COL_KEYS, today: TODAY() });
+  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, cols: SGA_COL_KEYS, today: TODAY() });
 }
 
 // THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once", Miguel: "deploy"). One wave: the Keyman
@@ -5692,7 +5754,7 @@ function parseSgaFile(f){
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
         var sheets={};
         wb.SheetNames.forEach(function(sn){ var s=String(sn); if(/summary manning/i.test(s)||/trainrel/i.test(s)||/^training$/i.test(s.trim())||/^\\d{4} SUMMARY( \\(\\d+\\))?$/i.test(s.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
-        sha256buf(e.target.result).then(function(hh){ SGAUP={sheets:sheets,name:f.name,hash:hh}; previewSga(); });
+        sha256buf(e.target.result).then(function(hh){ SGAUP={sheets:sheets,name:f.name,hash:hh,buf:e.target.result}; previewSga(); });
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };
     rd.readAsArrayBuffer(f);
@@ -5720,6 +5782,16 @@ async function applySga(){
   var r=await (await fetch('/api/sga/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:SGAUP.sheets,name:SGAUP.name,hash:SGAUP.hash})})).json();
   if(r.ok){apiDirty();$('#imp').innerHTML='<span class="cchip ok">Done</span> '+(r.replaced?'replaced':'loaded')+' '+sgaMonthName(r.period.year,r.period.month)+': '+r.applied+' lines, $'+Number(r.total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.training?(', training centre '+r.training+' months'):'')+'. <a href="#" onclick="show(\\'travel\\');return false">Open Travel</a>';}
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.detail?(': '+impEsc(r.detail)):'')+'.</div>';
+  if(r.ok)keepSgaOriginal();
+}
+// the original workbook, kept as it arrived (15 Oct 2026, "I dont wanna lose this"): the raw bytes go to /api/sga/archive
+async function keepSgaOriginal(){
+  if(!SGAUP||!SGAUP.buf)return;
+  var el=$('#imp');
+  try{
+    var a=await (await fetch('/api/sga/archive',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(SGAUP.name||'')},body:SGAUP.buf})).json();
+    if(el)el.innerHTML+=(a&&a.kept)?' <span class="cchip ok">Original kept</span>':' <span class="cchip warn">Original not kept'+(a&&a.error?(': '+impEsc(a.error)):'')+'</span>';
+  }catch(e){ if(el)el.innerHTML+=' <span class="cchip warn">Original not kept</span>'; }
 }
 function parseVesselFile(f){
   $('#imp').textContent='Reading '+f.name+'…';
@@ -6058,13 +6130,22 @@ function paintTraining(){
   h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td>'+TRCAT.map(function(c){return '<td style="text-align:right"><b>'+usd(sum(fixed,c[0]))+'</b></td>';}).join('')+'<td style="text-align:right"><b>'+usd(sum(ly))+'</b></td><td style="text-align:right"><b>'+usd(sum(py))+'</b></td></tr>';
   h+='</tbody></table></div>';
   var files=(SGA.files||[]).slice(0,6);
-  if(files.length){h+='<div class=zlabel style="margin-top:18px">Bills on file</div><table class=tbl><thead><tr><th>Month</th><th>SGA</th><th>Dated</th><th>File</th><th style="text-align:right">Lines</th><th style="text-align:right">Total</th><th>Loaded</th></tr></thead><tbody>'
-    +files.map(function(f){return '<tr><td>'+TMN[f.month]+' '+f.year+'</td><td>'+escHtml(f.sga_no||'')+'</td><td>'+escHtml(f.sga_date||'')+'</td><td class=muted style="padding:6px 8px">'+escHtml(f.file_name||'')+'</td><td style="text-align:right">'+f.rows+'</td><td style="text-align:right">'+usd(f.total)+'</td><td class=muted style="padding:6px 8px">'+escHtml(String(f.loaded_at||'').slice(0,10))+' · '+escHtml(String(f.loaded_by||'').split('@')[0])+'</td></tr>';}).join('')+'</tbody></table>';}
+  if(files.length){h+='<div class=zlabel style="margin-top:18px">Bills on file</div><table class=tbl><thead><tr><th>Month</th><th>SGA</th><th>Dated</th><th>File</th><th style="text-align:right">Lines</th><th style="text-align:right">Total</th><th>Loaded</th><th>Original</th></tr></thead><tbody>'
+    +files.map(function(f){return '<tr><td>'+TMN[f.month]+' '+f.year+'</td><td>'+escHtml(f.sga_no||'')+'</td><td>'+escHtml(f.sga_date||'')+'</td><td class=muted style="padding:6px 8px">'+escHtml(f.file_name||'')+'</td><td style="text-align:right">'+f.rows+'</td><td style="text-align:right">'+usd(f.total)+'</td><td class=muted style="padding:6px 8px">'+escHtml(String(f.loaded_at||'').slice(0,10))+' · '+escHtml(String(f.loaded_by||'').split('@')[0])+'</td><td>'+sgaOriginalCell(f)+'</td></tr>';}).join('')+'</tbody></table>';}
   t.innerHTML=h;
 }
 // THE BILL AGAINST THE WORKBOOK (Miguel, 15 Oct 2026: "the SGA becomes the audit number, Rita's is the operational one, and
 // the console shows where they disagree"). Per month of LY: what TDG billed for air / hotel / medical / visa, what the
 // workbook typed, the gap. Nothing is reconciled here (§6) — the gap is shown, Rita and TDG settle it.
+// the bill's original workbook on the Bills on file table: kept (a download), loaded but never received, or no record
+// (sga_file.file_hash is the page upload's SHA-256 or the inbox file_key mail:<sha16>@<sha16>; sga_source_file carries both)
+function sgaOriginalCell(f){
+  var h=String(f.file_hash||''); if(!h)return '<span class=muted>no record</span>';
+  var s=(SGA.sources||[]).find(function(x){return x.hash===h||x.file_key===h;});
+  if(!s)return '<span class=muted>no record</span>';
+  if(s.r2_key)return '<a href="/api/sga/file?hash='+encodeURIComponent(s.hash)+'" title="'+escHtml(s.name||'')+'">kept &middot; download</a>';
+  return '<span class=muted title="'+escHtml(s.note||'')+'">not kept</span>';
+}
 function sgaCompareHTML(sc,LY){
   // Bill per month: the per-crew lines when the month has them, else the bill's MONTHLY SUMMARY row (the sheet the connector
   // always delivers — 15 Oct 2026); the previous year's same month from the summary rows for the year-over-year.

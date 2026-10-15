@@ -25,7 +25,12 @@ function envFor(d, vars = {}) {
     first: async () => d.prepare(sql).get(...args) ?? null,
     run: async () => { d.prepare(sql).run(...args); return { success: true }; },
   });
-  return { DB: { prepare: (sql) => stmt(sql), batch: async (st) => { const o = []; for (const x of st) o.push(await x.run()); return o; } }, ...vars };
+  return { DB: { prepare: (sql) => stmt(sql), batch: async (st) => { const o = []; for (const x of st) o.push(await x.run()); return o; } }, EXPORTS: r2Fake(), ...vars };
+}
+// the EXPORTS bucket as the archive sees it: put / get on a Map
+function r2Fake() {
+  const store = new Map();
+  return { store, async put(key, bytes, opts) { store.set(key, { bytes: bytes.byteLength ?? bytes.length, opts }); }, async get(key) { return store.has(key) ? { body: "bytes" } : null; } };
 }
 const J = async (r) => JSON.parse(await r.text());
 
@@ -131,10 +136,46 @@ test("the Worker: a mail to sga@cims.work loads the month through the inbox at o
   assert.deepEqual(rec, { from_addr: "rita.berenyi@dg3.com", to_addr: "sga@cims.work", allowed: 1, outcome: "queued" });
   const st = await J(await apiSharePointStatus(env));
   assert.equal(st.mail.to, "sga@cims.work"); assert.equal(st.mail.recent.length, 1); assert.equal(st.mail.recent[0].files.length, 2); assert.equal(st.inbox.ok, 2);
-  // the same mail again: same hashes, same file keys → INSERT OR REPLACE re-queues nothing new beyond re-marking pending; the apply replaces the month with itself
+  // THE ARCHIVE (15 Oct 2026, "I dont wanna lose this"): both originals are in the bucket under their own keys and on sga_source_file
+  const src = d.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, bucket, source, by, file_key FROM sga_source_file ORDER BY kind").all().map((x) => ({ ...x }));
+  assert.equal(src.length, 2);
+  assert.equal(src[0].kind, "sga"); assert.equal(src[0].year, 2026); assert.equal(src[0].month, 10); assert.equal(src[0].source, "email"); assert.equal(src[0].by, "email:rita.berenyi@dg3.com");
+  assert.match(src[0].r2_key, /^sga-archive\/sga\/2026\/10\/[0-9a-f]{16}-DG3_SGA_EXCEL_OCTOBER_26\.xlsx$/); assert.equal(src[0].bucket, "cims-hr-exports");
+  assert.equal(src[0].file_key, "mail:" + src[0].hash.slice(0, 16) + "@" + src[0].hash.slice(0, 16), "the archive row and the inbox rows share the file's identity");
+  assert.equal(src[0].file_key, d.prepare("SELECT file_hash FROM sga_file WHERE month=10").get().file_hash, "and so does the bill on file");
+  assert.match(src[1].r2_key, /^sga-archive\/travel\/2026\/[0-9a-f]{16}-UPDATED_-_Travel_Expenses_2026/); assert.ok(src[1].bytes > 1000);
+  assert.equal(env.EXPORTS.store.size, 2); assert.equal(env.EXPORTS.store.get(src[0].r2_key).opts.customMetadata.sha256, src[0].hash);
+  assert.ok(r.files.every((f) => f.archived === true && !("bytes" in f)), "the receipt says kept and never carries the bytes");
+  assert.equal(JSON.parse(d.prepare("SELECT files_json FROM mail_intake").get().files_json)[0].archived, true);
+  // the same mail again: same bytes → same key, already loaded → archived and receipted, NOT queued again (the month is not re-applied)
   const r2 = await intakeMailToInbox(env, fakeMessage(raw, "rita.berenyi@dg3.com"), null);
-  assert.equal(r2.outcome, "queued"); assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE year=2026 AND month=10").get().n, 1, "replaced, not appended");
+  assert.equal(r2.outcome, "already_loaded"); assert.ok(r2.files.every((f) => f.status === "already_loaded"));
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE year=2026 AND month=10").get().n, 1, "not appended");
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_file").get().n, 1, "not re-applied");
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sp_inbox WHERE status='pending'").get().n, 0);
   assert.equal(d.prepare("SELECT COUNT(*) n FROM mail_intake").get().n, 2);
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_source_file").get().n, 2, "one archive row per file, refreshed not duplicated");
+});
+
+test("the archive without a bucket: the row says the bytes were not kept; a row that holds the bytes is never downgraded", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const raw = mime({ from: "rita.berenyi@dg3.com", subject: "SGA October", attachments: [{ name: "DG3 SGA EXCEL OCTOBER'26.xlsx", type: XLSX_MIME, buf: sgaXlsx() }] });
+  const noBucket = envFor(d, { EXPORTS: undefined });
+  const r = await intakeMailToInbox(noBucket, fakeMessage(raw, "rita.berenyi@dg3.com"), null);
+  assert.equal(r.outcome, "queued"); assert.equal(r.files[0].archived, false); assert.match(r.files[0].archive_error, /no EXPORTS bucket/);
+  const row = { ...d.prepare("SELECT r2_key, note FROM sga_source_file").get() };
+  assert.equal(row.r2_key, null); assert.match(row.note, /Bytes not kept: no EXPORTS bucket/);
+  // the bucket comes back: the next mail with the same file keeps the bytes and clears the note
+  const withBucket = envFor(d);
+  const r2 = await intakeMailToInbox(withBucket, fakeMessage(raw, "rita.berenyi@dg3.com"), null);
+  assert.equal(r2.outcome, "already_loaded"); assert.equal(r2.files[0].archived, true);
+  const row2 = { ...d.prepare("SELECT r2_key, note FROM sga_source_file").get() };
+  assert.match(row2.r2_key, /^sga-archive\/sga\/2026\/10\//); assert.equal(row2.note, null);
+  // and a later failure to put never downgrades it
+  const failing = envFor(d, { EXPORTS: { store: new Map(), async put() { throw new Error("R2 down"); }, async get() { return null; } } });
+  const r3 = await intakeMailToInbox(failing, fakeMessage(raw, "rita.berenyi@dg3.com"), null);
+  assert.equal(r3.files[0].archived, true, "the bytes already in the bucket count");
+  assert.equal({ ...d.prepare("SELECT r2_key FROM sga_source_file").get() }.r2_key, row2.r2_key);
 });
 
 test("the Worker: an unknown sender is held and loads nothing; a mail with no workbook is a receipt only", async () => {

@@ -106,3 +106,20 @@ Email Routing → Routing rules → Create address → `sga@cims.work` → Actio
 other sender is written `held` and loads nothing; the receipt names the sender, so after TDG's first mail Miguel adds
 their domain (e.g. `dg3.com, tdgcrew.com`) and the next mail loads. Until then Rita can forward TDG's mail from her
 dg3.com address and it loads at once.
+
+## The archive of the original workbooks (15 Oct 2026, later that evening)
+
+Miguel: *"keep this [the files] somewhere in a bucket in the database or u will figure out where .. I dont wanna lose this
+.. so is accessible to the brain when need it."*
+
+Every workbook the Worker receives is kept as it arrived: the bytes in the **EXPORTS R2 bucket** (`cims-hr-exports`, prefix
+`sga-archive/<kind>/<year>/<MM>/<sha16>-<name>`) and one row on `sga_source_file` keyed by the file's SHA-256 — the same
+identity as the inbox rows and `sga_file.file_hash`. The mail intake archives every attachment it took; the Upload page sends
+the raw file to `POST /api/sga/archive` after a successful Apply; `GET /api/sga/file?hash=` returns it; the Travel tab's
+"Bills on file" table says kept / not kept / no record. A mail whose file is already loaded is archived and receipted, never
+queued again — re-sending a bill to sga@cims.work archives its original without re-applying the month. Code
+`src/sga_archive.js`, `archiveSourceFile` in worker.js; pinned by `test/sga_archive.test.js`, `test/mail_intake.test.js`.
+
+The ten workbooks loaded from Miguel's uploads on 15 Oct 2026 (Dec 2025, Jan–Sep 2026) have rows with no `r2_key`: they were
+parsed outside the Worker and no tool in that session could carry a 2 MB binary into the bucket. Dragging each once on Upload
+data, or emailing it to sga@cims.work, keeps the original.
