@@ -233,8 +233,8 @@ test("the save paths are one or two round trips, not five", () => {
 // cold start paying to create tables that have existed since June.
 test("a guard that has already been applied to this database does nothing at all", () => {
   const memo = body("function memoEnsure(");
-  assert.match(memo, /const key = "guard:" \+ etagFor\(fn\.toString\(\)\);/,
-    "the marker is the fingerprint of the guard's own source — no constant anyone can forget to bump");
+  assert.match(memo, /const key = "guard:" \+ etagFor\(fn\.toString\(\) \+ \(version \? "\\n" \+ version : ""\)\);/,
+    "the marker is the fingerprint of the guard's own source (and, for a guard that loops over a DDL list, of that list) — no constant anyone can forget to bump");
   assert.match(memo, /if \(applied\.has\(key\)\) return;/, "applied means: no DDL, no writes, nothing");
   assert.match(memo, /INSERT OR IGNORE INTO data_meta \(k,v\) VALUES \(\?,\?\)/, "and it records itself once");
   const ag = body("function appliedGuards(");
