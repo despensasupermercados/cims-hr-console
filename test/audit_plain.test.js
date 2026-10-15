@@ -47,3 +47,20 @@ test("a rewrite that makes a date more exact than the note is refused", async ()
   const env = { AI: { run: async () => ({ response: "Rush order on October 8, 2026, $1,807.75." }) } };
   assert.equal(await rewritePlain(env, MARTO + " Filed 8 2026.", { engine: "workersai" }), null);
 });
+
+test("one incident, one entry: the same text, or the same rush cost within 14 days, merges; the others ride on it", async () => {
+  const { mergeIntel, sameIncident } = await import("../src/audit_plain.js");
+  const a = { kind: "intel", who: "Miguel San Martin", at: "2026-10-08", full: "• Summary: $1,807.75 emergency toner shipment to Brisbane." };
+  const b = { kind: "intel", who: "Ray Guerra", at: "2026-10-08", full: "• Summary: emergency shipment costing $1,807.75 to Brisbane." };
+  const c = { kind: "intel", who: "Ray Guerra", at: "2026-09-02", full: "• Summary: magenta ran out before the Pacific crossing." };
+  const fb = { kind: "feedback", who: "Ray", at: "2026-10-13", text: "Rush order, $1,807.75." };
+  assert.ok(sameIncident(a, b));
+  assert.equal(sameIncident(a, c), false);
+  assert.equal(sameIncident(a, { ...b, at: "2026-11-30" }), false, "same cost far apart is another incident");
+  const out = mergeIntel([fb, a, b, c]);
+  assert.equal(out.length, 3, "feedback is never merged into intel");
+  assert.equal(out[1].whoAll, "Miguel San Martin and Ray Guerra");
+  assert.equal(out[1].others.length, 1);
+  assert.equal(out[1].others[0].full, b.full);
+  assert.ok(sameIncident({ at: "2026-01-01", full: "Same words." }, { at: "2026-05-01", full: "same words." }), "identical text merges whatever the dates");
+});

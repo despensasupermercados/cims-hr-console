@@ -154,6 +154,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
 .feed .w{font-size:12px;color:var(--mut);font-weight:600;margin-bottom:3px}
 .feed .pl{font-size:15px;line-height:1.45}
 .full{margin-top:6px}.full>summary{display:inline-flex;align-items:center;min-height:40px;padding-right:12px;font-size:13px;font-weight:600;color:var(--nfg);cursor:pointer}
+.full>div p.also{margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--line);font-weight:600;color:var(--fg)}
 .full>div{font-size:13px;line-height:1.5;color:var(--mut);padding-top:2px}.full>div p{margin:0 0 6px}.full>div b{color:var(--fg);font-weight:600}
 .sbox .clr{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;padding:0;border:0;background:none;color:var(--mut);display:flex;align-items:center;justify-content:center;border-radius:10px;cursor:pointer}
 .sbox .clr[hidden]{display:none}.sbox .clr .ic{position:static;transform:none;width:18px;height:18px}
@@ -346,7 +347,8 @@ main{max-width:640px;margin:0 auto;padding:18px 16px 130px;display:flex;flex-dir
       h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
       feed.forEach(function (f) {
         h += '<div class="feed"><div class="w">' + esc(KIND[f.kind] || f.kind) + (f.who ? " · " + esc(f.who) : "") + " · " + fmtD(f.at, true) + (f.rating != null ? " · " + esc(f.rating) + "/5" : "") + '</div><div class="pl">' + esc(f.text) + "</div>";
-        if (f.full && f.full.trim() !== String(f.text || "").trim()) h += '<details class="full"><summary>Full report</summary><div>' + fullReport(f.full) + "</div></details>";
+        var more = (f.others || []).map(function (o) { return '<p class="also">Also reported' + (o.who ? " by " + esc(o.who) : "") + " · " + fmtD(o.at, true) + "</p>" + fullReport(o.full); }).join("");
+        if ((f.full && f.full.trim() !== String(f.text || "").trim()) || more) h += '<details class="full"><summary>Full report' + (f.others && f.others.length ? " · " + (f.others.length + 1) + " reports" : "") + "</summary><div>" + fullReport(f.full) + more + "</div></details>";
         h += "</div>";
       });
       h += "</details>";
