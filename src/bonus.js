@@ -94,13 +94,19 @@ export function auditPoints(score) {
 }
 const day = (v) => (v ? String(v).slice(0, 10) : "");
 const inSpan = (d, on, off) => { const x = day(d); return !!x && (!on || x >= on) && (!off || x <= off); };
+// Two moments as instants: "2026-08-01 15:00:00" and "2026-08-01T08:00:00Z" compared by time, not by day
+// (a report at 08:00 and Ray's answer at 15:00 the same day: Ray answered AFTER it).
+const instant = (v) => { const t = Date.parse(String(v || "").trim().replace(" ", "T")); return isNaN(t) ? null : t; };
 // in: { signOn, signOff, answers:{ray,rolando,dexter}, rayAt (ISO the answer was given), misses:[{ref,at,total}],
-//       handover:{signedAt,id}|null, audits:[{score,at,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null }
+//       handover:{signedAt,id}|null, audits:[{score,at,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null,
+//       today (ISO day; default the clock) }
+// Without a sign-on nothing dated is counted (a blank start read every miss in the ship's history); a contract whose
+// sign-off is still ahead (or blank) is running, so its handover is not due yet and keeps the window's value.
 export function autoScore(inp) {
-  const x = inp || {}, on = day(x.signOn), off = day(x.signOff);
+  const x = inp || {}, on = day(x.signOn), off = day(x.signOff), today = day(x.today) || new Date().toISOString().slice(0, 10);
   const base = mapFeedbackToScore(x.answers || {});
   const sliders = { ...base.sliders }, gates = { ...base.gates }, gateNote = [...base.gateNote], evidence = [];
-  const misses = (x.misses || []).filter((m) => inSpan(m.at, on, off));
+  const misses = on ? (x.misses || []).filter((m) => inSpan(m.at, on, off)) : [];
   if (misses.length) {
     sliders.sOrder = 0; gates.rush = true;
     for (const m of misses) {
@@ -108,13 +114,16 @@ export function autoScore(inp) {
       gateNote.push(t + " (Parts Portal)"); evidence.push({ factor: "sOrder", text: t, source: "Parts Portal" });
     }
   }
-  const rayAt = day(x.rayAt);
-  for (const f of (x.flags || []).filter((g) => inSpan(g.at, on, off))) {
-    const after = rayAt && rayAt > day(f.at); // Ray answered after the report: his answer stands
+  const rayT = instant(x.rayAt);
+  for (const f of (on ? x.flags || [] : []).filter((g) => inSpan(g.at, on, off))) {
+    const fT = instant(f.at);
+    const after = rayT != null && (fT != null ? rayT > fT : day(x.rayAt) > day(f.at)); // Ray answered after the report: his answer stands
     if (f.accuracy && !after) { sliders.sAcc = 0; evidence.push({ factor: "sAcc", text: "Field report " + day(f.at) + ": " + f.quote, source: "Field intel" }); }
     if (f.par && !after) { sliders.sPar = 0; evidence.push({ factor: "sPar", text: "Field report " + day(f.at) + ": " + f.quote, source: "Field intel" }); }
   }
-  if (off && off >= HON_FROM) {
+  if (off && off >= HON_FROM && off > today && !x.handover) {
+    evidence.push({ factor: "sHand", text: "Contract still running: the HON handover is checked at the sign-off", source: "HON" });
+  } else if (off && off >= HON_FROM) {
     sliders.sHand = x.handover ? FW.sHand : 0;
     evidence.push({ factor: "sHand", text: x.handover ? "HON handover signed " + day(x.handover.signedAt) : "No signed HON handover for this sign-off", source: "HON" });
   }

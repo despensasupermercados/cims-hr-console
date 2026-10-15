@@ -11,18 +11,27 @@ import { autoScore } from "./bonus.js";
 export const shipKey = (s) => String(s || "").toLowerCase()
   .replace(/^\s*(mv|m\/v|ms)\s+/, "").replace(/^(celebrity|azamara|royal caribbean)\s+/, "")
   .replace(/\bof the seas\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+// "Quantum, Anthem" (a transfer) is two ships: every one of them is the crew's for this contract.
+export const shipKeys = (s) => [...new Set(String(s || "").split(/\s*[,;/]\s*|\s+(?:and|&)\s+/i).map(shipKey).filter(Boolean))];
 const surname = (n) => String(n || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/\s+/).filter(Boolean).pop() || "";
 const day = (v) => (v ? String(v).slice(0, 10) : "");
 function addDays(d, n) { const t = Date.parse(day(d) + "T00:00:00Z"); return isNaN(t) ? day(d) : new Date(t + n * 86400000).toISOString().slice(0, 10); }
 
 // The handover that closes THIS contract: same ship, signed between 30 days before the sign-off and 10 after; when HON
 // names the outgoing crew, it must be this crew (surname). HON leaves the name blank on 2 of 5 signed records.
-export function pickHandover(rows, { ship, signOff, crewName }) {
-  const k = shipKey(ship), off = day(signOff), sn = surname(crewName);
-  if (!k || !off) return null;
+// HON's outgoing_crew_id (the SC id, on 3 of 5 signed rows on 15 Oct 2026) decides first: the same id is this crew,
+// another id is not; only a row without one falls back to the surname ("Villacortes Jr." no longer fails).
+export function pickHandover(rows, { ship, signOff, crewName, sc }) {
+  const keys = shipKeys(ship), off = day(signOff), sn = surname(crewName);
+  if (!keys.length || !off) return null;
   const lo = addDays(off, -30), hi = addDays(off, 10);
-  const hit = (rows || []).filter((r) => shipKey(r.ship) === k && day(r.signed_at) >= lo && day(r.signed_at) <= hi
-    && (!r.outgoing_name || !sn || surname(r.outgoing_name) === sn));
+  const sameCrew = (r) => {
+    if (r.outgoing_crew_id && sc) return String(r.outgoing_crew_id).trim().toUpperCase() === String(sc).trim().toUpperCase();
+    if (!r.outgoing_name || !sn) return true;
+    const words = String(r.outgoing_name).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[\s,]+/).filter(Boolean);
+    return words.includes(sn);
+  };
+  const hit = (rows || []).filter((r) => keys.includes(shipKey(r.ship)) && day(r.signed_at) >= lo && day(r.signed_at) <= hi && sameCrew(r));
   hit.sort((a, b) => (a.signed_at < b.signed_at ? 1 : -1));
   return hit[0] ? { id: hit[0].id, signedAt: hit[0].signed_at } : null;
 }
@@ -35,15 +44,19 @@ export const FLAG_SYSTEM = [
   "quote: the exact words from the report that show it, copied character for character; empty when both are false.",
   'Answer exactly: {"accuracy":false,"par":false,"quote":""}',
 ].join("\n");
+export const QUOTE_MIN = 15;
 export function parseFlag(txt, source) {
   const m = String(txt || "").match(/\{[\s\S]*\}/);
   if (!m) return null;
   let j; try { j = JSON.parse(m[0]); } catch (e) { return null; }
   const quote = String(j.quote || "").trim();
-  const yes = !!j.accuracy || !!j.par;
-  // the quote is the evidence a money user reads: it must be the report's own words, or nothing is flagged
-  if (yes && (!quote || String(source || "").toLowerCase().indexOf(quote.toLowerCase()) < 0)) return { accuracy: false, par: false, quote: "", refused: true };
-  return { accuracy: !!j.accuracy, par: !!j.par, quote: yes ? quote : "" };
+  const acc = j.accuracy === true, par = j.par === true; // the string "false" is not a yes
+  const yes = acc || par;
+  // the quote is the evidence a money user reads: the report's own words, a real phrase (15+ characters, 3+ words —
+  // "the" or "kept" is in every report), or nothing is flagged
+  const real = quote.length >= QUOTE_MIN && quote.split(/\s+/).length >= 3;
+  if (yes && (!real || String(source || "").toLowerCase().indexOf(quote.toLowerCase()) < 0)) return { accuracy: false, par: false, quote: "", refused: true };
+  return { accuracy: acc, par, quote: yes ? quote : "" };
 }
 async function flagKey(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("flag-v1|" + String(text || "")));
@@ -69,31 +82,40 @@ async function classify(env, text, { engine, claudeModel, workersModel }) {
 }
 
 // deps: { ensure (score_intel_flag guard), engine, claudeModel, workersModel }
-export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName }, deps = {}) {
-  const on = day(signOn), off = day(signOff) || new Date().toISOString().slice(0, 10);
+// in: { sc, ship ("A" or "A, B" for a transfer), signOn, signOff, crewName, today }
+export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, today }, deps = {}) {
+  const on = day(signOn), offIn = day(signOff), now = day(today) || new Date().toISOString().slice(0, 10);
+  const off = offIn || now; // reads stop today for a contract with no sign-off yet
+  const keys = shipKeys(ship);
   const none = () => ({ results: [] });
   if (deps.ensure) await deps.ensure(env);
-  const [crewRow, misses, hons, audits, intel] = await Promise.all([
-    env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(sc).first().catch(() => null),
-    env.PARTS_DB ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on || "0000", off + "T23:59:59").all().catch(none) : none(),
-    env.HON_DB ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(none) : none(),
-    env.DB.prepare("SELECT visit_id, request_id, ship, score, filed_at FROM audit_eval WHERE agency_id=? ORDER BY filed_at DESC").bind(sc).all().catch(none),
-    env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on || "0000", off + "T23:59:59").all().catch(none),
+  // ONE wave (§12). Without a sign-on nothing dated is read; without a ship no miss or handover can be his.
+  const [misses, hons, audits, intel, resp] = await Promise.all([
+    env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(none) : none(),
+    env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(none) : none(),
+    // a TEST request's grade is a rehearsal: never a seafarer's score
+    env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(none),
+    on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
+    env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
   ]);
-  const resp = crewRow ? await env.DB.prepare("SELECT role, answers_json, submitted_at FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NULL").bind(crewRow.id).all().catch(none) : none();
   const answers = {}; let rayAt = null;
   for (const r of resp.results || []) { try { answers[r.role] = JSON.parse(r.answers_json || "{}"); } catch (e) {} if (r.role === "ray") rayAt = r.submitted_at; }
-  const k = shipKey(ship);
-  const vm = (misses.results || []).filter((m) => !k || shipKey(m.ship) === k).map((m) => ({ ref: m.order_ref, at: m.submitted_at, total: m.grand_total, ship: m.ship }));
-  const handover = pickHandover(hons.results || [], { ship, signOff: off, crewName });
+  const vm = (misses.results || []).filter((m) => keys.includes(shipKey(m.ship))).map((m) => ({ ref: m.order_ref, at: m.submitted_at, total: m.grand_total, ship: m.ship }));
+  const handover = pickHandover(hons.results || [], { ship, signOff: offIn, crewName, sc });
   // field reports: classify each once (cached by the report's text), at most 4 new per open
   const reports = (intel.results || []).filter((r) => r.summary);
   const flags = [];
+  let unread = 0;
   if (reports.length) {
-    const keys = await Promise.all(reports.map((r) => flagKey(r.summary)));
-    const got = await env.DB.prepare("SELECT h, accuracy, par, quote FROM score_intel_flag WHERE h IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all().catch(none);
-    const kept = new Map((got.results || []).map((r) => [r.h, r]));
-    const miss = reports.map((r, i) => [r, keys[i]]).filter(([, h]) => !kept.has(h)).slice(0, 4);
+    const keysH = await Promise.all(reports.map((r) => flagKey(r.summary)));
+    const kept = new Map();
+    const uniq = [...new Set(keysH)];
+    for (let i = 0; i < uniq.length; i += 90) { // D1 binds at most 100 parameters per statement
+      const part = uniq.slice(i, i + 90);
+      const got = await env.DB.prepare("SELECT h, accuracy, par, quote FROM score_intel_flag WHERE h IN (" + part.map(() => "?").join(",") + ")").bind(...part).all().catch(none);
+      for (const r of got.results || []) kept.set(r.h, r);
+    }
+    const miss = reports.map((r, i) => [r, keysH[i]]).filter(([, h]) => !kept.has(h)).filter(([, h], i, a) => a.findIndex(([, x]) => x === h) === i).slice(0, 4);
     await Promise.all(miss.map(async ([r, h]) => {
       if (!deps.engine || deps.engine === "none") return;
       const f = await classify(env, r.summary, deps);
@@ -101,9 +123,27 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName }, d
       kept.set(h, { h, accuracy: f.accuracy ? 1 : 0, par: f.par ? 1 : 0, quote: f.quote });
       await env.DB.prepare("INSERT OR IGNORE INTO score_intel_flag (h, accuracy, par, quote, engine, at) VALUES (?,?,?,?,?,?)").bind(h, f.accuracy ? 1 : 0, f.par ? 1 : 0, f.quote, deps.engine, new Date().toISOString()).run().catch(() => null);
     }));
-    reports.forEach((r, i) => { const f = kept.get(keys[i]); if (f && (f.accuracy || f.par)) flags.push({ at: r.ts, accuracy: !!f.accuracy, par: !!f.par, quote: f.quote, who: r.reporter || null }); });
+    reports.forEach((r, i) => {
+      const f = kept.get(keysH[i]);
+      if (!f) { unread++; return; }
+      if (f.accuracy || f.par) flags.push({ at: r.ts, accuracy: !!f.accuracy, par: !!f.par, quote: f.quote, who: r.reporter || null });
+    });
   }
-  const aud = (audits.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at }));
-  const res = autoScore({ signOn: on, signOff: off, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: null });
-  return { ok: true, ...res, allAudits: aud, sources: { parts: !!env.PARTS_DB, hon: !!env.HON_DB, clicks: false } };
+  // audits of THIS contract: on one of its ships (an audit of the next or previous contract on another hull is not his
+  // score here); every audit of the seafarer still comes back as allAudits for the list
+  const allAud = (audits.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at, open: /no sign-in/.test(String(a.filed_by || "")) }));
+  const aud = keys.length ? allAud.filter((a) => keys.includes(shipKey(a.ship))) : [];
+  const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: null });
+  const notes = [];
+  if (!keys.length) notes.push({ factor: "sOrder", text: "No ship on the Score Card: the Parts Portal, HON and the audits were not checked", source: "Score Card" });
+  if (!on) notes.push({ factor: "sOrder", text: "No sign-on date: misses and field reports were not checked", source: "Score Card" });
+  if (unread) notes.push({ factor: "sAcc", text: unread + " field report" + (unread === 1 ? "" : "s") + " in this contract not read yet (" + (deps.engine && deps.engine !== "none" ? "read on the next open" : "no AI engine") + "): check them on the crew's Notes", source: "Field intel" });
+  for (const a of res.audits || []) if (a.open) notes.push({ factor: "sComm", text: "The audit grade was filed on the open audit site, without a sign-in", source: "Audit" });
+  return { ok: true, ...res, evidence: (res.evidence || []).concat(notes), unread, allAudits: allAud, sources: { parts: !!env.PARTS_DB, hon: !!env.HON_DB, clicks: false } };
+}
+
+// The seafarer's audits for the Inputs page: one light read, no Parts Portal, HON or AI.
+export async function listAudits(env, sc) {
+  const r = await env.DB.prepare("SELECT e.request_id, e.ship, e.score, e.filed_at FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(() => ({ results: [] }));
+  return (r.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at }));
 }
