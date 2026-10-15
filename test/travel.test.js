@@ -79,3 +79,19 @@ test("travelNameKey normalizes 'Last, First' to 'first last'", () => {
   assert.equal(travelNameKey("Macay, Jamicah"), "jamicah macay");
   assert.equal(travelNameKey("Espenilla, Zandro (Orlando)"), "zandro orlando espenilla");
 });
+
+test("closedMonths: a month counts for the YTD budget only once it has ended", async () => {
+  const { closedMonths, TRAVEL_BUDGET_MO } = await import("../src/travel.js");
+  assert.equal(closedMonths("2026-10-15", 2026), 9, "October is in progress; Jan–Sep are closed");
+  assert.equal(closedMonths("2026-01-20", 2026), 0, "nothing closed in January");
+  assert.equal(closedMonths("2026-10-15", 2025), 12, "a past year is whole");
+  assert.equal(closedMonths("2026-10-15", 2027), 0, "a future year has nothing");
+  assert.equal(closedMonths("", 2026), 0);
+  assert.equal(TRAVEL_BUDGET_MO, 15000, "the one budget constant");
+});
+
+test("parseMonthSheet carries the ship the row sits under", () => {
+  const recs = parseMonthSheet("SEPT", [r0, r1, r2, r3], 2025);
+  assert.equal(recs.find(r => r.crew_name.startsWith("Macay")).ship, "Adventure");
+  assert.equal(recs.find(r => r.crew_name.startsWith("Osorio")).ship, "Allure");
+});

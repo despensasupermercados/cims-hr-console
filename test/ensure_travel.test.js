@@ -48,7 +48,21 @@ test("a populated table is left alone: no DELETE, no reseed, and the count rides
   await ensureTravelImpl(envFor(d, { log }));
   assert.equal(count(d), 2, "steady state writes nothing");
   assert.ok(!log.includes("delete"), "a live table must never be re-seeded: " + log.join(","));
-  assert.deepEqual(log, ["create", "select"], "one CREATE (a no-op) and one count — nothing sequential after them");
+  // one wave: the CREATE (a no-op), the count and the `ship` ALTER (15 Oct 2026; a no-op error on a table that has it)
+  // leave together — nothing sequential after them
+  assert.deepEqual([...log].sort(), ["alter", "create", "select"], "one CREATE, one count, one ALTER in ONE wave: " + log.join(","));
+});
+
+test("a populated table WITHOUT shoreside rows is left alone too (15 Oct 2026: 'no shoreside' re-seeded 2025 on every cold start)", async () => {
+  const d = new DatabaseSync(":memory:");
+  d.exec(LIVE);
+  d.exec("INSERT INTO travel_expense (id,year,month,kind,total) VALUES ('t1',2026,1,'crew',10),('t2',2026,2,'crew',20);");
+  const log = [];
+  await ensureTravelImpl(envFor(d, { log }));
+  assert.equal(count(d), 2, "the 2026 rows stand, 2025 is not re-seeded over them");
+  assert.ok(!log.includes("delete") && !log.includes("other"), "no DELETE, no INSERT: " + log.join(","));
+  const cols = d.prepare("PRAGMA table_info(travel_expense)").all().map((c) => c.name);
+  assert.ok(cols.includes("ship"), "the `ship` column is added to a live table");
 });
 
 test("a fresh database ends up created and seeded, whichever of the two statements lands first", async () => {
