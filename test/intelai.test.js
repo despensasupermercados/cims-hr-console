@@ -15,7 +15,17 @@ test("system prompt: anti-hallucination + plain-text + decision sections", () =>
   assert.match(s, /never invent/i);
   assert.match(s, /no code fences|PLAIN TEXT/i);
   assert.match(s, /Impact:/);
-  assert.match(s, /Recommended action:/);
+});
+
+test("system prompt: a thread is a dated timeline, forecasts stay forecasts, the sender's ask is quoted, never invented (16 Oct 2026)", () => {
+  const s = intelSystemPrompt();
+  assert.match(s, /FORWARDED THREAD/);
+  assert.match(s, /OLDEST FIRST/);
+  assert.match(s, /keeps the date of the message that reports it/);
+  assert.match(s, /forecast/i);
+  assert.match(s, /Asked of the crew:/);
+  assert.match(s, /Decision:/);
+  assert.doesNotMatch(s, /Recommended action/, "the AI's own recommendation read as the sender's (Ryan Marto's record)");
 });
 
 test("user prompt: embeds crew name + reporter + clipped body", () => {

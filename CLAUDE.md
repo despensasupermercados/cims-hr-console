@@ -98,6 +98,16 @@ dated card on the crew. Hard rules:
 - **Engine preference:** Claude (`ANTHROPIC_API_KEY` secret, optional) → Workers AI (`[ai]` binding,
   default, no key) → none (leave email queued for manual). The agent never handles the key (see §7).
   Currently runs on Workers AI. Adding the Anthropic key in Cloudflare auto-upgrades, no redeploy.
+- **A thread is a dated timeline** (16 Oct 2026, Ray Guerra on Ryan Marto's record; Miguel: "I think the AI mixed the notes on
+  how it was originally by dates"). The forwarded emails run for months; the first prompt asked for ONE "What happened", so
+  Marto's May–October threads became stories filed on the forwarding day: a projected end-of-September count written as a
+  stock-out, the 8 Oct cost email read as the dispatch date, "no disciplinary action" and "no-return list" in one card, the
+  AI's "Recommended action" read as Ray's. `intelSystemPrompt` now asks for one line per message, oldest first, each with
+  its own date and who said it; a forecast stays a forecast; "Asked of the crew" and "Decision" quote the thread, never the
+  model. Marto's 3 cards were replaced (status `replaced`, kept; backup `bak_crew_intel_marto_20261016`, activity
+  `act_intel_marto_20261016`) by 4 written from Ray's emails, dated by event (6 May, 3 Jun, 2 Sep, 8 Oct). Cards filed
+  before the prompt change keep the old shape; correcting another crew's is per record, from its source emails, never in
+  bulk. Pinned by `test/intelai.test.js`.
 - `contract_no` on a `crew_intel` row is the crew's contract count snapshotted AT FILING; don't
   recompute it for already-filed rows (only the lazy backfill of legacy NULLs is allowed).
 
