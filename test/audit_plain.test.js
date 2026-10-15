@@ -64,3 +64,16 @@ test("one incident, one entry: the same text, or the same rush cost within 14 da
   assert.equal(out[1].others[0].full, b.full);
   assert.ok(sameIncident({ at: "2026-01-01", full: "Same words." }, { at: "2026-05-01", full: "same words." }), "identical text merges whatever the dates");
 });
+
+test("16 Oct 2026 review: a date's digits are not quantities, and an empty answer is not a refusal", async () => {
+  const src = "On 2026-10-06 Ray said he ordered 3 toners; freight $450. Oct 8, 2026 the parts left.";
+  assert.ok(numbersKept("He ordered 3 toners; freight $450.", src));
+  for (const bad of ["He ordered 6 toners; freight $450.", "10 toners, $450.", "2026 toners, $450."]) assert.equal(numbersKept(bad, src), false, bad);
+  let refused = 0;
+  const env = { AI: { run: async () => ({ response: "" }) } };
+  assert.equal(await rewritePlain(env, src, { engine: "workersai", onRefused: () => refused++ }), null);
+  assert.equal(refused, 0, "an empty answer is asked again next time, never kept as refused");
+  const env2 = { AI: { run: async () => ({ response: "He ordered 9 toners, $450." }) } };
+  await rewritePlain(env2, src, { engine: "workersai", onRefused: () => refused++ });
+  assert.equal(refused, 1, "a real refusal is still kept");
+});

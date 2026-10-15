@@ -35,12 +35,12 @@ const R2 = () => { const m = new Map(); return { m, put: async (k, b) => { m.set
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
 const html = (b, status = 200) => new Response(b, { status, headers: { "Content-Type": "text/html" } });
 const BOARD = { sections: [{ ship: "Oasis", crew: [{ agency_id: "SC-1", current: true, aboard: true }] }, { ship: "Apex", crew: [] }] };
-function setup({ live = false, reads } = {}) {
+function setup({ live = false, reads, board = BOARD } = {}) {
   const { db, DB } = d1();
-  const sent = [];
+  const sent = [], ctl = { mail: true, failed: [] };
   const env = { DB, TIMECARD_DB: TC, HON: fakeHon(reads), AUDIT_FILES: R2(), AUDIT_TO: "ray@dg3.com, rolando@dg3.com, miguel@dg3.com", AUDIT_REQUEST_CC: "rolando@dg3.com, ray@dg3.com", AUDIT_LIVE: live ? "true" : undefined };
-  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => BOARD,
-    sendViaMailer: async (e, env2) => { sent.push(env2 || e); return { ok: true }; } });
+  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => board,
+    sendViaMailer: async (e, env2) => { if (!ctl.mail) { ctl.failed.push(env2 || e); return { ok: false, error: "mailer down" }; } sent.push(env2 || e); return { ok: true }; } });
   // sendViaMailer(env, envelope): keep the envelope
   R._sent = sent;
   const call = async (method, path, body, session = { email: "dexter.lawrence@dg3.com" }, headers = {}) => {
@@ -48,7 +48,7 @@ function setup({ live = false, reads } = {}) {
     const req = new Request(u, { method, headers: Object.assign(body instanceof Uint8Array ? {} : { "Content-Type": "application/json" }, headers), body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body) });
     return R.handle(u.pathname, req, env, u, session);
   };
-  return { R, env, db, sent, call };
+  return { R, env, db, sent, call, ctl };
 }
 async function makeRequest(t) {
   const r = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json();
@@ -118,6 +118,12 @@ test("the gate: reads by HON, the count, then complete once and ONE documents-in
   const before = t.sent.length;
   await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "1", B2: "0" } }, null);
   st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
+  // the last value does NOT close the request (16 Oct 2026): the crew can still correct "1" to "12", then taps Send
+  assert.equal(st.status, "sent"); assert.equal(st.gate.open, true); assert.equal(t.sent.length, before, "nothing sent on the last keystroke");
+  assert.equal((await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "12" } }, null)).status, 200, "a correction is taken before Send");
+  await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "1" } }, null);
+  assert.equal((await (await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null)).json()).ok, true);
+  st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
   assert.equal(st.status, "complete");
   const docs = t.sent.slice(before);
   assert.equal(docs.length, 1, "the documents-in email goes once");
@@ -149,6 +155,7 @@ test("a machine down needs a reason, and then needs nothing else", async () => {
   assert.equal(r.status, 400);
   await t.call("POST", "/api/audit/u/down?t=" + token, { serial: "S1", down: true, reason: "Fuser error, engineer called" }, null);
   await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "2", B2: "5" } }, null);
+  await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null);
   const st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
   assert.equal(st.status, "complete");
 });
@@ -251,4 +258,169 @@ test("open site: a request only to a seafarer aboard THAT ship; no re-send insid
   assert.equal((await t.call("POST", "/api/audit/request/grade", { id: r.id, inventory: 5, technical: 4, collaterals: 5 }, OPEN)).status, 200);
   assert.match(t.db.prepare("SELECT filed_by FROM audit_eval").get().filed_by, /open site, no sign-in/);
   assert.equal((await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json()).open, null, "graded: the way is open for the next audit");
+});
+
+/* ------------------------- the 16 Oct 2026 review (three reviews, every finding reproduced) ------------------------- */
+const fullyIn = async (t, token) => {
+  for (const kind of ["p43", "mgmt"]) { const u = await (await upload(t, token, "S1", kind)).json(); await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null); }
+  await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "1", B2: "5" } }, null);
+};
+
+test("a first email that fails closes its draft: 'try again' makes a new request instead of being locked out", async () => {
+  const t = setup();
+  t.ctl.mail = false;
+  const r1 = await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" });
+  assert.equal(r1.status, 502);
+  assert.equal(t.db.prepare("SELECT status FROM audit_request").get().status, "cancelled");
+  t.ctl.mail = true;
+  const { id } = await makeRequest(t);
+  assert.equal(t.db.prepare("SELECT status FROM audit_request WHERE id=?").get(id).status, "sent");
+});
+
+test("one open request per crew and ship, even when two taps race past the check", async () => {
+  const t = setup();
+  await makeRequest(t);
+  // the race: a second row inserted straight, past create's SELECT — the unique index refuses it
+  assert.throws(() => t.db.prepare("INSERT INTO audit_request (id, ship, normalized_ship, agency_id, auditor, status, created_at) SELECT 'ar_x', ship, normalized_ship, agency_id, auditor, 'draft', created_at FROM audit_request").run(), /UNIQUE/);
+});
+
+test("the reminder adds a link only once its email went, and the link the crew holds keeps working", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  t.db.prepare("UPDATE audit_request SET sent_at=?, due_at=? WHERE id=?").run(ago(13), new Date(Date.now() + 11 * 3600e3).toISOString(), id);
+  t.ctl.mail = false;
+  let o = await t.R.sweep(t.env);
+  assert.equal(o.reminded, 0);
+  assert.equal((await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).status, 200, "a failed reminder changes nothing");
+  t.ctl.mail = true;
+  o = await t.R.sweep(t.env);
+  assert.equal(o.reminded, 1, "a failed reminder is tried again next hour");
+  const fresh = (t.sent[t.sent.length - 1].text.match(/\/audit\/u\/([A-Za-z0-9_-]+)/) || [])[1];
+  assert.ok(fresh && fresh !== token);
+  assert.equal((await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).status, 200, "the page open at hour 12 is not cut off");
+  assert.equal((await t.call("GET", "/api/audit/u/state?t=" + fresh, undefined, null)).status, 200);
+  assert.equal((await t.R.sweep(t.env)).reminded, 0, "still one reminder");
+});
+
+test("a resend after day 14 sends a link that opens, and a cancel closes every link", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  const ago = (d) => new Date(Date.now() - d * 864e5).toISOString();
+  t.db.prepare("UPDATE audit_request SET sent_at=?, due_at=? WHERE id=?").run(ago(16), ago(15), id); // a full day past the 14, never the same millisecond
+  t.db.prepare("UPDATE audit_send_log SET sent_at=?").run(ago(15));
+  assert.equal((await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).status, 410, "the old link has expired");
+  const rs = await (await t.call("POST", "/api/audit/request/resend", { id })).json();
+  assert.equal(rs.ok, true, JSON.stringify(rs));
+  const fresh = (t.sent[t.sent.length - 1].text.match(/\/audit\/u\/([A-Za-z0-9_-]+)/) || [])[1];
+  assert.equal((await t.call("GET", "/api/audit/u/state?t=" + fresh, undefined, null)).status, 200, "the resent link opens");
+  await t.call("POST", "/api/audit/request/cancel", { id });
+  assert.equal((await t.call("GET", "/api/audit/u/state?t=" + fresh, undefined, null)).status, 410);
+});
+
+test("a read that keeps failing becomes 'send it again' after three tries, and the sweep takes the least-tried first", async () => {
+  const t = setup({ reads: { mml: { ok: false, error: "took too long" } } });
+  const { token } = await makeRequest(t);
+  const u = await (await upload(t, token, "S1", "mgmt")).json();
+  const read = async () => (await (await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null)).json()).read_state;
+  assert.equal(await read(), "failed"); assert.equal(await read(), "failed");
+  assert.equal(await read(), "unreadable");
+  const st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
+  assert.ok(st.gate.missing.includes("Machine # 1 · Management List needs a new file"));
+});
+
+test("everything in and nobody taps Send: the sweep sends it after the idle hours, once", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  await fullyIn(t, token);
+  const before = t.sent.length;
+  assert.equal((await t.R.sweep(t.env)).completed, 0, "not while the crew may still be correcting");
+  const ago = new Date(Date.now() - 7 * 3600e3).toISOString();
+  for (const tb of ["audit_count", "audit_upload"]) t.db.prepare("UPDATE " + tb + " SET at=?").run(ago);
+  t.db.prepare("UPDATE audit_upload SET read_at=?").run(ago);
+  assert.equal((await t.R.sweep(t.env)).completed, 1);
+  assert.equal(t.db.prepare("SELECT status FROM audit_request WHERE id=?").get(id).status, "complete");
+  assert.equal(t.sent.length, before + 1, "one documents-in email");
+});
+
+test("Send is refused while something is missing, and says what", async () => {
+  const t = setup();
+  const { token } = await makeRequest(t);
+  const r = await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null);
+  assert.equal(r.status, 409); assert.match((await r.json()).say, /Pattern 43 not sent/);
+});
+
+test("a documents-in email that did not go is sent again by the sweep, and never twice", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  await fullyIn(t, token);
+  t.ctl.mail = false;
+  await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null);
+  assert.equal(t.db.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind='docsin'").get(id).ok, 0);
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 30 * 60000).toISOString(), id);
+  t.ctl.mail = true;
+  assert.equal((await t.R.sweep(t.env)).docsin, 1);
+  assert.equal(t.db.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind='docsin'").get(id).ok, 1);
+  assert.equal((await t.R.sweep(t.env)).docsin, 0);
+});
+
+test("an overdue note that did not go is tried again next hour", async () => {
+  const t = setup();
+  const { id } = await makeRequest(t);
+  t.db.prepare("UPDATE audit_request SET due_at=? WHERE id=?").run(new Date(Date.now() - 3600e3).toISOString(), id);
+  t.ctl.mail = false;
+  assert.equal((await t.R.sweep(t.env)).overdue, 0);
+  t.ctl.mail = true;
+  assert.equal((await t.R.sweep(t.env)).overdue, 1);
+  assert.equal((await t.R.sweep(t.env)).overdue, 0);
+});
+
+test("no OBP list = no request: the count would be empty and the email would say it agrees", async () => {
+  const t = setup();
+  t.env.HON = Object.assign({}, t.env.HON, { ship: async () => ({ ok: true, ship: "Oasis", presses: [{ serial: "S1", label: "Machine # 1" }], obp: null }) });
+  const r = await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" });
+  assert.equal(r.status, 422); assert.equal((await r.json()).error, "no_obp_list");
+});
+
+test("a file name beyond Latin-1 arrives URI-encoded and is stored as the crew named it", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  const name = "Dexter’s scan – M1.pdf";
+  const r = await (await t.call("POST", "/api/audit/u/upload?t=" + token + "&serial=S1&kind=p43", new TextEncoder().encode("%PDF-1.4 x"), null, { "content-type": "application/pdf", "x-file-name": encodeURIComponent(name) })).json();
+  assert.equal(r.ok, true);
+  assert.equal(t.db.prepare("SELECT filename FROM audit_upload WHERE request_id=?").get(id).filename, "Dexter_s_scan_M1.pdf", "decoded, then cleaned — never the %E2%80%99 escape");
+  // and the page sends it encoded: a raw "’" in setRequestHeader throws in the browser and froze the tile at 0%
+  assert.match(readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf8"), /setRequestHeader\("X-File-Name", encodeURIComponent\(/);
+});
+
+test("a finished TEST request is not 'open': the next audit can be asked", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  await fullyIn(t, token);
+  await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null);
+  assert.equal(t.db.prepare("SELECT status, test_mode FROM audit_request WHERE id=?").get(id).test_mode, 1);
+  const prev = await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json();
+  assert.equal(prev.open, null);
+});
+
+test("OPEN MODE: the preview answers only for a seafarer the board has aboard; an undated TDG seat is aboard", async () => {
+  const open = { email: "dexter.lawrence@dg3.com", open: true };
+  const t = setup({ board: { sections: [{ ship: "Oasis", crew: [{ agency_id: "SC-1", current: true, aboard: false, signOn: null }] }] } });
+  assert.equal((await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1", undefined, open)).status, 200, "No contract dates yet is still aboard");
+  assert.equal((await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-9", undefined, open)).status, 422);
+});
+
+test("the documents-in email: plain text reads the crew's name as written, and an empty count never 'agrees'", () => {
+  const base = { ship: "Oasis", auditor: "Dexter", completeAt: "2026-10-15T10:00:00Z", machines: [{ serial: "S1", label: "M1", p43: null, mml: null }] };
+  const a = docsInEmail(Object.assign({ crew: "Ma. O'Neil & Co", count: { total: 2, diff: [] } }, base));
+  assert.match(a.text, /Ma\. O'Neil & Co sent/); assert.doesNotMatch(a.text, /&#39;|&amp;/);
+  const b = docsInEmail(Object.assign({ crew: "John", count: { total: 0, diff: [] } }, base));
+  assert.doesNotMatch(b.html + b.text, /agrees/i); assert.match(b.text, /No OBP list to count against/);
+});
+
+test("Dexter's page: a late error never replaces the screen moved on to, and a TEST audit offers no Grade", () => {
+  const src = readFileSync(new URL("../src/audit_ui.js", import.meta.url), "utf8");
+  assert.equal((src.match(/\}\)\.catch\(function \(e\) \{ if \(S\.view === key\) fail\(e\); \}\)/g) || []).length, 5, "every view's load");
+  assert.match(src, /if \(done && !d\.grade && !d\.test\) dock\(/);
+  assert.match(src, /var bf = S\.brief\[ship \+ "\|" \+ sc\];/, "the request carries THIS seafarer's contract label");
 });

@@ -92,6 +92,8 @@ main{max-width:1080px;margin:0 auto;padding:22px 16px 120px;display:grid;gap:28p
 .dock .msg span{color:var(--mut);font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dock.done{background:var(--fill);color:#fff}.dock.done .msg span{color:#E3F2DD}
 .dock .ic.big{width:28px;height:28px}
+.dock .btn{flex:none;white-space:nowrap}.dock .btn:disabled{opacity:.55}
+@media (max-width:480px){.dock.ready .in{flex-direction:column;align-items:stretch;gap:10px}.dock.ready .btn{width:100%}.dock.ready .msg span{-webkit-line-clamp:3}}
 .test{max-width:1080px;margin:14px auto 0;padding:0 16px}.test div{background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
 .toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,8px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:13.5px;opacity:0;transition:.2s;pointer-events:none;z-index:9;max-width:90vw}.toast.on{opacity:1;transform:translate(-50%,0)}
 .sk{height:118px;border-radius:14px;background:var(--line);opacity:.6}
@@ -128,8 +130,8 @@ const SCRIPT = String.raw`
   function left(v) { var h = (Date.parse(v) - Date.now()) / 36e5; if (isNaN(h)) return ""; if (h <= 0) return "Overdue"; return h < 1 ? Math.round(h * 60) + " min left" : Math.floor(h) + " h left"; }
   function toast(t) { var e = $("toast"); e.textContent = t; e.className = "toast on"; clearTimeout(e._t); e._t = setTimeout(function () { e.className = "toast"; }, 2800); }
   function q(p) { return p + (p.indexOf("?") < 0 ? "?" : "&") + "t=" + encodeURIComponent(T); }
-  function api(p, body) {
-    return fetch(q(p), body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+  function api(p, body, keep) {
+    return fetch(q(p), body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: !!keep })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.say) j.say = j.error || ("HTTP " + r.status); return j; }); })
       .catch(function () { return { ok: false, say: "No connection. Your numbers on this page are kept; try again." }; });
   }
@@ -147,7 +149,9 @@ const SCRIPT = String.raw`
   }
   function dock() {
     var el = $("dock"); el.hidden = false;
-    if (S.status !== "sent" || S.gate.open) { el.className = "dock done"; el.innerHTML = '<div class="in">' + ic("f:check-circle", "big") + '<div class="msg"><b>Everything is in.</b><span>' + esc(S.auditor) + " has been told. Thank you.</span></div></div>"; return; }
+    if (S.status !== "sent") { el.className = "dock done"; el.innerHTML = '<div class="in">' + ic("f:check-circle", "big") + '<div class="msg"><b>Everything is in.</b><span>' + esc(S.auditor) + " has been told. Thank you.</span></div></div>"; return; }
+    // everything is in: the crew checks the numbers and sends — the request no longer closes on the last keystroke
+    if (S.gate.open) { el.className = "dock ready"; el.innerHTML = '<div class="in"><div class="msg"><b>All in. Check your numbers.</b><span>Then send it. You cannot change it after.</span></div><button class="btn" id="submit">Send to ' + esc(String(S.auditor || "").split(" ")[0]) + "</button></div>"; return; }
     var miss = S.gate.missing || [];
     el.className = "dock"; el.innerHTML = '<div class="in"><div class="msg"><b>' + miss.length + (miss.length === 1 ? " thing" : " things") + ' left</b><span>' + esc(miss.join(" · ")) + "</span></div></div>";
   }
@@ -158,9 +162,10 @@ const SCRIPT = String.raw`
     if (b) { cls += " busy"; st = (b.pct != null ? ic("cloud-arrow-up") + "Sending " + b.pct + "%" : ic("hourglass-medium") + esc(b.text)); if (b.pct != null) extra = '<i class="pg" style="width:' + b.pct + '%"></i>'; }
     else if (!s) { st = ic("cloud-arrow-up") + "Add file"; }
     else if (s.read_state === "ok") { cls += " ok"; st = ic("f:check-circle") + "Read"; }
-    else if (s.read_state === "pending" || s.read_state === "failed") { cls += " busy"; st = ic("hourglass-medium") + "Reading…"; }
+    else if (s.read_state === "pending") { cls += " busy"; st = ic("hourglass-medium") + "Reading…"; }
+    else if (s.read_state === "failed") { cls += " busy"; st = ic("hourglass-medium") + "Trying again"; }
     else { cls += " bad"; st = ic("f:warning-circle") + "Send again"; }
-    var input = (S.status === "sent" && !b && !(s && (s.read_state === "pending" || s.read_state === "failed"))) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + esc(title) + ' for ' + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
+    var input = (S.status === "sent" && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + esc(title) + ' for ' + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
     return '<label class="' + cls + '">' + input + '<div><div class="t">' + title + '</div>' + (s && s.filename && !b ? '<div class="s fn" title="' + esc(s.filename) + '">' + esc(s.filename) + "</div>" : '<div class="s">' + sub + "</div>") + '</div><div class="st">' + st + "</div>" + extra + "</label>";
   }
   function machine(m) {
@@ -213,7 +218,7 @@ const SCRIPT = String.raw`
     var x = new XMLHttpRequest();
     x.open("POST", q("/api/audit/u/upload?serial=" + encodeURIComponent(serial) + "&kind=" + kind));
     x.setRequestHeader("Content-Type", file.type || "application/pdf");
-    x.setRequestHeader("X-File-Name", file.name || "file");
+    x.setRequestHeader("X-File-Name", encodeURIComponent(file.name || "file")); // a header is Latin-1 only: "Dexter’s scan.pdf" threw
     x.upload.onprogress = function (e) { if (e.lengthComputable) { busy[k] = { pct: Math.round(e.loaded / e.total * 100) }; var t = document.querySelector('[data-serial="' + serial + '"][data-kind="' + kind + '"]'); draw(); } };
     x.onerror = function () { delete busy[k]; draw(); toast("No connection. Choose the file again."); };
     x.onload = function () {
@@ -224,11 +229,18 @@ const SCRIPT = String.raw`
     };
     x.send(file);
   }
-  function flush() {
+  function flush(keep) {
     var counts = {}, any = false;
     Object.keys(pend).forEach(function (k) { if (k.indexOf("c:") === 0) { counts[k.slice(2)] = pend[k]; delete pend[k]; any = true; } });
     if (!any) return Promise.resolve();
-    return api("/api/audit/u/count", { counts: counts }).then(function (j) { if (j && j.ok === false) toast(j.say || "Not saved"); else return load(true); });
+    return api("/api/audit/u/count", { counts: counts }, keep).then(function (j) {
+      if (j && j.ok === false) {
+        // not saved: the numbers go back in the queue (a newer keystroke wins) and are tried again
+        Object.keys(counts).forEach(function (p) { if (!("c:" + p in pend)) pend["c:" + p] = counts[p]; });
+        toast(j.say || "Not saved"); clearTimeout(timer); timer = setTimeout(flush, 5000); return;
+      }
+      return load(true);
+    });
   }
   function setCount(part, v) {
     S.counted[part] = v === "" ? null : Number(v);
@@ -260,13 +272,18 @@ const SCRIPT = String.raw`
       return;
     }
     if (t.hasAttribute("data-undown")) { api("/api/audit/u/down", { serial: t.getAttribute("data-undown"), down: false }).then(load); return; }
+    if (t.id === "submit") {
+      t.disabled = true;
+      flush().then(function () { return api("/api/audit/u/submit", {}); }).then(function (j) { if (j && j.ok) load(); else { t.disabled = false; toast((j && j.say) || "Not sent"); load(); } });
+      return;
+    }
     if (t.id === "xadd") {
       var tx = $("xt").value.trim(); if (!tx) { toast("Write the item"); return; }
       api("/api/audit/u/count", { extras: [{ text: tx, counted: $("xn").value }] }).then(function (j) { if (j.ok) load(); else toast(j.say || "Not saved"); });
     }
   });
-  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flush(); });
-  window.addEventListener("pagehide", flush);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flush(true); });
+  window.addEventListener("pagehide", function () { flush(true); }); // keepalive: a plain fetch is dropped on unload
   load();
 })();
 `;

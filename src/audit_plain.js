@@ -116,8 +116,13 @@ const numTokens = (s) => {
   return out;
 };
 const NUM_WORDS = { two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100, dozen: 12, thousand: 1000 };
+// Dates are datesKept's to judge, never counted as quantities here: "2026-10-06" or "Oct 6, 2026" in the source let a
+// rewrite invent "6 toners" or "10 toners" (16 Oct 2026 review). ISO dates, times and month–day phrases go first.
+const MON_RX = "(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\\.?";
+const DATE_RX = new RegExp("\\b\\d{4}-\\d{2}-\\d{2}(?:[t ]\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?z?)?\\b|\\b\\d{1,2}:\\d{2}\\b|\\b" + MON_RX + "\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?" + MON_RX + "(?:,?\\s+\\d{4})?\\b", "gi");
+export const stripDates = (t) => String(t || "").replace(DATE_RX, " ");
 export function numbersKept(plain, source) {
-  const src = numTokens(source), pl = numTokens(plain);
+  const src = numTokens(stripDates(source)), pl = numTokens(stripDates(plain));
   const any = new Set(src.map((x) => x.v)), cash = new Set(src.filter((x) => x.cash).map((x) => x.v));
   for (const x of pl) {
     if (x.cash ? !cash.has(x.v) : !any.has(x.v)) return false;
@@ -188,7 +193,8 @@ export async function rewritePlain(env, text, { engine, claudeModel, workersMode
   if (out == null) { if (ctl) ctl.abort(); return null; }
   const p = parsePlain(out);
   if (p && numbersKept(p, text) && datesKept(p, text)) return p;
-  if (typeof onRefused === "function") onRefused(p);
+  // an EMPTY answer is an engine fault, not a refusal: kept as refused it was never asked again
+  if (p != null && typeof onRefused === "function") onRefused(p);
   return null;
 }
 

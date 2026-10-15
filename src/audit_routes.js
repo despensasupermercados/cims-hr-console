@@ -5,13 +5,13 @@
 // PR A + B (this file today): the shell, the health proof, the ships list and the briefing. READ-ONLY: nothing here
 // sends an email or writes a crew-facing record. The request, the seafarer's upload page, the blind count and the
 // gate arrive in the next PR (C), the reading of the files through HON in PR G.
-import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso } from "./audit.js";
+import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso, aboardNow } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel, numbersKept, datesKept } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-16.e4";
+export const AUDIT_VERSION = "2026-10-16.r1";
 
 // The briefing's order-portal read covers this many days back in its first wave; a longer contract reads again.
 export const RUSH_LOOKBACK_DAYS = 460;
@@ -29,7 +29,7 @@ export function personName(v) {
   return local.split(/[._-]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ") || null;
 }
 export function aboardSomewhere(board, sc) {
-  for (const s of (board && board.sections) || []) for (const c of s.crew || []) if (c && c.current && c.aboard && c.agency_id === sc) return true;
+  for (const s of (board && board.sections) || []) for (const c of s.crew || []) if (aboardNow(c) && c.agency_id === sc) return true;
   return false;
 }
 // A POST from another site, or from another *.cims.work app carrying the shared cookie, is refused: the browser always
@@ -74,7 +74,7 @@ export function installAudit(deps) {
     for (const r of reqs.results || []) { const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r; }
     const out = [];
     for (const s of (board && board.sections) || []) {
-      const aboard = (s.crew || []).filter((c) => c && c.current && c.aboard && c.agency_id)
+      const aboard = (s.crew || []).filter((c) => aboardNow(c) && c.agency_id)
         .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile }));
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
@@ -105,7 +105,9 @@ export function installAudit(deps) {
       session.open ? rotationSections(env).catch(() => null) : null,
       readRush(lo),
     ]);
-    if (session.open && !(reqs.results || []).length && !aboardSomewhere(board, sc)) return json({ error: "not_found" }, 404);
+    // OPEN MODE: a seafarer the board has aboard, or one a LIVE request was made for (a cancelled or TEST row is no pass)
+    const liveReq = (reqs.results || []).some((r) => r.status !== "cancelled" && !r.test_mode);
+    if (session.open && !liveReq && !aboardSomewhere(board, sc)) return json({ error: "not_found" }, 404);
     if (!prof || prof.error) return json({ error: (prof && prof.error) || "not_found" }, 404);
     const P = prof.profile || {}, crew = prof.crew || {};
     const contracts = Array.isArray(P.contracts) ? P.contracts : [];
@@ -121,7 +123,9 @@ export function installAudit(deps) {
     await plainIntel(env, feed);
     // the contract's own window: sign-on to its sign-off, today while it runs. An older sign-on reads again from it.
     const rShip = ship || (cur && cur.ship) || null, rFrom = cur && cur.on ? String(cur.on).slice(0, 10) : null;
-    const rTo = cur && cur.off && String(cur.off).slice(0, 10) < today && !cur.held ? String(cur.off).slice(0, 10) : today;
+    // `cur` is the CURRENT contract: a sign-off already passed on it is projected (overdue) or held, and he is still aboard,
+    // so the window runs to today (it stopped at the passed projected date and dropped every miss after it)
+    const rTo = today;
     let rRows = rushRows;
     if (rFrom && rFrom < lo) rRows = await readRush(rFrom);
     const rush = rushOrders && rRows && rFrom && rShip ? await rushOrders.summarize(env, rRows, { sc, ship: rShip, from: rFrom, to: rTo }).catch(() => null) : null;
@@ -138,9 +142,9 @@ export function installAudit(deps) {
       // is relevant or provide any value"): they stay on the console's crew profile and are not sent here
       feed,
       rush,
-      audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
+      audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: session.open ? null : r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
       // the request still in motion: sent, or in and not graded yet (a graded one is finished and opens the way to the next)
-      open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "draft" || (r.status === "complete" && r.grade == null)) || {}).id || null,
+      open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "draft" || (r.status === "complete" && r.grade == null && !r.test_mode)) || {}).id || null,
     });
   }
 

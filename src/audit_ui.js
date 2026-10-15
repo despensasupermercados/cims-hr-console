@@ -245,7 +245,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       .then(function (r) { if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); } return r.json().then(function (j) { j._status = r.status; return j; }); });
   }
   var WHY = { no_ship_mailbox: "No printshop mailbox for this ship in the ship contacts.", hon_unavailable: "HON did not answer. The machines and the OBP list come from it; try again in a minute.",
-    no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console." };
+    no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console.", no_obp_list: "HON has no OBP stock list for this ship, so there is nothing to count.", not_aboard: "The board does not have this seafarer aboard this ship." };
   function fail(e) { hero(""); $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(e && e.message || e) + ". Reopen to try again.</span></div>"; dock(""); }
 
   // One status word per request, said the same way on every screen.
@@ -284,7 +284,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       if (!q) return true;
       return (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase().indexOf(q) >= 0;
     });
-    var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null)); });
+    var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null && !s.last.test)); });
     var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
     var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b === "Royal Caribbean" ? "Royal" : b) + "</button>"; }).join("") + "</div>";
     if (open.length) {
@@ -413,7 +413,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       S.lastBrief = b;
       if (b.open) dock('<button class="btn" data-go="q=' + esc(b.open) + '">' + ic("hourglass-medium") + "Open the request</button>");
       else dock('<button class="btn green" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">' + ic("paper-plane-tilt") + "Request the documents</button>");
-    }).catch(fail);
+    }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
 
   /* ---------------- A3 · The request ---------------- */
@@ -442,13 +442,14 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       var btn = $("sendreq");
       if (btn) btn.onclick = function () {
         btn.disabled = true; btn.innerHTML = ic("paper-plane-tilt") + "Sending";
-        var contract = S.lastBrief && S.lastBrief.contract ? S.lastBrief.contract.label : null;
+        var bf = S.brief[ship + "|" + sc]; // THIS seafarer's briefing, never the last one drawn
+        var contract = bf && bf.contract ? bf.contract.label : null;
         post("/api/audit/request", { ship: ship, sc: sc, contract: contract }).then(function (r) {
           if (r.ok || r.error === "already_open") { S.brief = {}; reloadShips(); location.replace("#q=" + r.id); }
           else { btn.disabled = false; btn.innerHTML = ic("arrow-clockwise") + "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY[r.error] || r.detail || r.error) + "</span></div>"); }
-        }).catch(fail);
+        }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
       };
-    }).catch(fail);
+    }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
 
   /* ---------------- A6 / A8 · Waiting, then everything is in ---------------- */
@@ -493,7 +494,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       h += '<div class="card"><div class="ch">' + ic("package") + 'Blind count<span class="r">' + d.count.done + " of " + d.count.total + '</span></div><div class="pad" style="padding-top:4px">' + '<div class="track' + (done ? "" : " navy") + '"><i style="width:' + pct(d.count.done, d.count.total) + '%"></i></div>' + (d.extras ? '<div class="sm" style="margin-top:8px">' + d.extras + (d.extras === 1 ? " item found that is" : " items found that are") + " not on the OBP list</div>" : "") + "</div></div>";
       if (d.grade) h = gradeCard(d.grade) + h;
       $("main").innerHTML = h;
-      if (done && !d.grade) dock('<button class="btn green" data-go="g=' + esc(id) + '">' + ic("clipboard-text") + "Grade the audit</button>");
+      if (done && !d.grade && !d.test) dock('<button class="btn green" data-go="g=' + esc(id) + '">' + ic("clipboard-text") + "Grade the audit</button>");
       else if (sent) {
         dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + 'Add 24 h</button></div><button class="btn txt" id="cx">Cancel request</button>');
         /* one action at a time: a double tap on Add 24 h added 48, a double Resend sent two emails */
@@ -508,7 +509,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
         $("ex").onclick = act("extend");
         $("cx").onclick = act("cancel", "Cancel this request? The upload link closes.");
       }
-    }).catch(fail);
+    }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
   /* ---------------- A5 · Dexter's grade (15 Oct 2026) ---------------- */
   var RATINGS = [["inventory", "Inventory", "OBP matches the shelf, par kept, parts life tracked"], ["technical", "Technical", "Machines, error codes, maintenance, test prints"], ["collaterals", "Customer collaterals", "Quality of what the ship prints for guests"], ["overall", "Overall", "Leave blank to use the average of the three above"]];
@@ -579,7 +580,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
         }).catch(function () { alert("No connection. Nothing was filed; try again."); back(); });
       };
       draw();
-    }).catch(fail);
+    }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
   function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
 

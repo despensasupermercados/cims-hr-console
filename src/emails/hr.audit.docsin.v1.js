@@ -85,9 +85,10 @@ export function docsInEmail({ ship, crew, auditor, completeAt, machines = [], co
   const countTable = gaps.length ? box(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
 <td style="padding:0 0 6px;font-family:${FB};font-size:12px;color:${T.slate};">Part</td><td align="right" style="padding:0 0 6px 8px;font-family:${FB};font-size:12px;color:${T.slate};">OBP</td><td align="right" style="padding:0 0 6px 8px;font-family:${FB};font-size:12px;color:${T.slate};">Count</td><td align="right" style="padding:0 0 6px 8px;font-family:${FB};font-size:12px;color:${T.slate};">Off</td></tr>` +
     gaps.map((d) => `<tr><td style="padding:8px 0;border-top:1px solid ${T.border};font-family:${FB};font-size:14px;font-weight:700;color:${T.navy};line-height:1.3;">${esc(d.description || d.part_no)}<div style="font-family:${FM};font-size:12px;font-weight:400;color:${T.slate};padding-top:2px;">${esc(d.part_no)}</div></td>${num(esc(d.obp), T.body)}${num(esc(d.counted), T.body)}${num((d.diff > 0 ? "+" : "−") + esc(Math.abs(d.diff)), T.amberInk, true)}</tr>`).join("") + `</table>`)
+    : !count.total ? `<div style="font-family:${FB};font-size:14px;color:${T.amberInk};font-weight:700;padding-top:6px;">No OBP list to count against.</div>`
     : `<div style="font-family:${FB};font-size:14px;color:${T.greenInk};font-weight:700;padding-top:6px;">Every line agrees with OBP.</div>`;
   const countCard = row(card(
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-family:${FH};font-size:20px;font-weight:600;color:${T.navy};">Blind count</td><td align="right">${gaps.length ? pill(gaps.length + (gaps.length === 1 ? " line off" : " lines off"), "amber") : pill("Agrees", "green")}</td></tr></table>
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-family:${FH};font-size:20px;font-weight:600;color:${T.navy};">Blind count</td><td align="right">${gaps.length ? pill(gaps.length + (gaps.length === 1 ? " line off" : " lines off"), "amber") : !count.total ? pill("No list", "amber") : pill("Agrees", "green")}</td></tr></table>
 <div style="font-family:${FB};font-size:13px;color:${T.slate};padding-top:3px;">${count.total || 0} lines, against OBP as of ${esc(fmtDate(obpAsOf) || "the latest export")}</div>` + countTable +
     (timing.length ? `<div style="font-family:${FB};font-size:13px;color:${T.slate};line-height:1.45;padding-top:10px;">One unit off on ${timing.length} part${timing.length === 1 ? "" : "s"} OBP moved that day (${timing.map((d) => esc(d.part_no)).join(", ")}): timing, flagged only if it does not close tomorrow.</div>` : "") +
     ((count.extras || []).length ? `<div style="font-family:${FB};font-size:14px;color:${T.body};line-height:1.45;padding-top:10px;"><b style="color:${T.navy};">Found, not on the OBP list:</b> ${(count.extras || []).map((x) => esc(x.text) + (x.counted != null ? " (" + esc(x.counted) + ")" : "")).join(" · ")}</div>` : "")), "12px 32px 0");
@@ -101,10 +102,12 @@ export function docsInEmail({ ship, crew, auditor, completeAt, machines = [], co
   const footer = "Pattern 43 measured and the Management List read by HON's readers, the same ones on the handover record · the count is the crew's, blind · " +
     "ordering-schedule due dates are not in this email yet · completed " + esc(fmtWhen(completeAt)) + " · " + PARTS_RULE;
   const html = frame({ preheader: head + " " + head2, eyebrow: "Documents in", date: ship, head, head2, lead, rows, footer });
-  const text = [head + " " + head2, lead.replace(/<[^>]+>/g, ""),
+  // the text part is plain text: the lead's tags go and its escaped entities come back as the characters ("O'Neil & Co")
+  const unesc = (t) => t.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const text = [head + " " + head2, unesc(lead.replace(/<[^>]+>/g, "")),
     ...busy.map((m) => m.label + " (" + m.serial + "): " + ((m.p43 && m.p43.legend && m.p43.legend.items) || []).map((i) => i.head).join("; ") + (((m.mml && m.mml.lifeOver) || []).length ? " · past rated life: " + m.mml.lifeOver.map((x) => x.name + " " + x.pct + "%").join(", ") : "")),
     ...down.map((m) => m.label + " down: " + m.down),
-    gaps.length ? "Count off OBP: " + gaps.map((d) => d.part_no + " OBP " + d.obp + " counted " + d.counted).join("; ") : "Count agrees with OBP.",
+    gaps.length ? "Count off OBP: " + gaps.map((d) => d.part_no + " OBP " + d.obp + " counted " + d.counted).join("; ") : !count.total ? "No OBP list to count against." : "Count agrees with OBP.",
     PARTS_RULE].join("\n\n");
   return { subject, html, text };
 }
