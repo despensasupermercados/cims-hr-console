@@ -97,7 +97,48 @@ async function classify(env, text, { engine, claudeModel, workersModel }) {
   return out == null ? null : parseFlag(out, text);
 }
 
-// deps: { ensure (score_intel_flag guard), engine, claudeModel, workersModel }
+// WHOSE MISS IT IS (Miguel, 16 Oct 2026, the second answer: "the audit is the person who's onboard .. when u have two
+// people work with the person who is currently onboard or at least the one who has been more than 4 weeks"). The board's
+// ONE schedule says who was aboard the hull on the order's day; the order's typed name only breaks a tie:
+//   one crew aboard                       -> theirs (whoever typed it);
+//   two aboard, ONE of them 4+ weeks       -> the 4+ weeks one (a reliever typing the rescue order is not charged);
+//   otherwise (both 4+ weeks — a two-printer hull — or both new) -> the one the order names, if exactly one of them;
+//                                            else the longest aboard when nobody is 4+ weeks; else nobody (flagged, §6);
+//   nobody aboard per the schedule (an old order, a gap in the file) -> the typed name, as before (missOwner).
+export const ESTABLISHED_DAYS = 28;
+const daysBetween = (a, b) => Math.round((Date.parse(day(b) + "T00:00:00Z") - Date.parse(day(a) + "T00:00:00Z")) / 86400000);
+export function aboardOn(legs, ship, date) {
+  const k = shipKey(ship), d = day(date), by = new Map();
+  for (const l of legs || []) {
+    if (!l || !l.sc || !l.on || shipKey(l.ship) !== k) continue;
+    const on = day(l.on), off = day(l.off);
+    if (on > d || (!l.is_current && off && off < d)) continue;
+    const prev = by.get(l.sc);
+    if (!prev || on < prev.on) by.set(l.sc, { sc: l.sc, name: l.name || l.sc, on });
+  }
+  return [...by.values()].sort((a, b) => a.on.localeCompare(b.on));
+}
+export function missOwnerByBoard(m, sc, ix, legs) {
+  const named = missOwner(m.requester, sc, ix);
+  const aboard = aboardOn(legs, m.ship, m.submitted_at || m.at);
+  if (!aboard.length) return { ...named, rule: "name", why: "the schedule has nobody aboard that day; the order's name decides" };
+  const d = day(m.submitted_at || m.at);
+  const weeks = (a) => Math.floor(daysBetween(a.on, d) / 7);
+  const est = aboard.filter((a) => daysBetween(a.on, d) >= ESTABLISHED_DAYS);
+  const namedIds = new Set(String(m.requester || "").split(/\s*(?:\/|&|\band\b|;)\s*/i).map((p) => matchTravelName(p.trim(), ix).agency_id).filter(Boolean));
+  let owner = null, why = "";
+  if (aboard.length === 1) { owner = aboard[0]; why = "the only crew aboard"; }
+  else if (est.length === 1) { owner = est[0]; why = "aboard " + weeks(est[0]) + " weeks, the other under 4"; }
+  else {
+    const pool = est.length ? est : aboard;
+    const byName = pool.filter((a) => namedIds.has(a.sc));
+    if (byName.length === 1) { owner = byName[0]; why = "named on the order, " + (est.length ? "both aboard 4+ weeks" : "both aboard under 4 weeks"); }
+    else if (!est.length) { owner = aboard[0]; why = "the longest aboard, both under 4 weeks"; }
+  }
+  return { mine: !!owner && owner.sc === sc, who: named.who, joint: named.joint, rule: "board", why,
+    owner: owner ? owner.name : null, aboard: aboard.map((a) => a.name), unplaced: owner ? [] : ["(two crew aboard 4+ weeks, the order names neither)"], others: owner && owner.sc !== sc ? [owner.name] : [] };
+}
+// deps: { ensure (score_intel_flag guard), engine, claudeModel, workersModel, boardLegs: async () => legs (the ONE schedule) }
 // in: { sc, ship ("A" or "A, B" for a transfer), signOn, signOff, crewName, today }
 export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, today }, deps = {}) {
   const on = day(signOn), offIn = day(signOff), now = day(today) || new Date().toISOString().slice(0, 10);
@@ -106,7 +147,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   const none = () => ({ results: [] });
   if (deps.ensure) await deps.ensure(env);
   // ONE wave (§12). Without a sign-on nothing dated is read; without a ship no miss or handover can be his.
-  const [misses, hons, audits, intel, resp, roster] = await Promise.all([
+  const [misses, hons, audits, intel, resp, roster, legs] = await Promise.all([
     env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(none) : none(),
     env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(none) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
@@ -114,15 +155,17 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
     env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
     env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
+    env.PARTS_DB && on && keys.length && deps.boardLegs ? Promise.resolve().then(deps.boardLegs).catch(() => null) : null,
   ]);
   const answers = {}; let rayAt = null;
   for (const r of resp.results || []) { try { answers[r.role] = JSON.parse(r.answers_json || "{}"); } catch (e) {} if (r.role === "ray") rayAt = r.submitted_at; }
   const ix = buildCrewIndex(roster.results || []);
   const vm = [], notMine = [];
   for (const m of (misses.results || []).filter((x) => keys.includes(shipKey(x.ship)))) {
-    const o = missOwner(m.requester, sc, ix);
-    const row = { ref: m.order_ref, at: m.submitted_at, total: m.grand_total, ship: m.ship, by: o.who, joint: o.joint };
-    if (o.mine) vm.push(row); else notMine.push({ ...row, others: o.others, unplaced: o.unplaced });
+    const o = legs ? missOwnerByBoard(m, sc, ix, legs) : missOwner(m.requester, sc, ix);
+    const why = o.rule === "board" && o.why ? " (charged to " + (o.mine ? "this crew" : o.owner) + ": " + o.why + ")" : "";
+    const row = { ref: m.order_ref, at: m.submitted_at, total: m.grand_total, ship: m.ship, by: (o.who || "nobody named") + why, joint: o.joint };
+    if (o.mine) vm.push(row); else notMine.push({ ...row, others: o.others, unplaced: o.unplaced, rule: o.rule });
   }
   const handover = pickHandover(hons.results || [], { ship, signOff: offIn, crewName, sc });
   // field reports: classify each once (cached by the report's text), at most 4 new per open
@@ -159,10 +202,9 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: null });
   const notes = [];
   for (const m of notMine) {
-    const head = "Vessel-side miss " + m.ref + " · " + day(m.at) + " · " + (m.ship || "") + " · placed by " + (m.by || "nobody named");
-    notes.push({ factor: "sOrder", source: "Parts Portal", text: m.unplaced.length
-      ? head + ": the name is not on the roster, not counted. Check who placed it."
-      : head + ": another crew's order, not counted." });
+    const head = "Vessel-side miss " + m.ref + " · " + day(m.at) + " · " + (m.ship || "") + " · placed by " + m.by;
+    notes.push({ factor: "sOrder", source: "Parts Portal", text: !m.unplaced.length ? head + ": another crew's miss, not counted."
+      : m.rule === "board" ? head + ": not counted. Check whose miss it is." : head + ": the name is not on the roster, not counted. Check who placed it." });
   }
   if (!keys.length) notes.push({ factor: "sOrder", text: "No ship on the Score Card: the Parts Portal, HON and the audits were not checked", source: "Score Card" });
   if (!on) notes.push({ factor: "sOrder", text: "No sign-on date: misses and field reports were not checked", source: "Score Card" });
