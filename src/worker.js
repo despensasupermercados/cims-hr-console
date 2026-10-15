@@ -61,7 +61,7 @@ import { apiRosterExport } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
 import { isAuditHost } from "./audit.js";
-import { ensureAuditTables } from "./audit_store.js";
+import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -78,7 +78,10 @@ const _seval = installSeval({});
 const _sbm = installSbm({ sendViaMailer, logActivity, SECTIONS: rotationSections, VESSEL_REF, ORIGIN: "https://cims.work", onReviewStored: _seval.sevalAutoApply });
 // Printshop Audit (audit.cims.work, 14 Oct 2026): src/audit_routes.js. Nothing in it is money (§1); its tables reach
 // production through ensureAudit (memoEnsure), like ensureSbm.
-const ensureAudit = memoEnsure(ensureAuditTables);
+// The DDL rides in the guard's key: ensureAuditTables is a loop over AUDIT_DDL, so its own source never changes when a
+// table is added, and keyed on the source alone the guard read "applied" and skipped audit_plain and audit_eval in
+// production (15 Oct 2026). Pinned by test/audit_guards.test.js.
+const ensureAudit = memoEnsure(ensureAuditTables, AUDIT_DDL.join("\n"));
 const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections, sendViaMailer, logActivity, applyOverride, TODAY: () => TODAY(),
   crewProfile: async (env, sc, session) => (await apiCrewOne(env, new URL("https://cims.work/api/crew/get?id=" + encodeURIComponent(sc)), session)).json() });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
@@ -988,7 +991,7 @@ function appliedGuards(env) {
   return pr;
 }
 const _ensureMemo = new WeakMap();
-function memoEnsure(fn) {
+function memoEnsure(fn, version = "") {
   return (env) => {
     let m = _ensureMemo.get(env.DB);
     if (!m) { m = new Map(); _ensureMemo.set(env.DB, m); }
@@ -996,7 +999,7 @@ function memoEnsure(fn) {
     if (!pr) {
       const t0 = Date.now();
       pr = (async () => {
-        const key = "guard:" + etagFor(fn.toString());
+        const key = "guard:" + etagFor(fn.toString() + (version ? "\n" + version : ""));
         const applied = await appliedGuards(env);
         if (applied.has(key)) return; // already applied, long ago: no DDL, no writes, nothing
         await fn(env);

@@ -42,3 +42,10 @@ test("the audit page escapes everything it draws from data", () => {
   // every innerHTML built from a name / ship / text goes through esc(): a raw b.crew.name or f.text would be the bug
   assert.doesNotMatch(ui, /\+ (b\.crew\.name|f\.text|c\.name|s\.ship|a\.ship|t) \+/, "a data field reaches HTML unescaped");
 });
+
+test("the audit's table guard is keyed on its DDL, so a new table is created in production", async () => {
+  const { readFileSync } = await import("node:fs");
+  const w = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  assert.match(w, /const ensureAudit = memoEnsure\(ensureAuditTables, AUDIT_DDL\.join\(/, "keyed on the source alone, audit_plain and audit_eval were never created (15 Oct 2026)");
+  assert.match(w, /etagFor\(fn\.toString\(\) \+ \(version \?/);
+});

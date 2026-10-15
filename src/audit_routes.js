@@ -11,7 +11,7 @@ import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel } from "./audit_plain.js";
 import { pickEngine, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 
-export const AUDIT_VERSION = "2026-10-15.d1";
+export const AUDIT_VERSION = "2026-10-15.d2";
 
 export const auditOpen = (env, host) => String((env && env.AUDIT_OPEN) || "").toLowerCase() === "true" && isAuditHost(host);
 
