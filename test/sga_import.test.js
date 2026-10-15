@@ -125,3 +125,40 @@ test("training months are replaced one at a time and a NEWER bill's figure stand
   assert.equal(d.prepare("SELECT total FROM training_cost WHERE year=2026 AND month=9").get().total, 5);
   assert.equal(d.prepare("SELECT total FROM training_cost WHERE year=2026 AND month=2").get().total, 1018.83, "February's own month, which September's sheet does not name, stays");
 });
+
+const SUMMARY_SHEET = [
+  ["2025", "HOME ALLOTMENT", "TRAVEL/ PLANEFARE", "MEDICAL", "VISA", "HOTEL", "BANK CHARGE/ COURIER", "TRAINING RELATED", "TOTAL"],
+  ["SEPTEMBER", " 48,795.11 ", " 9,583.92 ", " 553.71 ", " 831.61 ", " 223.00 ", " 15.00 ", " 2,356.31 ", " 62,358.66 "], ["TOTAL", "", "", "", "", "", "", "", ""], [],
+  ["2026", "HOME ALLOTMENT", "TRAVEL/ PLANEFARE", "MEDICAL", "VISA", "HOTEL", "BANK CHARGE/ COURIER", "TRAINING RELATED2", "SETTLEMENT PAYMENT", "TOTAL"],
+  ["AUGUST", " 100.00 ", " 10.00 ", "", "", "", " 15.00 ", " 5.00 ", "", " 130.00 "],
+  // crew total 3,955.86 = the fixture's GRAND TOTAL (three lines + the 15.00 bank charge); + training 5,954.94 = 9,910.80
+  ["SEPTEMBER", " 3,189.86 ", " 614.00 ", "", "", " 137.00 ", " 15.00 ", " 5,954.94 ", "", " 9,910.80 "],
+];
+
+test("the monthly summary sheet loads per month (newer bill wins) and a SUMMARY-ONLY file never touches the month's lines", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = envFor(d);
+  // September's full workbook: lines + the summary sheet
+  const a = await J(await apiSgaImport(req({ sheets: { "SUMMARY MANNING": manning(), "2026 SUMMARY TRAINREL": training, "2026 SUMMARY (2)": SUMMARY_SHEET }, name: "DG3 SGA EXCEL SEPTEMBER'26.xlsx" }), env, { email: "r" }));
+  assert.equal(a.summary_only, false); assert.equal(a.summary_written, 3, "Sep 2025, Aug 2026, Sep 2026");
+  assert.equal(a.summary_agrees, true, "the summary sheet's crew total for September = the manning sheet's GRAND TOTAL");
+  const sep = { ...d.prepare("SELECT total, training, crew_total, air, hotel FROM sga_summary WHERE year=2026 AND month=9").get() };
+  assert.deepEqual(sep, { total: 9910.8, training: 5954.94, crew_total: 3955.86, air: 614, hotel: 137 });
+  // October's workbook arrives through the inbox with the manning sheet CUT: summary only, the same September row revised, October added
+  const oct = SUMMARY_SHEET.map((r) => r[0] === "SEPTEMBER" && r.length === 10 ? ["SEPTEMBER", " 3,189.86 ", " 614.00 ", "", "", " 137.00 ", " 15.00 ", " 5,000.00 ", "", " 8,955.86 "] : r).concat([["OCTOBER", " 200.00 ", " 20.00 ", "", "", "", " 15.00 ", " 1.00 ", "", " 236.00 "]]);
+  const dry = await J(await apiSgaImport(req({ sheets: { "2026 SUMMARY (2)": oct }, name: "DG3 SGA EXCEL OCTOBER'26.xlsx", dryRun: true }), env, null));
+  assert.equal(dry.summaryOnly, true); assert.equal(dry.rows, 0); assert.equal(dry.summaryMonths, 4); assert.deepEqual(dry.period, { year: 2026, month: 10, source: "name" });
+  const b = await J(await apiSgaImport(req({ sheets: { "2026 SUMMARY (2)": oct }, name: "DG3 SGA EXCEL OCTOBER'26.xlsx" }), env, { email: "r" }));
+  assert.equal(b.summary_only, true); assert.equal(b.applied, 0); assert.equal(b.summary_written, 4, "the newer bill revises every month it carries");
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE month=9").get().n, 3, "September's lines untouched by the summary-only load");
+  assert.equal(d.prepare("SELECT training FROM sga_summary WHERE year=2026 AND month=9").get().training, 5000, "October's bill revised September's summary row");
+  assert.equal(d.prepare("SELECT crew_total FROM sga_summary WHERE year=2026 AND month=10").get().crew_total, 235);
+  // /api/sga: the summary rows ride along, and the summary-only file (rows 0) does not hide September's lines
+  const api = await J(await apiSga(env));
+  assert.equal(api.summary.length, 4); assert.equal(api.lines.filter((l) => l.month === 9).length, 3);
+  assert.equal(api.files.length, 2); assert.equal(api.files.find((f) => f.month === 10).rows, 0);
+  // an OLDER bill's summary (August's workbook) does not overwrite what October wrote
+  const aug = [["2026", "HOME ALLOTMENT", "TRAVEL/ PLANEFARE", "BANK CHARGE/ COURIER", "TRAINING RELATED2", "TOTAL"], ["AUGUST", " 999.00 ", "", " 15.00 ", " 5.00 ", " 1,019.00 "]];
+  const c = await J(await apiSgaImport(req({ sheets: { "2026 SUMMARY (2)": aug }, name: "DG3 SGA EXCEL AUGUST'26.xlsx" }), env, { email: "r" }));
+  assert.equal(c.summary_written, 0); assert.equal(d.prepare("SELECT total FROM sga_summary WHERE year=2026 AND month=8").get().total, 130);
+});

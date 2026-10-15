@@ -71,7 +71,7 @@ export const SGA_COLS = [
   ["reimbursement", /REIMBURSEMENT/],
   ["funeral", /FUNERAL/],
   // TRANSPORTATION, TRANSPORTATION EXPENSE, SETTLEMENT TRANSPORTATION (February 2026: $12.50 that the first cut missed)
-  ["transport", /TRANSPORTATION/],
+  ["transport", /TRANSPO/],
   ["hmo", /^HMO/],
   ["cash_advance", /CASH ADVANCE/],
   ["donation", /DONATION/],
@@ -237,5 +237,47 @@ export function pickSgaSheets(sheets) {
   const names = Object.keys(sheets || {});
   const manning = names.find((n) => /SUMMARY MANNING/i.test(n)) || null;
   const training = names.find((n) => /TRAINREL/i.test(n)) || names.find((n) => /^TRAINING$/i.test(n.trim())) || null;
-  return { manning, training };
+  // "2026 SUMMARY (2)": the whole SGA by month and category — 2025 whole, the current year to the bill's month
+  const summary = names.find((n) => isSummarySheet(n)) || null;
+  return { manning, training, summary };
+}
+export const isSummarySheet = (n) => /^\d{4} SUMMARY( \(\d+\))?$/i.test(String(n || "").trim());
+
+// THE MONTHLY SUMMARY SHEET ("2026 SUMMARY (2)", 15 Oct 2026). It sits third in TDG's workbook, so the connector delivers
+// it whole even when SUMMARY MANNING is cut (January, April, May 2026 were) — it is what makes the month's totals and the
+// year-over-year reliable through the inbox. Blocks headed by a year cell, then one row per month: every SGA_COLS word
+// ("MANNING FEE/AGENCY FEE2", "SETTLEMENT TRANSPO", "PORT AGENT EXPENSE"…), TRAINING RELATED, SETTLEMENT PAYMENT, TOTAL.
+// Checked on September 2026: TOTAL 82,016.88 = the crew lines 76,046.94 + the 15.00 bank charge + training 5,954.94, so
+// crew_total = total − training − settlement is the bill's crew costs (= the GRAND TOTAL of SUMMARY MANNING).
+// Returns [{ year, month, <SGA_COL_KEYS>, training, settlement, total, crew_total }] for every month with a total.
+export function parseSgaSummary(rows) {
+  const out = [];
+  let year = null, cols = null, totalCol = -1, trainCol = -1, settleCol = -1;
+  for (const r0 of rows || []) {
+    const r = r0 || [];
+    const a = up(r[0]);
+    if (/^20\d\d$/.test(a)) {
+      year = +a; cols = {}; totalCol = -1; trainCol = -1; settleCol = -1;
+      r.forEach((c, j) => {
+        const u = up(c); if (!u || j === 0) return;
+        if (/^TOTAL$/.test(u)) { totalCol = j; return; }
+        if (/^TRAINING RELATED/.test(u)) { trainCol = j; return; }
+        if (/^SETTLEMENT PAYMENT/.test(u)) { settleCol = j; return; }
+        for (const [key, re] of SGA_COLS) if (re.test(u)) { (cols[key] = cols[key] || []).push(j); break; }
+      });
+      continue;
+    }
+    if (!year || !cols || totalCol < 0) continue;
+    const m = MONTHS[a];
+    if (!m) continue;
+    const rec = { year, month: m };
+    for (const key of SGA_COL_KEYS) rec[key] = Math.round((cols[key] || []).reduce((acc, j) => acc + num(r[j]), 0) * 100) / 100;
+    rec.training = trainCol >= 0 ? num(r[trainCol]) : 0;
+    rec.settlement = settleCol >= 0 ? num(r[settleCol]) : 0;
+    rec.total = num(r[totalCol]);
+    if (!rec.total) continue;
+    rec.crew_total = Math.round((rec.total - rec.training - rec.settlement) * 100) / 100;
+    out.push(rec);
+  }
+  return out;
 }

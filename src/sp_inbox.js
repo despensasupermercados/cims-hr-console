@@ -52,14 +52,22 @@ export function dumpToSheets(text) {
 
 // What the bill needs from its dump: SUMMARY MANNING whole; the TRAINREL summary when the dump has it whole. The TRAINING
 // line items (far down the book) are never expected — the view reads the summary. Returns { ok, reason?, sheets }.
+// With the manning sheet cut (the connector's budget ran out — January, April, May 2026 did, three reads each) the dump
+// still carries the MONTHLY SUMMARY sheet ("2026 SUMMARY (2)", third in the book): the file loads as SUMMARY ONLY — the
+// month's totals and the year-over-year, no per-crew lines — `summaryOnly: true`. Nothing → refused.
 export function sgaFromDump(parsed) {
   const names = parsed.complete;
   const manning = names.find((n) => /summary manning/i.test(n));
-  if (!manning) return { ok: false, reason: parsed.cut && /summary manning/i.test(parsed.cut) ? "manning_cut" : "no_manning", detail: parsed.cut ? "the reader stopped inside " + parsed.cut : "no SUMMARY MANNING sheet in the dump", sheets: {} };
-  const sheets = { [manning]: parsed.sheets[manning] };
+  const summary = names.find((n) => /^\d{4} SUMMARY( \(\d+\))?$/i.test(String(n).trim()));
   const tr = names.find((n) => /trainrel/i.test(n));
+  if (!manning && !summary) return { ok: false, reason: parsed.cut && /summary manning/i.test(parsed.cut) ? "manning_cut" : "no_manning", detail: parsed.cut ? "the reader stopped inside " + parsed.cut : "no SUMMARY MANNING sheet in the dump", sheets: {} };
+  const sheets = {};
+  if (manning) sheets[manning] = parsed.sheets[manning];
+  if (summary) sheets[summary] = parsed.sheets[summary];
   if (tr) sheets[tr] = parsed.sheets[tr];
-  return { ok: true, sheets, manning, training: tr || null, trainingCut: !tr && parsed.cut && /trainrel/i.test(parsed.cut) ? parsed.cut : null };
+  return { ok: true, sheets, manning: manning || null, summary: summary || null, summaryOnly: !manning, training: tr || null,
+    manningCut: !manning && parsed.cut && /summary manning/i.test(parsed.cut) ? parsed.cut : null,
+    trainingCut: !tr && parsed.cut && /trainrel/i.test(parsed.cut) ? parsed.cut : null };
 }
 
 const MONTH_SHEETS = ["JAN", "FEB", "MAR", "APRIL", "MAY", "JUNE", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC"];
