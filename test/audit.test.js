@@ -94,8 +94,8 @@ test("the request window is 24 hours", () => {
 });
 
 test("the migration is the same statements that reach production", () => {
-  const sql = ["0024_audit.sql", "0025_audit_plain.sql", "0026_audit_eval.sql"].map((f) => readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8")).join("\n");
+  const sql = ["0024_audit.sql", "0025_audit_plain.sql", "0026_audit_eval.sql", "0030_audit_token.sql"].map((f) => readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8")).join("\n");
   const stmts = sql.split("\n").filter((l) => l && !l.startsWith("--")).map((l) => l.replace(/;$/, ""));
   assert.deepEqual(stmts, AUDIT_DDL);
-  for (const s of AUDIT_DDL) assert.match(s, /^CREATE (TABLE|INDEX) IF NOT EXISTS /);
+  for (const s of AUDIT_DDL) assert.match(s, /^CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS /);
 });

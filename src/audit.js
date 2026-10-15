@@ -143,6 +143,10 @@ export const safeName = (s) => String(s || "file").replace(/[^A-Za-z0-9._-]+/g, 
 // (decision 13, open in round 2 only as a confirmation). The gate opens when EVERY press on the register has either
 // both documents in — and READ, once the reader is wired (PR G) — or is reported down with a reason, AND every OBP
 // line has a count. Anything short of that is listed, line by line, so Dexter and the crew see the same list.
+// A seafarer the board has aboard a ship NOW: TDG's On board seat, dated or not. A seat with no embark date yet ("No
+// contract dates yet") is still aboard per the file — it used to read "Nobody aboard" and was refused a request.
+export const aboardNow = (c) => !!(c && c.current && (c.aboard || !c.signOn));
+
 export function gateState({ request, machines, uploads, down, lines, counted, requireRead = true }) {
   const missing = [];
   if (!request || request.status === "cancelled") return { open: false, missing: [{ what: "request", say: "No request sent." }] };

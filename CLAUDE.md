@@ -34,6 +34,11 @@ untested migration or data load against the production database.
 - Documentation updates.
 Anything else — and ALWAYS anything touching money, auth, schema, or crew data — must be
 a PR for human review, not an auto-merge.
+The nightly agent is **"Cims night watch"** (scheduled Claude task, 02:45 America/New_York, a fresh session per night;
+runbook `docs/NIGHT_WATCH.md`, Miguel 16 Oct 2026: "add a night watcher to look for bugs and fix it"): health first (the
+suite on main, deployed = main, last night's jobs from D1, read-only), then one area of the code a night by weekday;
+every fix is a draft PR "Night watch: …" with a failing-first test, never merged by the watcher. The GitHub Action
+`nightly-self-maintenance` is manual-only since that day (its nightly runs were refused 8 tool calls and changed nothing).
 
 **Interactive sessions (Miguel's standing instruction, 2026-09-15: "next time u go ahead and merge
 them"):** a session Miguel is driving may merge its OWN pull request once (a) CI is green, (b) the
@@ -1226,3 +1231,29 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   note's headline cost (largest $100+) to stay, and reads ISO dates and bare ordinals as days; a REFUSED rewrite is kept as
   an empty `audit_plain` row (`refused:<engine>`) so it is not paid for on every open, a timeout is retried, a kept line
   that fails today's guards is not shown, and the Claude call is aborted on its 7s ceiling.
+- **The 16 Oct 2026 review** (Miguel: "read the code and find bugs and fix gaps"; three reviews, 31 findings, the 21 distinct
+  ones fixed, each reproduced first; pinned by `test/audit_request.test.js`, `test/audit_routes.test.js`,
+  `test/audit_plain.test.js`, cims-hon `test/audit_reader.test.js`). Production had no audit request yet, so nothing stored
+  needed repair. **A first email that fails closes its draft** (cancelled, "system: the request email did not go"): it used
+  to block that crew and ship for good. **One open request per crew and ship** is a partial UNIQUE index
+  (`ux_audit_request_open`, migrations/0030), not only a SELECT. **Links are added, never swapped** (`audit_token`): a
+  reminder or resend adds its link only AFTER its email went, and the link the crew holds keeps working (a reminder at
+  hour 12 cut off a page open mid-upload); a failed reminder is logged `remind_failed:` and tried again next hour; a link
+  closes `LINK_DAYS` after the newest of the first send, the latest link and the deadline (a resend after day 14 used to
+  open "expired"); a cancel closes every link. **The crew SENDS** (`POST /api/audit/u/submit`, "All in. Check your numbers"
+  → "Send to <first name>"): the request no longer completes on the last keystroke (a "12" typed with a pause filed "1"
+  and the correction was refused); the sweep sends it after `AUTO_SUBMIT_HOURS` = 6 idle or once the deadline passes. **A
+  read that keeps failing** becomes "send it again" after `READ_TRIES` = 3 (it froze the tile at "Reading…" and starved the
+  sweep, now least-recently-tried first); the tile keeps its file input while a read is retried. **What did not go is tried
+  again**: an overdue note is logged only once sent; a documents-in email that failed is resent by the sweep for
+  `DOCSIN_RETRY_DAYS` = 3 (never twice: a sent row is never overwritten). **No OBP list = no request** (`no_obp_list`): the
+  count would be empty and the email said "Every line agrees". The crew page keeps unsaved counts on a failed save and
+  flushes with `keepalive` on leaving; the file name travels URI-encoded (a "’" in the name threw in the browser and froze
+  the tile at 0%). **Open mode**: the preview answers only for a seafarer the board has aboard (`aboardNow`: TDG's On board
+  seat, dated or not — an undated seat used to read "Nobody aboard"); the briefing's pass is a LIVE request, never a
+  cancelled or TEST one; "who asked" is not shown. A finished TEST request is never "open" (it cannot be graded and blocked
+  the next audit); the rush window of a contract past its projected sign-off runs to today; the plain-words guard strips
+  dates before comparing quantities ("2026-10-06" let a rewrite invent "6 toners"); an EMPTY engine answer is not stored as
+  refused; a late error never replaces the screen moved on to; the request carries THIS seafarer's contract label.
+  **HON's reader now sends `update_date`** (cims-hon PR #115, `AUDIT_READER_VERSION` 2): the one-unit TIMING rule never
+  fired because the field never arrived.

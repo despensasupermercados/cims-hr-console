@@ -136,3 +136,17 @@ test("the briefing: rush orders this contract, the portal's misses on this hull 
   const none = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1")).json();
   assert.equal(none.rush, null, "no portal read: no card, never a zero");
 });
+
+test("16 Oct 2026 review: an overdue contract's rush window runs to today; a finished TEST audit is not open; the open site never shows who asked", async () => {
+  const seen = [];
+  const prof = async () => ({ crew: { first_name: "John", last_name: "Gorre" }, profile: { contracts: [{ current: true, ship: "Oasis", on: "2026-03-01", off: "2026-09-30", offSource: "projected" }], people: { feed: [] }, checks: [] } });
+  const rushOrders = { read: async () => [], summarize: async (env, rows, args) => { seen.push(args); return null; } };
+  const H2 = installAudit({ json, htmlResponse, ensureAudit: async () => {}, rotationSections: async () => SECTIONS, TODAY: () => "2026-10-14", crewProfile: prof, rushOrders });
+  const rows = [{ id: "ar_t", ship: "Oasis", status: "complete", test_mode: 1, grade: null, auditor: "miguel.sanmartin@dg3.com", created_at: "2026-10-14T10:00:00Z" }];
+  const c = (session, env) => { const u = new URL("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1"); return H2(u.pathname, new Request(u), env || { DB: fakeDb(rows) }, u, session); };
+  const b = await (await c(S)).json();
+  assert.equal(seen[0].to, "2026-10-14", "past the projected sign-off and still aboard: the misses after it count");
+  assert.equal(b.open, null, "a TEST request cannot be graded, so it never holds the crew 'open'");
+  const o = await (await c(null, { DB: fakeDb(rows), AUDIT_OPEN: "true", AUDIT_OPEN_AS: "Dexter.Lawrence@dg3.com" })).json();
+  assert.equal(o.audits[0].by, null, "who asked is not for anonymous visitors");
+});

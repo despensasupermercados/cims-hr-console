@@ -22,6 +22,12 @@ export const AUDIT_DDL = [
   // migrations/0026_audit_eval.sql: Dexter's grade, filed once per audit (never rewritten)
   "CREATE TABLE IF NOT EXISTS audit_eval (visit_id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, agency_id TEXT NOT NULL, ship TEXT NOT NULL, r_inventory INTEGER NOT NULL, r_technical INTEGER NOT NULL, r_collaterals INTEGER NOT NULL, r_overall INTEGER, score INTEGER NOT NULL, score_from TEXT NOT NULL, note TEXT, filed_by TEXT NOT NULL, filed_at TEXT NOT NULL)",
   "CREATE INDEX IF NOT EXISTS idx_audit_eval_sc ON audit_eval (agency_id, filed_at)",
+  // migrations/0030_audit_token.sql (16 Oct 2026 review): every link a request was ever sent with stays valid while the
+  // request is open — a reminder or a resend adds a link, it never breaks the one the crew already has open
+  "CREATE TABLE IF NOT EXISTS audit_token (token_hash TEXT PRIMARY KEY, request_id TEXT NOT NULL, at TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_token_req ON audit_token (request_id, at)",
+  // one open request per seafarer and ship: two taps (or two visitors on the open site) cannot both send one
+  "CREATE UNIQUE INDEX IF NOT EXISTS ux_audit_request_open ON audit_request (agency_id, normalized_ship) WHERE status IN ('draft','sent')",
 ];
 
 export async function ensureAuditTables(env) {
