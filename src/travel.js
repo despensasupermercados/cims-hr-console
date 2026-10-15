@@ -7,6 +7,21 @@
 const MONTHS = { JAN:1, FEB:2, MAR:3, APRIL:4, APR:4, MAY:5, JUNE:6, JUN:6, JULY:7, JUL:7, AUG:8, SEPT:9, SEP:9, OCT:10, NOV:11, DEC:12 };
 const CATS = ["air", "hotel", "medical", "visa", "food", "transport"];
 
+// The crew travel budget per month — ONE place (15 Oct 2026; it was typed on the server and again on the page).
+// Source: Rita's workbook, SUMMARY sheet ($15,000/mo, $180,000/yr). Miguel named "$150,000 for all our seafarers" the
+// same day — open question #4; whichever he settles on is a one-line change here. Shoreside has no budget by his word.
+export const TRAVEL_BUDGET_MO = 15000;
+
+// How many months of `year` are CLOSED on `today` (ISO date): a month counts for the YTD budget only once it has ended.
+// The running month is "in progress" — counting it charged a full month of budget against a few days of invoices.
+export function closedMonths(today, year) {
+  const y = +String(today).slice(0, 4), m = +String(today).slice(5, 7);
+  if (!year || !y) return 0;
+  if (+year < y) return 12;
+  if (+year > y) return 0;
+  return Math.max(0, m - 1);
+}
+
 export function monthNum(name) { return MONTHS[String(name || "").toUpperCase().trim()] || null; }
 
 function num(v) {
@@ -34,6 +49,9 @@ export function parseMonthSheet(name, rows, year) {
   const out = [];
   for (let ri = 2; ri < rows.length; ri++) {
     const row = rows[ri] || [];
+    // Column 0 is the ship the row belongs to ("Anthem", "Azamara Quest", "Apex"); kept since 15 Oct 2026 so a line
+    // item knows its hull and its cruise line. A total row (blank ship) leaves it null.
+    const ship = String(row[0] == null ? "" : row[0]).trim() || null;
     for (const s of secs) {
       const raw = row[s.col];
       if (raw == null) continue;
@@ -42,7 +60,7 @@ export function parseMonthSheet(name, rows, year) {
       const vals = CATS.map((_, k) => num(row[s.col + 1 + k]));
       const total = Math.round(vals.reduce((a, b) => a + b, 0) * 100) / 100;
       if (total <= 0) continue; // skip name rows with no spend
-      const rec = { year, month: mon, leg: s.leg, kind: "crew", crew_name: nm, total, other: 0 };
+      const rec = { year, month: mon, leg: s.leg, kind: "crew", crew_name: nm, ship, total, other: 0 };
       CATS.forEach((c, k) => { rec[c] = vals[k]; });
       out.push(rec);
     }

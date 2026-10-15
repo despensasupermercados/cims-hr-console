@@ -13,7 +13,8 @@ import { mapRows, diffCrew, storableStatus } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
-import { parseTravelSheets, summarize as travelSummarize } from "./travel.js";
+import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
+import { annotateTravel, unmatchedTravel, travelRowsFor } from "./travel_match.js";
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
@@ -1344,11 +1345,11 @@ async function apiDaysWorked(env, url) {
 // kind = 'crew' (monthly sheets) | 'shoreside' (CIMS staff sheet) so the dashboard can show
 // totals with and without shoreside management.
 async function insertTravel(env, recs, year) {
-  const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,kind,crew_name,air,hotel,medical,visa,food,transport,other,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+  const stmt = env.DB.prepare("INSERT INTO travel_expense (id,year,month,leg,kind,crew_name,ship,air,hotel,medical,visa,food,transport,other,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
   for (let i = 0; i < recs.length; i += 100) {
     await env.DB.batch(recs.slice(i, i + 100).map((r, j) => {
       const y = year || r.year;
-      return stmt.bind("tx_" + y + "_" + r.month + "_" + (r.kind || "crew") + "_" + (i + j), y, r.month, r.leg, r.kind || "crew", r.crew_name, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.other || 0, r.total);
+      return stmt.bind("tx_" + y + "_" + r.month + "_" + (r.kind || "crew") + "_" + (i + j), y, r.month, r.leg, r.kind || "crew", r.crew_name, r.ship || null, r.air, r.hotel, r.medical, r.visa, r.food, r.transport, r.other || 0, r.total);
     }));
   }
 }
@@ -1362,8 +1363,11 @@ async function ensureTravelImpl(env) {
   let st = null;
   try {
     const r = await Promise.all([
-      env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run(),
+      env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, ship TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run(),
       env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch(() => null),
+      // `ship` (15 Oct 2026, migrations/0026): the hull the workbook row sits under. Rides in the same wave; a table that
+      // already carries it (or does not exist yet — the CREATE above has it) answers with an error we ignore.
+      env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN ship TEXT").run().catch(() => null),
     ]);
     st = r[1];
   } catch (e) { st = null; }
@@ -1372,25 +1376,36 @@ async function ensureTravelImpl(env) {
     try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0").run(); } catch {}
   }
   const total = st ? st.total : (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
-  const shore = st ? (st.shore || 0) : 0;
-  if ((total === 0 || shore === 0) && TRAVEL_2025.length) {
+  // The bundled 2025 history seeds an EMPTY table, or completes the one-time migration of a legacy (pre-`kind`) table.
+  // Until 15 Oct 2026 "no shoreside rows" also re-seeded 2025 on every cold start (nine seeds on 25 Jun 2026); a 2026
+  // workbook without its CIMS sheet would have started that again. A populated, current table is never touched.
+  if ((total === 0 || !st) && TRAVEL_2025.length) {
     await env.DB.prepare("DELETE FROM travel_expense WHERE year=2025").run();
     await insertTravel(env, TRAVEL_2025, 2025);
     await logData(env, "travel_expense (2025 history incl. shoreside)", TRAVEL_2025.length, "seeded");
   }
 }
+// The ledger with every row placed on the roster (src/travel_match.js): agency_id, how it matched, the cruise line.
+// One wave (§12): the rows, the years and the roster leave together.
 async function apiTravel(env, url) {
   await ensureTravel(env);
   const year = url.searchParams.get("year"), kind = url.searchParams.get("kind");
-  let sql = "SELECT year,month,leg,kind,crew_name,air,hotel,medical,visa,food,transport,other,total FROM travel_expense";
+  let sql = "SELECT year,month,leg,kind,crew_name,ship,air,hotel,medical,visa,food,transport,other,total FROM travel_expense";
   const where = [], bind = [];
   if (year) { where.push("year=?"); bind.push(+year); }
   if (kind) { where.push("kind=?"); bind.push(kind); }
   if (where.length) sql += " WHERE " + where.join(" AND ");
   sql += " ORDER BY year DESC, month, crew_name";
-  const rows = (await env.DB.prepare(sql).bind(...bind).all()).results;
-  const years = (await env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all()).results.map(r => r.year);
-  return json({ years, summary: travelSummarize(rows), records: rows });
+  const [rowsRes, yearsRes, crewRes] = await Promise.all([
+    env.DB.prepare(sql).bind(...bind).all(),
+    env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all(),
+    env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
+  ]);
+  const records = annotateTravel(rowsRes.results, crewRes.results);
+  const years = yearsRes.results.map(r => r.year);
+  const today = TODAY(); // the DATA basis (UTC), like the dashboard — test/date_basis.test.js
+  const closed = Object.fromEntries(years.map((y) => [y, closedMonths(today, y)]));
+  return json({ years, today, closed, budgetMo: TRAVEL_BUDGET_MO, summary: travelSummarize(records), records, unmatched: unmatchedTravel(records) });
 }
 async function apiTravelImport(request, env, session) {
   await ensureTravel(env);
@@ -1398,7 +1413,13 @@ async function apiTravelImport(request, env, session) {
   const year = +b.year;
   if (!year) return json({ error: "year_required" }, 400);
   const recs = parseTravelSheets(b.sheets || {}, year);
-  if (b.dryRun) { const s = travelSummarize(recs); return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind }); }
+  if (b.dryRun) {
+    const s = travelSummarize(recs);
+    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply
+    const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
+    const unmatched = unmatchedTravel(annotateTravel(recs, crew));
+    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched });
+  }
   await env.DB.prepare("DELETE FROM travel_expense WHERE year=?").bind(year).run();
   if (recs.length) await insertTravel(env, recs, year);
   await logData(env, "travel_expense (" + year + ", by " + ((session && session.email) || "?") + ")", recs.length, "replaced year " + year);
@@ -1456,8 +1477,9 @@ async function apiDashboard(env) {
     env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=" + TY + " GROUP BY kind").all(),
     env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=" + TY + " GROUP BY month ORDER BY month").all(),
     env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside'").first(),
-    // YTD crew spend: elapsed months = current month if latest year is the current year, else 12.
-    env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside' AND month <= CASE WHEN " + TY + "=? THEN ? ELSE 12 END").bind(curY, curM).first(),
+    // YTD crew spend over CLOSED months only (15 Oct 2026): the running month is in progress, not a budget month —
+    // counting it charged a full month of budget against a few days of invoices and read "$42k under".
+    env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside' AND month <= CASE WHEN " + TY + "=? THEN ? ELSE 12 END").bind(curY, closedMonths(today, curY)).first(),
     boardLegs(env), // the live schedule — same source as the crew list and rotation board (§11)
   ]);
   const total = cc.total || 0, vessels = cc.vessels || 0;
@@ -1497,8 +1519,8 @@ async function apiDashboard(env) {
     travel.air = Math.round(ms.reduce((s, r) => s + (r.a || 0), 0) * 100) / 100;
     const rnd = (x) => Math.round((x || 0) * 100) / 100;
     travel.cats = { air: rnd(trCat.air), hotel: rnd(trCat.hotel), medical: rnd(trCat.medical), visa: rnd(trCat.visa), food: rnd(trCat.food), transport: rnd(trCat.transport), other: rnd(trCat.other) };
-    travel.elapsedMo = (ty === curY) ? curM : 12;          // YTD = elapsed calendar months
-    travel.budgetMo = 15000;                               // crew travel budget (source: travel sheet SUMMARY!C55)
+    travel.elapsedMo = closedMonths(today, ty);             // YTD = CLOSED calendar months; the running month is in progress
+    travel.budgetMo = TRAVEL_BUDGET_MO;                     // one constant, src/travel.js — the page reads it from here
     travel.ytdBudget = travel.budgetMo * travel.elapsedMo;
     travel.crewYTD = rnd(trCy.t);
     travel.pctUsedYTD = travel.ytdBudget ? Math.round(travel.crewYTD / travel.ytdBudget * 100) : 0;
@@ -1693,7 +1715,10 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT ship, sign_on, sign_off, sent_at, sent_by FROM deploy_log WHERE sc=? ORDER BY sent_at DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT ship_key, dismissed_at, dismissed_by FROM earmark_dismiss WHERE sc=?").bind(id).all().catch(none),
     env.DB.prepare("SELECT field, old_value, new_value, resolved, created_at FROM sync_conflict WHERE agency_id=? AND field='status'").bind(id).all().catch(none),
-    env.DB.prepare("SELECT t.* FROM travel_expense t JOIN crew c ON lower(t.crew_name) = lower(c.last_name || ', ' || c.first_name) WHERE c.agency_id=?").bind(id).all().catch(none), // the ledger names crew "Last, First" — matched by name
+    // the ledger names crew by hand ("Villfranca, Dave", "Edelmar, Doctolero"): every crew row of it comes here (~400 small
+    // rows) and src/travel_match.js decides which belong to this seafarer against the whole roster (below, `travel:`).
+    // Until 15 Oct 2026 this joined on the exact "Last, First" string and 53% of the crew spend reached no profile.
+    env.DB.prepare("SELECT * FROM travel_expense WHERE kind='crew' OR kind IS NULL").all().catch(none),
     env.DB.prepare("SELECT at, user_id, action, detail FROM activity_log WHERE detail LIKE ? ORDER BY at DESC LIMIT 60").bind("%" + id + "%").all().catch(none),
     env.DB.prepare("SELECT vessel, sign_off_date, status, requested_at, ack_at FROM instr_ack WHERE sc=?").bind(id).all().catch(none),
     env.DB.prepare("SELECT vessel, sign_off_date, status, requested_at, ack_at FROM ack_request WHERE sc=?").bind(id).all().catch(none),
@@ -1718,7 +1743,7 @@ async function apiCrewOne(env, url, session) {
     legs: HIST.filter((h) => h && h.sc === id), counter: ct.map((k) => ({ seq: k.seq, ship: k.ship, sign_on: k.on, proj_off: k.proj, act_off: k.act, imported_at: k.imported_at })),
     edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
     sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
-    statusRows: statusRes.results, travel: travelRes.results, activity: actRes.results, instr: instrRes.results, links: linkRes.results,
+    statusRows: statusRes.results, travel: travelRowsFor(travelRes.results, { agency_id: id }, namesRes.results), activity: actRes.results, instr: instrRes.results, links: linkRes.results,
     fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
   // `tdg` = the crew row as the last import wrote it, `override` = what a person typed over it: the Edit crew window
@@ -5570,9 +5595,15 @@ function usd(n){return n?('$'+Number(n).toLocaleString(undefined,{maximumFractio
 function usd0(n){return '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});}
 function pct(a,b){if(b==null||b===0)return null;return (a-b)/b*100;}
 function deltaCell(a,b){var d=pct(a,b);if(d==null)return '<span class=muted style="padding:0">—</span>';var up=d>=0;return '<span style="color:'+(up?'var(--red)':'var(--green-d)')+';font-weight:700">'+(up?'▲':'▼')+' '+Math.abs(d).toFixed(0)+'%</span>';}
-var TBUD=15000; // monthly travel budget — source: travel workbook SUMMARY!C55 ($15k/mo, $180k/yr). Edit here if the budget changes.
-var TSEL=null;  // drilled-down crew name (null = overview)
-var TLB=[];     // current leaderboard names (drill-click target by index)
+var TBUD=15000; // monthly travel budget — the SERVER's TRAVEL_BUDGET_MO (src/travel.js) overwrites this from /api/travel; never edit here
+var TSEL=null;  // drilled-down person key (null = overview): the agency_id when the roster places the name, else the name as typed
+var TLB=[];     // current leaderboard keys (drill-click target by index)
+var TLBL={};    // key -> label (the registry's spelling when matched, else the workbook's)
+// One person, many spellings (15 Oct 2026): rows the roster places share the agency_id, so "Villfranca, Dave" and
+// "Villafranca, Dave" are one line on the board. An unplaced name stays its own line.
+function tKey(r){return r.agency_id||r.crew_name;}
+function tLabel(r){return r.crew_display||r.crew_name;}
+var TCLIENT={royal:'Royal',celebrity:'Celebrity',azamara:'Azamara',ncl:'NCL',shoreside:'Shoreside'};
 var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 async function renderTravel(){
@@ -5580,20 +5611,22 @@ async function renderTravel(){
   try{ TRV=await cachedJson('/api/travel',renderTravel); if(TRV&&TRV.error)throw new Error(TRV.error); }
   catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
+  if(TRV.budgetMo)TBUD=TRV.budgetMo;
   TSEL=null;
-  TF={q:'',year:'',month:'',cat:'',kind:'crew'};
+  TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};
   var years=(TRV.years||[]).slice();
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
     +'<input id=tq placeholder="search a person…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:180px">'
     +'<select id=tyear onchange="TF.year=this.value;paintTravel()"><option value="">All years</option>'+years.map(function(y){return '<option>'+y+'</option>';}).join('')+'</select>'
     +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+TMN.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
     +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
+    +'<select id=tclient onchange="TF.client=this.value;paintTravel()"><option value="">All cruise lines</option>'+['royal','celebrity','azamara','ncl'].map(function(c){return '<option value="'+c+'">'+TCLIENT[c]+'</option>';}).join('')+'</select>'
     +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="crew" selected>Crew only</option><option value="">Crew + shoreside</option><option value="shoreside">Shoreside only</option></select>'
     +'</div><div id=trbody></div>';
   paintTravel();
 }
 
-function tScope(){return TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.q&&(r.crew_name||'').toLowerCase().indexOf(TF.q.toLowerCase())<0)return false;return true;});}
+function tScope(){return TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.client&&r.client!==TF.client)return false;if(TF.q&&(tLabel(r)+' '+(r.crew_name||'')).toLowerCase().indexOf(TF.q.toLowerCase())<0)return false;return true;});}
 function tSum(rows,yr,months,cat){var t=0;for(var i=0;i<rows.length;i++){var r=rows[i];if(yr&&r.year!==yr)continue;if(months&&months.indexOf(r.month)<0)continue;t+=cat?(r[cat]||0):r.total;}return t;}
 function pv(v,l,col){return '<div><div style="font-family:Outfit;font-size:24px;font-weight:800;color:'+(col||'var(--navy)')+'">'+v+'</div><div class=hint style="margin-top:0">'+l+'</div></div>';}
 function travelDrill(i){TSEL=TLB[i];paintTravel();window.scrollTo(0,0);}
@@ -5606,18 +5639,41 @@ function paintTravel(){
   var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
   var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
   if(!LY){document.getElementById('trbody').innerHTML='<div class=muted>No travel data for this filter.</div>';return;}
-  var now=new Date(),curY=now.getFullYear(),curM=now.getMonth()+1;
-  var lastMo=(LY===curY)?curM:12;                 // YTD = ELAPSED calendar months (not months that merely have a row)
+  var today=(TRV&&TRV.today)||new Date().toISOString().slice(0,10),curY=+today.slice(0,4),curM=+today.slice(5,7);
+  // YTD = CLOSED calendar months, the server's word (/api/travel closed): the running month is in progress, not a
+  // budget month — counting it charged a full month of budget against a few days of invoices (15 Oct 2026).
+  var lastMo=(TRV&&TRV.closed&&TRV.closed[LY]!=null)?TRV.closed[LY]:((LY===curY)?Math.max(0,curM-1):(LY<curY?12:0));
+  var openMo=(LY===curY)?curM:0;                  // the month in progress (0 = none: a past year)
   var monthsLY=[];for(var mm=1;mm<=lastMo;mm++)monthsLY.push(mm);
   var dataMo={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){dataMo[r.month]=1;}); // months with any record (for the table)
   var ytdA=tSum(sc,LY,monthsLY,null), ytdB=TBUD*lastMo, ytdP=PY?tSum(sc,PY,monthsLY,null):null;
   var air=tSum(sc,LY,monthsLY,'air');
-  var byp={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){byp[r.crew_name]=(byp[r.crew_name]||0)+r.total;});
+  var byp={};TLBL={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){var k=tKey(r);byp[k]=(byp[k]||0)+r.total;TLBL[k]=tLabel(r);});
   var pctUsed=Math.round(ytdA/(TBUD*12)*100);
   var fullProj=lastMo?(ytdA/lastMo*12):0;
   var h='';
+  // The budget is the whole fleet's crew travel (Miguel, 15 Oct 2026: no other budget exists). A cruise-line slice or the
+  // shoreside view has no budget of its own: actuals only, no pacing — never "$134k under budget" for NCL alone.
+  var budgeted=!TF.client&&TF.kind==='crew';
+  if(!budgeted){
+    h+='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:6px">'
+      +tile(usd0(ytdA),'YTD actual '+LY+' · '+lastMo+' closed mo'+(openMo?(' · '+TMN[openMo]+' in progress'):''))
+      +tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same period'+(ytdP!=null?(' · '+usd0(ytdP)):''))
+      +tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber')
+      +tile(usd0(fullProj),'run-rate × 12 · no budget for '+(TF.client?TCLIENT[TF.client]:(TF.kind==='shoreside'?'shoreside':'this view')))+'</div>';
+    h+='<div class=zlabel>Monthly spend '+LY+(TF.client?' · '+TCLIENT[TF.client]:'')+'</div>';
+    h+='<div class="card" style="max-width:none">';
+    var maxv0=1;for(var m0=1;m0<=12;m0++){var a0=tSum(sc,LY,[m0],null);if(a0>maxv0)maxv0=a0;}
+    h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
+    for(var m1=1;m1<=12;m1++){var a1=tSum(sc,LY,[m1],null);
+      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1">'
+        +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a1?usd0(a1):'')+'</div>'
+        +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+(a1/maxv0*100).toFixed(1)+'%;background:var(--navy)"></div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m1]+'</div></div>';}
+    h+='</div><div class=hint style="margin-top:6px">The $'+Number(TBUD*12).toLocaleString()+' budget covers all crew travel together; a single cruise line or shoreside is shown against last year only.</div></div>';
+  } else {
   h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:6px">'
-    +tile(usd0(ytdA),'YTD actual '+LY+' · '+lastMo+' mo')
+    +tile(usd0(ytdA),'YTD actual '+LY+' · '+lastMo+' closed mo'+(openMo?(' · '+TMN[openMo]+' in progress'):''))
     +tile('<span style="color:'+(ytdA<=ytdB?'var(--green-d)':'var(--red)')+'">'+usd0(Math.abs(ytdB-ytdA))+'</span>',(ytdA<=ytdB?'under':'over')+' budget YTD · '+usd0(ytdB))
     +tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same period'+(ytdP!=null?(' · '+usd0(ytdP)):''))
     +tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber')
@@ -5640,13 +5696,14 @@ function paintTravel(){
       +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+hp+'%;background:'+(over?'var(--red)':'var(--navy)')+'"></div>'
       +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';}
   h+='</div>';
-  h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = YTD run-rate × 12.</div>';
+  h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = run-rate of the closed months × 12.</div>';
   h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">Variance</th><th style="text-align:right">'+(PY||'PY')+'</th></tr></thead><tbody>';
-  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;
-    if(!has&&!p)continue;
-    h+='<tr><td>'+TMN[m]+'</td><td style="text-align:right">'+(has?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+usd0(TBUD)+'</td><td style="text-align:right">'+(has?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
+  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;var open=(m===openMo);
+    if(!has&&!p&&!open)continue;
+    h+='<tr'+(open?' style="color:var(--muted)"':'')+'><td>'+TMN[m]+(open?' <span class=hint style="display:inline;margin:0">in progress</span>':'')+'</td><td style="text-align:right">'+(has||open?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+(open?'—':usd0(TBUD))+'</td><td style="text-align:right">'+(has&&!open?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
   h+='<tr style="border-top:2px solid var(--line-2)"><td><b>YTD</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+usd0(ytdB)+'</b></td><td style="text-align:right"><b><span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span></b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
   h+='</tbody></table></div>';
+  } // budgeted
   h+='<div class=zlabel style="margin-top:18px">STLY — same time last year · '+TMN[1]+'–'+TMN[lastMo]+' ('+LY+' vs '+(PY||'PY')+') · top spenders</div>';
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
   var yc='<div><table class=tbl><thead><tr><th>Category</th><th style="text-align:right">STLY '+(PY||'')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
@@ -5654,9 +5711,18 @@ function paintTravel(){
   yc+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right">'+(ytdP==null?'—':deltaCell(ytdA,ytdP))+'</td></tr></tbody></table></div>';
   TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,12);
   var lh='<div><table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">Total</th></tr></thead><tbody>';
-  TLB.forEach(function(n,i){var c=sc.filter(function(r){return r.year===LY&&r.crew_name===n;}).length;var k=(sc.find(function(r){return r.crew_name===n;})||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+n+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+c+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
-  lh+='</tbody></table><div class=hint style="margin-top:6px">Click a name for their full history.</div></div>';
+  TLB.forEach(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&tKey(r)===n;});var k=(rs[0]||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(k!=='shoreside'&&!(rs[0]||{}).agency_id?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
+  lh+='</tbody></table><div class=hint style="margin-top:6px">Click a name for their full history. One person, every spelling.</div></div>';
   h+=yc+lh+'</div>';
+  // The names the registry cannot place (src/travel_match.js): Rita's clean-up list — fix the spelling in the workbook
+  // and re-upload, or the spend never reaches a profile. NCL-prep people are not crew yet; they stay listed, tagged.
+  var un=(TRV.unmatched||[]).filter(function(u){return !TF.year||u.years.indexOf(+TF.year)>=0;});
+  if(un.length&&TF.kind!=='shoreside'){
+    h+='<div class=zlabel style="margin-top:18px">Names the crew registry cannot place · '+un.length+'</div>';
+    h+='<table class=tbl><thead><tr><th>As typed in the workbook</th><th>Why</th><th style="text-align:right">Rows</th><th style="text-align:right">Total</th><th>Years</th></tr></thead><tbody>';
+    un.slice(0,40).forEach(function(u){var why=u.how==='ambiguous'?'two crew share this name — add the first name':/\\bncl\\b/i.test(u.crew_name)?'NCL prep — not on the TDG registry':'no crew with this surname — check the spelling';h+='<tr><td>'+escHtml(u.crew_name)+'</td><td class=muted style="padding:6px 8px">'+why+'</td><td style="text-align:right">'+u.rows+'</td><td style="text-align:right">'+usd0(u.total)+'</td><td>'+u.years.join(', ')+'</td></tr>';});
+    h+='</tbody></table><div class=hint style="margin-top:6px">Matched by surname + first name, accents and typos tolerated; a note in brackets is ignored. Fix the name in the workbook and re-upload the year.</div>';
+  }
   var yrRows=sc.filter(function(r){return r.year===LY&&r.total>0;});
   var tt=yrRows.map(function(r){return r.total;}).sort(function(a,b){return a-b;});
   var med=tt.length?tt[Math.floor(tt.length/2)]:0;
@@ -5667,19 +5733,20 @@ function paintTravel(){
     outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(r.total)+'</b></td></tr>';});
     h+='</tbody></table>';
   }
-  var q=(TF.q||'').toLowerCase();
-  var rows=TRVALL.filter(function(r){if(TF.kind&&(r.kind||'crew')!==TF.kind)return false;if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;if(q&&(r.crew_name||'').toLowerCase().indexOf(q)<0)return false;return true;});
+  var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;return true;});
   h+='<div class=zlabel style="margin-top:18px">Line items'+(rows.length?(' · '+rows.length):'')+'</div>';
-  h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
-    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':'crew')+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+escHtml(r.crew_name)+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=13 class=muted>No line items match these filters.</td></tr>';
+  h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Ship</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
+    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':(r.client==='ncl'?'<span class="cchip amber">NCL</span>':'crew'))+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+escHtml(r.ship||'')+'</td><td>'+escHtml(r.crew_name)+(r.crew_display&&r.crew_display!==r.crew_name?' <span class=muted style="padding:0">· '+escHtml(r.crew_display)+'</span>':'')+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=14 class=muted>No line items match these filters.</td></tr>';
   h+='</tbody></table>';
   document.getElementById('trbody').innerHTML=h;
 }
 
-function profileHTML(name){
-  var rows=TRVALL.filter(function(r){return r.crew_name===name;});
+function profileHTML(k){
+  var rows=TRVALL.filter(function(r){return tKey(r)===k;});
   var ys=Array.from(new Set(rows.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
-  var h='<div class=zlabel>'+escHtml(name)+'</div>';
+  var spellings=Array.from(new Set(rows.map(function(r){return r.crew_name;})));
+  var h='<div class=zlabel>'+escHtml(rows.length?tLabel(rows[0]):k)+(rows[0]&&rows[0].agency_id?' <span class=muted style="padding:0;font-weight:400">· '+escHtml(rows[0].agency_id)+'</span>':'')+'</div>';
+  if(spellings.length>1)h+='<div class=hint style="margin:-4px 0 8px">In the workbook as: '+spellings.map(escHtml).join(' · ')+'</div>';
   h+='<div class=tiles style="grid-template-columns:repeat('+Math.min(ys.length+1,5)+',1fr);margin-bottom:6px">';
   ys.forEach(function(y){var t=rows.filter(function(r){return r.year===y;}).reduce(function(a,b){return a+b.total;},0);var c=rows.filter(function(r){return r.year===y;}).length;h+=tile(usd0(t),y+' · '+c+' trips');});
   h+=tile(usd0(rows.reduce(function(a,b){return a+b.total;},0)),'All-time');
@@ -5697,16 +5764,16 @@ function profileHTML(name){
 function paintTravelCrew(){document.getElementById('trbody').innerHTML='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back</div>'+profileHTML(TSEL);}
 function paintTravelSearch(){
   var q=(TF.q||'').trim().toLowerCase();var sc=tScope();
-  var seen={},names=[],tot={};
-  sc.forEach(function(r){if((r.crew_name||'').toLowerCase().indexOf(q)>=0){if(!seen[r.crew_name]){seen[r.crew_name]=1;names.push(r.crew_name);}tot[r.crew_name]=(tot[r.crew_name]||0)+r.total;}});
+  var seen={},names=[],tot={};TLBL={};
+  sc.forEach(function(r){var k=tKey(r);if(!seen[k]){seen[k]=1;names.push(k);}tot[k]=(tot[k]||0)+r.total;TLBL[k]=tLabel(r);}); // tScope already applied the search to both spellings
   names.sort(function(a,b){return (tot[b]||0)-(tot[a]||0);});
   var t=document.getElementById('trbody');if(!t)return;
-  if(names.length===0){t.innerHTML='<div class=muted style="padding:20px 2px">No one matches "'+TF.q+'". Try another name, or change the Crew / shoreside filter.</div>';return;}
+  if(names.length===0){t.innerHTML='<div class=muted style="padding:20px 2px">No one matches "'+escHtml(TF.q)+'". Try another name, or change the Crew / shoreside filter.</div>';return;}
   if(names.length===1){t.innerHTML='<div class=hint style="margin-bottom:8px">Showing every expense for this person · clear the search box to return to the overview.</div>'+profileHTML(names[0]);return;}
-  var h='<div class=zlabel>'+names.length+' people match "'+TF.q+'" — click one for their full history</div>';
+  var h='<div class=zlabel>'+names.length+' people match "'+escHtml(TF.q)+'" — click one for their full history</div>';
   h+='<table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">Total</th></tr></thead><tbody>';
   TLB=names.slice(0,60);
-  TLB.forEach(function(n,i){var c=sc.filter(function(r){return r.crew_name===n;}).length;var k=(sc.find(function(r){return r.crew_name===n;})||{}).kind;h+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+n+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+c+'</td><td style="text-align:right"><b>'+usd0(tot[n])+'</b></td></tr>';});
+  TLB.forEach(function(n,i){var rs=sc.filter(function(r){return tKey(r)===n;});var k=(rs[0]||{}).kind;h+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(tot[n])+'</b></td></tr>';});
   h+='</tbody></table>';
   t.innerHTML=h;
 }
@@ -7153,8 +7220,8 @@ function opsTravel(tv){
   if(!tv||!tv.year)return '<section class=oc-card><h2 class=oc-h>Crew travel</h2><p class=oc-sub>No travel on file yet.</p></section>';
   var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crew||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo||12)/12*100);
   var h='<section class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>Crew travel &middot; '+tv.year+'</h2><p class=oc-sub>Against the '+opsMoney(ann)+' budget. Reference only, never an invoice source.</p></div>';
-  h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crew)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget to date')+'</div>';
-  h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="position:relative;height:14px;font-size:11px"><span style="position:absolute;left:'+yearPct+'%;transform:translateX(-50%);font-weight:600;white-space:nowrap">'+(tv.elapsedMo||12)+' of 12 months</span></div>'
+  h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crew)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget over '+(tv.elapsedMo||0)+' closed month'+(tv.elapsedMo===1?'':'s'))+'</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="position:relative;height:14px;font-size:11px"><span style="position:absolute;left:'+yearPct+'%;transform:translateX(-50%);font-weight:600;white-space:nowrap">'+(tv.elapsedMo||0)+' of 12 months closed</span></div>'
     +'<div class=oc-bul role=img aria-label="'+used+' percent of the budget used"><i style="width:'+Math.min(100,used)+'%"></i><em style="left:'+yearPct+'%"></em></div>'
     +'<div style="display:flex;justify-content:space-between;font-size:11px" class=oc-mut><span>$0</span><span>'+opsMoney(ann)+'</span></div></div>';
   var c=tv.cats||{},L=[['Air',c.air],['Medical',c.medical],['Visa',c.visa],['Transport',c.transport],['Hotel + food',(c.hotel||0)+(c.food||0)],['Other',c.other]].filter(function(x){return x[1];});

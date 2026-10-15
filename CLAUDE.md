@@ -564,6 +564,48 @@ Independence / IN Infinity, AX Apex / AT Ascent — "the first two letters" coll
 letters .. rita knows who they are". The "Email Joy · all four" send he approved is NOT built yet: an email template
 ships only after he signs off the rendered email (CIMS email standard). Pinned by `test/ops_dashboard.test.js`.
 
+## 10j. THE TRAVEL TAB — Miguel, 15 Oct 2026 ("review the code .. connect the dots .. fix bugs")
+His decisions, same day: (1) **TDG's Statement of General Account (SGA) is the audited number, Rita's travel workbook the
+operational one, and the console shows where they disagree** — the goal is that Rita stops typing ("move away from the manual
+entry"). (2) **Training centre cost = everything on TDG's monthly "Training-related costs" statement** (rent, utilities,
+hotels, airfare, training fees). (3) **No budget except seafarer travel**; shoreside has none ("spend less over time").
+(4) Ingest the whole SGA Excel. (5) **NCL-prep people stay in, tagged NCL** ("it's moving forward"). (6) **Automatic**: the
+Worker reads SharePoint itself (Microsoft Graph; the app registration and secrets are his to create — §7).
+- **Where the files are**: SharePoint `CruiseLineManagedServicesTeam / 1. ACCOUNTING / SGA / <year> / <NN month> /` — per month
+  `DG3 SGA EXCEL <month>.xlsx` (TDG's working file, ~212 sheets: `SUMMARY MANNING` = one row per crew per ship with every cost
+  column and TDG's ref `SYS-2026-09-39-02`; hidden `2026 SUMMARY TRAINREL` = training cost by month and category, the September
+  row equals the PDF to the cent; hidden `TRAINING` = the line items), `TRAINING RELATED COSTS <month>.pdf` (a SCAN — page 1 is
+  the statement, the rest receipts; no text in any month checked), the per-crew SGA PDFs under `Royal / Celebrity / Azamara
+  Vessels` (text until ~Mar 2026, scanned since). Rita's workbook: `1. ACCOUNTING / Travel Expenses Crew / UPDATED - Travel
+  Expenses <year> RCCL & AZAMARA & CELEBRITY.xlsx` — the file she drags into Upload data. **Read the Excel, never OCR the PDF.**
+- **Rita's workbook ≠ TDG's bill.** September 2026: air $4,994 vs $5,029 (agrees); medical $420 vs $1,042 and visa $670 vs $139
+  do not — hers carries DG3-paid items (US visas) and misses TDG-billed PEMEs. Her SUMMARY sheet's CIMS row is misaligned (a blank
+  VISA column), so her own MOM totals for Apr / May / Aug 2026 are off by $1–2k; the console reads the month sheets directly and is
+  right (`parseMonthSheet`). Neither is "wrong" to fix silently — the console shows both (§6).
+- **The name bridge** (`src/travel_match.js`, pure, pinned by `test/travel_match.test.js`): the ledger names people by hand
+  ("Villfranca, Dave", "Edelmar, Doctolero", "Marto ryan", "Espenilla, Zandro (Orlando)"). Rules in order, the first that yields
+  exactly ONE crew wins, two = `ambiguous`, never a guess: surname exact + a first-name token (exact / 4+ letter prefix / one
+  typo); unique surname alone; surname one typo away (5+ letters) + first name agrees; swapped halves; comma-less either order;
+  every word a first-name token of one crew (JOSEPH, Emil Rondy). A bracketed or trailing note never matches; an "NCL" note
+  tags `client = ncl`. Measured 15 Oct 2026 on production rows: **96% of crew spend reaches a profile (was 47%)**; the 19 names
+  left are non-Filipino crew not on TDG's registry (Malkevich, Asim, Villaran, Tutaan, Aguas), the NCL preps, and Purnama, Ida
+  (two roster rows). `/api/travel` returns every row with `agency_id`, `match`, `client`, `ship` and the `unmatched` list the
+  Travel tab shows Rita ("Names the crew registry cannot place"). The profile's travel (`apiCrewOne` → `travelRowsFor`) reads the
+  whole crew ledger (~400 rows, one statement in the wave) and lets the bridge decide — never the exact-string join again.
+- **YTD = CLOSED months** (`closedMonths(today, year)`, `src/travel.js`): the running month is "in progress", not a budget month
+  (October 2026 had charged a full month of budget against 9 rows). Page, `/api/travel` (`closed`) and `/api/dashboard`
+  (`elapsedMo`) read the same helper on the DATA (UTC) basis — `test/date_basis.test.js`.
+- **One budget constant**: `TRAVEL_BUDGET_MO` (`src/travel.js`, $15,000 = Rita's SUMMARY sheet), served as `budgetMo`; the page's
+  `TBUD` is overwritten from it. **Open**: Miguel said "$150,000 for all our seafarers" (= $12,500/mo) the same day — his answer
+  sets the constant; nothing else moves.
+- **`travel_expense.ship`** (migrations/0026, the same ALTER in `ensureTravelImpl`'s wave): the hull the row sits under, so a line
+  item knows its cruise line (`travelClientOf`: Royal / Celebrity / Azamara / NCL; bare "Apex" is Celebrity — `shipname.clientOf`
+  would call it Royal). Rows loaded before 15 Oct 2026 carry NULL until the year is re-uploaded.
+- **The seed never re-runs on a live table**: the bundled 2025 history (`TRAVEL_2025` = crew + the 2025 CIMS sheet's 41 shoreside
+  rows, $60,161.21, added 15 Oct 2026) seeds an EMPTY table or completes a legacy (pre-`kind`) one. "No shoreside rows" used to
+  re-seed 2025 on every cold start (nine seeds on 25 Jun 2026). Pinned by `test/ensure_travel.test.js`.
+- Not money (§1). The Travel tab is a reference read (§10b), never an invoice source.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

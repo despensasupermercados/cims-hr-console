@@ -86,6 +86,8 @@ test("UTC basis is used by exactly these functions", () => {
     "apiRotationProject",
     // 2026-10-12: the statement email dates its body by the board's day (hr.statement.v2).
     "apiStatementEmail",
+    // 2026-10-15: the Travel tab's closed-month YTD (closedMonths) reads the same day as the dashboard's travel card.
+    "apiTravel",
     "boardLegs",
     // 2026-10-07: a TDG earmark with no card becomes a console card at the registry Apply — the same path and
     // day basis as a drop (createProjection), so its default dates land on the board's day.
