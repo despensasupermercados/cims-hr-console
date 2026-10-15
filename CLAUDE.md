@@ -725,8 +725,9 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   detail beats its summary, a summary never replaces detail, detail replaces a summary, else the later `sga_file` period
   wins) — the first cut deleted the whole year the sheet named, so an older workbook loaded after September's would have
   wiped March–September. `SETTLEMENT TRANSPORTATION` folds into `transport`, `OTHER` / `PORT AGENT EXPENSE` is `other`
-  (migrations/0027). **The connector's read budget is shared across calls in flight**: workbooks are read one at a time and a
-  cut read retried. Pinned by `test/sga.test.js`, `test/sga_import.test.js`.
+  (migrations/0027). **The connector's read budget varies per call** (January 2026 was cut at the manning header on three single
+  reads; February and March came whole): workbooks are read one at a time, a cut read retried up to three times, a
+  workbook that never comes through is a digest line — the Graph identity is what reads it. Pinned by `test/sga.test.js`, `test/sga_import.test.js`.
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").
