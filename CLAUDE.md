@@ -679,8 +679,9 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   (October 2026 had charged a full month of budget against 9 rows). Page, `/api/travel` (`closed`) and `/api/dashboard`
   (`elapsedMo`) read the same helper on the DATA (UTC) basis — `test/date_basis.test.js`.
 - **One budget constant**: `TRAVEL_BUDGET_MO` (`src/travel.js`, $15,000 = Rita's SUMMARY sheet), served as `budgetMo`; the page's
-  `TBUD` is overwritten from it. **Open**: Miguel said "$150,000 for all our seafarers" (= $12,500/mo) the same day — his answer
-  sets the constant; nothing else moves.
+  `TBUD` is overwritten from it. **Settled, Miguel 16 Oct 2026**: "last year the budget was the same across all months .. I kept
+  it all at 15000 per month" — $15,000 flat, every month, 2025 and 2026 alike; his "$150,000 for all our seafarers" of 15 Oct
+  is not the figure. One constant, no per-year map, no per-month table.
 - **`travel_expense.ship`** (migrations/0026, the same ALTER in `ensureTravelImpl`'s wave): the hull the row sits under, so a line
   item knows its cruise line (`travelClientOf`: Royal / Celebrity / Azamara / NCL; bare "Apex" is Celebrity — `shipname.clientOf`
   would call it Royal). Rows loaded before 15 Oct 2026 carry NULL until the year is re-uploaded.
@@ -834,7 +835,19 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   tool can carry a 2 MB binary — their `sga_source_file` rows say so (`r2_key` NULL, note). To keep them, drag each once on
   Upload data (Replace → identical lines, then the archive) or email them to sga@cims.work once the Email Routing rule exists.
   Pinned by `test/sga_archive.test.js`, `test/mail_intake.test.js`.
-- **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`); NO budget for
+- **THE TRAVEL TAB'S FILTERS ACT ON EVERY SECTION** (Miguel, 16 Oct 2026: "I dont think this filter is working correctly .. review
+  this and all the filters and fix the bugs"; PR #265). The background revalidation (`cachedJson`) lands in `travelRefresh`,
+  which repaints the body under the same `TF` — it used to re-run `renderTravel`, resetting Year / Month / Category / cruise
+  line / kind and the search box to the defaults. `tPeriod` = year + month is the period every section reads (the year's
+  closed months, or the one month; a month in progress or ahead has no budget pacing; the pacing chart and table keep the
+  whole year and highlight the month); a Category narrows every amount and drops the pacing (the $15,000 is for all travel
+  together; the share tile reads "Hotel share of $13,321 all categories"); All years shows the latest year on the overview
+  and SAYS so ("latest year" on the tile, "all years" on the line items — the budget is annual, an all-years aggregate has
+  no meaning against it); the search lists people inside the period; a previous year with no rows reads "—", never "$0";
+  the Training centre view greys out the selectors it does not use; `usd0` prints "-$655". Pinned by
+  `test/travel_filters.test.js`; `test/perf_invariants.test.js` names `travelRefresh` beside `crewRefresh`.
+- **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`, flat every month in
+  every year — Miguel, 16 Oct 2026: "I kept it all at 15000 per month"); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").
 - Not money (§1). The Travel tab is a reference read (§10b), never an invoice source.
