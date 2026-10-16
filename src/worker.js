@@ -5544,7 +5544,7 @@ function handleDrop(files){
         var _tabs=wb.SheetNames.map(function(n){return String(n).trim().toUpperCase();});
         if(_tabs.indexOf('ACTIVE')>=0&&_tabs.indexOf('INACTIVE')>=0){upBand('Completed contracts (TDG count)',0,0,f);parseCountFile(f);return;}
         // TDG's Statement of General Account workbook ("DG3 SGA EXCEL <month>.xlsx", 15 Oct 2026) is recognised by its SUMMARY MANNING sheet.
-        if(wb.SheetNames.some(function(n){return /summary manning/i.test(String(n));})){upBand('TDG Statement of General Account (SGA)',0,0,f);parseSgaFile(f);return;}
+        if(wb.SheetNames.some(function(n){return /summary mann?i+ng/i.test(String(n));})){upBand('TDG Statement of General Account (SGA)',0,0,f);parseSgaFile(f);return;}
         var ws=wb.Sheets[wb.SheetNames[0]];
         var aoa=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
         for(var i=0;i<Math.min(aoa.length,15);i++){
@@ -5753,7 +5753,8 @@ function parseSgaFile(f){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
         var sheets={};
-        wb.SheetNames.forEach(function(sn){ var s=String(sn); if(/summary manning/i.test(s)||/trainrel/i.test(s)||/^training$/i.test(s.trim())||/^\\d{4} SUMMARY( \\(\\d+\\))?$/i.test(s.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        // the same names as sga.js isManningSheet / isSummarySheet (TDG's spellings: SUMMARY MANNIING, SEPTEMBER SUMMARY MANNING, DG3 SUMMARY 2025; never the hidden "(2)" copy)
+        wb.SheetNames.forEach(function(sn){ var s=String(sn); if(/summary mann?i+ng(?! *\\(\\d+\\))/i.test(s)||/trainrel/i.test(s)||/^training$/i.test(s.trim())||/^(dg3 )?(\\d{4} summary|summary \\d{4})( \\(\\d+\\))?$/i.test(s.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
         sha256buf(e.target.result).then(function(hh){ SGAUP={sheets:sheets,name:f.name,hash:hh,buf:e.target.result}; previewSga(); });
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };

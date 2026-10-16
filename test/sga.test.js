@@ -3,7 +3,9 @@
 // month to month (September 2026 gained ID NUMBER / NATIONALITY / HMO).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, pickSgaSheets, sgaManningHeader, sgaManningMeta, excelSerialToISO, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf } from "../src/sga.js";
+import { parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, pickSgaSheets, sgaManningHeader, sgaManningMeta, excelSerialToISO, REF_RE, sgaPeriodFromName, sgaPeriodFromPath, sgaPeriodOf, isManningSheet, isSummarySheet } from "../src/sga.js";
+import { WANT_SGA } from "../src/sharepoint_sync.js";
+import { readFileSync } from "node:fs";
 
 // A real workbook read by SheetJS carries the DATE cell as an Excel serial (Miguel's uploads of 15 Oct 2026: January's
 // 46057 = 2026-02-04, February's 46085 = 2026-03-04, March's 46125 = 2026-04-13); the connector's text dump never did.
@@ -155,4 +157,60 @@ test("parseSgaSummary reads the monthly summary sheet: both year blocks, header 
   assert.equal(feb.transport, 12.5, "SETTLEMENT TRANSPO folds into transport"); assert.equal(feb.hmo, 485.34); assert.equal(feb.crew_total, 75792.64, "February's GRAND TOTAL");
   assert.deepEqual(pickSgaSheets({ "2026 SUMMARY (2)": [], "2026 SUMMARY TRAINREL": [], "SUMMARY MANNING": [] }), { manning: "SUMMARY MANNING", training: "2026 SUMMARY TRAINREL", summary: "2026 SUMMARY (2)" });
   assert.equal(pickSgaSheets({ "2025 SUMMARY": [] }).summary, "2025 SUMMARY");
+});
+
+// THE 2025 WORKBOOKS (Miguel's third batch, 16 Oct 2026: July–November 2025). TDG spelled the manning sheet "SUMMARY
+// MANNIING" (July, August), "SEPTEMBER SUMMARY MANNING" (September), headed the allotment column "BASIC PAY" (July–October;
+// "Allotment Total" above it every month) and named September's summary sheet "DG3 SUMMARY 2025". Read as they came, July
+// and August were refused (no manning sheet) and September / October did not reconcile ($34,050.19 and $24,096.85 against
+// TDG's $82,860.30 and $79,084.61 — the allotment column missing). Every workbook also hides a "SUMMARY MANNIING (2)" sheet
+// (CODE / PARTICULARS / REF. NO. / AMOUNT, no CREW column) that must never be taken for the manning sheet.
+const H25 = ["", "REF. NO.", "", "CREW", "CREW", "VESSELS", "", "", "", "", "BASIC PAY", "FINAL PAY", "MANNING FEE/ AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRANSITION FEE", "TRAVEL /PLANEFARE", "MEDICAL", "MEDICAL REPAT", "VISA", "HOTEL", "TRAVEL INSURANCE", "REIMBURSEMENT", "FUNERAL EXPENSE", "TRANSPORTATION", "PORT AGENT EXPENSE", "CASH ADVANCE", "HMO INSURANCE", "REFUND", "OTHER EXPENSES", "BANK CHARGE / COURIER", "AMOUNT"];
+const row25 = (ref, name, vessel, vals) => { const r = new Array(H25.length).fill(""); r[1] = ref; r[3] = name; r[4] = name; r[5] = vessel; Object.entries(vals).forEach(([k, v]) => { r[H25.indexOf(k)] = v; }); return r; };
+const OCT25 = [
+  [], [], [], [" STATEMENT OF GENERAL ACCOUNT SUMMARY "], [], ["", "DATE", ":", 46084], ["", "SGA NO.", ":", "28-A"], [],
+  ["", "", "", "", "PARTICULARS", "", "", "", "", "", "Allotment Total", "Final Pay Total", "Agency fee Total"],
+  H25, [], ["", "1. ROYAL VESSELS"],
+  row25("ADV-2025-09-28-01", "CAAG, HAZIEL", "ADVENTURE OF THE SEAS", { "BASIC PAY": 1169.6, "MANNING FEE/ AGENCY FEE": 95, "SOCIAL COSTS": 83.21, "TRAVEL /PLANEFARE": 614, "AMOUNT": 1961.81 }),
+  row25("ALR-2025-09-28-02", "TAÑGONAN, RAYMOND", "ALLURE OF THE SEAS", { "BASIC PAY": 974.4, "MANNING FEE/ AGENCY FEE": 95, "SOCIAL COSTS": 80.21, "MEDICAL": 0, "AMOUNT": 1149.61 }),
+  ["", "OTHERS", "", "", "", "", "Bank Charge - October 2025 SGA", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", 15, 15],
+  ["", "", "", "GRAND TOTAL ", "", "", "", "", "", "", 2144, 0, 190, 163.42, 0, 0, 0, 614, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15, 3126.42],
+];
+const MANNIING2 = [[], ["", "CODE", "PARTICULARS", "", "", "", "REF. NO.", "AMOUNT"], ["", "1", "ALLOTMENT", "", "", "", "ADV-2025-09-28-01", 1169.6]];
+
+test("the 2025 workbooks: BASIC PAY is the allotment column, and the lines reconcile to TDG's grand total", () => {
+  const h = sgaManningHeader(OCT25);
+  assert.ok(h, "the header row is found"); assert.deepEqual(h.cols.allotment, [10]); assert.deepEqual(h.cols.other, [26, 30], "OTHER EXPENSES + PORT AGENT EXPENSE fold into other");
+  const { records, grand_total, others } = parseSgaManning(OCT25, { year: 2025, month: 10 });
+  assert.equal(records.length, 2); assert.equal(records[0].allotment, 1169.6); assert.equal(records[0].amount, 1961.81);
+  assert.equal(grand_total, 3126.42); assert.deepEqual(others, [{ label: "Bank Charge - October 2025 SGA", amount: 15 }]);
+  assert.equal(Math.round((summarizeSga(records).total + others[0].amount) * 100) / 100, grand_total, "lines + the bank charge = GRAND TOTAL");
+  // a 2026 header never carries BASIC PAY beside HOME ALLOTMENT (checked on the ten 2026 workbooks), so the fold never doubles
+  assert.deepEqual(sgaManningHeader([H26]).cols.allotment, [H26.indexOf("HOME ALLOTMENT")]);
+});
+
+test("the manning sheet by every spelling TDG used, never the hidden '(2)' copy; the summary sheet by its 2025 names; a file name with underscores", () => {
+  for (const n of ["SUMMARY MANNING", "SUMMARY MANNING ", "SUMMARY MANNIING", "SEPTEMBER SUMMARY MANNING", "summary manning"]) assert.equal(isManningSheet(n), true, n);
+  for (const n of ["SUMMARY MANNIING (2)", "SUMMARY MANNING (3)", "SGA SUMMARY WITH SBP ", "SUMMARY 2", "TRAINING", "MANNING", ""]) assert.equal(isManningSheet(n), false, n);
+  for (const n of ["2026 SUMMARY (2)", "2025 SUMMARY", "DG3 SUMMARY 2025", "dg3 summary 2025 ", "SUMMARY 2025"]) assert.equal(isSummarySheet(n), true, n);
+  for (const n of ["2026 SUMMARY TRAINREL", "SGA SUMMARY WITH SBP ", "TEMPLATE SUMMARY SGA", "SUMMARY MANNING", "SUMMARY 2"]) assert.equal(isSummarySheet(n), false, n);
+  // July 2025's book: the typo'd name and its hidden "(2)" copy — the one with the REF. NO. + CREW header is the manning sheet
+  assert.deepEqual(pickSgaSheets({ "SGA SUMMARY WITH SBP ": [], "SUMMARY MANNIING": OCT25, TRAINING: [], "SUMMARY MANNIING (2)": MANNIING2 }), { manning: "SUMMARY MANNIING", training: "TRAINING", summary: null });
+  // even listed first, the "(2)" copy is never picked; with no rows to tell them apart the name decides
+  assert.equal(pickSgaSheets({ "SUMMARY MANNIING (2)": MANNIING2, "SUMMARY MANNIING": OCT25 }).manning, "SUMMARY MANNIING");
+  assert.equal(pickSgaSheets({ "SUMMARY MANNIING (2)": [], "SUMMARY MANNING": [] }).manning, "SUMMARY MANNING");
+  // September 2025: "SEPTEMBER SUMMARY MANNING" and "DG3 SUMMARY 2025"
+  assert.deepEqual(pickSgaSheets({ "DG3 SUMMARY 2025": [], "SEPTEMBER SUMMARY MANNING": OCT25, TRAINING: [] }), { manning: "SEPTEMBER SUMMARY MANNING", training: "TRAINING", summary: "DG3 SUMMARY 2025" });
+  // the same names reach the mail intake's sheet filter
+  for (const n of ["SUMMARY MANNIING", "SEPTEMBER SUMMARY MANNING", "DG3 SUMMARY 2025", "2026 SUMMARY (2)", "2026 SUMMARY TRAINREL", "TRAINING"]) assert.equal(WANT_SGA(n), true, n);
+  for (const n of ["SUMMARY MANNIING (2)", "SGA SUMMARY WITH SBP ", "4. TRAINING", "SOA ADV1"]) assert.equal(WANT_SGA(n), false, n);
+  // and the Upload page's own filter is written with the same words (the page cannot import sga.js)
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  assert.match(W, /\/summary mann\?i\+ng\(\?! \*\\\\\(\\\\d\+\\\\\)\)\/i\.test\(s\)/, "the page sends every spelling of the manning sheet, never the (2) copy");
+  assert.match(W, /\/\^\(dg3 \)\?\(\\\\d\{4\} summary\|summary \\\\d\{4\}\)\( \\\\\(\\\\d\+\\\\\)\)\?\$\/i\.test\(s\.trim\(\)\)/, "the page sends the summary sheet by its 2025 names too");
+  assert.match(W, /\/summary mann\?i\+ng\/i\.test\(String\(n\)\)/, "the page recognises a 2025 workbook as TDG's bill");
+  // an upload that swapped the spaces for underscores still says its month; the double dot of SEPTEMBER_2025..xlsx too
+  assert.deepEqual(sgaPeriodFromName("REVISED_DG3_SGA_EXCEL_NOVEMBER_2025.xlsx"), { year: 2025, month: 11, source: "name" });
+  assert.deepEqual(sgaPeriodFromName("DG3_SGA_EXCEL_SEPTEMBER_2025..xlsx"), { year: 2025, month: 9, source: "name" });
+  assert.deepEqual(sgaPeriodFromName("REVISED DG3 SGA EXCEL AUG2025.xlsx"), { year: 2025, month: 8, source: "name" });
 });

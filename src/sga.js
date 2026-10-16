@@ -40,7 +40,8 @@ const MONTH_WORDS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AU
 const monthWord = (w) => { const u = String(w || "").toUpperCase(); for (const [k, n] of Object.entries(MONTH_WORDS)) if (u === k || (u.length >= 3 && k.length === 3 && u.startsWith(k) && /^[A-Z]+$/.test(u))) return n; return null; };
 // "DG3 SGA EXCEL FEBRUARY 2026.xlsx" / "MARCH'26" / "MAY'2026" / "REVISED DG3 SGA EXCEL JULY'2026.xlsx" → { year, month, source: "name" }
 export function sgaPeriodFromName(name) {
-  const m = /([A-Za-z]{3,9})\s*'?\s*(\d{4}|\d{2})\b/.exec(String(name || "").replace(/\.xlsx?$/i, ""));
+  // "NOVEMBER 2025", "JULY'2026", "MARCH'26", "AUG2025", "NOVEMBER_2025" (an upload that swapped spaces for underscores)
+  const m = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})\b/.exec(String(name || "").replace(/\.xlsx?$/i, ""));
   if (!m) return null;
   const month = monthWord(m[1]); if (!month) return null;
   const year = m[2].length === 2 ? 2000 + +m[2] : +m[2];
@@ -55,7 +56,9 @@ export function sgaPeriodOf(name, path) { return sgaPeriodFromName(name) || sgaP
 
 // The cost columns of SUMMARY MANNING, by the words TDG puts in the header row. Order = display order.
 export const SGA_COLS = [
-  ["allotment", /HOME ALLOTMENT/],
+  // HOME ALLOTMENT since November 2025; the July–October 2025 bills head the same column "BASIC PAY" (the row above it reads
+  // "Allotment Total" in every month). Without it October 2025 read $24,096.85 against TDG's $79,084.61.
+  ["allotment", /HOME ALLOTMENT|^BASIC PAY$/],
   ["final_pay", /FINAL PAY/],
   ["agency_fee", /MANNING FEE|AGENCY FEE/],
   ["social", /SOCIAL COST/],
@@ -240,16 +243,25 @@ export function summarizeSga(records) {
   return { total: Math.round(total * 100) / 100, rows: (records || []).length, crew: new Set((records || []).map((r) => r.crew_name)).size, byMonth, byBrand, byCat };
 }
 
+// The manning sheet's name, as TDG has spelled it: "SUMMARY MANNING", "SUMMARY MANNIING" (July–August 2025), "SEPTEMBER
+// SUMMARY MANNING" (September 2025) — never the hidden "SUMMARY MANNIING (2)", a CODE / PARTICULARS / REF. NO. / AMOUNT
+// summary that sits in every workbook and has no CREW column. One regex for the page, the mail intake, the inbox and here.
+export const MANNING_SHEET_RE = /SUMMARY MANN?I+NG(?! *\(\d+\))/i;
+export const isManningSheet = (n) => MANNING_SHEET_RE.test(String(n || ""));
+
 // Find the sheets by their job, whatever TDG called them this month.
 export function pickSgaSheets(sheets) {
   const names = Object.keys(sheets || {});
-  const manning = names.find((n) => /SUMMARY MANNING/i.test(n)) || null;
+  // Several names may qualify: the one whose rows carry the REF. NO. + CREW header is the manning sheet; else the first.
+  const manningNames = names.filter((n) => isManningSheet(n));
+  const manning = manningNames.find((n) => Array.isArray(sheets[n]) && sheets[n].length && sgaManningHeader(sheets[n])) || manningNames[0] || null;
   const training = names.find((n) => /TRAINREL/i.test(n)) || names.find((n) => /^TRAINING$/i.test(n.trim())) || null;
   // "2026 SUMMARY (2)": the whole SGA by month and category — 2025 whole, the current year to the bill's month
   const summary = names.find((n) => isSummarySheet(n)) || null;
   return { manning, training, summary };
 }
-export const isSummarySheet = (n) => /^\d{4} SUMMARY( \(\d+\))?$/i.test(String(n || "").trim());
+// "2026 SUMMARY (2)", "2025 SUMMARY", "DG3 SUMMARY 2025" (September 2025's workbook)
+export const isSummarySheet = (n) => /^(DG3 )?(\d{4} SUMMARY|SUMMARY \d{4})( \(\d+\))?$/i.test(String(n || "").trim());
 
 // THE MONTHLY SUMMARY SHEET ("2026 SUMMARY (2)", 15 Oct 2026). It sits third in TDG's workbook, so the connector delivers
 // it whole even when SUMMARY MANNING is cut (January, April, May 2026 were) — it is what makes the month's totals and the
