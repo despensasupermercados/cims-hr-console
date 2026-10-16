@@ -2,7 +2,9 @@
 
 Miguel, 16 Oct 2026: *"add a night watcher to look for bugs and fix it just like the other apps we have built"*.
 
-The night watch is a scheduled Claude task called **"Cims night watch"**. It runs once a night at 02:45 America/New_York, and each run starts a fresh session on this repo. It has three connectors: the Cloudflare Developer Platform (D1 + worker code), GitHub, and the Brain.
+The night watch is a scheduled Claude task called **"Cims night watch (in Miguel's session)"** (`trig_01SUCNgF53mPqyfMmBUSzCbK`). It runs once a night at 02:45 America/New_York **inside Miguel's long-running Claude Code session** (`session_018m28ANv7ThyLJmt5z37RZq`), which already holds the repo with push access and the three connectors it needs: the Cloudflare Developer Platform (D1 + worker code), GitHub, and the Brain. Each run works on its own branch `night-watch/<date>` cut from `origin/main`.
+
+**Why not a fresh session per night** (16 Oct 2026). The first design was a routine that starts a fresh session each night (`trig_01LYtAgz4kL1YmU5JrXyTkFj`, now paused, kept for its history). Its two runs (15 Oct by hand, 16 Oct 02:45) had the repo read-only and NO Cloudflare, GitHub or Brain tools: the suite ran, the health checks could not, and the one real bug it found (#262) could not be pushed. A routine's repositories and connectors are attached only in the claude.ai routines page; a session cannot attach them (`create_trigger` with connectors is refused for this organization), and Miguel could not ("cant do it .. figure it out"). Binding the routine to the session that already has everything was the way. If that session is ever archived, the routine disables itself (`auto_disabled_session_gone`): recreate it from a session that holds the repo and the three connectors.
 
 It does two jobs, always in this order:
 

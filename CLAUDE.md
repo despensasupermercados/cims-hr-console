@@ -34,7 +34,7 @@ untested migration or data load against the production database.
 - Documentation updates.
 Anything else — and ALWAYS anything touching money, auth, schema, or crew data — must be
 a PR for human review, not an auto-merge.
-The nightly agent is **"Cims night watch"** (scheduled Claude task, 02:45 America/New_York, a fresh session per night;
+The nightly agent is **"Cims night watch"** (scheduled Claude task, 02:45 America/New_York, run inside Miguel's own Claude Code session that holds the repo + Cloudflare + GitHub + Brain — a fresh-session routine could not be given them, 16 Oct 2026 "figure it out";
 runbook `docs/NIGHT_WATCH.md`, Miguel 16 Oct 2026: "add a night watcher to look for bugs and fix it"): health first (the
 suite on main, deployed = main, last night's jobs from D1, read-only), then one area of the code a night by weekday;
 every fix is a PR "Night watch: …" with a failing-first test. The GitHub Action `nightly-self-maintenance` is manual-only
