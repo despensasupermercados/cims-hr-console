@@ -12,6 +12,7 @@
 // Built to the CIMS email standard: the canonical letterhead (cims-mast.js), tables and inline styles only, no rgba, no
 // gradients, bgcolor paired with background. Pure: (data) => { subject, html, text }.
 import { mastRows } from "../cims-mast.js";
+import { mdWords } from "../span_md.js";
 
 export const TEMPLATE_ID = "hr.signoff.instructions.v2";
 export const HON_URL = "https://hon.cims.work";
@@ -92,7 +93,7 @@ export function instructionsEmail(d) {
   const fact = (k, v, w) => `<td class="stack" width="${w}" valign="top" style="padding:14px 12px 14px 0;border-top:3px solid ${C.navy};"><div style="font-family:${FB};font-size:12px;color:${C.slate};padding-bottom:3px;">${k}</div><div style="font-family:${FH};font-size:17px;font-weight:600;color:${C.navy};line-height:22px;">${v}</div></td>`;
 
   const meet = overlap
-    ? `You and <b>${esc(rel.name)}</b> overlap aboard for ${overlap.days} day${overlap.days === 1 ? "" : "s"} from ${shortDate(overlap.from)}: use them to walk ${relFirst} through the ship.`
+    ? `You and <b>${esc(rel.name)}</b> overlap aboard for ${mdWords(overlap.from, off)} from ${shortDate(overlap.from)}: use them to walk ${relFirst} through the ship.`
     : rel
       ? `Your reliever is <b>${esc(rel.name)}</b>. You may or may not see ${relFirst} aboard, so your notes must carry everything.`
       : `Your reliever is not named yet. You may not meet them aboard, so your notes must carry everything.`;

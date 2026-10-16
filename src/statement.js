@@ -2,6 +2,7 @@
 // Brand: navy #1B3A5C, green #5FB946. Includes bonus standing (Miguel's choice 2026-06-12).
 
 import { Pdf, PAGE_W, PAGE_H, MARGIN } from "./pdf.js";
+import { mdParts, mdShort } from "./span_md.js";
 
 const NAVY = [0.106, 0.227, 0.361];
 const GREEN = [0.373, 0.725, 0.275];
@@ -37,12 +38,7 @@ const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct
 const isoD = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
 export const fmtD = (v) => { const d = isoD(v); return d ? MON[+d.slice(5, 7) - 1] + " " + (+d.slice(8, 10)) + ", " + d.slice(0, 4) : "-"; };
 const dayN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 86400000;
-function spanTxt(on, off) {
-  const a = isoD(on), b = isoD(off); if (!a || !b || b < a) return "-";
-  let m = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)); let d = +b.slice(8, 10) - +a.slice(8, 10);
-  if (d < 0) { m -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); } // the days left after m whole months from a, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d, never 7 mo -2 d)
-  return (m ? m + " mo" : "") + (m && d ? " " : "") + (d || !m ? d + " d" : "");
-}
+function spanTxt(on, off) { return mdShort(on, off) || "-"; } // one definition (span_md.mdParts, 16 Oct 2026)
 // How long a document has left, in words a seafarer reads ("in 1 yr 5 mo", "in 4 mo 27 d", "3 mo 2 d ago").
 function leftTxt(exp, today) {
   const e = isoD(exp); if (!e) return "";
@@ -61,9 +57,8 @@ export function seaTime(contracts, today) {
     // only a RECORDED sign-off ends the time at sea; a running / overdue / held contract (no act) is at sea to today
     const off = isoD(x.act), b = off && off < today ? off : today;
     if (b < a) continue; // a sign-off before the sign-on adds nothing (never subtracts)
-    let mm = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)), dd = +b.slice(8, 10) - +a.slice(8, 10);
-    if (dd < 0) { mm -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + mm, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); dd = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); }
-    m += mm; d += dd;
+    const p = mdParts(a, b); if (!p) continue; // one definition (span_md.mdParts, 16 Oct 2026)
+    m += p.m; d += p.d;
   }
   m += Math.floor(d / 30); d %= 30;
   return m ? m + " mo" + (d ? " " + d + " d" : "") : d + " d";

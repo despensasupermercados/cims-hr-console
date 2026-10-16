@@ -267,3 +267,39 @@ test("the worker feeds the board's context to both senders and keeps two switche
   assert.match(W, /id="linkToggle" onclick="autoToggleClick\(&#39;signoff&#39;\)"/);
   assert.match(W, /if \(b\.kind === "instructions" \|\| b\.kind === "signoff"\) \{/);
 });
+
+// ---- 16 Oct 2026 bug hunt: the port is never the home-port SEED; a colleague aboard is not the reliever ----------------
+test("seatContexts: the home-port seed is not a sign-off port; the itinerary's port is, when the date lands on it; Rita's typed port wins", () => {
+  const S = [{ ship: "Allure", brand: "Royal", crew: [
+    { agency_id: "SC-H", name: "Home Seed", ship: "Allure", current: true, signOn: "2026-04-01", signOff: "2026-11-01", disembark: "MIAMI, FLORIDA", disembarkSrc: "home", off_city: "MIAMI, FLORIDA", off_conf: "seed" },
+    { agency_id: "SC-D", name: "Derived", ship: "Allure", current: true, signOn: "2026-04-02", signOff: "2026-11-02", disembark: "MIAMI, FLORIDA", disembarkSrc: "home", off_city: "PORT CANAVERAL, FLORIDA", off_conf: "derived" },
+    { agency_id: "SC-P", name: "Provisional", ship: "Allure", current: true, signOn: "2026-04-03", signOff: "2026-11-03", disembark: "MIAMI, FLORIDA", disembarkSrc: "home", off_city: "NASSAU, BAHAMAS", off_conf: "provisional" },
+    { agency_id: "SC-R", name: "Rita Typed", ship: "Allure", current: true, signOn: "2026-04-04", signOff: "2026-11-04", disembark: "BARCELONA, SPAIN", disembarkSrc: "rita", off_city: "MIAMI, FLORIDA", off_conf: "derived" },
+  ], projections: [] }];
+  const X = seatContexts(S);
+  assert.equal(X["SC-H"].port, null, "the console's seed is where the ship LIVES, not where he signs off — the email says no port rather than a wrong one");
+  assert.equal(X["SC-D"].port, "PORT CANAVERAL, FLORIDA", "the itinerary's port on that day");
+  assert.equal(X["SC-P"].port, null, "a port a day away is a guess, not a sign-off port");
+  assert.equal(X["SC-R"].port, "BARCELONA, SPAIN", "a typed port wins over the itinerary");
+  assert.equal(seatContexts(SECTIONS)["SC-K"].port, "HONG KONG, CHINA", "a fixture without the source word reads as before");
+});
+
+test("seatContexts: a second printer aboard for months is a colleague, not the reliever; the reliever is the sign-on near the sign-off", () => {
+  const S = [{ ship: "Allure", brand: "Royal", crew: [
+    { agency_id: "SC-A", name: "Printer One", ship: "Allure", current: true, signOn: "2026-02-01", signOff: "2026-10-30" },
+    { agency_id: "SC-B", name: "Printer Two", ship: "Allure", current: true, signOn: "2026-05-01", signOff: "2027-01-15" },  // joined 6 months before A's sign-off: the second printer
+    { agency_id: "SC-C", name: "The Reliever", ship: "Allure", state: "yellow", signOn: "2026-10-25", signOff: "2027-05-25" },
+  ], projections: [] }];
+  const X = seatContexts(S);
+  assert.equal(X["SC-A"].reliever.sc, "SC-C", "not the colleague who has been aboard since May");
+  assert.equal(X["SC-B"].reliever, null, "nobody is dated to relieve the second printer yet");
+  const two = seatContexts([{ ...S[0], crew: S[0].crew.slice(0, 2) }]);
+  assert.equal(two["SC-A"].reliever, null, "with no card near the sign-off there is no reliever — the email says so instead of naming the colleague");
+});
+
+test("the overlap is said in the email's own words for a span (months and days past a month), from one definition", () => {
+  const long = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-09-21" } }).html);
+  assert.match(long, /overlap aboard for 1 month 10 days from 21 Sep/);
+  const short = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-10-26" } }).html);
+  assert.match(short, /overlap aboard for 5 days from 26 Oct/);
+});

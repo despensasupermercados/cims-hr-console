@@ -4,6 +4,7 @@
 // It goes to the CREW: it never carries notes, field intel, feedback or anything the console only keeps for HR.
 // Pure: (data) => { subject, html, text }.
 import { mastRows } from "../cims-mast.js";
+import { mdWords } from "../span_md.js";
 import { seaTime } from "../statement.js";
 
 export const TEMPLATE_ID = "hr.statement.v2";
@@ -17,12 +18,7 @@ const iso = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(
 export const fmtDate = (v) => { const d = iso(v); return d ? MON[+d.slice(5, 7) - 1] + " " + (+d.slice(8, 10)) + ", " + d.slice(0, 4) : ""; };
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const dayN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 86400000;
-export function span(on, off) {
-  const a = iso(on), b = iso(off); if (!a || !b || b < a) return "";
-  let m = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)); let d = +b.slice(8, 10) - +a.slice(8, 10);
-  if (d < 0) { m -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); } // the days left after m whole months from a, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d, never 7 mo -2 d)
-  return (m ? m + (m === 1 ? " month" : " months") : "") + (m && d ? " " : "") + (d || !m ? d + (d === 1 ? " day" : " days") : "");
-}
+export function span(on, off) { return mdWords(on, off); } // one definition (span_md.mdParts, 16 Oct 2026)
 // The four required documents (Schengen is optional) and where each stands today.
 // With a running contract (runOff = its projected sign-off) they are read against it, as the attached PDF reads them
 // (13 Oct 2026 bug hunt: the email said "4 of 4" while the PDF beside it said Medical "Lapses", 3 of 4).
