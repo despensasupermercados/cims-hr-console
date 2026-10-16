@@ -801,6 +801,21 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   $79,782.31 / $78,050.32 / $78,650.47 / $76,061.94); July–September carry TRAINREL, so `training_cost` holds the category
   detail for Jan–Sep 2026; December 2025's refs read `ADV-2026-01-30-01` and its period is still DECEMBER — the file's name
   (§10c), never the ref.
+- **TDG's 2025 WORKBOOKS SPELL THINGS DIFFERENTLY — read them as they are** (16 Oct 2026, Miguel's third batch, July–November
+  2025, PR #263). July and August name the manning sheet `SUMMARY MANNIING`, September's is `SEPTEMBER SUMMARY MANNING` with a
+  `DG3 SUMMARY 2025` summary sheet, and July–October head the allotment column `BASIC PAY` ("Allotment Total" above it every
+  month; `HOME ALLOTMENT` from November 2025). Read as 2026 files they were refused (`no_manning_sheet`) or did NOT reconcile
+  (October $24,096.85 against TDG's $79,084.61 — the allotment column missing), and `applyInbox` would still have loaded the
+  short totals. ONE source of truth in `sga.js`: `isManningSheet` (`SUMMARY MANN?I+NG`, never the hidden `SUMMARY MANNIING (2)`
+  copy every workbook carries — CODE / PARTICULARS / REF. NO. / AMOUNT, no CREW column; `pickSgaSheets` takes the sheet whose
+  rows carry the REF. NO. + CREW header), `isSummarySheet` (`2026 SUMMARY (2)`, `2025 SUMMARY`, `DG3 SUMMARY 2025`),
+  `SGA_COLS.allotment` = HOME ALLOTMENT or BASIC PAY (no 2026 header carries both — checked on the ten 2026 workbooks), shared by
+  the mail intake's `WANT_SGA`, the inbox and the Upload page's inline filters (static-guarded). A file name with underscores
+  (`NOVEMBER_2025`) still says its month. Batch 3, 16 Oct 2026: July–November 2025 (SGA 25-A … 29-A; 58 / 57 / 67 / 59 / 58
+  lines; $63,396.16 / $72,848.00 / $82,860.30 / $79,084.61 / $75,131.46 incl. the $15 bank charge), every month reconciling,
+  the summary sheet agreeing where the workbook has one (July and August have none). These older bills write no
+  `training_cost` row (their `TRAINING` sheet is a statement cover, not the TRAINREL table) and never replace the 2025
+  `sga_summary` rows the September 2026 file wrote (the later period wins; the figures are identical). Pinned by `test/sga.test.js`.
 - **THE ORIGINAL WORKBOOKS ARE KEPT — Miguel, 15 Oct 2026: "keep this [the files] somewhere in a bucket in the database or u
   will figure out where .. I dont wanna lose this .. so is accessible to the brain when need it."** `src/sga_archive.js` (pure)
   + `archiveSourceFile` in worker.js: every workbook the Worker receives goes to the **EXPORTS R2 bucket** (`cims-hr-exports`,
