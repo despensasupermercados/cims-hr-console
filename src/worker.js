@@ -9510,6 +9510,7 @@ async function applySeval(sc){
   var off=$('#spanEnd')?$('#spanEnd').value:'';
   if(!sc||!off)return;
   var d;try{d=await (await fetch('/api/score/seval?agency_id='+encodeURIComponent(sc)+'&signoff='+encodeURIComponent(off))).json();}catch(e){return;}
+  if(_SEVAL.sc!==sc||($('#spanEnd')&&$('#spanEnd').value!==off))return; // the card moved to another crew or span while this answer was in flight (16 Oct 2026)
   if(!d||d.error)return;
   _SEVAL.value=d.value;_SEVAL.source=d.source;
   if(d.value){var s=$('#sEval');if(s)s.value=String(d.value);recalcScore();}
