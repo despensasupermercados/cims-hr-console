@@ -857,6 +857,32 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   line on Azamara Quest stays as TDG wrote it ("leave the W as it is").
 - Not money (§1). The Travel tab is a reference read (§10b), never an invoice source.
 
+## 10i. THE SIGN-OFF INSTRUCTIONS EMAIL, 14 DAYS OUT — Miguel + Rita, 16 Oct 2026
+Seven rounds on the rendered mock-up, then "shoot this email 2 week prior the seafarer sign off .. CC onboard support".
+`src/emails/hr.signoff.instructions.v2.js` (pure, canonical letterhead), filled from the Keyman board (`seatContexts`,
+`src/signoff_context.js`: the CURRENT seat's ship, brand, sign-off, port, and the first card / seat after it on that hull,
+else TDG's undated Earmarked row). Sent by the daily auto-send (`auto_send.js`, 08:00 Budapest, once per seat in
+`auto_send_log`) and by the crew page's button, both through `sendInstructionsFor` / `apiInstrRequest`. Rules (Brain
+recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
+- Greeted by FIRST NAME (first word of TDG's first name). Signed by Rita; reply-to Rita; **CC onboardsupport@dg3.com**
+  (the whole CIMS team's distribution list).
+- **Digital Handover Notes** in HON (open hon.cims.work, select the ship — no other click), mandatory; a short PRINTED
+  copy still stays onboard: one for the reliever, one for the shipboard manager. The manager's title is the brand's:
+  Azamara **BOM**, Royal **GSM**, Celebrity **DCM** (`MANAGER`). Never "GSM" fleet-wide.
+- **Never promise the two specialists meet** (Azamara usually overlaps; Royal / Celebrity usually do not, except a new
+  hire). Only when the reliever's sign-on is BEFORE this sign-off does the email say "you overlap aboard for N days";
+  otherwise "you may or may not see <first name> aboard". No reliever: "not named yet", never a guess.
+- The final count is signed in the handover notes; Ray Guerra and Jonathan Placer Alonzo receive it.
+- **One call to action**: Open HON is the acknowledgment link (`/instr?t=`), which records the receipt (`instr_ack`,
+  the onboardsupport confirmation, the profile's crew-change tick) and forwards to hon.cims.work. No "I have read" button.
+- The HON bonus box (Ship handover factor, reczJqxZnOuzkv74X) shows only for sign-offs on or after 1 Nov 2026.
+- **One switch per email** (the rail's Automation: Instructions · Sign-off link · GSM review; `/api/autosend` with `kind`).
+  Switching a kind ON stamps the day (`auto_send_instr_since` / `auto_send_link_since`): a seat already inside the
+  window is never auto-emailed, only listed in the digest ("inside the window at switch-on — send by hand"). The old
+  one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was NOT reviewed in this round: its
+  switch stays off until Miguel signs off its rendered email.
+Pinned by `test/signoff_instructions_v2.test.js`.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

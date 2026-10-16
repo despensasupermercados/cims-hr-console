@@ -43,6 +43,11 @@ export function installAutoSend(deps) {
     return new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).formatToParts(now)
       .reduce(function (a, p) { if (p.type === "hour") a = p.value; return a; }, "");
   }
+  function isoDay(v) { return v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null; }
+  function addDays(d, n) { var x = new Date(String(d).slice(0, 10) + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); }
+  async function setting(env, k) {
+    try { var r = await env.DB.prepare("SELECT v FROM app_setting WHERE k=?").bind(k).first(); return r ? r.v : null; } catch (e) { return null; }
+  }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
   async function ensureLog(env) {
@@ -75,7 +80,7 @@ export function installAutoSend(deps) {
     var out = [];
     for (var l of legs) {
       if (!l.off || l.off < today || l.off > upper || red[l.sc]) continue;
-      out.push({ sc: l.sc, seq: parseInt(String(l.off).replace(/-/g, ""), 10) || 0, off: l.off, ship: l.ship || null, port: l.port || null, name: l.name || null, email: em[l.sc] || null });
+      out.push({ sc: l.sc, seq: parseInt(String(l.off).replace(/-/g, ""), 10) || 0, off: l.off, ship: l.ship || null, port: l.port || null, name: l.name || null, email: em[l.sc] || null, ctx: l.ctx || null });
     }
     out.sort(function (a, b) { return a.off < b.off ? -1 : a.off > b.off ? 1 : 0; });
     return out;
@@ -110,9 +115,17 @@ export function installAutoSend(deps) {
     } catch (e) { return []; }
   }
 
-  async function processKind(env, today, upper, kind, sender, DRY, sent, alerts) {
+  // since: the day this kind was switched on by itself (per-kind switch, 16 Oct 2026). A leg whose crossing into the window
+  // (sign-off - days) came BEFORE it is not auto-emailed: switching on never emails the backlog. Listed in the digest on the
+  // first runs (the crew already inside the window), so somebody can send those by hand.
+  async function processKind(env, today, upper, kind, sender, DRY, sent, alerts, since, days) {
     for (const leg of await dueWithin(env, today, upper)) {
       if (await already(env, leg.sc, leg.seq, kind)) continue;                 // already handled
+      if (since && addDays(leg.off, -days) < since) {
+        if (addDays(since, 1) >= today && !(await manualExists(env, leg.sc, leg.off, kind)))
+          alerts.push({ kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: leg.name || null, to: leg.email || null, emailed: false, error: "before_switch_on" });
+        continue;
+      }
       if (await manualExists(env, leg.sc, leg.off, kind)) {                 // manual send on file - skip, do not wipe its ack
         if (!DRY) await markSent(env, leg.sc, leg.seq, kind, "manual-preexisting");
         continue;
@@ -127,7 +140,7 @@ export function installAutoSend(deps) {
       if (DRY) { sent.push(rec); continue; }                                   // report only
 
       try {
-        var res = await sender(env, leg.sc, leg.seq, ORIGIN, { ship: leg.ship, proj_off: leg.off, act_off: null, port: leg.port || null });
+        var res = await sender(env, leg.sc, leg.seq, ORIGIN, { ship: leg.ship, proj_off: leg.off, act_off: null, port: leg.port || null, ctx: leg.ctx || null });
         rec.emailed = !!(res && res.emailed);
         rec.name = (res && res.crew_name) || null;
         rec.to = (res && res.to) || leg.email;
@@ -140,8 +153,8 @@ export function installAutoSend(deps) {
   }
 
   function rowHtml(r, kind_label, DRY) {
-    var status = r.error === "no_email" ? "NO EMAIL — add address" : (r.error === "seeded" ? "seeded — not auto-emailed" : (DRY ? "would send" : (r.emailed ? "sent" : ("not sent — " + esc(r.error || "error")))));
-    var color = r.error === "no_email" ? "#B4232A" : (r.error === "seeded" ? "#6B7C93" : (DRY ? "#6B7C93" : (r.emailed ? "#3E8E2A" : "#B4232A")));
+    var status = r.error === "no_email" ? "NO EMAIL — add address" : r.error === "before_switch_on" ? "inside the window at switch-on — not auto-emailed, send by hand if needed" : (r.error === "seeded" ? "seeded — not auto-emailed" : (DRY ? "would send" : (r.emailed ? "sent" : ("not sent — " + esc(r.error || "error")))));
+    var color = r.error === "no_email" ? "#B4232A" : (r.error === "seeded" || r.error === "before_switch_on") ? "#6B7C93" : (DRY ? "#6B7C93" : (r.emailed ? "#3E8E2A" : "#B4232A"));
     var cell = 'padding:9px 12px;border-bottom:1px solid #EEF1F5;font-family:Arial,Helvetica,sans-serif;font-size:13px;';
     return '<tr>' +
       '<td style="' + cell + 'color:#16293D;">' + kind_label[r.kind] + '</td>' +
@@ -159,8 +172,9 @@ export function installAutoSend(deps) {
       return '<td style="padding:9px 12px;border-bottom:1px solid #EEF1F5;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#6B7C93;">' + h + '</td>';
     }).join("") + '</tr>';
     var tbl = function (rows) { return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E4E9F0;border-radius:10px;border-collapse:separate;">' + head + rows.map(function (r) { return rowHtml(r, L, meta.dry); }).join("") + '</table>'; };
-    var alertBanner = alerts.length
-      ? '<div style="background:#FCEBEC;border:1px solid #F1B9BE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8A1C24;"><strong>&#9888; ' + alerts.length + ' crew need an email on file</strong> — they qualified but have no address, so nothing was sent. They will keep appearing here until fixed.</div>'
+    var noEmail = alerts.filter(function (r) { return r.error === "no_email"; }).length;
+    var alertBanner = noEmail
+      ? '<div style="background:#FCEBEC;border:1px solid #F1B9BE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8A1C24;"><strong>&#9888; ' + noEmail + ' crew need an email on file</strong> — they qualified but have no address, so nothing was sent. They will keep appearing here until fixed.</div>'
       : "";
     var body = (sent.length ? tbl(sent) : '<p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16293D;">Nothing qualified today (no crew reached T-14 or T-7).</p>') +
       (alerts.length ? '<div style="height:14px"></div>' + tbl(alerts) : "") +
@@ -181,7 +195,7 @@ export function installAutoSend(deps) {
   }
 
   async function sendDigest(env, sent, alerts, seeded, meta) {
-    var n = sent.length, a = alerts.length;
+    var n = sent.length, a = alerts.filter(function (r) { return r.error === "no_email"; }).length;
     var subj = "CIMS auto-timing " + (meta.dry ? "(dry run) " : "") + meta.date + " — " + n + " sent" + (a ? ", " + a + " need email" : "");
     var envelope = { to: DIGEST_TO, subject: subj, html: digestHtml(sent, alerts, seeded, meta), templateId: "hr.autosend.digest.v1", critical: false };
     if (DIGEST_CC && DIGEST_CC.length) envelope.cc = DIGEST_CC;
@@ -193,7 +207,16 @@ export function installAutoSend(deps) {
     if (hourIn(GATE_TZ, now) !== GATE_HOUR) return { skipped: "not_gate_hour" };
     await ensureLog(env);
     var DRY = String(env.AUTO_SEND_DRY_RUN || "").toLowerCase() === "true";
-    { let _en = false; try { const _r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first(); _en = !!(_r && _r.v === "true"); } catch (e) {} if (!_en) { await logRun(env, "disabled", null, null, null); return { skipped: "disabled" }; } }
+    // Switches (16 Oct 2026): 'auto_send_enabled' is the old one-for-both switch (both kinds, seeded at enable); each kind
+    // also has its own — 'auto_send_instr_enabled' (T-14 instructions) and 'auto_send_link_enabled' (T-7 sign-off link),
+    // each with the day it was switched on ('..._since'). Miguel turned on the instructions alone: "shoot this email 2
+    // week prior the seafarer sign off" — the T-7 link email has not been reviewed in its new form.
+    var both = (await setting(env, "auto_send_enabled")) === "true";
+    var instrOn = both || (await setting(env, "auto_send_instr_enabled")) === "true";
+    var linkOn = both || (await setting(env, "auto_send_link_enabled")) === "true";
+    if (!instrOn && !linkOn) { await logRun(env, "disabled", null, null, null); return { skipped: "disabled" }; }
+    var instrSince = both ? null : isoDay(await setting(env, "auto_send_instr_since"));
+    var linkSince = both ? null : isoDay(await setting(env, "auto_send_link_since"));
     var today = todayStr(), t14 = plus(14), t7 = plus(7);
     var sent = [], alerts = [];
     // GUARDED 2026-09-10. This was the ONE task in the Worker's scheduled() handler that could
@@ -204,8 +227,8 @@ export function installAutoSend(deps) {
     // make: "the cron is dead" vs "nothing qualified today". Now a failure still records a row
     // and still tries to tell somebody.
     try {
-      await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts);
-      await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts);
+      if (instrOn) await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts, instrSince, 14);
+      if (linkOn) await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts, linkSince, 7);
       var seeded = await recentSeeded(env);
       await sendDigest(env, sent, alerts, seeded, { dry: DRY, date: today, t14: t14, t7: t7 });
       await logRun(env, "ran", DRY, sent.length, alerts.length);
