@@ -62,6 +62,7 @@ import { runEvals } from "./maria_eval.js";
 import { mariaFriendlyError } from "./maria_errors.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
+import { seatContexts } from "./signoff_context.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
@@ -73,7 +74,7 @@ import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 
-const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
+const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
 // markDeployed: the card STAYS on the ship once sent (Miguel, 5 Oct 2026) — stamped, not removed.
 // Telling Joy changes no date, so it leaves updated_at alone (8 Oct 2026): the sign-off ladder reads a reliever card's
@@ -97,14 +98,16 @@ const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections,
   crewProfile: async (env, sc, session) => (await apiCrewOne(env, new URL("https://cims.work/api/crew/get?id=" + encodeURIComponent(sc)), session)).json() });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
+// Since 16 Oct 2026 only CURRENT seats (an earmark's planned sign-off is not a sign-off to instruct), each carrying what the
+// instructions email says about it (seatContexts: brand, port, reliever) so the email and the board agree.
 async function autoSendBoardLegs(env) {
   const { sections } = await rotationSections(env);
-  const out = [];
-  for (const s of (sections || [])) for (const c of (s.crew || [])) {
-    if (!c || !c.agency_id || !c.signOff) continue;
-    out.push({ sc: c.agency_id, name: c.name || null, ship: c.ship || null, off: String(c.signOff).slice(0, 10), port: c.disembark || null });
-  }
-  return out;
+  return Object.values(seatContexts(sections)).map((x) => ({ sc: x.sc, name: x.name, ship: x.ship, off: x.off, port: x.port, ctx: x }));
+}
+// One seat's context for a send from the crew page (the manual button).
+async function instrSeatContext(env, sc) {
+  const { sections } = await rotationSections(env);
+  return seatContexts(sections)[sc] || null;
 }
 // Called when the toggle flips OFF->ON: mark everything already inside the T-14/T-7
 // windows as handled (note 'seeded') so enabling never emails historical crossings.
@@ -134,9 +137,29 @@ async function autoSendSeed(env) {
 async function apiAutoSend(request, env, session) {
   if (!session) return json({ error: "unauthorized" }, 401);
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run();
+  const getS = async (k) => { const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k=?").bind(k).first(); return r ? r.v : null; };
+  const setS = (k, v) => env.DB.prepare("INSERT INTO app_setting (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(k, v).run();
+  const state = async () => { const both = (await getS("auto_send_enabled")) === "true";
+    return { enabled: both, instructions: both || (await getS("auto_send_instr_enabled")) === "true", signoff: both || (await getS("auto_send_link_enabled")) === "true",
+      instructions_since: await getS("auto_send_instr_since"), signoff_since: await getS("auto_send_link_since") }; };
   if (request.method === "POST") {
     if (!session) return json({ error: "unauthorized" }, 401);
     const b = await request.json().catch(function () { return {}; });
+    // One switch per email (16 Oct 2026: Miguel turned on the T-14 instructions alone). Switching a kind ON stamps the day:
+    // the run never emails a seat that was already inside the window (auto_send.js processKind).
+    if (b.kind === "instructions" || b.kind === "signoff") {
+      const K = b.kind === "instructions" ? "auto_send_instr" : "auto_send_link";
+      const today = new Date().toISOString().slice(0, 10);
+      if ((await getS("auto_send_enabled")) === "true") {      // the old one-for-both switch hands its state to the two
+        for (const k of ["auto_send_instr", "auto_send_link"]) { await setS(k + "_enabled", "true"); await setS(k + "_since", today); }
+        await setS("auto_send_enabled", "false");
+      }
+      const was = (await getS(K + "_enabled")) === "true", on = b.enabled === true;
+      await setS(K + "_enabled", on ? "true" : "false");
+      if (on && !was) await setS(K + "_since", today);
+      await logActivity(env, session.email, "autosend_" + b.kind, on ? "on" : "off");
+      return json(Object.assign({ ok: true }, await state()));
+    }
     const v = b.enabled === true ? "true" : "false";
     const prev = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first();
     const wasOn = !!(prev && prev.v === "true");
@@ -153,8 +176,7 @@ async function apiAutoSend(request, env, session) {
     }
     return json({ ok: true, enabled: v === "true", seeded: seeded });
   }
-  const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k='auto_send_enabled'").first();
-  return json({ enabled: !!(r && r.v === "true") });
+  return json(await state());
 }
 
 async function apiSbmToggle(request, env, session) {
@@ -239,7 +261,7 @@ export default {
       // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
       { const _au = await _audit(p, request, env, url, session); if (_au) return _au; }
       { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_a) return _a; }
-      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_i) return _i; }
+      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs })(p, request, env, url, session); if (_i) return _i; }
       if (p === '/api/roster/export') return apiRosterExport(request, env);
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
@@ -7123,9 +7145,10 @@ async function saveNote(id){
   var t=document.getElementById('cmt').value;document.getElementById('cmtmsg').textContent='Saving…';
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
-async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_ON=!!r.enabled;var c=document.getElementById('autoToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
-async function autoToggleClick(){var c=document.getElementById('autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn Crew auto-timing ON? This arms automated T-14/T-7 emails to crew.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_ON=!!r.enabled;if(c)c.checked=!!r.enabled;alert('Auto-timing is now '+(r.enabled?'ON':'OFF')+(r.seeded>0?(' — '+r.seeded+' in-window items were seeded and will NOT be auto-emailed.'):''));}catch(e){alert('Could not change the setting.');}}
-function ensureSbmToggle(){var a=document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
+// Two switches since 16 Oct 2026, one per email: the T-14 sign-off instructions and the T-7 sign-off link (/api/autosend kind).
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}}
+async function autoToggleClick(kind){var link=kind==='signoff';var c=document.getElementById(link?'linkToggleCb':'autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm(link?'Turn the T-7 sign-off link ON? Every crew 7 days before their sign-off gets the sign-off link email. Crew already inside the 7 days are not emailed.':'Turn the sign-off instructions ON? Every crew 14 days before their sign-off gets the instructions email, CC onboardsupport@dg3.com. Crew already inside the 14 days are not emailed.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:link?'signoff':'instructions',enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();alert((link?'The T-7 sign-off link':'The sign-off instructions')+' email is now '+((link?r.signoff:r.instructions)?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
+function ensureSbmToggle(){var a=document.getElementById('linkToggle')||document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
 async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();window.SBM_ON=!!r.enabled;ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}window.SBM_ON=!!r.enabled;if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 // THE BOARD SAYS ITS OWN AGE (24 Sep 2026) through sources on /api/rotation. The page line that printed it above the
@@ -7185,7 +7208,7 @@ async function renderRotation(){
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
-    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick()" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span></div></div>'
     +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'
@@ -7209,7 +7232,7 @@ async function renderRotation(){
 }
 // 13 Oct 2026: every re-render rebuilt the rail with Crew auto-timing unchecked and no GSM review switch, while the
 // emails stayed armed on the server. The last known values are kept and painted back.
-function applyChromeToggles(){var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_ON!=null)c.checked=!!window.AUTO_ON;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
+function applyChromeToggles(){var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
 var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
 function rotRail(shown,total){

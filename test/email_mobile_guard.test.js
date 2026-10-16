@@ -13,7 +13,7 @@ const SENDERS = [
   ["src/seafarer_movements.js", "the weekly Movements report"],
   ["src/doc_radar.js", "the weekly Fleet Document Radar"],
   ["src/signoff_ack.js", "the seafarer sign-off confirm + acknowledgement"],
-  ["src/signoff_instructions.js", "the seafarer sign-off instructions"],
+  ["src/emails/hr.signoff.instructions.v2.js", "the seafarer sign-off instructions"],
   ["src/emails/hr.magiclink.v2.js", "the console sign-in link"],
 ];
 const read = (p) => readFileSync(new URL("../" + p, import.meta.url), "utf-8");
