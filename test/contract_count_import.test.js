@@ -241,3 +241,18 @@ test("page code: no single-backslash regex escape inside APP_HTML (it is dropped
   const bad = body.match(/(^|[^\\])\\[dswDSW]/g) || [];
   assert.deepEqual(bad, [], "write \\\\d / \\\\s / \\\\w in page code");
 });
+
+// 16 Oct 2026 bug hunt: a crew the file DOES carry but the roster bridge could not place this time (the roster row hidden,
+// a name respelt) read as "not in the file" — their loaded TDG count was deleted and the grade fell to the derived number.
+// The file's unmatched ids are kept apart from "gone": a loaded row whose km the file still lists is held (§6).
+test("a loaded count whose cruise-line id the file still carries, unmatched this time, is kept — not 'not in file'", async () => {
+  // Encina 647250 is in ACTIVE and not on this roster (unmatched); his count was loaded on an earlier file
+  const current = [{ sc: "SC-ENC", km: "647250", completed: 0, as_of: "2026-09-01" }, { sc: "SC-GONE", km: "999", completed: 5, as_of: "2026-09-01" }];
+  const { env, writes } = fakeEnv({ current });
+  const dry = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24", dryRun: true }), env, session)).json();
+  assert.deepEqual(dry.notInFile.map((r) => r.sc), ["SC-GONE"], "Encina is in the file — the roster could not place him, that is a flag, not a removal");
+  const r = await (await apiContractCountImport(req({ sheets: SHEETS, asOf: "2026-09-24" }), env, session)).json();
+  assert.equal(r.removed, 1);
+  const dels = writes.filter((w) => /DELETE FROM contract_count/.test(w.sql));
+  assert.deepEqual(dels.flatMap((w) => w.args), ["SC-GONE"]);
+});

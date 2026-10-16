@@ -38,6 +38,7 @@ const openProjections = (env, deps) => (deps && deps.openProjections ? deps.open
 // the roster by the name TDG gives it, and a status word the console cannot read.
 const registryOf = (mapped) => mapped.map((m) => ({
   agency_id: m.agency_id, status: m.status || null, vessel_observed: m.vessel_observed || null,
+  ship_crew_id: m.ship_crew_id || null, // the cruise-line id the file carries, to FILL a crew row without one (16 Oct 2026)
   name: [m.first_name, m.last_name].filter(Boolean).join(" ").trim() || null, status_raw: m.status_raw || null,
   embarked_at: m.embarked_at || null, debarked_at: m.debarked_at || null, // the schedule (7 Oct 2026)
 }));
@@ -66,7 +67,7 @@ function stagedRegistry(mapped, diff) {
 // no-op (already_processed). Now, when it is the LATEST run and the board holds no copy of it, its rows
 // are kept as that run's snapshot — nothing else: no crew row, flag or status is touched (they were
 // applied the first time). An older file never overwrites a newer word. Returns the rows kept.
-async function keepCopyOfAppliedFile(env, deps, mapped, file_hash) {
+async function keepCopyOfAppliedFile(env, deps, mapped, file_hash, seen) {
   if (!deps || !deps.ensureRegistrySnapshot || !file_hash) return 0;
   // The stage route is open to every login and the hash is the browser's word (6 Oct 2026 review): the
   // snapshot is TDG's word to every screen, so only a money user may fill it, and only with a file that
@@ -78,7 +79,9 @@ async function keepCopyOfAppliedFile(env, deps, mapped, file_hash) {
     env.DB.prepare("SELECT id FROM import_run ORDER BY run_at DESC LIMIT 1").first(),
   ]);
   if (!run || !latest || run.id !== latest.id) return 0;
-  if (run.rows_seen != null && Number(run.rows_seen) !== mapped.length) return 0;
+  // rows_seen is every row the page read (a dateless trailer included); the same number is compared, not the rows that carry
+  // an agency id — that mismatch kept the 7 Oct 2026 file's copy from ever being filled on a re-drop (16 Oct 2026).
+  if (run.rows_seen != null && Number(run.rows_seen) !== Number(seen == null ? mapped.length : seen)) return 0;
   const held = await env.DB.prepare("SELECT COUNT(*) AS n FROM registry_snapshot WHERE import_run_id=?").bind(run.id).first();
   if (held && Number(held.n) > 0) return 0;
   const { existingByAgency } = await loadContext(env, null);
@@ -103,7 +106,7 @@ export const CREW_WRITABLE = new Set([
 export const OVR_CLEARABLE = new Set(OVR_FIELDS.filter(f => CREW_WRITABLE.has(f) || Object.values(OVR_COL).includes(f)));
 
 // Columns written when INSERTing a brand-new crew member (agency_code has a DB default).
-const INSERT_COLS = ["id", "agency_id", "first_name", "middle_name", "last_name", "status",
+const INSERT_COLS = ["id", "agency_id", "ship_crew_id", "first_name", "middle_name", "last_name", "status",
   "rank_observed", "vessel_observed", "dob", "province", "phone", "email", "gender", "pp_no",
   "med_exp", "sirb_exp", "pp_exp", "sch_exp", "usv_exp", "emergency_name", "emergency_relation", "emergency_phone", "created_at", "updated_at"];
 
@@ -151,7 +154,7 @@ export async function apiCrewImportStage(request, env, deps) {
   if (file_hash) {
     const dup = await env.DB.prepare("SELECT 1 AS x FROM import_run WHERE file_hash=?").bind(file_hash).first();
     if (dup) {
-      const kept = await keepCopyOfAppliedFile(env, deps, mapped, file_hash);
+      const kept = await keepCopyOfAppliedFile(env, deps, mapped, file_hash, rows.length);
       return J(kept ? { ok: false, error: "already_processed", snapshot_saved: kept } : { ok: false, error: "already_processed" });
     }
   }
@@ -166,6 +169,16 @@ export async function apiCrewImportStage(request, env, deps) {
   // snapshot, the verdict and the flag closures all find them.
   const today = new Date().toISOString().slice(0, 10);
   const registry = stagedRegistry(mapped, diff);
+  // THE CRUISE-LINE ID (16 Oct 2026): the file's SHIP CREW ID stays on the row only where Apply will FILL a crew row that has
+  // none (bound IS NULL there); a new crew's INSERT carries it itself; a roster row whose id DIFFERS is listed (§6: flag,
+  // never pick) and nothing is written for it.
+  const kmMismatch = [];
+  for (const r of registry) {
+    if (!r.ship_crew_id) continue;
+    const ex = existingByAgency[r.agency_id];
+    if (ex && ex.ship_crew_id && String(ex.ship_crew_id) !== String(r.ship_crew_id)) kmMismatch.push({ agency_id: r.agency_id, roster: String(ex.ship_crew_id), file: String(r.ship_crew_id) });
+    if (!ex || ex.ship_crew_id) r.ship_crew_id = null;
+  }
   const proj = reconcileProjections({ projections, registry, today, shipOf: SHIP_OF });
   review.projections = proj.items;
   review.projection_counts = proj.counts;
@@ -185,6 +198,7 @@ export async function apiCrewImportStage(request, env, deps) {
   const dismissed = deps && deps.dismissed ? await deps.dismissed(env).catch(() => []) : [];
   review.tdg_earmarks = tdgEarmarksWithoutCard({ projections, registry, shipOf: SHIP_OF, exclude: em.items.filter((i) => i.kind === "other_person" && i.file && i.file.other).map((i) => i.file.other.sc + "|" + String(i.ship).trim().toLowerCase()).concat(dismissed || []) });
   review.registry = registry;
+  review.km_mismatch = kmMismatch;
   review.groups.unretire = unretireItems(registry, retiredByAgency);
   review.counts.unretire = review.groups.unretire.length;
   review.duplicate_ids = [...new Set(duplicateIds)];
@@ -325,6 +339,9 @@ export async function apiCrewImportApply(request, env, deps) {
     if (!r || !r.agency_id) continue;
     stmts.push(snapshotStmt(env, r, run_at, importRunId));
     kept++;
+    // THE CRUISE-LINE ID REACHES THE CREW ROW (16 Oct 2026): the import read it off the file and dropped it, so the two TDG
+    // contract files kept bridging by name (§6). Only a row WITHOUT one is filled (the stage left the id on exactly those rows).
+    if (r.ship_crew_id) stmts.push(env.DB.prepare("UPDATE crew SET ship_crew_id=?, updated_at=? WHERE agency_id=? AND (ship_crew_id IS NULL OR ship_crew_id='')").bind(String(r.ship_crew_id), run_at, String(r.agency_id)));
   }
   // A crew the latest file does NOT carry has no word in it: their old snapshot row goes, so the board
   // never shows a previous file's verdict as current (silence is not a verdict). Only when this body

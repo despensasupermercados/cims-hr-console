@@ -325,7 +325,7 @@ test("the on_key backfill is its own statement, not hidden inside the ALTER's tr
   const upd = body.indexOf("UPDATE contract_edit SET on_key");
   assert.ok(alter > 0 && upd > alter, "both statements present, ALTER first");
   const between = body.slice(alter, upd);
-  assert.match(between, /catch \{\}|\.catch\(\(\) => null\)/, "the ALTER's try must be CLOSED before the UPDATE begins — a thrown ALTER must not skip the backfill, and a thrown backfill must not be lost behind an ALTER that already succeeded");
+  assert.match(between, /catch \{\}|\.catch\(\(\) => null\)|ADD COLUMN on_key TEXT"\),\s*\]\);/, "the ALTER's try must be CLOSED before the UPDATE begins — a thrown ALTER must not skip the backfill, and a thrown backfill must not be lost behind an ALTER that already succeeded");
   assert.match(body.slice(upd), /WHERE on_key IS NULL/, "idempotent: a no-op once backfilled");
 });
 

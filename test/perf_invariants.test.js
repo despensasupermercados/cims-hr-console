@@ -72,11 +72,14 @@ test("cold-start ensure guards seed/DDL in ONE batch, not one round trip per sta
   // with the batch (Promise.all), never after it — the same single round trip; a failing ALTER would abort a batch.
   const fb = body("async function ensureFbImpl(");
   assert.match(fb, /await Promise\.all\(\[env\.DB\.batch\(/, "ensureFbImpl: the batch and the ALTER travel together");
-  assert.equal((fb.match(/\.run\(\)/g) || []).length, 1, "only the one ALTER may run alone");
-  assert.match(fb, /ALTER TABLE feedback_response2 ADD COLUMN superseded_at TEXT"\)\.run\(\)\.catch/);
+  // 16 Oct 2026: every ALTER in a guard goes through addColumn (its own one-statement run; duplicate column / no such table
+  // swallowed, anything else fails the guard so it is never recorded as applied with the column missing)
+  assert.equal((fb.match(/\.run\(\)/g) || []).length, 0, "only the one ALTER may run alone, through addColumn");
+  assert.match(fb, /addColumn\(env, "ALTER TABLE feedback_response2 ADD COLUMN superseded_at TEXT"\)/);
   const intel = body("async function ensureIntelImpl(");
   assert.match(intel, /env\.DB\.batch\(/, "ensureIntelImpl CREATEs must be batched");
-  assert.equal((intel.match(/\.run\(\)/g) || []).length, 2, "only the two ALTERs may run alone (a failing ALTER would abort a batch)");
+  assert.equal((intel.match(/\.run\(\)/g) || []).length, 0, "only the ALTERs may run alone, through addColumn (a failing ALTER would abort a batch)");
+  assert.equal((intel.match(/addColumn\(env, "ALTER TABLE/g) || []).length, 3, "the three ALTERs (contract_no, edited_at, attempts)");
 });
 
 test("ensure* schema guards stay memoized (once per isolate), not per-request DDL", () => {
@@ -139,10 +142,11 @@ test("the board's cold-start guards are two round trips at most, not one per sta
   const k = body("async function ensureKeymanImpl(");
   assert.match(k, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS keyman_contract3[^\n]*\.run\(\),\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS data_meta/, "the two CREATEs leave together");
   assert.match(k, /SELECT \(SELECT COUNT\(\*\) FROM keyman_contract3\) AS n, \(SELECT v FROM data_meta WHERE k='keyman_version'\) AS v/, "count + version are ONE read");
-  assert.match(k, /await Promise\.all\(\[\s*env\.DB\.prepare\("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT"\)\.run\(\)\.catch/, "the ALTER rides beside the read");
+  assert.match(k, /await Promise\.all\(\[\s*addColumn\(env, "ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT"\),/, "the ALTER rides beside the read");
   const c = body("async function ensureCrewExtrasImpl(");
   assert.match(c, /await env\.DB\.batch\(\[/, "crew_override + crew_note_log + the MAN agency row are one batch");
-  assert.equal((c.match(/\.run\(\)/g) || []).length, 1, "the ALTERs (retired tag + the note archive columns, 12 Oct 2026) leave together in one wave");
+  assert.equal((c.match(/\.run\(\)/g) || []).length, 0, "no sequential run: the ALTERs (retired tag + the note archive columns, 12 Oct 2026) leave together in one wave");
+  assert.match(c, /await Promise\.all\(alters\.map\(\(q\) => addColumn\(env, q\)\)\)/);
   const r = body("async function ensureReadyImpl(");
   assert.match(r, /await Promise\.all\(\[\s*env\.DB\.prepare\("CREATE TABLE IF NOT EXISTS crew_ready/, "CREATE and legacy ALTER leave together");
   const e = body("async function ensureContractEditImpl(");

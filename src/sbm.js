@@ -29,6 +29,7 @@
 // <cims@cims.work>, exactly like auto_send.js.
 // ============================================================================
 
+import { memoDdl } from "./ensure_memo.js";
 import { signToken, verifyToken } from "./auth.js";
 
 /* ----------------------------- primitives ------------------------------ */
@@ -515,7 +516,9 @@ export function installSbm(deps) {
   const html = (body, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
 
   // Belt-and-suspenders alongside migrations/0013_sbm_review.sql (ensureFb pattern).
-  async function ensureSbm(env) {
+  // Once per database per isolate (16 Oct 2026): this CREATE ran on every request that reached the module (§12).
+  const ensureSbm = memoDdl(ensureSbmDdl);
+  async function ensureSbmDdl(env) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_review_request (id TEXT PRIMARY KEY, crew_id TEXT, agency_id TEXT NOT NULL, contract_signon TEXT, contract_signoff TEXT NOT NULL, ship TEXT, brand TEXT, recipient_email TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, sent_at TEXT, reminder_at TEXT, status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent','reminded','submitted','expired','suppressed')), created_at TEXT NOT NULL, UNIQUE (agency_id, contract_signoff))").run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_review_response (id TEXT PRIMARY KEY, request_id TEXT NOT NULL REFERENCES sbm_review_request(id), rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5), q_business TEXT, q_guests TEXT, q_grow TEXT, q_integrity TEXT, q_teams TEXT, q_energy TEXT, q_final TEXT, submitted_at TEXT NOT NULL, ip TEXT, ua TEXT)").run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS sbm_config (key TEXT PRIMARY KEY, value TEXT)").run();

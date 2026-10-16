@@ -63,10 +63,12 @@ export function parseContractCounter(aoa) { return parseContractCounterFull(aoa)
 //   full  : "last|first" -> SC agency id (fallback)
 //   byLast: last -> [SC agency id, ...] (fallback)
 export function buildBridge(roster) {
-  const full = {}, byLast = {}, byKm = {}, firstBySc = {}, ambiguous = new Set();
+  const full = {}, byLast = {}, byKm = {}, firstBySc = {}, ambiguous = new Set(), kmTwice = new Set();
   for (const c of (roster || [])) {
     const km = normKm(c.ship_crew_id);
-    if (km && c.agency_id) byKm[km] = c.agency_id; // authoritative bridge, when the persistent id is known
+    // authoritative bridge, when the persistent id is known — unless two roster rows carry it (Purnama's 6 Sep 2026
+    // duplicate held 349195 on both rows): then the id resolves nobody and the name ladder decides (§6, 16 Oct 2026)
+    if (km && c.agency_id) { if (km in byKm && byKm[km] !== c.agency_id) kmTwice.add(km); byKm[km] = c.agency_id; }
     const ln = norm(c.last_name), fn = norm(c.first_name);
     if (!c.agency_id || !ln) continue;
     // Two roster crew with the same full key ("Santos, Juan" / "Santos, Juan" under two ids) make the
@@ -78,6 +80,7 @@ export function buildBridge(roster) {
     (byLast[ln] = byLast[ln] || []).push(c.agency_id);
   }
   for (const key of ambiguous) delete full[key];
+  for (const km of kmTwice) delete byKm[km];
   return { full, byLast, byKm, firstBySc };
 }
 
