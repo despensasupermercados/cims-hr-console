@@ -6056,7 +6056,7 @@ let TRV=null,TRV_KIND='',TRVALL=[],TF={q:'',year:'',month:'',cat:'',kind:''};
 var TCATS=['air','hotel','medical','visa','food','transport','other'];
 var TCATLAB={air:'Air',hotel:'Hotel',medical:'Medical',visa:'Visa',food:'Food',transport:'Transport',other:'Other'};
 function usd(n){return n?('$'+Number(n).toLocaleString(undefined,{maximumFractionDigits:0})):'—';}
-function usd0(n){return '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});}
+function usd0(n){var v=Number(n||0);return (v<0?'-':'')+'$'+Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});} // -$655, never $-655 (16 Oct 2026)
 function pct(a,b){if(b==null||b===0)return null;return (a-b)/b*100;}
 function deltaCell(a,b){var d=pct(a,b);if(d==null)return '<span class=muted style="padding:0">—</span>';var up=d>=0;return '<span style="color:'+(up?'var(--red)':'var(--green-d)')+';font-weight:700">'+(up?'▲':'▼')+' '+Math.abs(d).toFixed(0)+'%</span>';}
 var TBUD=15000; // monthly travel budget — the SERVER's TRAVEL_BUDGET_MO (src/travel.js) overwrites this from /api/travel; never edit here

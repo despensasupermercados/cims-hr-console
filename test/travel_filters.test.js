@@ -53,4 +53,6 @@ test("the search lists people inside the same period; the Training centre view g
   assert.match(fn("tYears"), /\[SGA\.lines,SGA\.summary,SGA\.training\]/);
   assert.match(W, /function tYearOptions\(years\)\{return '<option value="">All years<\/option>'\+years\.map\(function\(y\)\{return '<option value="'\+y\+'">'\+y\+'<\/option>';\}\)/);
   assert.match(fn("paintTraining"), /No training-centre costs on file for '\+LY\+'/);
+  // a negative amount reads -$655, never $-655 (the pacing table's variance, the bill-vs-workbook gap)
+  assert.match(W, /function usd0\(n\)\{var v=Number\(n\|\|0\);return \(v<0\?'-':''\)\+'\$'\+Math\.abs\(v\)/);
 });
