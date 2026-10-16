@@ -193,13 +193,15 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
     if (a.off_port_seed) o.disembark = a.off_port_seed;
     out.push(o);
   }
-  // Ended assignments -> NON-current history legs (off = the actual sign-off). Skipped when a
-  // ship_leg row already records that same crew + sign-on (the snapshot has it).
-  const onKey = new Set(legs.map((r) => (r.sc || "") + "|" + (r.on || "")));
+  // Ended assignments -> NON-current history legs (off = the actual sign-off). Skipped when a leg already records
+  // that same crew's contract: the same sign-on (the snapshot has it), or — on the same hull — a sign-on within
+  // ABSORB_DAYS (16 Oct 2026: TDG books the real port day, the card the nearest turnaround, so an exact-date match
+  // alone drew two "Contract completed" rows for one contract).
+  const sameContract = (a, ship) => legs.some((r) => r.sc === a.sc && r.on && (r.on === a.sign_on || (shipKey(r.ship) === shipKey(ship) && (() => { const g = daysApart(r.on, a.sign_on); return g != null && Math.abs(g) <= ABSORB_DAYS; })())));
   for (const a of endedRows || []) {
     if (!a || !a.sc || !a.actual_sign_off || !a.sign_on) continue;
     const ship = a.ship == null ? "" : String(a.ship).trim();
-    if (!ship || onKey.has(a.sc + "|" + a.sign_on)) continue;
+    if (!ship || sameContract(a, ship)) continue;
     const o = {
       ship, name: a.crew_name || null, sc: a.sc, ours: true,
       on: a.sign_on, off: a.actual_sign_off,
@@ -416,10 +418,12 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
     for (const a of (open || [])) {
       if (!a || !a.sc || a.sc === L.sc || !a.ship || !dayOf(a.sign_on)) continue;
       if (shipKey(a.ship) !== L.key || dayOf(a.sign_on) <= L.on) continue;
-      // A card whose sign-on has passed holds only while no later file contradicts it: a file dated after
-      // the sign-on that does not have the reliever On board this hull says the relief did not happen.
+      // A card whose sign-on has passed holds only while no later file contradicts it: a file dated AFTER the
+      // sign-on that does not have the reliever On board this hull says the relief did not happen. A file dated ON
+      // the sign-on day says nothing yet — the export runs in the morning, the reliever embarks that day (16 Oct 2026;
+      // the same strict rule as earmark.js, seen = signOn < fileAt).
       const w = fileBy[a.sc];
-      if (dayOf(a.sign_on) <= today && w && w.at && w.at >= dayOf(a.sign_on) && !(w.status === "On board" && w.key === L.key)) continue;
+      if (dayOf(a.sign_on) <= today && w && w.at && w.at > dayOf(a.sign_on) && !(w.status === "On board" && w.key === L.key)) continue;
       if (!card || dayOf(a.sign_on) < card.on) card = { on: dayOf(a.sign_on), at: String(a.updated_at || a.created_at || ""), id: a.id || null, sc: a.sc, name: a.crew_name || null };
     }
     if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id } });

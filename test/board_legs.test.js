@@ -269,3 +269,17 @@ test("fetchOpenAssignments has NO date filter — a projection that has not star
   assert.match(calls[0].sql, /LEFT JOIN crew_override o/, "her manual rank must win over the imported one");
   assert.match(calls[0].sql, /LEFT JOIN vessel v ON v\.id = a\.vessel_id/, "selects v.name / v.brand — without the join D1 throws 'no such column: v.name' (2026-09-15, the empty board)");
 });
+
+// 16 Oct 2026 bug hunt: an ended card was drawn beside the registry leg of the SAME contract when the two dates differed
+// by a day or two (TDG books the real port day, the card the nearest turnaround) — two "Contract completed" rows for one
+// contract. The dedupe is within ABSORB_DAYS on the same hull, like everywhere else the file absorbs a card (§10d).
+test("an ended assignment within ABSORB_DAYS of a leg of the same crew on the same hull is the same contract — drawn once", () => {
+  const legs = [leg({ sc: "SC-1", ship: "Harmony", on: "2026-02-01", off: "2026-09-01", is_current: false, source: "registry" })];
+  const ended = [{ id: "as_e", sc: "SC-1", crew_name: "A B", ship: "Harmony", sign_on: "2026-02-03", actual_sign_off: "2026-09-02", crew_id: "c1" }];
+  const out = mergeBoardLegs(legs, [], "2026-10-16", ended);
+  assert.equal(out.length, 1, "the card's contract is the leg's contract");
+  const far = mergeBoardLegs(legs, [], "2026-10-16", [{ ...ended[0], sign_on: "2026-02-20" }]);
+  assert.equal(far.length, 2, "19 days apart is another contract (history the Counter never saw)");
+  const other = mergeBoardLegs(legs, [], "2026-10-16", [{ ...ended[0], ship: "Oasis" }]);
+  assert.equal(other.length, 2, "the same dates on another hull are another contract");
+});
