@@ -138,3 +138,19 @@ test("the passport number is read from PASSPORT NO., tracked, and an empty cell 
   const d2 = diffCrewPP([blank], [{ agency_id: "SC-1", first_name: "A", last_name: "B", status: "On board", pp_no: "OLD123" }]);
   assert.deepEqual(d2.change, [{ agency_id: "SC-1", changed: ["pp_no"] }], "an empty cell in a column the file carries clears the card");
 });
+
+// Night watch, 16 Oct 2026. crew.status holds four words (storableStatus): TDG's "Reserved Crew" is stored as On Vacation
+// and "Not for Rehire" as Inactive. diffCrew compared the file's word with the stored one, so De Leon, Miranda (Reserved
+// Crew) and Sison (Not for Rehire) were a "Status change from TDG" on every upload (sync_conflict, 10 and 13 Oct 2026) whose
+// Apply wrote the same word back. A real change (Reserved -> On board) is still a change.
+test("diffCrew: Reserved / Not for Rehire over their stored word is no change, a real move still is", () => {
+  const row = (id, st) => mapRow({ "CREW ID": id, "FIRST NAME": "A", "LAST NAME": "B", "CREW STATUS": st });
+  const roster = [
+    { agency_id: "SC-0038392", first_name: "A", last_name: "B", status: "On Vacation" },
+    { agency_id: "SC-0044467", first_name: "A", last_name: "B", status: "Inactive" },
+    { agency_id: "SC-0038378", first_name: "A", last_name: "B", status: "On Vacation" },
+  ];
+  const d = diffCrew([row("SC-0038392", "Reserved Crew"), row("SC-0044467", "Not for Rehire"), row("SC-0038378", "On board")], roster);
+  assert.deepEqual(d.change, [{ agency_id: "SC-0038378", changed: ["status"] }]);
+  assert.equal(d.unchanged, 2);
+});

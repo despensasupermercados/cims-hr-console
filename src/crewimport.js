@@ -337,6 +337,9 @@ export function diffCrew(incoming, existing) {
       // An EMPTY cell clears a value the card still holds (6 Oct 2026: TDG removed it); a column the file
       // does not carry, or a date no reading could parse (reported as unparsed), keeps the stored value.
       if (nv == null) return !!(m._blank && m._blank.includes(f) && ex[f] != null && ex[f] !== "");
+      // crew.status holds four words: compare the word the card CAN hold (Reserved Crew -> On Vacation, Not for
+      // Rehire -> Inactive), or those crew are a "status change" on every upload that writes the same word back.
+      if (f === "status") return String(storableStatus(nv) || nv) !== String(ex[f] == null ? "" : ex[f]);
       return String(nv) !== String(ex[f] == null ? "" : ex[f]);
     });
     // Key every change on the EXISTING agency id — never the id the file happened to use.
