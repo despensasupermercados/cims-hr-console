@@ -23,6 +23,7 @@
 // -----------------------------------------------------------------------------
 import { mastRows, M } from "./cims-mast.js";
 import { REQUIRED_DOCS, OPTIONAL_DOCS, docStatus } from "./compliance.js";
+import { mdShort, addDaysISO } from "./span_md.js";
 
 export const TEMPLATE_ID = "hr.keyman.deploy.v1";
 const T = { ink: "#16293D", body: "#2F3F52", mut: "#6B7C93", border: "#D9E0E9", cloud: "#EEF2F7",
@@ -74,7 +75,7 @@ export function docBadge(crew, today, warnDays = CARD_WARN_DAYS) {
   const title = [
     expired.length ? "Expired: " + short(expired) : "",
     missing.length ? "No expiry on record: " + short(missing) : "",
-    expiring.length ? "Within " + warnDays + " days: " + short(expiring) : "",
+    expiring.length ? "Within " + windowWords(warnDays) + ": " + short(expiring) : "",
   ].filter(Boolean).join(" · ");
   // The expired documents BY NAME (Miguel, 8 Oct 2026: "instead of saying 1 expired ... tag in red all the items that
   // are expired ... if we know that seafarer is going to Europe and he has an expired Schengen, she would know"):
@@ -115,15 +116,18 @@ export function contractDocBadge(crew, signOn, signOff) {
 
 // The warnings that ride on the card and in the email. Expired first, then expiring, then missing.
 // A warning never blocks the send.
+// A warning window in words, never a day count (16 Oct 2026: "we dont count days .. never"): 90 -> "3 months".
+export function windowWords(n) { return { 30: "1 month", 60: "2 months", 90: "3 months" }[n] || (n >= 30 ? Math.floor(n / 30) + " mo" + (n % 30 ? " " + (n % 30) + " d" : "") : n + " d"); }
+
 export function deployWarnings(docs) {
   const rank = { expired: 0, missing: 1, expiring: 2 };
   return (docs || [])
     .filter((d) => d.status !== "ok")
     .map((d) => ({
       doc: d.doc, status: d.status, exp: d.exp, days: d.days, required: !!d.required,
-      text: d.status === "expired" ? (d.doc + " expired" + (d.exp ? " on " + d.exp : "") + (d.days != null ? " (" + (-d.days) + " days ago)" : ""))
+      text: d.status === "expired" ? (d.doc + " expired" + (d.exp ? " on " + d.exp : "") + (d.days != null && d.exp ? " (" + (mdShort(d.exp, addDaysISO(d.exp, -d.days)) || "0 d") + " ago)" : ""))
           : d.status === "missing" ? (d.doc + " has no expiry on record")
-          : (d.doc + " expires " + (d.exp || "") + (d.days != null ? " (in " + d.days + " days)" : "")),
+          : (d.doc + " expires " + (d.exp || "") + (d.days != null && d.exp ? " (in " + (mdShort(addDaysISO(d.exp, -d.days), d.exp) || "0 d") + ")" : "")),
     }))
     .sort((a, b) => (rank[a.status] - rank[b.status]) || (a.required === b.required ? 0 : a.required ? -1 : 1));
 }

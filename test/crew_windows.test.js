@@ -77,7 +77,10 @@ test("hr.statement.v2 renders to the CIMS standard: canonical letterhead, no rgb
   assert.match(m.html, />4 of 4</);
   assert.match(m.html, /Signed off <b style="color:#3E7F2E;">Sep 5, 2026<\/b>/);
   assert.match(m.html, /Contract dates are from TDG's crew file of Oct 10, 2026\./);
-  assert.match(m.text, /Days at sea: 126/);
+  // time at sea in months and days, never a day count (Miguel, 16 Oct 2026: "we dont count days .. never")
+  assert.match(m.text, /Time at sea: 4 mo 3 d/);
+  assert.match(m.html, /4 mo 3 d at sea\./);
+  assert.doesNotMatch(m.html + m.text, /days at sea|Days at sea|126 days/i);
   assert.doesNotMatch(m.html, /intel|Resigned|corrective|feedback/i, "crew-facing: nothing kept for HR only");
   assert.deepEqual(docLines({ med_exp: "2026-10-01", sirb_exp: "2026-12-01", pp_exp: null, usv_exp: "2030-01-01" }, "2026-10-12").map((d) => d.state), ["expired", "soon", "missing", "ok"]);
   assert.equal(span("2026-05-02", "2026-09-05"), "4 months 3 days");

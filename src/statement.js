@@ -43,19 +43,18 @@ function spanTxt(on, off) {
   if (d < 0) { m -= 1; const ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); } // the days left after m whole months from a, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d, never 7 mo -2 d)
   return (m ? m + " mo" : "") + (m && d ? " " : "") + (d || !m ? d + " d" : "");
 }
-// How long a document has left, in words a seafarer reads ("in 1 yr 5 mo", "3 months ago").
+// How long a document has left, in words a seafarer reads ("in 1 yr 5 mo", "in 4 mo 27 d", "3 mo 2 d ago").
 function leftTxt(exp, today) {
   const e = isoD(exp); if (!e) return "";
   const a = e < today ? e : today, b = e < today ? today : e;
   let m = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)); if (+b.slice(8, 10) < +a.slice(8, 10)) m -= 1;
-  const days = Math.round(dayN(b) - dayN(a));
-  const t = m >= 12 ? Math.floor(m / 12) + " yr" + (m % 12 ? " " + (m % 12) + " mo" : "") : (m >= 1 ? m + (m === 1 ? " month" : " months") : days + (days === 1 ? " day" : " days"));
+  const t = m >= 12 ? Math.floor(m / 12) + " yr" + (m % 12 ? " " + (m % 12) + " mo" : "") : spanTxt(a, b); // under a year: months and days ("4 mo 27 d"), never a day count (16 Oct 2026)
   return e < today ? t + " ago" : (e === today ? "today" : "in " + t);
 }
 const portTxt = (p) => String(p || "").split(",")[0].trim().toLowerCase().replace(/(^|[ -])[a-z]/g, (m) => m.toUpperCase());
 // Time at sea in months and days, as the profile says it (Miguel, 13 Oct 2026: "X months at sea .. 1 is enough"): each
 // contract's calendar span to its sign-off or today, added up, days carried into months at 30.
-function seaTime(contracts, today) {
+export function seaTime(contracts, today) {
   let m = 0, d = 0;
   for (const x of contracts || []) {
     const a = isoD(x.on); if (!a || a > today) continue;
@@ -140,7 +139,7 @@ export function composeStatement(data) {
   const cnt = bonus && bonus.contracts != null ? bonus.contracts : null;
   const cntSub = bonus && bonus.contracts_source === "tdg" && bonus.contracts_as_of ? "TDG count, " + fmtD(bonus.contracts_as_of) + (bonus.contracts_added ? " + " + bonus.contracts_added : "") : INT ? "from the contract dates" : "from your contract dates";
   const tiles = [[cnt != null ? String(cnt) : "-", "Completed contracts", cnt != null ? cntSub : "", GREEN],
-    [seaTime(contracts, today), "Time at sea", Number(data.daysWorked || 0).toLocaleString("en-US") + " days, " + contracts.length + " contract" + (contracts.length === 1 ? "" : "s"), GREEN],
+    [seaTime(contracts, today), "Time at sea", contracts.length + " contract" + (contracts.length === 1 ? "" : "s"), GREEN],
     [valid + " of 4", "Documents valid", runOff ? "for this contract, to " + fmtD(runOff) : "required documents, today", docCol],
     [bonus ? String(bonus.count != null ? bonus.count : 0) : "-", "Bonus count", bonus && bonus.nextRungIfClean ? "next clean contract: " + money(bonus.nextRungIfClean) : (bonus && bonus.baseline_set === false ? "consecutive, baseline not set" : "consecutive contracts"), NAVY]];
   const tg = 8, tw = (W - 3 * tg) / 4, tt = 184, th = 58;
@@ -284,7 +283,7 @@ export function composeStatement(data) {
       const t = pdf.top, k = g.contract;
       const title = k ? "Contract " + k.n + "  -  " + (k.ship || "") : "Between contracts";
       const span = k ? fmtD(k.on) + "  to  " + (k.off ? fmtD(k.off) : "open") + (k.current ? "  -  running" : "") : "notes and reports dated outside a contract";
-      const endTxt = k && (k.earlyDays || k.end) ? [k.earlyDays ? "Ended " + k.earlyDays + " days early" : "", k.end ? "Why: " + k.end.reason + (k.end.note ? " - " + k.end.note : "") : ""].filter(Boolean).join("   ") : "";
+      const endTxt = k && (k.earlyDays || k.end) ? [k.earlyDays ? "Ended " + (k.earlyText || "") + " early" : "", k.end ? "Why: " + k.end.reason + (k.end.note ? " - " + k.end.note : "") : ""].filter(Boolean).join("   ") : "";
       pdf.rrect(L, t, W, endTxt ? 34 : 22, 5, NTINT);
       pdf.textAt(title, L + 12, t + 6, { size: 10.5, bold: true, color: NAVY });
       rtext(span, R - 12, t + 7.5, { size: 8, color: SLATE });

@@ -215,6 +215,15 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
   function fmtD(d, withYear) { if (!d) return ""; var p = String(d).slice(0, 10).split("-"); if (p.length < 3) return esc(d); var s = MON[Number(p[1]) - 1] + " " + Number(p[2]); return withYear || p[0] !== String(S.today || "").slice(0, 4) ? s + ", " + esc(p[0]) : s; }
   function first(n) { return String(n || "").split(" ")[0]; }
   function days(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
+  /* time is said in months and days, never a day count (Miguel, 16 Oct 2026: "we dont count days .. never .. 4m 27days"):
+     calendar months from the dates, then the days left, month-end clamped (Jul 31 -> Mar 1 = 7 mo 1 d) */
+  function md(a, b) {
+    a = String(a || "").slice(0, 10); b = String(b || "").slice(0, 10);
+    if (!/^\d{4}-\d\d-\d\d$/.test(a) || !/^\d{4}-\d\d-\d\d$/.test(b) || b < a) return "";
+    var m = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)), d = +b.slice(8, 10) - +a.slice(8, 10);
+    if (d < 0) { m--; var ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); }
+    return m ? m + " mo" + (d ? " " + d + " d" : "") : d + " d";
+  }
   function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }
   function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
   function left(v) { var ms = Date.parse(v) - Date.now(); if (isNaN(ms)) return ""; if (ms <= 0) return "past due"; var h = Math.floor(ms / 3600000); return h >= 1 ? h + " h left" : Math.max(1, Math.round(ms / 60000)) + " min left"; }
@@ -312,8 +321,8 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
     var h = '<div class="sh">Who are you auditing?</div><div class="card">';
     if (!s.aboard.length) h += '<div class="empty">' + ic("user") + "The TDG file has nobody aboard " + esc(s.ship) + ".</div>";
     s.aboard.forEach(function (c) {
-      var day = c.signOn ? Math.max(0, days(c.signOn, S.today)) : null;
-      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (day != null ? " · day " + day : "") + "</div>" + contractBar(c) + "</div>" + ic("caret-right", "go") + "</button>";
+      var aboard = c.signOn ? md(c.signOn, S.today) : "";
+      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (aboard ? " · " + aboard + " aboard" : "") + "</div>" + contractBar(c) + "</div>" + ic("caret-right", "go") + "</button>";
     });
     $("main").innerHTML = h + "</div>";
   }
@@ -382,11 +391,11 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       var h = '<div class="card"><div class="pad"><h2 class="who">' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "");
       if (cur && cur.on && cur.off) {
         var late = cur.of && cur.day > cur.of;
-        h += '<div class="prog"><div class="lb"><span>Contract</span><b>Day ' + esc(cur.day) + (cur.of ? " of " + esc(cur.of) : "") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
+        h += '<div class="prog"><div class="lb"><span>Contract</span><b>' + esc(md(cur.on, S.today) || "0 d") + (cur.off && md(cur.on, cur.off) ? " of " + esc(md(cur.on, cur.off)) : "") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
       }
       h += "</div>";
       var done = (String(c.label || "").match(/^(\d+)/) || [])[1]; if (done == null && /^ongoing/i.test(String(c.label || ""))) done = 0;
-      h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + (cur && cur.day != null ? esc(cur.day) : "?") + '</b><span>days aboard</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
+      h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + (cur && cur.off && md(S.today, cur.off) ? esc(md(S.today, cur.off)) : cur && cur.on ? "Past" : "?") + '</b><span>' + (cur && cur.off && md(S.today, cur.off) ? "to go" : "sign-off") + '</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
       if (c.source) h += '<div class="note" style="text-align:left;margin:-6px 16px 0">Contracts: ' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</div>";
 
       h += needCard(first(b.crew.name), b.machines, b.lines);

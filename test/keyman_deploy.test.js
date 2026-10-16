@@ -43,9 +43,9 @@ test("every required document is listed even when it is missing; an optional one
 test("warnings read in plain words, expired first, and never mention a document that is fine", () => {
   const w = deployWarnings(documentLines(CREW, TODAY));
   assert.deepEqual(w.map((x) => x.status), ["expired", "missing", "expiring"]);
-  assert.match(w[0].text, /Seaman's Book expired on 2026-08-01 \(44 days ago\)/);
+  assert.match(w[0].text, /Seaman's Book expired on 2026-08-01 \(1 mo 13 d ago\)/);
   assert.match(w[1].text, /Passport has no expiry on record/);
-  assert.match(w[2].text, /US C1\/D Visa expires 2026-10-05 \(in 21 days\)/);
+  assert.match(w[2].text, /US C1\/D Visa expires 2026-10-05 \(in 21 d\)/);
   assert.ok(!w.some((x) => /Medical/.test(x.text)));
   assert.deepEqual(deployWarnings(documentLines({ med_exp: "2099-01-01", sirb_exp: "2099-01-01", pp_exp: "2099-01-01", usv_exp: "2099-01-01" }, TODAY)), []);
 });

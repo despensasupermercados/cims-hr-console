@@ -4,6 +4,7 @@
 // It goes to the CREW: it never carries notes, field intel, feedback or anything the console only keeps for HR.
 // Pure: (data) => { subject, html, text }.
 import { mastRows } from "../cims-mast.js";
+import { seaTime } from "../statement.js";
 
 export const TEMPLATE_ID = "hr.statement.v2";
 
@@ -44,7 +45,9 @@ export function statementEmail({ crew = {}, contracts = [], daysWorked = 0, bonu
   const lastOff = last ? (last.act || last.proj || null) : null;
   const running = last && last.on <= t && !last.act;
   const subject = "Your CIMS crew statement · " + fmtDate(t);
-  const pre = "Your crew statement is attached" + (done != null ? " · " + done + " completed contract" + (done === 1 ? "" : "s") : "") + " · " + Number(daysWorked || 0).toLocaleString("en-US") + " days at sea.";
+  // time at sea in months and days, as the PDF tile says it (16 Oct 2026: "we dont count days .. never")
+  const sea = seaTime(contracts, t);
+  const pre = "Your crew statement is attached" + (done != null ? " · " + done + " completed contract" + (done === 1 ? "" : "s") : "") + " · " + sea + " at sea.";
   const rule = (col) => `<td width="33%" valign="top" style="padding:0 6px 0 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td height="3" bgcolor="${col}" style="background:${col};height:3px;font-size:0;line-height:0;">&nbsp;</td></tr>`;
   const stat = (n, label, col) => rule(col) + `<tr><td style="padding:10px 0 0;font-family:${FH};font-size:30px;font-weight:700;color:${T.navy};line-height:1.1;">${esc(n)}</td></tr><tr><td style="font-family:${FB};font-size:12px;color:${T.slate};padding-top:2px;">${esc(label)}</td></tr></table></td>`;
   const docCol = valid === 4 ? T.green : (docs.some((d) => d.state === "expired" || d.state === "missing") ? T.red : T.amber);
@@ -78,7 +81,7 @@ ${mastRows()}
  <div style="font-family:${FB};font-size:15px;line-height:1.55;color:${T.body};padding-top:12px;">It lists your contracts with DG3, your documents and your bonus standing as CIMS holds them today. If anything is wrong, reply to this email — it goes to ${esc(replyName)}.</div>
 </td></tr>
 <tr><td class="px" style="padding:18px 32px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
- ${stat(done != null ? done : "—", "Completed contract" + (done === 1 ? "" : "s"), T.green)}${stat(Number(daysWorked || 0).toLocaleString("en-US"), "Days at sea", T.green)}${stat(valid + " of 4", "Documents valid", docCol)}
+ ${stat(done != null ? done : "—", "Completed contract" + (done === 1 ? "" : "s"), T.green)}${stat(sea, "Time at sea", T.green)}${stat(valid + " of 4", "Documents valid", docCol)}
 </tr></table></td></tr>
 ${card}
 <tr><td class="px" style="padding:20px 32px 24px;font-family:${FB};font-size:14px;line-height:1.6;color:${T.body};">Documents on file: ${esc(docText)}.</td></tr>
@@ -88,7 +91,7 @@ ${card}
     "CIMS - Crew statement - " + fmtDate(t), "",
     "Hi " + first + ", your statement is attached. Please check it.",
     "It lists your contracts with DG3, your documents and your bonus standing as CIMS holds them today. If anything is wrong, reply to this email - it goes to " + replyName + ".", "",
-    "Completed contracts: " + (done != null ? done : "-"), "Days at sea: " + Number(daysWorked || 0), "Documents valid: " + valid + " of 4",
+    "Completed contracts: " + (done != null ? done : "-"), "Time at sea: " + sea, "Documents valid: " + valid + " of 4",
     last ? "Last contract: " + last.ship + ", signed on " + fmtDate(last.on) + (lastOff ? (last.act ? ", signed off " : ", projected sign-off ") + fmtDate(lastOff) : "") : "",
     "Documents on file: " + docText + ".", "",
     "Sent by CIMS for DG3 Cruise Industry Managed Services. This email and its attachment are for " + full + " only.",
