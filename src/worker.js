@@ -6056,7 +6056,7 @@ let TRV=null,TRV_KIND='',TRVALL=[],TF={q:'',year:'',month:'',cat:'',kind:''};
 var TCATS=['air','hotel','medical','visa','food','transport','other'];
 var TCATLAB={air:'Air',hotel:'Hotel',medical:'Medical',visa:'Visa',food:'Food',transport:'Transport',other:'Other'};
 function usd(n){return n?('$'+Number(n).toLocaleString(undefined,{maximumFractionDigits:0})):'—';}
-function usd0(n){return '$'+Number(n||0).toLocaleString(undefined,{maximumFractionDigits:0});}
+function usd0(n){var v=Number(n||0);return (v<0?'-':'')+'$'+Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});} // -$655, never $-655 (16 Oct 2026)
 function pct(a,b){if(b==null||b===0)return null;return (a-b)/b*100;}
 function deltaCell(a,b){var d=pct(a,b);if(d==null)return '<span class=muted style="padding:0">—</span>';var up=d>=0;return '<span style="color:'+(up?'var(--red)':'var(--green-d)')+';font-weight:700">'+(up?'▲':'▼')+' '+Math.abs(d).toFixed(0)+'%</span>';}
 var TBUD=15000; // monthly travel budget — the SERVER's TRAVEL_BUDGET_MO (src/travel.js) overwrites this from /api/travel; never edit here
@@ -6072,23 +6072,42 @@ var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','D
 
 async function renderTravel(){
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2><span class=muted style="padding:0">Loading…</span></div>';
-  try{ TRV=await cachedJson('/api/travel',renderTravel); if(TRV&&TRV.error)throw new Error(TRV.error); }
+  try{ TRV=await cachedJson('/api/travel',travelRefresh); if(TRV&&TRV.error)throw new Error(TRV.error); }
   catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
   if(TRV.budgetMo)TBUD=TRV.budgetMo;
   // TDG's bill (the SGA, §10j) rides beside the workbook: the comparison and the Training centre view read it.
-  try{ SGA=await cachedJson('/api/sga',renderTravel); if(SGA&&SGA.error)SGA=null; }catch(e){ SGA=null; }
+  try{ SGA=await cachedJson('/api/sga',travelRefresh); if(SGA&&SGA.error)SGA=null; }catch(e){ SGA=null; }
   TSEL=null;
   TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};
-  var years=(TRV.years||[]).slice();
+  var years=tYears();
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
     +'<input id=tq placeholder="search a person…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:180px">'
-    +'<select id=tyear onchange="TF.year=this.value;paintTravel()"><option value="">All years</option>'+years.map(function(y){return '<option>'+y+'</option>';}).join('')+'</select>'
+    +'<select id=tyear onchange="TF.year=this.value;paintTravel()">'+tYearOptions(years)+'</select>'
     +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+TMN.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
     +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
     +'<select id=tclient onchange="TF.client=this.value;paintTravel()"><option value="">All cruise lines</option>'+['royal','celebrity','azamara','ncl'].map(function(c){return '<option value="'+c+'">'+TCLIENT[c]+'</option>';}).join('')+'</select>'
     +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="crew" selected>Crew only</option><option value="">Crew + shoreside</option><option value="shoreside">Shoreside only</option><option value="training">Training centre</option></select>'
     +'</div><div id=trbody></div>';
+  paintTravel();
+}
+// The years the tab can show: the workbook's (TRV.years) and the bill's (lines, summary, training) together — the Training
+// centre view has TDG's years even when the workbook does not.
+function tYears(){
+  var ys=(TRV&&TRV.years||[]).slice();
+  if(SGA){[SGA.lines,SGA.summary,SGA.training].forEach(function(a){(a||[]).forEach(function(r){if(r&&r.year&&ys.indexOf(r.year)<0)ys.push(r.year);});});}
+  return ys.sort(function(a,b){return b-a;});
+}
+function tYearOptions(years){return '<option value="">All years</option>'+years.map(function(y){return '<option value="'+y+'">'+y+'</option>';}).join('');}
+// The background revalidation (cachedJson) lands here: the fresh answers are taken from the cache, the year list is
+// refreshed with the selection kept, and the body repaints under the SAME filters. Before 16 Oct 2026 it re-ran
+// renderTravel, which reset every selector and the search box to the defaults.
+function travelRefresh(){
+  var e=API_CACHE['/api/travel'],sg=API_CACHE['/api/sga'];
+  if(!e||!e.data||e.data.error||!document.getElementById('tyear')){renderTravel();return;}
+  TRV=e.data;TRVALL=TRV.records||[];if(TRV.budgetMo)TBUD=TRV.budgetMo;
+  if(sg&&sg.data&&!sg.data.error)SGA=sg.data;
+  var sel=document.getElementById('tyear'),keep=sel.value;sel.innerHTML=tYearOptions(tYears());sel.value=keep;if(sel.value!==keep){sel.value='';TF.year='';}
   paintTravel();
 }
 var SGA=null;
@@ -6103,6 +6122,7 @@ function paintTraining(){
   var LY=TF.year?+TF.year:ys[0], PY=LY-1;
   var today=(SGA&&SGA.today)||(TRV&&TRV.today)||new Date().toISOString().slice(0,10),curY=+today.slice(0,4),curM=+today.slice(5,7);
   var ly=rows.filter(function(r){return r.year===LY;}), py=rows.filter(function(r){return r.year===PY;});
+  if(!ly.length){t.innerHTML='<div class="card" style="max-width:none"><b>No training-centre costs on file for '+LY+'.</b><div class=csub style="margin-top:6px">TDG’s bills on file carry '+ys.join(', ')+'. Pick one of those years, or All years for the latest.</div></div>';return;}
   var sum=function(rs,k){return rs.reduce(function(a,r){return a+(k?(+r[k]||0):(+r.total||0));},0);};
   var lastMo=Math.max.apply(null,ly.map(function(r){return r.month;}).concat([0]));
   var pySame=py.filter(function(r){return r.month<=lastMo;});
@@ -6147,15 +6167,18 @@ function sgaOriginalCell(f){
   if(s.r2_key)return '<a href="/api/sga/file?hash='+encodeURIComponent(s.hash)+'" title="'+escHtml(s.name||'')+'">kept &middot; download</a>';
   return '<span class=muted title="'+escHtml(s.note||'')+'">not kept</span>';
 }
-function sgaCompareHTML(sc,LY){
+function sgaCompareHTML(sc,LY,monthsSel,cat){
   // Bill per month: the per-crew lines when the month has them, else the bill's MONTHLY SUMMARY row (the sheet the connector
   // always delivers — 15 Oct 2026); the previous year's same month from the summary rows for the year-over-year.
+  // monthsSel (16 Oct 2026): the Month filter — only those months; cat: one of air / hotel / medical / visa shows that
+  // column group alone (the bill has no comparable column for food / transport / other: all four stay).
   if(!SGA)return '';
-  var L=(SGA.lines||[]).filter(function(l){return l.year===LY;}), SM=(SGA.summary||[]).filter(function(r){return r.year===LY;}), PYR=(SGA.summary||[]).filter(function(r){return r.year===LY-1;});
-  if(!L.length&&!SM.length)return '<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+'</div><div class=hint>No SGA month loaded for '+LY+' yet — the SharePoint pickup loads TDG’s DG3 SGA EXCEL workbook each morning, or drop it on Upload data.</div>';
+  var inSel=function(m){return !monthsSel||monthsSel.indexOf(m)>=0;};
+  var L=(SGA.lines||[]).filter(function(l){return l.year===LY&&inSel(l.month);}), SM=(SGA.summary||[]).filter(function(r){return r.year===LY&&inSel(r.month);}), PYR=(SGA.summary||[]).filter(function(r){return r.year===LY-1;});
+  if(!L.length&&!SM.length)return '<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+(monthsSel?' · '+TMN[monthsSel[0]]:'')+'</div><div class=hint>No SGA month loaded for '+(monthsSel?TMN[monthsSel[0]]+' ':'')+LY+' yet — finance emails TDG’s DG3 SGA EXCEL workbook to sga@cims.work once a month, or drop it on Upload data.</div>';
   var lineMonths=new Set(L.map(function(l){return l.month;}));
   var months=Array.from(new Set(L.map(function(l){return l.month;}).concat(SM.map(function(r){return r.month;})))).sort(function(a,b){return a-b;});
-  var cats=[['air','air','Air'],['hotel','hotel','Hotel'],['medical','medical','Medical'],['visa','visa','Visa']];
+  var cats=[['air','air','Air'],['hotel','hotel','Hotel'],['medical','medical','Medical'],['visa','visa','Visa']].filter(function(c){return !cat||!['air','hotel','medical','visa'].includes(cat)||c[0]===cat;});
   var smRow=function(m){return SM.find(function(r){return r.month===m;});};
   var sgaSum=function(m,k){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l[k]||0)+(k==='medical'?(+l.medical_repat||0):0);},0);var r=smRow(m);return r?(+r[k]||0)+(k==='medical'?(+r.medical_repat||0):0):0;};
   var billAll=function(m){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l.amount||0);},0);var r=smRow(m);return r?(+r.crew_total||0):0;};
@@ -6193,90 +6216,121 @@ function pv(v,l,col){return '<div><div style="font-family:Outfit;font-size:24px;
 function travelDrill(i){TSEL=TLB[i];paintTravel();window.scrollTo(0,0);}
 function travelBack(){TSEL=null;paintTravel();}
 
+// EVERY FILTER ACTS ON EVERY SECTION (Miguel, 16 Oct 2026: "I dont think this filter is working correctly .. review this and
+// all the filters and fix the bugs"). Year = the year shown (All years: the latest year on the overview, every year in the
+// line items, said so on the tile); Month narrows the PERIOD from the year's closed months to that month; Category narrows
+// every amount to that cost line (no budget pacing then: the $15,000 is for all travel together); cruise line and
+// Crew / shoreside scope the rows (tScope); the search box lists people inside the same period. The background refresh
+// (travelRefresh) repaints the body and keeps every filter — until 16 Oct 2026 it re-ran renderTravel, which reset them to
+// the defaults under Rita's hands. Pinned by test/travel_filters.test.js.
+function tPeriod(sc){
+  var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
+  var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
+  var today=(TRV&&TRV.today)||new Date().toISOString().slice(0,10),curY=+today.slice(0,4),curM=+today.slice(5,7);
+  // YTD = CLOSED calendar months, the server's word (/api/travel closed): the running month is in progress, not a
+  // budget month — counting it charged a full month of budget against a few days of invoices (15 Oct 2026).
+  var lastMo=(TRV&&TRV.closed&&LY!=null&&TRV.closed[LY]!=null)?TRV.closed[LY]:((LY===curY)?Math.max(0,curM-1):(LY<curY?12:0));
+  var openMo=(LY===curY)?curM:0;                  // the month in progress (0 = none: a past year)
+  var mo=TF.month?+TF.month:0;
+  var months=[];if(mo)months.push(mo);else for(var mm=1;mm<=lastMo;mm++)months.push(mm);
+  var inProgress=!!mo&&mo===openMo, ahead=!!mo&&LY===curY&&mo>curM;
+  var budgetMonths=mo?((inProgress||ahead)?0:1):lastMo;
+  var label=mo?(TMN[mo]+' '+LY+(inProgress?' · in progress':(ahead?' · not started':''))):('YTD '+LY+' · '+lastMo+' closed mo'+(openMo?(' · '+TMN[openMo]+' in progress'):'')+(TF.year?'':' · latest year'));
+  var span=mo?TMN[mo]:(lastMo?(TMN[1]+'–'+TMN[lastMo]):'—');
+  return {ys:ys,LY:LY,PY:PY,curY:curY,curM:curM,lastMo:lastMo,openMo:openMo,mo:mo,months:months,inProgress:inProgress,ahead:ahead,budgetMonths:budgetMonths,label:label,span:span,cat:TF.cat||null};
+}
+// The selectors that mean nothing on the Training centre view (its figures are TDG's statement, not the workbook rows) are
+// greyed out there and live again on every other view.
+function tFilterChrome(){
+  var off=TF.kind==='training';
+  ['tmonth','tcat','tclient','tq'].forEach(function(id){var el=document.getElementById(id);if(el){el.disabled=off;el.title=off?'Not used on the Training centre view':'';}});
+}
 function paintTravel(){
+  tFilterChrome();
   if(TF.kind==='training')return paintTraining();
   if(TSEL)return paintTravelCrew();
   if((TF.q||'').trim())return paintTravelSearch();
   var sc=tScope();
-  var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
-  var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
+  var P=tPeriod(sc),LY=P.LY,PY=P.PY,lastMo=P.lastMo,openMo=P.openMo,months=P.months,cat=P.cat,catName=cat?TCATLAB[cat]:'';
   if(!LY){document.getElementById('trbody').innerHTML='<div class=muted>No travel data for this filter.</div>';return;}
-  var today=(TRV&&TRV.today)||new Date().toISOString().slice(0,10),curY=+today.slice(0,4),curM=+today.slice(5,7);
-  // YTD = CLOSED calendar months, the server's word (/api/travel closed): the running month is in progress, not a
-  // budget month — counting it charged a full month of budget against a few days of invoices (15 Oct 2026).
-  var lastMo=(TRV&&TRV.closed&&TRV.closed[LY]!=null)?TRV.closed[LY]:((LY===curY)?Math.max(0,curM-1):(LY<curY?12:0));
-  var openMo=(LY===curY)?curM:0;                  // the month in progress (0 = none: a past year)
-  var monthsLY=[];for(var mm=1;mm<=lastMo;mm++)monthsLY.push(mm);
   var dataMo={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){dataMo[r.month]=1;}); // months with any record (for the table)
-  var ytdA=tSum(sc,LY,monthsLY,null), ytdB=TBUD*lastMo, ytdP=PY?tSum(sc,PY,monthsLY,null):null;
-  var air=tSum(sc,LY,monthsLY,'air');
-  var byp={};TLBL={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){var k=tKey(r);byp[k]=(byp[k]||0)+r.total;TLBL[k]=tLabel(r);});
+  var hasPY=!!PY&&sc.some(function(r){return r.year===PY;});   // no rows for the previous year → '—', never '$0'
+  var ytdA=tSum(sc,LY,months,cat), ytdB=TBUD*P.budgetMonths, ytdP=hasPY?tSum(sc,PY,months,cat):null;
+  var allA=cat?tSum(sc,LY,months,null):ytdA;        // every category, for the share tile
+  var air=tSum(sc,LY,months,'air');
+  var byp={};TLBL={};sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0;}).forEach(function(r){var v=cat?(r[cat]||0):r.total;if(cat&&!v)return;var k=tKey(r);byp[k]=(byp[k]||0)+v;TLBL[k]=tLabel(r);});
   var pctUsed=Math.round(ytdA/(TBUD*12)*100);
-  var fullProj=lastMo?(ytdA/lastMo*12):0;
+  var fullProj=P.mo?0:(lastMo?(ytdA/lastMo*12):0);
   var h='';
-  // The budget is the whole fleet's crew travel (Miguel, 15 Oct 2026: no other budget exists). A cruise-line slice or the
-  // shoreside view has no budget of its own: actuals only, no pacing — never "$134k under budget" for NCL alone.
-  var budgeted=!TF.client&&TF.kind==='crew';
+  // The budget is the whole fleet's crew travel (Miguel, 15 Oct 2026: no other budget exists). A cruise-line slice, the
+  // shoreside view or ONE category has no budget of its own: actuals only, no pacing — never "$134k under budget" for NCL alone.
+  var budgeted=!TF.client&&TF.kind==='crew'&&!cat;
+  var scopeName=TF.client?TCLIENT[TF.client]:(TF.kind==='shoreside'?'shoreside':(cat?catName+' alone':'this view'));
+  var actualLabel=(cat?catName+' · ':'')+P.label;
+  var vsTile=tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same '+(P.mo?'month':'period')+(ytdP!=null?(' · '+usd0(ytdP)):''));
+  var shareTile=cat?tile(usd0(ytdA)+' · '+(allA?Math.round(ytdA/allA*100):0)+'%',catName+' share of '+usd0(allA)+' all categories','amber'):tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber');
+  var dim=function(m){return P.mo&&m!==P.mo?';opacity:.35':'';};
   if(!budgeted){
     h+='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:6px">'
-      +tile(usd0(ytdA),'YTD actual '+LY+' · '+lastMo+' closed mo'+(openMo?(' · '+TMN[openMo]+' in progress'):''))
-      +tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same period'+(ytdP!=null?(' · '+usd0(ytdP)):''))
-      +tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber')
-      +tile(usd0(fullProj),'run-rate × 12 · no budget for '+(TF.client?TCLIENT[TF.client]:(TF.kind==='shoreside'?'shoreside':'this view')))+'</div>';
-    h+='<div class=zlabel>Monthly spend '+LY+(TF.client?' · '+TCLIENT[TF.client]:'')+'</div>';
+      +tile(usd0(ytdA),actualLabel)
+      +vsTile
+      +shareTile
+      +(P.mo?tile(usd0(TBUD),'monthly budget, all crew travel · no pacing for '+scopeName):tile(usd0(fullProj),'run-rate × 12 · no budget for '+scopeName))+'</div>';
+    h+='<div class=zlabel>Monthly spend '+LY+(cat?' · '+catName:'')+(TF.client?' · '+TCLIENT[TF.client]:'')+'</div>';
     h+='<div class="card" style="max-width:none">';
-    var maxv0=1;for(var m0=1;m0<=12;m0++){var a0=tSum(sc,LY,[m0],null);if(a0>maxv0)maxv0=a0;}
+    var maxv0=1;for(var m0=1;m0<=12;m0++){var a0=tSum(sc,LY,[m0],cat);if(a0>maxv0)maxv0=a0;}
     h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
-    for(var m1=1;m1<=12;m1++){var a1=tSum(sc,LY,[m1],null);
-      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1">'
+    for(var m1=1;m1<=12;m1++){var a1=tSum(sc,LY,[m1],cat);
+      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1'+dim(m1)+'">'
         +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a1?usd0(a1):'')+'</div>'
         +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+(a1/maxv0*100).toFixed(1)+'%;background:var(--navy)"></div>'
         +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m1]+'</div></div>';}
-    h+='</div><div class=hint style="margin-top:6px">The $'+Number(TBUD*12).toLocaleString()+' budget covers all crew travel together; a single cruise line or shoreside is shown against last year only.</div></div>';
+    h+='</div><div class=hint style="margin-top:6px">The $'+Number(TBUD*12).toLocaleString()+' budget covers all crew travel together; a single cruise line, shoreside or one category is shown against last year only.</div></div>';
   } else {
   h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:6px">'
-    +tile(usd0(ytdA),'YTD actual '+LY+' · '+lastMo+' closed mo'+(openMo?(' · '+TMN[openMo]+' in progress'):''))
-    +tile('<span style="color:'+(ytdA<=ytdB?'var(--green-d)':'var(--red)')+'">'+usd0(Math.abs(ytdB-ytdA))+'</span>',(ytdA<=ytdB?'under':'over')+' budget YTD · '+usd0(ytdB))
-    +tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same period'+(ytdP!=null?(' · '+usd0(ytdP)):''))
-    +tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber')
-    +tile('<span style="color:'+(pctUsed<=100?'var(--green-d)':'var(--red)')+'">'+pctUsed+'%</span>','of '+usd0(TBUD*12)+' annual budget used')+'</div>';
-  h+='<div class=zlabel>Plan vs actual — budget pacing '+LY+'</div>';
+    +tile(usd0(ytdA),actualLabel)
+    +(P.budgetMonths?tile('<span style="color:'+(ytdA<=ytdB?'var(--green-d)':'var(--red)')+'">'+usd0(Math.abs(ytdB-ytdA))+'</span>',(ytdA<=ytdB?'under':'over')+' budget '+(P.mo?TMN[P.mo]:'YTD')+' · '+usd0(ytdB)):tile('—','budget · '+(P.inProgress?'month in progress':'month not started')))
+    +vsTile
+    +shareTile
+    +tile('<span style="color:'+(pctUsed<=100?'var(--green-d)':'var(--red)')+'">'+pctUsed+'%</span>','of '+usd0(TBUD*12)+' annual budget'+(P.mo?' · '+TMN[P.mo]+' alone':' used'))+'</div>';
+  h+='<div class=zlabel>Plan vs actual — budget pacing '+LY+(P.mo?' · '+TMN[P.mo]+' highlighted':'')+'</div>';
   h+='<div class="card" style="max-width:none">';
   h+='<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px">'
-    +pv(usd0(ytdA),'YTD actual','var(--navy)')
-    +pv(usd0(ytdB),'YTD budget','var(--muted)')
-    +pv((ytdA<=ytdB?'+':'')+usd0(ytdB-ytdA),'variance ('+(ytdA<=ytdB?'under':'over')+')',ytdA<=ytdB?'var(--green-d)':'var(--red)')
-    +pv(usd0(fullProj),'projected FY vs '+usd0(TBUD*12),fullProj<=TBUD*12?'var(--green-d)':'var(--red)')
+    +pv(usd0(ytdA),(P.mo?TMN[P.mo]:'YTD')+' actual','var(--navy)')
+    +pv(P.budgetMonths?usd0(ytdB):'—',(P.mo?TMN[P.mo]:'YTD')+' budget','var(--muted)')
+    +(P.budgetMonths?pv((ytdA<=ytdB?'+':'')+usd0(ytdB-ytdA),'variance ('+(ytdA<=ytdB?'under':'over')+')',ytdA<=ytdB?'var(--green-d)':'var(--red)'):pv('—','variance · '+(P.inProgress?'month in progress':'month not started'),'var(--muted)'))
+    +(P.mo?pv('—','projected FY · All months to see it','var(--muted)'):pv(usd0(fullProj),'projected FY vs '+usd0(TBUD*12),fullProj<=TBUD*12?'var(--green-d)':'var(--red)'))
     +'</div>';
   var maxv=TBUD;for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);if(a>maxv)maxv=a;}
   var budTop=(1-TBUD/maxv)*100;
   h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
   h+='<div style="position:absolute;left:0;right:0;top:'+budTop.toFixed(1)+'%;border-top:2px dashed var(--amber)"></div>';
   for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var hp=(a/maxv*100).toFixed(1);var over=a>TBUD;
-    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1">'
+    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1'+dim(m)+'">'
       +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a?usd0(a):'')+'</div>'
       +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+hp+'%;background:'+(over?'var(--red)':'var(--navy)')+'"></div>'
       +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';}
   h+='</div>';
   h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = run-rate of the closed months × 12.</div>';
   h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">Variance</th><th style="text-align:right">'+(PY||'PY')+'</th></tr></thead><tbody>';
-  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;var open=(m===openMo);
-    if(!has&&!p&&!open)continue;
-    h+='<tr'+(open?' style="color:var(--muted)"':'')+'><td>'+TMN[m]+(open?' <span class=hint style="display:inline;margin:0">in progress</span>':'')+'</td><td style="text-align:right">'+(has||open?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+(open?'—':usd0(TBUD))+'</td><td style="text-align:right">'+(has&&!open?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
-  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>YTD</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+usd0(ytdB)+'</b></td><td style="text-align:right"><b><span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span></b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
+  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;var open=(m===openMo);var pick=(m===P.mo);
+    if(!has&&!p&&!open&&!pick)continue;
+    h+='<tr style="'+(open?'color:var(--muted);':'')+(pick?'background:rgba(30,60,120,.07);font-weight:700':'')+'"><td>'+TMN[m]+(open?' <span class=hint style="display:inline;margin:0">in progress</span>':'')+'</td><td style="text-align:right">'+(has||open?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+(open?'—':usd0(TBUD))+'</td><td style="text-align:right">'+(has&&!open?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
+  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>'+(P.mo?TMN[P.mo]:'YTD')+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+(P.budgetMonths?usd0(ytdB):'—')+'</b></td><td style="text-align:right"><b>'+(P.budgetMonths?('<span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span>'):'—')+'</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
   h+='</tbody></table></div>';
   } // budgeted
-  h+='<div class=zlabel style="margin-top:18px">STLY — same time last year · '+TMN[1]+'–'+TMN[lastMo]+' ('+LY+' vs '+(PY||'PY')+') · top spenders</div>';
+  h+='<div class=zlabel style="margin-top:18px">STLY — same time last year · '+P.span+' ('+LY+' vs '+(PY||'PY')+')'+(cat?' · '+catName:'')+' · top spenders</div>';
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
   var yc='<div><table class=tbl><thead><tr><th>Category</th><th style="text-align:right">STLY '+(PY||'')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
-  TCATS.forEach(function(c){var l=tSum(sc,LY,monthsLY,c),p=PY?tSum(sc,PY,monthsLY,c):null;if(!l&&!p)return;yc+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+(p==null?'—':deltaCell(l,p))+'</td></tr>';});
+  (cat?[cat]:TCATS).forEach(function(c){var l=tSum(sc,LY,months,c),p=hasPY?tSum(sc,PY,months,c):null;if(!l&&!p)return;yc+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+(p==null?'—':deltaCell(l,p))+'</td></tr>';});
   yc+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right">'+(ytdP==null?'—':deltaCell(ytdA,ytdP))+'</td></tr></tbody></table></div>';
   TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,12);
-  var lh='<div><table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">Total</th></tr></thead><tbody>';
-  TLB.forEach(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&tKey(r)===n;});var k=(rs[0]||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(k!=='shoreside'&&!(rs[0]||{}).agency_id?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
-  lh+='</tbody></table><div class=hint style="margin-top:6px">Click a name for their full history. One person, every spelling.</div></div>';
+  var lh='<div><table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">'+(cat?catName:'Total')+'</th></tr></thead><tbody>';
+  TLB.forEach(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||r[cat]>0);});var k=(rs[0]||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(k!=='shoreside'&&!(rs[0]||{}).agency_id?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
+  if(!TLB.length)lh+='<tr><td colspan=4 class=muted>Nobody in this period.</td></tr>';
+  lh+='</tbody></table><div class=hint style="margin-top:6px">'+(P.mo?TMN[P.mo]+' '+LY:P.span+' '+LY)+(cat?' · '+catName+' only':'')+'. Click a name for their full history. One person, every spelling.</div></div>';
   h+=yc+lh+'</div>';
-  if(TF.kind!=='shoreside'&&!TF.client)h+=sgaCompareHTML(sc,LY);
+  if(TF.kind!=='shoreside'&&!TF.client)h+=sgaCompareHTML(sc,LY,P.mo?[P.mo]:null,cat);
   // The names the registry cannot place (src/travel_match.js): Rita's clean-up list — fix the spelling in the workbook
   // and re-upload, or the spend never reaches a profile. NCL-prep people are not crew yet; they stay listed, tagged.
   var un=(TRV.unmatched||[]).filter(function(u){return !TF.year||u.years.indexOf(+TF.year)>=0;});
@@ -6286,18 +6340,19 @@ function paintTravel(){
     un.slice(0,40).forEach(function(u){var why=u.how==='ambiguous'?'two crew share this name — add the first name':/\\bncl\\b/i.test(u.crew_name)?'NCL prep — not on the TDG registry':'no crew with this surname — check the spelling';h+='<tr><td>'+escHtml(u.crew_name)+'</td><td class=muted style="padding:6px 8px">'+why+'</td><td style="text-align:right">'+u.rows+'</td><td style="text-align:right">'+usd0(u.total)+'</td><td>'+u.years.join(', ')+'</td></tr>';});
     h+='</tbody></table><div class=hint style="margin-top:6px">Matched by surname + first name, accents and typos tolerated; a note in brackets is ignored. Fix the name in the workbook and re-upload the year.</div>';
   }
-  var yrRows=sc.filter(function(r){return r.year===LY&&r.total>0;});
-  var tt=yrRows.map(function(r){return r.total;}).sort(function(a,b){return a-b;});
+  var val=function(r){return cat?(r[cat]||0):r.total;};
+  var yrRows=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&val(r)>0;});
+  var tt=yrRows.map(val).sort(function(a,b){return a-b;});
   var med=tt.length?tt[Math.floor(tt.length/2)]:0;
-  var outs=yrRows.filter(function(r){return r.total>med*2.5;}).sort(function(a,b){return b.total-a.total;}).slice(0,8);
+  var outs=yrRows.filter(function(r){return val(r)>med*2.5;}).sort(function(a,b){return val(b)-val(a);}).slice(0,8);
   if(outs.length){
-    h+='<div class=zlabel style="margin-top:18px">Anomalies — single movements &gt; 2.5× median ('+usd0(med)+')</div>';
-    h+='<table class=tbl><thead><tr><th>Mo</th><th>Person</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">Total</th></tr></thead><tbody>';
-    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(r.total)+'</b></td></tr>';});
+    h+='<div class=zlabel style="margin-top:18px">Anomalies — single movements &gt; 2.5× median ('+usd0(med)+(cat?' '+catName:'')+')</div>';
+    h+='<table class=tbl><thead><tr><th>Mo</th><th>Person</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">'+(cat?catName:'Total')+'</th></tr></thead><tbody>';
+    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(val(r))+'</b></td></tr>';});
     h+='</tbody></table>';
   }
   var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;return true;});
-  h+='<div class=zlabel style="margin-top:18px">Line items'+(rows.length?(' · '+rows.length):'')+'</div>';
+  h+='<div class=zlabel style="margin-top:18px">Line items'+(TF.year?'':' · all years')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+catName:'')+(rows.length?(' · '+rows.length):'')+'</div>';
   h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Ship</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
     +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':(r.client==='ncl'?'<span class="cchip amber">NCL</span>':'crew'))+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+escHtml(r.ship||'')+'</td><td>'+escHtml(r.crew_name)+(r.crew_display&&r.crew_display!==r.crew_name?' <span class=muted style="padding:0">· '+escHtml(r.crew_display)+'</span>':'')+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=14 class=muted>No line items match these filters.</td></tr>';
   h+='</tbody></table>';
@@ -6327,15 +6382,18 @@ function profileHTML(k){
 }
 function paintTravelCrew(){document.getElementById('trbody').innerHTML='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back</div>'+profileHTML(TSEL);}
 function paintTravelSearch(){
-  var q=(TF.q||'').trim().toLowerCase();var sc=tScope();
+  var q=(TF.q||'').trim().toLowerCase();
+  // the Year / Month / Category selectors narrow the search like every other section (16 Oct 2026)
+  var cat=TF.cat||null,sc=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(cat&&!(r[cat]>0))return false;return true;});
+  var within=(TF.year?' in '+TF.year:'')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+TCATLAB[cat]:'');
   var seen={},names=[],tot={};TLBL={};
-  sc.forEach(function(r){var k=tKey(r);if(!seen[k]){seen[k]=1;names.push(k);}tot[k]=(tot[k]||0)+r.total;TLBL[k]=tLabel(r);}); // tScope already applied the search to both spellings
+  sc.forEach(function(r){var k=tKey(r);if(!seen[k]){seen[k]=1;names.push(k);}tot[k]=(tot[k]||0)+(cat?(r[cat]||0):r.total);TLBL[k]=tLabel(r);}); // tScope already applied the search to both spellings
   names.sort(function(a,b){return (tot[b]||0)-(tot[a]||0);});
   var t=document.getElementById('trbody');if(!t)return;
-  if(names.length===0){t.innerHTML='<div class=muted style="padding:20px 2px">No one matches "'+escHtml(TF.q)+'". Try another name, or change the Crew / shoreside filter.</div>';return;}
+  if(names.length===0){t.innerHTML='<div class=muted style="padding:20px 2px">No one matches "'+escHtml(TF.q)+'"'+within+'. Try another name, or widen the year, month, category or Crew / shoreside filter.</div>';return;}
   if(names.length===1){t.innerHTML='<div class=hint style="margin-bottom:8px">Showing every expense for this person · clear the search box to return to the overview.</div>'+profileHTML(names[0]);return;}
-  var h='<div class=zlabel>'+names.length+' people match "'+escHtml(TF.q)+'" — click one for their full history</div>';
-  h+='<table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+  var h='<div class=zlabel>'+names.length+' people match "'+escHtml(TF.q)+'"'+within+' — click one for their full history</div>';
+  h+='<table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">'+(cat?TCATLAB[cat]:'Total')+'</th></tr></thead><tbody>';
   TLB=names.slice(0,60);
   TLB.forEach(function(n,i){var rs=sc.filter(function(r){return tKey(r)===n;});var k=(rs[0]||{}).kind;h+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(tot[n])+'</b></td></tr>';});
   h+='</tbody></table>';
