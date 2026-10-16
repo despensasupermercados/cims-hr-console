@@ -69,7 +69,6 @@ button{font:inherit;color:inherit}
 .ttl{display:flex;align-items:center;gap:12px;margin-bottom:4px}
 .logo{width:40px;height:40px;border-radius:11px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
 .top.gone{display:none}
-.hero .who{color:#B9C6D6;font-size:14px}
 .sbox{position:relative;margin-top:16px}
 .sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
 .search::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}
@@ -214,8 +213,6 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
   function ic(n, cls) { return (IC[n] || "").replace("<svg ", '<svg class="ic' + (cls ? " " + cls : "") + '" '); }
   var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   function fmtD(d, withYear) { if (!d) return ""; var p = String(d).slice(0, 10).split("-"); if (p.length < 3) return esc(d); var s = MON[Number(p[1]) - 1] + " " + Number(p[2]); return withYear || p[0] !== String(S.today || "").slice(0, 4) ? s + ", " + esc(p[0]) : s; }
-  function todayLong() { var t = S.today ? new Date(S.today + "T12:00:00") : new Date(); return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][t.getDay()] + ", " + MON[t.getMonth()] + " " + t.getDate(); }
-  function nameOf(email) { var e = String(email || "").split("@")[0].split("."); return e.map(function (w) { return w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : ""; }).join(" "); }
   function first(n) { return String(n || "").split(" ")[0]; }
   function days(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 86400000); }
   function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }
@@ -269,7 +266,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
   }
   function shipsView() {
     top("", "", "", "", false); dock("");
-    hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="who">' + (S.me ? esc(nameOf(S.me)) + " · " : "") + esc(todayLong()) + '</div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
+    hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
     var qi = $("q"), qx = $("qx");
     qi.addEventListener("input", function () { S.q = qi.value; qx.hidden = !S.q; shipsList(); });
     qx.addEventListener("click", function () { S.q = ""; qi.value = ""; qx.hidden = true; shipsList(); qi.focus(); });
@@ -619,7 +616,6 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
   Promise.all([api("/api/me"), api("/api/audit/ships")]).then(function (r) {
     S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships;
     var h = location.hash.replace(/^#/, ""); if (!h) shipsList(); else if (h.indexOf("s=") === 0) route();
-    if (!h) { var w = $("heroslot").querySelector(".who"); if (w) w.textContent = nameOf(S.me) + " · " + todayLong(); }
   }).catch(fail);
 })();
 </script>

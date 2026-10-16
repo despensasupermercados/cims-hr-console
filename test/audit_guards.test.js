@@ -49,3 +49,11 @@ test("the audit's table guard is keyed on its DDL, so a new table is created in 
   assert.match(w, /const ensureAudit = memoEnsure\(ensureAuditTables, AUDIT_DDL\.join\(/, "keyed on the source alone, audit_plain and audit_eval were never created (15 Oct 2026)");
   assert.match(w, /etagFor\(fn\.toString\(\) \+ \(version \?/);
 });
+
+// Miguel, 16 Oct 2026, on the home screen's "Miguel Sanmartin · Fri, Oct 16" under the title: "i dont think the name is needed
+// here". It helped nobody audit, and on the open site (no sign-in) every action is recorded as AUDIT_OPEN_AS anyway.
+test("the audit home carries no signed-in name or date line under its title", () => {
+  const ui = code("audit_ui.js");
+  assert.doesNotMatch(ui, /nameOf\(|todayLong\(/, "no name / date helper is called");
+  assert.doesNotMatch(ui, /<h1>Printshop audit<\/h1><\/div><div class="who">/, "the title is followed by the search box, not a subtitle");
+});
