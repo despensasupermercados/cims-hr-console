@@ -844,8 +844,13 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   together; the share tile reads "Hotel share of $13,321 all categories"); All years shows the latest year on the overview
   and SAYS so ("latest year" on the tile, "all years" on the line items — the budget is annual, an all-years aggregate has
   no meaning against it); the search lists people inside the period; a previous year with no rows reads "—", never "$0";
-  the Training centre view greys out the selectors it does not use; `usd0` prints "-$655". Pinned by
-  `test/travel_filters.test.js`; `test/perf_invariants.test.js` names `travelRefresh` beside `crewRefresh`.
+  the Training centre view greys out the selectors it does not use; `usd0` prints "-$655". **A quiet year-over-year on every
+  monthly chart** (Miguel, the same day, on the Training centre chart: "a very settle YOY comparison when filtered"; PR #270):
+  ONE helper `tBars` draws last year's same month as a pale bar beside each month, a small muted percentage under the month
+  (only for closed months — never "-100%" on months not yet run; hover for both figures) and one legend line; no previous
+  year → the plain bar. Used by the Training centre chart and both Travel tab charts (the pacing one keeps its dashed budget
+  line and red months). Pinned by `test/travel_filters.test.js`; `test/perf_invariants.test.js` names `travelRefresh` beside
+  `crewRefresh`.
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`, flat every month in
   every year — Miguel, 16 Oct 2026: "I kept it all at 15000 per month"); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
