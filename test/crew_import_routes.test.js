@@ -176,7 +176,8 @@ test("apply is MONEY_USERS only; stage is any session", async () => {
 
 // Ship flags (Miguel, 2026-09-05): the same flag was re-raised every weekly upload (411 open rows
 // for 58 crew+ship pairs on prod) and nothing ever closed one.
-test("apply: a ship flag the live board already satisfies is not inserted, and the open copy closes (resolved=2)", async () => {
+test("apply: a ship flag the live board already satisfies is not inserted, and the open copy closes (resolved=2)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-16T12:00:00Z") }); // the leg below ends 2027-02-01: "already satisfies" needs a clock inside it
   const env = { DB: fakeDB({ existing: EXISTING, openFlags: [{ id: "f1", agency_id: "SC-1", new_value: "Celebrity Apex" }] }) };
   const deps = { boardLegs: async () => [{ ours: true, sc: "SC-1", ship: "Apex", on: "2026-08-01", off: "2027-02-01" }] };
   const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h11" }), env)).json();
