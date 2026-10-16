@@ -10,6 +10,7 @@
 // while TDG's file and Rita's recorded edit both had him off Silhouette on Sep 5; sea-days counted 163 instead
 // of 126; Ray's feedback, the intel card and the "Resigned." comment were nowhere on the page.
 import { VESSEL_REF } from "./vessel_ref.js";
+import { mdShort } from "./span_md.js";
 import { buildShipKeys, canonShipWith, normShip, AZAMARA_SHORT } from "./shipname.js";
 
 const SHIP_KEYS = buildShipKeys(VESSEL_REF);
@@ -187,6 +188,8 @@ export function buildCrewProfile(input) {
       held: !!l.heldByFile, confirmed: !!l.offConfirmed, reliever: l.reliever || null,
       embark: (e && e.embark) || l.embark || null, disembark: (e && e.disembark) || l.disembark || null,
       planned, earlyDays: earlyBy != null && earlyBy > EARLY_DAYS ? earlyBy : 0,
+      // how much earlier, in months and days (16 Oct 2026: "we dont count days .. never"); earlyDays stays the rule's number
+      earlyText: earlyBy != null && earlyBy > EARLY_DAYS ? mdShort(off, planned) : "",
       days: l.on <= lastDay ? daysBetween(l.on, lastDay) : 0, plannedDays: daysBetween(l.on, planned),
       dates, readiness: r,
       emails: { instructions: sentFor(instr, off, l.ship), link: sentFor(links, off, l.ship), review: review ? { sent: day(review.sent_at || review.created_at), status: review.status || null } : null },
@@ -244,7 +247,7 @@ export function buildCrewProfile(input) {
   const checks = [];
   const latest = contracts[0] || null;
   if (latest && latest.earlyDays && !latest.end && !A(I.cards).some((c) => c.end_reason && iso(c.sign_on) && near(c.sign_on, latest.on)))
-    checks.push({ key: "end_reason", text: "Why the " + latest.ship + " contract ended " + latest.earlyDays + " days early is not recorded." + (comment ? " The comment says “" + comment.replace(/[.\s]+$/, "") + "”." : "") });
+    checks.push({ key: "end_reason", text: "Why the " + latest.ship + " contract ended " + latest.earlyText + " early is not recorded." + (comment ? " The comment says “" + comment.replace(/[.\s]+$/, "") + "”." : "") });
   if (I.grade && count && count.position && normGrade(I.grade) !== normGrade(count.position))
     checks.push({ key: "grade", text: "The console grades " + I.grade + " (" + count.n + " completed contract" + (count.n === 1 ? "" : "s") + "); TDG’s count file says " + count.position + "." });
   if (latest && !latest.current && latest.off && daysBetween(latest.off, today) >= 0) {
@@ -337,7 +340,7 @@ export function feedbackFile(profile, today) {
   const feed = (P.people && Array.isArray(P.people.feed)) ? P.people.feed : [];
   const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review" };
   const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.current ? t : (k.off && k.off < t ? k.off : t))) || null; // a running contract (overdue / held) runs to today
-  const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, end: k.end || null }, items: [] }));
+  const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, earlyText: k.earlyText || "", end: k.end || null }, items: [] }));
   const between = { key: "between", contract: null, items: [] };
   for (const f of feed) {
     const d = day(f.at); if (!d) continue;

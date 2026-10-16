@@ -121,18 +121,20 @@ const RB=(()=>{
   const need=BOARD.filter(r=>!r.reliever&&r.days_to_off!=null&&r.days_to_off<=CFG.due_days).length;
   const urgent=BOARD.filter(r=>!r.reliever&&r.days_to_off!=null&&r.days_to_off<=CFG.critical_days).length;
   const set=BOARD.filter(r=>r.reliever).length;
-  $("metrics").innerHTML='<div class="metric"><span class="mn" style="color:var(--text-warning)">'+need+'</span> need a reliever</div><div class="metric"><span class="mn" style="color:var(--text-danger)">'+urgent+'</span> urgent (≤'+CFG.critical_days+'d)</div><div class="metric"><span class="mn" style="color:var(--text-success)">'+set+'</span> handover set</div>';
+  $("metrics").innerHTML='<div class="metric"><span class="mn" style="color:var(--text-warning)">'+need+'</span> need a reliever</div><div class="metric"><span class="mn" style="color:var(--text-danger)">'+urgent+'</span> urgent (≤'+mdN(CFG.critical_days)+')</div><div class="metric"><span class="mn" style="color:var(--text-success)">'+set+'</span> handover set</div>';
   $("reset").style.display=manualOrder?"inline-flex":"none";
  }
  function cityLine(o,which){const city=which==="on"?o.on_city:o.off_city;const conf=which==="on"?o.on_conf:o.off_conf;const c=CONF[conf]||CONF.TBA;return '<span class="dot" style="background:'+c[1]+'"></span>'+(city||"— no coverage —");}
  function tagStrip(t){if(!t)return"";const on=Object.keys(t).filter(k=>t[k]);if(!on.length)return"";const lbl={eccr:"ECCR",air:"AIR",hotel:"HOTEL",on_date_conf:"ON DATE",off_date_conf:"OFF DATE"};return '<div class="tags">'+on.map(k=>'<span class="t">'+(lbl[k]||k)+'</span>').join("")+'</div>';}
+ // a day count from today as months and days (16 Oct 2026: "we dont count days .. never"): 40 -> "1 mo 10 d"
+ function mdN(n){n=Math.round(Number(n));if(!isFinite(n)||n<0)return "";const t=new Date(),a=Date.UTC(t.getUTCFullYear(),t.getUTCMonth(),t.getUTCDate()),b=new Date(a+n*864e5),A=new Date(a);let m=(b.getUTCFullYear()-A.getUTCFullYear())*12+(b.getUTCMonth()-A.getUTCMonth()),d=b.getUTCDate()-A.getUTCDate();if(d<0){m--;const ad=Math.min(A.getUTCDate(),new Date(Date.UTC(A.getUTCFullYear(),A.getUTCMonth()+m+1,0)).getUTCDate());d=Math.round((b.getTime()-Date.UTC(A.getUTCFullYear(),A.getUTCMonth()+m,ad))/864e5);}return m?(m+" mo"+(d?" "+d+" d":"")):(d+" d");}
  function handTxt(r){const h=r.handover||{kind:"none"};const d=r.days_to_off;
   if(h.kind==="clean")return{c:"success",ic:"ti-arrows-left-right",t:"Clean handover"+((r.reliever&&r.reliever.on_city)?(" · "+r.reliever.on_city+(r.reliever.on_date?(" · "+r.reliever.on_date):"")):"")};
   if(h.kind==="port_mismatch")return{c:"warning",ic:"ti-alert-triangle",t:"Same day, port differs — "+(h.relieverCity||"—")+" vs "+(h.printerCity||"—")};
-  if(h.kind==="gap")return{c:"warning",ic:"ti-alert-triangle",t:(h.days!=null?h.days:"?")+"-day gap between OFF and reliever ON"};
-  if(d!=null&&d<=CFG.critical_days)return{c:"danger",ic:"ti-alert-circle",t:"Reliever needed — printer signs off in "+d+" days"};
-  if(d!=null&&d<=CFG.due_days)return{c:"warning",ic:"ti-clock",t:"Reliever due — printer signs off in "+d+" days"};
-  return{c:"muted",ic:"ti-circle-dashed",t:d!=null?("Slot open — printer signs off in "+d+" days"):"Slot open"};}
+  if(h.kind==="gap")return{c:"warning",ic:"ti-alert-triangle",t:(h.days!=null?mdN(h.days):"?")+" gap between OFF and reliever ON"};
+  if(d!=null&&d<=CFG.critical_days)return{c:"danger",ic:"ti-alert-circle",t:d<0?("Reliever needed — printer is "+mdN(-d)+" past the sign-off"):d===0?"Reliever needed — printer signs off today":("Reliever needed — printer signs off in "+mdN(d))};
+  if(d!=null&&d<=CFG.due_days)return{c:"warning",ic:"ti-clock",t:"Reliever due — printer signs off in "+mdN(d)};
+  return{c:"muted",ic:"ti-circle-dashed",t:d!=null?("Slot open — printer signs off in "+mdN(d)):"Slot open"};}
  function render(){
   metrics();
   if(!BOARD.length){$("board").innerHTML='<div class="empty">No ships yet.</div>';return;}
@@ -282,7 +284,7 @@ const RB=(()=>{
  function docBlock(d){const el=$("mdocs");if(!el)return;DOCS_LAST=d||null;if(!d){el.innerHTML="";return;}const today=new Date().toISOString().slice(0,10);const son=dateVal("on")||"",soff=dateVal("off")||"";const in30=(()=>{const t=new Date(today+"T00:00:00Z");t.setUTCDate(t.getUTCDate()+30);return t.toISOString().slice(0,10);})();
   const bad=[],due=[],lap=[],ok=[];for(const [lab,f,req] of DOCL){const v=d[f]?String(d[f]).slice(0,10):null;const tag=(cls,txt)=>'<span class="dtag '+cls+'">'+lab.toUpperCase()+' · '+txt+'</span>';if(!v){if(req)bad.push(tag("mis","NO DATE"));continue;}if(v<today||(son&&v<son))bad.push(tag("bad",fmtDate(v)));else if(v<=in30)due.push(tag("due",fmtDate(v)));else if(soff&&v<soff)lap.push(tag("due",fmtDate(v)));else ok.push(tag("ok",fmtDate(v)));}
   const row=(k,arr)=>arr.length?'<div class="drow"><span class="dk">'+k+'</span><span class="dv">'+arr.join("")+'</span></div>':"";
-  el.innerHTML='<div class="lbl">Documents<span style="color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400"> — '+ok.length+' of '+(bad.length+due.length+lap.length+ok.length)+' valid</span></div><div class="dblk">'+row("Expired",bad)+row("Within 30 days",due)+row("Lapses during this contract",lap)+row("Valid",ok)+'</div>';}
+  el.innerHTML='<div class="lbl">Documents<span style="color:var(--text-muted);text-transform:none;letter-spacing:0;font-weight:400"> — '+ok.length+' of '+(bad.length+due.length+lap.length+ok.length)+' valid</span></div><div class="dblk">'+row("Expired",bad)+row("Within 1 month",due)+row("Lapses during this contract",lap)+row("Valid",ok)+'</div>';}
  let BENCH=null,BTAB="ready";
  const spanMD=(a,b)=>{if(!a||!b)return"";let y0=+a.slice(0,4),m0=+a.slice(5,7),d0=+a.slice(8,10),y1=+b.slice(0,4),m1=+b.slice(5,7),d1=+b.slice(8,10);let m=(y1-y0)*12+(m1-m0);let d=d1-d0;if(d<0){m--;d+=new Date(Date.UTC(y1,m1-1,0)).getUTCDate();}return (m?m+" mo ":"")+(d||!m?d+" d":"").trim();};
  async function loadBench(ship){const box=$("mbench");if(!box)return;box.style.display="block";box.innerHTML='<div class="mb"><div class="mbe">Finding who can take the seat…</div></div>';

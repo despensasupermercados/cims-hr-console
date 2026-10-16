@@ -247,7 +247,7 @@ test("expired documents are a warning on BOTH states, never a block", () => {
     assert.doesNotMatch(h, /2 EXPIRED/, "named, never counted");
   }
   const soon = ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "Within 90 days: US C1/D Visa", expiring: 1, items: [], expiringItems: [{ doc: "US C1/D Visa", exp: "2026-12-13", days: 66, required: true }], rest: null } });
-  assert.match(soon, /class="rtag due" title="US C1\/D Visa expires Dec 13, 2026 \(in 66 days\)">US C1\/D VISA &middot; DEC 13</);
+  assert.match(soon, /class="rtag due" title="US C1\/D Visa expires Dec 13, 2026 \(in 2 mo 5 d\)">US C1\/D VISA &middot; DEC 13</);
   const miss = ctx.rotCard({ ...YELLOW, docs: { worst: "missing", label: "4 MISSING", title: "No expiry on record: Medical, Seaman's Book, Passport, US C1/D Visa", missing: 4, items: [], expiringItems: [], rest: { worst: "missing", label: "4 MISSING", title: "No expiry on record: Medical, Seaman's Book, Passport, US C1/D Visa" } } });
   assert.match(miss, /class="rtag mis"[^>]*>4 MISSING</);
   assert.match(ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "x", expiring: 1 } }), /class="rtag due"[^>]*>1 EXPIRING</, "legacy shape: the summary in the worst colour");

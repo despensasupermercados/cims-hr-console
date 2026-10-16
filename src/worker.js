@@ -5609,7 +5609,7 @@ async function previewKeyman(){
   if(boardBits)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">What changes on the board</b>'+boardBits+'</div>';
   if(r.absorbs&&r.absorbs.length)
     h+='<div class=hint style="margin-top:8px;border-left:3px solid #1f7a3d"><b style="color:#1f7a3d">'+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' the file now carries</b> &mdash; the loop closes: '+(r.absorbs.length===1?'this card is':'these cards are')+' removed on Apply and the seafarer comes back as a TDG card.<br>'
-      +r.absorbs.slice(0,12).map(function(x){return nmOf(x)+' &middot; '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &rarr; TDG '+dt(x.counter.sign_on)+(x.gap_days!=null?(' ('+(x.gap_days>0?'+':'')+x.gap_days+'d)'):'');}).join('<br>')+'</div>';
+      +r.absorbs.slice(0,12).map(function(x){return nmOf(x)+' &middot; '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &rarr; TDG '+dt(x.counter.sign_on)+(x.gap_days!=null&&x.gap_days!==0?(' ('+(x.gap_days>0?'+':'−')+daysMD(Math.abs(x.gap_days))+')'):'');}).join('<br>')+'</div>';
   if(r.conflicts&&r.conflicts.length)
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.conflicts.length+' projection'+(r.conflicts.length===1?'':'s')+' the file contradicts</b> &mdash; unticked '+(r.conflicts.length===1?'it stays':'they stay')+' on the board for you to settle; tick a row and the Counter wins (your card is removed on Apply).<br>'
       +r.conflicts.map(function(x){return '<label class=csub style="display:block;margin-top:3px"><input type=checkbox class=kmdrop value="'+impEsc(x.id)+'"> '+nmOf(x)+' &middot; you have '+impEsc(x.card.ship||'?')+' '+dt(x.card.sign_on)+' &middot; TDG says '+impEsc(x.counter.ship||'?')+' '+dt(x.counter.sign_on)+' ('+(x.why==='ship'?'different ship':'dates apart')+')</label>';}).join('')+'</div>';
@@ -6431,10 +6431,10 @@ function paintFleet(){
   var ddBadge=function(s){var c=s==='in_dock'?'red':s==='upcoming'?'amber':'ok';var t=s==='in_dock'?'in dock':s;return '<span class="cchip '+c+'">'+t+'</span>';};
   var dd=(f.dryDock||[]).filter(function(d){if(!q)return true;var s=((d.ship||'')+' '+(d.loc||'')).toLowerCase();return s.indexOf(q)>=0;});
   var h='<details open class=ddwrap><summary class="zlabel ddsum" style="cursor:pointer;user-select:none">Dry-dock schedule'+(q?(' · matching "'+FLT.q+'"'):'')+' <span class=csub style="font-weight:600">('+dd.length+')</span></summary>'
-    +'<table class=tbl style="margin-top:8px"><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Days</th><th>Status</th></tr></thead><tbody>'
-    +(dd.length?dd.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.days||'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table></details>';
+    +'<table class=tbl style="margin-top:8px"><thead><tr><th>Ship</th><th>Start</th><th>End</th><th>Location</th><th>Length</th><th>Status</th></tr></thead><tbody>'
+    +(dd.length?dd.map(function(d){return '<tr><td>'+d.ship+'</td><td>'+d.start+'</td><td>'+(d.end||'open')+'</td><td>'+d.loc+'</td><td>'+(d.end?(spanCompact(d.start,d.end)||'—'):'—')+'</td><td>'+ddBadge(d.status)+(d.note?(' <span class=csub>'+d.note+'</span>'):'')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table></details>';
   h+='<div class=zlabel style="margin-top:18px">Vessels ('+vs.length+')</div><table class=tbl><thead><tr><th>Ship</th><th>Brand</th><th>Class</th><th>Homeport</th><th>Region</th><th>Lead time</th></tr></thead><tbody>'
-    +(vs.length?vs.map(function(v){return '<tr><td>'+v.name+'</td><td>'+v.brand+'</td><td>'+v.cls+'</td><td>'+(v.homeport||'—')+'</td><td>'+(v.region||'—')+'</td><td>'+(v.lead?(v.lead+'d'):'—')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table>'
+    +(vs.length?vs.map(function(v){return '<tr><td>'+v.name+'</td><td>'+v.brand+'</td><td>'+v.cls+'</td><td>'+(v.homeport||'—')+'</td><td>'+(v.region||'—')+'</td><td>'+(v.lead?daysMD(v.lead):'—')+'</td></tr>';}).join(''):'<tr><td colspan=6 class=muted style="padding:10px">No matches.</td></tr>')+'</tbody></table>'
     +'<p class=muted style="text-align:left;padding:10px 2px">Tap a tile to filter the vessel list; search matches ship, port, region, class, brand. Lead time = Miami PO to delivery at ship location.</p>';
   document.getElementById('fleetbody').innerHTML=h;
 }
@@ -6483,7 +6483,7 @@ function dragStart(el,id){dragMoved=true;DRAGID=id;DRAGEL=el;setTimeout(function
 function dragEnd(el){el.classList.remove('dragging');document.querySelectorAll('.shipdrop.dragover').forEach(function(z){z.classList.remove('dragover');});}
 const BRANDCOL={Royal:'#1E6FD0',Celebrity:'#0C8C8C',Azamara:'#7A5AA8',NCL:'#E0962B'};
 function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+st+'" style="cursor:pointer;'+((st&&ROT_F===st)?'outline:2px solid var(--navy);outline-offset:-2px;':'')+'"><div class=n>'+(n!=null?n:0)+'</div><div class=l>'+l+'</div></div>';}
-function durLabel(a,b){if(!a||!b)return'';var d=Math.round((new Date(b)-new Date(a))/86400000);if(!(d>0))return'';var m=Math.round(d/30);return d+'d'+(m?(' · ~'+m+'mo'):'');}
+function durLabel(a,b){return spanCompact(String(a||'').slice(0,10),String(b||'').slice(0,10));}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
 function openRelief(el){if(document.getElementById('reliefovl'))return;var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}// WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, mock-up B "polished, real list" chosen): the empty earmark slot lists the
@@ -6721,7 +6721,7 @@ function rotCard(x){
   // amber by name with its month ("MEDICAL · FEB 6"), the missing ones one muted count. Never the page's .warn box class.
   if(x.docs){var _di=x.docs.items||[],_dx=x.docs.expiringItems||[];
     _di.forEach(function(d){tg+='<span class="rtag bad" title="'+escHtml(d.doc+' expired'+(d.exp?(' '+fmtDateS(d.exp)):''))+'">'+escHtml(String(d.doc).toUpperCase())+'</span>';});
-    _dx.forEach(function(d){tg+='<span class="rtag due" title="'+escHtml(d.doc+' expires '+(d.exp?fmtDateS(d.exp):'')+(d.days!=null?(' (in '+d.days+' days)'):''))+'">'+escHtml(String(d.doc).toUpperCase())+(d.exp?(' &middot; '+escHtml(fmtMD(d.exp).toUpperCase())):'')+'</span>';});
+    _dx.forEach(function(d){tg+='<span class="rtag due" title="'+escHtml(d.doc+' expires '+(d.exp?fmtDateS(d.exp):'')+(d.days!=null?(' (in '+daysMD(d.days,d.exp)+')'):''))+'">'+escHtml(String(d.doc).toUpperCase())+(d.exp?(' &middot; '+escHtml(fmtMD(d.exp).toUpperCase())):'')+'</span>';});
     if(x.docs.rest)tg+='<span class="rtag mis" title="'+escHtml(x.docs.rest.title)+'">'+escHtml(x.docs.rest.label)+'</span>';
     if(!_di.length&&!_dx.length&&!x.docs.rest)tg+='<span class="rtag '+(x.docs.worst==='expired'?'bad':x.docs.worst==='expiring'?'due':'mis')+'" title="'+escHtml(x.docs.title)+'">'+escHtml(x.docs.label)+'</span>';}
   // Yellow is Rita's EARMARK (Miguel, 5 + 7 Oct 2026): it stands until TDG's file carries the person.
@@ -6952,7 +6952,7 @@ function docTags(docs,son,soff){if(!docs||!docs.length)return '';son=son?String(
   var byOn=function(d){return d.status!=='expired'&&d.status!=='missing'&&son&&ex(d)&&ex(d)<son;},lapse=function(d){return d.status==='ok'&&!byOn(d)&&soff&&ex(d)&&ex(d)<soff;};
   var bad=docs.filter(function(d){return d.status==='expired'||(d.status==='missing'&&d.required)||byOn(d);}),soon=docs.filter(function(d){return d.status==='expiring'&&!byOn(d);}),lap=docs.filter(lapse),ok=docs.filter(function(d){return (d.status==='ok'&&!byOn(d)&&!lapse(d))||(d.status==='missing'&&!d.required);});
   var row=function(lab,arr,cls){return arr.length?('<div class=docrow><span class=dock>'+lab+'</span><span class=docs>'+arr.map(function(d){return t(d,d.status==='missing'?'mis':(byOn(d)?'bad':cls));}).join('')+'</span></div>'):'';};
-  return '<div class=zlabel>Documents <span class=zcount>'+docs.filter(function(d){return d.status==='ok'&&!byOn(d)&&!lapse(d);}).length+' of '+docs.length+' valid'+(soff?' for this contract':'')+'</span></div><div class=docblock>'+row('Expired',bad,'bad')+row('Within 30 days',soon,'due')+row('Lapses during this contract',lap,'due')+row('Valid',ok,'on')+'</div>';}
+  return '<div class=zlabel>Documents <span class=zcount>'+docs.filter(function(d){return d.status==='ok'&&!byOn(d)&&!lapse(d);}).length+' of '+docs.length+' valid'+(soff?' for this contract':'')+'</span></div><div class=docblock>'+row('Expired',bad,'bad')+row('Within 1 month',soon,'due')+row('Lapses during this contract',lap,'due')+row('Valid',ok,'on')+'</div>';}
 // NOTES OF THIS CONTRACT (Miguel, 12 Oct 2026: "put those notes right below the sign-off workflow ... the notes for this current
 // contract ... we don't need all the notes over the history, we have them in the crew tab"): the dated notes logged since this
 // contract's sign-on (to its sign-off when it has ended), newest first. The full history stays on the Crew tab.
@@ -6970,6 +6970,10 @@ function spanCompact(a,b){
   if(!p.m)return p.d+' d';
   return p.m+' mo'+(p.d?(' '+p.d+' d'):'');
 }
+// A day count from today as months and days (16 Oct 2026: "we dont count days .. never"): 40 -> "1 mo 10 d", 12 -> "12 d".
+// With an end date (an ISO date the count was measured to, e.g. a document's expiry) the span is read back from that date, so the
+// words never depend on the viewer's clock.
+function daysMD(n,end){n=Math.round(Number(n));if(!isFinite(n)||n<0)return '';var e=end&&/^\\d{4}-\\d\\d-\\d\\d/.test(String(end))?String(end).slice(0,10):'';var b=e?new Date(e+'T00:00:00Z'):(function(){var t=new Date();return new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth(),t.getUTCDate())+n*864e5);})();var a=new Date(b.getTime()-n*864e5);return spanCompact(a.toISOString().slice(0,10),b.toISOString().slice(0,10))||'0 d';}
 function histCard(h){
   var span=(h.on?fmtDateS(h.on):'')+(h.off&&h.off!==h.on?(' → '+fmtDateS(h.off)):'');
   var dur=monthsDays(h.on,h.off);
@@ -7407,24 +7411,25 @@ async function renderCompliance(){
   if(!$('#compdays')){
     $('#view').innerHTML='<div class=bar><h2>Document compliance</h2>'
       +'<label class=csub style="margin-left:auto">Window '
-      +'<select id=compdays onchange="loadCompliance()"><option value=30>30 days</option><option value=60 selected>60 days</option><option value=90>90 days</option></select></label>'
+      +'<select id=compdays onchange="loadCompliance()"><option value=30>1 month</option><option value=60 selected>2 months</option><option value=90>3 months</option></select></label>'
       +'<button class="btn ghost" onclick="exportCompliance()">Download CSV</button></div>'
       +'<div id=compsub class=csub style="margin:-6px 0 12px"></div><div id=compbody></div>';
   }
   loadCompliance();
 }
+function compWin(n){return {30:'1 month',60:'2 months',90:'3 months'}[n]||daysMD(n);}
 async function loadCompliance(){
   const days=$('#compdays')?$('#compdays').value:60;
   $('#compbody').innerHTML='<div class=muted>Loading…</div>';
   COMP=await (await fetch('/api/compliance?days='+days)).json();
   const rows=COMP.report||[];
   const exp=rows.filter(function(r){return r.severity===3;}).length;
-  $('#compsub').textContent=rows.length+' flagged ('+exp+' expired) · within '+COMP.warnDays+' days · as of '+COMP.today;
-  if(!rows.length){$('#compbody').innerHTML='<p class=muted style="text-align:left;padding:14px 2px">All clear — no documents expired or expiring within '+COMP.warnDays+' days.</p>';return;}
+  $('#compsub').textContent=rows.length+' flagged ('+exp+' expired) · within '+compWin(COMP.warnDays)+' · as of '+COMP.today;
+  if(!rows.length){$('#compbody').innerHTML='<p class=muted style="text-align:left;padding:14px 2px">All clear — no documents expired or expiring within '+compWin(COMP.warnDays)+'.</p>';return;}
   $('#compbody').innerHTML='<div class=grid>'+rows.map(function(r){
     const flags=r.flags.map(function(f){
       const cls=f.status==='expired'?'red':f.status==='expiring'?'amber':'royal';
-      const txt=f.status==='missing'?(f.doc+' missing'):(f.doc+' '+(f.exp||'')+(f.days!=null?(' ('+(f.days<0?(Math.abs(f.days)+'d ago'):(f.days+'d'))+')'):''));
+      const txt=f.status==='missing'?(f.doc+' missing'):(f.doc+' '+(f.exp||'')+(f.days!=null?(' ('+(f.days<0?(spanCompact(String(f.exp||'').slice(0,10),COMP.today)+' ago'):daysMD(f.days,f.exp))+')'):''));
       return '<span class="cchip '+cls+'">'+txt+'</span>';
     }).join('');
     return '<div class="card b-'+brandOf(r.vessel)+'" data-crew="'+r.agency_id+'" style="cursor:pointer"><div class=cname>'+escHtml(r.name)+'</div><div class=csub>'+r.agency_id+' · '+(r.vessel||'—')+'</div><div class=statdot><i style="background:'+dot(r.status)+'"></i>'+(r.status||'')+'</div><div class=cchips>'+flags+'</div></div>';
@@ -7671,7 +7676,7 @@ function opsKpis(k){
   var o=k.overdue,nr=k.noReliever,cs=k.cantSail,ab=k.aboard,b=k.bench;
   var h='<div class=oc-kpis>';
   h+=opsKpi('oc-changes','Past sign-off',o.n?'crit':'ok',o.n?'Act':'None',o.n,'',o.n?o.items.map(function(x){return escHtml(x.code)+' '+x.days+' d';}).join(' &middot; '):'every seat within its sign-off');
-  h+=opsKpi('oc-changes','No reliever',nr.n?'crit':'ok',nr.n?'Act':'All planned',nr.n,'of '+nr.of,'sign-offs in 90 days'+(nr.first.length?' &middot; first '+nr.first.map(function(x){return escHtml(x.code);}).join(', ')+' '+opsD(nr.first[0].off):''));
+  h+=opsKpi('oc-changes','No reliever',nr.n?'crit':'ok',nr.n?'Act':'All planned',nr.n,'of '+nr.of,'sign-offs in 3 months'+(nr.first.length?' &middot; first '+nr.first.map(function(x){return escHtml(x.code);}).join(', ')+' '+opsD(nr.first[0].off):''));
   h+=opsKpi('oc-changes','Can&#39;t sail yet',cs.n?'warn':'ok',cs.n?'Watch':'Clear',cs.n,'of '+cs.of,'relievers with a failing document'+(cs.first?' &middot; first '+escHtml(cs.first.code)+' '+opsD(cs.first.on):''));
   h+=opsKpi('oc-crew','Aboard','ok','Seated',ab.n,'',ab.ships+' ships'+(ab.doubled.length?' &middot; '+ab.doubled.length+' with two aboard ('+ab.doubled.map(escHtml).join(' ')+')':''));
   var bd=b.now.length?('ready: '+b.now.map(function(x){return escHtml(x.surname);}).join(', ')):(b.next.length?('next: '+b.next.map(function(x){return escHtml(x.surname)+' '+opsD(x.ready);}).join(', ')):'nobody ashore in the window');
@@ -7807,8 +7812,8 @@ function opsCoverage(cv){
 }
 function opsTdg(t){
   var h='<section class=oc-card style="display:flex;flex-direction:column;gap:12px"><div><h2 class=oc-h>TDG</h2><p class=oc-sub>The files the board reads, and what TDG has to correct.</p></div><div>';
-  if(t.advq){var late=t.advq.age>t.advq.every;h+='<div class=oc-fresh><b style="font-size:13px">AdvancedQuery</b>'+opsSt(late?'warn':'ok',t.advq.age+' of '+t.advq.every+' days')+'<span class=oc-mut style="font-size:12px;grid-column:1 / -1">'+opsD(t.advq.at)+(t.advq.crew?' &middot; '+t.advq.crew+' crew, '+(t.advq.dated||0)+' dated':'')+' &middot; '+(late?'a newer file is due':'next due ~'+opsD(OPS_addDays(t.advq.at,7)))+'</span><div class=oc-bar><i style="width:'+Math.min(100,Math.round(t.advq.age/t.advq.every*100))+'%;background:'+(late?'#F2B01E':'#2E9E5B')+'"></i></div></div>';}
-  if(t.count){var lc=t.count.age>t.count.every;h+='<div class=oc-fresh><b style="font-size:13px">Completed-contract count</b>'+opsSt(lc?'warn':'ok',t.count.age+' of '+t.count.every+' days')+'<span class=oc-mut style="font-size:12px;grid-column:1 / -1">as of '+opsD(t.count.asOf)+'</span><div class=oc-bar><i style="width:'+Math.min(100,Math.round(t.count.age/t.count.every*100))+'%;background:'+(lc?'#F2B01E':'#2E9E5B')+'"></i></div></div>';}
+  if(t.advq){var late=t.advq.age>t.advq.every;h+='<div class=oc-fresh><b style="font-size:13px">AdvancedQuery</b>'+opsSt(late?'warn':'ok',daysMD(t.advq.age)+' old')+'<span class=oc-mut style="font-size:12px;grid-column:1 / -1">'+opsD(t.advq.at)+(t.advq.crew?' &middot; '+t.advq.crew+' crew, '+(t.advq.dated||0)+' dated':'')+' &middot; '+(late?'a newer file is due':'next due ~'+opsD(OPS_addDays(t.advq.at,7)))+'</span><div class=oc-bar><i style="width:'+Math.min(100,Math.round(t.advq.age/t.advq.every*100))+'%;background:'+(late?'#F2B01E':'#2E9E5B')+'"></i></div></div>';}
+  if(t.count){var lc=t.count.age>t.count.every;h+='<div class=oc-fresh><b style="font-size:13px">Completed-contract count</b>'+opsSt(lc?'warn':'ok',daysMD(t.count.age)+' old')+'<span class=oc-mut style="font-size:12px;grid-column:1 / -1">as of '+opsD(t.count.asOf)+'</span><div class=oc-bar><i style="width:'+Math.min(100,Math.round(t.count.age/t.count.every*100))+'%;background:'+(lc?'#F2B01E':'#2E9E5B')+'"></i></div></div>';}
   h+='<div class=oc-fresh><b style="font-size:13px">Contract Counter</b><span class="oc-st oc-mut">history only</span><span class=oc-mut style="font-size:12px;grid-column:1 / -1">'+(t.counter.stamp?'uploaded '+opsD(t.counter.stamp):'never uploaded through the console')+'</span></div></div>';
   h+='<div style="border-top:1px solid #F0F3F7;padding-top:12px;display:flex;flex-direction:column;gap:8px"><div style="display:flex;justify-content:space-between;align-items:center">'+opsSt(t.fixes.length?'warn':'ok','To correct in TDG')+'<b>'+t.fixes.length+'</b></div>';
   if(t.fixes.length)h+='<div style="display:flex;flex-direction:column;gap:6px;font-size:12.5px">'+t.fixes.map(function(f){
@@ -7903,7 +7908,7 @@ async function renderDashboard(){
   var d;try{d=await cachedJson('/api/ops',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load the dashboard'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
   OPS=d;OPS_WK=0;var w=d.crew||{};
   var h='<div class=ops><div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px"><div><h2 style="margin:0;font-family:Outfit;font-size:24px">Operational dashboard</h2>'
-    +'<p class=oc-sub style="font-size:13px">'+escHtml(fmtDateS(d.today))+(d.tdg.advq?' &middot; reads the TDG file of <b style="color:var(--ink)">'+opsD(d.tdg.advq.at)+'</b>, '+d.tdg.advq.age+' days old':'')+' &middot; '+d.kpis.aboard.ships+' ships</p></div>'
+    +'<p class=oc-sub style="font-size:13px">'+escHtml(fmtDateS(d.today))+(d.tdg.advq?' &middot; reads the TDG file of <b style="color:var(--ink)">'+opsD(d.tdg.advq.at)+'</b>, '+daysMD(d.tdg.advq.age)+' old':'')+' &middot; '+d.kpis.aboard.ships+' ships</p></div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type=button class="btn ghost" data-gantt=1>Fleet Gantt</button><button type=button class=btn onclick="show(&#39;data&#39;)">Upload TDG file</button></div></div>';
   h+=opsKpis(d.kpis)+opsWeek(d.week)+opsChanges(d.changes);
   h+='<div class=oc-row3>'+opsCoverage(d.coverage)+opsTdg(d.tdg)+opsDocs(d.docsAboard)+'</div>';
@@ -8168,7 +8173,7 @@ async function openCrew(id){
   var cnSrc=CN&&CN.n!=null?pfSrc('count','TDG count '+fmtDateS(CN.asOf)+(CN.added?(' + '+CN.added+' since'):'')):pfSrc('counter','derived from dates');
   var NUMS='<div class="pf2nums inhd">'
     +pfNum(cnN,'Completed contracts',cnSrc)
-    +pfNum(pfSeaTime(K,todayS),'Time at sea',pfSrc('tdg',Number(N.seaDays||0).toLocaleString()+' days · the schedule'))
+    +pfNum(pfSeaTime(K,todayS),'Time at sea',pfSrc('tdg','the schedule'))
     +pfNum(bz&&!bz.error&&bz.count!=null?bz.count:'—','Bonus count (consecutive)','<span class=pfsrc>'+(bz&&bz.baseline_set?'baseline set':'baseline not set')+'</span>')
     +'</div>';
   h+='<div class=pf2hd><div class=pf2top><div class=pfid><div style="min-width:0">'
@@ -8194,7 +8199,7 @@ async function openCrew(id){
     if(it)why.push('Field intel: <b>'+escHtml(pfIntelHead(it,110))+'</b> ('+fmtDateS(it.at)+').');
     var hs=(P.status&&P.status.history)||[];
     if(F&&F.status)why.push('TDG: '+escHtml(F.status)+(hs[0]&&hs[0].from?(' since '+fmtDateS(hs[0].from)):'')+'.');
-    h+='<div class=pf2band><div style="flex:1 1 420px;min-width:0"><div class=pf2bt>'+(off?'Out of the rotation':'Contract ended early')+(last&&last.earlyDays?(' — ended '+last.earlyDays+' days early'):'')+'</div><div class=pf2bb>'+why.join(' ')+'</div></div>'
+    h+='<div class=pf2band><div style="flex:1 1 420px;min-width:0"><div class=pf2bt>'+(off?'Out of the rotation':'Contract ended early')+(last&&last.earlyDays?(' — ended '+last.earlyText+' early'):'')+'</div><div class=pf2bb>'+why.join(' ')+'</div></div>'
       +'<div class=pf2bx><button class="btn ghost" onclick="notesModal(\\''+escHtml(c.agency_id)+'\\')">Add note</button><button class="btn ghost" onclick="editCrewModal(\\''+escHtml(c.agency_id)+'\\')">Change status…</button></div></div>';
   }
   // 4 · the career line
@@ -8283,8 +8288,8 @@ function pfContract(x,isCur,todayS,K,feed){
   var st;
   if(x.held)st=['red','Past the sign-off · TDG still has them aboard'];
   else if(isCur&&off&&off<todayS)st=['red','Past the projected sign-off'];
-  else if(isCur)st=['green','Aboard · day '+x.days+' of '+x.plannedDays];
-  else if(x.earlyDays)st=['red','Ended '+x.earlyDays+' days early'+(x.end?' · '+x.end.reason:'')];
+  else if(isCur)st=['green','Aboard · '+(spanCompact(on,todayS)||'0 d')+' of '+spanCompact(on,x.planned)];
+  else if(x.earlyDays)st=['red','Ended '+x.earlyText+' early'+(x.end?' · '+x.end.reason:'')];
   else st=['grey','Signed off '+fmtDateS(off)+(x.end?' · '+x.end.reason:'')];
   var ports=[x.embark?pfPort(x.embark):'',x.disembark?pfPort(x.disembark):''];
   var route=ports[0]||ports[1]?escHtml((ports[0]||'?')+' → '+(ports[1]||'?')):'Ports not on file';
@@ -8303,7 +8308,7 @@ function pfContract(x,isCur,todayS,K,feed){
     +fact('Signed on',fmtDateS(on),pfSrc('tdg',PF3_SRC[(D[0]||{}).src]||'TDG embark'))
     +fact(isCur?'Sign-off':'Signed off',off?fmtDateS(off):'Not set',pfSrc(offSrc==='rita'?'typed':offSrc,offNote)+(differs?'<em class=pf3dif>'+escHtml((PF3_SRC[differs.src]||differs.src)+' says '+fmtDateS(differs.value))+'</em>':''))
     +(isCur?fact('To go',dLeft==null?'—':(dLeft>=0?spanCompact(todayS,off):'<span style="color:var(--red)">'+spanCompact(off,todayS)+' over</span>'),'<span class=pf3sub>of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract</span>')
-      :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):(x.days+' days'))+'</span>'))
+      :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):('of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract'))+'</span>'))
     +fact(isCur?'Signs off at':'Signed off at',ports[1]?escHtml(ports[1]):'<span class=pf3na>Not on file</span>','<span class=pf3sub>'+(ports[0]?'joined at '+escHtml(ports[0]):'joining port not on file')+'</span>')
     +'</div>';
   if(!isCur&&off&&off<=todayS)h+=pfWhy(x);
@@ -8328,7 +8333,7 @@ function pfWhy(x){
     +(E?'<button class="btn ghost" data-on="'+escHtml(x.on)+'" onclick="pfWhySave(this.dataset.on,true)">Clear</button>':'')+'<span id=pf3wm class=pf3hint style="margin:0"></span></div>';
   var head=E?'<div class=pf3wh><span class=pf3l>Why it ended</span><b>'+escHtml(E.reason)+'</b>'+(E.note?'<span>'+escHtml(E.note)+'</span>':'')
       +'<small>'+escHtml([E.by,E.at?fmtDateS(E.at):''].filter(Boolean).join(' · '))+'</small><a href="#" onclick="pfWhyOpen();return false">Change</a></div>'
-    :'<div class="pf3wh none"><span class=pf3l>Why it ended</span><span>Not recorded'+(x.earlyDays?' · it ended '+x.earlyDays+' days early':'')+'</span><a href="#" onclick="pfWhyOpen();return false">Record why</a></div>';
+    :'<div class="pf3wh none"><span class=pf3l>Why it ended</span><span>Not recorded'+(x.earlyDays?' · it ended '+x.earlyText+' early':'')+'</span><a href="#" onclick="pfWhyOpen();return false">Record why</a></div>';
   return '<div class=pf3why>'+head+form+'</div>';
 }
 function pfWhyOpen(){var f=document.getElementById('pf3wf');if(f){f.style.display='flex';var s=document.getElementById('pf3wr');if(s)s.focus();}}
@@ -8605,7 +8610,7 @@ function contractPass(on,off,o){
   o=o||{};if(!on)return {html:'',chip:'',bar:''};
   var DAY=86400000,now=Date.now(),t0=new Date(on+'T00:00:00Z').getTime(),today=new Date().toISOString().slice(0,10);
   var chip='',pct=0,state='open';
-  var dur=off?durLabel(on,off).replace('d ·',' d ·').replace('mo',' mo'):'';
+  var dur=off?durLabel(on,off):'';
   if(off){
     var t1=new Date(off+'T00:00:00Z').getTime();
     var dd=Math.round((t1-now)/DAY),tot=Math.round((t1-t0)/DAY),el=Math.round((now-t0)/DAY);
@@ -8732,7 +8737,7 @@ async function editCrewModal(id){
   var name=[c.first_name,c.middle_name,c.last_name].filter(Boolean).join(' ');
   var st=crStyle(c.status);
   var age=ageOf(c.dob),ph=fmtPhone(c.phone);
-  var docLeft=function(e){if(!e)return '';var n=dUntil(e);return n<0?'<span style="color:var(--red);font-weight:600">Expired</span>':(n<=90?'<span style="color:var(--amber);font-weight:600">'+n+' days left</span>':fmtDateS(e));};
+  var docLeft=function(e){if(!e)return '';var n=dUntil(e);return n<0?'<span style="color:var(--red);font-weight:600">Expired</span>':(n<=90?'<span style="color:var(--amber);font-weight:600">'+(n?daysMD(n,e)+' left':'Expires today')+'</span>':fmtDateS(e));};
   var docRow=function(lab,k,el,no,place,opt){
     var meta=[no,place].filter(Boolean).map(escHtml).join(' · ')||(opt?'Not held · optional':'No number on file');
     return '<div class=ecdoc><b>'+lab+'</b><span>'+meta+'</span>'+fld(k,el,'<span class=sr>'+lab+' expiry</span>','<input id='+el+' type=date value="'+iv(c[k])+'" data-k='+k+'>',docLeft(c[k]))+'</div>';
@@ -8858,7 +8863,7 @@ function ntDraw(){
   var body='',lastKey=null;
   shown.forEach(function(it){
     var day=String(it.at||'').slice(0,10),k=ntGroup(day),key=k?(k.ship+k.on):'none';
-    if(key!==lastKey){lastKey=key;body+='<div class=ntgrp>'+(k?('<b>'+escHtml(niceShip(k.ship))+'</b><span>Contract '+k.n+' · '+fmtDateS(k.on)+' → '+(k.off?fmtDateS(k.off):'open')+(k.earlyDays?' · ended '+k.earlyDays+' days early':'')+'</span>'):'<b>Not inside a contract</b><span>between contracts, or before the first one on file</span>')+'</div>';}
+    if(key!==lastKey){lastKey=key;body+='<div class=ntgrp>'+(k?('<b>'+escHtml(niceShip(k.ship))+'</b><span>Contract '+k.n+' · '+fmtDateS(k.on)+' → '+(k.off?fmtDateS(k.off):'open')+(k.earlyDays?' · ended '+k.earlyText+' early':'')+'</span>'):'<b>Not inside a contract</b><span>between contracts, or before the first one on file</span>')+'</div>';}
     body+=ntItem(it);
   });
   if(!shown.length)body='<div class=muted style="padding:18px 2px">'+(S.items.length?'Nothing of this kind.':'Nothing said yet — the first note starts the log.')+'</div>';
@@ -9086,7 +9091,7 @@ async function renderFeedback(){
   $('#view').innerHTML='<div class=muted>Loading…</div>';
   var d;try{d=await (await fetch('/api/feedback/board')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderFeedback()">Retry</button></div>';return;}
   var rows=d.rows||[],pn={ray:'Ray',rolando:'Rolando',dexter:'Dexter'};
-  function dlabel(n){return n<0?(Math.abs(n)+'d ago'):(n===0?'today':('in '+n+'d'));}
+  function dlabel(n){return n<0?(daysMD(-n)+' ago'):(n===0?'today':('in '+daysMD(n)));}
   function pill(id,r){var cls=r.answered?'on':(r.status==='pending'?'pend':'');var mark=r.answered?'✓':(r.status==='pending'?'…':'+');var tt=r.answered?'response in':(r.status==='pending'?'requested — awaiting':'click to request a window');return '<span class="fbp '+cls+'" title="'+tt+'" onclick="fbRequest(\\''+id+'\\',\\''+r.role+'\\')">'+pn[r.role]+' '+mark+'</span>';}
   var body=rows.map(function(x){var due=x.days<=7?'red':(x.days<=21?'amber':'ok');
     return '<tr><td><b>'+escHtml(x.name)+'</b><div class=csub>'+x.agency_id+'</div></td><td>'+(x.vessel||'—')+'</td><td><span class="cchip '+due+'">'+x.signOff+' · '+dlabel(x.days)+'</span></td><td>'+x.roles.map(function(r){return pill(x.agency_id,r);}).join(' ')+'</td><td style="text-align:center">'+x.answeredCount+'/3</td><td><button class="btn green" onclick="ledgerScore(\\''+x.agency_id+'\\')">Score</button></td></tr>';

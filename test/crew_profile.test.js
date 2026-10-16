@@ -75,7 +75,7 @@ test("what people said: the note with its author (the activity row of the same s
 test("to check: why it ended, the grade against TDG's position, the feedback never asked, the name-only bridge — the console never picks", () => {
   const p = buildCrewProfile(JAMES());
   assert.deepEqual(p.checks.map((c) => c.key), ["end_reason", "grade", "feedback", "identity"]);
-  assert.match(p.checks[0].text, /ended 77 days early is not recorded\. The comment says “Resigned”\./);
+  assert.match(p.checks[0].text, /ended 2 mo 16 d early is not recorded\. The comment says “Resigned”\./);
   assert.match(p.checks[1].text, /Printer Specialist .*TDG’s count file says Junior Printer Specialist/);
   assert.match(p.checks[2].text, /Sep 5, 2026 — never asked: Rolando, Dexter, Shipboard review\./);
   // a recorded end reason on the card for that contract answers the first
