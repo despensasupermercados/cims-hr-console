@@ -114,7 +114,7 @@ const RB=(()=>{
   }catch(e){BOARD=[];}
   render();
   var _op=new URLSearchParams(location.search).get("open"),_aid=new URLSearchParams(location.search).get("aid");
-  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";var _m=document.getElementById("modal");if(_m)_m.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;})){open(_op,"reliever",_aid);if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefReady"},"*");}catch(e){}}}}
+  if(_op){var w=document.querySelector(".wrap");Array.prototype.forEach.call(w.children,function(c){if(c.id!=="modal")c.style.display="none";});document.body.style.background="transparent";var _m=document.getElementById("modal");if(_m)_m.style.background="transparent";if(BOARD.some(function(x){return x.vessel_key===_op;})){open(_op,"reliever",_aid);if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefReady"},"*");}catch(e){}}}else if(window.parent&&window.parent!==window){try{window.parent.postMessage({t:"reliefClose",error:"board"},"*");}catch(e){}}}
  }
  function order(){ if(manualOrder){const extra=BOARD.filter(r=>!manualOrder.includes(r.vessel_key));return manualOrder.map(k=>BOARD.find(r=>r.vessel_key===k)).filter(Boolean).concat(extra);} return BOARD; }
  function metrics(){
@@ -142,7 +142,7 @@ const RB=(()=>{
    const p=r.printer,rel=r.reliever,d=r.days_to_off;
    const bc=d==null?"muted":d<=CFG.critical_days?"danger":d<=CFG.due_days?"warning":"muted",bcol=col(bc);
    let printer="";
-   if(p){printer='<div class="card printer" onclick="RB.open(\\''+r.vessel_key+'\\',\\'printer\\')">'+(d!=null?'<span class="badge" style="background:'+bcol[0]+';color:'+bcol[1]+'">OFF in '+d+'d</span>':'')+'<div style="font-size:15px;font-weight:600;padding-right:64px">'+rEsc(p.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">PS</span></div><div class="line"><span class="dot" style="background:var(--text-success)"></span>On board</div><div class="line">'+cityLine(p,"off")+' · OFF '+(p.off_date||"TBA")+'</div>'+tagStrip(p.tags)+'</div>';}
+   if(p){printer='<div class="card printer" onclick="RB.open(\\''+r.vessel_key+'\\',\\'printer\\')">'+(d!=null?'<span class="badge" style="background:'+bcol[0]+';color:'+bcol[1]+'">OFF in '+mdN(d)+'</span>':'')+'<div style="font-size:15px;font-weight:600;padding-right:64px">'+rEsc(p.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">PS</span></div><div class="line"><span class="dot" style="background:var(--text-success)"></span>On board</div><div class="line">'+cityLine(p,"off")+' · OFF '+(p.off_date||"TBA")+'</div>'+tagStrip(p.tags)+'</div>';}
    let reliever;
    if(rel){reliever='<div class="card relief" draggable="true" ondragstart="RB.cds(event,\\''+r.vessel_key+'\\',\\'reliever\\')" ondragend="RB.cde(event)" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:14px;font-weight:600">'+rEsc(rel.crew_name||"—")+' <span style="font-size:11px;color:var(--text-accent)">reliever</span></div><div class="line"><span class="dot" style="background:var(--text-accent)"></span>Signs on'+(rel.auto_on?' <span style="color:var(--text-muted)">(follows printer)</span>':'')+'</div><div class="line">'+cityLine(rel,"on")+' · ON '+(rel.on_date||"TBA")+'</div>'+tagStrip(rel.tags)+'</div>';}
    else{reliever='<div class="card ghost'+(bc==='danger'?' crit':bc==='warning'?' due':'')+'" onclick="RB.open(\\''+r.vessel_key+'\\',\\'reliever\\')"><div style="font-size:13px;font-weight:500"><i class="ti ti-plus"></i> Add reliever</div><div style="font-size:11px;opacity:.8;margin-top:2px">empty slot · drop a card to fill</div></div>';}
@@ -172,7 +172,9 @@ const RB=(()=>{
  function taPorts(){return (PORTS||[]).filter(p=>Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name).slice().sort((a,b)=>a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0);}
  // Names and ports from TDG files and manual entry are text, never markup (8 Oct 2026).
  function rEsc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
- function addMonths(d,n){if(!d)return"";const dt=new Date(d+"T00:00:00Z");dt.setUTCMonth(dt.getUTCMonth()+n);return dt.toISOString().slice(0,10);}
+ // Month-end clamped (16 Oct 2026): setUTCMonth overflowed, so a printer off Jul 31 gave the earmark a SAVED sign-off of
+ // Mar 3 where the server (addMonthsISO / plusMonths) says Feb 28 — 1–3 days off on every 29th–31st into a shorter month.
+ function addMonths(d,n){if(!d)return"";const p=String(d).slice(0,10).split("-");const y=+p[0],m0=+p[1]-1+n,dd=+p[2];const t=new Date(Date.UTC(y,m0,1));const last=new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth()+1,0)).getUTCDate();t.setUTCDate(Math.min(dd,last));return t.toISOString().slice(0,10);}
  function brandOf(ship){const row=BOARD.find(r=>shipName(r.vessel_key)===ship);return row?String(row.vessel_key).split("|")[0]:"";}
  function minMonths(){const b=brandOf($("mship")?$("mship").value:shipName(cur&&cur.key));return /azamara/i.test(b)?5:7;} // a contract is SEVEN months, five on Azamara (Miguel, 7 Oct 2026) — the board's own length; 6 here until 8 Oct
  function portOpts(list,selDate,lead){let h=lead;for(const p of list){h+='<option value="'+p.berth_date+'"'+(p.berth_date===selDate?' selected':'')+'>'+p.port_name+' · '+fmtDate(p.berth_date)+'</option>';}h+='<option value="__c">Custom date…</option>';return h;}

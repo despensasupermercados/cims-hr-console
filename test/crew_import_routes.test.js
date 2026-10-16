@@ -534,3 +534,16 @@ test("a passport number in the file is written to the crew row on Apply", async 
   const upd = env.DB._batched.find(s => /^UPDATE crew SET pp_no=/.test(s.sql));
   assert.ok(upd && upd.args[0] === "P7637028A" && upd.args[2] === "SC-0046383");
 });
+
+// 16 Oct 2026 bug hunt: the page posted run_by:"Rita" for everyone; the audit row and the Joy emails said Rita did it
+// whoever applied the file. The route takes the session's email (handleCrewImport passes deps.runBy); the body's
+// run_by is only the fallback the tests use.
+test("apply: the run is signed by the session, not by the body", async () => {
+  const env = { DB: fakeDB({ existing: EXISTING }) };
+  const stage = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: "h-rb" }), env)).json();
+  await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-rb", run_by: "Rita" }), env, { runBy: "miguel.sanmartin@dg3.com" });
+  const ins = env.DB._batched.find((s) => /INSERT INTO import_run/.test(s.sql));
+  assert.ok(ins, "import_run written");
+  assert.ok(ins.args.includes("miguel.sanmartin@dg3.com"), "the session's email is the run_by");
+  assert.ok(!ins.args.includes("Rita"));
+});

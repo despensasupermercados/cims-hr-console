@@ -192,7 +192,7 @@ test("the route and the page: one wave, the board's own reads, and the page read
   const i = SRC.indexOf("async function apiOps("), body = SRC.slice(i, SRC.indexOf("\n}\n", i));
   assert.match(body, /await Promise\.all\(\[\s*rotationSections\(env\),\s*apiDashboard\(env\),/, "one concurrent wave over the board (§12)");
   assert.doesNotMatch(body, /\n\s+await env\.DB/, "no sequential D1 round trip");
-  assert.match(SRC, /d=await cachedJson\('\/api\/ops',renderDashboard\)/);
+  assert.match(SRC, /d=await cachedJson\('\/api\/ops',opsRefresh\)/); // 16 Oct 2026: a revalidation repaints under the same week page and filter
   // The Joy email is held for Miguel's sign-off on the rendered email (CIMS email standard): no send from this page yet.
   const page = SRC.slice(SRC.indexOf("var OPS=null,OPS_F='all';"), SRC.indexOf("async function renderDashboard(){"));
   assert.doesNotMatch(page, /fetch\(|sendViaMailer|\/api\/ops\/tdg/, "the dashboard sends nothing");

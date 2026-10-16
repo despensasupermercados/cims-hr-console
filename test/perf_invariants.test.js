@@ -268,8 +268,10 @@ test("a tab you have already opened paints from the last answer and revalidates 
   assert.match(fn, /err\.status=r\.status/, "an HTTP failure keeps its status: the board banner reports it (§11)");
   // 13 Oct 2026: the Crew tab revalidates into crewRefresh (repaints the list, keeps the search and filters) — a refresh
   // that re-opened the tab wiped what Rita was typing.
-  // 16 Oct 2026: the Travel tab revalidates into travelRefresh the same way — renderTravel reset every filter and the search.
-  for (const t of ["renderDashboard", "crewRefresh", "renderContracts", "renderFleet", "travelRefresh"]) {
+  // 16 Oct 2026: the Travel tab revalidates into travelRefresh the same way — renderTravel reset every filter and the search;
+  // the same evening the Dashboard (opsRefresh: the week page and the Crew-changes filter) and Fleet (fleetRefresh: the mode
+  // and the search box) followed.
+  for (const t of ["opsRefresh", "crewRefresh", "renderContracts", "fleetRefresh", "travelRefresh"]) {
     assert.match(SRC, new RegExp("cachedJson\\('/api/[a-z/]+'," + t + "\\)"), t + " still refetches from scratch on every visit");
   }
 });
