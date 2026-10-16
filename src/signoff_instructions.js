@@ -2,20 +2,20 @@
 // CIMS - Sign-off INSTRUCTIONS (Email 1)  ·  self-contained module
 // ============================================================================
 // Front of the hand-over workflow: the seafarer gets their pre-departure
-// instructions ~14 days out; the "I have read and understood" button records
-// the acknowledgement (date/time) and notifies onboardsupport.
+// instructions 14 days out; the email's one button, Open HON, records the
+// acknowledgement (date/time), notifies onboardsupport, then forwards to HON.
 //
 // USAGE (src/worker.js): import { installInstr } from "./signoff_instructions.js";
 //   inside fetch(request, env), AFTER  const session = await getSession(request, env);  add:
 //   { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex,
-//       logActivity, applyOverride, VESSEL_REF, sendViaMailer })(url.pathname, request, env, url, session);
+//       logActivity, applyOverride, VESSEL_REF, instrContext, sendViaMailer, boardLegs })(url.pathname, request, env, url, session);
 //     if (_i) return _i; }
 // Env INSTR_NOTIFY (default onboardsupport@dg3.com).
 // v2 (16 Oct 2026): the email is hr.signoff.instructions.v2 (src/emails/), filled from the Keyman board through
 // deps.instrContext (ship, brand, sign-off, port, reliever); CC onboardsupport@dg3.com, reply-to Rita; its one button
 // (Open HON) is the acknowledgment link, and /instr records the receipt then forwards to HON.
 // ============================================================================
-import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, HON_URL, firstWord } from "./emails/hr.signoff.instructions.v2.js";
+import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
 // ACK_HTML in signoff_ack.js. /instr is a PUBLIC seafarer page and its inline <script> was
