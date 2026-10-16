@@ -56,3 +56,21 @@ test("the search lists people inside the same period; the Training centre view g
   // a negative amount reads -$655, never $-655 (the pacing table's variance, the bill-vs-workbook gap)
   assert.match(W, /function usd0\(n\)\{var v=Number\(n\|\|0\);return \(v<0\?'-':''\)\+'\$'\+Math\.abs\(v\)/);
 });
+
+// A quiet year-over-year on every monthly chart (Miguel, 16 Oct 2026: "a very settle YOY comparison when filtered"): last
+// year's same month as a pale bar beside each month, a muted percentage under the month, one legend line; the plain bar
+// when no previous year exists. One helper for the Training centre chart and both Travel tab charts.
+test("every monthly chart draws last year beside this year through one helper", () => {
+  const b = fn("tBars");
+  assert.match(b, /hasPrev=!!prev&&prev\.some\(function\(v\)\{return v>0;\}\)/, "no previous year → the plain bar");
+  assert.match(b, /if\(hasPrev&&\(prev\[i\]\|\|0\)>maxv\)maxv=prev\[i\];/, "both years share one scale");
+  assert.match(b, /background:'\+PALE\+'/, "last year is the pale bar");
+  assert.match(b, /\(d>0\?'\+':''\)\+d\+'%'/, "the small percentage is this year vs last");
+  assert.match(b, /d=\(hasPrev&&pv0>0&&m<=upto\)/, "no percentage for a month still running or not started");
+  assert.match(b, /same month · the small figure is '\+o\.ly\+' vs '\+o\.py/, "one legend line");
+  assert.match(fn("paintTraining"), /h\+=tBars\(curT,\{prev:prevT,ly:LY,py:PY,upto:lastMo,color:/);
+  const t = fn("paintTravel");
+  assert.match(t, /h\+=tBars\(cur0,\{prev:hasPY\?prev0:null,ly:LY,py:PY,upto:lastMo,dim:dim\}\);/, "the non-budgeted chart");
+  assert.match(t, /h\+=tBars\(curB,\{prev:hasPY\?prevB:null,ly:LY,py:PY,budget:TBUD,upto:lastMo,dim:dim,color:/, "the budget pacing chart keeps its dashed line and red months");
+  assert.doesNotMatch(t, /gap:8px;height:150px/, "no hand-rolled bar loop left in paintTravel");
+});
