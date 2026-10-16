@@ -8288,7 +8288,7 @@ function pfContract(x,isCur,todayS,K,feed){
   var st;
   if(x.held)st=['red','Past the sign-off · TDG still has them aboard'];
   else if(isCur&&off&&off<todayS)st=['red','Past the projected sign-off'];
-  else if(isCur)st=['green','Aboard · '+(spanCompact(on,todayS)||'0 d')+' of '+spanCompact(on,x.planned)];
+  else if(isCur)st=['green','Aboard · '+(spanCompact(on,todayS)||'0 d')];
   else if(x.earlyDays)st=['red','Ended '+x.earlyText+' early'+(x.end?' · '+x.end.reason:'')];
   else st=['grey','Signed off '+fmtDateS(off)+(x.end?' · '+x.end.reason:'')];
   var ports=[x.embark?pfPort(x.embark):'',x.disembark?pfPort(x.disembark):''];
