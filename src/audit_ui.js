@@ -391,7 +391,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       var h = '<div class="card"><div class="pad"><h2 class="who">' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "");
       if (cur && cur.on && cur.off) {
         var late = cur.of && cur.day > cur.of;
-        h += '<div class="prog"><div class="lb"><span>Contract</span><b>' + esc(md(cur.on, S.today) || "0 d") + (cur.off && md(cur.on, cur.off) ? " of " + esc(md(cur.on, cur.off)) : "") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
+        h += '<div class="prog"><div class="lb"><span>Contract</span><b>' + esc(md(cur.on, S.today) || "0 d") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
       }
       h += "</div>";
       var done = (String(c.label || "").match(/^(\d+)/) || [])[1]; if (done == null && /^ongoing/i.test(String(c.label || ""))) done = 0;
