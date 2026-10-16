@@ -6134,14 +6134,9 @@ function paintTraining(){
     +tile(usd0(fixedMo),'rent + utilities · per month','amber')
     +tile(usd0(sum(fixed,'hotel')+sum(fixed,'air')),'hotels + airfare for trainees · '+LY)+'</div>';
   h+='<div class=zlabel>Training centre by month · '+LY+'</div><div class="card" style="max-width:none">';
-  var maxv=1;ly.forEach(function(r){if(r.total>maxv)maxv=r.total;});
-  h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2)">';
-  for(var m=1;m<=12;m++){var r=ly.find(function(x){return x.month===m;});var a=r?r.total:0;
-    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%">'
-      +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a?usd0(a):'')+'</div>'
-      +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+(a/maxv*100).toFixed(1)+'%;background:'+(r&&r.summary_only?'var(--muted)':'var(--navy)')+'"></div>'
-      +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';}
-  h+='</div><div class=hint style="margin-top:6px">Source: TDG’s SGA workbook, training summary sheet — the same figure as the monthly “Training-related costs” statement. No budget exists for the training centre (Miguel, 15 Oct 2026).</div>';
+  var curT=[],prevT=[];for(var m=1;m<=12;m++){var r=ly.find(function(x){return x.month===m;}),q=py.find(function(x){return x.month===m;});curT[m]=r?r.total:0;prevT[m]=q?q.total:0;}
+  h+=tBars(curT,{prev:prevT,ly:LY,py:PY,upto:lastMo,color:function(m){var r=ly.find(function(x){return x.month===m;});return r&&r.summary_only?'var(--muted)':'var(--navy)';}});
+  h+='<div class=hint style="margin-top:6px">Source: TDG’s SGA workbook, training summary sheet — the same figure as the monthly “Training-related costs” statement. No budget exists for the training centre (Miguel, 15 Oct 2026).</div>';
   h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th>'+TRCAT.map(function(c){return '<th style="text-align:right">'+c[1]+'</th>';}).join('')+'<th style="text-align:right">Total</th><th style="text-align:right">'+PY+'</th></tr></thead><tbody>';
   for(var m2=1;m2<=12;m2++){var r2=ly.find(function(x){return x.month===m2;}),p2=py.find(function(x){return x.month===m2;});if(!r2&&!p2)continue;
     var open=(LY===curY&&m2>=curM&&!r2);
@@ -6223,6 +6218,38 @@ function travelBack(){TSEL=null;paintTravel();}
 // Crew / shoreside scope the rows (tScope); the search box lists people inside the same period. The background refresh
 // (travelRefresh) repaints the body and keeps every filter — until 16 Oct 2026 it re-ran renderTravel, which reset them to
 // the defaults under Rita's hands. Pinned by test/travel_filters.test.js.
+// MONTHLY BARS WITH A QUIET YEAR-OVER-YEAR (Miguel, 16 Oct 2026, on the Training centre chart: "are u able to do a very
+// settle YOY comparison when filtered"). Last year's same month is a pale bar beside each month, a small muted percentage
+// sits under the month (hover for both figures), one legend line names the two years. No previous year → the plain bar.
+// cur / prev: arrays indexed 1..12. opts: { prev, ly, py, budget (dashed line; a month over it is red), color(m) → css
+// colour for the current bar, dim(m) → extra style (the month filter fades the others), upto → the last month whose
+// percentage is shown (a month still running or not started compares with nothing: no "-100%" on Oct–Dec) }.
+function tBars(cur,opts){
+  var o=opts||{},prev=o.prev||null,hasPrev=!!prev&&prev.some(function(v){return v>0;}),upto=o.upto==null?12:o.upto;
+  var maxv=o.budget||1;for(var i=1;i<=12;i++){if((cur[i]||0)>maxv)maxv=cur[i];if(hasPrev&&(prev[i]||0)>maxv)maxv=prev[i];}
+  var PALE='#D9DEE6';
+  var h='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
+  if(o.budget)h+='<div style="position:absolute;left:0;right:0;top:'+((1-o.budget/maxv)*100).toFixed(1)+'%;border-top:2px dashed var(--amber)"></div>';
+  for(var m=1;m<=12;m++){var a=cur[m]||0,pv0=hasPrev?(prev[m]||0):0,d=(hasPrev&&pv0>0&&m<=upto)?Math.round((a-pv0)/pv0*100):null;
+    var col=o.color?o.color(m,a):'var(--navy)';
+    var tip=hasPrev?' title="'+TMN[m]+' '+o.ly+': '+usd0(a)+' · '+o.py+': '+usd0(pv0)+(d!=null?' · '+(d>0?'+':'')+d+'%':'')+'"':'';
+    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1'+(o.dim?o.dim(m):'')+'"'+tip+'>'
+      +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a?usd0(a):'')+'</div>';
+    if(hasPrev){
+      h+='<div style="display:flex;align-items:flex-end;justify-content:center;gap:2px;width:78%;flex:1;min-height:0">'
+        +'<div style="flex:1.5;border-radius:4px 4px 0 0;min-height:2px;height:'+(a/maxv*100).toFixed(1)+'%;background:'+col+'"></div>'
+        +'<div style="flex:1;border-radius:3px 3px 0 0;min-height:'+(pv0?'2px':'0')+';height:'+(pv0/maxv*100).toFixed(1)+'%;background:'+PALE+'"></div></div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.1">'+TMN[m]+'</div>'
+        +'<div style="font-size:9px;color:var(--muted);opacity:.75;height:11px">'+(d!=null?((d>0?'+':'')+d+'%'):'')+'</div></div>';
+    } else {
+      h+='<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+(a/maxv*100).toFixed(1)+'%;background:'+col+'"></div>'
+        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';
+    }
+  }
+  h+='</div>';
+  if(hasPrev)h+='<div class=hint style="margin-top:6px"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--navy);vertical-align:-1px"></i> '+o.ly+' &nbsp;<i style="display:inline-block;width:8px;height:10px;border-radius:2px;background:'+PALE+';vertical-align:-1px"></i> '+o.py+' same month · the small figure is '+o.ly+' vs '+o.py+'</div>';
+  return h;
+}
 function tPeriod(sc){
   var ys=Array.from(new Set(sc.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
   var LY=TF.year?+TF.year:ys[0], PY=TF.year?(+TF.year-1):ys[1];
@@ -6278,14 +6305,9 @@ function paintTravel(){
       +(P.mo?tile(usd0(TBUD),'monthly budget, all crew travel · no pacing for '+scopeName):tile(usd0(fullProj),'run-rate × 12 · no budget for '+scopeName))+'</div>';
     h+='<div class=zlabel>Monthly spend '+LY+(cat?' · '+catName:'')+(TF.client?' · '+TCLIENT[TF.client]:'')+'</div>';
     h+='<div class="card" style="max-width:none">';
-    var maxv0=1;for(var m0=1;m0<=12;m0++){var a0=tSum(sc,LY,[m0],cat);if(a0>maxv0)maxv0=a0;}
-    h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
-    for(var m1=1;m1<=12;m1++){var a1=tSum(sc,LY,[m1],cat);
-      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1'+dim(m1)+'">'
-        +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a1?usd0(a1):'')+'</div>'
-        +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+(a1/maxv0*100).toFixed(1)+'%;background:var(--navy)"></div>'
-        +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m1]+'</div></div>';}
-    h+='</div><div class=hint style="margin-top:6px">The $'+Number(TBUD*12).toLocaleString()+' budget covers all crew travel together; a single cruise line, shoreside or one category is shown against last year only.</div></div>';
+    var cur0=[],prev0=[];for(var m0=1;m0<=12;m0++){cur0[m0]=tSum(sc,LY,[m0],cat);prev0[m0]=hasPY?tSum(sc,PY,[m0],cat):0;}
+    h+=tBars(cur0,{prev:hasPY?prev0:null,ly:LY,py:PY,upto:lastMo,dim:dim});
+    h+='<div class=hint style="margin-top:6px">The $'+Number(TBUD*12).toLocaleString()+' budget covers all crew travel together; a single cruise line, shoreside or one category is shown against last year only.</div></div>';
   } else {
   h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:6px">'
     +tile(usd0(ytdA),actualLabel)
@@ -6301,16 +6323,8 @@ function paintTravel(){
     +(P.budgetMonths?pv((ytdA<=ytdB?'+':'')+usd0(ytdB-ytdA),'variance ('+(ytdA<=ytdB?'under':'over')+')',ytdA<=ytdB?'var(--green-d)':'var(--red)'):pv('—','variance · '+(P.inProgress?'month in progress':'month not started'),'var(--muted)'))
     +(P.mo?pv('—','projected FY · All months to see it','var(--muted)'):pv(usd0(fullProj),'projected FY vs '+usd0(TBUD*12),fullProj<=TBUD*12?'var(--green-d)':'var(--red)'))
     +'</div>';
-  var maxv=TBUD;for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);if(a>maxv)maxv=a;}
-  var budTop=(1-TBUD/maxv)*100;
-  h+='<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:14px 0 0;border-bottom:1px solid var(--line-2);position:relative">';
-  h+='<div style="position:absolute;left:0;right:0;top:'+budTop.toFixed(1)+'%;border-top:2px dashed var(--amber)"></div>';
-  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var hp=(a/maxv*100).toFixed(1);var over=a>TBUD;
-    h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;z-index:1'+dim(m)+'">'
-      +'<div style="font-size:9px;color:var(--navy);font-weight:700">'+(a?usd0(a):'')+'</div>'
-      +'<div style="width:62%;border-radius:4px 4px 0 0;min-height:2px;height:'+hp+'%;background:'+(over?'var(--red)':'var(--navy)')+'"></div>'
-      +'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+TMN[m]+'</div></div>';}
-  h+='</div>';
+  var curB=[],prevB=[];for(var m=1;m<=12;m++){curB[m]=tSum(sc,LY,[m],null);prevB[m]=hasPY?tSum(sc,PY,[m],null):0;}
+  h+=tBars(curB,{prev:hasPY?prevB:null,ly:LY,py:PY,budget:TBUD,upto:lastMo,dim:dim,color:function(m,a){return a>TBUD?'var(--red)':'var(--navy)';}});
   h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = run-rate of the closed months × 12.</div>';
   h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">Variance</th><th style="text-align:right">'+(PY||'PY')+'</th></tr></thead><tbody>';
   for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;var open=(m===openMo);var pick=(m===P.mo);
