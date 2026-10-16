@@ -25,8 +25,8 @@ export const pill = (txt, tone) => {
 
 // The frame: letterhead, eyebrow + date, headline (+ grey second clause), one sentence of context, the body rows, footer.
 export function frame({ preheader, eyebrow, date, head, head2, lead, rows, footer }) {
-  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(eyebrow)}</title>
-<style>@media only screen and (max-width:620px){.c{width:100%!important}.px{padding-left:20px!important;padding-right:20px!important}.hl{font-size:30px!important}.fr{padding:0!important}}</style></head>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>${esc(eyebrow)}</title>
+<style>a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}@media only screen and (max-width:620px){.c{width:100%!important}.px{padding-left:20px!important;padding-right:20px!important}.hl{font-size:30px!important}.fr{padding:0!important}}</style></head>
 <body style="margin:0;padding:0;background:${T.page};">
 <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${T.page};">${esc(preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.page}" style="background:${T.page};"><tr><td class="fr" align="center" style="padding:24px 12px;">
@@ -36,13 +36,17 @@ ${mastRows()}
  <td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${T.greenInk};text-transform:uppercase;">${esc(eyebrow)}</td>
  <td align="right" style="font-family:${FB};font-size:13px;color:${T.slate};">${esc(date)}</td></tr></table></td></tr>
 <tr><td class="px" style="padding:14px 32px 0;"><div class="hl" style="font-family:${FH};font-size:36px;font-weight:600;letter-spacing:-0.6px;color:${T.navy};line-height:1.1;">${esc(head)}${head2 ? `<br><span style="color:${T.grey};">${esc(head2)}</span>` : ""}</div>
-${lead ? `<div style="font-family:${FB};font-size:15px;color:${T.body};line-height:1.5;padding-top:12px;">${lead}</div>` : ""}</td></tr>
+${lead ? blk(`padding-top:12px;font-family:${FB};font-size:15px;color:${T.body};line-height:1.5;`, lead) : ""}</td></tr>
 ${rows || ""}
 <tr><td height="28" style="height:28px;font-size:0;line-height:0;">&nbsp;</td></tr>
 <tr><td class="px" style="padding:24px 32px 24px;font-family:${FB};font-size:12px;color:${T.slate};line-height:1.5;border-top:1px solid ${T.border};">${footer || ""}</td></tr>
 </table></td></tr></table></body></html>`;
   return html;
 }
+// Outlook desktop lays mail out with Word, which drops padding and margin on a <div>, padding on an <a> and margin on a
+// <table> (Kevin Jugao's request on Pursuit, 16 Oct 2026: every gap closed, the button lost its shape). Every gap is a
+// table cell's padding: blk() is a block of text with its own spacing. Pinned by test/audit_email_outlook.test.js.
+export const blk = (style, inner) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="${style}">${inner}</td></tr></table>`;
 export const row = (inner, pad = "20px 32px 0") => `<tr><td class="px" style="padding:${pad};">${inner}</td></tr>`;
 export const card = (inner, tone) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${T.cloud}" style="background:${T.cloud};border-radius:16px;${tone ? "border-left:3px solid " + (tone === "red" ? T.red : tone === "amber" ? T.amber : T.green) + ";" : ""}"><tr><td style="padding:18px 20px;">${inner}</td></tr></table>`;
 export const stat = (n, label, tone) => {
