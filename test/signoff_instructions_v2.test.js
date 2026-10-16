@@ -260,7 +260,8 @@ test("everything off: nothing runs", async () => {
 
 test("the worker feeds the board's context to both senders and keeps two switches in the rail", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
-  assert.equal((W.match(/instrContext: instrSeatContext, sendViaMailer, boardLegs \}\)/g) || []).length, 2);
+  assert.equal((W.match(/instrContext: instrSeatContext, sendViaMailer, boardLegs \}\)/g) || []).length, 1, "installed once at module level (16 Oct 2026)");
+  assert.match(W, /_autoInstr\(p, request, env, url, session\)/, "the fetch handler dispatches through the module-level handle");
   assert.match(W, /return Object\.values\(seatContexts\(sections\)\)\.map/);
   assert.match(W, /id="autoToggle" onclick="autoToggleClick\(&#39;instructions&#39;\)"/);
   assert.match(W, /id="linkToggle" onclick="autoToggleClick\(&#39;signoff&#39;\)"/);

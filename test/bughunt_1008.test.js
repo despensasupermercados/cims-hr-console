@@ -125,7 +125,9 @@ test("emails: the sign-off link / instructions use the seat, never wipe an ackno
     assert.match(S, /if \(prev && prev\.status === "acknowledged" && !b\.force\) return json\(\{ ok: false, error: "already_acknowledged" \}, 409\);/, f);
     assert.match(S, /var ed = \(ovr && ovr\.fromBoard\) \? \{\} :/, f);
   }
-  assert.equal((W.match(/sendViaMailer, boardLegs \}\)/g) || []).length, 4, "both installers, both call sites, get the board schedule");
+  // 16 Oct 2026: the two installers are built once at module level and the fetch handler dispatches through those handles
+  assert.equal((W.match(/sendViaMailer, boardLegs \}\)/g) || []).length, 2, "both installers get the board schedule");
+  assert.match(W, /_autoAck\(p, request, env, url, session\)/); assert.match(W, /_autoInstr\(p, request, env, url, session\)/);
   assert.match(src("auto_send.js"), /COALESCE\(NULLIF\(o\.email,''\), c\.email\) AS email/);
   assert.match(src("relief_coverage.js"), /LEFT JOIN registry_snapshot rs ON rs\.agency_id = rc\.agency_id\s*WHERE a\.sign_on BETWEEN \? AND \? AND a\.actual_sign_off IS NULL/);
 });

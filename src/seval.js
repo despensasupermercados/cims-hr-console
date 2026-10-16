@@ -12,6 +12,7 @@
 // Precedence (§6.2): auto PREFILLS, never commits; MANUAL ALWAYS WINS; auto never
 // overwrites manual; multiple reviews average (rounded half-up); a review after a
 // commit is filed + flagged but has NO bonus effect (ledger is append-only).
+import { memoDdl } from "./ensure_memo.js";
 
 export function sevalValidValue(v) {
   const n = parseInt(v, 10);
@@ -32,7 +33,9 @@ export function installSeval(deps) {
   const nowIso = deps.now || (() => new Date().toISOString());
   const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
 
-  async function ensureSeval(env) {
+  // Once per database per isolate (16 Oct 2026): this CREATE ran on every request that reached the module (§12).
+  const ensureSeval = memoDdl(ensureSevalDdl);
+  async function ensureSevalDdl(env) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS seval_state (agency_id TEXT NOT NULL, crew_id TEXT, contract_signoff TEXT NOT NULL, value INTEGER, source TEXT NOT NULL DEFAULT 'none' CHECK (source IN ('auto','manual','none')), set_by TEXT, set_at TEXT, reason TEXT, PRIMARY KEY (agency_id, contract_signoff))").run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS seval_audit (id TEXT PRIMARY KEY, agency_id TEXT NOT NULL, contract_signoff TEXT NOT NULL, actor TEXT, old_value INTEGER, new_value INTEGER, old_source TEXT, new_source TEXT, reason TEXT, note TEXT, at TEXT NOT NULL)").run();
   }

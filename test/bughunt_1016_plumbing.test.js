@@ -1,0 +1,153 @@
+// THE 16 OCT 2026 BUG HUNT — the Worker's plumbing (Miguel: "read the code.. find bugs and fix them .. also review the
+// logic"). worker.js keeps these private, so the file is copied with an export line (the sp_inbox test's way). Each case
+// was reproduced on the old code first; real SQLite where a sequence of writes is the point.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { memoDdl } from "../src/ensure_memo.js";
+
+let DatabaseSync = null;
+try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted below */ }
+
+const SRC_PATH = new URL("../src/worker.js", import.meta.url);
+const SRC = readFileSync(SRC_PATH, "utf-8");
+const TMP = new URL(`../src/__bh1016_${process.pid}__.mjs`, import.meta.url);
+writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS };\n", "utf-8");
+let W;
+try { W = await import(TMP.href); } finally { unlinkSync(TMP); }
+
+// ---- B1: a forwarded report is cut at the MIME boundary, never at a "--" line of its own text ---------------------------
+const MIME = [
+  "From: Ray Guerra <ray@dg3.com>", "Subject: Fwd: Marto", 'Content-Type: multipart/mixed; boundary="outer"', "",
+  "--outer", 'Content-Type: multipart/alternative; boundary="inner"', "",
+  "--inner", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: quoted-printable", "",
+  "Ryan Ta=C3=B1gonan missed the par order twice.", "-- ", "Ray Guerra", "--- Forwarded message ---", "From: ship", "Cost =3D $450 freight.", "",
+  "--inner", "Content-Type: text/html; charset=UTF-8", "", "<p>html copy</p>", "--inner--", "--outer--", "",
+].join("\r\n");
+test("B1: the text/plain part runs to ITS boundary — a signature's '-- ' and a '--- Forwarded' line stay in the body, UTF-8 QP reads as UTF-8", () => {
+  const b = W.decodeEmailBody(MIME);
+  assert.match(b, /Tañgonan/, "quoted-printable UTF-8 is decoded as UTF-8, not as Latin-1 mojibake");
+  assert.match(b, /Ray Guerra/, "the signature after '-- ' used to be where the body was cut");
+  assert.match(b, /Forwarded message/); assert.match(b, /Cost = \$450 freight/);
+  assert.doesNotMatch(b, /html copy/, "the html alternative is not part of the text");
+});
+test("B1: a 7bit body is never quoted-printable-decoded ('=1A' in a part number stays)", () => {
+  const raw = ["From: a@b", "Content-Type: text/plain", "", "Toner TN=1A used 3=20 of 4.", ""].join("\n");
+  assert.equal(W.decodeEmailBody(raw), "Toner TN=1A used 3=20 of 4.");
+});
+
+// ---- B4: a cookie the browser mangled must not 500 every request -------------------------------------------------------
+test("B4: getCookie returns the raw value when it is not valid percent-encoding, instead of throwing", () => {
+  const req = { headers: { get: () => "other=1; sid=abc%E0%A4%A; x=2" } };
+  assert.equal(W.getCookie(req, "sid"), "abc%E0%A4%A");
+  assert.equal(W.getCookie({ headers: { get: () => "sid=a%20b" } }, "sid"), "a b");
+});
+
+// ---- B2: the sign-off dispatchers are built once; the per-module ensure guards run their DDL once per database ----------
+test("B2: the fetch handler dispatches through the module-level _autoAck / _autoInstr, not a fresh install per request", () => {
+  const handler = SRC.slice(SRC.indexOf("export default {"));
+  assert.doesNotMatch(handler, /installAck\(\{/, "installAck is called once, at module level");
+  assert.doesNotMatch(handler, /installInstr\(\{/, "installInstr is called once, at module level");
+  assert.match(handler, /_autoAck\(p, request, env, url, session\)/); assert.match(handler, /_autoInstr\(p, request, env, url, session\)/);
+  for (const fn of ["apiAutoSend", "apiSbmToggle", "apiAsk"]) {
+    const i = SRC.indexOf("async function " + fn + "("); assert.ok(i > 0, fn);
+    const body = SRC.slice(i, SRC.indexOf("\n}\n", i));
+    assert.doesNotMatch(body, /CREATE TABLE/, fn + " runs DDL on every request — use a memoized guard (§12)");
+  }
+  for (const f of ["sbm.js", "seval.js", "signoff_ack.js", "signoff_instructions.js"]) {
+    const s = readFileSync(new URL("../src/" + f, import.meta.url), "utf-8");
+    assert.match(s, /memoDdl\(/, f + ": its ensure guard is wrapped (it ran CREATE TABLE on every request)");
+  }
+});
+test("B2: memoDdl runs the guard once per database, retries after a failure, and keeps databases apart", async () => {
+  let n = 0;
+  const g = memoDdl(async (env) => { n++; if (env.fail) throw new Error("boom"); });
+  const a = { DB: {} }, b = { DB: {} };
+  await g(a); await g(a); await g(a);
+  assert.equal(n, 1, "once per isolate and database");
+  await g(b); assert.equal(n, 2, "a second database is its own guard");
+  const c = { DB: {}, fail: true };
+  await assert.rejects(g(c)); c.fail = false; await g(c); assert.equal(n, 4, "a failed guard is not remembered as done");
+});
+
+// ---- B3: a guard whose ALTER fails for a REAL reason is not recorded as applied for ever -------------------------------
+function guardDb(alterError) {
+  const meta = [];
+  const mk = (sql) => ({
+    bind: () => mk(sql),
+    async run() {
+      if (/^ALTER TABLE/.test(sql)) { if (alterError) throw new Error(alterError(sql)); return {}; }
+      if (/INSERT OR IGNORE INTO data_meta/.test(sql)) meta.push(sql);
+      return {};
+    },
+    async first() { return null; },
+    async all() { return { results: [] }; },
+  });
+  return { DB: { prepare: mk, async batch(st) { return st.map(() => ({})); } }, meta };
+}
+test("B3: a guard's ALTER swallows 'duplicate column' and 'no such table' only; any other error fails the guard and records nothing", async () => {
+  const ok = guardDb((sql) => (/assignment/.test(sql) ? "no such table: assignment" : "duplicate column name: name"));
+  await W.ensureRegistrySnapshot(ok);
+  assert.equal(ok.meta.length, 1, "the column is there, or the table is not there yet (its CREATE carries the column): applied");
+  const bad = guardDb((sql) => (/assignment/.test(sql) ? "D1_ERROR: storage caused object to be reset" : "duplicate column name: x"));
+  await assert.rejects(W.ensureRegistrySnapshot(bad), /D1_ERROR/);
+  assert.equal(bad.meta.length, 0, "a guard that did not add its column is NOT written to data_meta (it was, for ever, with the column missing)");
+});
+
+// ---- B5 / B6 on real SQLite ----------------------------------------------------------------------------------------------
+function envFor(d, extra = {}) {
+  const stmt = (sql, args = []) => ({
+    bind: (...a) => stmt(sql, a),
+    all: async () => ({ results: d.prepare(sql).all(...args) }),
+    first: async () => d.prepare(sql).get(...args) ?? null,
+    run: async () => { const r = d.prepare(sql).run(...args); return { success: true, meta: { changes: Number(r.changes) } }; },
+  });
+  return { DB: { prepare: (sql) => stmt(sql), batch: async (st) => { const o = []; for (const x of st) o.push(await x.run()); return o; } }, ...extra };
+}
+const CREW = "CREATE TABLE crew (agency_id TEXT, first_name TEXT, last_name TEXT, status TEXT, redacted INTEGER DEFAULT 0); INSERT INTO crew VALUES ('SC-1','Ryan','Marto','On board',0);";
+const LOG = "CREATE TABLE activity_log (id TEXT PRIMARY KEY, at TEXT, user_id TEXT, action TEXT, detail TEXT); CREATE TABLE data_log (id TEXT PRIMARY KEY, source TEXT, rows INTEGER, note TEXT, at TEXT);";
+
+test("B5: an email the engine returns nothing for is retried, then lands in the human review queue — never released for ever", async () => {
+  assert.ok(DatabaseSync, "node:sqlite");
+  const d = new DatabaseSync(":memory:"); d.exec(CREW + LOG);
+  let calls = 0;
+  const env = envFor(d, { AI: { run: async () => { calls++; return { response: "" }; } } });
+  await W.processIntelInbox(env, 10); // the schema
+  d.prepare("INSERT INTO email_inbox (id,from_addr,to_addr,subject,raw,received_at,status) VALUES ('em1','ray@dg3.com','crew-reports@cims.work','Marto','From: ray@dg3.com\n\nRyan Marto missed the par order.','2026-10-16T08:00:00Z','new')").run();
+  const max = W.INTEL_MAX_ATTEMPTS;
+  assert.ok(max >= 2 && max <= 5, "a small, named ceiling");
+  for (let i = 1; i < max; i++) {
+    await W.processIntelInbox(env, 10);
+    assert.equal(d.prepare("SELECT status FROM email_inbox WHERE id='em1'").get().status, "new", "released for the next sweep");
+  }
+  await W.processIntelInbox(env, 10);
+  assert.equal(calls, max, "the engine is asked exactly INTEL_MAX_ATTEMPTS times, then never again for this email");
+  const em = d.prepare("SELECT status, attempts FROM email_inbox WHERE id='em1'").get();
+  assert.equal(em.status, "processed"); assert.equal(em.attempts, max);
+  const ci = d.prepare("SELECT agency_id, status, created_by, summary FROM crew_intel WHERE source_email_id='em1'").get();
+  assert.ok(ci, "a card exists for the email");
+  assert.equal(ci.status, "pending", "in the human review queue (apiIntelReview lists status='pending')");
+  assert.equal(ci.agency_id, null, "the console never picks the crew for it");
+  assert.match(ci.summary, /Ryan Marto missed the par order/, "the sender's own words, for a human to read");
+  assert.match(ci.summary, new RegExp("could not summarise.*" + max + " attempts", "i"));
+  await W.processIntelInbox(env, 10);
+  assert.equal(calls, max, "a processed email is not re-read");
+});
+
+test("B6: two applyInbox runs on the same pending file load it ONCE (the mail intake applies at once; the hourly cron is the safety net)", async () => {
+  assert.ok(DatabaseSync, "node:sqlite");
+  const d = new DatabaseSync(":memory:"); d.exec(CREW + LOG);
+  const env = envFor(d);
+  await W.applyInbox(env); // the schema
+  const ins = d.prepare("INSERT INTO sp_inbox (id, file_key, kind, year, month, item_id, name, path, modified, sheet, part, parts, file_parts, rows_json, written_by, at, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+  ins.run("k1_S_1", "k1", "nothing", 2026, 9, "01X", "x.xlsx", "p", "2026-10-02T03:11:09.000Z", "S", 1, 1, 1, "[]", "t", "2026-10-16T05:00:00Z", "pending");
+  const [a, b] = await Promise.all([W.applyInbox(env), W.applyInbox(env)]);
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sp_sync WHERE item_id='01X'").get().n, 1, "one record of the load, not two");
+  assert.equal(a.loaded.length + a.errors.length + b.loaded.length + b.errors.length, 1, "one run took the file; the other saw it claimed");
+  assert.equal(d.prepare("SELECT status FROM sp_inbox WHERE id='k1_S_1'").get().status, "error", "the unknown kind is marked (never left 'applying')");
+  // a claim an isolate never finished is released after INBOX_STALE_MIN
+  ins.run("k2_S_1", "k2", "nothing", 2026, 9, "02X", "y.xlsx", "p", "2026-10-02T03:11:09.000Z", "S", 1, 1, 1, "[]", "t", "2026-10-16T05:00:00Z", "applying");
+  d.prepare("UPDATE sp_inbox SET applied_at='2026-10-16T00:00:00Z' WHERE id='k2_S_1'").run();
+  const r = await W.applyInbox(env);
+  assert.equal(r.files, 1, "the stale claim was released and the file taken");
+});

@@ -15,6 +15,7 @@
 // deps.instrContext (ship, brand, sign-off, port, reliever); CC onboardsupport@dg3.com, reply-to Rita; its one button
 // (Open HON) is the acknowledgment link, and /instr records the receipt then forwards to HON.
 // ============================================================================
+import { memoDdl } from "./ensure_memo.js";
 import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
@@ -83,7 +84,9 @@ export function installInstr(deps) {
 
   var INSTR_TTL = 60 * 60 * 24 * 45; // 45 days (email goes ~14d before sign-off)
 
-  async function ensureInstr(env) {
+  // Once per database per isolate (16 Oct 2026): this CREATE ran on every request that reached the module (§12).
+  const ensureInstr = memoDdl(ensureInstrDdl);
+  async function ensureInstrDdl(env) {
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS instr_ack (" +
       " id TEXT PRIMARY KEY, sc TEXT NOT NULL, seq INTEGER NOT NULL, crew_id TEXT," +

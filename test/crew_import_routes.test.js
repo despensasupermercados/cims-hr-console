@@ -283,7 +283,7 @@ test("stage lists every open projection against the file, and carries the file's
   assert.equal(stage.review.projections.length, 1);
   assert.equal(stage.review.projections[0].verdict, "confirmed", "the file has SC-1 On board Celebrity Apex: the Apex card is confirmed");
   assert.equal(stage.review.projection_counts.confirmed, 1);
-  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex", name: "Jomar Dela Cruz", status_raw: "On board", embarked_at: null, debarked_at: null }]);
+  assert.deepEqual(stage.review.registry, [{ agency_id: "SC-1", status: "On board", vessel_observed: "Celebrity Apex", ship_crew_id: null, name: "Jomar Dela Cruz", status_raw: "On board", embarked_at: null, debarked_at: null }]);
   assert.equal(env.DB._batched.length, 0, "stage still writes nothing");
 });
 
@@ -546,4 +546,43 @@ test("apply: the run is signed by the session, not by the body", async () => {
   assert.ok(ins, "import_run written");
   assert.ok(ins.args.includes("miguel.sanmartin@dg3.com"), "the session's email is the run_by");
   assert.ok(!ins.args.includes("Rita"));
+});
+
+// 16 Oct 2026 bug hunt — THE CRUISE-LINE ID REACHES THE CREW ROW. The import read SHIP CREW ID off the file (mapRowFull)
+// and then dropped it: INSERT_COLS had no ship_crew_id, so a brand-new crew lost it; an existing crew with a NULL id
+// never gained one. The identity bridge for both TDG contract files (§6) is "by name until ship_crew_id is stored on crew".
+test("apply: a new crew's INSERT carries the file's ship_crew_id; an existing crew with none is filled, never overwritten", async () => {
+  const existing = [{ ...EXISTING[0], ship_crew_id: null }, { agency_id: "SC-2", first_name: "Ida", last_name: "Purnama", status: "On Vacation", ship_crew_id: "349195" }];
+  const rows = [
+    { ...ROWS[0], "SHIP CREW ID": "526444" },
+    { "CREW ID": "SC-2", "FIRST NAME": "Ida", "LAST NAME": "Purnama", "CREW STATUS": "On Vacation", "SHIP CREW ID": "999999" }, // disagrees: flag territory, never a silent overwrite
+    { "CREW ID": "SC-NEW", "FIRST NAME": "Jim", "LAST NAME": "Olid", "CREW STATUS": "On Vacation", "SHIP CREW ID": "569037" },
+  ];
+  const env = { DB: fakeDB({ existing }) };
+  const stage = await (await apiCrewImportStage(req({ rows, file_hash: "h-km" }), env)).json();
+  await apiCrewImportApply(req({ review: stage.review, decisions: {}, file_hash: "h-km", run_by: "t" }), env);
+  const ins = env.DB._batched.find((s) => /INSERT INTO crew \(/.test(s.sql));
+  assert.ok(ins, "the new crew is inserted");
+  const cols = ins.sql.match(/INSERT INTO crew \(([^)]*)\)/)[1].split(",");
+  assert.ok(cols.includes("ship_crew_id"), "INSERT_COLS carries ship_crew_id");
+  assert.equal(ins.args[cols.indexOf("ship_crew_id")], "569037");
+  const fills = env.DB._batched.filter((s) => /UPDATE crew SET ship_crew_id=\?/.test(s.sql));
+  assert.deepEqual(fills.map((s) => s.args.filter((a) => a !== null && !/T\d\d:\d\d/.test(String(a)))), [["526444", "SC-1"]], "SC-1 is filled; SC-2 (already has one) and the new crew (its INSERT carries it) get no UPDATE");
+  assert.ok(fills.every((s) => /ship_crew_id IS NULL/.test(s.sql)), "bound to a row without one");
+  assert.deepEqual(stage.review.km_mismatch, [{ agency_id: "SC-2", roster: "349195", file: "999999" }], "a differing id is listed (§6), never overwritten");
+});
+
+// 16 Oct 2026 bug hunt — the re-drop compared the run's rows_seen (every row of the file, the dateless trailer included)
+// with the number of rows that carry an agency id, so a file with one row the import had skipped could never fill the
+// board's copy ("already_processed", nothing kept). Same number on both sides now: the rows read.
+test("re-drop: a file with a row the import skipped (no agency id) still fills the board's copy", async () => {
+  const runs = [{ id: "run-oct7", file_hash: "h-oct7", run_at: "2026-10-07T09:00:00.000Z", rows_seen: 2 }];
+  const env = { DB: redropDB({ runs }) };
+  const rows = [...ROWS, { "CREW ID": "", "FIRST NAME": "", "LAST NAME": "Total", "CREW STATUS": "" }]; // TDG's trailer row
+  const body = await (await apiCrewImportStage(req({ rows, file_hash: "h-oct7" }), env, ensured)).json();
+  assert.equal(body.error, "already_processed");
+  assert.equal(body.snapshot_saved, 1, "the one crew row is kept (it was refused: 2 rows seen vs 1 mapped)");
+  const other = { DB: redropDB({ runs: [{ ...runs[0], rows_seen: 5 }] }) };
+  const b2 = await (await apiCrewImportStage(req({ rows, file_hash: "h-oct7" }), other, ensured)).json();
+  assert.equal(b2.snapshot_saved, undefined, "a file that reads a different number of rows than the run it claims to be keeps nothing");
 });

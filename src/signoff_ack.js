@@ -11,6 +11,7 @@
 //     if (_a) return _a; }
 // Env ACK_NOTIFY (default onboardsupport@dg3.com).
 // ============================================================================
+import { memoDdl } from "./ensure_memo.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it. This page's inline
 // <script> was NOT covered by scripts/verify_client_scripts.mjs while it lived inside the
@@ -24,7 +25,9 @@ export function installAck(deps) {
 
   var ACK_TTL = 60 * 60 * 24 * 30; // 30 days (mirrors FB_TTL)
 
-  async function ensureAck(env) {
+  // Once per database per isolate (16 Oct 2026): this CREATE ran on every request that reached the module (§12).
+  const ensureAck = memoDdl(ensureAckDdl);
+  async function ensureAckDdl(env) {
     await env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS ack_request (" +
       " id TEXT PRIMARY KEY, sc TEXT NOT NULL, seq INTEGER NOT NULL, crew_id TEXT," +

@@ -33,7 +33,9 @@ function pick(row, patterns) {
   for (const p of patterns) {
     const np = norm(p);
     const k = keys.find(h => norm(h).includes(np));
-    if (k != null) { const v = row[k]; return v == null ? "" : String(v).trim(); }
+    // "-" is TDG's blank in EVERY cell (16 Oct 2026): it was read so for dates only, so a "-" became the crew's province,
+    // phone, passport number or SHIP ("-" as a hull → an unknown_ship row) and never cleared anything.
+    if (k != null) { const v = row[k]; return v == null ? "" : String(dash(v) == null ? "" : dash(v)).trim(); }
   }
   return "";
 }
@@ -46,7 +48,7 @@ function blankCell(row, patterns) {
   for (const p of patterns) {
     const np = norm(p);
     const k = keys.find(h => norm(h).includes(np));
-    if (k != null) { const v = row[k]; return v == null || String(v).trim() === ""; }
+    if (k != null) { const v = row[k]; return v == null || String(v).trim() === "" || String(v).trim() === "-"; } // "-" = TDG's blank
   }
   return false;
 }

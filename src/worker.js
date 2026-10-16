@@ -134,9 +134,12 @@ async function autoSendSeed(env) {
 }
 
 
+// app_setting's guard, memoized like every other (§12): the two switch routes ran this CREATE on every call — the page
+// calls both at boot (16 Oct 2026).
+const ensureAppSetting = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); });
 async function apiAutoSend(request, env, session) {
   if (!session) return json({ error: "unauthorized" }, 401);
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run();
+  await ensureAppSetting(env);
   const getS = async (k) => { const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k=?").bind(k).first(); return r ? r.v : null; };
   const setS = (k, v) => env.DB.prepare("INSERT INTO app_setting (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(k, v).run();
   const state = async () => { const both = (await getS("auto_send_enabled")) === "true";
@@ -186,7 +189,7 @@ async function apiSbmToggle(request, env, session) {
   // src/sbm.js sbmDailySweep reads 'sbm_enabled' and no-ops while it is OFF.
   if (!session) return json({ error: "unauthorized" }, 401);
   if (request.method === "POST" && !isMoneyUser(session && session.email)) return json({ error: "money_users_only" }, 403);
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run();
+  await ensureAppSetting(env);
   if (request.method === "POST") {
     const b = await request.json().catch(function () { return {}; });
     const v = b.enabled === true ? "true" : "false";
@@ -260,8 +263,10 @@ export default {
       // Printshop Audit: the shell on audit.cims.work (and cims.work/audit), its manifest and service worker, and
       // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
       { const _au = await _audit(p, request, env, url, session); if (_au) return _au; }
-      { const _a = await installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs })(p, request, env, url, session); if (_a) return _a; }
-      { const _i = await installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs })(p, request, env, url, session); if (_i) return _i; }
+      // The two sign-off dispatchers are built ONCE at module level (_autoAck / _autoInstr); they used to be re-installed —
+      // closures, templates and all — on every request that reached this line (16 Oct 2026).
+      { const _a = await _autoAck(p, request, env, url, session); if (_a) return _a; }
+      { const _i = await _autoInstr(p, request, env, url, session); if (_i) return _i; }
       if (p === '/api/roster/export') return apiRosterExport(request, env);
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
@@ -448,7 +453,8 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
 function getCookie(request, name) {
   const c = request.headers.get("Cookie") || "";
   const m = c.match(new RegExp("(?:^|; )" + name + "=([^;]+)"));
-  return m ? decodeURIComponent(m[1]) : null;
+  if (!m) return null;
+  try { return decodeURIComponent(m[1]); } catch { return m[1]; } // a mangled cookie must not 500 every request (16 Oct 2026)
 }
 // A signed session alone outlived a removed user for up to SESSION_TTL (8 Oct 2026): the allowlist is now re-read,
 // remembered per isolate for ALLOW_CACHE_MS so a request costs no extra round trip. A failed read keeps the last
@@ -512,8 +518,8 @@ function sessionCookie(token, host) {
 const ensurePerfLog = memoEnsure(async (env) => {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS perf_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, path TEXT NOT NULL, method TEXT, dur INTEGER NOT NULL, colo TEXT, guard_ms INTEGER, guards INTEGER)").run();
   // guard_ms / guards were added 15 Sep 2026 to a table that already existed in prod.
-  try { await env.DB.prepare("ALTER TABLE perf_log ADD COLUMN guard_ms INTEGER").run(); } catch {}
-  try { await env.DB.prepare("ALTER TABLE perf_log ADD COLUMN guards INTEGER").run(); } catch {}
+  await addColumn(env, "ALTER TABLE perf_log ADD COLUMN guard_ms INTEGER");
+  await addColumn(env, "ALTER TABLE perf_log ADD COLUMN guards INTEGER");
 });
 // guard_ms = of this request's `dur`, how much was first-time schema-guard work (a cold isolate).
 // guards  = how many guards ran for the first time. Both zero on a warm isolate, which is the point:
@@ -818,6 +824,8 @@ async function mariaExecTool(env, name, input) {
   return { error: "unknown tool: " + name };
 }
 // POST /api/ask {question, history?} -> { answer, sources } (session-gated, read-only)
+// maria_log's guard, memoized (§12): it was a CREATE TABLE inside every question (16 Oct 2026).
+const ensureMariaLog = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run(); });
 async function apiAsk(request, env, session) {
   if (!env.ANTHROPIC_API_KEY) return json({ error: "Ask Maria is not configured yet (no AI key set)." }, 503);
   const b = await request.json().catch(() => ({}));
@@ -833,7 +841,7 @@ async function apiAsk(request, env, session) {
   // correction loop. Never blocks the answer; failures are logged and swallowed.
   let logId = null;
   try {
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS maria_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT DEFAULT (datetime('now')), user_email TEXT, question TEXT, answer TEXT, error TEXT, sources TEXT, sql_run TEXT, steps INTEGER, in_tokens INTEGER, out_tokens INTEGER, ms INTEGER, verdict TEXT, note TEXT)").run();
+    await ensureMariaLog(env);
     const sqlRun = (res.toolCalls || []).filter(c => c.name === "run_sql").map(c => String((c.input && c.input.sql) || "")).join("\n---\n");
     // On a provider failure keep the provider's OWN response body. Without it all we retain is a
     // bare status code, and the reason has to be guessed after the fact — which is exactly what
@@ -1044,6 +1052,16 @@ function appliedGuards(env) {
   return pr;
 }
 const _ensureMemo = new WeakMap();
+// An ALTER inside a guard swallows TWO errors: the column already being there, and the table not being there yet (the
+// ALTERs are for tables made before the column existed; a CREATE in the same wave or a migration carries the column,
+// and the two may land in either order). Every OTHER error — a D1 hiccup, a storage error — used to be swallowed too,
+// and memoEnsure then wrote the guard to data_meta as applied, with the column missing, for ever (16 Oct 2026). Now
+// the guard fails, is forgotten (memoEnsure deletes it) and runs again on the next request.
+async function addColumn(env, sql) {
+  try { await env.DB.prepare(sql).run(); }
+  catch (e) { if (!/duplicate column|no such table/i.test(String((e && e.message) || e))) throw e; }
+  return null;
+}
 function memoEnsure(fn, version = "") {
   return (env) => {
     let m = _ensureMemo.get(env.DB);
@@ -1084,7 +1102,7 @@ async function ensureKeymanImpl(env) {
   // Rita's edit and the file (Miguel, 14 Sep). NULL on every row imported before this column existed,
   // which counter_sync.resolveLeg reads as "older than any edit" — i.e. today's behaviour exactly.
   const [, st] = await Promise.all([
-    env.DB.prepare("ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE keyman_contract3 ADD COLUMN imported_at TEXT"),
     env.DB.prepare("SELECT (SELECT COUNT(*) FROM keyman_contract3) AS n, (SELECT v FROM data_meta WHERE k='keyman_version') AS v").first(),
   ]);
   const n = st ? st.n : 0;
@@ -1330,7 +1348,10 @@ async function apiContractCountImport(request, env, session) {
   // (§6: flag, never pick, and never wipe a TDG number because the file has a defect in that row).
   const dupIds = new Set((parsed.duplicates || []).map((d) => String(d.id)));
   const heldSc = new Set((collisions || []).map((c) => c.sc).filter(Boolean));
-  const notInFile = (curRes.results || []).filter((r) => r.sc && !inFile.has(r.sc) && !heldSc.has(r.sc) && !(r.km && dupIds.has(String(r.km)))).map((r) => ({ sc: r.sc, completed: r.completed, as_of: r.as_of || null }));
+  // ... or a row the file carries that the roster could not place THIS time (16 Oct 2026: a hidden roster row, a respelt
+  // name): its loaded count is held under the id the file still lists, never deleted as "gone".
+  const unmatchedIds = new Set((unmatched || []).map((u) => String(u.id || "")).filter(Boolean));
+  const notInFile = (curRes.results || []).filter((r) => r.sc && !inFile.has(r.sc) && !heldSc.has(r.sc) && !(r.km && (dupIds.has(String(r.km)) || unmatchedIds.has(String(r.km))))).map((r) => ({ sc: r.sc, completed: r.completed, as_of: r.as_of || null }));
   const report = {
     asOf, loadedAsOf, olderThanLoaded, tabs: parsed.tabs, crewInFile: parsed.rows.length + parsed.duplicates.reduce((n, d) => n + d.rows.length, 0),
     matched: matched.length, unmatched: unmatched.filter((u) => !u.collision).length, changes, unchanged: same.length, // collisions are listed apart
@@ -1424,13 +1445,13 @@ async function ensureTravelImpl(env) {
       env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch(() => null),
       // `ship` (15 Oct 2026, migrations/0026): the hull the workbook row sits under. Rides in the same wave; a table that
       // already carries it (or does not exist yet — the CREATE above has it) answers with an error we ignore.
-      env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN ship TEXT").run().catch(() => null),
+      addColumn(env, "ALTER TABLE travel_expense ADD COLUMN ship TEXT"),
     ]);
     st = r[1];
   } catch (e) { st = null; }
   if (!st) {
-    try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'").run(); } catch {}
-    try { await env.DB.prepare("ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0").run(); } catch {}
+    await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'");
+    await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0");
   }
   const total = st ? st.total : (await env.DB.prepare("SELECT COUNT(*) n FROM travel_expense").first()).n;
   // The bundled 2025 history seeds an EMPTY table, or completes the one-time migration of a legacy (pre-`kind`) table.
@@ -1505,7 +1526,7 @@ async function ensureSgaImpl(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_source_file (hash TEXT PRIMARY KEY, name TEXT, kind TEXT, year INTEGER, month INTEGER, bytes INTEGER, r2_key TEXT, bucket TEXT, source TEXT, by TEXT, at TEXT, file_key TEXT, note TEXT)").run(),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS training_cost (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, rental REAL DEFAULT 0, utilities REAL DEFAULT 0, hotel REAL DEFAULT 0, air REAL DEFAULT 0, other REAL DEFAULT 0, bank_charge REAL DEFAULT 0, total REAL, summary_only INTEGER DEFAULT 0)").run(),
     // `other` (15 Oct 2026, migrations/0027): TDG's OTHER / PORT AGENT EXPENSE column. Same wave; a table that has it answers with an error we ignore.
-    env.DB.prepare("ALTER TABLE sga_line ADD COLUMN other REAL DEFAULT 0").run().catch(() => null),
+    addColumn(env, "ALTER TABLE sga_line ADD COLUMN other REAL DEFAULT 0"),
     // the bill's MONTHLY SUMMARY sheet (15 Oct 2026, migrations/0028): one row per month, the whole SGA by category
     env.DB.prepare("CREATE TABLE IF NOT EXISTS sga_summary (id TEXT PRIMARY KEY, file_id TEXT, year INTEGER, month INTEGER, " + SGA_COL_KEYS.map((k) => k + " REAL DEFAULT 0").join(", ") + ", training REAL DEFAULT 0, settlement REAL DEFAULT 0, total REAL, crew_total REAL)").run(),
   ]);
@@ -1674,6 +1695,8 @@ async function ensureSpInboxImpl(env) {
 const INBOX_FILES_PER_RUN = 12;
 async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
   await Promise.all([ensureSpInbox(env), ensureSpSync(env), ensureSga(env), ensureTravel(env)]);
+  // A claim an isolate never finished (killed mid-load) is released after INBOX_STALE_MIN, like the intel inbox.
+  await env.DB.prepare("UPDATE sp_inbox SET status='pending' WHERE status='applying' AND (applied_at IS NULL OR applied_at < ?)").bind(new Date(Date.now() - INBOX_STALE_MIN * 60000).toISOString()).run().catch(() => null);
   const pend = (await env.DB.prepare("SELECT id, file_key, kind, year, month, item_id, name, path, modified, sheet, part, parts, file_parts, rows_json, written_by, at FROM sp_inbox WHERE status='pending' ORDER BY at, file_key, sheet, part").all()).results;
   if (!pend.length) return { files: 0, loaded: [], waiting: 0, errors: [] };
   const byFile = new Map();
@@ -1685,11 +1708,22 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
     if (done >= limit) break;
     const sheets = assembleInbox(rows);
     if (!sheets) { report.waiting++; continue; }   // a part is still missing — the session may still be writing
-    done++;
     const h = rows[0];
     const now = new Date().toISOString();
-    const rec = { item_id: h.item_id, path: h.path, name: h.name, etag: h.modified, modified: h.modified, kind: h.kind, year: h.year, month: h.month || null, at: now };
     const ids = rows.map((r) => r.id);
+    // THE CLAIM (16 Oct 2026): the mail intake applies the inbox the moment a mail lands and the hourly cron is its safety
+    // net — two runs that both read the same pending file loaded it twice (two sp_sync records, the month replaced twice).
+    // A run owns a file only when every row of it took ITS token; a partial claim is given back.
+    const token = "claim_" + crypto.randomUUID();
+    for (let i = 0; i < ids.length; i += 50) await env.DB.prepare("UPDATE sp_inbox SET status='applying', detail=?, applied_at=? WHERE status='pending' AND id IN (" + ids.slice(i, i + 50).map(() => "?").join(",") + ")").bind(token, now, ...ids.slice(i, i + 50)).run();
+    const got = await env.DB.prepare("SELECT COUNT(*) AS n FROM sp_inbox WHERE status='applying' AND detail=?").bind(token).first();
+    if (!got || Number(got.n) !== ids.length) {
+      await env.DB.prepare("UPDATE sp_inbox SET status='pending', detail=NULL, applied_at=NULL WHERE status='applying' AND detail=?").bind(token).run().catch(() => null);
+      report.claimed = (report.claimed || 0) + 1; // another run holds it
+      continue;
+    }
+    done++;
+    const rec = { item_id: h.item_id, path: h.path, name: h.name, etag: h.modified, modified: h.modified, kind: h.kind, year: h.year, month: h.month || null, at: now };
     const mark = async (status, detail) => { for (let i = 0; i < ids.length; i += 50) await env.DB.prepare("UPDATE sp_inbox SET status=?, detail=?, applied_at=? WHERE id IN (" + ids.slice(i, i + 50).map(() => "?").join(",") + ")").bind(status, String(detail || "").slice(0, 2000), now, ...ids.slice(i, i + 50)).run(); };
     try {
       const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup", path: h.path };
@@ -1953,7 +1987,7 @@ const ensurePortDayIndexes = memoEnsure(async (env) => {
 const ensureCrewExtras = memoEnsure(ensureCrewExtrasImpl);
 // crew.gender (6 Oct 2026): M / F as TDG's file states it. Its own one-statement guard, so it rides in the
 // existing ensure wave of every reader that selects it (§12) without adding a statement to ensureCrewExtras.
-const ensureCrewGender = memoEnsure(async (env) => { await env.DB.prepare("ALTER TABLE crew ADD COLUMN gender TEXT").run().catch(() => null); });
+const ensureCrewGender = memoEnsure(async (env) => { await addColumn(env, "ALTER TABLE crew ADD COLUMN gender TEXT"); });
 async function ensureCrewExtrasImpl(env) {
   // COLD START (15 Sep 2026, perf_log: /api/dashboard 1.5s, /api/rotation 2s at GRU against a PRG
   // primary): every statement here used to be its own ~220ms round trip, on every new isolate. Now
@@ -1978,7 +2012,7 @@ async function ensureCrewExtrasImpl(env) {
     // the emergency contact (13 Oct 2026, migrations/0022_emergency_contact.sql): TDG's value on crew, a typed one on crew_override
     "ALTER TABLE crew ADD COLUMN emergency_name TEXT", "ALTER TABLE crew ADD COLUMN emergency_relation TEXT", "ALTER TABLE crew ADD COLUMN emergency_phone TEXT",
     "ALTER TABLE crew_override ADD COLUMN emergency_name TEXT", "ALTER TABLE crew_override ADD COLUMN emergency_relation TEXT", "ALTER TABLE crew_override ADD COLUMN emergency_phone TEXT"];
-  await Promise.all(alters.map((q) => env.DB.prepare(q).run().catch(() => null)));
+  await Promise.all(alters.map((q) => addColumn(env, q)));
 }
 // Board legs = the live schedule: current ship_leg rows + crew aboard per the relief board
 // (ship_leg_source.boardLegsFromDb). The source flip is a DATA change (app_config.board_source);
@@ -3007,7 +3041,7 @@ async function ensureReadyImpl(env) {
   // One round trip (15 Sep 2026): the CREATE already carries `note`; the ALTER is for a legacy table only.
   await Promise.all([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_ready (agency_id TEXT PRIMARY KEY, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, note TEXT, updated_at TEXT)").run(),
-    env.DB.prepare("ALTER TABLE crew_ready ADD COLUMN note TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE crew_ready ADD COLUMN note TEXT"),
   ]);
 }
 // TDG's stated completed-contract count (src/contract_count.js). One row per crew; the file's as-of
@@ -3038,20 +3072,20 @@ const ensureRegistrySnapshot = memoEnsure(async (env) => {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT)").run();
   await Promise.all([
     // The file's own words (5 Oct 2026): the name TDG gives a row, and the status word as written.
-    env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN name TEXT").run().catch(() => null),
-    env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN raw_status TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE registry_snapshot ADD COLUMN name TEXT"),
+    addColumn(env, "ALTER TABLE registry_snapshot ADD COLUMN raw_status TEXT"),
     // THE SCHEDULE (7 Oct 2026): the file's EMBARKEDDATE / DEBARKEDDATE, kept per crew — the board's sign-on
     // and TDG's final sign-off (ship_leg_source.legsFromRegistry).
-    env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN embarked_at TEXT").run().catch(() => null),
-    env.DB.prepare("ALTER TABLE registry_snapshot ADD COLUMN debarked_at TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE registry_snapshot ADD COLUMN embarked_at TEXT"),
+    addColumn(env, "ALTER TABLE registry_snapshot ADD COLUMN debarked_at TEXT"),
     // A TDG earmark Rita REJECTED from the board (7 Oct 2026): not drawn and not given a card while the file that
     // showed it stands; a LATER file still carrying it brings it back (Joy did not correct TDG).
     env.DB.prepare("CREATE TABLE IF NOT EXISTS earmark_dismiss (sc TEXT NOT NULL, ship_key TEXT NOT NULL, dismissed_at TEXT NOT NULL, dismissed_by TEXT, notified INTEGER DEFAULT 0, PRIMARY KEY (sc, ship_key))").run().catch(() => null),
     // A deployed card stays on the ship, stamped (Miguel, 5 Oct 2026); the board reads these columns.
-    env.DB.prepare("ALTER TABLE assignment ADD COLUMN deployed_at TEXT").run().catch(() => null),
-    env.DB.prepare("ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE assignment ADD COLUMN deployed_at TEXT"),
+    addColumn(env, "ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT"),
     // The import may write crew.gender (6 Oct 2026); its guard is this one, so the column is made here too.
-    env.DB.prepare("ALTER TABLE crew ADD COLUMN gender TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE crew ADD COLUMN gender TEXT"),
   ]);
 });
 // The STRICT hull matcher for the registry comparison (crew_flags.js): "MV JEWEL OF THE SEAS" meets
@@ -3068,7 +3102,7 @@ async function ensureContractEditImpl(env) {
   // column existed (prod): the two leave together — one round trip instead of two.
   await Promise.all([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_edit (sc TEXT, seq INTEGER, embark TEXT, disembark TEXT, sign_on TEXT, sign_off TEXT, ship TEXT, eccr INTEGER DEFAULT 0, air INTEGER DEFAULT 0, hotel INTEGER DEFAULT 0, on_conf INTEGER DEFAULT 0, off_conf INTEGER, updated_at TEXT, on_key TEXT, PRIMARY KEY (sc, seq))").run(),
-    env.DB.prepare("ALTER TABLE contract_edit ADD COLUMN on_key TEXT").run().catch(() => null),
+    addColumn(env, "ALTER TABLE contract_edit ADD COLUMN on_key TEXT"),
   ]);
   // The backfill is its own statement, idempotent (WHERE on_key IS NULL), and runs once per isolate
   // like every other ensure — NOT inside the ALTER's try: on an isolate where keyman_contract3 did
@@ -3559,7 +3593,7 @@ async function ensureFbImpl(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS feedback_response2 (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, crew_id TEXT NOT NULL, role TEXT NOT NULL, answers_json TEXT NOT NULL, submitted_at TEXT NOT NULL, superseded_at TEXT)"),
   ]),
   // the existing table gains the column; on a fresh database the CREATE above already has it (this one fails, caught)
-  env.DB.prepare("ALTER TABLE feedback_response2 ADD COLUMN superseded_at TEXT").run().catch(() => null)]);
+  addColumn(env, "ALTER TABLE feedback_response2 ADD COLUMN superseded_at TEXT")]);
   // PAST ANSWERS ARE KEPT, NOT CARRIED (Miguel, 9 Oct 2026: "I like your idea but we need to keep stored somewhere the
   // previous feedback"). A response is superseded — never deleted — when a new window is fired for that crew + role, or
   // the in-app form is answered again. Only rows with superseded_at NULL feed the Score Card: a Rush ticked for
@@ -3753,8 +3787,9 @@ async function ensureIntelImpl(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS email_inbox (id TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, raw TEXT, received_at TEXT, status TEXT DEFAULT 'new', processed_at TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS crew_intel (id TEXT PRIMARY KEY, agency_id TEXT, reporter TEXT, summary TEXT, source TEXT DEFAULT 'email', source_email_id TEXT, confidence TEXT, status TEXT DEFAULT 'filed', candidates TEXT, ts TEXT, created_by TEXT)"),
   ]);
-  try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN contract_no INTEGER").run(); } catch (e) {}
-  try { await env.DB.prepare("ALTER TABLE crew_intel ADD COLUMN edited_at TEXT").run(); } catch (e) {}
+  await addColumn(env, "ALTER TABLE crew_intel ADD COLUMN contract_no INTEGER");
+  await addColumn(env, "ALTER TABLE crew_intel ADD COLUMN edited_at TEXT");
+  await addColumn(env, "ALTER TABLE email_inbox ADD COLUMN attempts INTEGER DEFAULT 0"); // migrations/0031 (16 Oct 2026)
 }
 // The crew's contract number at the moment a note is filed (total Keyman legs) — lets the timeline
 // show "Contract 3" per entry so issues can be read per-contract over time.
@@ -3791,7 +3826,12 @@ function decodeEmailBody(raw) {
     start = nl >= 0 ? nl + 2 : tp;
     const hdr = raw.slice(tp, start).toLowerCase();
     if (hdr.indexOf("base64") >= 0) cte = "b64"; else if (hdr.indexOf("quoted-printable") >= 0) cte = "qp";
-    let end = raw.indexOf("\n--", start);
+    // The part ends at ITS MIME boundary — the innermost one declared before it (a forwarded report is multipart/mixed
+    // around multipart/alternative). It used to end at the first line starting "--": the sender's "-- " signature or
+    // the "--- Forwarded message ---" line, so the matcher and the model saw the first paragraph only (16 Oct 2026).
+    const bounds = [...raw.slice(0, tp).matchAll(/boundary=("?)([^"\s;]+)\1/gi)].map((x) => x[2]);
+    const bnd = bounds.length ? bounds[bounds.length - 1] : null;
+    const end = bnd ? raw.indexOf("\n--" + bnd, start) : -1;
     body = raw.slice(start, end >= 0 ? end : undefined);
   } else {
     const nl = raw.indexOf("\n\n");
@@ -3801,8 +3841,18 @@ function decodeEmailBody(raw) {
     else if (low.indexOf("content-transfer-encoding: quoted-printable") >= 0) cte = "qp";
   }
   if (cte === "b64") { try { body = decodeURIComponent(escape(atob(body.replace(/\s+/g, "")))); } catch (e) { try { body = atob(body.replace(/\s+/g, "")); } catch (e2) {} } }
-  else { body = body.replace(/=\n/g, "").replace(/=([0-9A-Fa-f]{2})/g, (m, h) => String.fromCharCode(parseInt(h, 16))); }
+  else if (cte === "qp") body = decodeQuotedPrintable(body); // only when declared: a 7bit "TN=1A" is a part number, not an escape
   return body.replace(/<[^>]+>/g, " ").replace(/https?:\/\/\S+/gi, " ").replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim();
+}
+// Quoted-printable to text: soft breaks dropped, the bytes read as UTF-8 (String.fromCharCode made "Tañgonan" "TaÃ±gonan",
+// which the crew matcher's accent folding could not place) (16 Oct 2026).
+function decodeQuotedPrintable(s) {
+  const t = String(s).replace(/=\n/g, ""), enc = new TextEncoder(), bytes = [];
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(t.slice(i + 1, i + 3))) { bytes.push(parseInt(t.slice(i + 1, i + 3), 16)); i += 2; }
+    else { const c = t.charCodeAt(i); if (c < 128) bytes.push(c); else for (const x of enc.encode(t[i])) bytes.push(x); }
+  }
+  try { return new TextDecoder("utf-8").decode(new Uint8Array(bytes)); } catch { return t; }
 }
 // Unprocessed inbox + a server-suggested crew match per email (the scheduled AI task confirms it).
 async function apiIntelInbox(env) {
@@ -3941,9 +3991,24 @@ async function processIntelEmail(env, row, roster) {
   const match = matchCrew((row.subject || "") + " \n " + body, roster);
   const reporter = fromDisplayName(row.raw, row.from_addr);
   const summary = await aiSummarize(env, body, match.matchedName, reporter);
-  if (!summary) { // AI unavailable/failed -> release the row back to 'new' for the next sweep
-    await env.DB.prepare("UPDATE email_inbox SET status='new' WHERE id=?").bind(row.id).run();
-    return false;
+  if (!summary) {
+    // AI unavailable / answered nothing: released for the next sweep — INTEL_MAX_ATTEMPTS times. It used to be released for
+    // ever: an email the engine never answered was asked again every hour and reached nobody (16 Oct 2026). Past the
+    // ceiling it goes to the human review queue with the sender's own words; a person writes the summary and names the
+    // crew (the console never picks, §10).
+    const tries = Number(((await env.DB.prepare("SELECT COALESCE(attempts,0) AS n FROM email_inbox WHERE id=?").bind(row.id).first()) || {}).n || 0) + 1;
+    if (tries < INTEL_MAX_ATTEMPTS) {
+      await env.DB.prepare("UPDATE email_inbox SET status='new', attempts=? WHERE id=?").bind(tries, row.id).run();
+      return false;
+    }
+    const text = "The AI could not summarise this report after " + tries + " attempts. The email as received:\n\n" + body.slice(0, 2500);
+    const pid = "ci_" + crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO crew_intel (id,agency_id,reporter,summary,source,source_email_id,confidence,status,candidates,ts,created_by,contract_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(pid, null, reporter, text, "email", row.id, match.confidence, "pending", JSON.stringify(match.candidates || []), new Date().toISOString(), "ai", null).run();
+    inserted = true;
+    await env.DB.prepare("UPDATE email_inbox SET status='processed', processed_at=?, attempts=? WHERE id=?").bind(new Date().toISOString(), tries, row.id).run();
+    await logActivity(env, "ai", "intel_unsummarised", row.id + " " + tries + " attempts");
+    return true;
   }
   const filed = !!(match.agency_id && (match.confidence === "high" || match.confidence === "med"));
   const contractNo = filed ? await intelContractNo(env, match.agency_id) : null;
@@ -3961,6 +4026,8 @@ async function processIntelEmail(env, row, roster) {
   return true;
 }
 const INTEL_STALE_MIN = 30;
+const INBOX_STALE_MIN = 30; // an sp_inbox claim older than this was never finished (applyInbox)
+const INTEL_MAX_ATTEMPTS = 3; // an email the engine answers nothing for is asked this many times, then goes to the review queue (16 Oct 2026)
 
 // Sweep up to `limit` unprocessed inbox rows. Used on arrival and by the hourly cron. Never throws.
 async function processIntelInbox(env, limit) {
