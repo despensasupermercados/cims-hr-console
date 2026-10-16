@@ -10,6 +10,8 @@
 // Everything that touches the network or the database is injected, so the whole decision path runs in tests with a fake
 // Graph and a real SheetJS workbook: { fetch, now, db, parseWorkbook, applySga, applyTravel, log }.
 
+import { isManningSheet, isSummarySheet } from "./sga.js";
+
 export const GRAPH = "https://graph.microsoft.com/v1.0";
 
 export function syncConfigured(env) {
@@ -109,7 +111,7 @@ export function sheetsOf(XLSX, buf, want) {
   for (const sn of wb.SheetNames) if (want(String(sn))) out[sn] = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: "" });
   return out;
 }
-export const WANT_SGA = (n) => /summary manning/i.test(n) || /trainrel/i.test(n) || /^training$/i.test(n.trim()) || /^\d{4} SUMMARY( \(\d+\))?$/i.test(n.trim());
+export const WANT_SGA = (n) => isManningSheet(n) || /trainrel/i.test(n) || /^training$/i.test(n.trim()) || isSummarySheet(n);
 export const WANT_TRAVEL = (n) => ["JAN", "FEB", "MAR", "APRIL", "MAY", "JUNE", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC", "CIMS"].includes(n.trim().toUpperCase());
 
 // One run. deps: { fetch, now (ms), today (ISO), db, XLSX, applySga(sheets, meta) → result, applyTravel(sheets, year, meta) → result, log(fn) }.

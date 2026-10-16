@@ -19,6 +19,8 @@
 // Pure: no I/O. Pinned by test/sp_inbox.test.js.
 
 // "## Sheet: SUMMARY MANNING — 107 rows × 37 columns (A1:AK107)"   name may carry " [hidden]" and trailing spaces
+import { isManningSheet, isSummarySheet } from "./sga.js";
+
 const SHEET_RE = /^## Sheet: (.+?)\s*(\[hidden\])?\s*—\s*(\d+) rows? × (\d+) columns? \(([A-Z]+)(\d+):([A-Z]+)(\d+)\)/;
 const EMPTY_RE = /^\[(\d+) empty rows?\]/;
 const TRUNC_RE = /^\[Output truncated/;
@@ -57,16 +59,16 @@ export function dumpToSheets(text) {
 // month's totals and the year-over-year, no per-crew lines — `summaryOnly: true`. Nothing → refused.
 export function sgaFromDump(parsed) {
   const names = parsed.complete;
-  const manning = names.find((n) => /summary manning/i.test(n));
-  const summary = names.find((n) => /^\d{4} SUMMARY( \(\d+\))?$/i.test(String(n).trim()));
+  const manning = names.find((n) => isManningSheet(n));
+  const summary = names.find((n) => isSummarySheet(n));
   const tr = names.find((n) => /trainrel/i.test(n));
-  if (!manning && !summary) return { ok: false, reason: parsed.cut && /summary manning/i.test(parsed.cut) ? "manning_cut" : "no_manning", detail: parsed.cut ? "the reader stopped inside " + parsed.cut : "no SUMMARY MANNING sheet in the dump", sheets: {} };
+  if (!manning && !summary) return { ok: false, reason: parsed.cut && isManningSheet(parsed.cut) ? "manning_cut" : "no_manning", detail: parsed.cut ? "the reader stopped inside " + parsed.cut : "no SUMMARY MANNING sheet in the dump", sheets: {} };
   const sheets = {};
   if (manning) sheets[manning] = parsed.sheets[manning];
   if (summary) sheets[summary] = parsed.sheets[summary];
   if (tr) sheets[tr] = parsed.sheets[tr];
   return { ok: true, sheets, manning: manning || null, summary: summary || null, summaryOnly: !manning, training: tr || null,
-    manningCut: !manning && parsed.cut && /summary manning/i.test(parsed.cut) ? parsed.cut : null,
+    manningCut: !manning && parsed.cut && isManningSheet(parsed.cut) ? parsed.cut : null,
     trainingCut: !tr && parsed.cut && /trainrel/i.test(parsed.cut) ? parsed.cut : null };
 }
 
