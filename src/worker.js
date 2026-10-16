@@ -2399,7 +2399,7 @@ async function rotationSections(env) {
     registry: { at: _lastRun.run_at ? String(_lastRun.run_at).slice(0, 10) : null, crew: ((snapRes && snapRes.results) || []).length, dated: ((snapRes && snapRes.results) || []).filter((r) => r && r.embarked_at).length },
   };
   const tdgCount = countMapOf(_cnt);
-  const tdgAdded = {}; for (const r of _cnt) if (r && r.sc) tdgAdded[r.sc] = completedSince(r.as_of, r.tdg_off, today); // finished since the count file (8 Oct 2026)
+  const tdgAdded = {}; for (const r of _cnt) if (r && r.sc) tdgAdded[r.sc] = completedSince(r.as_of, ccRowOf(r), today); // finished since the count file (8 Oct 2026)
   const shipHome = {}, shipBrand = {};
   for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
@@ -2612,7 +2612,7 @@ async function rotationSections(env) {
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
-  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null  })); };
+  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null  })); };
   const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
@@ -2673,7 +2673,7 @@ async function rotationSections(env) {
     }
     for (const a of cards) {
       if (a.key === seatKey) continue;
-      drawSeat(c, base, a.hull, a.key, {}, { on: a.on, off: a.off, embark: a.embark, disembark: a.disembark }, { state: "yellow", asgId: a.asgId || cardAsg[sc + "|" + a.key] || null, confirmed: false, file: w });
+      drawSeat(c, base, a.hull, a.key, {}, { on: a.on, off: a.off, embark: a.embark, disembark: a.disembark, src: "card" }, { state: "yellow", asgId: a.asgId || cardAsg[sc + "|" + a.key] || null, confirmed: false, file: w });
     }
     if (!seatKey && !cards.length && !isOffFleet(c.status) && !plannedScs.has(sc) && !earmarkSc.has(sc)) pool.push(base);
   }
@@ -3054,14 +3054,18 @@ async function ensureContractCountImpl(env) {
 function countMapOf(rows) { const m = {}; for (const r of (rows || [])) if (r && r.sc) m[r.sc] = r.completed; return m; }
 // TDG's count per crew + the debark of the crew's row in the last AdvancedQuery (one join, no extra trip):
 // a debark after the count's as-of date is a contract finished since (completedSince, 8 Oct 2026).
-const CC_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc";
-const CC_ONE_WITH_OFF_SQL = "SELECT c.completed, c.as_of, r.debarked_at AS tdg_off FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc WHERE c.sc=?";
+// The row's EMBARK rides beside the debark (16 Oct 2026): completedSince reads both — a debark before the row's own embark
+// (TDG's row disagreeing with itself, Del Rosario on the 16 Oct file) is not a contract finished since the count — and
+// every caller used to hand it the bare debark, so that guard never fired.
+const CC_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc";
+const CC_ONE_WITH_OFF_SQL = "SELECT c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc WHERE c.sc=?";
+const ccRowOf = (r) => ({ debarked_at: r.tdg_off, embarked_at: r.tdg_on });
 // sc -> { completed, as_of, added } from the last count import; {} until one has been applied. Read inside a
 // route's existing wave (§12), never as its own round trip.
 async function contractCountMap(env) {
   const r = await env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] }));
   const today = new Date().toISOString().slice(0, 10);
-  const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null, added: completedSince(x.as_of, x.tdg_off, today) };
+  const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null, added: completedSince(x.as_of, ccRowOf(x), today) };
   return m;
 }
 // The file's row per crew from the last AdvancedQuery upload (registry_sync.js, 5 Oct 2026): status +
@@ -3317,7 +3321,7 @@ async function apiBonusCrew(env, url) {
   const legN = fullContracts(legRows.map(legShape));
   // cumulative completed -> grade/pay (never resets): TDG's stated count, else baseline + derived legs.
   // `count` (the consecutive bonus count: ledger + ladder) is untouched by this — that is money (§1).
-  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN, tdgRow ? completedSince(tdgRow.as_of, tdgRow.tdg_off, new Date().toISOString().slice(0, 10)) : 0);
+  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN, tdgRow ? completedSince(tdgRow.as_of, ccRowOf(tdgRow), new Date().toISOString().slice(0, 10)) : 0);
   const effN = cc.n;
   return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
 }
@@ -3404,7 +3408,7 @@ async function gatherStatement(env, id) {
   const contracts = sched.contracts.length ? sched.contracts : counterRows; // a crew the schedule does not date keeps the Counter's rows
   const count = await crewCount(env, crew.id, baseline); // needs the baseline: its own trip, after the wave
   const fc = fullContracts(counterRows.map(c => ({ on: c.on, end: c.act || c.proj, ship: c.ship })));
-  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc, tdgRow ? completedSince(tdgRow.as_of, tdgRow.tdg_off, new Date().toISOString().slice(0, 10)) : 0); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
+  const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, fc, tdgRow ? completedSince(tdgRow.as_of, ccRowOf(tdgRow), new Date().toISOString().slice(0, 10)) : 0); // cumulative completed -> grade/pay on the statement: TDG's count, else baseline + derived
   const effFc = cc.n;
   const bonus = { rank: psRank(effFc, true), base_salary_usd: psSalary(effFc), contracts: effFc, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, count, baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results };
   // The route the PDF prints: the leg's own ports, else the ones Rita typed for that contract — as the profile reads them.
@@ -8480,7 +8484,7 @@ function pfRelay(x,isCur,todayS,K,feed){
   var who=function(p){return '<a href="#" class=pf2who data-sc="'+escHtml(p.sc)+'" onclick="openCrew(this.dataset.sc);return false">'+escHtml(p.name||p.sc)+'</a>';};
   var L=b?'<div class="pf3p prev"><div>'+who(b)+'<small>Handed over '+fmtDateS(b.off)+'</small></div></div>'
     :'<div class="pf3p prev none"><div><span>Before</span><small>Not on record</small></div></div>';
-  var lab=a?(a.src==='earmark'?(a.tdg?'earmark · TDG has them':(a.told?'earmark · told Joy':'earmark · console only')):(a.src==='tdg_earmark'?'TDG earmark · no dates yet':(a.src==='card'?'aboard per relief board':'in the TDG file'))):'';
+  var lab=a?(a.src==='earmark'?(a.tdg?'earmark · TDG has them':(a.told?'earmark · told Joy':'earmark · console only')):(a.src==='tdg_earmark'?'TDG earmark · no dates yet':(a.src==='card'?'aboard per relief board':(a.src==='counter'?'per the Contract Counter':'in the TDG file')))):'';
   var R=a?'<div class="pf3p next'+(a.src==='earmark'||a.src==='tdg_earmark'?' em':'')+'"><div>'+who(a)+'<small>'+(a.on?((a.on<=todayS?'Took over ':'From ')+fmtDateS(a.on)+' · '):'')+lab+'</small></div></div>'
     :(isCur?'<div class="pf3p next none pf3w"><div><span>No reliever yet</span><small>Earmark one on the Keyman board</small></div></div>'
       :'<div class="pf3p next none"><div><span>After</span><small>Not on record</small></div></div>');

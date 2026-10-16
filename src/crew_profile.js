@@ -251,7 +251,8 @@ export function buildCrewProfile(input) {
   if (I.grade && count && count.position && normGrade(I.grade) !== normGrade(count.position))
     checks.push({ key: "grade", text: "The console grades " + I.grade + " (" + count.n + " completed contract" + (count.n === 1 ? "" : "s") + "); TDG’s count file says " + count.position + "." });
   if (latest && !latest.current && latest.off && daysBetween(latest.off, today) >= 0) {
-    const missing = slots.filter((s) => s.state === "never").map((s) => s.label.split(" · ")[0]);
+    // Dexter is not asked: his audit replaced his feedback on the Score Card (§10j, 15 Oct 2026)
+    const missing = slots.filter((s) => s.state === "never" && s.role !== "dexter").map((s) => s.label.split(" · ")[0]);
     if (missing.length) checks.push({ key: "feedback", text: "Contract ended " + fmtD(latest.off) + " — never asked: " + missing.join(", ") + "." });
   }
   if (identity.km && !identity.shipCrewId) checks.push({ key: "identity", text: "TDG id " + identity.km + " is matched to " + sc + " by name; the ship crew id is not stored." });

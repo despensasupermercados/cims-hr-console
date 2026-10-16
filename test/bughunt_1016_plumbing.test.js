@@ -12,7 +12,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted be
 const SRC_PATH = new URL("../src/worker.js", import.meta.url);
 const SRC = readFileSync(SRC_PATH, "utf-8");
 const TMP = new URL(`../src/__bh1016_${process.pid}__.mjs`, import.meta.url);
-writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS };\n", "utf-8");
+writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS, contractCountMap };\n", "utf-8");
 let W;
 try { W = await import(TMP.href); } finally { unlinkSync(TMP); }
 
@@ -150,4 +150,29 @@ test("B6: two applyInbox runs on the same pending file load it ONCE (the mail in
   d.prepare("UPDATE sp_inbox SET applied_at='2026-10-16T00:00:00Z' WHERE id='k2_S_1'").run();
   const r = await W.applyInbox(env);
   assert.equal(r.files, 1, "the stale claim was released and the file taken");
+});
+
+// ---- P2: the count file's "finished since" reads the row's embark too ----------------------------------------------------
+test("P2: contractCountMap hands completedSince the WHOLE registry row — an embark after the debark (TDG's row disagreeing with itself) adds nothing", async () => {
+  assert.match(SRC, /AS tdg_off, r\.embarked_at AS tdg_on FROM contract_count c/, "the join carries the embark beside the debark");
+  assert.doesNotMatch(SRC, /completedSince\([^)]*\.tdg_off,/, "no caller passes the bare debark — the embark guard never fired in production");
+  const rows = [{ sc: "SC-1", completed: 3, as_of: "2026-10-08", tdg_off: "2026-10-20", tdg_on: "2026-10-25" }, { sc: "SC-2", completed: 2, as_of: "2026-10-08", tdg_off: "2026-10-12", tdg_on: "2026-04-01" }];
+  const env = { DB: { prepare: () => ({ bind() { return this; }, all: async () => ({ results: rows }), first: async () => rows[0], run: async () => ({}) }) } };
+  const m = await W.contractCountMap(env);
+  assert.equal(m["SC-1"].added, 0, "Del Rosario's row: debarked Oct 20, embarked Oct 25 — not a contract finished since the count");
+  assert.equal(m["SC-2"].added, 1);
+});
+
+// ---- P4: months and days have ONE definition (span_md.mdParts) ---------------------------------------------------------
+test("P4: the statement PDF and its email read months+days from span_md, not their own arithmetic", async () => {
+  for (const f of ["statement.js", "emails/hr.statement.v2.js"]) {
+    const s = readFileSync(new URL("../src/" + f, import.meta.url), "utf-8");
+    assert.match(s, /from "\.\.?\/(?:\.\.\/)?span_md\.js"/, f + " imports span_md");
+    assert.doesNotMatch(s, /Math\.min\(\+a\.slice\(8, 10\)/, f + " carries its own month-end clamp (a fork of mdParts)");
+  }
+  const { span } = await import("../src/emails/hr.statement.v2.js");
+  assert.equal(span("2026-07-31", "2027-03-01"), "7 months 1 day");
+  assert.equal(span("2026-10-26", "2026-10-31"), "5 days");
+  const { seaTime } = await import("../src/statement.js");
+  assert.equal(seaTime([{ on: "2026-07-31", act: "2027-03-01" }], "2027-06-01"), "7 mo 1 d");
 });

@@ -77,7 +77,9 @@ test("to check: why it ended, the grade against TDG's position, the feedback nev
   assert.deepEqual(p.checks.map((c) => c.key), ["end_reason", "grade", "feedback", "identity"]);
   assert.match(p.checks[0].text, /ended 2 mo 16 d early is not recorded\. The comment says “Resigned”\./);
   assert.match(p.checks[1].text, /Printer Specialist .*TDG’s count file says Junior Printer Specialist/);
-  assert.match(p.checks[2].text, /Sep 5, 2026 — never asked: Rolando, Dexter, Shipboard review\./);
+  // Dexter's audit replaced his feedback on the Score Card (§10j, 15 Oct 2026): he is not "asked", so he is not in the row
+  assert.match(p.checks[2].text, /Sep 5, 2026 — never asked: Rolando, Shipboard review\./);
+  assert.doesNotMatch(p.checks[2].text, /Dexter/);
   // a recorded end reason on the card for that contract answers the first
   const j = JAMES(); j.cards = [{ id: "a1", vessel_name: "Silhouette", sign_on: "2026-05-02", end_reason: "early_relief" }];
   assert.ok(!buildCrewProfile(j).checks.some((c) => c.key === "end_reason"));

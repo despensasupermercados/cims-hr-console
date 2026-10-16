@@ -22,5 +22,11 @@ export function mdShort(a, b) {
   if (!p.m) return p.d + " d";
   return p.m + " mo" + (p.d ? " " + p.d + " d" : "");
 }
+// "1 month 10 days", "5 days", "7 months" — the sentence form the emails use. "" when the dates do not say.
+export function mdWords(a, b) {
+  const p = mdParts(a, b); if (!p) return "";
+  const mo = p.m ? p.m + (p.m === 1 ? " month" : " months") : "", dy = p.d || !p.m ? p.d + (p.d === 1 ? " day" : " days") : "";
+  return mo + (mo && dy ? " " : "") + dy;
+}
 // A day offset from a date as months and days: "in 40 days" from today is mdShort(today, today + 40).
 export function addDaysISO(d, n) { const t = iso(d); if (!t) return null; return new Date(Date.UTC(+t.slice(0, 4), +t.slice(5, 7) - 1, +t.slice(8, 10) + n)).toISOString().slice(0, 10); }

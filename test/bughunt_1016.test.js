@@ -155,3 +155,9 @@ test("10. the dashboard paints from buildOps and a revalidation keeps the week p
   assert.equal(ctx.OPS_WK, 1, "the revalidation kept the week page (renderDashboard reset it to 0)");
   assert.match(view(), /class=ops/);
 });
+
+// The relay under the contract card labelled a predecessor / successor read off the Contract Counter "in the TDG file";
+// the Counter is history, not the file (§10d).
+test("11. the relay names the Contract Counter as the Counter, never as the TDG file", () => {
+  assert.match(APP_HTML, /a\.src==='counter'\?'per the Contract Counter'/);
+});

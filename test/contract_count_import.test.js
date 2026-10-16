@@ -158,7 +158,7 @@ test("the board reads TDG's count and says its own age (static: the wave carries
   // through cumulativeContracts, with the seeded baseline, like every other reader (5 Oct 2026: the board
   // dropped the baseline and showed "Contracts 0" for a crew the crew list showed at 3).
   assert.match(body, /const cc = cumulativeContracts\(tdgCount\[sc\] != null \? tdgCount\[sc\] : null, applyOverride\(c, ovMap\[sc\]\)\.baseline_count, derivedBy\[sc\] \|\| 0, tdgAdded\[sc\] \|\| 0\);/);
-  assert.match(body, /tdgAdded\[r\.sc\] = completedSince\(r\.as_of, r\.tdg_off, today\)/, "contracts finished since the count file ride on top (8 Oct 2026)");
+  assert.match(body, /tdgAdded\[r\.sc\] = completedSince\(r\.as_of, ccRowOf\(r\), today\)/, "contracts finished since the count file ride on top (8 Oct 2026) — the whole row, embark included (16 Oct 2026)");
   assert.match(body, /derivedBy\[sc\] = fullContracts\(/, "derived remains the fallback for a crew the count file does not carry");
   assert.match(wave, /baseline_count, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp, " \+ TDG_ABSENT_COL \+ " FROM crew " \+ TDG_ABSENT_JOIN \+ " WHERE redacted=0/, "the baseline rides the existing crew read");
   assert.match(wave, /retired, baseline_count, med_exp/, "and the manual baseline rides the override read (0 is a valid override)");
@@ -184,14 +184,14 @@ test("every grade reader takes TDG's stated count first, in its own wave, and ke
   const bonus = fn("async function apiBonusCrew(");
   const bonusWave2 = bonus.slice(bonus.indexOf("const [baseline, outs, legRowsRes, tdgRow]"));
   assert.match(bonusWave2.slice(0, bonusWave2.indexOf("]);")), /FROM contract_count WHERE sc=\?/, "Score Card: the count is read in the second wave");
-  assert.match(bonus, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, legN, tdgRow \? completedSince\(tdgRow\.as_of, tdgRow\.tdg_off, /);
+  assert.match(bonus, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, legN, tdgRow \? completedSince\(tdgRow\.as_of, ccRowOf\(tdgRow\), /);
   assert.match(bonus, /fullContracts\(legRows\.map\(legShape\)\)/, "the derived number is still computed — it is the fallback");
   const ledger = fn("async function apiContracts(");
   assert.match(wave(ledger), /contractCountMap\(env\)/, "ledger: the count is read in the wave");
   assert.match(ledger, /cumulativeContracts\(TDG\[b\.agency_id\]/);
   const stmt = fn("async function gatherStatement(", 4000); // 13 Oct 2026: the wave gained the typed-ports read
   assert.match(stmt, /FROM contract_count WHERE sc=\?/);
-  assert.match(stmt, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, fc, tdgRow \? completedSince\(tdgRow\.as_of, tdgRow\.tdg_off, /);
+  assert.match(stmt, /cumulativeContracts\(tdgRow \? tdgRow\.completed : null, baseline, fc, tdgRow \? completedSince\(tdgRow\.as_of, ccRowOf\(tdgRow\), /);
   assert.match(stmt, /CC_ONE_WITH_OFF_SQL/, "the statement reads the count with the file's debark, one query");
   // Every one of them says where its number came from.
   for (const [n, body] of [["crew", crew], ["bonus", bonus], ["ledger", ledger], ["statement", stmt]]) assert.match(body, /contracts_source: cc\.source/, n + " reports contracts_source");
