@@ -8,8 +8,9 @@ const MONTHS = { JAN:1, FEB:2, MAR:3, APRIL:4, APR:4, MAY:5, JUNE:6, JUN:6, JULY
 const CATS = ["air", "hotel", "medical", "visa", "food", "transport"];
 
 // The crew travel budget per month — ONE place (15 Oct 2026; it was typed on the server and again on the page).
-// Source: Rita's workbook, SUMMARY sheet ($15,000/mo, $180,000/yr). Miguel named "$150,000 for all our seafarers" the
-// same day — open question #4; whichever he settles on is a one-line change here. Shoreside has no budget by his word.
+// Source: Rita's workbook, SUMMARY sheet ($15,000/mo, $180,000/yr). SETTLED by Miguel, 16 Oct 2026: "last year the budget
+// was the same across all months .. I kept it all at 15000 per month" — flat, every month, 2025 and 2026 alike (his
+// "$150,000 for all our seafarers" of 15 Oct was not the figure). Shoreside has no budget by his word.
 export const TRAVEL_BUDGET_MO = 15000;
 
 // How many months of `year` are CLOSED on `today` (ISO date): a month counts for the YTD budget only once it has ended.
