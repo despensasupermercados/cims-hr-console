@@ -239,3 +239,20 @@ test("rotationSections dates a seat from the file's leg (regEnr) before the Coun
   assert.match(WORKER, /function fileDatesNote\(x\)\{/);
   assert.match(WORKER, /ABOARD &middot; AWAITING TDG FILE/);
 });
+
+// 16 Oct 2026 bug hunt: a card whose sign-on is the FILE'S OWN DAY was read as contradicted when that file did not have
+// the reliever aboard yet — the export runs in the morning, the reliever embarks that day. The file can only contradict
+// what it could see: a file dated AFTER the sign-on (§10d, "a file DATED AFTER it"), the strict rule earmark.js already
+// applies (seen = signOn < fileAt).
+test("a reliever card dated ON the file's day is not contradicted by that file; a file dated after it is", () => {
+  const rows = [row("X9", "On board", "MV NAVIGATOR OF THE SEAS", "2026-06-01", null), row("REL9", "On Vacation", null, null, null)];
+  const open = [{ id: "as_f", sc: "REL9", crew_name: "Reliever Nine", ship: "Navigator", sign_on: TODAY, created_at: "2026-09-01T00:00:00Z" }];
+  const L = by(legsFromRegistry({ rows, open, vessels: VES, today: TODAY }));
+  assert.deepEqual({ off: L["X9|Navigator"].off, src: L["X9|Navigator"].offSource, cur: L["X9|Navigator"].is_current, held: !!L["X9|Navigator"].heldByFile },
+    { off: TODAY, src: "card", cur: true, held: false }, "the card dates the sign-off (today: not yet passed)");
+  const Lh = by(legsFromRegistry({ rows, open, vessels: VES, today: "2026-10-08" }));
+  assert.deepEqual({ off: Lh["X9|Navigator"].off, src: Lh["X9|Navigator"].offSource, cur: Lh["X9|Navigator"].is_current, held: !!Lh["X9|Navigator"].heldByFile },
+    { off: TODAY, src: "card", cur: true, held: true }, "a day later the sign-off has passed while the 7 Oct file still lists X9 On board: held, never a recorded sign-off");
+  const later = by(legsFromRegistry({ rows: rows.map((r) => ({ ...r, run_at: "2026-10-08T08:00:00.000Z" })), open, vessels: VES, today: "2026-10-08" }));
+  assert.equal(later["X9|Navigator"].offSource, "projected", "a file dated the day AFTER the sign-on without the reliever aboard contradicts the card");
+});

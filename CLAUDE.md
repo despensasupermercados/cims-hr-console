@@ -1198,6 +1198,61 @@ Pinned by `test/bughunt_1013.test.js`, `test/port_days.test.js`, `test/turnaroun
   trips — they read the bonus count, so a rewrite is his to merge (§1); the bench box vs one-tap start date when a card
   the file contradicts is hidden; `guard_ms` overstates cold starts; `/api/crew/file.pdf` computes the board twice.
 
+## 11e. Invariants from the 16 Oct 2026 bug hunt (Miguel: "read the code.. find bugs and fix them .. also review the logic")
+Four pull requests, every fix reproduced first; the fifth (the Score Card's automatic read) is a DRAFT for Miguel (§1).
+Pinned by `test/bughunt_1016.test.js` (the page, run in node:vm on a pinned clock), `test/bughunt_1016_imports.test.js`,
+`test/bughunt_1016_plumbing.test.js` (worker.js internals through a copy of the file with an export line, real SQLite where a
+sequence of writes is the point), and the suites named below.
+- **A slow tab never paints over the next** (PR #275): every tab render captures `VIEW_GEN` and gives up when its answer lands
+  after the user moved on; Dashboard and Fleet revalidate through `opsRefresh` / `fleetRefresh` (the week page, the filter, the
+  mode and the search survive a changed answer); the relief overlay closes on Esc, a backdrop click and a 15-second notice, and
+  the iframe reports a board it cannot open; `contractPass` counts between CALENDAR days ("OFF today", never "OFF 1 d ago" at
+  14:00); the ship timeline and the relief board project an earmark's end month-end clamped (`pfAddMo`, 5 months on Azamara);
+  the import run is signed by the SESSION (`runBy`), never by a hard-coded "Rita".
+- **"-" is TDG's blank in EVERY cell** (PR #276), not only the dates (`crewimport pick` / `blankCell`): it became a province, a
+  phone, a passport number or a SHIP and never cleared a card. **The file's SHIP CREW ID reaches the crew row**: a new crew's
+  INSERT carries it, an existing crew with none is filled on Apply (bound `IS NULL`), a roster row whose id differs is listed
+  (`review.km_mismatch`), never overwritten (§6). A cruise-line id shared by two roster rows resolves nobody (`buildBridge`). The
+  count import holds a loaded count whose id the file still lists but the roster could not place this time. A re-drop compares
+  the rows READ on both sides (`rows_seen`), not the rows with an agency id.
+- **The Worker's plumbing** (PR #276): `decodeEmailBody` ends the text/plain part at ITS MIME boundary (a "-- " signature cut every
+  forwarded report to its first paragraph), decodes quoted-printable only when declared and as UTF-8; the sign-off dispatchers are
+  installed once (`_autoAck` / `_autoInstr`); every module guard runs once per database (`src/ensure_memo.js memoDdl`;
+  `ensureAppSetting`, `ensureMariaLog` memoized); **`addColumn`** is the one way a guard ALTERs — "duplicate column" and "no such
+  table" swallowed, any other error fails the guard so memoEnsure never records it as applied with the column missing; `getCookie`
+  returns the raw value of a cookie that is not valid percent-encoding instead of a 500 on every request; an intel email the
+  engine answers nothing for is asked `INTEL_MAX_ATTEMPTS` = 3 times, then goes to the human review queue with the sender's own
+  words (`email_inbox.attempts`, migrations/0031) — it was released for the next sweep for ever; `applyInbox` CLAIMS a file (status
+  `applying`, its own token) before loading it, a stale claim is released after `INBOX_STALE_MIN` — the mail intake and the
+  hourly cron loaded one file twice.
+- **The sign-off port is never the home-port seed** (PR #277): the seat says where its port came from (`disembarkSrc` rita / counter /
+  card / home); `signoff_context.portOf` takes a typed port, else the itinerary's port ON the day (`resolveCity` "derived"), never the
+  seed and never a port a day away. **A colleague is not the reliever**: a sign-on more than `RELIEF_WINDOW_DAYS` = 45 before this
+  sign-off is the second printer. `completedSince` reads the row's embark too (`ccRowOf`, `CC_WITH_OFF_SQL`): a debark before the row's
+  own embark is not a contract finished since the count. **Months and days have ONE definition**: `span_md.mdParts` / `mdShort` /
+  `mdWords` — the statement, its email and the instructions email read it; the page keeps its inline twin (`monthsDaysParts`).
+  Dexter is not "asked" (his audit replaced his feedback, §10j); the relay labels a Counter leg "per the Contract Counter".
+- **The Keyman schedule** (the PR after #277): an ended card within `ABSORB_DAYS` of a leg of the same crew on the same hull is the
+  same contract (`mergeBoardLegs`: it drew two "Contract completed" rows); a reliever card is contradicted only by a file dated
+  AFTER its sign-on (`>`), never by the file of the same day — the export runs in the morning, the reliever embarks that day (the
+  strict rule earmark.js already had). Checked on the 16 Oct 2026 production data before merging (§11d): no `assignment` row
+  carries an `actual_sign_off` and no open card has a passed sign-on, so neither rule moved a seat, a date or a statement that day.
+  **Left as designed**: the earmark bench lists a crew whose current contract is past its sign-off (held / overdue) as home from that
+  sign-off — the pool is measured on the earmark's START date (`earmark_bench.test.js` pins it, "off 6 Oct per the board (held)").
+- **The Score Card's automatic read — a DRAFT for Miguel (§1)**: Ray's answer from BEFORE this contract's sign-on is listed as earlier
+  feedback and not used (it pre-filled the next contract because nobody asked again); `aboardOn` does not read an ENDED leg with no
+  date as aboard for ever; HON's outgoing NAME must be this crew (a shared surname on the hull is not his handover; a surname with
+  only a suffix beside it still is); a Parts Portal or HON read that FAILS is said on the card (`sources.partsRead / honRead`) and
+  never read as "no miss" / "no handover"; the page's `applySeval` drops an answer that lands after the card moved to another crew.
+- **Reported, not changed**: `crewmatch`'s "med" surname tier (design, pinned); the page's "today" is UTC while the user's is local
+  (design); a card's own tick vs a confirmed sign-off on the timeline (`K3`, nuance); D1 as read on 16 Oct 2026: one `registry_snapshot`
+  row with debark < embark (Ed Del Rosario, TDG's data, handled by `completedSince`), one legacy `contract_edit` without `on_key`
+  (SC-0026127, Journey), 11 `keyman_contract3` rows without a projected sign-off (the Counter as uploaded, §6), 37 crew without
+  `ship_crew_id` (filled by the next AdvancedQuery that carries the column).
+- **The dated fixtures hold on every calendar day** (`scripts/clock_shift.mjs`, SHIFT_DAYS; `docs/NIGHT_WATCH.md`): four tests were
+  time bombs (a DST-dependent gate hour in `sbm.test.js`, `mock.timers` in the earmark and board tests). The night watch runs the suite
+  with the clock pushed +30 / +60 / +90 days once a month.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):
