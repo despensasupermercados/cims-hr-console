@@ -5614,7 +5614,7 @@ async function previewKeyman(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">'+r.crewInFile+' crew in file</b> · <span class="cchip ok">'+r.matched+' matched to roster</span> <span class="cchip amber">'+r.unmatched+' not on roster</span> · '+r.contracts+' contracts'
     +'<div class=csub style="margin-top:4px">Current contract rows: '+r.currentRows+' → will refresh the matched crew. Unmatched are candidates/former crew (left as-is).</div></div>';
   if(r.collisions&&r.collisions.length)h+='<div class=hint style="margin-top:8px;color:#B0342F"><b>'+r.collisions.length+' roster crew '+(r.collisions.length===1?'has':'have')+' two sheet rows</b> &mdash; NOT imported until the sheet says one thing:<br>'+r.collisions.map(function(c){return impEsc(c.sc)+': '+c.rows.map(function(x){return impEsc(x.last+', '+x.first)+(x.km?(' ('+impEsc(x.km)+')'):'');}).join(' / ');}).join('<br>')+'</div>';
-  if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
+  if(r.sampleUnmatched&&r.sampleUnmatched.length)h+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Not on roster (skipped)</b><br>'+r.sampleUnmatched.map(impEsc).join('<br>')+(r.unmatched>r.sampleUnmatched.length?('<br>+'+(r.unmatched-r.sampleUnmatched.length)+' more'):'')+'</div>';
   // What this file does to the board Rita has been working on. Absorbed projections are the loop
   // closing (Miguel, 14 Sep); conflicts and overrides are hers to settle before Apply.
   var kdRow=function(label,items,render){
@@ -5646,7 +5646,7 @@ async function previewKeyman(){
     h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+sh.length+' crew would end up with FEWER contracts than the console holds today</b> &mdash; the file wins for matched crew, so their older contract rows are removed on Apply. Check this is the full Contract Counter, not a current-roster extract.<br>'
       +sh.slice(0,15).map(function(x){return impEsc((x.name||x.sc)+' ('+x.sc+')')+': '+x.before+' &rarr; '+x.after;}).join('<br>')+(sh.length>15?'<br>+'+(sh.length-15)+' more':'')+'</div>';
   }
-  if(r.unparsedDates&&r.unparsedDates.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsedDates.length+' date cell'+(r.unparsedDates.length===1?'':'s')+' unreadable</b> (a leg with an unreadable sign-on is skipped; fix the sheet and re-drop)<br>'+r.unparsedDates.slice(0,15).map(function(u){return impEsc(u.last+', '+u.first+' &middot; contract '+u.seq+' '+u.field+': '+u.raw);}).join('<br>')+(r.unparsedDates.length>15?'<br>+'+(r.unparsedDates.length-15)+' more':'')+'</div>';
+  if(r.unparsedDates&&r.unparsedDates.length)h+='<div class=hint style="margin-top:8px;color:#9A6614"><b>'+r.unparsedDates.length+' date cell'+(r.unparsedDates.length===1?'':'s')+' unreadable</b> (a leg with an unreadable sign-on is skipped; fix the sheet and re-drop)<br>'+r.unparsedDates.slice(0,15).map(function(u){return impEsc(u.last+', '+u.first)+' &middot; contract '+impEsc(u.seq+' '+u.field+': '+u.raw);}).join('<br>')+(r.unparsedDates.length>15?'<br>+'+(r.unparsedDates.length-15)+' more':'')+'</div>';
   h+='<button class="btn" style="margin-top:10px" onclick="applyKeyman()">'+(r.shrink&&r.shrink.length?'Apply anyway &mdash; refresh '+r.matched+' crew ('+r.shrink.length+' lose rows)':'Refresh contract history for '+r.matched+' crew')+'</button>';
   if(r.absorbs&&r.absorbs.length)h+=' <label class=csub style="margin-left:8px"><input type=checkbox id=kmabsorb checked> also remove the '+r.absorbs.length+' projection'+(r.absorbs.length===1?'':'s')+' this file carries</label>';
   $('#imp').innerHTML=h;
@@ -5971,7 +5971,7 @@ function cimsRender(){
   if(g.cert.length){L+='<div class=isec><h3>&#9677; Certificate updates from TDG</h3><div class=d>Accepted by default &mdash; TDG maintains these. An expiry moving earlier is flagged.</div>';
     g.cert.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff(impFld(it.field),it.old,it.new,it.earlier?impTag("&#9888; moved earlier","amber"):impTag("renewed","green"))+impSeg(it.agency_id+":"+it.field,"accept","accept","keep","Accept","Hold",true));});L+='</div>';}
   if(g.new.length){L+='<div class=isec><h3>&#65291; New crew</h3>';
-    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+impEsc(f.vessel_observed||"&mdash;")+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
+    g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+(f.vessel_observed?impEsc(f.vessel_observed):'&mdash;')+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
   if(g.departed.length){L+='<div class=isec><h3>&#128682; Absent from this file</h3><div class=d>Never auto-removed. Decide the status yourself.</div>';
     g.departed.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss",true));});L+='</div>';}
   var ab=g.override_absorbed||[];
@@ -6033,7 +6033,7 @@ function cimsCart(){
 async function cimsApply(){
   var btn=$("#impcart")?$("#impcart").querySelector(".applyb2"):null;if(btn){btn.disabled=true;btn.textContent="Applying…";}
   var ed={};for(var ek in EDITS)if(DEC[ek]==="edit")ed[ek]=EDITS[ek];
-  var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen,run_by:"Rita"};
+  var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:IMPHASH,filename:IMPNAME,rows_seen:STAGE.rows_seen};
   var res;try{res=await (await fetch("/api/crew/import/apply",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})).json();}catch(e){res={ok:false,error:"network"};}
   if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?"Already processed.":"Apply failed: "+impEsc(res.error))+'</div>';return;}
   $("#imp").innerHTML='<div style="'+NOCHG+'">&#10003; '+impEsc(res.summary||('Applied '+res.applied+' changes.'))+'</div>';
@@ -6093,13 +6093,16 @@ var TCLIENT={royal:'Royal',celebrity:'Celebrity',azamara:'Azamara',ncl:'NCL',sho
 var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 async function renderTravel(){
+  var _g=VIEW_GEN;
   $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2><span class=muted style="padding:0">Loading…</span></div>';
   try{ TRV=await cachedJson('/api/travel',travelRefresh); if(TRV&&TRV.error)throw new Error(TRV.error); }
-  catch(e){ $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
+  catch(e){ if(_g!==VIEW_GEN)return; $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
   TRVALL=TRV.records||[];
   if(TRV.budgetMo)TBUD=TRV.budgetMo;
   // TDG's bill (the SGA, §10j) rides beside the workbook: the comparison and the Training centre view read it.
+  if(_g!==VIEW_GEN)return;
   try{ SGA=await cachedJson('/api/sga',travelRefresh); if(SGA&&SGA.error)SGA=null; }catch(e){ SGA=null; }
+  if(_g!==VIEW_GEN)return;
   TSEL=null;
   TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};
   var years=tYears();
@@ -6438,12 +6441,15 @@ function paintTravelSearch(){
 async function loadTravel(){return renderTravel();}
 let FLEET=null,FLT={mode:'all',q:''};
 async function renderFleet(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
-  FLEET=await cachedJson('/api/fleet',renderFleet);
+  var _g=VIEW_GEN;$('#view').innerHTML='<div class=muted>Loading…</div>';
+  var f;try{f=await cachedJson('/api/fleet',fleetRefresh);}catch(e){if(_g!==VIEW_GEN)return;$('#view').innerHTML='<div class=muted>Could not load the fleet'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderFleet()">Retry</button></div>';return;}
+  if(_g!==VIEW_GEN)return;FLEET=f;
   FLT={mode:'all',q:''};
   $('#view').innerHTML='<div class=bar><h2>Fleet</h2><input id=fq placeholder="Search ship, port, region, class, brand…" oninput="FLT.q=this.value;paintFleet()" style="margin-left:auto;width:300px"></div><div id=fleettiles class=tiles></div><div id=fleetbody></div>';
   paintFleet();
 }
+// A revalidation keeps the mode and the search (16 Oct 2026): re-running renderFleet reset both on every changed answer.
+function fleetRefresh(){var e=API_CACHE['/api/fleet'];if(!e||!e.data||!document.getElementById('fleettiles')){renderFleet();return;}FLEET=e.data;paintFleet();}
 function paintFleet(){
   var f=FLEET;if(!f)return;
   var inDock=f.inDock||[];
@@ -6491,7 +6497,7 @@ async function renderBilling(){
 async function loadBilling(){
   const f=$('#billfrom').value,t=$('#billto').value;
   $('#billbody').innerHTML='<div class=muted>Calculating…</div>';
-  BILL=await (await fetch('/api/daysworked?from='+f+'&to='+t)).json();
+  var _g=VIEW_GEN;BILL=await (await fetch('/api/daysworked?from='+f+'&to='+t)).json();if(_g!==VIEW_GEN)return;
   const T=BILL.totals;
   $('#billsub').textContent=T.days.toLocaleString()+' sea-days · '+T.crew+' crew · '+T.vessels+' vessels · '+T.contracts+' contracts in window';
   const bdg=function(b){const c=b==='actual'?'ok':b==='mixed'?'amber':'royal';return '<span class="cchip '+c+'">'+b+'</span>';};
@@ -6522,7 +6528,11 @@ function rfTile(n,l,cls,st){return '<div class="tile '+(cls||'')+'" data-rf="'+s
 function durLabel(a,b){return spanCompact(String(a||'').slice(0,10),String(b||'').slice(0,10));}
 function rankAbbr(r){var s=String(r||'').toLowerCase();if(!s)return'';if(s.indexOf('senior')>=0||s==='sr ps')return 'Sr PS';if(s.indexOf('junior')>=0||s.indexOf('jr')>=0)return 'Jr PS';if(s.indexOf('printer')>=0||s.indexOf('special')>=0||s==='ps')return 'PS';return String(r);}
 function rtag(label,on,crew,field){var c=on?'rtag on':'rtag';if(field)return '<span class="'+c+' rtoggle" data-crew="'+crew+'" data-f="'+field+'" data-v="'+(on?1:0)+'" title="click to toggle">'+label+'</span>';return '<span class="'+c+'">'+label+'</span>';}
-function openRelief(el){if(document.getElementById('reliefovl'))return;var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}// WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, mock-up B "polished, real list" chosen): the empty earmark slot lists the
+function openRelief(el){if(document.getElementById('reliefovl'))return;var vk=(el&&el.getAttribute)?el.getAttribute('data-vk'):el;if(!vk)return;var aid=(el&&el.getAttribute)?(el.getAttribute('data-aid')||''):'';var o=document.createElement('div');o.id='reliefovl';o.style.cssText='position:fixed;inset:0;z-index:99999;background:rgba(10,14,24,.44)';o.innerHTML='<iframe src="/relief?open='+encodeURIComponent(vk)+(aid?('&aid='+encodeURIComponent(aid)):'')+'" style="width:100%;height:100%;border:0;background:transparent;opacity:0;transition:opacity .12s" allowtransparency="true"></iframe>';document.body.appendChild(o);o.onclick=function(ev){if(ev.target===o)reliefDismiss();};o._esc=function(ev){if(ev.key==='Escape')reliefDismiss();};document.addEventListener('keydown',o._esc);o._t=setTimeout(function(){var f=o.querySelector('iframe');if(document.getElementById('reliefovl')===o&&f&&f.style.opacity!=='1'){o.insertAdjacentHTML('beforeend','<div style="position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:#fff;border-radius:12px;padding:18px 22px;font-size:14px;line-height:1.5;color:#1B3A5C;box-shadow:0 10px 30px rgba(0,0,0,.25);text-align:center"><b>The relief board did not load.</b><br>Try again in a moment.<br><button class="btn ghost" style="margin-top:10px" onclick="reliefDismiss()">Close</button></div>');}},15000);}
+// The overlay used to be a dark screen with an invisible iframe that only a reliefReady message revealed: a failed
+// /api/relief/board (or a hull not on it) left the console dark until a reload (16 Oct 2026). Esc, the backdrop and a
+// 15-second notice close it; the iframe itself reports a board it cannot open.
+function reliefDismiss(){var o=document.getElementById('reliefovl');if(!o)return;if(o._esc)document.removeEventListener('keydown',o._esc);clearTimeout(o._t);if(o.parentNode)o.parentNode.removeChild(o);}function offSpan(off){if(!off)return null;var td=new Date().toISOString().slice(0,10);off=String(off).slice(0,10);return off<td?{ago:true,t:spanCompact(off,td)}:{ago:false,t:spanCompact(td,off)};}// WHO CAN TAKE THE SEAT (Miguel, 8 Oct 2026, mock-up B "polished, real list" chosen): the empty earmark slot lists the
 // nine most rested seafarers for this ship (sec.bench, earmark_bench.js on the server) on a soft yellow card. One tap
 // earmarks them through the same route as a drag (sign-on = the printer's sign-off, +7 months / Azamara 5), with Undo.
 // "+ N more" opens the relief panel, which lists everyone available and keeps the search.
@@ -6560,7 +6570,7 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
 function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
   return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
 // Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
-function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){var o=document.getElementById('reliefovl');if(o&&o.parentNode)o.parentNode.removeChild(o);if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -6870,7 +6880,10 @@ function rotShip(sec){
 function shipTimeline(sec){
   var today=new Date().toISOString().slice(0,10);
   var P=function(iso){return Date.parse(iso+'T00:00:00Z');};
-  var addM=function(iso,m){var x=new Date(P(iso));x.setUTCMonth(x.getUTCMonth()+m);return x.toISOString().slice(0,10);};
+  // An open earmark's end is projected like the Fleet Gantt and the server (16 Oct 2026): month-end clamped (pfAddMo, never
+  // setUTCMonth — Jul 31 + 7 read Mar 3), 5 months on Azamara. The two drawings of one card used to disagree.
+  var mos=/azamara/i.test(String((sec&&sec.brand)||''))?5:7;
+  var addM=function(iso,m){return pfAddMo(iso,m);};
   // Every card on the ship is on the line (Miguel, 7 Oct 2026: "here you have 3 people .. so you should have 3 in the
   // timeline"): a TDG earmark carries no dates, so it is drawn as a short stub AFTER the last dated contract, named,
   // "no dates" under it — the horizon does not stretch for it.
@@ -6881,8 +6894,8 @@ function shipTimeline(sec){
   segs.sort(function(a,b){return a.on<b.on?-1:a.on>b.on?1:0;});
   var STUB=9,nu=Math.min(und.length,3),W=segs.length?100-nu*STUB:0;
   var start=segs.length?segs[0].on:today,end=start;
-  segs.forEach(function(x){x.end=x.off||addM(x.on,7);if(x.end>end)end=x.end;});
-  if(!(P(end)>P(start)))end=addM(start,7);
+  segs.forEach(function(x){x.end=x.off||addM(x.on,mos);if(x.end>end)end=x.end;});
+  if(!(P(end)>P(start)))end=addM(start,mos);
   var pct=function(iso){return Math.max(0,Math.min(W,(P(iso)-P(start))/(P(end)-P(start))*W));};
   // lanes: a crew whose contract overlaps an earlier one goes a lane down
   var lanes=[];
@@ -7154,6 +7167,7 @@ async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var
 // THE BOARD SAYS ITS OWN AGE (24 Sep 2026) through sources on /api/rotation. The page line that printed it above the
 // ships went on 7 Oct 2026 with the heading and the hint — Miguel: "remove this".
 async function renderRotation(){
+  var _g=VIEW_GEN;
   // Keep the board on screen while it refreshes (15 Sep 2026): blanking it to "Loading…" after every
   // save/drag made a 1s round trip read as "takes forever to save". First paint still says Loading.
   if(document.querySelector('#view .shipsec')){document.body.classList.add('rot-refreshing');}
@@ -7165,6 +7179,7 @@ async function renderRotation(){
   var _relP=cachedJson('/api/relief/board',renderRotation).then(function(v){_relV=v;_relIn=true;return v;},function(){_relV={};_relIn=true;return {};});
   var _st=0;
   try{ROT=await cachedJson('/api/rotation',renderRotation);}catch(e){_st=(e&&e.status)||0;ROT={error:(e&&e.message)||'network'};}
+  if(_g!==VIEW_GEN){document.body.classList.remove('rot-refreshing');return;}
   // A failed board API must SAY so. On 15 Sep 2026 a 500 here drew the toolbar over an empty ship list
   // and nobody could tell the server from the page.
   if(_st||!ROT||ROT.error||!ROT.sections){document.body.classList.remove('rot-refreshing');$('#view').innerHTML='<div class=zlabel>Keyman</div><div style="padding:14px 16px;border-left:3px solid var(--red);background:#fbe7e6;border-radius:0 8px 8px 0;max-width:720px"><b>The board could not load.</b> The server answered '+(_st?('HTTP '+_st):'with no board')+' ('+escHtml((ROT&&ROT.error)||'no sections')+'). Nothing is lost - reload the page; if it persists, tell Miguel.</div>';return;}
@@ -7458,7 +7473,7 @@ function compWin(n){return {30:'1 month',60:'2 months',90:'3 months'}[n]||daysMD
 async function loadCompliance(){
   const days=$('#compdays')?$('#compdays').value:60;
   $('#compbody').innerHTML='<div class=muted>Loading…</div>';
-  COMP=await (await fetch('/api/compliance?days='+days)).json();
+  var _g=VIEW_GEN;COMP=await (await fetch('/api/compliance?days='+days)).json();if(_g!==VIEW_GEN)return;
   const rows=COMP.report||[];
   const exp=rows.filter(function(r){return r.severity===3;}).length;
   $('#compsub').textContent=rows.length+' flagged ('+exp+' expired) · within '+compWin(COMP.warnDays)+' · as of '+COMP.today;
@@ -7712,7 +7727,7 @@ function opsKpi(target,label,state,word,value,small,detail){
 function opsKpis(k){
   var o=k.overdue,nr=k.noReliever,cs=k.cantSail,ab=k.aboard,b=k.bench;
   var h='<div class=oc-kpis>';
-  h+=opsKpi('oc-changes','Past sign-off',o.n?'crit':'ok',o.n?'Act':'None',o.n,'',o.n?o.items.map(function(x){return escHtml(x.code)+' '+x.days+' d';}).join(' &middot; '):'every seat within its sign-off');
+  h+=opsKpi('oc-changes','Past sign-off',o.n?'crit':'ok',o.n?'Act':'None',o.n,'',o.n?o.items.map(function(x){return escHtml(x.code)+' '+daysMD(x.days);}).join(' &middot; '):'every seat within its sign-off');
   h+=opsKpi('oc-changes','No reliever',nr.n?'crit':'ok',nr.n?'Act':'All planned',nr.n,'of '+nr.of,'sign-offs in 3 months'+(nr.first.length?' &middot; first '+nr.first.map(function(x){return escHtml(x.code);}).join(', ')+' '+opsD(nr.first[0].off):''));
   h+=opsKpi('oc-changes','Can&#39;t sail yet',cs.n?'warn':'ok',cs.n?'Watch':'Clear',cs.n,'of '+cs.of,'relievers with a failing document'+(cs.first?' &middot; first '+escHtml(cs.first.code)+' '+opsD(cs.first.on):''));
   h+=opsKpi('oc-crew','Aboard','ok','Seated',ab.n,'',ab.ships+' ships'+(ab.doubled.length?' &middot; '+ab.doubled.length+' with two aboard ('+ab.doubled.map(escHtml).join(' ')+')':''));
@@ -7760,7 +7775,7 @@ function opsWeek(w){
       var e0=f.date<ws?0:pos(f.date);
       if(!r)b+=bar('gap',e0,100,'<b>No reliever</b>','Nobody planned after '+f.surname+' - open the ship',s.ship,null);
       else if(!rd)b+=bar('gap',e0,100,'<b>'+escHtml(r.surname)+'</b><small>no sign-on date</small>',r.surname+' has no sign-on date - open the card',s.ship,r.sc);
-      else if(rd>f.date&&f.date<=we)b+=bar('gap',e0,rd<=we?pos(rd):100,'<small>empty '+(dayNum(rd)-dayNum(f.date))+' d</small>','The seat is empty from '+opsD(f.date)+' to '+opsD(rd),s.ship,null);
+      else if(rd>f.date&&f.date<=we)b+=bar('gap',e0,rd<=we?pos(rd):100,'<small>empty '+spanCompact(f.date,rd)+'</small>','The seat is empty from '+opsD(f.date)+' to '+opsD(rd),s.ship,null);
     }
     mk.forEach(function(p,i){if(i&&Math.abs(p-mk[0])<0.5)return;b+='<i class=oc-hd style="left:'+p.toFixed(2)+'%"></i>';});
     h+='<div class="oc-wr'+(lane2?' two':'')+'"><div class=oc-wl><button type=button class="oc-code oc-cb" data-ship="'+escHtml(s.ship)+'" title="Open '+escHtml(s.ship)+' on the board">'+escHtml(s.code)+'</button></div><div class=oc-wt>'+b+'</div></div>';
@@ -7809,7 +7824,7 @@ function opsRows(rows){
       var n=keep.filter(function(x){return x.group===group;}).length;
       h+='<tr class="oc-mh'+(group==='overdue'?' oc-crit':'')+'"><td colspan=6>'+(group==='overdue'?'Past the sign-off':OPS_MONL[parseInt(group.slice(5,7),10)-1])+' &middot; '+n+'</td></tr>';}
     var cls=r.overdue||r.days<=14?'oc-crit':r.days<=30?'oc-warn':'';
-    var when='<b>'+(r.mark==='proj'?'~':'')+opsD(r.off)+(r.mark==='ok'?opsIc('check'):'')+'</b><small class="'+cls+'">'+(r.overdue?(-r.days)+' d over':'in '+r.days+' d')+'</small>';
+    var when='<b>'+(r.mark==='proj'?'~':'')+opsD(r.off)+(r.mark==='ok'?opsIc('check'):'')+'</b><small class="'+cls+'">'+(r.overdue?daysMD(-r.days)+' over':'in '+daysMD(r.days,r.off))+'</small>';
     var rel=r.reliever,chg='<span style="color:#33465C">'+escHtml(r.surname)+'</span><span class=oc-arr aria-hidden=true>&rarr;</span>';
     if(!rel)chg+='<span class=oc-nob>nobody planned</span>';
     else{chg+='<b>'+escHtml(rel.surname)+'</b>';
@@ -7941,9 +7956,15 @@ function opsBindWeek(){
 }
 function opsBindRows(){var v=document.getElementById('view');if(!v)return;v.querySelectorAll('[data-ship]').forEach(function(b){b.onclick=function(e){if(e)e.preventDefault();opsGoShip(b.getAttribute('data-ship'),b.getAttribute('data-sc'));};if(b.getAttribute('role')==='button')b.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();b.click();}};});}
 async function renderDashboard(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
-  var d;try{d=await cachedJson('/api/ops',renderDashboard);}catch(e){$('#view').innerHTML='<div class=muted>Could not load the dashboard'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
-  OPS=d;OPS_WK=0;var w=d.crew||{};
+  var _g=VIEW_GEN;$('#view').innerHTML='<div class=muted>Loading…</div>';
+  var d;try{d=await cachedJson('/api/ops',opsRefresh);}catch(e){if(_g!==VIEW_GEN)return;$('#view').innerHTML='<div class=muted>Could not load the dashboard'+(e&&e.status?' (HTTP '+e.status+')':'')+'. <button class="btn ghost" onclick="renderDashboard()">Retry</button></div>';return;}
+  if(_g!==VIEW_GEN)return; // 16 Oct 2026: a slow first answer must not paint over the tab the user moved to (§11d)
+  OPS=d;OPS_WK=0;opsPaint(d);
+}
+// A background revalidation repaints under the SAME week page and filter (the Travel tab's 16 Oct fix): re-running
+// renderDashboard reset OPS_WK and the Crew-changes filter every time /api/ops changed behind the paint.
+function opsRefresh(){var e=API_CACHE['/api/ops'];if(!e||!e.data||!document.querySelector('.ops')){renderDashboard();return;}OPS=e.data;opsPaint(e.data);}
+function opsPaint(d){var w=d.crew||{};
   var h='<div class=ops><div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px"><div><h2 style="margin:0;font-family:Outfit;font-size:24px">Operational dashboard</h2>'
     +'<p class=oc-sub style="font-size:13px">'+escHtml(fmtDateS(d.today))+(d.tdg.advq?' &middot; reads the TDG file of <b style="color:var(--ink)">'+opsD(d.tdg.advq.at)+'</b>, '+daysMD(d.tdg.advq.age)+' old':'')+' &middot; '+d.kpis.aboard.ships+' ships</p></div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type=button class="btn ghost" data-gantt=1>Fleet Gantt</button><button type=button class=btn onclick="show(&#39;data&#39;)">Upload TDG file</button></div></div>';
@@ -7985,10 +8006,11 @@ function crewMatchesComp(c){
 // the focus (13 Oct 2026: it re-opened the tab — "alega" typed, 1 of 105 shown, became "", 52 of 105, focus gone).
 function crewRefresh(){var e=API_CACHE['/api/crew'];if(!e||!e.data||!document.getElementById('crrail')){renderCrew();return;}CREW=e.data.crew||[];paintCrew();}
 async function renderCrew(){
+  var _g=VIEW_GEN;
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   CREW=[];CF.q='';CF.status=CREW_DEFAULT_STATUS.slice();CF.comp='';CF.client=[];CF.ship=[];CF.sort='az';CF.rank=[];
   $('#view').innerHTML='<div class=muted>Loading crew…</div>';
-  try{var r=await cachedJson('/api/crew',crewRefresh);CREW=r.crew||[];}catch(e){$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
+  try{var r=await cachedJson('/api/crew',crewRefresh);if(_g!==VIEW_GEN)return;CREW=r.crew||[];}catch(e){if(_g!==VIEW_GEN)return;$('#view').innerHTML='<div class=muted>Could not load crew. <button class="btn ghost" onclick="renderCrew()">Retry</button></div>';return;}
   $('#view').innerHTML=
    // No page heading (Miguel, 6 Oct 2026: "remove this .. All crew · 104 results"): the count lives at the foot of the rail.
    '<div class=bar style="margin:0;justify-content:flex-end">'
@@ -8645,17 +8667,19 @@ async function emailStatement(resend){
 // (OFF in N d / OFF N d ago / ON in N d). One drawing for the roster card, the crew profile and the Keyman card.
 function contractPass(on,off,o){
   o=o||{};if(!on)return {html:'',chip:'',bar:''};
-  var DAY=86400000,now=Date.now(),t0=new Date(on+'T00:00:00Z').getTime(),today=new Date().toISOString().slice(0,10);
+  var DAY=86400000,t0=new Date(on+'T00:00:00Z').getTime(),today=new Date().toISOString().slice(0,10);
   var chip='',pct=0,state='open';
   var dur=off?durLabel(on,off):'';
   if(off){
-    var t1=new Date(off+'T00:00:00Z').getTime();
-    var dd=Math.round((t1-now)/DAY),tot=Math.round((t1-t0)/DAY),el=Math.round((now-t0)/DAY);
+    // Days are counted between CALENDAR days (16 Oct 2026): off the clock, a sign-off today read "OFF 1 d ago" at 14:00
+    // and tomorrow read "ON in 0 d". And the chip says months and days, never a day count (Miguel, same day).
+    var t1=new Date(off+'T00:00:00Z').getTime(),tn=new Date(today+'T00:00:00Z').getTime();
+    var dd=Math.round((t1-tn)/DAY),tot=Math.round((t1-t0)/DAY),el=Math.round((tn-t0)/DAY);
     pct=tot>0?Math.max(0,Math.min(100,Math.round(el/tot*100))):0;
-    if(on>today){var ds=Math.round((t0-now)/DAY);state='soon';pct=0;chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+ds+' d</span>';}
+    if(on>today){state='soon';pct=0;chip='<span class=croff style="background:#E6EFFB;color:#1E5FB0">ON in '+(spanCompact(today,on)||'0 d')+'</span>';}
     else if(o.done){state='done';pct=100;}
-    else if(dd<0){state='past';pct=100;chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+(-dd)+' d ago</span>';}
-    else{state=dd<=14?'due':'live';chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">OFF in '+dd+' d</span>';}
+    else if(dd<0){state='past';pct=100;chip='<span class=croff style="background:#EEF1F5;color:#4B5563">OFF '+spanCompact(off,today)+' ago</span>';}
+    else{state=dd<=14?'due':'live';chip='<span class=croff style="background:'+(dd<=14?'#F8ECEB;color:var(--red)':'#FBF2E0;color:var(--amber)')+'">'+(dd===0?'OFF today':'OFF in '+spanCompact(today,off))+'</span>';}
   }
   var track='<div class="cptrack '+state+'"><i style="width:'+pct+'%"></i></div>';
   // The contract line (6 Oct 2026): small labels over the dates and one thin bar. Kept quiet on purpose.
@@ -8993,8 +9017,9 @@ function rng(id,label,max){return '<div class=fg><label>'+label+' — '+max+'%</
 /* ---- Contracts & Bonus: fleet-wide ledger ---- */
 var CTL=null,CTLF={q:'',ship:[],client:[],rank:[],bz:[],sort:'az'};
 async function renderContracts(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
-  var d;try{d=await cachedJson('/api/contracts',renderContracts);}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderContracts()">Retry</button></div>';return;}
+  var _g=VIEW_GEN;$('#view').innerHTML='<div class=muted>Loading…</div>';
+  var d;try{d=await cachedJson('/api/contracts',renderContracts);}catch(e){if(_g!==VIEW_GEN)return;$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderContracts()">Retry</button></div>';return;}
+  if(_g!==VIEW_GEN)return;
   CTL=d;CTLF={q:'',ship:[],client:[],rank:[],bz:[],sort:'az'};
   var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
   var pend=d.totals.crew-d.totals.baselineSet;
@@ -9125,8 +9150,9 @@ function ledgerCard(r){
 function ledgerScore(id){openScore(id);}
 /* ---- Feedback windows board ---- */
 async function renderFeedback(){
-  $('#view').innerHTML='<div class=muted>Loading…</div>';
-  var d;try{d=await (await fetch('/api/feedback/board')).json();}catch(e){$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderFeedback()">Retry</button></div>';return;}
+  var _g=VIEW_GEN;$('#view').innerHTML='<div class=muted>Loading…</div>';
+  var d;try{d=await (await fetch('/api/feedback/board')).json();}catch(e){if(_g!==VIEW_GEN)return;$('#view').innerHTML='<div class=muted>Could not load. <button class="btn ghost" onclick="renderFeedback()">Retry</button></div>';return;}
+  if(_g!==VIEW_GEN)return;
   var rows=d.rows||[],pn={ray:'Ray',rolando:'Rolando',dexter:'Dexter'};
   function dlabel(n){return n<0?(daysMD(-n)+' ago'):(n===0?'today':('in '+daysMD(n)));}
   function pill(id,r){var cls=r.answered?'on':(r.status==='pending'?'pend':'');var mark=r.answered?'✓':(r.status==='pending'?'…':'+');var tt=r.answered?'response in':(r.status==='pending'?'requested — awaiting':'click to request a window');return '<span class="fbp '+cls+'" title="'+tt+'" onclick="fbRequest(\\''+id+'\\',\\''+r.role+'\\')">'+pn[r.role]+' '+mark+'</span>';}

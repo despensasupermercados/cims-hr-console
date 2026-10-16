@@ -113,6 +113,17 @@ function fakeDB(state) {
 // the night the hardcoded date passes (that exact time bomb fired on 2026-07-11).
 const dayN = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 const TODAY = dayN(0);                       // sweep "today"
+// The sweep is gated to 08:00 Europe/Budapest. Find the UTC instant of TODAY that reads 08 there instead of hard-coding
+// 06:00Z: that is CEST only, and from the last Sunday of October (CET, UTC+1) 06:00Z is 07:00 Budapest — the gate shuts
+// and this file goes red on main, blocking every deploy (auto_send.test.js found the instant the same way).
+function gateInstant(day = TODAY) {
+  for (let h = 0; h < 24; h++) {
+    const t = Date.parse(day + "T" + String(h).padStart(2, "0") + ":00:00Z");
+    const hour = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Budapest", hour: "2-digit", hour12: false }).formatToParts(new Date(t)).find((p) => p.type === "hour").value;
+    if (hour === "08") return t;
+  }
+  throw new Error("no UTC hour of " + day + " reads 08:00 in Europe/Budapest");
+}
 const T7_OFF = dayN(7), T4_OFF = dayN(4);    // sign-offs at T-7 / T-4 from TODAY
 
 function rig(opts = {}) {
@@ -541,13 +552,13 @@ test("S3: send failures and missing recipients reach the activity log", async ()
 
 test("S4: sweep acts only at 08:00 Europe/Budapest (auto_send's gate, default on)", async () => {
   const r = rig({ GATE_HOUR: undefined });             // undefined -> module default "08"
-  // 12:00 UTC in July = 14:00 Budapest (CEST) -> gated out, nothing happens
-  const off = await r.sbm.sbmDailySweep(r.env, { scheduledTime: Date.parse(TODAY + "T12:00:00Z") });
+  // six hours after the gate -> 14:00 Budapest, gated out, nothing happens
+  const off = await r.sbm.sbmDailySweep(r.env, { scheduledTime: gateInstant() + 6 * 3600 * 1000 });
   assert.equal(off.skipped, "not_gate_hour");
   assert.equal(r.outbox.length, 0);
   assert.equal(r.state.requests.length, 0);
-  // 06:00 UTC in July = 08:00 Budapest -> runs and invites
-  const on = await r.sbm.sbmDailySweep(r.env, { scheduledTime: Date.parse(TODAY + "T06:00:00Z") });
+  // 08:00 Budapest -> runs and invites
+  const on = await r.sbm.sbmDailySweep(r.env, { scheduledTime: gateInstant() });
   assert.equal(on.invited, 1);
   assert.equal(r.outbox.length, 1);
 });
@@ -578,10 +589,9 @@ test("master switch OFF by default: absent flag -> sweep does nothing, even at t
   assert.deepEqual(res, { skipped: "disabled" });
   assert.equal(r.outbox.length, 0);
   assert.equal(r.state.requests.length, 0);
-  // checked BEFORE the hour gate: 06:00 UTC in July = 08:00 Budapest would pass
-  // the S4 gate, but the switch still wins
+  // checked BEFORE the hour gate: 08:00 Budapest would pass the S4 gate, but the switch still wins
   const g = rig({ settings: {}, GATE_HOUR: undefined });
-  const res2 = await g.sbm.sbmDailySweep(g.env, { scheduledTime: Date.parse(TODAY + "T06:00:00Z") });
+  const res2 = await g.sbm.sbmDailySweep(g.env, { scheduledTime: gateInstant() });
   assert.deepEqual(res2, { skipped: "disabled" });
   assert.equal(g.outbox.length, 0);
   assert.equal(g.state.requests.length, 0);

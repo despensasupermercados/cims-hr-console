@@ -377,7 +377,7 @@ function renderCart(){
 async function apply(){
  var ap=$("ap");if(ap){ap.disabled=true;ap.textContent="Applying…";}
  var ed={};for(var ek in EDITS)if(DEC[ek]==="edit")ed[ek]=EDITS[ek];
- var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:META.file_hash,filename:META.filename,rows_seen:META.rows_seen,run_by:"Rita"};
+ var body={review:STAGE.review,decisions:DEC,edits:ed,file_hash:META.file_hash,filename:META.filename,rows_seen:META.rows_seen};
  var res;try{res=await fetch("/api/crew/import/apply",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}).then(function(r){return r.json();});}catch(e){res={ok:false,error:"network"};}
  if(!res.ok){$("cart").innerHTML='<div class="ch"><div class="h">Apply failed</div></div><div class="foot"><div class="msg">'+(res.error==="already_processed"?"Already processed.":esc(res.error))+'</div></div>';return;}
  $("work").style.display="none";

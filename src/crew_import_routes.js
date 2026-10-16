@@ -222,7 +222,7 @@ export async function apiCrewImportApply(request, env, deps) {
     if (dup) return J({ ok: false, error: "already_processed" }, 409);
   }
   const run_at = new Date().toISOString();
-  const run_by = body.run_by || "unknown";
+  const run_by = (deps && deps.runBy) || body.run_by || "unknown"; // the session signs the run (16 Oct 2026); the body only for tests
   const plan = buildApplyPlan(body.review, body.decisions || {}, {
     file_hash, filename: body.filename || null, rows_seen: body.rows_seen ?? null, run_by, run_at,
   });
@@ -501,7 +501,7 @@ export async function handleCrewImport(request, url, env, session, deps) {
   if (p === "/api/crew/import/stage" && request.method === "POST") return apiCrewImportStage(request, env, { ...(deps || {}), canKeepCopy: isMoneyUser(session && session.email) });
   if (p === "/api/crew/import/apply" && request.method === "POST") {
     if (!isMoneyUser(session && session.email)) return J({ ok: false, error: "money_users_only" }, 403);
-    return apiCrewImportApply(request, env, deps);
+    return apiCrewImportApply(request, env, { ...(deps || {}), runBy: session && session.email });
   }
   return null;
 }

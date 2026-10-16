@@ -4,7 +4,7 @@
 // that import, you need to send an email back to Joy and copy Rita". His answers: a different hull → move the card
 // (her dates kept); Inactive → remove; one email per seafarer, Joy's Deploy address, Rita in copy, same letterhead;
 // a deployed earmark the file lacks is reported only; the rest of the file still applies.
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { earmarkDiscrepancies, tdgEarmarksWithoutCard, earmarkSummary, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, TEMPLATE_ID, loadEarmarkRecord } from "../src/earmark.js";
@@ -12,6 +12,10 @@ import { deployRecipient, deployCc } from "../src/keyman_deploy.js";
 import { apiCrewImportStage, apiCrewImportApply, applySummary } from "../src/crew_import_routes.js";
 
 const TODAY = "2026-10-07";
+// The route-level assertions below read the real clock (apiCrewImportStage/Apply), while the pure calls take `today`.
+// Pin the clock to TODAY so the cards' "future" sign-ons stay future: unpinned, this file went red the day a fixture
+// sign-on passed (found by running the suite with the clock pushed ahead, 16 Oct 2026).
+mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07" + "T12:00:00Z") });
 const AT = "2026-10-07T08:00:00.000Z";
 const card = (o = {}) => ({ id: "as_1", sc: "SC-1", crew_name: "Edward Guazon", ship: "Allure", sign_on: "2026-11-29", planned_sign_off: "2027-06-29", ...o });
 const row = (o = {}) => ({ agency_id: "SC-1", status: "Earmarked", status_raw: "Earmarked", vessel_observed: "MV ALLURE OF THE SEAS", embarked_at: null, run_at: AT, ...o });

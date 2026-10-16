@@ -8,7 +8,7 @@
 //
 // This also catches what three shadowed copies of reliefSlot hid for months: the LAST definition
 // is the one the browser runs, and only running it tells you which that is.
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import vm from "node:vm";
@@ -19,6 +19,9 @@ writeFileSync(TMP, readFileSync(SRC, "utf-8") + "\nexport { APP_HTML };\n", "utf
 let APP_HTML;
 try { ({ APP_HTML } = await import(TMP.href)); } finally { unlinkSync(TMP); }
 
+// The fixtures are dated (a contract Mar 8 -> Dec 7, 2026; a timeline that must carry TODAY to Dec 1, 2027): the clock is
+// pinned to the day they were written, and the vm is handed the host Date so the pin reaches the page code.
+mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-16T12:00:00Z") });
 function pageContext() {
   const el = () => ({ style: {}, classList: { add() {}, remove() {}, contains() { return false; } }, addEventListener() {}, appendChild() {}, setAttribute() {}, getAttribute() { return null; }, querySelector() { return null; }, querySelectorAll() { return []; }, focus() {}, value: "", innerHTML: "", textContent: "", dataset: {} });
   const ctx = {
@@ -31,7 +34,7 @@ function pageContext() {
     // under test need the FUNCTIONS defined, not the page rendered.
     fetch: () => new Promise(() => {}),
     localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
-    setTimeout, clearTimeout, setInterval, clearInterval, console,
+    setTimeout, clearTimeout, setInterval, clearInterval, console, Date,
     addEventListener() {}, alert() {}, confirm() { return true; }, requestAnimationFrame: (f) => f && f(),
   };
   ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;

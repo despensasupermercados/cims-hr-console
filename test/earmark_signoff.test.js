@@ -4,7 +4,7 @@
 // that crew signs off, you will email Joy and CC Rita ... tell Joy everything about this crew member ... Put the not
 // valid items first, the valid items second, and the bottom part following that. ... If there is any discrepancy ...
 // Rita will decide what to do: either accept it, change it, or ..." — his choice: Accept, Keep mine, or Edit.
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { earmarkDiscrepancies, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail, renderEarmarkText, earmarkSummary, SIGNED_OFF_DAYS } from "../src/earmark.js";
@@ -12,6 +12,10 @@ import { deployRecipient, deployCc } from "../src/keyman_deploy.js";
 import { apiCrewImportStage, apiCrewImportApply, editOf } from "../src/crew_import_routes.js";
 
 const TODAY = "2026-10-08";
+// The route-level assertions below read the real clock (apiCrewImportStage/Apply), while the pure calls take `today`.
+// Pin the clock to TODAY so the cards' "future" sign-ons stay future: unpinned, this file went red the day a fixture
+// sign-on passed (found by running the suite with the clock pushed ahead, 16 Oct 2026).
+mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-08" + "T12:00:00Z") });
 const AT = "2026-10-08T08:00:00.000Z";
 const card = (o = {}) => ({ id: "as_1", sc: "SC-1", crew_name: "Edward Guazon", ship: "Allure", sign_on: "2027-01-10", planned_sign_off: "2027-08-10", ...o });
 const row = (o = {}) => ({ agency_id: "SC-1", status: "On board", status_raw: "On board", vessel_observed: "MV LIBERTY OF THE SEAS", embarked_at: "2026-05-01", debarked_at: null, run_at: AT, ...o });
