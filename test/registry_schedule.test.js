@@ -61,9 +61,13 @@ test("TDG's own word is final: a debark on the row or the Counter's actual sign-
      edits: [{ sc: "OLD", seq: 1, on_key: "2026-03-22", sign_off: "2026-12-01", updated_at: "2026-10-06T00:00:00Z" }],
      vessels: VES, today: TODAY });
   const L = by(legs);
-  assert.deepEqual({ off: L["OLD|Wonder"].off, src: L["OLD|Wonder"].offSource, cur: L["OLD|Wonder"].is_current, rel: L["OLD|Wonder"].reliever.sc }, { off: "2026-10-02", src: "tdg", cur: true, rel: "NEW" }, "the reliever's embark dates the sign-off; TDG's file still lists the outgoing crew On board, so the contract stays current (held)");
-  assert.equal(L["OLD|Wonder"].heldByFile, true, "drawn red: past the sign-off, TDG still has them aboard");
-  assert.equal(L["OLD|Wonder"].offConfirmed, undefined, "never a recorded sign-off while TDG lists them On board");
+  // Miguel, 17 Oct 2026 (Kevin Jugao, Pursuit): Rita's typed sign-off outranks the file's cross-over while TDG lists the crew
+  // On board. OLD carries a typed 1 Dec beside the 2 Oct cross-over: her date stands, NEW is still named as the reliever.
+  assert.deepEqual({ off: L["OLD|Wonder"].off, src: L["OLD|Wonder"].offSource, cur: L["OLD|Wonder"].is_current, rel: L["OLD|Wonder"].reliever.sc, held: L["OLD|Wonder"].heldByFile }, { off: "2026-12-01", src: "rita", cur: true, rel: "NEW", held: undefined }, "Rita's typed date over the cross-over; the file's second crew is still the reliever");
+  // Without a typed date the cross-over dates the sign-off and the held rule stands (8 Oct 2026)
+  assert.deepEqual({ off: L["NAV1|Navigator"].off, src: L["NAV1|Navigator"].offSource, cur: L["NAV1|Navigator"].is_current, rel: L["NAV1|Navigator"].reliever.sc }, { off: "2026-10-02", src: "tdg", cur: true, rel: "NAV2" }, "the reliever's embark dates the sign-off; TDG's file still lists the outgoing crew On board, so the contract stays current (held)");
+  assert.equal(L["NAV1|Navigator"].heldByFile, true, "drawn red: past the sign-off, TDG still has them aboard");
+  assert.equal(L["NAV1|Navigator"].offConfirmed, undefined, "never a recorded sign-off while TDG lists them On board");
   assert.equal(L["NEW|Wonder"].is_current, true); assert.equal(L["NEW|Wonder"].off, "2027-05-02");
   assert.equal(L["NAV1|Navigator"].off, "2026-10-02", "a trailing space in the vessel cell still meets the hull");
   assert.deepEqual({ off: L["DEB|Apex"].off, src: L["DEB|Apex"].offSource, cur: L["DEB|Apex"].is_current, conf: L["DEB|Apex"].offConfirmed }, { off: "2026-11-20", src: "tdg", cur: true, conf: undefined });
@@ -255,4 +259,25 @@ test("a reliever card dated ON the file's day is not contradicted by that file; 
     { off: TODAY, src: "card", cur: true, held: true }, "a day later the sign-off has passed while the 7 Oct file still lists X9 On board: held, never a recorded sign-off");
   const later = by(legsFromRegistry({ rows: rows.map((r) => ({ ...r, run_at: "2026-10-08T08:00:00.000Z" })), open, vessels: VES, today: "2026-10-08" }));
   assert.equal(later["X9|Navigator"].offSource, "projected", "a file dated the day AFTER the sign-on without the reliever aboard contradicts the card");
+});
+
+test("Rita's typed sign-off outranks the file's cross-over while TDG lists the crew On board (Miguel, 17 Oct 2026: Jugao, Valderrama, Belhida as on the 16 Oct file)", () => {
+  const F16 = "2026-10-16T13:36:44.757Z", T17 = "2026-10-17";
+  const legs = legsFromRegistry({ rows: [
+    row("SC-0039935", "On board", "MV AZAMARA PURSUIT", "2026-05-02", null, { run_at: F16 }),        // Kevin Jugao
+    row("SC-0041465", "On board", "MV AZAMARA PURSUIT", "2026-10-16", null, { run_at: F16 }),        // Jonathan Alonzo
+    row("SC-0038464", "On board", "MV ENCHANTMENT OF THE SEAS", "2026-06-20", null, { run_at: F16 }), // Jeffrey Valderrama
+    row("SC-0036160", "On board", "MV ENCHANTMENT OF THE SEAS", "2026-10-03", null, { run_at: F16 }), // Myrna Suarez
+    row("SC-0037752", "On board", "MV CELEBRITY APEX", "2026-03-14", null, { run_at: F16 }),          // Dan Belhida
+    row("SC-0038129", "On board", "MV CELEBRITY APEX", "2026-10-07", null, { run_at: F16 }),          // Michael Angelo Resposo
+  ], edits: [
+    { sc: "SC-0039935", seq: 1, on_key: "2026-05-02", sign_off: "2026-10-31", updated_at: "2026-10-09T17:15:52.266Z" },
+    { sc: "SC-0038464", seq: 1, on_key: "2026-06-20", sign_off: "2027-01-31", updated_at: "2026-10-09T16:18:28.577Z" },
+    { sc: "SC-0037752", seq: 1, on_key: "2026-03-14", sign_off: "2026-10-07", updated_at: "2026-10-08T17:53:01.926Z" },
+  ], vessels: [...VES, { name: "Pursuit", brand: "Azamara" }, { name: "Enchantment", brand: "Royal Caribbean" }], today: T17 });
+  const L = by(legs);
+  const v = (k) => ({ off: L[k].off, src: L[k].offSource, cur: L[k].is_current, held: !!L[k].heldByFile, rel: L[k].reliever ? L[k].reliever.sc : null });
+  assert.deepEqual(v("SC-0039935|Pursuit"), { off: "2026-10-31", src: "rita", cur: true, held: false, rel: "SC-0041465" }, "Kevin: 31 Oct, not the 16 Oct cross-over");
+  assert.deepEqual(v("SC-0038464|Enchantment"), { off: "2027-01-31", src: "rita", cur: true, held: false, rel: "SC-0036160" }, "Valderrama: 31 Jan 2027, no longer red past a 3 Oct sign-off");
+  assert.deepEqual(v("SC-0037752|Apex"), { off: "2026-10-07", src: "rita", cur: true, held: true, rel: "SC-0038129" }, "Belhida: the same date either way; passed while TDG lists him On board -> held");
 });

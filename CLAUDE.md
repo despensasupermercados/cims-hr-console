@@ -158,6 +158,11 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
   legacy seq edit through the Counter position) or her **reliever card** on the same hull (its sign-on is the
   outgoing crew's sign-off); (3) **projected: embark + 7 months, Azamara 5** ("TDG does not say the sign-off
   until very late"). Every card says which (`offSource` tdg / rita / card / projected, `fileDatesNote`).
+  **Rita's typed date outranks the cross-over** (Miguel, 17 Oct 2026, on Kevin Jugao, Pursuit: the 16 Oct file has his
+  relievers aboard, Rita typed 31 Oct, TDG still lists him On board — "Rita's typed date"): a sign-off she typed for the
+  contract wins over the file's cross-over (source `rita`), the file's second crew still named as the reliever; the held
+  rule still applies once her date passes. On the 16 Oct file it moved Jugao 16 Oct → 31 Oct and Valderrama (Enchantment,
+  Suarez embarked 3 Oct) 3 Oct → 31 Jan 2027; Belhida (Apex) reads 7 Oct either way. Pinned by `test/registry_schedule.test.js`.
 - **The swap.** When the reliever's sign-on has PASSED (file row or card), the outgoing contract ends that
   day — non-current, drawn "Contract completed" underneath with who relieved them — and the reliever holds
   the seat: from the file row if the file has them, else from the card, drawn green **"ABOARD · AWAITING
@@ -1249,6 +1254,10 @@ sequence of writes is the point), and the suites named below.
   row with debark < embark (Ed Del Rosario, TDG's data, handled by `completedSince`), one legacy `contract_edit` without `on_key`
   (SC-0026127, Journey), 11 `keyman_contract3` rows without a projected sign-off (the Counter as uploaded, §6), 37 crew without
   `ship_crew_id` (filled by the next AdvancedQuery that carries the column).
+- **The Feedback board is its window** (Miguel, 17 Oct 2026: "Add the 45/30-day window"): `apiFeedbackBoard` lists a crew On
+  board / On Vacation / Reserved only when the contract ends within `FB_DUE_AHEAD` = 45 days or ended within `FB_DUE_BEHIND` = 30
+  (no known sign-off = not listed), as its heading always said; Maria's scoring_board reads the same list. Pinned by
+  `test/bughunt_1016_plumbing.test.js`.
 - **The dated fixtures hold on every calendar day** (`scripts/clock_shift.mjs`, SHIFT_DAYS; `docs/NIGHT_WATCH.md`): four tests were
   time bombs (a DST-dependent gate hour in `sbm.test.js`, `mock.timers` in the earmark and board tests). The night watch runs the suite
   with the clock pushed +30 / +60 / +90 days once a month.

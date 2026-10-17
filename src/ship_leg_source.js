@@ -280,7 +280,9 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 //               tdg        TDG's own word: a DEBARKEDDATE on the row (final), or the Counter's actual
 //                          sign-off for the same contract (final). The file's own cross-over — a SECOND
 //                          crew the same file has On board the same hull with a later embark — is the
-//                          sign-off DATE (source tdg, with the reliever), never the end (see "held").
+//                          sign-off DATE (source tdg, with the reliever), never the end (see "held"),
+//                          UNLESS Rita typed a sign-off for this contract: hers wins over the cross-over
+//                          (Miguel, 17 Oct 2026), the file's second crew still named as the reliever.
 //               rita/card  whichever is NEWER: the sign-off Rita typed for this contract
 //                          (contract_edit, keyed on the embark date), or Rita's yellow card for a
 //                          RELIEVER on the same hull (its sign-on is the outgoing crew's sign-off —
@@ -429,7 +431,10 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
     if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id } });
     let pick = cand.find((c) => c.final) || null;
     if (pick) { const t = cand.filter((c) => c.final).sort((a, b) => (a.off < b.off ? -1 : 1)); pick = t[0]; }
-    if (!pick && cross) pick = cross;
+    // RITA'S TYPED DATE OUTRANKS THE CROSS-OVER while TDG still lists the crew On board (Miguel, 17 Oct 2026, on Kevin Jugao,
+    // Pursuit: the 16 Oct file has his relievers aboard, Rita typed 31 Oct, TDG still lists him On board — "Rita's typed
+    // date"). The file's second crew still names the reliever; the held rule still applies once her date passes.
+    if (!pick && cross) { const typed = cand.find((c) => c.source === "rita"); pick = typed ? { ...typed, reliever: cross.reliever } : cross; }
     if (!pick) {
       const rc = cand.filter((c) => c.source === "rita" || c.source === "card");
       if (rc.length === 1) pick = rc[0];
