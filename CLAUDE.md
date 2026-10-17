@@ -868,7 +868,9 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   $180,000 with the pace tick and the dashed projection; last year same months, where the year lands, and **what is left a
   month** for the rest of the year to land on budget — or, on a view with no budget, "No budget for this view · year
   against year"); **Needs a decision** (`tvDecisions`): a closed month over $15,000 (budgeted view), TDG's bill against the
-  workbook by month and category ≥ `TV_GAP_MIN` = $150 (biggest three, "N more"), the category up most on last year
+  workbook as ONE net gap per category over the months the bill covers, ≥ `TV_GAP_MIN` = $150 (Miguel, 17 Oct 2026:
+  "Net per year" — a charge typed into the next month cancels out; a chosen month is that month alone; each month stays in
+  the comparison fold), the category up most on last year
   (≥ 20% and ≥ $1,000), a closed month with spend and no bill on file, the names the roster cannot place, single movements
   above 2.5× the usual — each says what it means and opens the place that holds it (`tvGo` sets one filter, `tvOpen`
   opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". Then Month by month (`tBars`),

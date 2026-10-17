@@ -6594,12 +6594,15 @@ function tvDecisions(ctx){
   // 2. the category that grew most against last year's same months (only when every category is shown)
   if(!cat&&ctx.hasPY){var best=null;TCATS.forEach(function(c){var l=tSum(sc,LY,P.months,c),p=tSum(sc,PY,P.months,c),d=l-p;if(p>0&&d>=1000&&d/p>=0.2&&(!best||d>best.d))best={c:c,l:l,p:p,d:d};});
     if(best)out.push({sev:'warn',t:TCATLAB[best.c]+' is up '+Math.round(best.d/best.p*100)+'% on '+PY,w:usd0(best.l)+' against '+usd0(best.p)+' in '+P.span+' '+PY+' · '+usd0(best.d)+' more.',go:'tvGo(&quot;cat&quot;,&quot;'+best.c+'&quot;)',gl:'See '+TCATLAB[best.c]});}
-  // 3. TDG's bill against the workbook (crew view, every cruise line): the biggest gaps first
+  // 3. TDG's bill against the workbook (crew view, every cruise line): ONE net gap per category over the months the bill
+  // covers (Miguel, 17 Oct 2026: "Net per year") — a charge typed into a neighbouring month cancels out here; each month
+  // stays in the comparison fold. A chosen month is that month alone.
   if(SGA&&TF.kind==='crew'&&!TF.client){var B=sgaBillOf(LY,P.mo?[P.mo]:null),gaps=[];
-    B.months.forEach(function(m){TV_BILL_CATS.forEach(function(c){if(cat&&c[0]!==cat)return;var s=B.sum(m,c[0]),w=sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[c[0]]||0);},0),d=w-s;if(Math.abs(d)>=TV_GAP_MIN)gaps.push({m:m,c:c[1],d:d,s:s,w:w});});});
+    var wbOf=function(m,k){return sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[k]||0);},0);};
+    var bm=B.months,spanB=bm.length?(bm.length===1?TMN[bm[0]]:TMN[bm[0]]+'–'+TMN[bm[bm.length-1]]):'';
+    TV_BILL_CATS.forEach(function(c){if(cat&&c[0]!==cat)return;var s=0,w=0,off=0;bm.forEach(function(m){var sm=B.sum(m,c[0]),wm=wbOf(m,c[0]);s+=sm;w+=wm;if(Math.abs(wm-sm)>=TV_GAP_MIN)off++;});var d=w-s;if(Math.abs(d)>=TV_GAP_MIN)gaps.push({c:c[1],d:d,s:s,w:w,off:off});});
     gaps.sort(function(a,b){return Math.abs(b.d)-Math.abs(a.d);});
-    gaps.slice(0,3).forEach(function(g){out.push({sev:g.d<0?'crit':'warn',t:g.c+' · '+TMN[g.m]+': '+(g.d<0?'TDG billed '+usd0(-g.d)+' the workbook does not have':'the workbook has '+usd0(g.d)+' TDG did not bill'),w:'Bill '+usd0(g.s)+' · workbook '+usd0(g.w)+'. '+(g.d<0?'A TDG charge nobody typed: ask TDG what it is, or add it to the workbook.':'Paid by DG3 directly, or typed in the wrong month: check with Rita’s receipts.'),go:'tvOpen(&quot;tvsga&quot;)',gl:'Compare'});});
-    if(gaps.length>3)out.push({sev:'info',t:(gaps.length-3)+' more gaps between the bill and the workbook',w:'Every month and category is in the comparison.',go:'tvOpen(&quot;tvsga&quot;)',gl:'Compare'});
+    gaps.forEach(function(g){out.push({sev:g.d<0?'crit':'warn',t:g.c+' · '+(bm.length===1?TMN[bm[0]]+' '+LY:spanB+' '+LY)+': '+(g.d<0?'TDG billed '+usd0(-g.d)+' the workbook does not have':'the workbook has '+usd0(g.d)+' TDG did not bill'),w:'Bill '+usd0(g.s)+' · workbook '+usd0(g.w)+(bm.length>1?' over the '+bm.length+' months on the bill ('+g.off+' differ'+(g.off===1?'s':'')+' by '+usd0(TV_GAP_MIN)+'+)':'')+'. '+(g.d<0?'A TDG charge nobody typed: ask TDG what it is, or add it to the workbook.':'Paid by DG3 directly, or not billed yet: check with Rita’s receipts.'),go:'tvOpen(&quot;tvsga&quot;)',gl:'Compare'});});
     // a closed month of the year with workbook spend but no bill on file
     var billed=new Set(B.months);for(var mm=1;mm<=P.lastMo;mm++){if(P.mo&&mm!==P.mo)continue;if(!billed.has(mm)&&tSum(sc,LY,[mm],null)>0&&((SGA.files||[]).length))out.push({sev:'info',t:'No TDG bill on file for '+TMN[mm]+' '+LY,w:'Finance sends it to sga@cims.work once a month; until then the workbook is the only number.',go:'',gl:''});}
   }
