@@ -193,3 +193,47 @@ test("16 Oct, second answer: the miss is the crew ABOARD that day; two aboard ->
   // nobody aboard per the schedule: the typed name decides, as before
   assert.equal(missOwnerByBoard({ ship: "Apex", submitted_at: "2026-07-05", requester: "Michael Resposo" }, "SC-2", ix, legs).rule, "name");
 });
+
+// ---- 16 Oct 2026 bug hunt — the automatic read (money, §1: a draft for Miguel; each case reproduced first) --------------
+const stOf = (rows) => ({ bind: () => ({ all: async () => ({ results: rows }), first: async () => rows[0] || null, run: async () => ({}) }) });
+
+test("S1: Ray's answer from BEFORE this contract's sign-on is not this contract's pre-fill — it is listed as earlier feedback, not used", async () => {
+  // Ray answered on 10 Mar for the previous contract; nobody has asked him about this one (sign-on 1 Apr)
+  const RESP = [{ role: "ray", answers_json: JSON.stringify(BEST.ray), submitted_at: "2026-03-10T09:00:00Z" }];
+  const env = { DB: { prepare: (sql) => stOf(/FROM crew$/.test(sql) ? ROSTER : /feedback_response2/.test(sql) ? RESP : []) }, HON_DB: { prepare: () => stOf([]) } };
+  const r = await gatherAuto(env, { sc: "SC-1", ship: "Quantum", signOn: "2026-04-01", signOff: "2026-11-05", crewName: "Ryan Marto", today: "2026-11-10" }, { engine: "none" });
+  assert.equal(r.sliders.sOrder, undefined, "no on-time pre-fill from a March answer about an April-to-November contract");
+  assert.equal(r.sliders.sAcc, undefined); assert.equal(r.sliders.sPar, undefined);
+  assert.match(r.evidence.map((e) => e.text).join(" | "), /Ray.*2026-03-10.*before this contract.*not used/);
+  const inside = await gatherAuto({ ...env, DB: { prepare: (sql) => stOf(/FROM crew$/.test(sql) ? ROSTER : /feedback_response2/.test(sql) ? [{ ...RESP[0], submitted_at: "2026-06-10T09:00:00Z" }] : []) } },
+    { sc: "SC-1", ship: "Quantum", signOn: "2026-04-01", signOff: "2026-11-05", crewName: "Ryan Marto", today: "2026-11-10" }, { engine: "none" });
+  assert.equal(inside.sliders.sOrder, 20, "an answer given during the contract is this contract's");
+});
+
+test("S2: aboardOn — a contract that ENDED without a recorded sign-off date is not 'aboard for ever'", async () => {
+  const { aboardOn } = await import("../src/score_auto.js");
+  const legs = [{ sc: "SC-1", name: "Old", ship: "Quantum", on: "2025-01-30", off: null, is_current: false }, { sc: "SC-2", name: "Now", ship: "Quantum", on: "2026-06-01", off: "2027-01-01", is_current: true }];
+  assert.deepEqual(aboardOn(legs, "Quantum", "2026-08-01").map((a) => a.sc), ["SC-2"], "the ended leg with no date cannot say he was aboard a year later");
+  const held = [{ sc: "SC-3", name: "Held", ship: "Quantum", on: "2026-01-01", off: "2026-07-01", is_current: true }];
+  assert.deepEqual(aboardOn(held, "Quantum", "2026-08-01").map((a) => a.sc), ["SC-3"], "a CURRENT leg past its sign-off (held / overdue) is still aboard");
+});
+
+test("S4: HON's outgoing name must be THIS crew — a shared surname on the same hull is not his handover", () => {
+  const rows = [{ id: "h1", ship: "Quantum", outgoing_name: "Juan Santos", signed_at: "2026-11-04" }];
+  assert.equal(pickHandover(rows, { ship: "Quantum", signOff: "2026-11-05", crewName: "Pedro Santos", sc: "SC-9" }), null, "Juan is not Pedro");
+  assert.ok(pickHandover(rows, { ship: "Quantum", signOff: "2026-11-05", crewName: "Juan Carlos Santos", sc: "SC-9" }), "a first-name token agrees: his");
+  assert.ok(pickHandover([{ id: "h2", ship: "Quantum", outgoing_name: "Villacortes Jr.", signed_at: "2026-11-04" }], { ship: "Quantum", signOff: "2026-11-05", crewName: "Raymond Villacortes", sc: "SC-9" }), "a surname with only a suffix beside it still matches (Villacortes Jr.)");
+  assert.ok(pickHandover([{ id: "h3", ship: "Quantum", outgoing_name: "Santos", signed_at: "2026-11-04" }], { ship: "Quantum", signOff: "2026-11-05", crewName: "Pedro Santos", sc: "SC-9" }), "a bare surname cannot disagree");
+});
+
+test("S5: a Parts Portal or HON read that FAILS is said on the card, never read as 'no miss' / 'no handover'", async () => {
+  const boom = { prepare: () => ({ bind: () => ({ all: async () => { throw new Error("D1_ERROR: storage"); }, first: async () => { throw new Error("D1_ERROR"); } }) }) };
+  const env = { DB: { prepare: (sql) => stOf(/FROM crew$/.test(sql) ? ROSTER : []) }, PARTS_DB: boom, HON_DB: boom };
+  const r = await gatherAuto(env, { sc: "SC-1", ship: "Quantum", signOn: "2026-04-01", signOff: "2026-11-05", crewName: "Ryan Marto", today: "2026-11-10" }, { engine: "none" });
+  const txt = r.evidence.map((e) => e.text).join(" | ");
+  assert.match(txt, /Parts Portal.*could not be read/i, "the miss read failed: said, not 'full points'");
+  assert.match(txt, /HON.*could not be read/i);
+  assert.equal(r.sources.partsRead, false); assert.equal(r.sources.honRead, false);
+  assert.ok(!r.gates.rush, "a failed read never arms a gate either");
+  assert.equal(r.sliders.sHand, 0, "the handover factor still cannot be earned without a signed HON row — the card says why");
+});

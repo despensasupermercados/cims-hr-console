@@ -1232,14 +1232,14 @@ sequence of writes is the point), and the suites named below.
   own embark is not a contract finished since the count. **Months and days have ONE definition**: `span_md.mdParts` / `mdShort` /
   `mdWords` — the statement, its email and the instructions email read it; the page keeps its inline twin (`monthsDaysParts`).
   Dexter is not "asked" (his audit replaced his feedback, §10j); the relay labels a Counter leg "per the Contract Counter".
-- **The Keyman schedule** (the PR after #277): an ended card within `ABSORB_DAYS` of a leg of the same crew on the same hull is the
+- **The Keyman schedule** (PR #278): an ended card within `ABSORB_DAYS` of a leg of the same crew on the same hull is the
   same contract (`mergeBoardLegs`: it drew two "Contract completed" rows); a reliever card is contradicted only by a file dated
   AFTER its sign-on (`>`), never by the file of the same day — the export runs in the morning, the reliever embarks that day (the
   strict rule earmark.js already had). Checked on the 16 Oct 2026 production data before merging (§11d): no `assignment` row
   carries an `actual_sign_off` and no open card has a passed sign-on, so neither rule moved a seat, a date or a statement that day.
   **Left as designed**: the earmark bench lists a crew whose current contract is past its sign-off (held / overdue) as home from that
   sign-off — the pool is measured on the earmark's START date (`earmark_bench.test.js` pins it, "off 6 Oct per the board (held)").
-- **The Score Card's automatic read — a DRAFT for Miguel (§1)**: Ray's answer from BEFORE this contract's sign-on is listed as earlier
+- **The Score Card's automatic read — a DRAFT for Miguel (§1, the pull request after #278, never merged by the agent)**: Ray's answer from BEFORE this contract's sign-on is listed as earlier
   feedback and not used (it pre-filled the next contract because nobody asked again); `aboardOn` does not read an ENDED leg with no
   date as aboard for ever; HON's outgoing NAME must be this crew (a shared surname on the hull is not his handover; a surname with
   only a suffix beside it still is); a Parts Portal or HON read that FAILS is said on the card (`sources.partsRead / honRead`) and

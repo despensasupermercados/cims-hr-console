@@ -26,11 +26,19 @@ export function pickHandover(rows, { ship, signOff, crewName, sc }) {
   const keys = shipKeys(ship), off = day(signOff), sn = surname(crewName);
   if (!keys.length || !off) return null;
   const lo = addDays(off, -30), hi = addDays(off, 10);
+  // The name: the surname must be there, and a first name HON gives beside it must be one of this crew's (16 Oct 2026: "Juan
+  // Santos" on the hull is not Pedro Santos's handover). A surname alone, or one with only a suffix (Villacortes Jr.), cannot
+  // disagree and still matches.
+  const SUFFIX = new Set(["jr", "jr.", "sr", "sr.", "ii", "iii", "iv"]);
+  const fold = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const firstTokens = fold(crewName).split(/[\s,]+/).filter(Boolean).slice(0, -1);
   const sameCrew = (r) => {
     if (r.outgoing_crew_id && sc) return String(r.outgoing_crew_id).trim().toUpperCase() === String(sc).trim().toUpperCase();
     if (!r.outgoing_name || !sn) return true;
-    const words = String(r.outgoing_name).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[\s,]+/).filter(Boolean);
-    return words.includes(sn);
+    const words = fold(r.outgoing_name).split(/[\s,]+/).filter(Boolean);
+    if (!words.includes(sn)) return false;
+    const given = words.filter((w) => w !== sn && !SUFFIX.has(w));
+    return !given.length || !firstTokens.length || given.some((w) => firstTokens.some((t) => t === w || (w.length >= 4 && t.startsWith(w)) || (t.length >= 4 && w.startsWith(t))));
   };
   const hit = (rows || []).filter((r) => keys.includes(shipKey(r.ship)) && day(r.signed_at) >= lo && day(r.signed_at) <= hi && sameCrew(r));
   hit.sort((a, b) => (a.signed_at < b.signed_at ? 1 : -1));
@@ -112,7 +120,8 @@ export function aboardOn(legs, ship, date) {
   for (const l of legs || []) {
     if (!l || !l.sc || !l.on || shipKey(l.ship) !== k) continue;
     const on = day(l.on), off = day(l.off);
-    if (on > d || (!l.is_current && off && off < d)) continue;
+    // an ENDED contract with no recorded end cannot say he was aboard later (16 Oct 2026: it read as aboard for ever)
+    if (on > d || (!l.is_current && (!off || off < d))) continue;
     const prev = by.get(l.sc);
     if (!prev || on < prev.on) by.set(l.sc, { sc: l.sc, name: l.name || l.sc, on });
   }
@@ -147,9 +156,13 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   const none = () => ({ results: [] });
   if (deps.ensure) await deps.ensure(env);
   // ONE wave (§12). Without a sign-on nothing dated is read; without a ship no miss or handover can be his.
+  // A read that FAILS is said on the card (16 Oct 2026): it used to read as "no miss" / "no handover" — full points, or a
+  // factor lost, from a storage error nobody saw. The failure is kept apart from an empty answer.
+  const failed = {};
+  const fail = (k) => (e) => { failed[k] = String((e && e.message) || e).slice(0, 160); return none(); };
   const [misses, hons, audits, intel, resp, roster, legs] = await Promise.all([
-    env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(none) : none(),
-    env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(none) : none(),
+    env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(fail("parts")) : none(),
+    env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(fail("hon")) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
     env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(none),
     on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
@@ -157,8 +170,14 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
     env.PARTS_DB && on && keys.length && deps.boardLegs ? Promise.resolve().then(deps.boardLegs).catch(() => null) : null,
   ]);
-  const answers = {}; let rayAt = null;
-  for (const r of resp.results || []) { try { answers[r.role] = JSON.parse(r.answers_json || "{}"); } catch (e) {} if (r.role === "ray") rayAt = r.submitted_at; }
+  // An answer given BEFORE this contract's sign-on is the previous contract's (16 Oct 2026): nobody superseded it because
+  // nobody asked again, and it pre-filled this contract's factors. It is listed as earlier feedback, not used (§11c).
+  const answers = {}; let rayAt = null; const earlier = [];
+  for (const r of resp.results || []) {
+    if (on && r.submitted_at && day(r.submitted_at) < on) { earlier.push(r); continue; }
+    try { answers[r.role] = JSON.parse(r.answers_json || "{}"); } catch (e) {}
+    if (r.role === "ray") rayAt = r.submitted_at;
+  }
   const ix = buildCrewIndex(roster.results || []);
   const vm = [], notMine = [];
   for (const m of (misses.results || []).filter((x) => keys.includes(shipKey(x.ship)))) {
@@ -206,11 +225,15 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     notes.push({ factor: "sOrder", source: "Parts Portal", text: !m.unplaced.length ? head + ": another crew's miss, not counted."
       : m.rule === "board" ? head + ": not counted. Check whose miss it is." : head + ": the name is not on the roster, not counted. Check who placed it." });
   }
+  for (const r of earlier) notes.push({ factor: r.role === "ray" ? "sOrder" : r.role === "rolando" ? "sHand" : null, text: (r.role === "ray" ? "Ray" : r.role === "rolando" ? "Rolando" : r.role) + "'s answer of " + day(r.submitted_at) + " is from before this contract (sign-on " + on + "): kept as earlier feedback, not used", source: "Windows" });
+  if (failed.parts) notes.push({ factor: "sOrder", text: "The Parts Portal could not be read (" + failed.parts + "): vessel-side misses were NOT checked", source: "Parts Portal" });
+  if (failed.hon) notes.push({ factor: "sHand", text: "HON could not be read (" + failed.hon + "): the handover was NOT checked", source: "HON" });
   if (!keys.length) notes.push({ factor: "sOrder", text: "No ship on the Score Card: the Parts Portal, HON and the audits were not checked", source: "Score Card" });
   if (!on) notes.push({ factor: "sOrder", text: "No sign-on date: misses and field reports were not checked", source: "Score Card" });
   if (unread) notes.push({ factor: "sAcc", text: unread + " field report" + (unread === 1 ? "" : "s") + " in this contract not read yet (" + (deps.engine && deps.engine !== "none" ? "read on the next open" : "no AI engine") + "): check them on the crew's Notes", source: "Field intel" });
   for (const a of res.audits || []) if (a.open) notes.push({ factor: "sComm", text: "The audit grade was filed on the open audit site, without a sign-in", source: "Audit" });
-  return { ok: true, ...res, evidence: (res.evidence || []).concat(notes), unread, allAudits: allAud, sources: { parts: !!env.PARTS_DB, hon: !!env.HON_DB, clicks: false } };
+  return { ok: true, ...res, evidence: (res.evidence || []).concat(notes), unread, allAudits: allAud,
+    sources: { parts: !!env.PARTS_DB, hon: !!env.HON_DB, clicks: false, partsRead: !!env.PARTS_DB && !failed.parts, honRead: !!env.HON_DB && !failed.hon } };
 }
 
 // The seafarer's audits for the Inputs page: one light read, no Parts Portal, HON or AI.
