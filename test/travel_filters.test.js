@@ -174,3 +174,20 @@ test("6. every monthly chart draws last year beside this year through tBars", ()
   // a negative amount reads -$655, never $-655
   assert.match(W, /function usd0\(n\)\{var v=Number\(n\|\|0\);return \(v<0\?'-':''\)\+'\$'\+Math\.abs\(v\)/);
 });
+
+test("Needs a decision names a bill the inbox HELD (Miguel, 17 Oct 2026: \"Hold it for Rita\"), in every view of its year", async () => {
+  const p = pageContext();
+  p.ctx.show("travel"); await tick();
+  p.pending["/api/travel"](TRAVEL); await tick();
+  const held = { file_key: "mail:abc@abc", name: "DG3 SGA EXCEL OCTOBER'26.xlsx", held_at: "2026-11-02T03:12:00Z", year: 2026, month: 10, lines_total: 1428.52, others: 0, grand_total: 1500, gap: 71.48, rows: 1, hash: "a".repeat(64) };
+  p.pending["/api/sga"]({ ...SGA, held: [held] }); await tick(); await tick();
+  const dec = (b) => b.slice(b.indexOf("Needs a decision"), b.indexOf("Month by month"));
+  let d = dec(p.body());
+  assert.match(d, /TDG’s bill for Oct 2026 is held: its lines do not add up/);
+  assert.match(d, /Lines \$1,428\.52 against TDG’s grand total \$1,500\.00 · \$71\.48 missing\. It arrived on Nov 2, 2026 and loaded nothing\./);
+  assert.match(d, /window\.open\(&quot;\/api\/sga\/file\?hash=a{64}&quot;\)">Download →/);
+  p.run("TF.kind='shoreside';paintTravel()");
+  assert.match(dec(p.body()), /is held: its lines do not add up/, "the bill is the whole SGA: every view of its year");
+  p.run("TF.kind='crew';TF.year='2025';paintTravel()");
+  assert.doesNotMatch(dec(p.body()), /is held/, "another year does not carry it");
+});

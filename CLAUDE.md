@@ -840,6 +840,15 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   tool can carry a 2 MB binary — their `sga_source_file` rows say so (`r2_key` NULL, note). To keep them, drag each once on
   Upload data (Replace → identical lines, then the archive) or email them to sga@cims.work once the Email Routing rule exists.
   Pinned by `test/sga_archive.test.js`, `test/mail_intake.test.js`.
+- **A BILL THAT DOES NOT RECONCILE IS HELD FOR RITA** (Miguel, 17 Oct 2026, of three options: "Hold it for Rita"). A workbook
+  that arrives by itself — the inbox (`applyInbox`: the mail intake, the agent's rows) — whose lines + other charges do not
+  add up to TDG's GRAND TOTAL loads NOTHING (`syncDeps.applySga` with `holdUnreconciled`, the inbox's only caller): its rows are
+  `unreconciled`, `sp_sync` says `held`, the activity log names it, and `/api/sga` returns it as `held` (the month, lines,
+  others, grand total, the gap, the kept original's hash) until a bill for that month is loaded AFTER it. The Travel tab's
+  Needs a decision carries it in every view of its year, red, to the cent, with Download (`/api/sga/file`). Rita loads it on
+  Upload data after checking with Finance (the dry-run's amber chip, then Apply — unchanged). A summary-only file has no
+  total to miss; the dormant Graph sync and the Upload page are unchanged. The same held mail sent again is held again.
+  Pinned by `test/sga_hold.test.js` (real MIME, postal-mime, SheetJS, SQLite), `test/travel_filters.test.js`.
 - **THE TRAVEL TAB'S FILTERS ACT ON EVERY SECTION** (Miguel, 16 Oct 2026: "I dont think this filter is working correctly .. review
   this and all the filters and fix the bugs"; PR #265). The background revalidation (`cachedJson`) lands in `travelRefresh`,
   which repaints the body under the same `TF` — it used to re-run `renderTravel`, resetting Year / Month / Category / cruise
