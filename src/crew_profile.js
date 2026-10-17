@@ -82,13 +82,13 @@ export function handovers(c, { legs, cards, tdgEarmarks, names, sc } = {}) {
   const k = key(c.ship), nm = (x, fallback) => (names && names[x]) || fallback || x;
   let before = null;
   for (const l of (legs || [])) {
-    if (!l || l.sc === sc || !l.sc || key(l.ship) !== k || !iso(l.on) || l.on >= c.on || !iso(l.off)) continue;
+    if (!l || l.sc === sc || !l.sc || l.visit || key(l.ship) !== k || !iso(l.on) || l.on >= c.on || !iso(l.off)) continue;   // a training visit hands over nothing (visits.js)
     const g = Math.abs(daysBetween(l.off, c.on));
     if (g > HANDOVER_DAYS) continue;
     if (!before || g < before.gap) before = { sc: l.sc, name: nm(l.sc, l.name), off: l.off, src: legSrc(l), gap: g };
   }
   const after = [];
-  for (const l of (legs || [])) if (l && l.sc && l.sc !== sc && key(l.ship) === k && iso(l.on) && l.on > c.on && daysBetween(c.on, l.on) > 14)
+  for (const l of (legs || [])) if (l && l.sc && l.sc !== sc && !l.visit && key(l.ship) === k && iso(l.on) && l.on > c.on && daysBetween(c.on, l.on) > 14)
     after.push({ sc: l.sc, name: nm(l.sc, l.name), on: l.on, off: iso(l.off) || null, src: legSrc(l) });
   for (const a of (cards || [])) if (a && a.sc && a.sc !== sc && a.ship && key(a.ship) === k && iso(a.sign_on) && a.sign_on > c.on && daysBetween(c.on, a.sign_on) > 14 && !after.some((x) => x.sc === a.sc))
     after.push({ sc: a.sc, name: nm(a.sc, a.crew_name), on: iso(a.sign_on), off: iso(a.planned_sign_off) || null, src: "earmark", told: !!a.deployed_at,

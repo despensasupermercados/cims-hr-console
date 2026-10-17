@@ -154,7 +154,7 @@ test("B6: two applyInbox runs on the same pending file load it ONCE (the mail in
 
 // ---- P2: the count file's "finished since" reads the row's embark too ----------------------------------------------------
 test("P2: contractCountMap hands completedSince the WHOLE registry row — an embark after the debark (TDG's row disagreeing with itself) adds nothing", async () => {
-  assert.match(SRC, /AS tdg_off, r\.embarked_at AS tdg_on FROM contract_count c/, "the join carries the embark beside the debark");
+  assert.match(SRC, /AS tdg_off, r\.embarked_at AS tdg_on, [^"]*FROM contract_count c/, "the join carries the embark beside the debark");
   assert.doesNotMatch(SRC, /completedSince\([^)]*\.tdg_off,/, "no caller passes the bare debark — the embark guard never fired in production");
   const rows = [{ sc: "SC-1", completed: 3, as_of: "2026-10-08", tdg_off: "2026-10-20", tdg_on: "2026-10-25" }, { sc: "SC-2", completed: 2, as_of: "2026-10-08", tdg_off: "2026-10-12", tdg_on: "2026-04-01" }];
   const env = { DB: { prepare: () => ({ bind() { return this; }, all: async () => ({ results: rows }), first: async () => rows[0], run: async () => ({}) }) } };

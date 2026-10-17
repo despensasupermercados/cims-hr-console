@@ -856,6 +856,29 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   year → the plain bar. Used by the Training centre chart and both Travel tab charts (the pacing one keeps its dashed budget
   line and red months). Pinned by `test/travel_filters.test.js`; `test/perf_invariants.test.js` names `travelRefresh` beside
   `crewRefresh`.
+- **THE TRAVEL TAB, REDESIGNED** (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young,
+  luxury feeling .. place the filters like we have done elsewhere on the left .. allowing rita to make decisions"; proofs
+  under `docs/mockups/travel_20261017/`). **The filters are a left rail** like the Crew and Keyman tabs (`crrail` `#trrail`,
+  236px; the Filters button on a phone): Search (drawn ONCE in `renderTravel`, so it keeps its focus), View (Crew travel /
+  Shoreside team / Crew + shoreside / Training centre), Year, Month (a 12-chip grid, a month with nothing on file greyed),
+  Category, Cruise line — each row with its amount for the SAME period as the hero (`inPer`: the chosen month, else the
+  year's closed months), repainted by `tvRail` on every `paintTravel`; Training centre keeps View + Year only. `TF` is
+  unchanged, so every rule above holds. **The page answers in order**: one hero card (the number; "On budget · $X under" /
+  "Over budget" for crew travel only, every category and line; the year against last year as a pill; the meter against the
+  $180,000 with the pace tick and the dashed projection; last year same months, where the year lands, and **what is left a
+  month** for the rest of the year to land on budget — or, on a view with no budget, "No budget for this view · year
+  against year"); **Needs a decision** (`tvDecisions`): a closed month over $15,000 (budgeted view), TDG's bill against the
+  workbook as ONE net gap per category over the months the bill covers, ≥ `TV_GAP_MIN` = $150 (Miguel, 17 Oct 2026:
+  "Net per year" — a charge typed into the next month cancels out; a chosen month is that month alone; each month stays in
+  the comparison fold), the category up most on last year
+  (≥ 20% and ≥ $1,000), a closed month with spend and no bill on file, the names the roster cannot place, single movements
+  above 2.5× the usual — each says what it means and opens the place that holds it (`tvGo` sets one filter, `tvOpen`
+  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". Then Month by month (`tBars`),
+  Where it goes (bars, last year pale, click = that category) beside Who (top 8, initials, click = their history), and three
+  folds: TDG's bill against the workbook (its summary says the year's bill and workbook totals; `sgaBillOf` is the ONE
+  definition of the bill per month, read by the table and the decisions), the names the roster cannot place (the year
+  shown, like its decision row), the line items. Pinned by `test/travel_filters.test.js` (the page in a vm on a small
+  workbook + bill).
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`, flat every month in
   every year — Miguel, 16 Oct 2026: "I kept it all at 15000 per month"); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
@@ -886,13 +909,23 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   window is never auto-emailed, only listed in the digest ("inside the window at switch-on — send by hand"). The old
   one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was NOT reviewed in this round: its
   switch stays off until Miguel signs off its rendered email.
-- **Jonathan Placer Alonzo is never instructed and never anybody's reliever** (Miguel, 17 Oct 2026: "Exclude him").
-  He receives the final count and sails ships on visits; TDG lists him On board as a Printer Specialist (Pursuit,
-  embarked 16 Oct with A.J. Baleña), so nothing on his record tells him apart: `NOT_INSTRUCTED` in `signoff_context.js`
-  holds his id (SC-0041465). `seatContexts` never picks him as a reliever and marks his seat `instruct: false`; the T-14
-  run skips it silently; the crew page's button and `sendInstructionsFor` answer `not_instructed`. His seat stays on the
-  board and the T-7 sign-off link is not affected (not decided). A sign-off already past is never instructed
-  (`signoff_passed`, 17 Oct 2026).
+- **A TRAINING VISIT IS A TRIP, NOT A CONTRACT** (Miguel, 17 Oct 2026: Jonathan "sometimes he goes to the ship to teach as
+  crew and then home [to] support .. same as Ohji"; of three options, "Rita ticks 'Training visit'"). Jonathan Placer Alonzo
+  sailed a full contract (Rhapsody, Dec 2025 – Sep 2026) and is now teaching A.J. Baleña aboard Pursuit (embarked 16 Oct,
+  Rita typed 24 Oct); Ohji Garcia Miranda taught on Onward 7–12 Sep. TDG lists both as Printer Specialists On board, so the
+  file cannot tell a visit from a contract. `src/visits.js`: a trip is a visit when Rita ticked it (`contract_visit`, sc +
+  on_key = the trip's embark, `migrations/0032_contract_visit.sql`, the contract window's "Training visit" chip,
+  `POST /api/crew/contract-visit`, audited) or when the crew is on the shoreside team (`SHORE_IDS` / `SHORE_NM`, the one list
+  rotationSections already kept off the seats, the pool and the bench — moved here). His four answers: a visit gets **no
+  instructions email** (`seatContexts` instruct false; the T-14 run skips it silently; the button and `sendInstructionsFor`
+  answer `not_instructed`); is **never the reliever** and its embark **never dates the printer's sign-off** (no cross-over in
+  `legsFromRegistry`, not picked by `seatContexts`, not the profile's before/after); is **not a completed contract** (its
+  debark never adds to TDG's count: `completedSince`, the `CC_*_SQL` join); is **off the bench and the seats** (drawn as a
+  "Training visit" line under the ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard; the
+  bench skips a crew whose latest trip is a visit). Time at sea still counts its days; the T-7 link is not decided for a
+  visit. The tick belongs to the trip that embarked that day: a later file that moves the embark makes it a seat again.
+  (The same morning this was Jonathan's id alone — "Exclude him", PR #284 — wrong for his full contracts.) Pinned by
+  `test/visits.test.js`. A sign-off already past is never instructed (`signoff_passed`, 17 Oct 2026).
 Pinned by `test/signoff_instructions_v2.test.js`.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
