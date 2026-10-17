@@ -3,10 +3,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mapFeedbackToScore } from "../src/bonus.js";
 
-test("Ray: crew ordering failure raises rush gate", () => {
+// Miguel, 17 Oct 2026 ("Portal miss only"): the rush gate is the Parts Portal's vessel-side miss, charged by the whose-miss
+// rule (score_auto); Ray's "crew ordering failure" is evidence on the card, never a reset (Marto, Quantum, 13 Oct: Ray's
+// answer armed the gate, $1,807.75, with no missed order in the Portal).
+test("Ray: crew ordering failure is evidence only — the rush gate is the Parts Portal's", () => {
   const r = mapFeedbackToScore({ ray: { order: "Yes", rushcause: "Crew ordering failure", rushcost: 1200 } });
-  assert.equal(r.gates.rush, true);
-  assert.ok(r.gateNote.some(n => n.includes("Rush from crew ordering failure")));
+  assert.notEqual(r.gates.rush, true);
+  assert.ok(!r.gateNote.some(n => n.includes("Rush")));
+  assert.ok(r.evidence.some(n => n.includes("Crew ordering failure")), "still said on the card");
 });
 
 test("Ray: rush NOT raised when cause is not crew failure", () => {

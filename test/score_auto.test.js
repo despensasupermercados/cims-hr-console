@@ -237,3 +237,37 @@ test("S5: a Parts Portal or HON read that FAILS is said on the card, never read 
   assert.ok(!r.gates.rush, "a failed read never arms a gate either");
   assert.equal(r.sliders.sHand, 0, "the handover factor still cannot be earned without a signed HON row — the card says why");
 });
+
+test("aboardOn: a training visitor holds no seat and is never charged a miss (Miguel, 17 Oct 2026: never charged)", async () => {
+  const { aboardOn, missOwnerByBoard } = await import("../src/score_auto.js");
+  const { buildCrewIndex } = await import("../src/travel_match.js");
+  const ix = buildCrewIndex([{ agency_id: "SC-0041465", first_name: "Jonathan", last_name: "Alonzo" }, { agency_id: "SC-7", first_name: "A.J.", last_name: "Balena" }]);
+  const legs = [
+    { sc: "SC-0041465", name: "Jonathan Alonzo", ship: "Pursuit", on: "2026-10-16", off: "2026-10-16", is_current: true, visit: true },
+    { sc: "SC-7", name: "A.J. Balena", ship: "Pursuit", on: "2026-10-16", off: "2027-03-16", is_current: true },
+  ];
+  assert.deepEqual(aboardOn(legs, "Pursuit", "2026-10-16").map((a) => a.sc), ["SC-7"]);
+  const order = { ship: "Pursuit", submitted_at: "2026-10-16", requester: "Jonathan Alonzo" };
+  assert.equal(missOwnerByBoard(order, "SC-0041465", ix, legs).mine, false, "the visitor is not charged even when he typed the order");
+  assert.equal(missOwnerByBoard(order, "SC-7", ix, legs).mine, true, "the seat aboard is: the only crew aboard");
+});
+
+test("an audit belongs to the contract it was REQUESTED in, whenever Dexter grades it (Miguel, 17 Oct 2026)", async () => {
+  const { autoScore } = await import("../src/bonus.js");
+  // contract A: Quantum, 1 Mar -> 31 Oct; Dexter asks on 25 Oct, grades 3/5 on 20 Nov; contract B starts 10 Nov
+  const aud = [{ id: "ar1", score: 3, at: "2026-11-20T10:00:00Z", requestedAt: "2026-10-25T09:00:00Z" }];
+  const A = autoScore({ signOn: "2026-03-01", signOff: "2026-10-31", today: "2026-12-01", audits: aud });
+  assert.equal(A.sliders.sComm, 0, "A's audit, a 3: 0 points");
+  const B = autoScore({ signOn: "2026-11-10", signOff: "2027-06-10", today: "2026-12-01", audits: aud });
+  assert.equal(B.sliders.sComm, 10, "graded during B, asked during A: not B's (the grading-day window gave B the 3)");
+  // graded more than 30 days after the sign-off: still A's (the old window lost it)
+  const late = autoScore({ signOn: "2026-03-01", signOff: "2026-10-31", today: "2027-01-10", audits: [{ ...aud[0], at: "2026-12-15T10:00:00Z" }] });
+  assert.equal(late.sliders.sComm, 0);
+  // an audit with no request date keeps the grading window
+  const legacy = autoScore({ signOn: "2026-03-01", signOff: "2026-10-31", today: "2026-12-01", audits: [{ id: "v1", score: 4, at: "2026-11-15" }] });
+  assert.equal(legacy.sliders.sComm, 8);
+  // the read carries the request's date: sent, else created
+  const src = (await import("node:fs")).readFileSync(new URL("../src/score_auto.js", import.meta.url), "utf8");
+  assert.match(src, /COALESCE\(r\.sent_at, r\.created_at\) AS requested_at FROM audit_eval e LEFT JOIN audit_request r/);
+  assert.match(src, /requestedAt: a\.requested_at \|\| null/);
+});

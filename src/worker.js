@@ -50,7 +50,7 @@ import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
-import { classifyWindow } from "./scorequeue.js";
+import { classifyWindow, defaultScoreLeg, commitBlock } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements, monthsLabel } from "./seafarer_movements.js";
@@ -3378,15 +3378,11 @@ async function apiBonusCrew(env, url) {
   // since the Contract Counter table is only as fresh as its last upload (2026-07-06) and knows nothing
   // of relief-board contracts. Fall back to the latest Counter leg.
   const td = TODAY();
-  let current = null, bestPast = null, bestFut = null;
-  for (const h of HIST) {
-    if (!h.ours || h.sc !== cr.agency_id || !h.on) continue;
-    const off = h.off || "9999"; // TBA sign-off = still aboard (same rule as the board and deriveStatus)
-    if (h.on <= td && off >= td) { if (!current || off > (current.off || "9999")) current = h; } // contract spanning today
-    else if (off < td) { if (!bestPast || off > bestPast.off) bestPast = h; }                    // last completed
-    else { if (!bestFut || off < (bestFut.off || "9999")) bestFut = h; }                          // next one
-  }
-  const sched = current || bestPast || bestFut;  // the contract being scored: current first, else most-recent
+  // The contract being scored is ONE definition, src/scorequeue.js defaultScoreLeg (night watch, 17 Oct 2026): an ENDED
+  // contract nobody has scored yet before a contract that has only begun. "Current first, else most recent" opened Olid,
+  // Alonzo, Santos, De Torres, Noche and Resposo on the hull they joined in October, not the one they left in July/August.
+  const pickd = defaultScoreLeg(HIST, cr.agency_id, td, { outcomes: outs.results || [] });
+  const sched = pickd.leg;
   let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null; // TBA off stays blank for manual entry
   // Already committed for this contract? Prefill the COMMITTED span, not the board's (planned vs
   // actual drift, snapshot vs grid). The commit path's double-commit guard is an exact (start,end)
@@ -3399,13 +3395,16 @@ async function apiBonusCrew(env, url) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
   }
+  // Whether the span the card opens on may be committed, in the commit's own words (Miguel, 17 Oct 2026: after the
+  // sign-off, oldest first, wait for TDG). The commit route decides again; this only lets the page say why up front.
+  const block = (lastLeg && lastLeg.on && lastLeg.off && !lastLeg.committed) ? commitBlock(HIST, cr.agency_id, td, outs.results || [], lastLeg.on, lastLeg.off) : null;
   const legRows = legRowsRes.results;
   const legN = fullContracts(legRows.map(legShape));
   // cumulative completed -> grade/pay (never resets): TDG's stated count, else baseline + derived legs.
   // `count` (the consecutive bonus count: ledger + ladder) is untouched by this — that is money (§1).
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN, tdgRow ? completedSince(tdgRow.as_of, ccRowOf(tdgRow), new Date().toISOString().slice(0, 10)) : 0);
   const effN = cc.n;
-  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg, scoring: { why: pickd.why, block } });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -3588,7 +3587,9 @@ const ensureBonusV2 = memoEnsure(async (env) => {
   await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) SELECT 'policy-v2', 2, '2026-10-15', ladder_json, floor_pct, weights_json, eval_rule, gates_json, agg_policy, 'v1 weights and gates unchanged. sComm = Dexter''s audit, not Communication. The Score Card pre-fills from the systems (bonus.js autoScore, 15-16 Oct 2026).' FROM bonus_policy WHERE version = 1").run();
   try { await env.DB.prepare("ALTER TABLE bonus_outcome ADD COLUMN evidence_json TEXT").run(); }
   catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
-}, "policy-v2+v1seed");
+  // One outcome per contract span, by the database (migrations/0033, 17 Oct 2026): the commit's backstop below relied on it.
+  await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome(crew_id, span_start, span_end) WHERE corrects_id IS NULL").run();
+}, "policy-v2+v1seed+span-unique");
 // The automatic read for the span and ships being committed, re-run on the server (cached AI answers only: a commit never
 // waits on a model), kept beside the outcome. Never blocks a commit: a failed read is stored as the failure.
 async function commitEvidence(env, cr, b, ships) {
@@ -3632,6 +3633,16 @@ async function apiBonusCommit(request, env, session) {
     return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"),
       result: { score: dup.score_pct, gate: dup.gate, pay: dup.pay_usd, count: dup.count_before, nextCount: dup.count_after, rung: ladderValue(dup.count_after) } });
   }
+  // AFTER THE SIGN-OFF, OLDEST FIRST, AND TDG ENDS IT (Miguel, 17 Oct 2026, answers to the logic review). The server is the
+  // authority: a span whose sign-off has not come, a contract TDG still has On board (held, or past a projected sign-off),
+  // a training visit, or a newer contract while an older one inside SCORE_RECENT_DAYS has no outcome — refused, 409, in
+  // words the page prints. Read on the ONE schedule (boardLegs, §11), the same one the card's default span came from.
+  const [HIST, prior] = await Promise.all([
+    boardLegs(env),
+    env.DB.prepare("SELECT span_start, span_end FROM bonus_outcome WHERE crew_id=?").bind(cr.id).all(),
+  ]);
+  const blk = commitBlock(HIST, cr.agency_id, TODAY(), prior.results || [], b.spanStart, b.spanEnd);
+  if (blk) return json(blk, 409);
   const ships = (Array.isArray(b.ships) && b.ships.filter(Boolean).length) ? b.ships.filter(Boolean) : [cr.vessel_observed || "—"];
   const g = b.gates || {};
   const endReason = (!g.complete && g.compassion) ? "compassionate" : (g.complete ? "completed" : (b.endReason || "early_relief"));
@@ -3639,21 +3650,25 @@ async function apiBonusCommit(request, env, session) {
   const groupId = cr.agency_id + "-C" + grpN;
   const cid = "ct_" + crypto.randomUUID();
   const now = new Date().toISOString();
-  await env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now).run();
-  for (let i = 0; i < ships.length; i++) {
-    await env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
-      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now).run();
-  }
   const oid = "bo_" + crypto.randomUUID();
   await ensureBonusV2(env);
   const evidence = await commitEvidence(env, cr, b, ships);
+  // The contract, its legs and the outcome are ONE transaction (D1 batch), written after the evidence read: a racing
+  // second commit that passed the pre-check trips ux_bonus_outcome_span and leaves NOTHING behind — before 17 Oct 2026
+  // the contract and assignment rows were written first, one by one, so a refused outcome left an orphan contract.
+  const writes = [env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now)];
+  for (let i = 0; i < ships.length; i++) {
+    writes.push(env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now));
+  }
+  writes.push(env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence));
   try {
-    await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence).run();
+    await env.DB.batch(writes);
   } catch (e) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
-    // SELECT trips UNIQUE(crew_id,span_start,span_end) (migration 0004, primary outcomes only). Return the
-    // already-recorded outcome as a duplicate instead of double-paying / double-counting.
+    // SELECT trips ux_bonus_outcome_span (migrations/0033, primary outcomes only) and the whole batch rolls back. Return
+    // the already-recorded outcome as a duplicate instead of double-paying / double-counting.
     const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
     if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
       result: { score: ex.score_pct, gate: ex.gate, pay: ex.pay_usd, count: ex.count_before, nextCount: ex.count_after, rung: ladderValue(ex.count_after) } });
@@ -9707,6 +9722,19 @@ function swResultBox(pf,st){
    +(gt.length?'<div class=gateflag>Gate armed: '+gt.join(', ')+' — would reset the bonus</div>':'')
    +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Dexter\u2019s audit (10) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">Ray and Rolando are in. Dexter\u2019s audit and the supervisor evaluation are added on the Score Card.</div>')+'</div>';
 }
+// Why a span cannot be committed yet, in words (Miguel, 17 Oct 2026). The server decides (apiBonusCommit, commitBlock);
+// the card says it before the click and after a refusal.
+function scBlockMsg(e){
+  if(!e||!e.error)return '';
+  var sh=e.ship?escHtml(e.ship):'';
+  if(e.error==='not_ended')return 'This contract signs off on '+fmtDateS(e.off)+'. A bonus is committed after the sign-off.';
+  if(e.error==='held_by_tdg')return 'TDG still lists this crew On board'+(sh?' '+sh:'')+' past the sign-off ('+fmtDateS(e.off)+'). The contract is scored once TDG ends it.';
+  if(e.error==='still_aboard')return 'This contract is still running'+(sh?' on '+sh:'')+(e.off?' (sign-off '+fmtDateS(e.off)+', not confirmed by TDG)':'')+'. It is scored once TDG ends it.';
+  if(e.error==='visit')return 'These dates are a training visit, not a contract. Visits are not scored.';
+  if(e.error==='older_first')return 'An older contract has no outcome yet'+(sh?': '+sh:'')+', '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. Score that one first.';
+  if(e.error==='already_scored')return 'A bonus is already recorded for '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+', which overlaps these dates. One outcome per contract.';
+  return '';
+}
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
   _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,notes:[]}; _PF={sliders:{},rush:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
@@ -9714,6 +9742,8 @@ async function openScore(id){
   var _blockCommit=(!d.baseline_set&&!_hasHist);
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
   var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
+  var _blkMsg=scBlockMsg(d.scoring&&d.scoring.block);
+  if(_blkMsg)warn+='<div class=warn>'+_blkMsg+'</div>';
   var _st=(cr.status||'').toLowerCase();
   var _onship=_st.indexOf('board')>=0;
   var scCls=_onship?'sc-on':'sc-off';
@@ -9877,7 +9907,7 @@ async function commitBonus(){
     gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
     gateNote:$('#gateNote')?$('#gateNote').value:''};
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
-  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||scBlockMsg(res)||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
