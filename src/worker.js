@@ -50,7 +50,7 @@ import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
-import { classifyWindow, defaultScoreLeg } from "./scorequeue.js";
+import { classifyWindow, defaultScoreLeg, commitBlock } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements, monthsLabel } from "./seafarer_movements.js";
@@ -3338,7 +3338,8 @@ async function apiBonusCrew(env, url) {
   // The contract being scored is ONE definition, src/scorequeue.js defaultScoreLeg (night watch, 17 Oct 2026): an ENDED
   // contract nobody has scored yet before a contract that has only begun. "Current first, else most recent" opened Olid,
   // Alonzo, Santos, De Torres, Noche and Resposo on the hull they joined in October, not the one they left in July/August.
-  const sched = defaultScoreLeg(HIST, cr.agency_id, td, { outcomes: outs.results || [] }).leg;
+  const pickd = defaultScoreLeg(HIST, cr.agency_id, td, { outcomes: outs.results || [] });
+  const sched = pickd.leg;
   let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null; // TBA off stays blank for manual entry
   // Already committed for this contract? Prefill the COMMITTED span, not the board's (planned vs
   // actual drift, snapshot vs grid). The commit path's double-commit guard is an exact (start,end)
@@ -3351,13 +3352,16 @@ async function apiBonusCrew(env, url) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
   }
+  // Whether the span the card opens on may be committed, in the commit's own words (Miguel, 17 Oct 2026: after the
+  // sign-off, oldest first, wait for TDG). The commit route decides again; this only lets the page say why up front.
+  const block = (lastLeg && lastLeg.on && lastLeg.off && !lastLeg.committed) ? commitBlock(HIST, cr.agency_id, td, outs.results || [], lastLeg.on, lastLeg.off) : null;
   const legRows = legRowsRes.results;
   const legN = fullContracts(legRows.map(legShape));
   // cumulative completed -> grade/pay (never resets): TDG's stated count, else baseline + derived legs.
   // `count` (the consecutive bonus count: ledger + ladder) is untouched by this — that is money (§1).
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN, tdgRow ? completedSince(tdgRow.as_of, ccRowOf(tdgRow), new Date().toISOString().slice(0, 10)) : 0);
   const effN = cc.n;
-  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg, scoring: { why: pickd.why, block } });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -3586,6 +3590,16 @@ async function apiBonusCommit(request, env, session) {
     return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"),
       result: { score: dup.score_pct, gate: dup.gate, pay: dup.pay_usd, count: dup.count_before, nextCount: dup.count_after, rung: ladderValue(dup.count_after) } });
   }
+  // AFTER THE SIGN-OFF, OLDEST FIRST, AND TDG ENDS IT (Miguel, 17 Oct 2026, answers to the logic review). The server is the
+  // authority: a span whose sign-off has not come, a contract TDG still has On board (held, or past a projected sign-off),
+  // a training visit, or a newer contract while an older one inside SCORE_RECENT_DAYS has no outcome — refused, 409, in
+  // words the page prints. Read on the ONE schedule (boardLegs, §11), the same one the card's default span came from.
+  const [HIST, prior] = await Promise.all([
+    boardLegs(env),
+    env.DB.prepare("SELECT span_start, span_end FROM bonus_outcome WHERE crew_id=?").bind(cr.id).all(),
+  ]);
+  const blk = commitBlock(HIST, cr.agency_id, TODAY(), prior.results || [], b.spanStart, b.spanEnd);
+  if (blk) return json(blk, 409);
   const ships = (Array.isArray(b.ships) && b.ships.filter(Boolean).length) ? b.ships.filter(Boolean) : [cr.vessel_observed || "—"];
   const g = b.gates || {};
   const endReason = (!g.complete && g.compassion) ? "compassionate" : (g.complete ? "completed" : (b.endReason || "early_relief"));
@@ -9657,6 +9671,18 @@ function swResultBox(pf,st){
    +(gt.length?'<div class=gateflag>Gate armed: '+gt.join(', ')+' — would reset the bonus</div>':'')
    +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Dexter\u2019s audit (10) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">Ray and Rolando are in. Dexter\u2019s audit and the supervisor evaluation are added on the Score Card.</div>')+'</div>';
 }
+// Why a span cannot be committed yet, in words (Miguel, 17 Oct 2026). The server decides (apiBonusCommit, commitBlock);
+// the card says it before the click and after a refusal.
+function scBlockMsg(e){
+  if(!e||!e.error)return '';
+  var sh=e.ship?escHtml(e.ship):'';
+  if(e.error==='not_ended')return 'This contract signs off on '+fmtDateS(e.off)+'. A bonus is committed after the sign-off.';
+  if(e.error==='held_by_tdg')return 'TDG still lists this crew On board'+(sh?' '+sh:'')+' past the sign-off ('+fmtDateS(e.off)+'). The contract is scored once TDG ends it.';
+  if(e.error==='still_aboard')return 'This contract is still running'+(sh?' on '+sh:'')+(e.off?' (sign-off '+fmtDateS(e.off)+', not confirmed by TDG)':'')+'. It is scored once TDG ends it.';
+  if(e.error==='visit')return 'These dates are a training visit, not a contract. Visits are not scored.';
+  if(e.error==='older_first')return 'An older contract has no outcome yet'+(sh?': '+sh:'')+', '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. Score that one first.';
+  return '';
+}
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
   _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,notes:[]}; _PF={sliders:{},rush:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
@@ -9664,6 +9690,8 @@ async function openScore(id){
   var _blockCommit=(!d.baseline_set&&!_hasHist);
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
   var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
+  var _blkMsg=scBlockMsg(d.scoring&&d.scoring.block);
+  if(_blkMsg)warn+='<div class=warn>'+_blkMsg+'</div>';
   var _st=(cr.status||'').toLowerCase();
   var _onship=_st.indexOf('board')>=0;
   var scCls=_onship?'sc-on':'sc-off';
@@ -9827,7 +9855,7 @@ async function commitBonus(){
     gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
     gateNote:$('#gateNote')?$('#gateNote').value:''};
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
-  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||scBlockMsg(res)||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }

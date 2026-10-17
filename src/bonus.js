@@ -45,7 +45,10 @@ export function mapFeedbackToScore(answers) {
   const out = { gates: {}, sliders: {}, evidence: [], gateNote: [] };
   const ray = answers.ray, rol = answers.rolando, dex = answers.dexter;
   if (ray) {
-    if (ray.order === "Yes" && ray.rushcause === "Crew ordering failure") { out.gates.rush = true; out.gateNote.push("Rush from crew ordering failure" + (ray.rushcost ? (" — $" + Number(ray.rushcost).toLocaleString()) : "") + " (Ray)"); }
+    // THE RUSH GATE IS THE PARTS PORTAL'S (Miguel, 17 Oct 2026: "Portal miss only"): a vessel-side miss charged by the
+    // whose-miss rule (autoScore, score_auto.missOwnerByBoard) resets the streak; Ray's "crew ordering failure" answer is
+    // evidence on the card, never a reset. Ray's 13 Oct answer armed the rush gate on Ryan Marto's Score Card ($1,807.75)
+    // while the Portal has no missed order of any kind on Quantum — Ray's word against the system, on a crew it does not charge.
     if (ray.audit === "Yes") { out.gates.audit = true; out.gateNote.push("Failed inventory audit (Ray)"); }
     // ALL OR NOTHING (Miguel, 15 Oct 2026: "Partial doesn't really work"): only the best answer earns the factor.
     // Until then "Mostly" gave 14 of 20, "Minor errors" 17 of 25, "Some gaps" 9 of 15.

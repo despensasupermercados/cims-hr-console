@@ -118,7 +118,8 @@ const daysBetween = (a, b) => Math.round((Date.parse(day(b) + "T00:00:00Z") - Da
 export function aboardOn(legs, ship, date) {
   const k = shipKey(ship), d = day(date), by = new Map();
   for (const l of legs || []) {
-    if (!l || !l.sc || !l.on || shipKey(l.ship) !== k) continue;
+    // a training visit holds no seat (visits.js): the visitor is never the one charged (Miguel, 17 Oct 2026, "never charged")
+    if (!l || !l.sc || !l.on || l.visit || shipKey(l.ship) !== k) continue;
     const on = day(l.on), off = day(l.off);
     // an ENDED contract with no recorded end cannot say he was aboard later (16 Oct 2026: it read as aboard for ever)
     if (on > d || (!l.is_current && (!off || off < d))) continue;
