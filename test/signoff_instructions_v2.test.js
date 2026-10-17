@@ -124,7 +124,7 @@ const sha256hex = async (s) => {
   const b = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 };
-function senderHarness() {
+function senderHarness(opts = {}) {
   const sent = [];
   const db = { prepare(sql) {
     const st = { sql, args: [] };
@@ -141,14 +141,17 @@ function senderHarness() {
   const h = installInstr({
     json: (o, s = 200) => new Response(JSON.stringify(o), { status: s }), htmlResponse: (b) => new Response(b),
     signToken, verifyToken, sha256hex, logActivity: async () => {}, applyOverride: (b) => b, VESSEL_REF: [],
-    instrContext: async (env, sc) => seatContexts(SECTIONS)[sc] || null,
-    boardLegs: async () => [{ ours: true, sc: "SC-K", is_current: true, on: "2026-05-02", off: "2026-10-31", ship: "Pursuit", disembark: "HONG KONG, CHINA" }],
+    instrContext: opts.ctx ? async () => opts.ctx : async (env, sc) => seatContexts(SECTIONS)[sc] || null,
+    boardLegs: async () => [{ ours: true, sc: "SC-K", is_current: true, on: "2026-05-02", off: opts.off || "2026-10-31", ship: "Pursuit", disembark: "HONG KONG, CHINA" }],
     sendViaMailer: async (env, e) => { sent.push(e); return { ok: true }; },
   });
   return { h, sent, env: { DB: db, SESSION_SECRET: "s", MAILER: {} } };
 }
 
-test("the T-14 send: v2 template, CC onboardsupport@dg3.com, reply to Rita, reliever as first name + surname", async () => {
+// The sender refuses a sign-off already past, so these run on a fixed day (17 Oct 2026, the first T-14 run).
+const ON_17_OCT = Date.UTC(2026, 9, 17, 6, 0, 0);
+test("the T-14 send: v2 template, CC onboardsupport@dg3.com, reply to Rita, reliever as first name + surname", async (tc) => {
+  tc.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
   const { h, sent, env } = senderHarness();
   const ctx = seatContexts(SECTIONS)["SC-K"];
   const r = await h.sendInstructionsFor(env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
@@ -166,7 +169,8 @@ test("the T-14 send: v2 template, CC onboardsupport@dg3.com, reply to Rita, reli
   assert.match(e.html, /href="https:\/\/cims\.work\/instr\?t=/);
 });
 
-test("the manual send from the crew page reads the same board context", async () => {
+test("the manual send from the crew page reads the same board context", async (tc) => {
+  tc.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
   const { h, sent, env } = senderHarness();
   const res = await h("/api/instructions/request", { method: "POST", url: "https://cims.work/x", json: async () => ({ sc: "SC-K", seq: 1, send: true }), headers: { get: () => null } },
     env, new URL("https://cims.work/api/instructions/request"), { email: "rita@dg3.com" });
@@ -179,6 +183,34 @@ test("the manual send from the crew page reads the same board context", async ()
   assert.match(t, /You sign off 31 Oct in Hong Kong\./);
   assert.match(t, /Your reliever is A\.J\. Baleña\./);
   assert.match(t, /select Azamara Pursuit\./);
+});
+
+// 17 Oct 2026, Kevin Jugao (Pursuit): the board dated his sign-off at his reliever's embark (the file's cross-over,
+// 16 Oct) while Rita typed 31 Oct and TDG still had him On board. A send from his page would have said "You sign off
+// 16 Oct". A sign-off already past is never instructed — manual or automatic — and nothing is written for it.
+test("a sign-off already past is never instructed: the crew page is refused, the T-14 sender skips it, nothing is written", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
+  const past = { sc: "SC-K", ship: "Pursuit", brand: "Azamara", off: "2026-10-16", port: "HONG KONG, CHINA", reliever: null };
+  const a = senderHarness({ ctx: past, off: "2026-10-16" });
+  const writes = [];
+  const prep = a.env.DB.prepare.bind(a.env.DB);
+  a.env.DB.prepare = (sql) => { const st = prep(sql); const run = st.run; st.run = async () => { writes.push(sql); return run(); }; return st; };
+  const res = await a.h("/api/instructions/request", { method: "POST", url: "https://cims.work/x", json: async () => ({ sc: "SC-K", seq: 1, send: true }), headers: { get: () => null } },
+    a.env, new URL("https://cims.work/api/instructions/request"), { email: "rita@dg3.com" });
+  assert.equal(res.status, 409);
+  const b = await res.json();
+  assert.equal(b.error, "signoff_passed");
+  assert.equal(b.sign_off, "2026-10-16");
+  assert.equal(a.sent.length, 0, "no email");
+  assert.ok(!writes.some((w) => /^(INSERT|DELETE|UPDATE)\b[^;]*instr_ack/.test(w)), "no link issued, no acknowledgement row touched");
+  const r = await a.h.sendInstructionsFor(a.env, "SC-K", 20261016, "https://cims.work", { ship: "Pursuit", proj_off: "2026-10-16", act_off: null, port: null, ctx: past });
+  assert.equal(r.emailed, false);
+  assert.equal(r.error, "signoff_passed");
+  assert.equal(a.sent.length, 0);
+  // the day itself still sends: a sign-off TODAY is not past
+  const c = senderHarness({ ctx: { ...past, off: "2026-10-17" }, off: "2026-10-17" });
+  const ok = await c.h.sendInstructionsFor(c.env, "SC-K", 20261017, "https://cims.work", { ship: "Pursuit", proj_off: "2026-10-17", act_off: null, port: null, ctx: { ...past, off: "2026-10-17" } });
+  assert.equal(ok.emailed, true, JSON.stringify(ok));
 });
 
 test("/instr records the receipt, then forwards to HON; an expired link still points to HON", () => {
