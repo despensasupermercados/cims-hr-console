@@ -34,7 +34,7 @@ import { applyOverride, OVR_FIELDS } from "./override.js";
 import { contractLedgerRow, psRank, psSalary } from "./ledger.js";
 import { contractCounts, fullContracts, deriveStatus } from "./contracts.js";
 import { parseCompletedContracts, bridgeCounts, diffCounts, cumulativeContracts, completedSince } from "./contract_count.js";
-import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet } from "./crew_status.js";
+import { scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet, OFF_FLEET } from "./crew_status.js";
 import { buildCrewProfile, statementContracts, feedbackFile } from "./crew_profile.js";
 import { statementEmail, TEMPLATE_ID as STATEMENT_TEMPLATE_ID } from "./emails/hr.statement.v2.js";
 import { parseContractCounterFull, buildKeymanRows, shrinkReport, replacePlan } from "./keymanimport.js";
@@ -736,9 +736,11 @@ async function mariaExecTool(env, name, input) {
   if (name === "compliance_expiring") { const d = Number(input.days) || 90; return await J(await apiCompliance(env, new URL(base + "/api/compliance?days=" + d))); }
   if (name === "find_crew") {
     const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    // Inactive replaces Retired (8 Oct 2026): "former crew" = the manual tag or the status Inactive.
+    // "Former crew" = the status word off the fleet (Inactive, Not for Rehire — isOffFleet, §10f), as on every other screen.
+    // It read the manual tag first: a tagged crew TDG has On board left the active lists, and Not for Rehire (TDG's word,
+    // which beats the tag) could not be listed by its own name (Sison, 17 Oct 2026).
     const wantRetired = input.include_inactive === true || input.include_retired === true;
-    const isRetired = (c) => !!c.retired || /^(retired|inactive)$/i.test(String(c.status || ""));
+    const isRetired = (c) => isOffFleet(c.status);
     const rows = (all.crew || []).filter(c => wantRetired || !isRetired(c)).map(c => ({ c, name: fullName(c) }));
     const ranked = rankCrewMatches(rows, String(input.name || ""), 6);
     const exact = ranked.length > 0 && ranked[0].exact;
@@ -748,8 +750,9 @@ async function mariaExecTool(env, name, input) {
   }
   if (name === "list_crew") {
     const all = await J(await apiCrew(env, new URL(base + "/api/crew")));
-    const wantRetired = input.include_inactive === true || input.include_retired === true || /^(retired|inactive)$/i.test(String(input.status || ""));
-    const isRetired = (c) => !!c.retired || /^(retired|inactive)$/i.test(String(c.status || ""));
+    const askedOff = [...OFF_FLEET].find((w) => w.toLowerCase() === String(input.status || "").trim().toLowerCase());
+    const wantRetired = input.include_inactive === true || input.include_retired === true || !!askedOff;
+    const isRetired = (c) => isOffFleet(c.status); // one definition with the rest of the console (§10f)
     let rows = (all.crew || []).filter(c => wantRetired || !isRetired(c));
     if (input.status) rows = rows.filter(c => String(c.status || "").toLowerCase() === String(input.status).toLowerCase());
     if (input.ship) rows = rows.filter(c => String(c.vessel_observed || "").toLowerCase().includes(String(input.ship).toLowerCase()));
@@ -1901,7 +1904,7 @@ async function apiDashboard(env) {
     env.DB.prepare("SELECT MAX(year) y FROM travel_expense").first(),
     env.DB.prepare("SELECT kind, SUM(total) t FROM travel_expense WHERE year=" + TY + " GROUP BY kind").all(),
     env.DB.prepare("SELECT month, SUM(total) t, SUM(air) a FROM travel_expense WHERE year=" + TY + " GROUP BY month ORDER BY month").all(),
-    env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside'").first(),
+    env.DB.prepare("SELECT COALESCE(SUM(air),0) air, COALESCE(SUM(hotel),0) hotel, COALESCE(SUM(medical),0) medical, COALESCE(SUM(visa),0) visa, COALESCE(SUM(food),0) food, COALESCE(SUM(transport),0) transport, COALESCE(SUM(other),0) other FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside' AND month <= CASE WHEN " + TY + "=? THEN ? ELSE 12 END").bind(curY, closedMonths(today, curY)).first(),
     // YTD crew spend over CLOSED months only (15 Oct 2026): the running month is in progress, not a budget month —
     // counting it charged a full month of budget against a few days of invoices and read "$42k under".
     env.DB.prepare("SELECT COALESCE(SUM(total),0) t FROM travel_expense WHERE year=" + TY + " AND kind!='shoreside' AND month <= CASE WHEN " + TY + "=? THEN ? ELSE 12 END").bind(curY, closedMonths(today, curY)).first(),
@@ -5967,6 +5970,20 @@ function impEmEdit(it){var k="earmark:"+it.id,e=EDITS[k]||{ship:it.ship,sign_on:
 function impTag(txt,kind){return ' <span class="itag t-'+kind+'">'+txt+'</span>';}
 function impDiff(lab,o,n,tag){return '<div class=irow><span class=ik>'+impEsc(lab)+'</span><span class=idf><span class=iold>'+impEsc(o)+'</span> <span class=iarw>&#8594;</span> <span class=inew>'+impEsc(n)+'</span>'+(tag||"")+'</span></div>';}
 function impCard(inner){return '<div class=icard>'+inner+'</div>';}
+// WHAT THE FILE SAYS THAT NOTHING CHANGES (17 Oct 2026). The stage lists four kinds of row the import never acts on —
+// a crew id the file repeats (the last row stands), a cruise-line id that differs from the roster (never overwritten),
+// a row keyed on the cruise-line id (matched, not added) and a new row with no status word it can read (not added).
+// Until now only the unused /api/crew/import page drew one of them: on Uploads they went nowhere (§6 flag, never silent).
+function impFlagged(rv){
+  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[];
+  if(!(dup.length||km.length||rk.length||ns.length))return '';
+  var h='<div class=isec><h3>&#9888; In the file, nothing changed</h3><div class=d>Listed so you can ask TDG to correct the file. No choice here: Apply leaves each one as it says.</div>';
+  dup.forEach(function(id){h+=impCard('<div class=iwho>'+impWho(id)+'</div><div class=itxt>The file lists this crew more than once. The last row stands.</div>');});
+  km.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Cruise-line id",it.roster,it.file,impTag("kept as on the roster","amber")));});
+  rk.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>The file keyed this crew on the cruise-line id '+impEsc(it.ship_crew_id||it.incoming_id||'')+'. Matched to the crew you hold, nothing added.</div>');});
+  ns.forEach(function(it){var f=it.fields||{};var nm=((f.first_name||'')+' '+(f.last_name||'')).trim();h+=impCard('<div class=iwho>'+impEsc(nm||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=itxt>A new row with no status word the console can read'+(f.status_raw||f.status?(' (&#8220;'+impEsc(f.status_raw||f.status)+'&#8221;)'):'')+'. Not added.</div>');});
+  return h+'</div>';
+}
 function impFld(f){return (typeof IMP_FLAB!=="undefined"&&IMP_FLAB[f])?IMP_FLAB[f]:f;}
 function cimsRender(){
   var g=STAGE.review.groups,c=STAGE.review.counts,L="";
@@ -6059,6 +6076,7 @@ function cimsRender(){
     g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+(f.vessel_observed?impEsc(f.vessel_observed):'&mdash;')+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
   if(g.departed.length){L+='<div class=isec><h3>&#128682; Absent from this file</h3><div class=d>Never auto-removed. Decide the status yourself.</div>';
     g.departed.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss",true));});L+='</div>';}
+  L+=impFlagged(STAGE.review);
   var ab=g.override_absorbed||[];
   if(ab.length){L+='<details class=iminor><summary><span class=c>'+ab.length+'</span> manual entries already match the file &#8212; absorbed (the file shows from now onward)</summary>'+ab.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}
   if(g.minor.length){L+='<details class=iminor><summary><span class=c>'+g.minor.length+'</span> minor tidy-ups auto-applied (spelling, spacing)</summary>'+g.minor.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}
@@ -6873,7 +6891,7 @@ function rotCard(x){
   // A card with no dates used to render as an empty box stretched to its neighbour's height. Say what it
   // is: TDG's file has them aboard this ship and no Contract Counter leg carries the contract yet.
   var gap=(!plan&&x.ship&&!x.signOn&&!x.signOff)?'<div class=gapnote>No contract dates yet &middot; the TDG file has them aboard without an embark date</div>':'';
-  if(ovd&&x.heldByFile)note='<div class=srcnote><b style="color:var(--red)">TDG still has them On board</b>, past the sign-off'+((x.reliever&&x.reliever.name)?(' ('+escHtml(x.reliever.name)+' embarked '+escHtml(fmtDateS(x.signOff))+')'):'')+'. The seat stays until the TDG file signs them off.</div>'+note;
+  if(ovd&&x.heldByFile)note='<div class=srcnote><b style="color:var(--red)">TDG still has them On board</b>, past the sign-off'+((x.reliever&&x.reliever.name)?(' ('+escHtml(x.reliever.name)+(x.reliever.on?(' embarked '+escHtml(fmtDateS(x.reliever.on))):'')+')'):'')+'. The seat stays until the TDG file signs them off.</div>'+note;
   else if(ovd)note='<div class=srcnote><b style="color:var(--red)">Past the projected sign-off.</b> The seat stays held until TDG, a reliever card or you record the sign-off.</div>'+note;
   // THE DEPLOY BUTTON IS GONE (Miguel, 7 Oct 2026: "this deploy CTA does not need it anymore .. the logic is not like
   // that no more"): Joy is told from the import review, row by row (Tell Joy on an earmark TDG does not have yet;
@@ -7982,9 +8000,9 @@ function opsCrewCard(w){
 }
 function opsTravel(tv){
   if(!tv||!tv.year)return '<section class=oc-card><h2 class=oc-h>Crew travel</h2><p class=oc-sub>No travel on file yet.</p></section>';
-  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crew||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo||12)/12*100);
+  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crewYTD||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo||12)/12*100);
   var h='<section class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>Crew travel &middot; '+tv.year+'</h2><p class=oc-sub>Against the '+opsMoney(ann)+' budget. Reference only, never an invoice source.</p></div>';
-  h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crew)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget over '+(tv.elapsedMo||0)+' closed month'+(tv.elapsedMo===1?'':'s'))+'</div>';
+  h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crewYTD)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget over '+(tv.elapsedMo||0)+' closed month'+(tv.elapsedMo===1?'':'s'))+'</div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="position:relative;height:14px;font-size:11px"><span style="position:absolute;left:'+yearPct+'%;transform:translateX(-50%);font-weight:600;white-space:nowrap">'+(tv.elapsedMo||0)+' of 12 months closed</span></div>'
     +'<div class=oc-bul role=img aria-label="'+used+' percent of the budget used"><i style="width:'+Math.min(100,used)+'%"></i><em style="left:'+yearPct+'%"></em></div>'
     +'<div style="display:flex;justify-content:space-between;font-size:11px" class=oc-mut><span>$0</span><span>'+opsMoney(ann)+'</span></div></div>';
@@ -8411,8 +8429,9 @@ var PF_SRC={tdg:['#2E9E5B','TDG file'],tdg_embark:['#2E9E5B','TDG embark'],count
 function pfSrc(k,label){var s=PF_SRC[k]||['#9AA7B8',k];return '<span class=pfsrc><i style="background:'+s[0]+'"></i>'+escHtml(label||s[1])+'</span>';}
 // Time at sea as months and days (Miguel, 13 Oct 2026: "X months at sea .. perhaps is more valuable .. u repeat it in
 // the crew tab few times .. 1 is enough"): each contract's calendar span to its sign-off or today, added up, days
-// carried into months at 30. One number, once; the contract card says how far into THIS contract they are.
-function pfSeaTime(K,todayS){var m=0,d=0;(K||[]).forEach(function(x){if(!x.on||x.on>todayS)return;var p=monthsDaysParts(x.on,x.off&&x.off<todayS?x.off:todayS);if(p){m+=p.m;d+=p.d;}});m+=Math.floor(d/30);d=d%30;return m?(m+' mo'+(d?' '+d+' d':'')):(d+' d');}
+// carried into months at 30. One number, once; the contract card says how far into THIS contract they are. A CURRENT
+// contract (held by TDG's On board, or past a projected sign-off) is at sea to today, like the statement (§11d, 17 Oct 2026).
+function pfSeaTime(K,todayS){var m=0,d=0;(K||[]).forEach(function(x){if(!x.on||x.on>todayS)return;var p=monthsDaysParts(x.on,(!x.current&&x.off&&x.off<todayS)?x.off:todayS);if(p){m+=p.m;d+=p.d;}});m+=Math.floor(d/30);d=d%30;return m?(m+' mo'+(d?' '+d+' d':'')):(d+' d');}
 function pfNum(n,l,src){return '<div class=pf2n><b>'+n+'</b><span>'+escHtml(l)+'</span>'+(src||'')+'</div>';}
 function pfPort(p){return String(p||'').split(',')[0].toLowerCase().replace(/(^|[ -])[a-z]/g,function(m){return m.toUpperCase();});}
 function pfIntelHead(it,n){var ps=it.parts||[];var s=ps.filter(function(p){return p.label==='Summary';})[0]||ps[0]||{text:it.text||''};var t=String(s.text||'');n=n||160;if(t.length<=n)return t;var cut=t.slice(0,n);var sp=cut.lastIndexOf(' ');return (sp>n*0.6?cut.slice(0,sp):cut).replace(/[,;:. ]+$/,'')+'…';}

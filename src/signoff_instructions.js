@@ -79,7 +79,7 @@ export const INSTR_HTML = `<!DOCTYPE html>
 </body></html>`;
 
 export function installInstr(deps) {
-  const { json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer } = deps;
+  const { json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, sendViaMailer } = deps;
   // The CC on every instructions email (Miguel, 16 Oct 2026: "CC onboard support"), and who the crew reply to (Rita signs it).
   var INSTR_CC = "onboardsupport@dg3.com", INSTR_REPLY_TO = "Rita.Berenyi@dg3.com";
 
@@ -104,16 +104,6 @@ export function installInstr(deps) {
     });
   }
 
-
-  function instrNormShip(s) { return String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]/g, ""); }
-  function instrHomeport(ship) {
-    var n = instrNormShip(ship);
-    if (!n) return null;
-    for (var i = 0; i < VESSEL_REF.length; i++) if (instrNormShip(VESSEL_REF[i].name) === n) return VESSEL_REF[i].homeport || null;
-    for (var j = 0; j < VESSEL_REF.length; j++) { var rn = instrNormShip(VESSEL_REF[j].name); if (rn && n.indexOf(rn) >= 0) return VESSEL_REF[j].homeport || null; }
-    return null;
-  }
-
   // Same resolution the sign-off ack uses: crew name/email, vessel, sign-off date, port.
   // THE SEAT, NOT THE COUNTER POSITION (8 Oct 2026). Since 7 Oct the Contract Counter is history (§10d): a seat dated
   // from the TDG file has no keyman_contract3 row at that seq, so the button failed (signoff_not_found), or the crew was
@@ -134,7 +124,10 @@ export function installInstr(deps) {
     var c = base ? applyOverride(base, ov) : {};
     var vessel = ed.ship || leg.ship || null;
     var sign_off = ed.sign_off || leg.act_off || leg.proj_off || null;
-    var port = ed.disembark || (ovr && ovr.port) || instrHomeport(vessel);
+    // A typed port, else the board's (Rita's, the Counter's or the turnaround's), else none: the email reads "To be
+    // confirmed". NEVER the ship's home-port seed (§11e, 16 Oct 2026) — it fell back to it here, so a seat with no typed
+    // or itinerary port read "You sign off … in Miami" while seatContexts had refused that seed.
+    var port = ed.disembark || (ovr && ovr.port) || null;
     var name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
     return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, first_name: firstWord(c.first_name) || null, email: c.email || null, vessel: vessel, port: port, sign_off_date: sign_off };
   }

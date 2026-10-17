@@ -203,7 +203,7 @@ ${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgr}
   const text = [
     `Dear ${d.firstName || ""},`, "",
     head.replace(/&[a-z]+;/g, " ") + " Digital Handover Notes.",
-    (overlap ? `You and ${rel.name} overlap aboard for ${overlap.days} days from ${shortDate(overlap.from)}.` : rel ? `Your reliever is ${rel.name}. You may or may not see them aboard, so your notes must carry everything.` : `Your reliever is not named yet.`),
+    (overlap ? `You and ${rel.name} overlap aboard for ${mdWords(overlap.from, off)} from ${shortDate(overlap.from)}.` : rel ? `Your reliever is ${rel.name}. You may or may not see them aboard, so your notes must carry everything.` : `Your reliever is not named yet.`),
     "", `Complete your handover notes in HON: ${link}`,
     `Select ${ship || "your ship"}, complete all eleven sections, sign your count, submit before you leave, and print a short copy for your reliever and your ${mgr}.`,
     "", "Thank you.", "Rita Berenyi", "Manager, People & Culture", "Rita.Berenyi@dg3.com",

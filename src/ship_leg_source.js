@@ -428,7 +428,7 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
       if (dayOf(a.sign_on) <= today && w && w.at && w.at > dayOf(a.sign_on) && !(w.status === "On board" && w.key === L.key)) continue;
       if (!card || dayOf(a.sign_on) < card.on) card = { on: dayOf(a.sign_on), at: String(a.updated_at || a.created_at || ""), id: a.id || null, sc: a.sc, name: a.crew_name || null };
     }
-    if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id } });
+    if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id, on: card.on } });
     let pick = cand.find((c) => c.final) || null;
     if (pick) { const t = cand.filter((c) => c.final).sort((a, b) => (a.off < b.off ? -1 : 1)); pick = t[0]; }
     // RITA'S TYPED DATE OUTRANKS THE CROSS-OVER while TDG still lists the crew On board (Miguel, 17 Oct 2026, on Kevin Jugao,
@@ -456,7 +456,9 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
     if (held) leg.heldByFile = true;
     if (pick.source === "projected" && pick.snapped) leg.offSnapped = pick.snapped;   // days moved to the turnaround
     if (pick.source === "projected" && pick.port) leg.disembark = pick.port;         // the turnaround port, unless Rita's edit names one (below)
-    if (pick.reliever) leg.reliever = { sc: pick.reliever.sc, name: pick.reliever.name || null, cardId: pick.reliever.cardId || null };
+    // The reliever's OWN sign-on rides with the name: since Rita's typed date outranks the cross-over (17 Oct 2026) the
+    // sign-off is no longer the reliever's embark, and the held note printed "<reliever> embarked <the typed date>".
+    if (pick.reliever) leg.reliever = { sc: pick.reliever.sc, name: pick.reliever.name || null, cardId: pick.reliever.cardId || null, on: pick.reliever.on || null };
     if (pick.source === "rita" && pick.conf && !held) leg.offConfirmed = true;
     if (e) { if (e.embark) leg.embark = e.embark; if (e.disembark) leg.disembark = e.disembark; leg.edit = { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, onConfirmed: !!e.on_conf, seq: e.seq != null ? Number(e.seq) : null }; }
     out.push(leg);

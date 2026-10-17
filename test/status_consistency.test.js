@@ -140,7 +140,7 @@ test("scheduleBySc and crewStatus live in ONE module, not copied per caller", ()
   assert.match(MOD, /export function scheduleBySc/);
   assert.match(MOD, /export function crewStatus/);
   // worker.js must import them rather than redeclare them (§3: deployed code equals tested code).
-  assert.match(SRC, /import \{ scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet \} from "\.\/crew_status\.js"/);
+  assert.match(SRC, /import \{ scheduleBySc, crewStatus, NOT_IN_FILE, TDG_ABSENT_JOIN, TDG_ABSENT_COL, isOffFleet(, OFF_FLEET)? \} from "\.\/crew_status\.js"/);
   assert.doesNotMatch(SRC, /^function (scheduleBySc|crewStatus)\(/m,
     "a second local copy is how two views start disagreeing");
 });

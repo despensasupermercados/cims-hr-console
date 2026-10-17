@@ -1269,6 +1269,23 @@ sequence of writes is the point), and the suites named below.
   time bombs (a DST-dependent gate hour in `sbm.test.js`, `mock.timers` in the earmark and board tests). The night watch runs the suite
   with the clock pushed +30 / +60 / +90 days once a month.
 
+## 11f. Invariants from the 17 Oct 2026 logic review (Miguel: "review the code and the goal here .. if u see anything u dont understand for the logic let me know")
+Five readers (Keyman schedule, Score Card, TDG imports + status, what the crew are told, travel / bill / audit), every
+finding traced to a production row. What contradicted a rule already written here was fixed; the rest went to Miguel as
+questions (his answers land in the sections they change). Pinned by `test/review_1017.test.js`, `test/signoff_public.test.js`.
+- **The sign-off emails never print the home-port seed** (§11e): `resolveInstr` / the link's resolver fell back to
+  `VESSEL_REF.homeport` when no port was typed and the board had none — "You sign off … in Miami". Now no port = "To be confirmed".
+- **The instructions email's plain-text part says the overlap in months and days** (`mdWords`), like its HTML.
+- **The reliever carries his own sign-on** (`leg.reliever.on`): since Rita's typed date outranks the cross-over, the held note
+  printed "<reliever> embarked <the typed date>".
+- **The profile's time at sea runs a CURRENT contract to today** (held, overdue), like the statement and the crew file (§11d).
+- **The dashboard's crew travel is the closed months** (headline, % used and the categories), like the Travel tab (§10j).
+- **The Uploads review lists what the file says that nothing changes** (`impFlagged`): a repeated agency id, a cruise-line id
+  that differs from the roster, a row keyed on the cruise-line id, a new row with no readable status — the stage built them,
+  only the unused `/api/crew/import` page drew one.
+- **Maria's "former crew" is `isOffFleet(status)`**, never the manual tag (a tagged crew TDG has On board left her active
+  lists; Not for Rehire could not be listed by name).
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

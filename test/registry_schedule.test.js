@@ -113,7 +113,7 @@ test("the cross-over: Rita's reliever card on the same hull sets the outgoing si
   ];
   const edits = [{ sc: "X1", seq: 1, on_key: "2026-03-14", sign_off: "2026-11-01", updated_at: "2026-09-15T00:00:00Z" }];
   const L = by(legsFromRegistry({ rows, open, edits, vessels: VES, today: TODAY }));
-  assert.deepEqual({ off: L["X1|Apex"].off, src: L["X1|Apex"].offSource, rel: L["X1|Apex"].reliever }, { off: "2026-11-15", src: "card", rel: { sc: "REL1", name: "Reliever One", cardId: "as_a" } }, "the card (1 Oct) is newer than the typed date (15 Sep): the card wins");
+  assert.deepEqual({ off: L["X1|Apex"].off, src: L["X1|Apex"].offSource, rel: L["X1|Apex"].reliever }, { off: "2026-11-15", src: "card", rel: { sc: "REL1", name: "Reliever One", cardId: "as_a", on: "2026-11-15" } }, "the card (1 Oct) is newer than the typed date (15 Sep): the card wins (the reliever signs on that day, 17 Oct 2026)");
   const L2 = by(legsFromRegistry({ rows, open, edits: [{ ...edits[0], updated_at: "2026-10-05T00:00:00Z" }], vessels: VES, today: TODAY }));
   assert.deepEqual({ off: L2["X1|Apex"].off, src: L2["X1|Apex"].offSource }, { off: "2026-11-01", src: "rita" }, "typed after the card: Rita's date wins");
   assert.deepEqual({ off: L["X2|Wonder"].off, src: L["X2|Wonder"].offSource, cur: L["X2|Wonder"].is_current }, { off: "2026-10-02", src: "card", cur: true }, "the reliever's sign-on passed BEFORE the 7 Oct file, which still lists the outgoing crew On board: held, no swap (8 Oct 2026)");
