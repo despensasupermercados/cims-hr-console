@@ -93,6 +93,16 @@ for (const [label, install, purpose, formPath, submitPath, requestPath] of VARIA
     return new URL(body.link).searchParams.get("t");
   }
 
+  test(label + ": no typed or board port -> no port, never the ship's home-port seed (§11e, 17 Oct 2026)", async () => {
+    // The harness's VESSEL_REF gives Reflection a home port. The seat resolver fell back to it, so a seat with no typed
+    // port and no itinerary port on the day read "You sign off ... in Fort Lauderdale" (and the confirmation said so too).
+    const h = harness(install);
+    await issue(h);
+    assert.equal(h.env.DB.rows.length, 1);
+    assert.equal(h.env.DB.rows[0].port, null, "the stored row carries no port");
+    for (const e of h.sent) assert.doesNotMatch(JSON.stringify(e), /Fort Lauderdale/, "no email names the home-port seed");
+  });
+
   test(label + ": the privileged issue route refuses an anonymous caller", async () => {
     const h = harness(install);
     const r = await h.handle(requestPath, req("POST", { sc: "SC-1", seq: 1 }), h.env, new URL("https://cims.work" + requestPath), null);
