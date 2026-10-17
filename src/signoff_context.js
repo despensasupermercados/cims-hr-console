@@ -13,6 +13,12 @@
 // console's home-port seed (the ship's base, where the ship LIVES) and never a port a day away ("provisional") — no
 // port in a crew-facing email beats a wrong one (16 Oct 2026).
 export const RELIEF_WINDOW_DAYS = 45;
+// NOT INSTRUCTED, AND NOBODY'S RELIEVER (Miguel, 17 Oct 2026, "Exclude him"): Jonathan Placer Alonzo receives the final
+// count and sails ships on visits. TDG lists him On board as a Printer Specialist (Pursuit, embarked 16 Oct with A.J.
+// Baleña), so the board seats him, the T-14 run would instruct him, and Kevin Jugao's email could name him the reliever.
+// Nothing on his record tells him apart, hence the id. His seat stays on the board; only this email skips him.
+export const NOT_INSTRUCTED = new Set(["SC-0041465"]);
+export const instructed = (sc) => !NOT_INSTRUCTED.has(String(sc || ""));
 
 const iso = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
 const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
@@ -28,7 +34,7 @@ export function portOf(c) {
 export function seatContexts(sections) {
   const out = {};
   for (const s of sections || []) {
-    const all = [].concat(s.crew || [], s.projections || []).filter((c) => c && c.agency_id);
+    const all = [].concat(s.crew || [], s.projections || []).filter((c) => c && c.agency_id && instructed(c.agency_id));
     for (const c of s.crew || []) {
       if (!c || !c.agency_id || !c.current || !iso(c.signOff)) continue;
       const on = iso(c.signOn), off = iso(c.signOff);
@@ -39,6 +45,7 @@ export function seatContexts(sections) {
       const pick = dated[0] || all.find((x) => x.agency_id !== c.agency_id && x.tdgEarmark) || null;
       out[c.agency_id] = {
         sc: c.agency_id,
+        instruct: instructed(c.agency_id),
         name: c.name || null,
         ship: c.ship || s.ship || null,
         brand: s.brand || null,

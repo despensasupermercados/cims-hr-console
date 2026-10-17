@@ -132,7 +132,7 @@ function senderHarness(opts = {}) {
     st.run = async () => ({ meta: { changes: 1 } });
     st.first = async () => {
       if (/COALESCE\(NULLIF\(o\.first_name/.test(sql)) return { fn: "A.J. Lorenzo", ln: "Baleña" };
-      if (/FROM crew WHERE agency_id=\?/.test(sql)) return { id: "crew_k", agency_id: "SC-K", first_name: "Kevin Leif", last_name: "Jugao", email: "kevin@example.com" };
+      if (/FROM crew WHERE agency_id=\?/.test(sql)) return { id: "crew_k", agency_id: opts.sc || "SC-K", first_name: "Kevin Leif", last_name: "Jugao", email: "kevin@example.com" };
       return null;
     };
     st.all = async () => ({ results: [] });
@@ -142,7 +142,7 @@ function senderHarness(opts = {}) {
     json: (o, s = 200) => new Response(JSON.stringify(o), { status: s }), htmlResponse: (b) => new Response(b),
     signToken, verifyToken, sha256hex, logActivity: async () => {}, applyOverride: (b) => b, VESSEL_REF: [],
     instrContext: opts.ctx ? async () => opts.ctx : async (env, sc) => seatContexts(SECTIONS)[sc] || null,
-    boardLegs: async () => [{ ours: true, sc: "SC-K", is_current: true, on: "2026-05-02", off: opts.off || "2026-10-31", ship: "Pursuit", disembark: "HONG KONG, CHINA" }],
+    boardLegs: async () => [{ ours: true, sc: opts.sc || "SC-K", is_current: true, on: "2026-05-02", off: opts.off || "2026-10-31", ship: "Pursuit", disembark: "HONG KONG, CHINA" }],
     sendViaMailer: async (env, e) => { sent.push(e); return { ok: true }; },
   });
   return { h, sent, env: { DB: db, SESSION_SECRET: "s", MAILER: {} } };
@@ -334,4 +334,52 @@ test("the overlap is said in the email's own words for a span (months and days p
   assert.match(long, /overlap aboard for 1 month 10 days from 21 Sep/);
   const short = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-10-26" } }).html);
   assert.match(short, /overlap aboard for 5 days from 26 Oct/);
+});
+
+// 17 Oct 2026, Miguel: "Exclude him". Jonathan Placer Alonzo (SC-0041465) receives the final count and sails ships on
+// visits; TDG's 16 Oct file has him On board Pursuit as a Printer Specialist, embarked the same day as A.J. Baleña. He is
+// never instructed and never named anybody's reliever; his seat stays on the board, and the T-7 link is not his to skip.
+test("Jonathan Placer Alonzo: never instructed, never the reliever, his seat kept for the other emails", async (t) => {
+  const JON = "SC-0041465";
+  const sections = [{ ship: "Pursuit", brand: "Azamara", crew: [
+    { agency_id: "SC-K", name: "Kevin Leif Jugao", ship: "Pursuit", current: true, signOn: "2026-05-02", signOff: "2026-10-31" },
+    { agency_id: JON, name: "Jonathan Placer Alonzo", ship: "Pursuit", current: true, signOn: "2026-10-16", signOff: "2027-03-16" },
+    { agency_id: "SC-A", name: "A.J. Lorenzo Baleña", ship: "Pursuit", current: true, signOn: "2026-10-16", signOff: "2027-03-16" },
+  ], projections: [] }];
+  const X = seatContexts(sections);
+  assert.equal(X["SC-K"].reliever.sc, "SC-A", "A.J. relieves Kevin, whatever order the board lists them in");
+  const flipped = seatContexts([{ ...sections[0], crew: [sections[0].crew[0], sections[0].crew[2], sections[0].crew[1]] }]);
+  assert.equal(flipped["SC-K"].reliever.sc, "SC-A");
+  assert.equal(X[JON].instruct, false);
+  assert.equal(X["SC-K"].instruct, true);
+  // only Jonathan on the hull after Kevin: nobody named, never Jonathan
+  const alone = seatContexts([{ ...sections[0], crew: sections[0].crew.slice(0, 2) }]);
+  assert.equal(alone["SC-K"].reliever, null);
+  const tdgOnly = seatContexts([{ ...sections[0], crew: [sections[0].crew[0], { agency_id: JON, name: "Jonathan Placer Alonzo", tdgEarmark: true }] }]);
+  assert.equal(tdgOnly["SC-K"].reliever, null, "not as TDG's undated earmark either");
+
+  // the senders refuse him, manual and automatic
+  t.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
+  const a = senderHarness({ ctx: X[JON], off: "2027-03-16", sc: JON });
+  const r = await a.h.sendInstructionsFor(a.env, JON, 20270316, "https://cims.work", { ship: "Pursuit", proj_off: "2027-03-16", act_off: null, port: null, ctx: X[JON] });
+  assert.equal(r.emailed, false);
+  assert.equal(r.error, "not_instructed");
+  const res = await a.h("/api/instructions/request", { method: "POST", url: "https://cims.work/x", json: async () => ({ sc: JON, seq: 1, send: true }), headers: { get: () => null } },
+    a.env, new URL("https://cims.work/api/instructions/request"), { email: "rita@dg3.com" });
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "not_instructed");
+  assert.equal(a.sent.length, 0);
+  t.mock.timers.reset();
+
+  // the T-14 run skips him silently (no digest alert every day); the T-7 link still sees his seat
+  const today = gateHourInstant().toISOString().slice(0, 10);
+  const plus = (n) => { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const legs = [{ sc: JON, off: plus(5), ctx: { instruct: false } }, { sc: "SC-B", off: plus(5), ctx: { instruct: true } }];
+  const h = autoHarness({ auto_send_enabled: "true" }, legs);
+  t.mock.timers.enable({ apis: ["Date"], now: gateHourInstant().getTime() });
+  await h.run(h.env, { scheduledTime: gateHourInstant().getTime() });
+  t.mock.timers.reset();
+  assert.deepEqual(h.calls.instr, ["SC-B"]);
+  assert.deepEqual(h.calls.link.sort(), [JON, "SC-B"].sort());
+  assert.ok(!/not_instructed/.test(JSON.stringify(h.digests)), "no daily digest alert for him");
 });
