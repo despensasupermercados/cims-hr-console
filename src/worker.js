@@ -3510,7 +3510,9 @@ const ensureBonusV2 = memoEnsure(async (env) => {
   await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) SELECT 'policy-v2', 2, '2026-10-15', ladder_json, floor_pct, weights_json, eval_rule, gates_json, agg_policy, 'v1 weights and gates unchanged. sComm = Dexter''s audit, not Communication. The Score Card pre-fills from the systems (bonus.js autoScore, 15-16 Oct 2026).' FROM bonus_policy WHERE version = 1").run();
   try { await env.DB.prepare("ALTER TABLE bonus_outcome ADD COLUMN evidence_json TEXT").run(); }
   catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
-}, "policy-v2+v1seed");
+  // One outcome per contract span, by the database (migrations/0032, 17 Oct 2026): the commit's backstop below relied on it.
+  await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome(crew_id, span_start, span_end) WHERE corrects_id IS NULL").run();
+}, "policy-v2+v1seed+span-unique");
 // The automatic read for the span and ships being committed, re-run on the server (cached AI answers only: a commit never
 // waits on a model), kept beside the outcome. Never blocks a commit: a failed read is stored as the failure.
 async function commitEvidence(env, cr, b, ships) {
@@ -3561,21 +3563,25 @@ async function apiBonusCommit(request, env, session) {
   const groupId = cr.agency_id + "-C" + grpN;
   const cid = "ct_" + crypto.randomUUID();
   const now = new Date().toISOString();
-  await env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now).run();
-  for (let i = 0; i < ships.length; i++) {
-    await env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
-      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now).run();
-  }
   const oid = "bo_" + crypto.randomUUID();
   await ensureBonusV2(env);
   const evidence = await commitEvidence(env, cr, b, ships);
+  // The contract, its legs and the outcome are ONE transaction (D1 batch), written after the evidence read: a racing
+  // second commit that passed the pre-check trips ux_bonus_outcome_span and leaves NOTHING behind — before 17 Oct 2026
+  // the contract and assignment rows were written first, one by one, so a refused outcome left an orphan contract.
+  const writes = [env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now)];
+  for (let i = 0; i < ships.length; i++) {
+    writes.push(env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now));
+  }
+  writes.push(env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence));
   try {
-    await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence).run();
+    await env.DB.batch(writes);
   } catch (e) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
-    // SELECT trips UNIQUE(crew_id,span_start,span_end) (migration 0004, primary outcomes only). Return the
-    // already-recorded outcome as a duplicate instead of double-paying / double-counting.
+    // SELECT trips ux_bonus_outcome_span (migrations/0032, primary outcomes only) and the whole batch rolls back. Return
+    // the already-recorded outcome as a duplicate instead of double-paying / double-counting.
     const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
     if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
       result: { score: ex.score_pct, gate: ex.gate, pay: ex.pay_usd, count: ex.count_before, nextCount: ex.count_after, rung: ladderValue(ex.count_after) } });
