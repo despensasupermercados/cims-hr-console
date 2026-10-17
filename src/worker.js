@@ -63,6 +63,7 @@ import { mariaFriendlyError } from "./maria_errors.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { seatContexts } from "./signoff_context.js";
+import { isShoreCrew } from "./visits.js";
 import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
@@ -280,6 +281,7 @@ export default {
         if (p === "/api/crew/hide" && request.method === "POST") return apiCrewHide(request, env, session);
         if (p === "/api/crew/notes") return apiCrewNotes(request, env, session, url);
         if (p === "/api/crew/contract-end" && request.method === "POST") return apiContractEnd(request, env, session);
+        if (p === "/api/crew/contract-visit" && request.method === "POST") return apiContractVisit(request, env, session);
         if (p === "/api/crew/statement.pdf") return apiStatementPdf(env, url);
         if (p === "/api/crew/file.pdf") return apiCrewFilePdf(env, url, session);
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
@@ -2006,6 +2008,8 @@ async function ensureCrewExtrasImpl(env) {
     env.DB.prepare("INSERT OR IGNORE INTO agency (id,code,name) VALUES ('agency-man','MAN','Manual entry (CIMS console)')"),
     // why a contract ended, Rita's word, HR only (13 Oct 2026, migrations/0021_contract_end.sql)
     env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_end (sc TEXT NOT NULL, on_key TEXT NOT NULL, reason TEXT NOT NULL, note TEXT, set_by TEXT, set_at TEXT NOT NULL, PRIMARY KEY (sc, on_key))"),
+    // a trip Rita ticked as a training visit (17 Oct 2026, migrations/0032_contract_visit.sql, visits.js)
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS contract_visit (sc TEXT NOT NULL, on_key TEXT NOT NULL, set_by TEXT, set_at TEXT NOT NULL, PRIMARY KEY (sc, on_key))"),
   ]);
   // The ALTERs leave together, each alone (a duplicate-column error would abort a batch — they are already there in
   // prod): the manual 'Retired' tag (Rita), and — NOTES ARE ARCHIVED, NEVER DELETED (Miguel, 12 Oct 2026: "archive";
@@ -2290,6 +2294,22 @@ async function apiContractEnd(request, env, session) {
   await env.DB.batch([write, env.DB.prepare("INSERT INTO activity_log (id,user_id,action,detail,at) VALUES (?,?,?,?,?)").bind("act_" + crypto.randomUUID(), who, "contract_end", sc + " " + onKey + " " + (reason || "cleared"), now)]);
   return json({ ok: true, reason: reason || null });
 }
+// A TRAINING VISIT (Miguel, 17 Oct 2026: "Rita ticks 'Training visit'"; visits.js). Rita ticks it on the contract window;
+// one row per crew + trip (on_key = the trip's embark), visit false clears it. Audited in activity_log. Not money: the
+// bonus never reads it.
+async function apiContractVisit(request, env, session) {
+  await ensureCrewExtras(env);
+  const b = await request.json().catch(() => ({}));
+  const sc = String(b.agency_id || "").trim(), onKey = String(b.on_key || "").slice(0, 10), on = b.visit === true;
+  if (!sc || !/^\d{4}-\d{2}-\d{2}$/.test(onKey) || typeof b.visit !== "boolean") return json({ error: "bad_request" }, 400);
+  if (!(await env.DB.prepare("SELECT 1 FROM crew WHERE agency_id=?").bind(sc).first())) return json({ error: "not_found" }, 404);
+  const now = new Date().toISOString(), who = (session && session.email) || null;
+  const write = on
+    ? env.DB.prepare("INSERT INTO contract_visit (sc,on_key,set_by,set_at) VALUES (?,?,?,?) ON CONFLICT(sc,on_key) DO UPDATE SET set_by=excluded.set_by, set_at=excluded.set_at").bind(sc, onKey, who, now)
+    : env.DB.prepare("DELETE FROM contract_visit WHERE sc=? AND on_key=?").bind(sc, onKey);
+  await env.DB.batch([write, env.DB.prepare("INSERT INTO activity_log (id,user_id,action,detail,at) VALUES (?,?,?,?,?)").bind("act_" + crypto.randomUUID(), who, "contract_visit", sc + " " + onKey + " " + (on ? "training visit" : "cleared"), now)]);
+  return json({ ok: true, visit: on });
+}
 const CONTRACT_END_REASONS = ["Completed", "Resigned", "Medical", "Compassionate", "Emergency", "Performance", "Early relief", "Other"];
 async function apiCrewNotes(request, env, session, url) {
   await ensureCrewExtras(env);
@@ -2482,10 +2502,9 @@ async function rotationSections(env) {
   // and Azamara schedule rows used to miss the registry/keyman sections and vanish).
   const vesselKeys = SHIP_KEYS;
   const shipOf = (vessel) => canonShipWith(vessel, vesselKeys);
-  // Shoreside DG3 team (not seafarers): tagged + kept OFF the ship rotation.
-  const SHORE_IDS = new Set(["SC-0038392", "SC-0038378"]);
-  const SHORE_NM = new Set(["deleonjoemar", "mirandaohji", "guerraray", "abellanrolando", "lawrencedexter", "sanmartinmiguel", "berenyirita"]);
-  const isShore = (c) => SHORE_IDS.has(c.agency_id) || SHORE_NM.has(normShip((c.last_name || "") + (c.first_name || "")));
+  // Shoreside DG3 team (not seafarers): tagged + kept OFF the ship rotation. One list, read by the schedule and the
+  // count too (visits.js, 17 Oct 2026): every trip of theirs is a training visit.
+  const isShore = (c) => isShoreCrew(c);
   // Schedule-tab dates per (ship, crew) — fallback enrichment when Keyman has no leg (latest run wins).
   const schEnr = {};
   for (const h of HIST) { if (!h.ours || !h.sc || !h.is_current) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
@@ -2504,7 +2523,7 @@ async function rotationSections(env) {
     const seq = same ? same.seq : (kc.reduce((m, l) => Math.max(m, Number(l.seq) || 0), 0) + 1);
     const ed = h.edit || {};
     (regEnr[k] = regEnr[k] || {})[h.sc] = {
-      seq, hasEdit: !!h.edit, ship: cs, onKey: h.on, signOn: h.on, signOff: h.off || null,
+      seq, hasEdit: !!h.edit, ship: cs, onKey: h.on, signOn: h.on, signOff: h.off || null, visit: !!h.visit,
       dateSource: "registry", dateSourceAt: h.fileAt || null, overridden: false,
       offSource: h.offSource || null, offAt: h.offAt || null, reliever: h.reliever || null, offSnapped: h.offSnapped || 0,
       // heldByFile (8 Oct 2026): the sign-off passed and TDG's file still has them On board — never "recorded".
@@ -2615,7 +2634,7 @@ async function rotationSections(env) {
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
-  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null  })); };
+  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore  })); };
   const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
@@ -2654,7 +2673,17 @@ async function rotationSections(env) {
   for (const c of crewRows) {
     const base = { agency_id: c.agency_id, name: cmap[c.agency_id].name, status: c.status || "Unknown", rank: cmap[c.agency_id].rank, contracts: contracts[c.agency_id] || 0 };
     const rm = rmap[c.agency_id] || {}; base.eccr = !!rm.eccr; base.air = !!rm.air; base.hotel = !!rm.hotel; base.hasNote = !!(rm.note && String(rm.note).trim());
-    if (isShore(c)) { shoreside.push(base); continue; }
+    if (isShore(c)) {
+      shoreside.push(base);
+      // Aboard per the file: drawn on that ship as a training visit (17 Oct 2026), never a seat — Ohji taught on Onward
+      // 7–12 Sep and the board showed nothing.
+      const ws = fileOf[c.agency_id];
+      if (ws && ws.status === "On board" && ws.known && !absentSince[c.agency_id]) {
+        const live = liveLeg.has(c.agency_id + "|" + ws.key), enr = live ? ((regEnr[ws.key] || {})[c.agency_id] || {}) : {};
+        drawSeat(c, base, ws.ship, ws.key, enr, {}, { state: "green", asgId: null, confirmed: false, file: ws, visit: true, shore: true });
+      }
+      continue;
+    }
     const sc = c.agency_id, w = fileOf[sc] || null, cards = (inForce[sc] || []).filter((a) => !overriddenAsg.has(a.asgId || cardAsg[sc + "|" + a.key]));
     let seatKey = null;
     if (w && w.status === "On board" && w.known && !absentSince[sc]) {
@@ -2786,14 +2815,17 @@ async function rotationSections(env) {
     // onboard"): every TDG card (green) before every plan card (yellow), current first inside each, then
     // by name. Before this, an aboard plan sorted among the greens alphabetically.
     // A yellow card the registry has CONFIRMED aboard is someone already onboard: it sorts with the greens.
-    const crew = (promByShip[ship] || []).slice().sort((a, b) =>
+    // TRAINING VISITS (17 Oct 2026, visits.js) are not seats: they leave the cards — and with them the timeline, the Gantt,
+    // the dashboard and the instructions email — and ride on the section as `visits`, drawn as one line under the cards.
+    const visits = (promByShip[ship] || []).filter((c) => c.visit).sort((a, b) => String(a.signOn || "").localeCompare(String(b.signOn || "")));
+    const crew = (promByShip[ship] || []).filter((c) => !c.visit).sort((a, b) =>
       (a.state === "yellow" && !a.confirmed && !a.awaiting ? 1 : 0) - (b.state === "yellow" && !b.confirmed && !b.awaiting ? 1 : 0)
       || (b.current ? 1 : 0) - (a.current ? 1 : 0)
       // Then by sign-on (8 Oct 2026): two crew aboard one hull (a handover TDG has not closed) read left to
       // right like the ship's timeline — the outgoing crew first.
       || String(a.signOn || "9999").localeCompare(String(b.signOn || "9999"))
       || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    const cur = new Set(crew.map(c => c.agency_id));
+    const cur = new Set(crew.concat(visits).map(c => c.agency_id));
     // Also-served = ACTUAL per-contract legs from the SCHEDULE (ship_history): one entry per contract
     // with its real sign-on/off. No min-on/max-off collapse and no merge with the Contract Counter,
     // which previously fused several contracts into one bogus 20-30 month span. Zero-day parse artifacts
@@ -2826,7 +2858,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off, byFile: !!h.byFile, offSource: h.offSource || null, reliever: h.reliever ? { name: h.reliever.name || null, sc: h.reliever.sc } : null }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff || x.signOff >= today) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, visits, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   // WHAT IS LEFT TO CLEAN UP (board_truth.boardIssues): the board applies the file; this lists only what a
@@ -3061,9 +3093,12 @@ function countMapOf(rows) { const m = {}; for (const r of (rows || [])) if (r &&
 // The row's EMBARK rides beside the debark (16 Oct 2026): completedSince reads both — a debark before the row's own embark
 // (TDG's row disagreeing with itself, Del Rosario on the 16 Oct file) is not a contract finished since the count — and
 // every caller used to hand it the bare debark, so that guard never fired.
-const CC_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc";
-const CC_ONE_WITH_OFF_SQL = "SELECT c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc WHERE c.sc=?";
-const ccRowOf = (r) => ({ debarked_at: r.tdg_off, embarked_at: r.tdg_on });
+// A TRAINING VISIT is not a contract finished (17 Oct 2026, visits.js): the row's trip ticked by Rita (contract_visit on its
+// embark) or a member of the shoreside team never adds to TDG's count. The same join, no extra trip.
+const CC_VISIT_JOIN = " LEFT JOIN contract_visit v ON v.sc = c.sc AND v.on_key = substr(r.embarked_at,1,10) LEFT JOIN crew w ON w.agency_id = c.sc";
+const CC_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on, v.sc AS tdg_visit, w.first_name AS v_fn, w.last_name AS v_ln FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN;
+const CC_ONE_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on, v.sc AS tdg_visit, w.first_name AS v_fn, w.last_name AS v_ln FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN + " WHERE c.sc=?";
+const ccRowOf = (r) => ({ debarked_at: r.tdg_off, embarked_at: r.tdg_on, visit: !!r.tdg_visit || isShoreCrew({ agency_id: r.sc, first_name: r.v_fn, last_name: r.v_ln }) });
 // sc -> { completed, as_of, added } from the last count import; {} until one has been applied. Read inside a
 // route's existing wave (§12), never as its own round trip.
 async function contractCountMap(env) {
@@ -4247,6 +4282,7 @@ body.rot-refreshing #view{opacity:.6;transition:opacity .15s}
 .rtag.bad{background:#FBE7E6;border-color:#f0cfcc;color:#B0342F}
 .rtag.warn,.rtag.due{background:#FBF0DA;border-color:#eddcb6;color:#9A6410}.rtag.mis{background:#F1F3F7;border-color:#dfe4ec;color:#5C6B80}
 .jrnote{margin-top:6px;font-size:10.5px;color:#9A6410;background:#FBF0DA;border-radius:6px;padding:4px 8px}
+.visitrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 14px 10px;padding:8px 12px;border-radius:9px;background:#F5F3FF;border-left:3px solid #6D5BD0;font-size:12.5px;color:var(--body);cursor:pointer}.visitrow:hover{background:#EEEAFE}.visitrow .vtag{font:700 10px "DM Sans";letter-spacing:.08em;text-transform:uppercase;color:#5B4BC4}.visitrow .sentmeta{color:var(--mut)}
 .sentrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 14px 10px;padding:8px 12px;border-radius:9px;background:#F3F6FA;border-left:3px solid var(--navy);font-size:12.5px;color:var(--body)}
 .sentrow b{color:var(--ink)}
 .sentrow .sentmeta{color:var(--mut);font-size:11.5px}
@@ -6959,6 +6995,12 @@ function rotShip(sec){
   var projs=sec.projections||[];
   var cards=sec.crew.map(function(c){c.brand=sec.brand;return rotCard(c);}).join('')+projs.map(function(c){c.brand=sec.brand;return rotCard(c);}).join('');
   var body=cards||'<div class=hint style="opacity:.55;padding:6px">drag crew here</div>';
+  // TRAINING VISITS (Miguel, 17 Oct 2026; visits.js): a trainer aboard to teach is not a seat — one line under the cards,
+  // never on the timeline or the Gantt. A tap opens the contract window, where Rita ticks or clears "Training visit".
+  var visitRows=(sec.visits||[]).map(function(v){
+    return '<div class=visitrow onclick="cardClick(\\''+v.agency_id+'\\','+(v.seq||1)+')" title="Open the trip"><span class=vtag>Training visit</span><b>'+escHtml(v.name)+'</b>'
+      +' <span class=sentmeta>'+(v.signOn?('aboard since '+escHtml(fmtDateS(v.signOn))):'aboard')+(v.signOff?(' &middot; off '+escHtml(fmtDateS(v.signOff))):'')+(v.shoreTeam?' &middot; shoreside team':'')+'</span></div>';
+  }).join('');
   // Sent to TDG and not yet back in a Contract Counter. The line clears itself when they return.
   var sentRows=(sec.deployed||[]).map(function(d){
     return '<div class=sentrow><b>'+escHtml(d.name)+'</b> &middot; '+escHtml(d.signOn||'TBA')
@@ -6972,7 +7014,7 @@ function rotShip(sec){
   // The handover banner under the cards went on 7 Oct 2026 (Miguel: "I don't think it's necessary"): the line above says it.
   var _rslot=reliefSlot(_rb,projs,sec);
   return '<div class=shipsec><div class=shiphdr data-toggle="'+sec.ship+'" style="border-left-color:'+col+'"><span class=nm>'+sec.ship+'</span>'+shipTimeline(sec)+'<span class=meta><span class="arw'+(closed?' closed':'')+'">▾</span></span></div>'
-    +'<div class="shipbody shipdrop onerow'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+sentRows+histBlock+'</div>';
+    +'<div class="shipbody shipdrop onerow'+(closed?' closed':'')+'" data-ship="'+sec.ship+'" data-jr="'+escHtml(sec.jrPsRule||'')+'">'+body+_rslot+'</div>'+visitRows+sentRows+histBlock+'</div>';
 }
 // THE SHIP'S TIMELINE (Miguel, 7 Oct 2026: "a timeline from the sign-on of the active crew to the sign-off of the
 // last earmarked crew ... so visually we see how far the ship is covered"). One line in the ship header, one
@@ -7140,7 +7182,7 @@ function histCard(h){
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
 function cardClick(id,seq){if(dragMoved)return;editContractModal(id,seq);}
 function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){return Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name;}).sort(function(a,b){return a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0;});var start=0,f=false;if(date){for(var i=0;i<ta.length;i++){if(ta[i].berth_date>=date){start=i;f=true;break;}}}if(!f)start=Math.max(0,ta.length-6);var win=ta.slice(start,start+6);var opts='',matched=false;for(var j=0;j<win.length;j++){var p=win[j],v=String(p.port_name).replace(/"/g,'');var isSel=date&&p.berth_date===date;if(isSel)matched=true;opts+='<option value="'+v+'" data-d="'+p.berth_date+'"'+(isSel?' selected':'')+'>'+niceCity(p.port_name)+' · '+fmtDateS(p.berth_date)+'</option>';}if(current&&!matched){opts='<option value="'+String(current).replace(/"/g,'')+'" selected>'+niceCity(current)+'</option>'+opts;}return opts||'<option value="">— no ports —</option>';}function pickPort(sel){var m={eEmb:'eOn',eDis:'eOff'};var o=sel.options[sel.selectedIndex];var dd=o?o.getAttribute('data-d'):null;var el=document.getElementById(m[sel.id]);if(dd&&el)el.value=dd;}async function editContractModal(id,seq){
-  var e=null;(ROT.sections||[]).forEach(function(s){s.crew.forEach(function(x){if(x.agency_id===id&&x.seq===seq)e=x;});});
+  var e=null;(ROT.sections||[]).forEach(function(s){(s.crew||[]).concat(s.visits||[]).forEach(function(x){if(x.agency_id===id&&x.seq===seq)e=x;});});
   if(!e||document.getElementById('rotmodal')||window._rotOpening)return; // one modal (a double click stacked two and leaked a key listener)
   window._rotOpening=1;
   var _dq=fetch('/api/rotation/crew?id='+encodeURIComponent(id)).then(function(r){return r.json();}).catch(function(){return {};}),
@@ -7222,6 +7264,11 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'</div>'
    +'<div class=zlabel>Confirmed <span class=zcount>shows as green tags on the card</span></div>'
    +'<div class=ckrow>'+ck('cEccr','ECCR',e.eccr)+ck('cAir','AIR',e.air)+ck('cHotel','HOTEL',e.hotel)+ck('cOn','ON DATE',e.onConfirmed)+ck('cOff','OFF DATE',e.offConfirmed)+'</div>'
+   // TRAINING VISIT (Miguel, 17 Oct 2026: "Rita ticks 'Training visit'"): this trip is a trainer teaching aboard, not a
+   // contract — no sign-off instructions, nobody's reliever, not counted as a contract, drawn as a visit line. Keyed on the
+   // trip's embark (eKey); the shoreside team's trips are visits already.
+   +(e.shoreTeam?'<div class=zlabel>Training visit <span class=zcount>shoreside team &middot; every trip is a training visit</span></div>'
+     :(e.onKey?('<div class=zlabel>Training visit <span class=zcount>a trainer teaching aboard, not a contract: no sign-off instructions, nobody&#39;s reliever, not counted as a contract</span></div><div class=ckrow>'+ck('cVisit','TRAINING VISIT',e.visit)+'<input type=hidden id=cVisitInit value="'+(e.visit?'1':'')+'"></div>'):''))
    +docTags(d.docs,e.signOn,e.signOff)
    +'<div class=zlabel>Comment</div><textarea id=cmt placeholder="Note for this crew…">'+note+'</textarea>'
    +(legs?'<div class=zlabel>Contract history <span class=zcount>'+(d.legs||[]).length+' contract'+((d.legs||[]).length===1?'':'s')+'</span></div><div class=echist><table class=tbl><thead><tr><th>#</th><th>Ship</th><th>On</th><th>Off</th></tr></thead><tbody>'+legs+'</tbody></table></div>':'')
@@ -7246,12 +7293,17 @@ async function saveContract(id,seq){
     // A refused save says so and keeps the modal open (8 Oct 2026: a 400/500 closed it as if it had saved).
     var r1=await fetch('/api/rotation/contract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});var j1=await r1.json().catch(function(){return {};});
     if(!r1.ok||j1.error){g('cmtmsg').textContent='Not saved: '+(j1.error||('HTTP '+r1.status));return;}
+    // The training-visit tick, only when Rita changed it (17 Oct 2026).
+    if(g('cVisit')&&body.on_key&&(g('cVisit').checked?'1':'')!==g('cVisitInit').value){
+      var rv=await fetch('/api/crew/contract-visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,on_key:body.on_key,visit:g('cVisit').checked})});var jv=await rv.json().catch(function(){return {};});
+      if(!rv.ok||jv.error){g('cmtmsg').textContent='Dates saved; the training visit was not: '+(jv.error||('HTTP '+rv.status));return;}
+    }
     var r2=await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:g('cmt').value})});var j2=await r2.json().catch(function(){return {};});
     if(!r2.ok||j2.error){g('cmtmsg').textContent='Dates saved; the comment was not: '+(j2.error||('HTTP '+r2.status));return;}
     closeRotModal();renderRotation();
   }catch(e){g('cmtmsg').textContent='Failed to save.';}
 }
-async function sendSignoffInstructions(id,seq){try{var r=await (await fetch('/api/instructions/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error==='not_instructed'?'Not sent: this crew member does not receive the sign-off instructions (ship visits; Miguel, 17 Oct 2026).':r.error==='signoff_passed'?('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.'):r.error?('Error: '+r.error):(r.emailed?'Instructions emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send instructions.');}}
+async function sendSignoffInstructions(id,seq){try{var r=await (await fetch('/api/instructions/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error==='not_instructed'?'Not sent: this trip is a training visit. Training visits get no sign-off instructions.':r.error==='signoff_passed'?('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.'):r.error?('Error: '+r.error):(r.emailed?'Instructions emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send instructions.');}}
 async function sendSignoffLink(id,seq){try{var r=await (await fetch('/api/ack/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error?('Error: '+r.error):(r.emailed?'Sign-off request emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send.');}}
 async function sendReviewInvite(id,seq){if(!confirm('Send a shipboard-management review invite for this contract now?'))return;try{var r=await (await fetch('/api/sbm/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq})})).json();if(r&&r.error){var m={sbm_disabled:'GSM review is OFF. Turn the GSM review switch ON first, then send the invite.',no_recipient_configured:'No shipboard-manager email is configured for this ship yet.',signoff_passed:'That sign-off date has already passed - the review link would be expired.',already_submitted:'A review for this contract was already submitted.',no_signoff_date:'No sign-off date on file for this contract.',send_failed:'The email could not be sent. Please try again.'}[r.error]||('Could not send: '+r.error);alert(m);return;}alert('Review invite emailed to '+(r.recipient||'the shipboard manager')+'.');}catch(e){alert('Could not send the review invite.');}}
 function closeRotModal(){var m=document.getElementById('rotmodal');if(m)m.remove();if(window.rotEscHandler){document.removeEventListener('keydown',window.rotEscHandler);window.rotEscHandler=null;}}
@@ -7460,7 +7512,7 @@ function drawRotation(){
     // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
     // (sec.deployed) and the Junior PS rule (sec.jrPsRule) were silently dropped on the way to the page:
     // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
-    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,history:hist};
+    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,visits:s.visits||[],history:hist};
   });
   // A status tile, a year or a month: a ship with nobody in it leaves the board (it used to stay, empty).
   if(ROT_F||ROT_YEAR||ROT_MONTHS.length)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
