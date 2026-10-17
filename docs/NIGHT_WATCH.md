@@ -26,7 +26,10 @@ It replaces the GitHub Action `nightly-self-maintenance` as the watcher. That Ac
     - the intel pipeline;
     - email templates;
     - `wrangler.toml`, `.github/` and dependencies;
-    - a diff with no test, and more than 120 changed lines in `src/`.
+    - a diff with no test, and more than 120 changed lines in `src/`;
+    - a hunk in ANY `src/` file that lands inside, or names, the bonus / Score Card / feedback-window / supervisor-evaluation
+      path or the sign-in / session path (`MONEY_RX`, `AUTH_RX`; git's hunk header names the function). `worker.js` holds most
+      of both: on 17 Oct 2026 a change to `apiBonusCrew` (#281) printed `MERGE_OK` when only the file was judged.
   - It is the first merge of the night. At most one merge a night.
 - **Everything the gate refuses is a draft PR** titled `Night watch: <what>` for Miguel, with the gate's reasons in the body. Anything touching money (§1), auth, schema or crew data is never merged by an agent without Miguel.
 - **After a merge, prove the deploy live** (CLAUDE.md §9: the deployed worker code carries the fix). If it cannot be proven, or main turns red, open a revert PR at once and flag it in the digest.
