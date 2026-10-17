@@ -352,7 +352,8 @@ test("drawRotation hands the ship renderer its projections, deployed lines and J
 // An aboard plan (state 'yellow') sat inside promByShip with the greens and sorted among them by name.
 test("inside a ship section every TDG (green) card precedes every plan (yellow) card", () => {
   const src = readFileSync(SRC, "utf-8");
-  const i = src.indexOf("const crew = (promByShip[ship] || []).slice().sort(");
+  // (17 Oct 2026) a training visit leaves the seats first (visits.js); the sort below is unchanged.
+  const i = src.indexOf("const crew = (promByShip[ship] || []).filter((c) => !c.visit).sort(");
   assert.ok(i > 0, "section sort not found");
   const sortSrc = src.slice(i, src.indexOf(";", i));
   // (5 Oct 2026) a yellow card the registry has CONFIRMED aboard is one of the people already onboard —

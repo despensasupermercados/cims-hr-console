@@ -130,6 +130,8 @@ export function completedSince(asOf, row, today) {
   if (o <= a) return 0;
   if (t && o > t) return 0;
   if (e && e > o) return 0;
+  // A training visit is not a contract (17 Oct 2026, visits.js): Ohji's five days on Onward never add to his count.
+  if (row && typeof row === "object" && row.visit) return 0;
   return 1;
 }
 

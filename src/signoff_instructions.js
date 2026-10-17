@@ -17,7 +17,6 @@
 // ============================================================================
 import { memoDdl } from "./ensure_memo.js";
 import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
-import { instructed } from "./signoff_context.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
 // ACK_HTML in signoff_ack.js. /instr is a PUBLIC seafarer page and its inline <script> was
@@ -147,7 +146,7 @@ export function installInstr(deps) {
     var r = await resolveInstr(env, String(b.sc), parseInt(b.seq), (await seatLeg(env, String(b.sc), parseInt(b.seq))) || undefined);
     if (!r) return json({ error: "signoff_not_found" }, 404);
     var ctx = await contextFor(env, r.sc);
-    if (!instructed(r.sc)) return json({ ok: false, error: "not_instructed" }, 409);
+    if (ctx && ctx.instruct === false) return json({ ok: false, error: "not_instructed" }, 409);   // a training visit (visits.js)
     var past = passedSignOff(ctx, r);
     if (b.send && past) return json({ ok: false, error: "signoff_passed", sign_off: past }, 409);
     // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
@@ -304,7 +303,7 @@ export function installInstr(deps) {
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
     var ctx = (ovr && ovr.ctx) || await contextFor(env, r.sc);
-    if (!instructed(r.sc)) return { emailed: false, error: "not_instructed", crew_name: r.crew_name, to: r.email };
+    if (ctx && ctx.instruct === false) return { emailed: false, error: "not_instructed", crew_name: r.crew_name, to: r.email };   // a training visit
     if (passedSignOff(ctx, r)) return { emailed: false, error: "signoff_passed", crew_name: r.crew_name, to: r.email };
     var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
     var th = await sha256hex(token);

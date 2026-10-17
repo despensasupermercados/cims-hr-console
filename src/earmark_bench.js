@@ -61,6 +61,10 @@ export function benchPool({ crew, legs, snapshot, open, tdgEarmarked, today, shi
   for (const c of (crew || [])) {
     if (!c || !c.sc || c.shore || !ACTIVE.has(c.status) || planned.has(c.sc) || marked.has(c.sc)) continue;
     const L = legsBy[c.sc] || [];
+    // Off the bench after a TRAINING VISIT (17 Oct 2026, visits.js): a trainer whose latest trip is a visit went home to
+    // shore support, not to the rotation — listed again once a real contract follows.
+    const latest = L.filter((l) => l.on && l.on <= today).reduce((m, l) => (!m || l.on > m.on ? l : m), null);
+    if (latest && latest.visit) continue;
     const cur = L.filter((l) => l.is_current && l.on && l.on <= today);
     let homeFrom = null, aboardShip = null, lastShip = null;
     if (cur.length) {

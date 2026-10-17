@@ -336,32 +336,30 @@ test("the overlap is said in the email's own words for a span (months and days p
   assert.match(short, /overlap aboard for 5 days from 26 Oct/);
 });
 
-// 17 Oct 2026, Miguel: "Exclude him". Jonathan Placer Alonzo (SC-0041465) receives the final count and sails ships on
-// visits; TDG's 16 Oct file has him On board Pursuit as a Printer Specialist, embarked the same day as A.J. Baleña. He is
-// never instructed and never named anybody's reliever; his seat stays on the board, and the T-7 link is not his to skip.
-test("Jonathan Placer Alonzo: never instructed, never the reliever, his seat kept for the other emails", async (t) => {
+// 17 Oct 2026, Miguel: a training visit is a trip, not a contract (visits.js). Jonathan Placer Alonzo (SC-0041465) teaches
+// A.J. Baleña aboard Pursuit (TDG's 16 Oct file: both On board, embarked the same day). rotationSections carries the trip on
+// the section as `visits`, never among the seats: it is never instructed, never anybody's reliever; its context is kept for
+// the T-7 link (not decided). Before the rule moved to the trip, this was his id alone ("Exclude him") — he also sails full
+// contracts (Rhapsody, Dec 2025 – Sep 2026), and those are instructed like anybody's.
+test("a training visit: never instructed, never the reliever, kept for the other emails; his full contract is instructed", async (t) => {
   const JON = "SC-0041465";
-  const sections = [{ ship: "Pursuit", brand: "Azamara", crew: [
-    { agency_id: "SC-K", name: "Kevin Leif Jugao", ship: "Pursuit", current: true, signOn: "2026-05-02", signOff: "2026-10-31" },
-    { agency_id: JON, name: "Jonathan Placer Alonzo", ship: "Pursuit", current: true, signOn: "2026-10-16", signOff: "2027-03-16" },
-    { agency_id: "SC-A", name: "A.J. Lorenzo Baleña", ship: "Pursuit", current: true, signOn: "2026-10-16", signOff: "2027-03-16" },
-  ], projections: [] }];
-  const X = seatContexts(sections);
-  assert.equal(X["SC-K"].reliever.sc, "SC-A", "A.J. relieves Kevin, whatever order the board lists them in");
-  const flipped = seatContexts([{ ...sections[0], crew: [sections[0].crew[0], sections[0].crew[2], sections[0].crew[1]] }]);
-  assert.equal(flipped["SC-K"].reliever.sc, "SC-A");
-  assert.equal(X[JON].instruct, false);
+  const kevin = { agency_id: "SC-K", name: "Kevin Leif Jugao", ship: "Pursuit", current: true, signOn: "2026-05-02", signOff: "2026-10-31" };
+  const aj = { agency_id: "SC-A", name: "A.J. Lorenzo Baleña", ship: "Pursuit", current: true, signOn: "2026-10-16", signOff: "2027-03-16" };
+  const jonVisit = { agency_id: JON, name: "Jonathan Placer Alonzo", ship: "Pursuit", current: true, visit: true, signOn: "2026-10-16", signOff: "2026-10-24" };
+  const X = seatContexts([{ ship: "Pursuit", brand: "Azamara", crew: [kevin, aj], visits: [jonVisit], projections: [] }]);
+  assert.equal(X["SC-K"].reliever.sc, "SC-A", "A.J. relieves Kevin");
+  assert.equal(X[JON].instruct, false, "the visit is kept, flagged");
   assert.equal(X["SC-K"].instruct, true);
-  // only Jonathan on the hull after Kevin: nobody named, never Jonathan
-  const alone = seatContexts([{ ...sections[0], crew: sections[0].crew.slice(0, 2) }]);
-  assert.equal(alone["SC-K"].reliever, null);
-  const tdgOnly = seatContexts([{ ...sections[0], crew: [sections[0].crew[0], { agency_id: JON, name: "Jonathan Placer Alonzo", tdgEarmark: true }] }]);
-  assert.equal(tdgOnly["SC-K"].reliever, null, "not as TDG's undated earmark either");
+  const alone = seatContexts([{ ship: "Pursuit", brand: "Azamara", crew: [kevin], visits: [jonVisit], projections: [] }]);
+  assert.equal(alone["SC-K"].reliever, null, "only the trainer after Kevin: nobody named, never him");
+  // the same man on a FULL contract is a seat like any other: instructed, and a reliever when he relieves
+  const rhapsody = seatContexts([{ ship: "Rhapsody", brand: "Royal", crew: [{ agency_id: JON, name: "Jonathan Placer Alonzo", ship: "Rhapsody", current: true, signOn: "2025-12-06", signOff: "2026-09-12" }], projections: [] }]);
+  assert.equal(rhapsody[JON].instruct, true, "a contract is instructed whoever sails it");
 
-  // the senders refuse him, manual and automatic
+  // the senders refuse a visit, manual and automatic
   t.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
-  const a = senderHarness({ ctx: X[JON], off: "2027-03-16", sc: JON });
-  const r = await a.h.sendInstructionsFor(a.env, JON, 20270316, "https://cims.work", { ship: "Pursuit", proj_off: "2027-03-16", act_off: null, port: null, ctx: X[JON] });
+  const a = senderHarness({ ctx: X[JON], off: "2026-10-24", sc: JON });
+  const r = await a.h.sendInstructionsFor(a.env, JON, 20261024, "https://cims.work", { ship: "Pursuit", proj_off: "2026-10-24", act_off: null, port: null, ctx: X[JON] });
   assert.equal(r.emailed, false);
   assert.equal(r.error, "not_instructed");
   const res = await a.h("/api/instructions/request", { method: "POST", url: "https://cims.work/x", json: async () => ({ sc: JON, seq: 1, send: true }), headers: { get: () => null } },
@@ -371,7 +369,7 @@ test("Jonathan Placer Alonzo: never instructed, never the reliever, his seat kep
   assert.equal(a.sent.length, 0);
   t.mock.timers.reset();
 
-  // the T-14 run skips him silently (no digest alert every day); the T-7 link still sees his seat
+  // the T-14 run skips a visit silently (no digest alert every day); the T-7 link still sees it
   const today = gateHourInstant().toISOString().slice(0, 10);
   const plus = (n) => { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const legs = [{ sc: JON, off: plus(5), ctx: { instruct: false } }, { sc: "SC-B", off: plus(5), ctx: { instruct: true } }];
@@ -381,5 +379,6 @@ test("Jonathan Placer Alonzo: never instructed, never the reliever, his seat kep
   t.mock.timers.reset();
   assert.deepEqual(h.calls.instr, ["SC-B"]);
   assert.deepEqual(h.calls.link.sort(), [JON, "SC-B"].sort());
-  assert.ok(!/not_instructed/.test(JSON.stringify(h.digests)), "no daily digest alert for him");
+  assert.ok(!/not_instructed/.test(JSON.stringify(h.digests)), "no daily digest alert for a visit");
+  assert.doesNotMatch(readFileSync(new URL("../src/signoff_context.js", import.meta.url), "utf-8"), /SC-0041465/, "no person's id decides it any more");
 });
