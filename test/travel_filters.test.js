@@ -54,9 +54,10 @@ RECORDS.push(rec(2026, 5, { client: "celebrity", air: 1200, crew_name: "Beta, Bo
 RECORDS.push(rec(2025, 6, { client: "celebrity", air: 900, crew_name: "Gamma, Gil", agency_id: "SC-3", ship: "Apex" }));
 const TRAVEL = { years: [2026, 2025], today: "2026-10-17", closed: { 2026: 9, 2025: 12 }, budgetMo: 15000, records: RECORDS,
   unmatched: [{ crew_name: "Nobody, Known", how: "none", rows: 2, total: 640, years: [2026] }] };
-// TDG billed March air $1,000 more than the workbook carries; every other month agrees.
+// TDG billed March air $1,000 more than the workbook carries; April's hotel is billed $500 high and May's $500 low (one
+// charge in the next month's bill: nets to zero over the year); every other month agrees.
 const SGA = { today: "2026-10-17", lines: [], files: [{ year: 2026, month: 9, sga_no: "39-A", rows: 0, total: 1 }],
-  summary: Array.from({ length: 9 }, (_, i) => ({ year: 2026, month: i + 1, air: (i + 1 === 8 ? 15500 : 9000) + (i + 1 === 3 ? 1000 : 0) + (i + 1 === 5 ? 1200 : 0), hotel: 1500, medical: 0, visa: 0, medical_repat: 0, crew_total: 30000 })),
+  summary: Array.from({ length: 9 }, (_, i) => ({ year: 2026, month: i + 1, air: (i + 1 === 8 ? 15500 : 9000) + (i + 1 === 3 ? 1000 : 0) + (i + 1 === 5 ? 1200 : 0), hotel: 1500 + (i + 1 === 4 ? 500 : 0) - (i + 1 === 5 ? 500 : 0), medical: 0, visa: 0, medical_repat: 0, crew_total: 30000 })),
   training: [{ year: 2026, month: 1, total: 1000, rental: 800, utilities: 200 }, { year: 2025, month: 1, total: 900, rental: 800, utilities: 100 }] };
 
 async function openTravel() {
@@ -116,7 +117,15 @@ test("4. Needs a decision: what the data holds, each with its button; nothing is
   const b = p.body();
   assert.match(b, /Aug ran \$2,000 over the \$15,000 budget/);
   assert.match(b, /tvGo\(&quot;month&quot;,8\)/, "the row opens August");
-  assert.match(b, /Air · Mar: TDG billed \$1,000 the workbook does not have/, "the bill against the workbook, by month and category");
+  assert.match(b, /Air · Jan–Sep 2026: TDG billed \$1,000 the workbook does not have/, "ONE net gap per category over the months the bill covers");
+  assert.match(b, /over the 9 months on the bill \(1 differs by \$150\+\)/);
+  const dec = b.slice(b.indexOf("Needs a decision"), b.indexOf("Month by month"));
+  assert.doesNotMatch(dec, /Hotel · /, "a charge typed in the neighbouring month nets to zero: not a decision");
+  assert.doesNotMatch(dec, /Air · Mar/, "no month-by-month rows on the year");
+  // a chosen month is that month alone: April's hotel gap shows there
+  p.run("TF.month='4';paintTravel()");
+  assert.match(p.body(), /Hotel · Apr 2026: TDG billed \$500 the workbook does not have/);
+  p.run("TF.month='';paintTravel()");
   assert.match(b, /tvOpen\(&quot;tvsga&quot;\)/);
   assert.match(b, /Air is up 22% on 2025/, "the category that grew most (in dollars, 20%+ and $1,000+) against last year's same months");
   assert.match(b, /1 name the crew registry cannot place/);
