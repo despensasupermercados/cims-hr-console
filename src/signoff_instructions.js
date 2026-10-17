@@ -145,6 +145,9 @@ export function installInstr(deps) {
     if (!b.sc || b.seq == null) return json({ error: "missing_sc_seq" }, 400);
     var r = await resolveInstr(env, String(b.sc), parseInt(b.seq), (await seatLeg(env, String(b.sc), parseInt(b.seq))) || undefined);
     if (!r) return json({ error: "signoff_not_found" }, 404);
+    var ctx = await contextFor(env, r.sc);
+    var past = passedSignOff(ctx, r);
+    if (b.send && past) return json({ ok: false, error: "signoff_passed", sign_off: past }, 409);
     // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
     // acknowledged row (ack_at, ip, user agent) and revoke the link they had answered. Resend only with force.
     var prev = await env.DB.prepare("SELECT status FROM instr_ack WHERE sc=? AND seq=?").bind(r.sc, r.seq).first();
@@ -159,7 +162,7 @@ export function installInstr(deps) {
     var link = new URL(request.url).origin + "/instr?t=" + token;
     var emailed = false;
     if (b.send && r.email) {
-      try { await sendInstructions(env, { to: r.email, r: r, ctx: await contextFor(env, r.sc), link: link, instr_id: insId }); emailed = true; }
+      try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
       catch (e) { await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq); }
     }
     await logActivity(env, session && session.email, "instr_request", r.sc + " #" + r.seq);
@@ -205,6 +208,13 @@ export function installInstr(deps) {
   async function contextFor(env, sc) {
     if (!deps.instrContext) return null;
     try { return (await deps.instrContext(env, sc)) || null; } catch (e) { return null; }
+  }
+  // Never instruct a sign-off that has already passed (17 Oct 2026, Kevin Jugao, Pursuit: the board dates his sign-off
+  // at his reliever's embark — the file's cross-over, 16 Oct — while Rita typed 31 Oct and TDG still has him On board,
+  // so a send from his page would have told him "You sign off 16 Oct"). Returns the passed date, else null.
+  function passedSignOff(ctx, r) {
+    var off = String((ctx && ctx.off) || (r && r.sign_off_date) || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(off) && off < new Date().toISOString().slice(0, 10) ? off : null;
   }
   // The reliever as the crew would say it: first word of the first name + the last name (the board joins every given name).
   async function relieverName(env, rel) {
@@ -291,6 +301,8 @@ export function installInstr(deps) {
     var r = await resolveInstr(env, String(sc), parseInt(seq), ovr || null);
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
+    var ctx = (ovr && ovr.ctx) || await contextFor(env, r.sc);
+    if (passedSignOff(ctx, r)) return { emailed: false, error: "signoff_passed", crew_name: r.crew_name, to: r.email };
     var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
     var th = await sha256hex(token);
     var now = new Date().toISOString();
@@ -298,7 +310,7 @@ export function installInstr(deps) {
     var insId = "ins_" + crypto.randomUUID();
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
     var link = origin + "/instr?t=" + token;
-    try { await sendInstructions(env, { to: r.email, r: r, ctx: (ovr && ovr.ctx) || await contextFor(env, r.sc), link: link, instr_id: insId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
+    try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
     catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
   }
   instrHandle.sendInstructionsFor = sendInstructionsFor;
