@@ -188,7 +188,7 @@ test("static: apiCrewOne reads every source in ONE wave and returns the profile;
   assert.equal((b.match(/await Promise\.all\(\[/g) || []).length, 2, "the guards, then ONE read wave");
   assert.match(b, /crew\.status = crewStatus\(row, ov, scheduleBySc\(HIST\)\[id\], today\);/);
   assert.match(b, /legs: HIST\.filter\(\(h\) => h && h\.sc === id\)/);
-  assert.match(b, /return json\(\{ crew, contracts: ct, daysWorked: profile\.numbers\.seaDays, deployment: crewDeployment\(crew, VESSEL_REF, DRY_DOCK, today\), profile, tdg, override: ov \|\| null, canMoney: isMoneyUser\(session && session\.email\) \}\);/);
+  assert.match(b, /return json\(\{ crew, contracts: ct, daysWorked: profile\.numbers\.seaDays, deployment: crewDeployment\(crew, VESSEL_REF, DRY_DOCK, today\), profile, tdg, override: ov \|\| null, trainer: !!trainerRow, canMoney: isMoneyUser\(session && session\.email\) \}\);/);
 });
 
 test("static: the page draws A+ — header with TDG's row, the band, the numbers with sources, the career line, the contract's dates, people, status history, documents, rotation, checks, activity", () => {

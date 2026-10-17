@@ -61,7 +61,7 @@ export function installAck(deps) {
     if (!deps.boardLegs) return null;
     var legs = (await deps.boardLegs(env).catch(function () { return null; })) || [];
     var cur = legs.filter(function (l) { return l && l.ours && l.sc === sc && l.is_current && l.off; }).sort(function (a, b) { return a.on < b.on ? 1 : -1; })[0];
-    return cur ? { sc: sc, seq: seq, ship: cur.ship, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true } : null;
+    return cur ? { sc: sc, seq: seq, ship: cur.ship, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true, visit: !!cur.visit } : null;
   }
   async function resolveSignoff(env, sc, seq, ovr) {
     var leg = ovr || await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
@@ -83,7 +83,10 @@ export function installAck(deps) {
     await ensureAck(env);
     var b = await request.json().catch(function () { return {}; });
     if (!b.sc || b.seq == null) return json({ error: "missing_sc_seq" }, 400);
-    var r = await resolveSignoff(env, String(b.sc), parseInt(b.seq), (await seatLeg(env, String(b.sc), parseInt(b.seq))) || undefined);
+    var seat = await seatLeg(env, String(b.sc), parseInt(b.seq));
+    // A training visit gets no sign-off link (Miguel, 17 Oct 2026; visits.js): the trainer is not signing off a contract.
+    if (seat && seat.visit) return json({ ok: false, error: "training_visit" }, 409);
+    var r = await resolveSignoff(env, String(b.sc), parseInt(b.seq), seat || undefined);
     if (!r) return json({ error: "signoff_not_found" }, 404);
     // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
     // acknowledged row (ack_at, ip, user agent) and revoke the link they had answered. Resend only with force.
@@ -178,6 +181,7 @@ export function installAck(deps) {
   }
   async function sendSignoffLinkFor(env, sc, seq, origin, ovr) {
     await ensureAck(env);
+    if (ovr && ((ovr.ctx && ovr.ctx.visit) || ovr.visit)) return { emailed: false, error: "training_visit" }; // visits.js
     var r = await resolveSignoff(env, String(sc), parseInt(seq), ovr || null);
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };

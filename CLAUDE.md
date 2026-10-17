@@ -886,22 +886,28 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   window is never auto-emailed, only listed in the digest ("inside the window at switch-on — send by hand"). The old
   one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was NOT reviewed in this round: its
   switch stays off until Miguel signs off its rendered email.
-- **A TRAINING VISIT IS A TRIP, NOT A CONTRACT** (Miguel, 17 Oct 2026: Jonathan "sometimes he goes to the ship to teach as
-  crew and then home [to] support .. same as Ohji"; of three options, "Rita ticks 'Training visit'"). Jonathan Placer Alonzo
-  sailed a full contract (Rhapsody, Dec 2025 – Sep 2026) and is now teaching A.J. Baleña aboard Pursuit (embarked 16 Oct,
-  Rita typed 24 Oct); Ohji Garcia Miranda taught on Onward 7–12 Sep. TDG lists both as Printer Specialists On board, so the
-  file cannot tell a visit from a contract. `src/visits.js`: a trip is a visit when Rita ticked it (`contract_visit`, sc +
-  on_key = the trip's embark, `migrations/0032_contract_visit.sql`, the contract window's "Training visit" chip,
-  `POST /api/crew/contract-visit`, audited) or when the crew is on the shoreside team (`SHORE_IDS` / `SHORE_NM`, the one list
-  rotationSections already kept off the seats, the pool and the bench — moved here). His four answers: a visit gets **no
-  instructions email** (`seatContexts` instruct false; the T-14 run skips it silently; the button and `sendInstructionsFor`
-  answer `not_instructed`); is **never the reliever** and its embark **never dates the printer's sign-off** (no cross-over in
-  `legsFromRegistry`, not picked by `seatContexts`, not the profile's before/after); is **not a completed contract** (its
-  debark never adds to TDG's count: `completedSince`, the `CC_*_SQL` join); is **off the bench and the seats** (drawn as a
-  "Training visit" line under the ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard; the
-  bench skips a crew whose latest trip is a visit). Time at sea still counts its days; the T-7 link is not decided for a
-  visit. The tick belongs to the trip that embarked that day: a later file that moves the embark makes it a seat again.
-  (The same morning this was Jonathan's id alone — "Exclude him", PR #284 — wrong for his full contracts.) Pinned by
+- **A TRAINING VISIT IS A TRIP, NOT A CONTRACT; THE TRAINERS ARE TAGGED** (Miguel, 17 Oct 2026: Jonathan "sometimes he goes
+  to the ship to teach as crew and then home [to] support .. same as Ohji"; then "perhaps you can tag the 3 guys as trainers"
+  — of the options, "Trainer tag"). Jonathan Placer Alonzo sailed a full contract (Rhapsody, Dec 2025 – Sep 2026) and is now
+  teaching A.J. Baleña aboard Pursuit (embarked 16 Oct, Rita typed 24 Oct); Ohji Garcia Miranda taught on Onward 7–12 Sep;
+  Joemar De Leon on Onward Jan–Feb. TDG lists them as Printer Specialists On board, so the file cannot tell a visit from a
+  contract. `src/visits.js`: a trip is a visit when Rita marked THAT trip a visit (`contract_visit.kind`), or the crew is a
+  **trainer** (`crew_trainer`, the "Trainer" toggle in Edit crew; Jonathan, Ohji, De Leon tagged on Miguel's word,
+  `migrations/0033_crew_trainer.sql`) and Rita did NOT mark the trip a full contract (`kind = 'contract'`, the contract
+  window's "FULL CONTRACT" chip on a trainer's trip, `POST /api/crew/contract-visit` with `kind`, audited), or the crew is
+  on the shoreside team who never sail as printers (`SHORE_NM`: Ray, Rolando, Dexter Lawrence, Miguel, Rita; trainers are
+  shoreside too — off the pool, the bench and the counts while ashore). Why the default is a visit, not a tick per visit:
+  a forgotten tick named the trainer as somebody's reliever in a crew email; a forgotten "full contract" leaves the ship
+  empty / red on the board and the Gantt, loud and internal. His answers on what a visit does: **no instructions email and
+  no 7-days-out sign-off link** ("yes"; `seatContexts` instruct false / visit true; the daily run skips both silently; the
+  buttons answer `not_instructed` / `training_visit`); **never the reliever** and its embark **never dates the printer's
+  sign-off** (no cross-over in `legsFromRegistry`, never the cross-over's reliever, not picked by `seatContexts`, not the
+  profile's before/after); **not a completed contract** (its debark never adds to TDG's count: `completedSince`, the
+  `CC_*_SQL` join reads the mark and the tag); **off the bench and the seats** (a "Training visit · trainer" line under the
+  ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard). Time at sea still counts its days. The
+  mark belongs to the trip that embarked that day: a later file that moves the embark makes it a new trip. (The same
+  morning this was Jonathan's id alone, PR #284, then a per-trip tick, PR #285.) Checked on the 17 Oct 2026 production
+  data before merging: Score Card inputs, statements and schedule legs identical for all 108 crew. Pinned by
   `test/visits.test.js`. A sign-off already past is never instructed (`signoff_passed`, 17 Oct 2026).
 Pinned by `test/signoff_instructions_v2.test.js`.
 

@@ -121,7 +121,7 @@ export function installAutoSend(deps) {
   async function processKind(env, today, upper, kind, sender, DRY, sent, alerts, since, days) {
     for (const leg of await dueWithin(env, today, upper)) {
       if (await already(env, leg.sc, leg.seq, kind)) continue;                 // already handled
-      if (kind === "instructions" && leg.ctx && leg.ctx.instruct === false) continue;  // a training visit (visits.js): never instructed, never a daily alert
+      if (leg.ctx && (leg.ctx.visit || leg.ctx.instruct === false)) continue;  // a training visit (visits.js): no instructions, no sign-off link, no daily alert
       if (since && addDays(leg.off, -days) < since) {
         if (addDays(since, 1) >= today && !(await manualExists(env, leg.sc, leg.off, kind)))
           alerts.push({ kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: leg.name || null, to: leg.email || null, emailed: false, error: "before_switch_on" });

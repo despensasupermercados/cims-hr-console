@@ -14,8 +14,8 @@
 // port in a crew-facing email beats a wrong one (16 Oct 2026).
 export const RELIEF_WINDOW_DAYS = 45;
 // A TRAINING VISIT IS NOT INSTRUCTED AND IS NOBODY'S RELIEVER (Miguel, 17 Oct 2026; visits.js): the board carries a visit
-// on its section as `visits`, never among the seats. Its context is kept (instruct: false) so the T-7 sign-off link —
-// not decided for visits — still sees it; the instructions senders refuse it. Until that day this was Jonathan Placer
+// on its section as `visits`, never among the seats. Its context is kept flagged (instruct: false, visit: true): the
+// instructions and the 7-days-out sign-off link both skip it (Miguel, 17 Oct 2026: "yes" to the link too). Until that day this was Jonathan Placer
 // Alonzo's id alone ("Exclude him"); he also sails full contracts, so the rule moved to the trip.
 
 const iso = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
@@ -43,7 +43,7 @@ export function seatContexts(sections) {
       const pick = dated[0] || all.find((x) => x.agency_id !== c.agency_id && x.tdgEarmark) || null;
       out[c.agency_id] = {
         sc: c.agency_id,
-        instruct: !c.visit,
+        instruct: !c.visit, visit: !!c.visit,
         name: c.name || null,
         ship: c.ship || s.ship || null,
         brand: s.brand || null,
