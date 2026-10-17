@@ -1254,6 +1254,10 @@ sequence of writes is the point), and the suites named below.
   row with debark < embark (Ed Del Rosario, TDG's data, handled by `completedSince`), one legacy `contract_edit` without `on_key`
   (SC-0026127, Journey), 11 `keyman_contract3` rows without a projected sign-off (the Counter as uploaded, §6), 37 crew without
   `ship_crew_id` (filled by the next AdvancedQuery that carries the column).
+- **The Feedback board is its window** (Miguel, 17 Oct 2026: "Add the 45/30-day window"): `apiFeedbackBoard` lists a crew On
+  board / On Vacation / Reserved only when the contract ends within `FB_DUE_AHEAD` = 45 days or ended within `FB_DUE_BEHIND` = 30
+  (no known sign-off = not listed), as its heading always said; Maria's scoring_board reads the same list. Pinned by
+  `test/bughunt_1016_plumbing.test.js`.
 - **The dated fixtures hold on every calendar day** (`scripts/clock_shift.mjs`, SHIFT_DAYS; `docs/NIGHT_WATCH.md`): four tests were
   time bombs (a DST-dependent gate hour in `sbm.test.js`, `mock.timers` in the earmark and board tests). The night watch runs the suite
   with the clock pushed +30 / +60 / +90 days once a month.

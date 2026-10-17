@@ -12,7 +12,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted be
 const SRC_PATH = new URL("../src/worker.js", import.meta.url);
 const SRC = readFileSync(SRC_PATH, "utf-8");
 const TMP = new URL(`../src/__bh1016_${process.pid}__.mjs`, import.meta.url);
-writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS, contractCountMap, apiFeedbackCrew };\n", "utf-8");
+writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS, contractCountMap, apiFeedbackCrew, apiFeedbackBoard, FB_DUE_AHEAD, FB_DUE_BEHIND };\n", "utf-8");
 let W;
 try { W = await import(TMP.href); } finally { unlinkSync(TMP); }
 
@@ -201,4 +201,19 @@ test("S1b: /api/feedback/crew?on= lists an answer from before the sign-on as ear
   // without a sign-on (the Inputs page, the feedback board) the answer is served as before
   r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129"))).json();
   assert.equal(r.prefill.sliders.sAcc, 25); assert.equal(r.previous.length, 0);
+});
+
+// ---- The Feedback board's window (Miguel, 17 Oct 2026: "Add the 45/30-day window") -----------------------------------------
+test("the Feedback board lists only contracts ending within 45 days or ended within 30, as its heading says", async () => {
+  assert.equal(W.FB_DUE_AHEAD, 45); assert.equal(W.FB_DUE_BEHIND, 30);
+  const today = "2026-10-17";
+  const crew = [["A", "On board", "2026-12-01"], ["B", "On board", "2026-12-02"], ["C", "On board", "2027-05-07"], ["D", "On board", null],
+    ["E", "On Vacation", "2026-09-17"], ["F", "On Vacation", "2026-09-16"], ["G", "Reserved", "2026-10-10"], ["H", "Inactive", "2026-10-15"], ["I", "On board", "2026-10-17"]];
+  const st = { today, crewRows: crew.map(([id, status]) => ({ id: "c" + id, agency_id: id, first_name: id, last_name: "X", vessel_observed: null, status })),
+    fbRoles: () => [{ role: "ray", answered: false, status: "none" }], statusOf: (c) => crew.find((x) => x[0] === c.agency_id)[1],
+    legNow: (sc) => { const off = crew.find((x) => x[0] === sc)[2]; return off ? { off, ship: "Apex" } : null; }, shipOf: (v) => v };
+  const r = await (await W.apiFeedbackBoard({}, st)).json();
+  assert.deepEqual(r.rows.map((x) => x.agency_id).sort(), ["A", "E", "G", "I"], "45 days ahead in, 46 out; 30 days behind in, 31 out; no sign-off out; Inactive out");
+  assert.equal(r.count, 4);
+  assert.deepEqual(r.rows.map((x) => x.agency_id), ["E", "G", "I", "A"], "ashore first, then by sign-off");
 });

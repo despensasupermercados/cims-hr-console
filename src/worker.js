@@ -4061,6 +4061,10 @@ async function processIntelInbox(env, limit) {
 // "On Vacation" = a contract just completed -> feedback due NOW; "On board" = currently serving ->
 // due at sign-off (pre-stage). The leg's dates are display/sort only, never include/exclude.
 // Inactive/Earmarked/Retired are not shown.
+// THE FEEDBACK WINDOW (Miguel, 17 Oct 2026: "Add the 45/30-day window"). The board's heading said "ending ≤45d or ended
+// ≤30d" while the board listed every crew On board, On Vacation or Reserved: a contract ending within FB_DUE_AHEAD days,
+// or one that ended within FB_DUE_BEHIND, is the list; no known sign-off is not on it.
+const FB_DUE_AHEAD = 45, FB_DUE_BEHIND = 30;
 async function apiFeedbackBoard(env, state) {
   // Same state, same status rule and same schedule as the scoring queue (loadFeedbackState).
   const { today, crewRows, fbRoles, statusOf, legNow, shipOf } = state || await loadFeedbackState(env);
@@ -4072,6 +4076,7 @@ async function apiFeedbackBoard(env, state) {
     const leg = legNow(c.agency_id);
     const off = leg ? (leg.off || null) : null;
     const days = off ? Math.round((new Date(off) - new Date(today)) / 86400000) : null;
+    if (days == null || days > FB_DUE_AHEAD || days < -FB_DUE_BEHIND) continue;
     const roles = fbRoles(c.id);
     rows.push({ agency_id: c.agency_id, name: [c.first_name, c.last_name].filter(Boolean).join(" "), vessel: (leg && shipOf(leg.ship)) || c.vessel_observed, signOff: off, days, status, due: DUE[status], roles, answeredCount: roles.filter(r => r.answered).length });
   }
