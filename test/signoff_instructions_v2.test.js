@@ -336,12 +336,12 @@ test("the overlap is said in the email's own words for a span (months and days p
   assert.match(short, /overlap aboard for 5 days from 26 Oct/);
 });
 
-// 17 Oct 2026, Miguel: a training visit is a trip, not a contract (visits.js). Jonathan Placer Alonzo (SC-0041465) teaches
-// A.J. Baleña aboard Pursuit (TDG's 16 Oct file: both On board, embarked the same day). rotationSections carries the trip on
-// the section as `visits`, never among the seats: it is never instructed, never anybody's reliever; its context is kept for
-// the T-7 link (not decided). Before the rule moved to the trip, this was his id alone ("Exclude him") — he also sails full
-// contracts (Rhapsody, Dec 2025 – Sep 2026), and those are instructed like anybody's.
-test("a training visit: never instructed, never the reliever, kept for the other emails; his full contract is instructed", async (t) => {
+// 17 Oct 2026, Miguel: a training visit is a trip, not a contract (visits.js). Jonathan Placer Alonzo (SC-0041465), a
+// tagged trainer, teaches A.J. Baleña aboard Pursuit (TDG's 16 Oct file: both On board, embarked the same day).
+// rotationSections carries the trip on the section as `visits`, never among the seats: never instructed, no sign-off
+// link, never anybody's reliever. Before the rule moved to the trip this was his id alone ("Exclude him") — he also sails
+// full contracts (Rhapsody, Dec 2025 – Sep 2026), and a trip marked a full contract is a seat, instructed like anybody's.
+test("a training visit: never instructed, no sign-off link, never the reliever; his full contract is instructed", async (t) => {
   const JON = "SC-0041465";
   const kevin = { agency_id: "SC-K", name: "Kevin Leif Jugao", ship: "Pursuit", current: true, signOn: "2026-05-02", signOff: "2026-10-31" };
   const aj = { agency_id: "SC-A", name: "A.J. Lorenzo Baleña", ship: "Pursuit", current: true, signOn: "2026-10-16", signOff: "2027-03-16" };
@@ -349,6 +349,7 @@ test("a training visit: never instructed, never the reliever, kept for the other
   const X = seatContexts([{ ship: "Pursuit", brand: "Azamara", crew: [kevin, aj], visits: [jonVisit], projections: [] }]);
   assert.equal(X["SC-K"].reliever.sc, "SC-A", "A.J. relieves Kevin");
   assert.equal(X[JON].instruct, false, "the visit is kept, flagged");
+  assert.equal(X[JON].visit, true);
   assert.equal(X["SC-K"].instruct, true);
   const alone = seatContexts([{ ship: "Pursuit", brand: "Azamara", crew: [kevin], visits: [jonVisit], projections: [] }]);
   assert.equal(alone["SC-K"].reliever, null, "only the trainer after Kevin: nobody named, never him");
@@ -369,16 +370,16 @@ test("a training visit: never instructed, never the reliever, kept for the other
   assert.equal(a.sent.length, 0);
   t.mock.timers.reset();
 
-  // the T-14 run skips a visit silently (no digest alert every day); the T-7 link still sees it
+  // the daily run skips a visit silently for BOTH emails (Miguel, 17 Oct 2026: the 7-days-out link too — "yes")
   const today = gateHourInstant().toISOString().slice(0, 10);
   const plus = (n) => { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-  const legs = [{ sc: JON, off: plus(5), ctx: { instruct: false } }, { sc: "SC-B", off: plus(5), ctx: { instruct: true } }];
+  const legs = [{ sc: JON, off: plus(5), ctx: { instruct: false, visit: true } }, { sc: "SC-B", off: plus(5), ctx: { instruct: true, visit: false } }];
   const h = autoHarness({ auto_send_enabled: "true" }, legs);
   t.mock.timers.enable({ apis: ["Date"], now: gateHourInstant().getTime() });
   await h.run(h.env, { scheduledTime: gateHourInstant().getTime() });
   t.mock.timers.reset();
   assert.deepEqual(h.calls.instr, ["SC-B"]);
-  assert.deepEqual(h.calls.link.sort(), [JON, "SC-B"].sort());
+  assert.deepEqual(h.calls.link, ["SC-B"], "no sign-off link for a visit either");
   assert.ok(!/not_instructed/.test(JSON.stringify(h.digests)), "no daily digest alert for a visit");
   assert.doesNotMatch(readFileSync(new URL("../src/signoff_context.js", import.meta.url), "utf-8"), /SC-0041465/, "no person's id decides it any more");
 });

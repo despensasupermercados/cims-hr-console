@@ -50,7 +50,7 @@ test("Edit crew: TDG's value under every field a person changed, Reset to TDG CL
   assert.match(W, /if\(String\(all\[k\]\)===String\(CREW_RESET\[k\]\)\)\{if\(!\(k in body\)\)n\+\+;body\[k\]='';\}/, "a reset sends '' (stored NULL), never TDG's value as a pin");
   assert.match(W, /b\.textContent=r\.n\?\('Save '\+r\.n\+' change'/);
   assert.match(W, /\(d\.canMoney\?'':' disabled'\)/);
-  assert.match(W, /return json\(\{ crew, contracts: ct, daysWorked: profile\.numbers\.seaDays, deployment: crewDeployment\(crew, VESSEL_REF, DRY_DOCK, today\), profile, tdg, override: ov \|\| null, canMoney: isMoneyUser\(session && session\.email\) \}\);/);
+  assert.match(W, /return json\(\{ crew, contracts: ct, daysWorked: profile\.numbers\.seaDays, deployment: crewDeployment\(crew, VESSEL_REF, DRY_DOCK, today\), profile, tdg, override: ov \|\| null, trainer: !!trainerRow, canMoney: isMoneyUser\(session && session\.email\) \}\);/);
   assert.match(W, /<option value="">TDG: '\+escHtml\(F\.status\|\|c\.status\|\|'—'\)\+'<\/option>/, "no manual status = TDG's word");
 });
 

@@ -311,7 +311,7 @@ export function applyRecordedSignoffs(legs, recMap, today) {
 import { snapToTurnaround, turnaroundsByShip } from "./turnaround.js";
 import { fetchTurnarounds } from "./port_days.js";
 import { shareInflight } from "./inflight.js";
-import { visitSet, isVisit } from "./visits.js";
+import { visitMap, isVisit, trainerSet } from "./visits.js";
 import { assignRelievers } from "./reliever.js";
 export const CONTRACT_MONTHS = 7;
 export const AZAMARA_CONTRACT_MONTHS = 5;
@@ -358,9 +358,15 @@ export async function fetchContractEdits(env) {
   ).all();
   return results || [];
 }
-// Rita's "Training visit" ticks (17 Oct 2026, visits.js). An older database without the table reads as none.
+// Rita's per-trip marks (17 Oct 2026, visits.js): kind 'visit' | 'contract'. An older database without the table or the
+// column reads as none (a trainer's trips are then visits by the tag alone).
 export async function fetchContractVisits(env) {
-  const r = await env.DB.prepare("SELECT sc, on_key FROM contract_visit").all().catch(() => ({ results: [] }));
+  const r = await env.DB.prepare("SELECT sc, on_key, kind FROM contract_visit").all().catch(() => ({ results: [] }));
+  return (r && r.results) || [];
+}
+// The crew tagged as trainers (crew_trainer, Rita's tag in Edit crew; 17 Oct 2026).
+export async function fetchTrainers(env) {
+  const r = await env.DB.prepare("SELECT sc FROM crew_trainer").all().catch(() => ({ results: [] }));
   return (r && r.results) || [];
 }
 export async function fetchVesselBrands(env) {
@@ -370,9 +376,9 @@ export async function fetchVesselBrands(env) {
 
 // PURE. rows: fetchRegistryRows · edits: fetchContractEdits · counter: fetchCounterKeys · open: the open
 // assignments (fetchOpenAssignments, with created_at/updated_at) · vessels: [{name, brand}] · today ·
-// visits: fetchContractVisits (Rita's "Training visit" ticks, visits.js).
-export function legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits } = {}) {
-  const vset = visitSet(visits);
+// visits: fetchContractVisits (Rita's per-trip marks) · trainers: fetchTrainers (the trainer tag) — visits.js.
+export function legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers } = {}) {
+  const vmap = visitMap(visits), tset = trainerSet(trainers);
   const brandOf = {};
   for (const v of (vessels || [])) if (v && v.name) brandOf[shipKey(v.name)] = BRAND_SHORT[v.brand] || v.brand || null;
   const isAz = (k) => AZAMARA_SHORT.includes(k);
@@ -409,8 +415,9 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
     fileBy[r.sc] = { status, key, at: dayOf(r.run_at) };
     if (!ship || !on) continue;
     const base = { ship, name: r.crew_name || null, sc: r.sc, ours: true, on, brand: brandOf[key] || (isAz(key) ? "Azamara" : null), crew_id: r.crew_id || null, source: "registry", fileAt: dayOf(r.run_at) };
-    // A TRAINING VISIT (17 Oct 2026, visits.js): Rita's tick on this trip, or a member of the shoreside team.
-    if (isVisit(vset, r.sc, on, { agency_id: r.sc, first_name: r.first_name, last_name: r.last_name })) base.visit = true;
+    // A TRAINING VISIT (17 Oct 2026, visits.js): a trainer's trip unless Rita marked it a full contract, a trip Rita
+    // marked a visit, or a trip of the shoreside team.
+    if (isVisit(vmap, r.sc, on, { agency_id: r.sc, first_name: r.first_name, last_name: r.last_name, trainer: tset.has(r.sc) })) base.visit = true;
     if (status === "On board") current.push({ ...base, key, tdgOff: off && off >= on ? off : null });
     else if ((status === "On Vacation" || status === "Inactive" || status === "Reserved" || status === "Not for Rehire") && off && off >= on) ended.push({ ...base, off, is_current: false, offSource: "tdg", offAt: dayOf(r.run_at) });
   }
@@ -536,14 +543,14 @@ export async function boardLegsFromDb(env, today) {
   return out;
 }
 async function boardLegsFromDbUncached(env, today) {
-  const [legs, asg, ended, recMap, rows, edits, counter, open, vessels, taRows, visits] = await Promise.all([
+  const [legs, asg, ended, recMap, rows, edits, counter, open, vessels, taRows, visits, trainers] = await Promise.all([
     legsFromCounter(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
     fetchRegistryRows(env), fetchContractEdits(env), fetchCounterKeys(env), fetchOpenAssignments(env), fetchVesselBrands(env),
     fetchTurnarounds(env, today).catch(() => []), // the fleet's turnaround days (8 Oct 2026): a projected sign-off lands on one
-    fetchContractVisits(env), // Rita's "Training visit" ticks (17 Oct 2026)
+    fetchContractVisits(env), fetchTrainers(env), // training visits (17 Oct 2026, visits.js)
   ]);
   const turnarounds = turnaroundsByShip(taRows);
-  const registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits });
+  const registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers });
   const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry);
   const out = mergeBoardLegs(registry.concat(history), asg, today, ended);
   // The same map rides on the schedule (non-enumerable) so the board's other projections — the earmark bench's
