@@ -312,6 +312,7 @@ import { snapToTurnaround, turnaroundsByShip } from "./turnaround.js";
 import { fetchTurnarounds } from "./port_days.js";
 import { shareInflight } from "./inflight.js";
 import { visitSet, isVisit } from "./visits.js";
+import { assignRelievers } from "./reliever.js";
 export const CONTRACT_MONTHS = 7;
 export const AZAMARA_CONTRACT_MONTHS = 5;
 const SHIP_KEYS = buildShipKeys(VESSEL_REF);
@@ -420,33 +421,38 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
     if (L.tdgOff) cand.push({ off: L.tdgOff, source: "tdg", at: L.fileAt, final: true });
     const act = counterActOff(L.sc, L.on);
     if (!L.tdgOff && act && act >= L.on) cand.push({ off: act, source: "tdg", at: null, final: true });
-    // A visit never dates the printer's sign-off (17 Oct 2026): the trainer embarking is not the relief. Nor is the
-    // printer's own visit dated by anybody else's embark — a visit ends on its own word (TDG's debark, Rita's date).
-    const next = L.visit ? null : current.filter((o) => o.sc !== L.sc && o.key === L.key && o.on > L.on && !o.visit).map((o) => o.on).sort()[0];
-    // The cross-over dates the sign-off but is not final: the same file still lists this crew On board (held).
-    const cross = next ? { off: next, source: "tdg", at: L.fileAt, reliever: current.find((o) => o.sc !== L.sc && o.key === L.key && o.on === next && !o.visit) } : null;
     // 2. Rita: the sign-off she typed for this contract, or her reliever card on this hull — the newer wins.
     const e = editFor(L.sc, L.on);
     if (e && dayOf(e.sign_off) && dayOf(e.sign_off) >= L.on) cand.push({ off: dayOf(e.sign_off), source: "rita", at: String(e.updated_at || ""), conf: e.off_conf != null ? !!e.off_conf : false });
-    let card = null;
+    const cards = [];
     for (const a of (open || [])) {
       if (!a || !a.sc || a.sc === L.sc || !a.ship || !dayOf(a.sign_on)) continue;
       if (shipKey(a.ship) !== L.key || dayOf(a.sign_on) <= L.on) continue;
       // A card whose sign-on has passed holds only while no later file contradicts it: a file dated AFTER the
       // sign-on that does not have the reliever On board this hull says the relief did not happen. A file dated ON
       // the sign-on day says nothing yet — the export runs in the morning, the reliever embarks that day (16 Oct 2026;
-      // the same strict rule as earmark.js, seen = signOn < fileAt).
+      // the same strict rule as earmark.js, seen = signOn < fileAt). TDG EARMARKING him for this very hull is not a
+      // contradiction either (17 Oct 2026, Corpin on Grandeur: "turn green"): TDG has the plan, not the embark yet.
       const w = fileBy[a.sc];
-      if (dayOf(a.sign_on) <= today && w && w.at && w.at > dayOf(a.sign_on) && !(w.status === "On board" && w.key === L.key)) continue;
-      if (!card || dayOf(a.sign_on) < card.on) card = { on: dayOf(a.sign_on), at: String(a.updated_at || a.created_at || ""), id: a.id || null, sc: a.sc, name: a.crew_name || null };
+      if (dayOf(a.sign_on) <= today && w && w.at && w.at > dayOf(a.sign_on) && !((w.status === "On board" || w.status === "Earmarked") && w.key === L.key)) continue;
+      cards.push({ on: dayOf(a.sign_on), at: String(a.updated_at || a.created_at || ""), id: a.id || null, sc: a.sc, name: a.crew_name || null });
     }
-    if (card) cand.push({ off: card.on, source: "card", at: card.at, reliever: { sc: card.sc, name: card.name, cardId: card.id, on: card.on } });
+    const card = cards.reduce((b, c) => (!b || c.on < b.on ? c : b), null);
+    if (card) cand.push({ off: card.on, source: "card", at: card.at });
+    // A visit never dates the printer's sign-off (17 Oct 2026): the trainer embarking is not the relief. Nor is the
+    // printer's own visit dated by anybody else's embark — a visit ends on its own word (TDG's debark, Rita's date).
+    const next = L.visit ? null : current.filter((o) => o.sc !== L.sc && o.key === L.key && o.on > L.on && !o.visit).map((o) => o.on).sort()[0];
+    // The cross-over dates the sign-off but is not final: the same file still lists this crew On board (held).
+    const cross = next ? { off: next, source: "tdg", at: L.fileAt } : null;
+    const typedOff = cand.find((c) => c.source === "rita");
+    // Who relieves him is decided after every leg on the hull has its sign-off (assignRelievers, below).
+    const rowCands = current.filter((o) => o.sc !== L.sc && o.key === L.key && !o.visit).map((o) => ({ sc: o.sc, on: o.on, row: o }));
     let pick = cand.find((c) => c.final) || null;
     if (pick) { const t = cand.filter((c) => c.final).sort((a, b) => (a.off < b.off ? -1 : 1)); pick = t[0]; }
     // RITA'S TYPED DATE OUTRANKS THE CROSS-OVER while TDG still lists the crew On board (Miguel, 17 Oct 2026, on Kevin Jugao,
     // Pursuit: the 16 Oct file has his relievers aboard, Rita typed 31 Oct, TDG still lists him On board — "Rita's typed
-    // date"). The file's second crew still names the reliever; the held rule still applies once her date passes.
-    if (!pick && cross) { const typed = cand.find((c) => c.source === "rita"); pick = typed ? { ...typed, reliever: cross.reliever } : cross; }
+    // date"). The reliever is named by the one rule below; the held rule still applies once her date passes.
+    if (!pick && cross) pick = typedOff || cross;
     if (!pick) {
       const rc = cand.filter((c) => c.source === "rita" || c.source === "card");
       if (rc.length === 1) pick = rc[0];
@@ -469,12 +475,27 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
     if (L.visit) leg.visit = true;
     if (pick.source === "projected" && pick.snapped) leg.offSnapped = pick.snapped;   // days moved to the turnaround
     if (pick.source === "projected" && pick.port) leg.disembark = pick.port;         // the turnaround port, unless Rita's edit names one (below)
-    // The reliever's OWN sign-on rides with the name: since Rita's typed date outranks the cross-over (17 Oct 2026) the
-    // sign-off is no longer the reliever's embark, and the held note printed "<reliever> embarked <the typed date>".
-    if (pick.reliever) leg.reliever = { sc: pick.reliever.sc, name: pick.reliever.name || null, cardId: pick.reliever.cardId || null, on: pick.reliever.on || null };
+    // The reliever's candidates ride on the leg (non-enumerable) until every leg on the hull has its sign-off.
+    if (!L.visit) Object.defineProperty(leg, "_rel", { value: { key: L.key, az: isAz(L.key), cands: rowCands.concat(cards.map((c) => ({ sc: c.sc, on: c.on, card: c }))) } });
     if (pick.source === "rita" && pick.conf && !held) leg.offConfirmed = true;
     if (e) { if (e.embark) leg.embark = e.embark; if (e.disembark) leg.disembark = e.disembark; leg.edit = { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, onConfirmed: !!e.on_conf, seq: e.seq != null ? Number(e.seq) : null }; }
     out.push(leg);
+  }
+  // THE RELIEVER, ONE RULE (reliever.js, Miguel 17 Oct 2026: "Adopt it everywhere"): the first person to sign on the hull
+  // after him, never a training visit, counted from RELIEF_WINDOW_DAYS before the earlier of his shown sign-off and his
+  // projected one; one person relieves one seat. His OWN sign-on rides with the name: since Rita's typed date outranks the
+  // cross-over the sign-off is no longer the reliever's embark (the held note printed "<reliever> embarked <typed date>").
+  // It names; it never dates — the sign-off above is the file's, Rita's or the card's (§10d). Myrna Suarez (embarked
+  // Enchantment 3 Oct) is not Valderrama's relief for 31 Jan; Karl Lanuza's card is.
+  const byHull = {};
+  for (const leg of out) if (leg._rel) (byHull[leg._rel.key] = byHull[leg._rel.key] || []).push(leg);
+  for (const legsOn of Object.values(byHull)) {
+    const hits = assignRelievers(legsOn.map((l) => ({ sc: l.sc, on: l.on, off: l.off, azamara: l._rel.az, cands: l._rel.cands })));
+    legsOn.forEach((l, i) => {
+      const h = hits[i]; if (!h) return;
+      l.reliever = h.card ? { sc: h.card.sc, name: h.card.name || null, cardId: h.card.id || null, on: h.card.on || null }
+        : { sc: h.row.sc, name: h.row.name || null, cardId: null, on: h.row.on || null };
+    });
   }
   for (const E of ended) { const { key, ...leg } = E; out.push(leg); }
   return out;

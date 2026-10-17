@@ -1317,6 +1317,26 @@ questions (his answers land in the sections they change). Pinned by `test/review
 - **Maria's "former crew" is `isOffFleet(status)`**, never the manual tag (a tagged crew TDG has On board left her active
   lists; Not for Rehire could not be listed by name).
 
+**Miguel's answers of 17 Oct 2026 to the review** (Brain recICJGsDk6oJJpSd). Pinned by `test/review_1017_board.test.js`.
+- **THE RELIEVER IS ONE RULE** (`src/reliever.js`; "Adopt it everywhere"): the first person to sign on the hull after him,
+  never a training visit, counted from `RELIEF_WINDOW_DAYS` = 45 before the EARLIER of his shown sign-off and his projected
+  one (sign-on + 7 months, Azamara 5 — an extension keeps the reliever who boarded on the original plan); TDG's undated
+  Earmarked row the last resort. **One person relieves one seat** (`assignRelievers`): two seats wanting the same person —
+  he relieves the one whose sign-off is nearest his sign-on, the other looks further. The board computes it once per hull
+  (`legsFromRegistry` → `leg.reliever`, with his own sign-on); the email (`seatContexts`), the profile (`handovers`: the
+  board's answer for a file-dated contract, the rule for any other) and the dashboard (`relieverFor`: the board's answer, a
+  reliever already aboard included — "in TDG") read the same. **It names, it never dates**: the cross-over still dates the
+  sign-off (§10d). On the 16 Oct file: 0 dates moved; Lanuza (not Suarez) for Valderrama; 20 seats gained the name the board
+  had left blank (it named a reliever only when he also dated the sign-off).
+- **A card TDG earmarks for that very hull** turns green "ABOARD · AWAITING TDG FILE" on its sign-on (`awaitingCard`, the
+  seat's `awaiting`: verdict `earmarked` like `pending`), and a later file still listing him Earmarked there does not
+  contradict it (`legsFromRegistry`): TDG has the plan, not the embark yet (Corpin, Grandeur, 18 Oct).
+- **Earmarked for the ship he is aboard** (Ida Purnama, Xcel: "remember that Ida is onboard"; one person, SC-0040010, the
+  duplicate merged): TDG's Earmarked word for the hull his contract is still RUNNING on (a live leg there) is his next
+  contract, not the end of this one — the board seats him (`earmarkedHere`) and never ends the leg "per the TDG file".
+- Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
+  audit request ar_eb101ea1 on Kevin Jugao is LIVE (test_mode 0) — Miguel says when to void or cancel it; do not grade it.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):
