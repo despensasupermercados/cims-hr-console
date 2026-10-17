@@ -11,6 +11,7 @@
 // of 126; Ray's feedback, the intel card and the "Resigned." comment were nowhere on the page.
 import { VESSEL_REF } from "./vessel_ref.js";
 import { mdShort } from "./span_md.js";
+import { pickReliever } from "./reliever.js";
 import { buildShipKeys, canonShipWith, normShip, AZAMARA_SHORT } from "./shipname.js";
 
 const SHIP_KEYS = buildShipKeys(VESSEL_REF);
@@ -88,14 +89,22 @@ export function handovers(c, { legs, cards, tdgEarmarks, names, sc } = {}) {
     if (!before || g < before.gap) before = { sc: l.sc, name: nm(l.sc, l.name), off: l.off, src: legSrc(l), gap: g };
   }
   const after = [];
-  for (const l of (legs || [])) if (l && l.sc && l.sc !== sc && !l.visit && key(l.ship) === k && iso(l.on) && l.on > c.on && daysBetween(c.on, l.on) > 14)
+  for (const l of (legs || [])) if (l && l.sc && l.sc !== sc && !l.visit && key(l.ship) === k && iso(l.on) && l.on > c.on)
     after.push({ sc: l.sc, name: nm(l.sc, l.name), on: l.on, off: iso(l.off) || null, src: legSrc(l) });
-  for (const a of (cards || [])) if (a && a.sc && a.sc !== sc && a.ship && key(a.ship) === k && iso(a.sign_on) && a.sign_on > c.on && daysBetween(c.on, a.sign_on) > 14 && !after.some((x) => x.sc === a.sc))
+  for (const a of (cards || [])) if (a && a.sc && a.sc !== sc && a.ship && key(a.ship) === k && iso(a.sign_on) && a.sign_on > c.on && !after.some((x) => x.sc === a.sc))
     after.push({ sc: a.sc, name: nm(a.sc, a.crew_name), on: iso(a.sign_on), off: iso(a.planned_sign_off) || null, src: "earmark", told: !!a.deployed_at,
       // TDG's file earmarks the same crew for this hull too: "EARMARK · TDG" on the board, so "in TDG" here (13 Oct 2026)
       tdg: (tdgEarmarks || []).some((r) => r && r.agency_id === a.sc && r.vessel && key(r.vessel) === k) });
   after.sort((a, b) => (a.on < b.on ? -1 : 1));
-  let next = after[0] || null;
+  // WHO RELIEVES HIM IS ONE RULE (reliever.js, Miguel 17 Oct 2026: "Adopt it everywhere"). A contract the board dates from
+  // TDG's file carries the board's own answer (one person relieves one seat, decided across the hull): read it, never a
+  // second opinion. Any other contract (the Counter's history, a card's seat): the same rule over these candidates.
+  let next = null;
+  if (c.source === "registry" && !c.visit) {
+    const r = c.reliever;
+    if (r && r.sc) next = after.find((x) => x.sc === r.sc && (!r.on || x.on === r.on)) || after.find((x) => x.sc === r.sc)
+      || { sc: r.sc, name: nm(r.sc, r.name), on: iso(r.on) || null, off: null, src: r.cardId ? "earmark" : "tdg" };
+  } else next = pickReliever({ sc, on: c.on, off: iso(c.off), azamara: c.brand === "Azamara" || isAz(c.ship) }, after);
   if (!next) { const t = (tdgEarmarks || []).find((r) => r && r.agency_id !== sc && r.vessel && key(r.vessel) === k); if (t) next = { sc: t.agency_id, name: nm(t.agency_id, t.name), on: null, src: "tdg_earmark" }; }
   if (before) delete before.gap;
   return { before, after: next };

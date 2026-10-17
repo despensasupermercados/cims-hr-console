@@ -6,6 +6,7 @@
 // what happens in the next 7 days, what TDG has to correct. Each fact is said ONCE on the page; the top tiles are
 // the headline and point at the one place that holds the detail. Nothing here is money (§1) or billing (§10b).
 import { shipCode } from "./ship_codes.js";
+import { pickReliever } from "./reliever.js";
 
 const DAY = 864e5;
 const t = (iso) => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
@@ -42,15 +43,16 @@ function earmarksOf(sec) {
   return (sec.projections || []).concat(extra);
 }
 
-function relieverFor(seat, earmarks) {
-  let e = null;
-  if (seat.reliever && seat.reliever.sc) e = earmarks.find((x) => x.agency_id === seat.reliever.sc) || null;
-  if (!e) {
-    const after = earmarks.filter((x) => x.agency_id !== seat.agency_id && (!x.signOn || !seat.signOn || x.signOn >= seat.signOn))
-      .sort((a, b) => String(a.signOn || "9999").localeCompare(String(b.signOn || "9999")));
-    e = after[0] || null;
-  }
-  return e;
+// WHO RELIEVES THE SEAT IS ONE RULE (reliever.js, Miguel 17 Oct 2026: "Adopt it everywhere"). The board names him for a
+// seat it dates (`reliever`, decided across the hull): read it — a card or a crew already aboard (A.J. Baleña aboard
+// Pursuit since 16 Oct relieves Kevin Jugao; "No reliever" was wrong). No name from the board: the same rule over the
+// ship's cards and seats, TDG's undated Earmarked row the last resort.
+function relieverFor(seat, earmarks, seats, azamara) {
+  const pool = earmarks.concat(seats.filter((o) => o !== seat && o.agency_id));
+  if (seat.reliever && seat.reliever.sc) return pool.find((x) => x.agency_id === seat.reliever.sc) || null;
+  const cands = pool.filter((x) => x.agency_id && (iso(x.signOn) || earmarks.includes(x))).map((x) => ({ sc: x.agency_id, on: iso(x.signOn), x }));
+  const hit = pickReliever({ sc: seat.agency_id, on: seat.signOn, off: seat.signOff, azamara }, cands);
+  return hit ? hit.x : null;
 }
 
 const tdgHas = (e, ship) => !!(e && ((e.registry && e.registry.verdict === "earmarked") || (e.file && e.file.status === "Earmarked" && e.file.ship === ship)));
@@ -96,11 +98,11 @@ export function buildOps(input) {
       if (overdue) past = true;
       const d = daysBetween(today, s.signOff);
       if (!overdue && d > WINDOW_CHANGES) continue;
-      const e = relieverFor(s, ems);
+      const e = relieverFor(s, ems, seats, sec.brand === "Azamara");
       const soon = !overdue && d <= WINDOW_DUE;
       const rel = e ? {
         name: e.name, surname: sn(e.name, e.agency_id), sc: e.agency_id || null, signOn: e.signOn || null,
-        tdg: tdgHas(e, sec.ship), told: !!e.deployedAt,
+        tdg: tdgHas(e, sec.ship) || !!(e.current && e.file && e.file.status === "On board"), told: !!e.deployedAt,   // aboard per TDG's file is in TDG
         passed: !!(e.signOn && e.signOn < today),
         docs: relieverDocs(e.docs),
       } : null;
