@@ -1579,6 +1579,14 @@ async function apiSgaImport(request, env, session) {
   }
   return json(await applySgaWorkbook(env, b, st, (session && session.email) || "?", b.source || "upload"));
 }
+// What a staged bill adds up to against TDG's own GRAND TOTAL — said on a held bill so Rita sees the gap before she opens it.
+function sgaGap(st) {
+  const lines = Math.round((st.summary.total || 0) * 100) / 100;
+  const others = Math.round(st.others.reduce((a, o) => a + (o.amount || 0), 0) * 100) / 100;
+  const grand = st.grand_total == null ? null : Math.round(st.grand_total * 100) / 100;
+  return { year: st.period.year, month: st.period.month, lines_total: lines, others, grand_total: grand,
+    gap: grand == null ? null : Math.round((grand - lines - others) * 100) / 100, rows: st.lines.length };
+}
 // The ONE path that loads a month of the bill — the Upload page and the SharePoint sync both come here (§10j).
 // `st` is sgaStage's result (staged once, applied once); `b` carries the file's name / hash for sga_file.
 async function applySgaWorkbook(env, b, st, by, source) {
@@ -1655,7 +1663,15 @@ function syncDeps(env) {
       seen: async (ids) => { const m = new Map(); if (!ids.length) return m; const r = await env.DB.prepare("SELECT item_id, etag FROM sp_sync WHERE status='ok' AND item_id IN (" + ids.map(() => "?").join(",") + ") ORDER BY at").bind(...ids).all(); for (const x of r.results) m.set(x.item_id, x.etag); return m; },
       record: async (r) => env.DB.prepare("INSERT INTO sp_sync (id,item_id,path,name,etag,modified,kind,year,month,status,detail,at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind("sp_" + crypto.randomUUID(), r.item_id, r.path, r.name, r.etag, r.modified, r.kind, r.year, r.month, r.status, r.detail, r.at).run(),
     },
-    applySga: async (sheets, meta) => { const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source, path: meta.path || null }; const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail }; return applySgaWorkbook(env, b, st, meta.by, meta.source); },
+    applySga: async (sheets, meta) => {
+      const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source, path: meta.path || null };
+      const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail };
+      // HELD FOR RITA (Miguel, 17 Oct 2026: "Hold it for Rita"): a bill that arrives by itself (the inbox: the mail intake
+      // and the agent's rows) whose lines do not add up to TDG's GRAND TOTAL loads nothing. The Upload page — the dry-run,
+      // its amber chip, then Apply — is how she loads it after checking. A summary-only file has no total to miss (null).
+      if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
+      return applySgaWorkbook(env, b, st, meta.by, meta.source);
+    },
     applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
   };
 }
@@ -1731,8 +1747,14 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
     const rec = { item_id: h.item_id, path: h.path, name: h.name, etag: h.modified, modified: h.modified, kind: h.kind, year: h.year, month: h.month || null, at: now };
     const mark = async (status, detail) => { for (let i = 0; i < ids.length; i += 50) await env.DB.prepare("UPDATE sp_inbox SET status=?, detail=?, applied_at=? WHERE id IN (" + ids.slice(i, i + 50).map(() => "?").join(",") + ")").bind(status, String(detail || "").slice(0, 2000), now, ...ids.slice(i, i + 50)).run(); };
     try {
-      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup", path: h.path };
+      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup", path: h.path, holdUnreconciled: true };
       const res = h.kind === "sga" ? await deps.applySga(sheets, meta) : h.kind === "travel" ? await deps.applyTravel(sheets, +h.year, meta) : { error: "unknown_kind", detail: h.kind };
+      if (res && res.held) {   // loads nothing; the rows stay as they arrived, named on the Travel tab (apiSga `held`)
+        await deps.db.record({ ...rec, status: "held", detail: JSON.stringify(res).slice(0, 2000) });
+        await mark("unreconciled", JSON.stringify(res));
+        report.held = report.held || []; report.held.push({ file_key: fileKey, name: h.name, ...res });
+        continue;
+      }
       const bad = res && res.error;
       await deps.db.record({ ...rec, status: bad ? "error" : "ok", detail: JSON.stringify(res || null).slice(0, 2000) });
       await mark(bad ? "error" : "ok", bad ? res.error + (res.detail ? ": " + res.detail : "") : JSON.stringify(res));
@@ -1744,7 +1766,8 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
       report.errors.push({ file_key: fileKey, name: h.name, error: msg });
     }
   }
-  if (report.loaded.length || report.errors.length) await logData(env, "sharepoint inbox", report.loaded.length, "loaded " + report.loaded.length + ", errors " + report.errors.length + ", waiting " + report.waiting);
+  const heldN = (report.held || []).length;
+  if (report.loaded.length || report.errors.length || heldN) await logData(env, "sharepoint inbox", report.loaded.length, "loaded " + report.loaded.length + ", errors " + report.errors.length + ", waiting " + report.waiting + (heldN ? ", HELD " + heldN + " (does not reconcile with TDG's grand total: " + report.held.map((x) => x.name).join(", ") + ")" : ""));
   return report;
 }
 // ---- THE MAIL INTAKE (src/mail_intake.js) ----
@@ -1836,13 +1859,15 @@ async function apiInboxApply(env, session) {
 // The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
 async function apiSga(env) {
   await ensureSga(env);
-  const [linesRes, filesRes, trRes, crewRes, sumRes, srcRes] = await Promise.all([
+  const [linesRes, filesRes, trRes, crewRes, sumRes, srcRes, heldRes] = await Promise.all([
     env.DB.prepare("SELECT * FROM sga_line ORDER BY year DESC, month DESC, brand, vessel, seq").all(),
     env.DB.prepare("SELECT * FROM sga_file ORDER BY year DESC, month DESC, loaded_at DESC").all(),
     env.DB.prepare("SELECT * FROM training_cost ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
     env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, source, by, at, file_key, note FROM sga_source_file ORDER BY at DESC").all(),
+    // bills the inbox HELD (17 Oct 2026): their lines do not add up to TDG's grand total; Rita loads them by hand
+    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' GROUP BY file_key").all().catch(() => ({ results: [] })),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -1853,7 +1878,17 @@ async function apiSga(env) {
   // the newest file per month is the one that counts; older loads of the same month stay on sga_file as history
   // (a summary-only load — rows 0 — never hides a month's lines)
   const latest = {}; for (const f of filesRes.results) { const k = f.year + "-" + f.month; if (!latest[k] && f.rows > 0) latest[k] = f.id; }
-  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, cols: SGA_COL_KEYS, today: TODAY() });
+  // a held bill stops being named once a bill for its month was loaded after it (Rita's Upload, or a corrected re-send)
+  const byFileKey = {}; for (const x of srcRes.results) if (x.file_key && !byFileKey[x.file_key]) byFileKey[x.file_key] = x;
+  const held = [];
+  for (const r of heldRes.results || []) {
+    let d = {}; try { d = JSON.parse(r.detail || "{}"); } catch {}
+    if (filesRes.results.some((f) => f.year === d.year && f.month === d.month && f.loaded_at > (r.held_at || ""))) continue;
+    const src = byFileKey[r.file_key];
+    held.push({ file_key: r.file_key, name: r.name, held_at: r.held_at, year: d.year || null, month: d.month || null, lines_total: d.lines_total ?? null,
+      others: d.others ?? null, grand_total: d.grand_total ?? null, gap: d.gap ?? null, rows: d.rows ?? null, hash: src && src.r2_key ? src.hash : null });
+  }
+  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, held, cols: SGA_COL_KEYS, today: TODAY() });
 }
 
 // THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once", Miguel: "deploy"). One wave: the Keyman
@@ -2651,7 +2686,7 @@ async function rotationSections(env) {
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
-  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore, trainer: !!c.trainer  })); };
+  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending" || regOf(x.asgId).verdict === "earmarked")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore, trainer: !!c.trainer  })); };
   const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
@@ -2704,7 +2739,12 @@ async function rotationSections(env) {
     }
     const sc = c.agency_id, w = fileOf[sc] || null, cards = (inForce[sc] || []).filter((a) => !overriddenAsg.has(a.asgId || cardAsg[sc + "|" + a.key]));
     let seatKey = null;
-    if (w && w.status === "On board" && w.known && !absentSince[sc]) {
+    // EARMARKED FOR THE SHIP HE IS ABOARD (Miguel, 17 Oct 2026, on Ida Purnama, Xcel: "remember that Ida is onboard"): TDG
+    // lists him "Earmarked Xcel" — his NEXT contract there (Rita's card for 24 Jan 2027) — while his current one runs to
+    // Rita's 21 Nov. The schedule already keeps that contract current (the file gives it no dates, foldCounterHistory);
+    // the board now seats him too instead of ending it "per the TDG file". Only a leg already running on THAT hull.
+    const earmarkedHere = !!(w && w.status === "Earmarked" && w.known && !absentSince[sc] && liveLeg.has(sc + "|" + w.key));
+    if (w && (w.status === "On board" || earmarkedHere) && w.known && !absentSince[sc]) {
       const off = completedOff(HIST, sc, w.key, today, keyOf);
       if (off) completedBy[sc + "|" + w.key] = off;          // KNOWN completed: drawn underneath (6 Oct 2026: not a row)
       else {
@@ -2753,7 +2793,9 @@ async function rotationSections(env) {
   // the file predates the sign-on, or has no word), is the seafarer aboard per the console: drawn green,
   // "awaiting the TDG file", which absorbs the card when it carries them. A card the file contradicts is off
   // the board (overriddenAsg); a confirmed one is the seat itself.
-  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending"); };
+  // TDG earmarking him for this very hull is TDG having the plan, not the embark yet (17 Oct 2026, Corpin on Grandeur:
+  // "turn green") — the same as no word: aboard per the console, awaiting the file.
+  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked"); };
   const projByShip = {};
   for (const a of pendingProjections(canonAsg, drawn)) {
     const ship = a.ship;
@@ -2868,6 +2910,7 @@ async function rotationSections(env) {
       // On board HERE keeps the leg; On board a hull the console cannot read keeps it too — a typo in TDG's
       // vessel cell is an unknown_ship row for Rita, never a contract ended on the board.
       if (!w || !w.status || (w.status === "On board" && (w.key === k || !w.known))) return null;
+      if (w.status === "Earmarked" && w.key === k) return null;   // his next contract HERE: the running one is not ended (Purnama, 17 Oct 2026)
       return w.at || today;
     };
     const history = scheduleLegs
@@ -4375,6 +4418,73 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .crscroll{max-height:252px;overflow:auto;overscroll-behavior:contain}
 .crtotal{text-align:center;font-size:12.5px;color:var(--mut);padding-top:2px;font-variant-numeric:tabular-nums}
 .crtotal b{color:var(--navy);font-weight:700}
+/* TRAVEL TAB (17 Oct 2026, Miguel: "fresh, young, luxury feeling .. filters on the left .. allowing rita to make decisions").
+   The rail is the Crew tab's (crrail); the cards are hairline white with one big number, two greys and soft fills. */
+#tvwrap .crrail{flex:0 0 236px;min-width:236px;max-width:236px}
+#tvwrap .crrail .crfacet input{width:16px;height:16px;margin:0;flex:0 0 auto;accent-color:var(--navy);pointer-events:none}
+#tvwrap .crfacet span:first-of-type{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tvfacets{display:flex;flex-direction:column;gap:18px}
+.tvfacets>div+div{border-top:1px solid var(--line);padding-top:16px}
+.tvmo{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.tvmo button{all:unset;box-sizing:border-box;text-align:center;font-size:12px;font-weight:600;height:28px;line-height:28px;border-radius:8px;cursor:pointer;color:var(--deep)}
+.tvmo button.all{grid-column:1/-1;text-align:left;padding:0 8px;font-weight:500;font-size:13px}
+.tvmo button:hover{background:#EEF2F7}
+.tvmo button.none{color:#B6C1CF}
+.tvmo button.on{background:var(--navy);color:#fff}
+.tvmo button:focus-visible{outline:2px solid var(--royal);outline-offset:1px}
+.tvmain{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.tvcard{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-sizing:border-box;min-width:0}
+.tvh{font-family:'Outfit';font-size:15px;font-weight:700;color:var(--ink);margin:0;display:inline-flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.tvh small{font-family:'DM Sans',system-ui,sans-serif;font-size:12px;font-weight:500;color:var(--mut)}
+.tvsub{font-size:12.5px;color:var(--mut);margin:3px 0 0;line-height:1.45}
+.tvlab{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--mut)}
+.tvhero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:36px;align-items:center;padding:24px 26px}
+.tvbig{font-family:'Outfit';font-size:46px;font-weight:700;letter-spacing:-.03em;color:var(--ink);line-height:1;margin:10px 0 14px;font-variant-numeric:tabular-nums}
+.tvpill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap;margin:2px 4px 2px 0}
+.tvpill.ok{background:#E8F5EC;color:#1F6B3A}.tvpill.bad{background:#FDECEA;color:#B42318}.tvpill.mut{background:#EEF1F6;color:var(--mut)}
+.tvmeter{position:relative;height:8px;border-radius:999px;background:#EEF1F6;margin:20px 0 8px}
+.tvmeter>i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:var(--navy)}
+.tvmeter>i.over{background:#D92D20}
+.tvmeter>u{position:absolute;top:-3px;bottom:-3px;border-radius:999px;border:1.5px dashed #B9C6D6;box-sizing:border-box}
+.tvmeter>b{position:absolute;top:-7px;bottom:-7px;width:2px;background:#E8A13A;border-radius:2px}
+.tvscale{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+.tvfacts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:18px;border-top:1px solid var(--line);padding-top:16px}
+.tvfact .v{font-family:'Outfit';font-size:21px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tvfact .l{font-size:12px;color:var(--mut);margin-top:3px;line-height:1.35}
+.tvdec{display:flex;flex-direction:column;margin-top:6px}
+.tvdi{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:14px;align-items:center;padding:13px 0}
+.tvdi+.tvdi{border-top:1px solid #F0F3F7}
+.tvdi>i{width:8px;height:8px;border-radius:50%}
+.tvdi .t{font-size:13.5px;font-weight:600;color:var(--ink)}
+.tvdi .w{font-size:12.5px;color:var(--mut);margin-top:2px;line-height:1.4}
+.tvgo{all:unset;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--royal);white-space:nowrap;padding:7px 10px;border-radius:9px}
+.tvgo:hover{background:#EEF4FC}.tvgo:focus-visible{outline:2px solid var(--royal)}
+.tvok{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13.5px;color:#1F6B3A;font-weight:600}
+.tvok i{width:8px;height:8px;border-radius:50%;background:#2E9E5B}
+.tvgrid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.tvcat{display:grid;grid-template-columns:84px minmax(0,1fr) 78px 46px;gap:12px;align-items:center;padding:8px 6px;margin:0 -6px;border-radius:8px;font-size:13px;cursor:pointer;color:var(--deep)}
+.tvcat:hover{background:#F5F7FA}
+.tvcat .bar{position:relative;height:8px}
+.tvcat .bar em,.tvcat .bar i{position:absolute;left:0;border-radius:999px}
+.tvcat .bar em{top:0;bottom:0;background:#E6EBF2}
+.tvcat .bar i{top:2px;bottom:2px;background:var(--navy)}
+.tvcat b{text-align:right;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.tvcat .d{text-align:right;font-size:11.5px;font-weight:700;color:var(--mut);font-variant-numeric:tabular-nums}
+.tvcat .d.up{color:#B42318}.tvcat .d.dn{color:#1F6B3A}
+.tvp{display:grid;grid-template-columns:32px minmax(0,1fr) auto;gap:12px;align-items:center;padding:8px 6px;margin:0 -6px;border-radius:10px;cursor:pointer}
+.tvp:hover{background:#F5F7FA}
+.tvp .av{width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:var(--navy);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;letter-spacing:.02em}
+.tvp .nm{font-size:13.5px;font-weight:600;color:var(--ink)}
+.tvp .sb{display:block;font-size:11.5px;color:var(--mut);margin-top:1px}
+.tvp b{font-size:13.5px;color:var(--ink);font-variant-numeric:tabular-nums}
+details.tvfold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+details.tvfold>summary::-webkit-details-marker{display:none}
+details.tvfold>summary::after{content:'';width:8px;height:8px;border-right:2px solid #9FB0C6;border-bottom:2px solid #9FB0C6;transform:rotate(45deg);margin:-4px 4px 0 12px;transition:transform .18s ease}
+details.tvfold[open]>summary::after{transform:rotate(-135deg);margin-top:4px}
+#tvsga .zlabel{margin-top:0 !important}
+@media(max-width:1180px){.tvhero{grid-template-columns:1fr;gap:18px}.tvgrid2{grid-template-columns:1fr}}
+@media(max-width:860px){#tvwrap .crrail{flex:1 1 auto;max-width:none;min-width:0}}
+@media(max-width:600px){.tvfacts{grid-template-columns:1fr 1fr}.tvbig{font-size:38px}.tvcard{padding:16px}.tvcat{grid-template-columns:70px minmax(0,1fr) 70px 40px}}
 .cpass{display:flex;flex-direction:column;gap:5px;min-width:0;max-width:440px}
 .cplbl,.cpdates{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .cplbl span{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);white-space:nowrap}
@@ -6252,11 +6362,18 @@ function tLabel(r){return r.crew_display||r.crew_name;}
 var TCLIENT={royal:'Royal',celebrity:'Celebrity',azamara:'Azamara',ncl:'NCL',shoreside:'Shoreside'};
 var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+// THE TRAVEL TAB, REDESIGNED (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young, luxury
+// feeling .. place the filters like we have done elsewhere on the left .. allowing rita to make decisions"). The filters live in
+// a left rail like the Crew and Keyman tabs (crrail); the page answers in order: where the money stands (one hero card: the
+// number, on or off budget, the pace, what is left per month), what needs a decision (tvDecisions: each row says what is wrong
+// and opens the place that holds it), then month by month, where it goes, who, TDG's bill against the workbook, and the line
+// items folded away. TF is unchanged, so the filters keep every rule of PR #265. Pinned by test/travel_filters.test.js.
 async function renderTravel(){
   var _g=VIEW_GEN;
-  $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2><span class=muted style="padding:0">Loading…</span></div>';
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide');
+  $('#view').innerHTML='<div class=muted style="padding:18px 2px">Loading travel…</div>';
   try{ TRV=await cachedJson('/api/travel',travelRefresh); if(TRV&&TRV.error)throw new Error(TRV.error); }
-  catch(e){ if(_g!==VIEW_GEN)return; $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2></div><div class="card" style="max-width:none"><b>Could not load travel data.</b><button class="btn" style="margin-top:10px" onclick="renderTravel()">Retry</button></div>'; return; }
+  catch(e){ if(_g!==VIEW_GEN)return; $('#view').innerHTML='<div class="tvcard"><b>Could not load travel data.</b><div style="margin-top:10px"><button class="btn" onclick="renderTravel()">Retry</button></div></div>'; return; }
   TRVALL=TRV.records||[];
   if(TRV.budgetMo)TBUD=TRV.budgetMo;
   // TDG's bill (the SGA, §10j) rides beside the workbook: the comparison and the Training centre view read it.
@@ -6265,17 +6382,21 @@ async function renderTravel(){
   if(_g!==VIEW_GEN)return;
   TSEL=null;
   TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};
-  var years=tYears();
-  $('#view').innerHTML='<div class=bar><h2>Travel expenses</h2>'
-    +'<input id=tq placeholder="search a person…" oninput="TF.q=this.value;paintTravel()" style="margin-left:auto;width:180px">'
-    +'<select id=tyear onchange="TF.year=this.value;paintTravel()">'+tYearOptions(years)+'</select>'
-    +'<select id=tmonth onchange="TF.month=this.value;paintTravel()"><option value="">All months</option>'+TMN.slice(1).map(function(m,i){return '<option value="'+(i+1)+'">'+m+'</option>';}).join('')+'</select>'
-    +'<select id=tcat onchange="TF.cat=this.value;paintTravel()"><option value="">All categories</option>'+TCATS.map(function(c){return '<option value="'+c+'">'+TCATLAB[c]+'</option>';}).join('')+'</select>'
-    +'<select id=tclient onchange="TF.client=this.value;paintTravel()"><option value="">All cruise lines</option>'+['royal','celebrity','azamara','ncl'].map(function(c){return '<option value="'+c+'">'+TCLIENT[c]+'</option>';}).join('')+'</select>'
-    +'<select id=tkind onchange="TF.kind=this.value;paintTravel()"><option value="crew" selected>Crew only</option><option value="">Crew + shoreside</option><option value="shoreside">Shoreside only</option><option value="training">Training centre</option></select>'
-    +'</div><div id=trbody></div>';
+  // The rail's shell is drawn ONCE (the search box keeps its focus while Rita types); paintTravel fills #tvfacets.
+  $('#view').innerHTML='<div class=bar style="margin:0;justify-content:flex-end">'
+    +'<button class="btn ghost crfbtn" onclick="document.getElementById(&quot;trrail&quot;).classList.toggle(&quot;open&quot;)">Filters</button></div>'
+    +'<div class=crwrap id=tvwrap>'
+    +'<aside class=crrail id=trrail>'
+    +'<div><label class=crlbl for=tq style="display:block;margin-bottom:6px">Search</label><input id=tq type=search placeholder="Search a name" oninput="TF.q=this.value;TSEL=null;paintTravel()"></div>'
+    +'<div id=tvfacets class=tvfacets></div>'
+    +'<button class="btn ghost" onclick="clearTravelFilters()">Clear filters</button>'
+    +'<div id=tvtotal class=crtotal></div>'
+    +'</aside>'
+    +'<section class=tvmain id=trbody></section>'
+    +'</div>';
   paintTravel();
 }
+function clearTravelFilters(){TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};TSEL=null;var q=document.getElementById('tq');if(q)q.value='';paintTravel();}
 // The years the tab can show: the workbook's (TRV.years) and the bill's (lines, summary, training) together — the Training
 // centre view has TDG's years even when the workbook does not.
 function tYears(){
@@ -6283,56 +6404,122 @@ function tYears(){
   if(SGA){[SGA.lines,SGA.summary,SGA.training].forEach(function(a){(a||[]).forEach(function(r){if(r&&r.year&&ys.indexOf(r.year)<0)ys.push(r.year);});});}
   return ys.sort(function(a,b){return b-a;});
 }
-function tYearOptions(years){return '<option value="">All years</option>'+years.map(function(y){return '<option value="'+y+'">'+y+'</option>';}).join('');}
-// The background revalidation (cachedJson) lands here: the fresh answers are taken from the cache, the year list is
-// refreshed with the selection kept, and the body repaints under the SAME filters. Before 16 Oct 2026 it re-ran
-// renderTravel, which reset every selector and the search box to the defaults.
+// The background revalidation (cachedJson) lands here: the fresh answers are taken from the cache and the body and the rail
+// repaint under the SAME filters (a year that left the data falls back to All years). Before 16 Oct 2026 it re-ran
+// renderTravel, which reset every filter and the search box to the defaults.
 function travelRefresh(){
   var e=API_CACHE['/api/travel'],sg=API_CACHE['/api/sga'];
-  if(!e||!e.data||e.data.error||!document.getElementById('tyear')){renderTravel();return;}
+  if(!e||!e.data||e.data.error||!document.getElementById('trrail')){renderTravel();return;}
   TRV=e.data;TRVALL=TRV.records||[];if(TRV.budgetMo)TBUD=TRV.budgetMo;
   if(sg&&sg.data&&!sg.data.error)SGA=sg.data;
-  var sel=document.getElementById('tyear'),keep=sel.value;sel.innerHTML=tYearOptions(tYears());sel.value=keep;if(sel.value!==keep){sel.value='';TF.year='';}
+  if(TF.year&&tYears().indexOf(+TF.year)<0)TF.year='';
   paintTravel();
 }
+// ---- the rail ---------------------------------------------------------------------------------------------------------
+var TV_VIEWS=[['crew','Crew travel'],['shoreside','Shoreside team'],['all','Crew + shoreside'],['training','Training centre']];
+function tvRow(kind,key,label,amount,on,radio,dot){
+  return '<div class="crfacet" data-tv="'+kind+'" data-key="'+escHtml(String(key))+'"><input type='+(radio?'radio':'checkbox')+(on?' checked':'')+'><span>'+(dot?'<i style="background:'+dot+'"></i>':'')+label+'</span><span class=n>'+(amount==null?'':amount)+'</span></div>';
+}
+function tvK(n){n=Number(n||0);if(!n)return '';return n>=1000?('$'+(Math.round(n/100)/10).toLocaleString()+'k'):('$'+Math.round(n));}
+function tvRail(){
+  var el=document.getElementById('tvfacets');if(!el)return;
+  var kindOf=function(r){return r.kind||'crew';};
+  var years=tYears(),LYr=TF.year?+TF.year:(years[0]||null);
+  var base=TRVALL.filter(function(r){return !TF.client||r.client===TF.client;});
+  var catOk=function(r){return !TF.cat||(r[TF.cat]>0);};
+  // the same period as the hero: the chosen month, else the year's closed months (the running month is not counted yet)
+  var closedOf=function(y){return (TRV&&TRV.closed&&TRV.closed[y]!=null)?TRV.closed[y]:12;};
+  var inPer=function(r){return TF.month?r.month===+TF.month:r.month<=closedOf(r.year);};
+  var val=function(r){return TF.cat?(r[TF.cat]||0):(r.total||0);};
+  var trainSum=function(y){return ((SGA&&SGA.training)||[]).filter(function(r){return !y||r.year===y;}).reduce(function(a,r){return a+(+r.total||0);},0);};
+  var h='<div><div class=crlbl style="margin-bottom:6px">View</div>'+TV_VIEWS.map(function(v){
+      var amt=v[0]==='training'?trainSum(LYr):base.filter(function(r){return r.year===LYr&&inPer(r)&&catOk(r)&&(v[0]==='all'||kindOf(r)===v[0]);}).reduce(function(a,r){return a+val(r);},0);
+      var on=(v[0]==='all'?TF.kind==='':TF.kind===v[0]);
+      return tvRow('kind',v[0],v[1],tvK(amt),on,true);}).join('')+'</div>';
+  h+='<div><div class=crlbl style="margin-bottom:6px">Year</div>'+tvRow('year','','All years · latest',null,!TF.year,true)+years.map(function(y){
+      var amt=TF.kind==='training'?trainSum(y):base.filter(function(r){return r.year===y&&inPer(r)&&catOk(r)&&(!TF.kind||kindOf(r)===TF.kind);}).reduce(function(a,r){return a+val(r);},0);
+      return tvRow('year',y,String(y),tvK(amt),String(TF.year)===String(y),true);}).join('')+'</div>';
+  if(TF.kind!=='training'){
+    var scY=TRVALL.filter(function(r){return r.year===LYr&&(!TF.kind||kindOf(r)===TF.kind)&&(!TF.client||r.client===TF.client);});
+    var moAmt=[];for(var m=1;m<=12;m++)moAmt[m]=scY.filter(function(r){return r.month===m&&catOk(r);}).reduce(function(a,r){return a+val(r);},0);
+    h+='<div><div class=crlbl style="margin-bottom:8px">Month</div><div class=tvmo>'
+      +'<button class="all'+(!TF.month?' on':'')+'" data-tv="month" data-key="">All months</button>'
+      +TMN.slice(1).map(function(n,i){var m=i+1;return '<button class="'+(String(TF.month)===String(m)?'on':'')+(moAmt[m]?'':' none')+'" data-tv="month" data-key="'+m+'" title="'+n+' '+(LYr||'')+(moAmt[m]?' · '+usd0(moAmt[m]):' · nothing on file')+'">'+n+'</button>';}).join('')
+      +'</div></div>';
+    var mSel=TF.month?[+TF.month]:null;
+    var inP=scY.filter(inPer);
+    var tot=inP.reduce(function(a,r){return a+(r.total||0);},0);
+    h+='<div><div class=crlbl style="margin-bottom:6px">Category</div>'+tvRow('cat','','All categories',tvK(tot),!TF.cat,true)
+      +TCATS.map(function(c){var a=inP.reduce(function(s,r){return s+(r[c]||0);},0);if(!a&&TF.cat!==c)return '';return tvRow('cat',c,TCATLAB[c],tvK(a),TF.cat===c,true);}).join('')+'</div>';
+    if(TF.kind!=='shoreside'){
+      var scC=TRVALL.filter(function(r){return r.year===LYr&&(!TF.kind||kindOf(r)===TF.kind)&&kindOf(r)!=='shoreside'&&inPer(r)&&catOk(r);});
+      var CLR={royal:'#1E6FD0',celebrity:'#16293D',azamara:'#8A5A00',ncl:'#2E9E5B'};
+      h+='<div><div class=crlbl style="margin-bottom:6px">Cruise line</div>'+tvRow('client','','All cruise lines',null,!TF.client,true)
+        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);if(!a&&TF.client!==c)return '';return tvRow('client',c,TCLIENT[c],tvK(a),TF.client===c,true,CLR[c]);}).join('')+'</div>';
+    }
+  }
+  el.innerHTML=h;
+  el.onclick=tvRailClick;
+  var tt=document.getElementById('tvtotal');
+  if(tt){if(TF.kind==='training'){tt.innerHTML='TDG’s training statement';}else{var n=tScope().filter(function(r){return (!TF.year||r.year===+TF.year)&&(!TF.month||r.month===+TF.month)&&(!TF.cat||r[TF.cat]>0);}).length;tt.innerHTML='<b>'+n+'</b> line item'+(n===1?'':'s')+(TF.year?'':' · all years');}}
+}
+function tvRailClick(e){
+  var el=e.target.closest?e.target.closest('[data-tv]'):null;if(!el)return;
+  var k=el.getAttribute('data-tv'),v=el.getAttribute('data-key');
+  if(k==='kind'){TF.kind=(v==='all'?'':v);}
+  else if(k==='year'){TF.year=v;}
+  else if(k==='month'){TF.month=(String(TF.month)===v?'':v);}
+  else if(k==='cat'){TF.cat=(TF.cat===v?'':v);}
+  else if(k==='client'){TF.client=(TF.client===v?'':v);}
+  TSEL=null;paintTravel();
+}
+// a decision row's button: set one filter, or open a folded section and scroll to it
+function tvGo(k,v){if(k==='month')TF.month=String(v);else if(k==='cat')TF.cat=v;else if(k==='client')TF.client=v;TSEL=null;paintTravel();window.scrollTo({top:0,behavior:'smooth'});}
+function tvOpen(id){var d=document.getElementById(id);if(!d)return;if(d.tagName==='DETAILS')d.open=true;d.scrollIntoView({behavior:'smooth',block:'start'});}
 var SGA=null;
 var TRCAT=[['rental','Rent'],['utilities','Utilities'],['hotel','Hotels'],['air','Airfare'],['other','Training fees + other'],['bank_charge','Bank']];
 // THE TRAINING CENTRE (Miguel, 15 Oct 2026: "another filter .. called training center cost"; everything on TDG's monthly
 // "Training-related costs" statement counts). Source: the SGA workbook's training summary — equal to the PDF to the cent.
+// No budget (Miguel, 16 Oct 2026): the year against last year's same months.
 function paintTraining(){
   var t=document.getElementById('trbody');if(!t)return;
   var rows=(SGA&&SGA.training)||[];
-  if(!rows.length){t.innerHTML='<div class="card" style="max-width:none"><b>No training-centre costs on file yet.</b><div class=csub style="margin-top:6px">Drop TDG’s <b>DG3 SGA EXCEL &lt;month&gt;.xlsx</b> on Upload data: its training summary sheet carries every month of the year by category (rent, utilities, hotels, airfare, training fees). The monthly “Training-related costs” PDF is a scan and cannot be read.</div></div>';return;}
+  if(!rows.length){t.innerHTML='<div class=tvcard><b>No training-centre costs on file yet.</b><div class=tvsub style="margin-top:6px">TDG’s <b>DG3 SGA EXCEL &lt;month&gt;.xlsx</b> carries every month of the year by category (rent, utilities, hotels, airfare, training fees) in its training summary sheet; finance sends it to sga@cims.work. The monthly “Training-related costs” PDF is a scan and cannot be read.</div></div>';return;}
   var ys=Array.from(new Set(rows.map(function(r){return r.year;}))).sort(function(a,b){return b-a;});
   var LY=TF.year?+TF.year:ys[0], PY=LY-1;
   var today=(SGA&&SGA.today)||(TRV&&TRV.today)||new Date().toISOString().slice(0,10),curY=+today.slice(0,4),curM=+today.slice(5,7);
   var ly=rows.filter(function(r){return r.year===LY;}), py=rows.filter(function(r){return r.year===PY;});
-  if(!ly.length){t.innerHTML='<div class="card" style="max-width:none"><b>No training-centre costs on file for '+LY+'.</b><div class=csub style="margin-top:6px">TDG’s bills on file carry '+ys.join(', ')+'. Pick one of those years, or All years for the latest.</div></div>';return;}
+  if(!ly.length){t.innerHTML='<div class=tvcard><b>No training-centre costs on file for '+LY+'.</b><div class=tvsub style="margin-top:6px">TDG’s bills on file carry '+ys.join(', ')+'. Pick one of those years, or All years for the latest.</div></div>';return;}
   var sum=function(rs,k){return rs.reduce(function(a,r){return a+(k?(+r[k]||0):(+r.total||0));},0);};
   var lastMo=Math.max.apply(null,ly.map(function(r){return r.month;}).concat([0]));
   var pySame=py.filter(function(r){return r.month<=lastMo;});
   var fixed=ly.filter(function(r){return !r.summary_only;});
   var fixedMo=fixed.length?(sum(fixed,'rental')+sum(fixed,'utilities'))/fixed.length:0;
-  var h='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:6px">'
-    +tile(usd0(sum(ly)),'Training centre '+LY+' · through '+(lastMo?TMN[lastMo]:'—'))
-    +tile(pySame.length?deltaCell(sum(ly),sum(pySame)):'—','vs '+PY+' same months'+(pySame.length?(' · '+usd0(sum(pySame))):''))
-    +tile(usd0(fixedMo),'rent + utilities · per month','amber')
-    +tile(usd0(sum(fixed,'hotel')+sum(fixed,'air')),'hotels + airfare for trainees · '+LY)+'</div>';
-  h+='<div class=zlabel>Training centre by month · '+LY+'</div><div class="card" style="max-width:none">';
+  var a=sum(ly),p=pySame.length?sum(pySame):null,d=p?Math.round((a-p)/p*100):null;
+  var h='<div class="tvcard tvhero"><div><div class=tvlab>Training centre · '+LY+' through '+(lastMo?TMN[lastMo]:'—')+'</div><div class=tvbig>'+usd0(a)+'</div>'
+    +(d==null?'<span class="tvpill mut">No '+PY+' to compare</span>':'<span class="tvpill '+(d>0?'bad':'ok')+'">'+(d>0?'▲ ':'▼ ')+Math.abs(d)+'% vs '+PY+'</span>')
+    +'<div class=tvsub style="margin-top:10px">TDG’s “Training-related costs” statement, month by month · no budget, year against year</div></div>'
+    +'<div><div class=tvlab>Year against year</div><div class=tvfacts style="margin-top:12px;border-top:0;padding-top:0">'
+    +'<div class=tvfact><div class=v>'+(p==null?'—':usd0(p))+'</div><div class=l>'+PY+', same months</div></div>'
+    +'<div class=tvfact><div class=v>'+usd0(fixedMo)+'</div><div class=l>rent + utilities a month</div></div>'
+    +'<div class=tvfact><div class=v>'+usd0(sum(fixed,'hotel')+sum(fixed,'air'))+'</div><div class=l>hotels + air fare for trainees</div></div>'
+    +'</div></div></div>';
   var curT=[],prevT=[];for(var m=1;m<=12;m++){var r=ly.find(function(x){return x.month===m;}),q=py.find(function(x){return x.month===m;});curT[m]=r?r.total:0;prevT[m]=q?q.total:0;}
+  h+='<div class=tvcard><div class=tvh>Month by month <small>'+LY+'</small></div><div style="margin-top:10px"></div>';
   h+=tBars(curT,{prev:prevT,ly:LY,py:PY,upto:lastMo,color:function(m){var r=ly.find(function(x){return x.month===m;});return r&&r.summary_only?'var(--muted)':'var(--navy)';}});
-  h+='<div class=hint style="margin-top:6px">Source: TDG’s SGA workbook, training summary sheet — the same figure as the monthly “Training-related costs” statement. No budget exists for the training centre (Miguel, 15 Oct 2026).</div>';
-  h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th>'+TRCAT.map(function(c){return '<th style="text-align:right">'+c[1]+'</th>';}).join('')+'<th style="text-align:right">Total</th><th style="text-align:right">'+PY+'</th></tr></thead><tbody>';
+  h+='</div>';
+  h+='<div class=tvcard><div class=tvh>By category <small>'+LY+' · '+PY+' beside it</small></div>';
+  h+='<div style="overflow:auto;margin-top:10px"><table class=tbl><thead><tr><th>Month</th>'+TRCAT.map(function(c){return '<th style="text-align:right">'+c[1]+'</th>';}).join('')+'<th style="text-align:right">Total</th><th style="text-align:right">'+PY+'</th></tr></thead><tbody>';
   for(var m2=1;m2<=12;m2++){var r2=ly.find(function(x){return x.month===m2;}),p2=py.find(function(x){return x.month===m2;});if(!r2&&!p2)continue;
     var open=(LY===curY&&m2>=curM&&!r2);
     h+='<tr'+(open?' style="color:var(--muted)"':'')+'><td>'+TMN[m2]+(r2&&r2.summary_only?' <span class=hint style="display:inline;margin:0">one figure</span>':'')+'</td>'
       +TRCAT.map(function(c){return '<td style="text-align:right">'+(r2&&!r2.summary_only?usd(r2[c[0]]):'·')+'</td>';}).join('')
       +'<td style="text-align:right"><b>'+(r2?usd(r2.total):(open?'<span class=muted style="padding:0">pending</span>':'—'))+'</b></td><td style="text-align:right">'+(p2?usd(p2.total):'—')+'</td></tr>';}
   h+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td>'+TRCAT.map(function(c){return '<td style="text-align:right"><b>'+usd(sum(fixed,c[0]))+'</b></td>';}).join('')+'<td style="text-align:right"><b>'+usd(sum(ly))+'</b></td><td style="text-align:right"><b>'+usd(sum(py))+'</b></td></tr>';
-  h+='</tbody></table></div>';
-  var files=(SGA.files||[]).slice(0,6);
-  if(files.length){h+='<div class=zlabel style="margin-top:18px">Bills on file</div><table class=tbl><thead><tr><th>Month</th><th>SGA</th><th>Dated</th><th>File</th><th style="text-align:right">Lines</th><th style="text-align:right">Total</th><th>Loaded</th><th>Original</th></tr></thead><tbody>'
-    +files.map(function(f){return '<tr><td>'+TMN[f.month]+' '+f.year+'</td><td>'+escHtml(f.sga_no||'')+'</td><td>'+escHtml(f.sga_date||'')+'</td><td class=muted style="padding:6px 8px">'+escHtml(f.file_name||'')+'</td><td style="text-align:right">'+f.rows+'</td><td style="text-align:right">'+usd(f.total)+'</td><td class=muted style="padding:6px 8px">'+escHtml(String(f.loaded_at||'').slice(0,10))+' · '+escHtml(String(f.loaded_by||'').split('@')[0])+'</td><td>'+sgaOriginalCell(f)+'</td></tr>';}).join('')+'</tbody></table>';}
+  h+='</tbody></table></div></div>';
+  var files=(SGA.files||[]).slice(0,12);
+  if(files.length){h+='<details class="tvcard tvfold"><summary><span class=tvh>Bills on file <small>'+(SGA.files||[]).length+'</small></span></summary><div style="overflow:auto;margin-top:10px"><table class=tbl><thead><tr><th>Month</th><th>SGA</th><th>Dated</th><th>File</th><th style="text-align:right">Lines</th><th style="text-align:right">Total</th><th>Loaded</th><th>Original</th></tr></thead><tbody>'
+    +files.map(function(f){return '<tr><td>'+TMN[f.month]+' '+f.year+'</td><td>'+escHtml(f.sga_no||'')+'</td><td>'+escHtml(f.sga_date||'')+'</td><td class=muted style="padding:6px 8px">'+escHtml(f.file_name||'')+'</td><td style="text-align:right">'+f.rows+'</td><td style="text-align:right">'+usd(f.total)+'</td><td class=muted style="padding:6px 8px">'+escHtml(String(f.loaded_at||'').slice(0,10))+' · '+escHtml(String(f.loaded_by||'').split('@')[0])+'</td><td>'+sgaOriginalCell(f)+'</td></tr>';}).join('')+'</tbody></table></div></details>';}
   t.innerHTML=h;
 }
 // THE BILL AGAINST THE WORKBOOK (Miguel, 15 Oct 2026: "the SGA becomes the audit number, Rita's is the operational one, and
@@ -6353,16 +6540,11 @@ function sgaCompareHTML(sc,LY,monthsSel,cat){
   // monthsSel (16 Oct 2026): the Month filter — only those months; cat: one of air / hotel / medical / visa shows that
   // column group alone (the bill has no comparable column for food / transport / other: all four stay).
   if(!SGA)return '';
-  var inSel=function(m){return !monthsSel||monthsSel.indexOf(m)>=0;};
-  var L=(SGA.lines||[]).filter(function(l){return l.year===LY&&inSel(l.month);}), SM=(SGA.summary||[]).filter(function(r){return r.year===LY&&inSel(r.month);}), PYR=(SGA.summary||[]).filter(function(r){return r.year===LY-1;});
+  var B=sgaBillOf(LY,monthsSel),L=B.L,SM=B.SM;
   if(!L.length&&!SM.length)return '<div class=zlabel style="margin-top:18px">TDG’s bill vs the workbook · '+LY+(monthsSel?' · '+TMN[monthsSel[0]]:'')+'</div><div class=hint>No SGA month loaded for '+(monthsSel?TMN[monthsSel[0]]+' ':'')+LY+' yet — finance emails TDG’s DG3 SGA EXCEL workbook to sga@cims.work once a month, or drop it on Upload data.</div>';
-  var lineMonths=new Set(L.map(function(l){return l.month;}));
-  var months=Array.from(new Set(L.map(function(l){return l.month;}).concat(SM.map(function(r){return r.month;})))).sort(function(a,b){return a-b;});
+  var lineMonths=B.lineMonths,months=B.months;
   var cats=[['air','air','Air'],['hotel','hotel','Hotel'],['medical','medical','Medical'],['visa','visa','Visa']].filter(function(c){return !cat||!['air','hotel','medical','visa'].includes(cat)||c[0]===cat;});
-  var smRow=function(m){return SM.find(function(r){return r.month===m;});};
-  var sgaSum=function(m,k){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l[k]||0)+(k==='medical'?(+l.medical_repat||0):0);},0);var r=smRow(m);return r?(+r[k]||0)+(k==='medical'?(+r.medical_repat||0):0):0;};
-  var billAll=function(m){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l.amount||0);},0);var r=smRow(m);return r?(+r.crew_total||0):0;};
-  var pyAll=function(m){var r=PYR.find(function(x){return x.month===m;});return r?(+r.crew_total||0):null;};
+  var sgaSum=B.sum,billAll=B.all,pyAll=B.py;   // ONE definition of the bill per month (sgaBillOf), shared with tvDecisions
   var wbSum=function(m,k){return sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[k]||0);},0);};
   var gap=function(w,s){var d=w-s;if(Math.abs(d)<1)return '<span class=muted style="padding:0">=</span>';return '<span style="color:'+(d>0?'var(--amber)':'var(--red)')+';font-weight:700">'+(d>0?'+':'')+usd0(d)+'</span>';};
   var yoy=function(cur,py){if(py==null)return '<span class=muted style="padding:0">—</span>';var d=cur-py,pc=py?Math.round(d/py*100):0;return '<span style="color:'+(d>0?'var(--red)':'var(--green,#2E9E5B)')+';font-weight:700">'+(d>0?'+':'')+pc+'%</span> <span class=muted style="padding:0">'+usd0(py)+'</span>';};
@@ -6451,111 +6633,171 @@ function tPeriod(sc){
   var span=mo?TMN[mo]:(lastMo?(TMN[1]+'–'+TMN[lastMo]):'—');
   return {ys:ys,LY:LY,PY:PY,curY:curY,curM:curM,lastMo:lastMo,openMo:openMo,mo:mo,months:months,inProgress:inProgress,ahead:ahead,budgetMonths:budgetMonths,label:label,span:span,cat:TF.cat||null};
 }
-// The selectors that mean nothing on the Training centre view (its figures are TDG's statement, not the workbook rows) are
-// greyed out there and live again on every other view.
-function tFilterChrome(){
-  var off=TF.kind==='training';
-  ['tmonth','tcat','tclient','tq'].forEach(function(id){var el=document.getElementById(id);if(el){el.disabled=off;el.title=off?'Not used on the Training centre view':'';}});
+// TDG's bill for one year, as both the comparison table and the decisions list read it (one definition, never two):
+// the per-crew lines when the month has them, else the bill's monthly summary row.
+function sgaBillOf(LY,monthsSel){
+  var inSel=function(m){return !monthsSel||monthsSel.indexOf(m)>=0;};
+  var L=((SGA&&SGA.lines)||[]).filter(function(l){return l.year===LY&&inSel(l.month);}), SM=((SGA&&SGA.summary)||[]).filter(function(r){return r.year===LY&&inSel(r.month);}), PYR=((SGA&&SGA.summary)||[]).filter(function(r){return r.year===LY-1;});
+  var lineMonths=new Set(L.map(function(l){return l.month;}));
+  var months=Array.from(new Set(L.map(function(l){return l.month;}).concat(SM.map(function(r){return r.month;})))).sort(function(a,b){return a-b;});
+  var smRow=function(m){return SM.find(function(r){return r.month===m;});};
+  return {L:L,SM:SM,lineMonths:lineMonths,months:months,
+    sum:function(m,k){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l[k]||0)+(k==='medical'?(+l.medical_repat||0):0);},0);var r=smRow(m);return r?(+r[k]||0)+(k==='medical'?(+r.medical_repat||0):0):0;},
+    all:function(m){if(lineMonths.has(m))return L.filter(function(l){return l.month===m;}).reduce(function(a,l){return a+(+l.amount||0);},0);var r=smRow(m);return r?(+r.crew_total||0):0;},
+    py:function(m){var r=PYR.find(function(x){return x.month===m;});return r?(+r.crew_total||0):null;}};
 }
+var TV_BILL_CATS=[['air','Air'],['hotel','Hotel'],['medical','Medical'],['visa','Visa']];
+var TV_GAP_MIN=150; // a bill-vs-workbook gap smaller than this is not a decision (rounding, a fee)
+// WHAT NEEDS A DECISION (Miguel, 17 Oct 2026: "allowing rita to make decisions"). Each row is a fact the data already holds,
+// what it means, and one button to the place that holds it. Nothing here settles anything (§6): a gap between TDG's bill and
+// the workbook is listed for Rita and TDG to settle, never reconciled by the console.
+function tvDecisions(ctx){
+  var out=[],sc=ctx.sc,LY=ctx.LY,PY=ctx.PY,P=ctx.P,cat=ctx.cat;
+  // 1. a closed month over the $15,000 (the budgeted view only: crew travel, every category, every cruise line)
+  if(ctx.budgeted){for(var m=1;m<=P.lastMo;m++){if(P.mo&&m!==P.mo)continue;var a=tSum(sc,LY,[m],null);if(a>TBUD)out.push({sev:'crit',t:TMN[m]+' ran '+usd0(a-TBUD)+' over the '+usd0(TBUD)+' budget',w:usd0(a)+' of crew travel in '+TMN[m]+' '+LY+'.',go:'tvGo(&quot;month&quot;,'+m+')',gl:'Open '+TMN[m]});}}
+  // 2. the category that grew most against last year's same months (only when every category is shown)
+  if(!cat&&ctx.hasPY){var best=null;TCATS.forEach(function(c){var l=tSum(sc,LY,P.months,c),p=tSum(sc,PY,P.months,c),d=l-p;if(p>0&&d>=1000&&d/p>=0.2&&(!best||d>best.d))best={c:c,l:l,p:p,d:d};});
+    if(best)out.push({sev:'warn',t:TCATLAB[best.c]+' is up '+Math.round(best.d/best.p*100)+'% on '+PY,w:usd0(best.l)+' against '+usd0(best.p)+' in '+P.span+' '+PY+' · '+usd0(best.d)+' more.',go:'tvGo(&quot;cat&quot;,&quot;'+best.c+'&quot;)',gl:'See '+TCATLAB[best.c]});}
+  // 3. TDG's bill against the workbook (crew view, every cruise line): ONE net gap per category over the months the bill
+  // covers (Miguel, 17 Oct 2026: "Net per year") — a charge typed into a neighbouring month cancels out here; each month
+  // stays in the comparison fold. A chosen month is that month alone.
+  if(SGA&&TF.kind==='crew'&&!TF.client){var B=sgaBillOf(LY,P.mo?[P.mo]:null),gaps=[];
+    var wbOf=function(m,k){return sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[k]||0);},0);};
+    var bm=B.months,spanB=bm.length?(bm.length===1?TMN[bm[0]]:TMN[bm[0]]+'–'+TMN[bm[bm.length-1]]):'';
+    TV_BILL_CATS.forEach(function(c){if(cat&&c[0]!==cat)return;var s=0,w=0,off=0;bm.forEach(function(m){var sm=B.sum(m,c[0]),wm=wbOf(m,c[0]);s+=sm;w+=wm;if(Math.abs(wm-sm)>=TV_GAP_MIN)off++;});var d=w-s;if(Math.abs(d)>=TV_GAP_MIN)gaps.push({c:c[1],d:d,s:s,w:w,off:off});});
+    gaps.sort(function(a,b){return Math.abs(b.d)-Math.abs(a.d);});
+    gaps.forEach(function(g){out.push({sev:g.d<0?'crit':'warn',t:g.c+' · '+(bm.length===1?TMN[bm[0]]+' '+LY:spanB+' '+LY)+': '+(g.d<0?'TDG billed '+usd0(-g.d)+' the workbook does not have':'the workbook has '+usd0(g.d)+' TDG did not bill'),w:'Bill '+usd0(g.s)+' · workbook '+usd0(g.w)+(bm.length>1?' over the '+bm.length+' months on the bill ('+g.off+' differ'+(g.off===1?'s':'')+' by '+usd0(TV_GAP_MIN)+'+)':'')+'. '+(g.d<0?'A TDG charge nobody typed: ask TDG what it is, or add it to the workbook.':'Paid by DG3 directly, or not billed yet: check with Rita’s receipts.'),go:'tvOpen(&quot;tvsga&quot;)',gl:'Compare'});});
+    // a closed month of the year with workbook spend but no bill on file
+    var billed=new Set(B.months);for(var mm=1;mm<=P.lastMo;mm++){if(P.mo&&mm!==P.mo)continue;if(!billed.has(mm)&&tSum(sc,LY,[mm],null)>0&&((SGA.files||[]).length))out.push({sev:'info',t:'No TDG bill on file for '+TMN[mm]+' '+LY,w:'Finance sends it to sga@cims.work once a month; until then the workbook is the only number.',go:'',gl:''});}
+  }
+  // 0. a bill the inbox HELD (Miguel, 17 Oct 2026: "Hold it for Rita"): its lines do not add up to TDG's GRAND TOTAL, so it
+  // loaded nothing. Named in every view of its year until a bill for that month is loaded after it.
+  var c2=function(n){return '$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});};   // a bill reconciles to the cent
+  ((SGA&&SGA.held)||[]).filter(function(x){return x.year===LY;}).forEach(function(x){
+    out.push({sev:'crit',t:'TDG’s bill for '+TMN[x.month]+' '+x.year+' is held: its lines do not add up',
+      w:'Lines '+c2(x.lines_total)+(x.others?' + '+c2(x.others)+' other':'')+' against TDG’s grand total '+c2(x.grand_total)+(x.gap!=null?' · '+c2(Math.abs(x.gap))+(x.gap>0?' missing':' too much'):'')+'. It arrived on '+fmtDateS(String(x.held_at||'').slice(0,10))+' and loaded nothing. Check it with Finance, then drop it on Upload data to load it.',
+      go:x.hash?'window.open(&quot;/api/sga/file?hash='+x.hash+'&quot;)':'',gl:x.hash?'Download':''});
+  });
+  // 4. names the roster cannot place: their spend never reaches a profile
+  var un=(TRV.unmatched||[]).filter(function(u){return u.years.indexOf(LY)>=0;});
+  if(un.length&&TF.kind!=='shoreside'){var ut=un.reduce(function(a,u){return a+(+u.total||0);},0);out.push({sev:'warn',t:un.length+' name'+(un.length===1?'':'s')+' the crew registry cannot place',w:usd0(ut)+' that never reaches a profile. Fix the spelling in the workbook and re-upload, or leave the NCL preps as they are.',go:'tvOpen(&quot;tvnames&quot;)',gl:'See names'});}
+  // 5. single movements far above the usual
+  if(ctx.outs.length)out.push({sev:'info',t:ctx.outs.length+' single movement'+(ctx.outs.length===1?'':'s')+' above '+usd0(ctx.med*2.5),w:'Two and a half times the usual '+(cat?TCATLAB[cat].toLowerCase()+' ':'')+'movement ('+usd0(ctx.med)+'). Worth a look before the next booking.',go:'tvOpen(&quot;tvanom&quot;)',gl:'Review'});
+  var sevO={crit:0,warn:1,info:2};out.sort(function(a,b){return sevO[a.sev]-sevO[b.sev];});
+  var COL={crit:'#D92D20',warn:'#E8A13A',info:'#9FB0C6'};
+  var h='<div class=tvcard><div class=tvh>Needs a decision <small>'+(out.length?out.length+' item'+(out.length===1?'':'s'):'')+'</small></div>';
+  if(!out.length)return h+'<div class=tvok><i></i>Nothing needs a decision in '+P.span+' '+LY+'.</div></div>';
+  h+='<div class=tvdec>'+out.map(function(d){return '<div class=tvdi><i style="background:'+COL[d.sev]+'"></i><div><div class=t>'+escHtml(d.t)+'</div><div class=w>'+escHtml(d.w)+'</div></div>'+(d.go?'<button class=tvgo onclick="'+d.go+'">'+escHtml(d.gl)+' →</button>':'<span></span>')+'</div>';}).join('')+'</div></div>';
+  return h;
+}
+function tvInitials(s){var p=String(s||'').replace(/[^A-Za-zÀ-ÿ ,]/g,' ').split(/[ ,]+/).filter(Boolean);return ((p[0]||'?')[0]+((p[1]||'')[0]||'')).toUpperCase();}
 function paintTravel(){
-  tFilterChrome();
+  tvRail();
   if(TF.kind==='training')return paintTraining();
   if(TSEL)return paintTravelCrew();
   if((TF.q||'').trim())return paintTravelSearch();
   var sc=tScope();
   var P=tPeriod(sc),LY=P.LY,PY=P.PY,lastMo=P.lastMo,openMo=P.openMo,months=P.months,cat=P.cat,catName=cat?TCATLAB[cat]:'';
-  if(!LY){document.getElementById('trbody').innerHTML='<div class=muted>No travel data for this filter.</div>';return;}
-  var dataMo={};sc.filter(function(r){return r.year===LY;}).forEach(function(r){dataMo[r.month]=1;}); // months with any record (for the table)
+  var t=document.getElementById('trbody');if(!t)return;
+  if(!LY){t.innerHTML='<div class=tvcard><b>No travel on file for this view.</b><div class=tvsub>Widen the filters on the left.</div></div>';return;}
   var hasPY=!!PY&&sc.some(function(r){return r.year===PY;});   // no rows for the previous year → '—', never '$0'
   var ytdA=tSum(sc,LY,months,cat), ytdB=TBUD*P.budgetMonths, ytdP=hasPY?tSum(sc,PY,months,cat):null;
-  var allA=cat?tSum(sc,LY,months,null):ytdA;        // every category, for the share tile
-  var air=tSum(sc,LY,months,'air');
-  var byp={};TLBL={};sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0;}).forEach(function(r){var v=cat?(r[cat]||0):r.total;if(cat&&!v)return;var k=tKey(r);byp[k]=(byp[k]||0)+v;TLBL[k]=tLabel(r);});
-  var pctUsed=Math.round(ytdA/(TBUD*12)*100);
+  var allA=cat?tSum(sc,LY,months,null):ytdA;        // every category, for the share line
+  var annual=TBUD*12;
   var fullProj=P.mo?0:(lastMo?(ytdA/lastMo*12):0);
-  var h='';
-  // The budget is the whole fleet's crew travel (Miguel, 15 Oct 2026: no other budget exists). A cruise-line slice, the
-  // shoreside view or ONE category has no budget of its own: actuals only, no pacing — never "$134k under budget" for NCL alone.
+  // The budget is the whole fleet's crew travel (Miguel, 15 Oct 2026: no other budget exists; 16 Oct: "$15,000 per month ..
+  // only for crew related travels .. shoreside team and training center dont have a budget .. we only compare YOY"). A
+  // cruise-line slice, the shoreside view or ONE category has no budget of its own: actuals and last year only.
   var budgeted=!TF.client&&TF.kind==='crew'&&!cat;
-  var scopeName=TF.client?TCLIENT[TF.client]:(TF.kind==='shoreside'?'shoreside':(cat?catName+' alone':'this view'));
-  var actualLabel=(cat?catName+' · ':'')+P.label;
-  var vsTile=tile((ytdP==null?'—':deltaCell(ytdA,ytdP)),'vs '+(PY||'PY')+' same '+(P.mo?'month':'period')+(ytdP!=null?(' · '+usd0(ytdP)):''));
-  var shareTile=cat?tile(usd0(ytdA)+' · '+(allA?Math.round(ytdA/allA*100):0)+'%',catName+' share of '+usd0(allA)+' all categories','amber'):tile(usd0(air)+' · '+(ytdA?Math.round(air/ytdA*100):0)+'%','Air share','amber');
-  var dim=function(m){return P.mo&&m!==P.mo?';opacity:.35':'';};
-  if(!budgeted){
-    h+='<div class=tiles style="grid-template-columns:repeat(4,1fr);margin-bottom:6px">'
-      +tile(usd0(ytdA),actualLabel)
-      +vsTile
-      +shareTile
-      +(P.mo?tile(usd0(TBUD),'monthly budget, all crew travel · no pacing for '+scopeName):tile(usd0(fullProj),'run-rate × 12 · no budget for '+scopeName))+'</div>';
-    h+='<div class=zlabel>Monthly spend '+LY+(cat?' · '+catName:'')+(TF.client?' · '+TCLIENT[TF.client]:'')+'</div>';
-    h+='<div class="card" style="max-width:none">';
-    var cur0=[],prev0=[];for(var m0=1;m0<=12;m0++){cur0[m0]=tSum(sc,LY,[m0],cat);prev0[m0]=hasPY?tSum(sc,PY,[m0],cat):0;}
-    h+=tBars(cur0,{prev:hasPY?prev0:null,ly:LY,py:PY,upto:lastMo,dim:dim});
-    h+='<div class=hint style="margin-top:6px">The $'+Number(TBUD*12).toLocaleString()+' budget covers all crew travel together; a single cruise line, shoreside or one category is shown against last year only.</div></div>';
+  var scopeName=TF.client?TCLIENT[TF.client]+' crew travel':(TF.kind==='shoreside'?'Shoreside team':(TF.kind==='crew'?'Crew travel':'Crew + shoreside'));
+  var yoyPill=function(){if(ytdP==null||!ytdP)return '<span class="tvpill mut">No '+(PY||'previous year')+' to compare</span>';var d=Math.round((ytdA-ytdP)/ytdP*100);return '<span class="tvpill '+(d>0?'bad':'ok')+'">'+(d>0?'▲ ':'▼ ')+Math.abs(d)+'% vs '+PY+'</span>';};
+  // ---- the hero: the number, the verdict, the pace ----
+  var h='<div class="tvcard tvhero"><div>';
+  h+='<div class=tvlab>'+escHtml(scopeName)+(cat?' · '+catName:'')+' · '+(P.mo?TMN[P.mo]+' '+LY:LY+' to date')+'</div>';
+  h+='<div class=tvbig>'+usd0(ytdA)+'</div>';
+  if(budgeted&&P.budgetMonths){var under=ytdA<=ytdB;h+='<span class="tvpill '+(under?'ok':'bad')+'">'+(under?'On budget · ':'Over budget · ')+usd0(Math.abs(ytdB-ytdA))+(under?' under':' over')+'</span> ';}
+  else if(budgeted&&P.mo){h+='<span class="tvpill mut">'+(P.inProgress?TMN[P.mo]+' is still running':TMN[P.mo]+' has not started')+'</span> ';}
+  h+=yoyPill();
+  h+='<div class=tvsub style="margin-top:10px">'+(P.mo?(P.inProgress?TMN[P.mo]+' so far · the month closes on its last day':'One month'):(lastMo+' closed month'+(lastMo===1?'':'s')+(openMo?' · '+TMN[openMo]+' running, not counted yet':'')))+(TF.year?'':' · the latest year')+'</div>';
+  h+='</div><div>';
+  if(budgeted){
+    var cap=P.mo?TBUD:annual, mark=P.mo?TBUD:ytdB;
+    var fillPct=Math.min(100,ytdA/cap*100), markPct=Math.min(100,mark/cap*100), projPct=Math.min(100,fullProj/cap*100);
+    h+='<div class=tvlab>'+(P.mo?'Against the month’s '+usd0(TBUD):'Against the '+usd0(annual)+' year')+'</div>';
+    h+='<div class=tvmeter title="'+usd0(ytdA)+' spent · '+usd0(mark)+' is where the budget says you should be">'+(P.mo?'':'<u style="left:0;width:'+projPct.toFixed(1)+'%"></u>')+'<i class="'+(ytdA>mark?'over':'')+'" style="width:'+fillPct.toFixed(1)+'%"></i><b style="left:calc('+markPct.toFixed(1)+'% - 1px)"></b></div>';
+    h+='<div class=tvscale><span>$0</span><span>'+(P.mo?'':'pace '+usd0(ytdB)+' · ')+usd0(cap)+'</span></div>';
+    var remain=12-lastMo, room=remain>0?(annual-ytdA)/remain:0;
+    h+='<div class=tvfacts>'
+      +'<div class=tvfact><div class=v>'+(ytdP==null?'—':usd0(ytdP))+'</div><div class=l>'+(PY||'Last year')+', same '+(P.mo?'month':'months')+'</div></div>'
+      +(P.mo?'<div class=tvfact><div class=v>'+usd0(TBUD-ytdA)+'</div><div class=l>'+(ytdA<=TBUD?'left in the month':'over the month')+'</div></div>'
+            :'<div class=tvfact><div class=v style="color:'+(fullProj<=annual?'var(--green-d)':'var(--red)')+'">'+usd0(fullProj)+'</div><div class=l>where the year lands at this pace</div></div>')
+      +(P.mo?'<div class=tvfact><div class=v>'+(allA?Math.round(tSum(sc,LY,months,'air')/allA*100):0)+'%</div><div class=l>of it is air fare</div></div>'
+            :(remain>0?'<div class=tvfact><div class=v style="color:'+(room>=0?'var(--ink)':'var(--red)')+'">'+usd0(room)+'</div><div class=l>a month left for '+TMN[lastMo+1]+(remain>1?'–Dec':'')+' to land on '+usd0(annual)+'</div></div>'
+                       :'<div class=tvfact><div class=v>'+usd0(annual-ytdA)+'</div><div class=l>'+(ytdA<=annual?'under':'over')+' the year’s budget</div></div>'))
+      +'</div>';
   } else {
-  h+='<div class=tiles style="grid-template-columns:repeat(5,1fr);margin-bottom:6px">'
-    +tile(usd0(ytdA),actualLabel)
-    +(P.budgetMonths?tile('<span style="color:'+(ytdA<=ytdB?'var(--green-d)':'var(--red)')+'">'+usd0(Math.abs(ytdB-ytdA))+'</span>',(ytdA<=ytdB?'under':'over')+' budget '+(P.mo?TMN[P.mo]:'YTD')+' · '+usd0(ytdB)):tile('—','budget · '+(P.inProgress?'month in progress':'month not started')))
-    +vsTile
-    +shareTile
-    +tile('<span style="color:'+(pctUsed<=100?'var(--green-d)':'var(--red)')+'">'+pctUsed+'%</span>','of '+usd0(TBUD*12)+' annual budget'+(P.mo?' · '+TMN[P.mo]+' alone':' used'))+'</div>';
-  h+='<div class=zlabel>Plan vs actual — budget pacing '+LY+(P.mo?' · '+TMN[P.mo]+' highlighted':'')+'</div>';
-  h+='<div class="card" style="max-width:none">';
-  h+='<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:baseline;margin-bottom:10px">'
-    +pv(usd0(ytdA),(P.mo?TMN[P.mo]:'YTD')+' actual','var(--navy)')
-    +pv(P.budgetMonths?usd0(ytdB):'—',(P.mo?TMN[P.mo]:'YTD')+' budget','var(--muted)')
-    +(P.budgetMonths?pv((ytdA<=ytdB?'+':'')+usd0(ytdB-ytdA),'variance ('+(ytdA<=ytdB?'under':'over')+')',ytdA<=ytdB?'var(--green-d)':'var(--red)'):pv('—','variance · '+(P.inProgress?'month in progress':'month not started'),'var(--muted)'))
-    +(P.mo?pv('—','projected FY · All months to see it','var(--muted)'):pv(usd0(fullProj),'projected FY vs '+usd0(TBUD*12),fullProj<=TBUD*12?'var(--green-d)':'var(--red)'))
-    +'</div>';
-  var curB=[],prevB=[];for(var m=1;m<=12;m++){curB[m]=tSum(sc,LY,[m],null);prevB[m]=hasPY?tSum(sc,PY,[m],null):0;}
-  h+=tBars(curB,{prev:hasPY?prevB:null,ly:LY,py:PY,budget:TBUD,upto:lastMo,dim:dim,color:function(m,a){return a>TBUD?'var(--red)':'var(--navy)';}});
-  h+='<div class=hint style="margin-top:6px">Dashed line = '+usd0(TBUD)+'/mo budget (source: travel sheet). Red bars = over budget. Projection = run-rate of the closed months × 12.</div>';
-  h+='<table class=tbl style="margin-top:12px"><thead><tr><th>Month</th><th style="text-align:right">Actual</th><th style="text-align:right">Budget</th><th style="text-align:right">Variance</th><th style="text-align:right">'+(PY||'PY')+'</th></tr></thead><tbody>';
-  for(var m=1;m<=12;m++){var a=tSum(sc,LY,[m],null);var p=PY?tSum(sc,PY,[m],null):null;var has=(!!dataMo[m]||m<=lastMo);var v=TBUD-a;var open=(m===openMo);var pick=(m===P.mo);
-    if(!has&&!p&&!open&&!pick)continue;
-    h+='<tr style="'+(open?'color:var(--muted);':'')+(pick?'background:rgba(30,60,120,.07);font-weight:700':'')+'"><td>'+TMN[m]+(open?' <span class=hint style="display:inline;margin:0">in progress</span>':'')+'</td><td style="text-align:right">'+(has||open?usd0(a):'<span class=muted style="padding:0">pending</span>')+'</td><td style="text-align:right">'+(open?'—':usd0(TBUD))+'</td><td style="text-align:right">'+(has&&!open?('<span style="color:'+(v>=0?'var(--green-d)':'var(--red)')+';font-weight:700">'+(v>=0?'+':'')+usd0(v)+'</span>'):'—')+'</td><td style="text-align:right">'+(p?usd0(p):'—')+'</td></tr>';}
-  h+='<tr style="border-top:2px solid var(--line-2)"><td><b>'+(P.mo?TMN[P.mo]:'YTD')+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right"><b>'+(P.budgetMonths?usd0(ytdB):'—')+'</b></td><td style="text-align:right"><b>'+(P.budgetMonths?('<span style="color:'+(ytdB-ytdA>=0?'var(--green-d)':'var(--red)')+'">'+(ytdB-ytdA>=0?'+':'')+usd0(ytdB-ytdA)+'</span>'):'—')+'</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td></tr>';
-  h+='</tbody></table></div>';
-  } // budgeted
-  h+='<div class=zlabel style="margin-top:18px">STLY — same time last year · '+P.span+' ('+LY+' vs '+(PY||'PY')+')'+(cat?' · '+catName:'')+' · top spenders</div>';
-  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
-  var yc='<div><table class=tbl><thead><tr><th>Category</th><th style="text-align:right">STLY '+(PY||'')+'</th><th style="text-align:right">'+LY+'</th><th style="text-align:right">Δ</th></tr></thead><tbody>';
-  (cat?[cat]:TCATS).forEach(function(c){var l=tSum(sc,LY,months,c),p=hasPY?tSum(sc,PY,months,c):null;if(!l&&!p)return;yc+='<tr><td>'+TCATLAB[c]+'</td><td style="text-align:right">'+(p==null?'—':usd0(p))+'</td><td style="text-align:right">'+usd0(l)+'</td><td style="text-align:right">'+(p==null?'—':deltaCell(l,p))+'</td></tr>';});
-  yc+='<tr style="border-top:2px solid var(--line-2)"><td><b>Total</b></td><td style="text-align:right"><b>'+(ytdP==null?'—':usd0(ytdP))+'</b></td><td style="text-align:right"><b>'+usd0(ytdA)+'</b></td><td style="text-align:right">'+(ytdP==null?'—':deltaCell(ytdA,ytdP))+'</td></tr></tbody></table></div>';
-  TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,12);
-  var lh='<div><table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">'+(cat?catName:'Total')+'</th></tr></thead><tbody>';
-  TLB.forEach(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||r[cat]>0);});var k=(rs[0]||{}).kind;lh+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(k!=='shoreside'&&!(rs[0]||{}).agency_id?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(byp[n])+'</b></td></tr>';});
-  if(!TLB.length)lh+='<tr><td colspan=4 class=muted>Nobody in this period.</td></tr>';
-  lh+='</tbody></table><div class=hint style="margin-top:6px">'+(P.mo?TMN[P.mo]+' '+LY:P.span+' '+LY)+(cat?' · '+catName+' only':'')+'. Click a name for their full history. One person, every spelling.</div></div>';
-  h+=yc+lh+'</div>';
-  if(TF.kind!=='shoreside'&&!TF.client)h+=sgaCompareHTML(sc,LY,P.mo?[P.mo]:null,cat);
-  // The names the registry cannot place (src/travel_match.js): Rita's clean-up list — fix the spelling in the workbook
-  // and re-upload, or the spend never reaches a profile. NCL-prep people are not crew yet; they stay listed, tagged.
-  var un=(TRV.unmatched||[]).filter(function(u){return !TF.year||u.years.indexOf(+TF.year)>=0;});
-  if(un.length&&TF.kind!=='shoreside'){
-    h+='<div class=zlabel style="margin-top:18px">Names the crew registry cannot place · '+un.length+'</div>';
-    h+='<table class=tbl><thead><tr><th>As typed in the workbook</th><th>Why</th><th style="text-align:right">Rows</th><th style="text-align:right">Total</th><th>Years</th></tr></thead><tbody>';
-    un.slice(0,40).forEach(function(u){var why=u.how==='ambiguous'?'two crew share this name — add the first name':/\\bncl\\b/i.test(u.crew_name)?'NCL prep — not on the TDG registry':'no crew with this surname — check the spelling';h+='<tr><td>'+escHtml(u.crew_name)+'</td><td class=muted style="padding:6px 8px">'+why+'</td><td style="text-align:right">'+u.rows+'</td><td style="text-align:right">'+usd0(u.total)+'</td><td>'+u.years.join(', ')+'</td></tr>';});
-    h+='</tbody></table><div class=hint style="margin-top:6px">Matched by surname + first name, accents and typos tolerated; a note in brackets is ignored. Fix the name in the workbook and re-upload the year.</div>';
+    h+='<div class=tvlab>'+(TF.kind==='shoreside'||TF.client||cat?'No budget for this view · year against year':'Year against year')+'</div>';
+    h+='<div class=tvfacts style="margin-top:12px;border-top:0;padding-top:0">'
+      +'<div class=tvfact><div class=v>'+(ytdP==null?'—':usd0(ytdP))+'</div><div class=l>'+(PY||'Last year')+', same '+(P.mo?'month':'months')+'</div></div>'
+      +'<div class=tvfact><div class=v>'+(ytdP==null?'—':((ytdA-ytdP>=0?'+':'')+usd0(ytdA-ytdP)))+'</div><div class=l>the difference</div></div>'
+      +(cat?'<div class=tvfact><div class=v>'+(allA?Math.round(ytdA/allA*100):0)+'%</div><div class=l>of '+usd0(allA)+', every category</div></div>'
+           :'<div class=tvfact><div class=v>'+(P.mo?'—':usd0(fullProj))+'</div><div class=l>'+(P.mo?'one month: no run-rate':'where the year lands at this pace')+'</div></div>')
+      +'</div>';
   }
+  h+='</div></div>';
+  // ---- what needs a decision ----
   var val=function(r){return cat?(r[cat]||0):r.total;};
   var yrRows=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&val(r)>0;});
   var tt=yrRows.map(val).sort(function(a,b){return a-b;});
   var med=tt.length?tt[Math.floor(tt.length/2)]:0;
   var outs=yrRows.filter(function(r){return val(r)>med*2.5;}).sort(function(a,b){return val(b)-val(a);}).slice(0,8);
+  h+=tvDecisions({sc:sc,LY:LY,PY:PY,P:P,cat:cat,budgeted:budgeted,hasPY:hasPY,outs:outs,med:med});
+  // ---- month by month: the quiet year-over-year (tBars) ----
+  var dim=function(m){return P.mo&&m!==P.mo?';opacity:.35':'';};
+  var curB=[],prevB=[];for(var m=1;m<=12;m++){curB[m]=tSum(sc,LY,[m],budgeted?null:cat);prevB[m]=hasPY?tSum(sc,PY,[m],budgeted?null:cat):0;}
+  h+='<div class=tvcard><div class=tvh>Month by month <small>'+LY+(cat?' · '+catName:'')+(budgeted?' · dashed line '+usd0(TBUD)+' a month':'')+'</small></div><div style="margin-top:10px"></div>';
+  h+=budgeted?tBars(curB,{prev:hasPY?prevB:null,ly:LY,py:PY,budget:TBUD,upto:lastMo,dim:dim,color:function(m,a){return a>TBUD?'var(--red)':'var(--navy)';}})
+             :tBars(curB,{prev:hasPY?prevB:null,ly:LY,py:PY,upto:lastMo,dim:dim});
+  h+='</div>';
+  // ---- where it goes · who ----
+  var catRows=(cat?[cat]:TCATS).map(function(c){return {c:c,l:tSum(sc,LY,months,c),p:hasPY?tSum(sc,PY,months,c):null};}).filter(function(x){return x.l||x.p;}).sort(function(a,b){return b.l-a.l;});
+  var catMax=Math.max.apply(null,catRows.map(function(x){return Math.max(x.l,x.p||0);}).concat([1]));
+  var wg='<div class=tvcard><div class=tvh>Where it goes <small>'+P.span+' '+LY+(hasPY?' · pale = '+PY:'')+'</small></div><div style="margin-top:8px">';
+  wg+=catRows.map(function(x){var d=(x.p&&x.p>0)?Math.round((x.l-x.p)/x.p*100):null;return '<div class=tvcat onclick="tvGo(&quot;cat&quot;,&quot;'+(cat?'':x.c)+'&quot;)" title="'+TCATLAB[x.c]+' · '+usd0(x.l)+(x.p!=null?' · '+PY+' '+usd0(x.p):'')+'"><span>'+TCATLAB[x.c]+'</span><span class=bar><em style="width:'+((x.p||0)/catMax*100).toFixed(1)+'%"></em><i style="width:'+(x.l/catMax*100).toFixed(1)+'%"></i></span><b>'+usd0(x.l)+'</b><span class="d '+(d==null?'':(d>0?'up':'dn'))+'">'+(d==null?'':(d>0?'+':'')+d+'%')+'</span></div>';}).join('')||'<div class=tvsub>Nothing in this period.</div>';
+  wg+='</div></div>';
+  var byp={};TLBL={};sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0;}).forEach(function(r){var v=cat?(r[cat]||0):r.total;if(cat&&!v)return;var k=tKey(r);byp[k]=(byp[k]||0)+v;TLBL[k]=tLabel(r);});
+  TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,8);
+  var ppl='<div class=tvcard><div class=tvh>Who <small>top '+TLB.length+' · '+P.span+' '+LY+(cat?' · '+catName:'')+'</small></div><div style="margin-top:6px">';
+  ppl+=TLB.map(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||r[cat]>0);});var k=(rs[0]||{}).kind;var unp=k!=='shoreside'&&!(rs[0]||{}).agency_id;
+    return '<div class=tvp onclick="travelDrill('+i+')"><span class=av>'+escHtml(tvInitials(TLBL[n]||n))+'</span><span><span class=nm>'+escHtml(TLBL[n]||n)+'</span>'+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(unp?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'<span class=sb>'+rs.length+' movement'+(rs.length===1?'':'s')+'</span></span><b>'+usd0(byp[n])+'</b></div>';}).join('')||'<div class=tvsub>Nobody in this period.</div>';
+  ppl+='</div></div>';
+  h+='<div class=tvgrid2>'+wg+ppl+'</div>';
+  // ---- TDG's bill against the workbook ----
+  if(TF.kind!=='shoreside'&&!TF.client&&SGA){
+    var Bs=sgaBillOf(LY,P.mo?[P.mo]:null),bt=0,wt=0;
+    Bs.months.forEach(function(m){TV_BILL_CATS.forEach(function(c){if(cat&&c[0]!==cat)return;bt+=Bs.sum(m,c[0]);wt+=sc.filter(function(r){return r.year===LY&&r.month===m&&(r.kind||'crew')!=='shoreside';}).reduce(function(a,r){return a+(+r[c[0]]||0);},0);});});
+    h+='<details class="tvcard tvfold" id=tvsga><summary><span class=tvh>TDG’s bill against the workbook <small>'+(Bs.months.length?(Bs.months.length+' month'+(Bs.months.length===1?'':'s')+' on file · '+(cat&&TV_BILL_CATS.some(function(c){return c[0]===cat;})?catName:'air, hotel, medical, visa')+' · bill '+usd0(bt)+' · workbook '+usd0(wt)):'no bill on file for '+(P.mo?TMN[P.mo]+' ':'')+LY)+'</small></span></summary><div style="overflow:auto;margin-top:12px">'+sgaCompareHTML(sc,LY,P.mo?[P.mo]:null,cat)+'</div></details>';
+  }
+  // ---- folded: the names the roster cannot place, the anomalies, every line ----
+  var un=(TRV.unmatched||[]).filter(function(u){return u.years.indexOf(LY)>=0;});
+  if(un.length&&TF.kind!=='shoreside'){
+    h+='<details class="tvcard tvfold" id=tvnames><summary><span class=tvh>Names the crew registry cannot place <small>'+un.length+'</small></span></summary>';
+    h+='<table class=tbl style="margin-top:10px"><thead><tr><th>As typed in the workbook</th><th>Why</th><th style="text-align:right">Rows</th><th style="text-align:right">Total</th><th>Years</th></tr></thead><tbody>';
+    un.slice(0,40).forEach(function(u){var why=u.how==='ambiguous'?'two crew share this name — add the first name':/\\bncl\\b/i.test(u.crew_name)?'NCL prep — not on the TDG registry':'no crew with this surname — check the spelling';h+='<tr><td>'+escHtml(u.crew_name)+'</td><td class=muted style="padding:6px 8px">'+why+'</td><td style="text-align:right">'+u.rows+'</td><td style="text-align:right">'+usd0(u.total)+'</td><td>'+u.years.join(', ')+'</td></tr>';});
+    h+='</tbody></table><div class=tvsub style="margin-top:8px">Matched by surname + first name, accents and typos tolerated; a note in brackets is ignored. Fix the name in the workbook and re-upload the year.</div></details>';
+  }
   if(outs.length){
-    h+='<div class=zlabel style="margin-top:18px">Anomalies — single movements &gt; 2.5× median ('+usd0(med)+(cat?' '+catName:'')+')</div>';
-    h+='<table class=tbl><thead><tr><th>Mo</th><th>Person</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">'+(cat?catName:'Total')+'</th></tr></thead><tbody>';
-    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(val(r))+'</b></td></tr>';});
-    h+='</tbody></table>';
+    h+='<details class="tvcard tvfold" id=tvanom><summary><span class=tvh>Single movements above '+usd0(med*2.5)+' <small>'+outs.length+' · 2.5× the usual '+usd0(med)+(cat?' '+catName.toLowerCase():'')+'</small></span></summary>';
+    h+='<table class=tbl style="margin-top:10px"><thead><tr><th>Mo</th><th>Person</th><th>Leg</th><th style="text-align:right">Air</th><th style="text-align:right">'+(cat?catName:'Total')+'</th></tr></thead><tbody>';
+    outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':escHtml(r.leg||''))+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(val(r))+'</b></td></tr>';});
+    h+='</tbody></table></details>';
   }
   var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;return true;});
-  h+='<div class=zlabel style="margin-top:18px">Line items'+(TF.year?'':' · all years')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+catName:'')+(rows.length?(' · '+rows.length):'')+'</div>';
-  h+='<table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Ship</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
-    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':(r.client==='ncl'?'<span class="cchip amber">NCL</span>':'crew'))+'</td><td>'+(r.leg==='shoreside'?'—':r.leg)+'</td><td>'+escHtml(r.ship||'')+'</td><td>'+escHtml(r.crew_name)+(r.crew_display&&r.crew_display!==r.crew_name?' <span class=muted style="padding:0">· '+escHtml(r.crew_display)+'</span>':'')+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=14 class=muted>No line items match these filters.</td></tr>';
-  h+='</tbody></table>';
-  document.getElementById('trbody').innerHTML=h;
+  h+='<details class="tvcard tvfold" id=tvlines><summary><span class=tvh>Line items <small>'+rows.length+(TF.year?'':' · all years')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+catName:'')+'</small></span></summary>';
+  h+='<div style="overflow:auto;margin-top:10px"><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Ship</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
+    +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':(r.client==='ncl'?'<span class="cchip amber">NCL</span>':'crew'))+'</td><td>'+(r.leg==='shoreside'?'—':escHtml(r.leg||''))+'</td><td>'+escHtml(r.ship||'')+'</td><td>'+escHtml(r.crew_name)+(r.crew_display&&r.crew_display!==r.crew_name?' <span class=muted style="padding:0">· '+escHtml(r.crew_display)+'</span>':'')+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=14 class=muted>No line items match these filters.</td></tr>';
+  h+='</tbody></table></div></details>';
+  t.innerHTML=h;
 }
 
 function profileHTML(k){
@@ -6579,23 +6821,22 @@ function profileHTML(k){
   h+=sgaPersonHTML(k);
   return h;
 }
-function paintTravelCrew(){document.getElementById('trbody').innerHTML='<div style="cursor:pointer;color:var(--navy);font-weight:700;margin-bottom:6px" onclick="travelBack()">← Back</div>'+profileHTML(TSEL);}
+function paintTravelCrew(){var t=document.getElementById('trbody');if(!t)return;t.innerHTML='<div class=tvcard><button class=tvgo style="margin:-6px 0 6px -10px" onclick="travelBack()">← Back to the overview</button>'+profileHTML(TSEL)+'</div>';}
 function paintTravelSearch(){
   var q=(TF.q||'').trim().toLowerCase();
-  // the Year / Month / Category selectors narrow the search like every other section (16 Oct 2026)
+  // the Year / Month / Category filters narrow the search like every other section (16 Oct 2026)
   var cat=TF.cat||null,sc=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(cat&&!(r[cat]>0))return false;return true;});
   var within=(TF.year?' in '+TF.year:'')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+TCATLAB[cat]:'');
   var seen={},names=[],tot={};TLBL={};
   sc.forEach(function(r){var k=tKey(r);if(!seen[k]){seen[k]=1;names.push(k);}tot[k]=(tot[k]||0)+(cat?(r[cat]||0):r.total);TLBL[k]=tLabel(r);}); // tScope already applied the search to both spellings
   names.sort(function(a,b){return (tot[b]||0)-(tot[a]||0);});
   var t=document.getElementById('trbody');if(!t)return;
-  if(names.length===0){t.innerHTML='<div class=muted style="padding:20px 2px">No one matches "'+escHtml(TF.q)+'"'+within+'. Try another name, or widen the year, month, category or Crew / shoreside filter.</div>';return;}
-  if(names.length===1){t.innerHTML='<div class=hint style="margin-bottom:8px">Showing every expense for this person · clear the search box to return to the overview.</div>'+profileHTML(names[0]);return;}
-  var h='<div class=zlabel>'+names.length+' people match "'+escHtml(TF.q)+'"'+within+' — click one for their full history</div>';
-  h+='<table class=tbl><thead><tr><th>#</th><th>Person</th><th style="text-align:right">Trips</th><th style="text-align:right">'+(cat?TCATLAB[cat]:'Total')+'</th></tr></thead><tbody>';
+  if(names.length===0){t.innerHTML='<div class=tvcard><b>No one matches “'+escHtml(TF.q)+'”'+within+'.</b><div class=tvsub style="margin-top:6px">Try another spelling, or widen the year, month, category or view on the left.</div></div>';return;}
+  if(names.length===1){t.innerHTML='<div class=tvcard><div class=tvsub style="margin:0 0 8px">Every expense for this person · clear the search box to return to the overview.</div>'+profileHTML(names[0])+'</div>';return;}
+  var h='<div class=tvcard><div class=tvh>'+names.length+' people match “'+escHtml(TF.q)+'”'+within+' <small>click one for the full history</small></div><div style="margin-top:6px">';
   TLB=names.slice(0,60);
-  TLB.forEach(function(n,i){var rs=sc.filter(function(r){return tKey(r)===n;});var k=(rs[0]||{}).kind;h+='<tr style="cursor:pointer" onclick="travelDrill('+i+')"><td>'+(i+1)+'</td><td>'+escHtml(TLBL[n]||n)+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'</td><td style="text-align:right">'+rs.length+'</td><td style="text-align:right"><b>'+usd0(tot[n])+'</b></td></tr>';});
-  h+='</tbody></table>';
+  h+=TLB.map(function(n,i){var rs=sc.filter(function(r){return tKey(r)===n;});var k=(rs[0]||{}).kind;return '<div class=tvp onclick="travelDrill('+i+')"><span class=av>'+escHtml(tvInitials(TLBL[n]||n))+'</span><span><span class=nm>'+escHtml(TLBL[n]||n)+'</span>'+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+'<span class=sb>'+rs.length+' movement'+(rs.length===1?'':'s')+'</span></span><b>'+usd0(tot[n])+'</b></div>';}).join('');
+  h+='</div></div>';
   t.innerHTML=h;
 }
 async function loadTravel(){return renderTravel();}

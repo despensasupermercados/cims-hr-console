@@ -278,6 +278,9 @@ test("Rita's typed sign-off outranks the file's cross-over while TDG lists the c
   const L = by(legs);
   const v = (k) => ({ off: L[k].off, src: L[k].offSource, cur: L[k].is_current, held: !!L[k].heldByFile, rel: L[k].reliever ? L[k].reliever.sc : null });
   assert.deepEqual(v("SC-0039935|Pursuit"), { off: "2026-10-31", src: "rita", cur: true, held: false, rel: "SC-0041465" }, "Kevin: 31 Oct, not the 16 Oct cross-over");
-  assert.deepEqual(v("SC-0038464|Enchantment"), { off: "2027-01-31", src: "rita", cur: true, held: false, rel: "SC-0036160" }, "Valderrama: 31 Jan 2027, no longer red past a 3 Oct sign-off");
+  // The reliever is ONE rule since 17 Oct 2026 (reliever.js, Miguel: "Adopt it everywhere"): Myrna Suarez embarked 3 Oct, months
+  // before the 45-day window of Valderrama's sign-off — a colleague in the file, not his relief (Lanuza's card is; see
+  // test/review_1017_board.test.js).
+  assert.deepEqual(v("SC-0038464|Enchantment"), { off: "2027-01-31", src: "rita", cur: true, held: false, rel: null }, "Valderrama: 31 Jan 2027, no longer red past a 3 Oct sign-off");
   assert.deepEqual(v("SC-0037752|Apex"), { off: "2026-10-07", src: "rita", cur: true, held: true, rel: "SC-0038129" }, "Belhida: the same date either way; passed while TDG lists him On board -> held");
 });

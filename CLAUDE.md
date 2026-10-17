@@ -840,6 +840,15 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   tool can carry a 2 MB binary — their `sga_source_file` rows say so (`r2_key` NULL, note). To keep them, drag each once on
   Upload data (Replace → identical lines, then the archive) or email them to sga@cims.work once the Email Routing rule exists.
   Pinned by `test/sga_archive.test.js`, `test/mail_intake.test.js`.
+- **A BILL THAT DOES NOT RECONCILE IS HELD FOR RITA** (Miguel, 17 Oct 2026, of three options: "Hold it for Rita"). A workbook
+  that arrives by itself — the inbox (`applyInbox`: the mail intake, the agent's rows) — whose lines + other charges do not
+  add up to TDG's GRAND TOTAL loads NOTHING (`syncDeps.applySga` with `holdUnreconciled`, the inbox's only caller): its rows are
+  `unreconciled`, `sp_sync` says `held`, the activity log names it, and `/api/sga` returns it as `held` (the month, lines,
+  others, grand total, the gap, the kept original's hash) until a bill for that month is loaded AFTER it. The Travel tab's
+  Needs a decision carries it in every view of its year, red, to the cent, with Download (`/api/sga/file`). Rita loads it on
+  Upload data after checking with Finance (the dry-run's amber chip, then Apply — unchanged). A summary-only file has no
+  total to miss; the dormant Graph sync and the Upload page are unchanged. The same held mail sent again is held again.
+  Pinned by `test/sga_hold.test.js` (real MIME, postal-mime, SheetJS, SQLite), `test/travel_filters.test.js`.
 - **THE TRAVEL TAB'S FILTERS ACT ON EVERY SECTION** (Miguel, 16 Oct 2026: "I dont think this filter is working correctly .. review
   this and all the filters and fix the bugs"; PR #265). The background revalidation (`cachedJson`) lands in `travelRefresh`,
   which repaints the body under the same `TF` — it used to re-run `renderTravel`, resetting Year / Month / Category / cruise
@@ -856,6 +865,29 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   year → the plain bar. Used by the Training centre chart and both Travel tab charts (the pacing one keeps its dashed budget
   line and red months). Pinned by `test/travel_filters.test.js`; `test/perf_invariants.test.js` names `travelRefresh` beside
   `crewRefresh`.
+- **THE TRAVEL TAB, REDESIGNED** (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young,
+  luxury feeling .. place the filters like we have done elsewhere on the left .. allowing rita to make decisions"; proofs
+  under `docs/mockups/travel_20261017/`). **The filters are a left rail** like the Crew and Keyman tabs (`crrail` `#trrail`,
+  236px; the Filters button on a phone): Search (drawn ONCE in `renderTravel`, so it keeps its focus), View (Crew travel /
+  Shoreside team / Crew + shoreside / Training centre), Year, Month (a 12-chip grid, a month with nothing on file greyed),
+  Category, Cruise line — each row with its amount for the SAME period as the hero (`inPer`: the chosen month, else the
+  year's closed months), repainted by `tvRail` on every `paintTravel`; Training centre keeps View + Year only. `TF` is
+  unchanged, so every rule above holds. **The page answers in order**: one hero card (the number; "On budget · $X under" /
+  "Over budget" for crew travel only, every category and line; the year against last year as a pill; the meter against the
+  $180,000 with the pace tick and the dashed projection; last year same months, where the year lands, and **what is left a
+  month** for the rest of the year to land on budget — or, on a view with no budget, "No budget for this view · year
+  against year"); **Needs a decision** (`tvDecisions`): a closed month over $15,000 (budgeted view), TDG's bill against the
+  workbook as ONE net gap per category over the months the bill covers, ≥ `TV_GAP_MIN` = $150 (Miguel, 17 Oct 2026:
+  "Net per year" — a charge typed into the next month cancels out; a chosen month is that month alone; each month stays in
+  the comparison fold), the category up most on last year
+  (≥ 20% and ≥ $1,000), a closed month with spend and no bill on file, the names the roster cannot place, single movements
+  above 2.5× the usual — each says what it means and opens the place that holds it (`tvGo` sets one filter, `tvOpen`
+  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". Then Month by month (`tBars`),
+  Where it goes (bars, last year pale, click = that category) beside Who (top 8, initials, click = their history), and three
+  folds: TDG's bill against the workbook (its summary says the year's bill and workbook totals; `sgaBillOf` is the ONE
+  definition of the bill per month, read by the table and the decisions), the names the roster cannot place (the year
+  shown, like its decision row), the line items. Pinned by `test/travel_filters.test.js` (the page in a vm on a small
+  workbook + bill).
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`, flat every month in
   every year — Miguel, 16 Oct 2026: "I kept it all at 15000 per month"); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
@@ -1301,6 +1333,26 @@ questions (his answers land in the sections they change). Pinned by `test/review
   only the unused `/api/crew/import` page drew one.
 - **Maria's "former crew" is `isOffFleet(status)`**, never the manual tag (a tagged crew TDG has On board left her active
   lists; Not for Rehire could not be listed by name).
+
+**Miguel's answers of 17 Oct 2026 to the review** (Brain recICJGsDk6oJJpSd). Pinned by `test/review_1017_board.test.js`.
+- **THE RELIEVER IS ONE RULE** (`src/reliever.js`; "Adopt it everywhere"): the first person to sign on the hull after him,
+  never a training visit, counted from `RELIEF_WINDOW_DAYS` = 45 before the EARLIER of his shown sign-off and his projected
+  one (sign-on + 7 months, Azamara 5 — an extension keeps the reliever who boarded on the original plan); TDG's undated
+  Earmarked row the last resort. **One person relieves one seat** (`assignRelievers`): two seats wanting the same person —
+  he relieves the one whose sign-off is nearest his sign-on, the other looks further. The board computes it once per hull
+  (`legsFromRegistry` → `leg.reliever`, with his own sign-on); the email (`seatContexts`), the profile (`handovers`: the
+  board's answer for a file-dated contract, the rule for any other) and the dashboard (`relieverFor`: the board's answer, a
+  reliever already aboard included — "in TDG") read the same. **It names, it never dates**: the cross-over still dates the
+  sign-off (§10d). On the 16 Oct file: 0 dates moved; Lanuza (not Suarez) for Valderrama; 20 seats gained the name the board
+  had left blank (it named a reliever only when he also dated the sign-off).
+- **A card TDG earmarks for that very hull** turns green "ABOARD · AWAITING TDG FILE" on its sign-on (`awaitingCard`, the
+  seat's `awaiting`: verdict `earmarked` like `pending`), and a later file still listing him Earmarked there does not
+  contradict it (`legsFromRegistry`): TDG has the plan, not the embark yet (Corpin, Grandeur, 18 Oct).
+- **Earmarked for the ship he is aboard** (Ida Purnama, Xcel: "remember that Ida is onboard"; one person, SC-0040010, the
+  duplicate merged): TDG's Earmarked word for the hull his contract is still RUNNING on (a live leg there) is his next
+  contract, not the end of this one — the board seats him (`earmarkedHere`) and never ends the leg "per the TDG file".
+- Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
+  audit request ar_eb101ea1 on Kevin Jugao is LIVE (test_mode 0) — Miguel says when to void or cancel it; do not grade it.
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
