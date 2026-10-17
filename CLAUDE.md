@@ -1320,7 +1320,7 @@ questions (his answers land in the sections they change). Pinned by `test/review
   lists; Not for Rehire could not be listed by name).
 - **One outcome per contract span, by the database** (money, §1: Miguel's merge). The commit's backstop cited a
   `UNIQUE(crew_id,span_start,span_end)` "migration 0004" that no migration created (production: non-unique indexes only), so
-  two racing commits paid twice. `ux_bonus_outcome_span` (migrations/0032, primary outcomes only, `ensureBonusV2` at runtime)
+  two racing commits paid twice. `ux_bonus_outcome_span` (migrations/0033, primary outcomes only, `ensureBonusV2` at runtime)
   and the contract + legs + outcome written as ONE batch after the evidence read: a refused second click leaves nothing.
   Pinned by `test/bonus_policy_v2.test.js` on real SQLite.
 

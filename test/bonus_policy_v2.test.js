@@ -42,7 +42,7 @@ function commitDb() {
   const db = new DatabaseSync(":memory:");
   db.exec(sql("0001_init.sql"));
   db.exec(sql("0028_bonus_policy_v2.sql"));
-  db.exec(sql("0032_bonus_outcome_unique.sql"));
+  db.exec(sql("0033_bonus_outcome_unique.sql"));
   db.exec("INSERT INTO crew (id, agency_id, first_name, last_name, status, created_at, updated_at) VALUES ('c1','SC-1','Ana','Cruz','On board','t','t')");
   return db;
 }
@@ -75,5 +75,5 @@ test("the commit writes contract, legs and outcome as one batch after the eviden
   assert.doesNotMatch(fn, /INSERT INTO (contract|assignment|bonus_outcome)[^\n]*\)\.run\(\)/, "no write runs on its own outside the batch");
   const g = w.slice(w.indexOf("const ensureBonusV2 = memoEnsure("), w.indexOf("async function commitEvidence("));
   assert.match(g, /CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome\(crew_id, span_start, span_end\) WHERE corrects_id IS NULL/);
-  assert.match(sql("0032_bonus_outcome_unique.sql"), /CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome\(crew_id, span_start, span_end\) WHERE corrects_id IS NULL;/, "the migration and the guard say the same");
+  assert.match(sql("0033_bonus_outcome_unique.sql"), /CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome\(crew_id, span_start, span_end\) WHERE corrects_id IS NULL;/, "the migration and the guard say the same");
 });

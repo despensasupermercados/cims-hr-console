@@ -3545,7 +3545,7 @@ const ensureBonusV2 = memoEnsure(async (env) => {
   await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) SELECT 'policy-v2', 2, '2026-10-15', ladder_json, floor_pct, weights_json, eval_rule, gates_json, agg_policy, 'v1 weights and gates unchanged. sComm = Dexter''s audit, not Communication. The Score Card pre-fills from the systems (bonus.js autoScore, 15-16 Oct 2026).' FROM bonus_policy WHERE version = 1").run();
   try { await env.DB.prepare("ALTER TABLE bonus_outcome ADD COLUMN evidence_json TEXT").run(); }
   catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
-  // One outcome per contract span, by the database (migrations/0032, 17 Oct 2026): the commit's backstop below relied on it.
+  // One outcome per contract span, by the database (migrations/0033, 17 Oct 2026): the commit's backstop below relied on it.
   await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome(crew_id, span_start, span_end) WHERE corrects_id IS NULL").run();
 }, "policy-v2+v1seed+span-unique");
 // The automatic read for the span and ships being committed, re-run on the server (cached AI answers only: a commit never
@@ -3615,7 +3615,7 @@ async function apiBonusCommit(request, env, session) {
     await env.DB.batch(writes);
   } catch (e) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
-    // SELECT trips ux_bonus_outcome_span (migrations/0032, primary outcomes only) and the whole batch rolls back. Return
+    // SELECT trips ux_bonus_outcome_span (migrations/0033, primary outcomes only) and the whole batch rolls back. Return
     // the already-recorded outcome as a duplicate instead of double-paying / double-counting.
     const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
     if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
