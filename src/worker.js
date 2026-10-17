@@ -50,7 +50,7 @@ import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
-import { classifyWindow } from "./scorequeue.js";
+import { classifyWindow, defaultScoreLeg } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements, monthsLabel } from "./seafarer_movements.js";
@@ -3296,15 +3296,10 @@ async function apiBonusCrew(env, url) {
   // since the Contract Counter table is only as fresh as its last upload (2026-07-06) and knows nothing
   // of relief-board contracts. Fall back to the latest Counter leg.
   const td = TODAY();
-  let current = null, bestPast = null, bestFut = null;
-  for (const h of HIST) {
-    if (!h.ours || h.sc !== cr.agency_id || !h.on) continue;
-    const off = h.off || "9999"; // TBA sign-off = still aboard (same rule as the board and deriveStatus)
-    if (h.on <= td && off >= td) { if (!current || off > (current.off || "9999")) current = h; } // contract spanning today
-    else if (off < td) { if (!bestPast || off > bestPast.off) bestPast = h; }                    // last completed
-    else { if (!bestFut || off < (bestFut.off || "9999")) bestFut = h; }                          // next one
-  }
-  const sched = current || bestPast || bestFut;  // the contract being scored: current first, else most-recent
+  // The contract being scored is ONE definition, src/scorequeue.js defaultScoreLeg (night watch, 17 Oct 2026): an ENDED
+  // contract nobody has scored yet before a contract that has only begun. "Current first, else most recent" opened Olid,
+  // Alonzo, Santos, De Torres, Noche and Resposo on the hull they joined in October, not the one they left in July/August.
+  const sched = defaultScoreLeg(HIST, cr.agency_id, td, { outcomes: outs.results || [] }).leg;
   let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null; // TBA off stays blank for manual entry
   // Already committed for this contract? Prefill the COMMITTED span, not the board's (planned vs
   // actual drift, snapshot vs grid). The commit path's double-commit guard is an exact (start,end)

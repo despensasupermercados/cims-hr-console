@@ -626,6 +626,14 @@ movable; the commit is a money user's click; committed outcomes are never touche
   the same day (it never had the 0001 seed); `ensureBonusV2` seeds v1 first on any database that lacks it. (4) with no miss,
   on-time ordering is Ray's on-time answer, all or nothing — as built. Pinned by `test/score_auto.test.js`,
   `test/bonus_policy_v2.test.js`.
+- **The contract the Score Card opens on** (night watch, 17 Oct 2026, draft PR for Miguel — §1): ONE definition,
+  `src/scorequeue.js defaultScoreLeg`, called by `apiBonusCrew`. An ENDED contract nobody has scored yet (no outcome covers
+  it), within `SCORE_RECENT_DAYS` = 180, comes before a contract that has only begun when its sign-off is the nearer of the
+  two; a contract ending within days is still pre-scored first; else the running one, else the most recent, else the next.
+  Why: "current first, else most recent" opened Olid, Alonzo, Santos, De Torres, Noche and Resposo — off a hull in July /
+  August 2026, aboard a new one since October, zero outcomes in production — on the hull they had just joined, "completed
+  in full" ticked, every automatic read on the wrong dates. The committed-span swap and the Counter fallback are unchanged.
+  Pinned by `test/scorequeue.test.js`.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
 "redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas
