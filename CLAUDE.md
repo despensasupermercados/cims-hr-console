@@ -856,6 +856,27 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   year → the plain bar. Used by the Training centre chart and both Travel tab charts (the pacing one keeps its dashed budget
   line and red months). Pinned by `test/travel_filters.test.js`; `test/perf_invariants.test.js` names `travelRefresh` beside
   `crewRefresh`.
+- **THE TRAVEL TAB, REDESIGNED** (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young,
+  luxury feeling .. place the filters like we have done elsewhere on the left .. allowing rita to make decisions"; proofs
+  under `docs/mockups/travel_20261017/`). **The filters are a left rail** like the Crew and Keyman tabs (`crrail` `#trrail`,
+  236px; the Filters button on a phone): Search (drawn ONCE in `renderTravel`, so it keeps its focus), View (Crew travel /
+  Shoreside team / Crew + shoreside / Training centre), Year, Month (a 12-chip grid, a month with nothing on file greyed),
+  Category, Cruise line — each row with its amount for the SAME period as the hero (`inPer`: the chosen month, else the
+  year's closed months), repainted by `tvRail` on every `paintTravel`; Training centre keeps View + Year only. `TF` is
+  unchanged, so every rule above holds. **The page answers in order**: one hero card (the number; "On budget · $X under" /
+  "Over budget" for crew travel only, every category and line; the year against last year as a pill; the meter against the
+  $180,000 with the pace tick and the dashed projection; last year same months, where the year lands, and **what is left a
+  month** for the rest of the year to land on budget — or, on a view with no budget, "No budget for this view · year
+  against year"); **Needs a decision** (`tvDecisions`): a closed month over $15,000 (budgeted view), TDG's bill against the
+  workbook by month and category ≥ `TV_GAP_MIN` = $150 (biggest three, "N more"), the category up most on last year
+  (≥ 20% and ≥ $1,000), a closed month with spend and no bill on file, the names the roster cannot place, single movements
+  above 2.5× the usual — each says what it means and opens the place that holds it (`tvGo` sets one filter, `tvOpen`
+  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". Then Month by month (`tBars`),
+  Where it goes (bars, last year pale, click = that category) beside Who (top 8, initials, click = their history), and three
+  folds: TDG's bill against the workbook (its summary says the year's bill and workbook totals; `sgaBillOf` is the ONE
+  definition of the bill per month, read by the table and the decisions), the names the roster cannot place (the year
+  shown, like its decision row), the line items. Pinned by `test/travel_filters.test.js` (the page in a vm on a small
+  workbook + bill).
 - **Budget and comparisons, settled 15 Oct 2026**: seafarer travel $15,000 / month (`TRAVEL_BUDGET_MO`, flat every month in
   every year — Miguel, 16 Oct 2026: "I kept it all at 15000 per month"); NO budget for
   shoreside or the training centre — those views show the year against the previous year (YoY), never a budget; TDG's "W"
