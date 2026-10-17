@@ -12,7 +12,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted be
 const SRC_PATH = new URL("../src/worker.js", import.meta.url);
 const SRC = readFileSync(SRC_PATH, "utf-8");
 const TMP = new URL(`../src/__bh1016_${process.pid}__.mjs`, import.meta.url);
-writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS, contractCountMap };\n", "utf-8");
+writeFileSync(TMP, SRC + "\nexport { decodeEmailBody, getCookie, applyInbox, processIntelInbox, ensureRegistrySnapshot, INTEL_MAX_ATTEMPTS, contractCountMap, apiFeedbackCrew };\n", "utf-8");
 let W;
 try { W = await import(TMP.href); } finally { unlinkSync(TMP); }
 
@@ -175,4 +175,30 @@ test("P4: the statement PDF and its email read months+days from span_md, not the
   assert.equal(span("2026-10-26", "2026-10-31"), "5 days");
   const { seaTime } = await import("../src/statement.js");
   assert.equal(seaTime([{ on: "2026-07-31", act: "2027-03-01" }], "2027-06-01"), "7 mo 1 d");
+});
+
+// ---- S1b (the Score Card read draft, 17 Oct 2026): the Windows pre-fill obeys the same sign-on rule as the automatic read ----
+test("S1b: /api/feedback/crew?on= lists an answer from before the sign-on as earlier feedback and keeps it out of the prefill", async () => {
+  assert.ok(DatabaseSync, "node:sqlite");
+  const d = new DatabaseSync(":memory:");
+  d.exec("CREATE TABLE crew (id TEXT PRIMARY KEY, agency_id TEXT, first_name TEXT, last_name TEXT, status TEXT, redacted INTEGER DEFAULT 0); INSERT INTO crew VALUES ('c1','SC-0038129','Michael Angelo','Resposo','On board',0); CREATE TABLE data_meta (k TEXT PRIMARY KEY, v TEXT);");
+  const env = envFor(d);
+  const url = (q) => new URL("https://cims.work/api/feedback/crew?" + q);
+  let r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129"))).json(); // the guard creates the two tables
+  assert.equal(r.ok, true);
+  d.prepare("INSERT INTO feedback_request2 (id,crew_id,role,token_hash,status,requested_at) VALUES ('fr1','c1','ray','x','answered','2026-07-20T11:00:00Z')").run();
+  d.prepare("INSERT INTO feedback_response2 (id,request_id,crew_id,role,answers_json,submitted_at) VALUES ('fp1','fr1','c1','ray',?,'2026-07-20T11:30:27Z')")
+    .run(JSON.stringify({ order: "Yes", rushcause: "Crew ordering failure", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "No" }));
+  // Resposo's Ray answer of 20 Jul 2026 was given for the Reflection contract (16 Jan -> 17 Jul)
+  r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129&on=2026-01-16"))).json();
+  assert.equal(r.answers.ray.acc, "Accurate"); assert.equal(r.prefill.sliders.sAcc, 25); assert.equal(r.prefill.gates.rush, true); assert.equal(r.previous.length, 0);
+  // the Apex contract (embarked 7 Oct): the same answer is from before its sign-on
+  r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129&on=2026-10-07"))).json();
+  assert.equal(r.answers.ray, undefined, "not this contract's answer");
+  assert.equal(r.prefill.sliders.sAcc, undefined); assert.ok(!r.prefill.gates.rush, "no rush gate from the previous contract");
+  assert.equal(r.previous.length, 1); assert.equal(r.previous[0].why, "before_sign_on"); assert.equal(r.previous[0].role, "ray");
+  assert.equal(r.on, "2026-10-07");
+  // without a sign-on (the Inputs page, the feedback board) the answer is served as before
+  r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129"))).json();
+  assert.equal(r.prefill.sliders.sAcc, 25); assert.equal(r.previous.length, 0);
 });

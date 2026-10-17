@@ -3666,14 +3666,22 @@ async function apiFeedbackCrew(env, url) {
   await ensureFb(env);
   const cr = await env.DB.prepare("SELECT id FROM crew WHERE agency_id=?").bind(url.searchParams.get("id")).first();
   if (!cr) return json({ error: "not_found" }, 404);
+  // The contract's sign-on (the Score Card sends it): an answer given BEFORE it is the previous contract's — the rule the
+  // automatic read applies (gatherAuto, 16 Oct 2026) — listed as earlier feedback (why "before_sign_on"), never this card's
+  // pre-fill. Without a sign-on (the Inputs page, the feedback board) every live answer is served as before.
+  const on = String(url.searchParams.get("on") || "").slice(0, 10);
   const reqs = await env.DB.prepare("SELECT role, status, requested_at FROM feedback_request2 WHERE crew_id=?").bind(cr.id).all();
   const [resp, prev] = await Promise.all([
-    env.DB.prepare("SELECT role, answers_json FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NULL").bind(cr.id).all(),
+    env.DB.prepare("SELECT role, answers_json, submitted_at FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NULL").bind(cr.id).all(),
     env.DB.prepare("SELECT role, answers_json, submitted_at, superseded_at FROM feedback_response2 WHERE crew_id=? AND superseded_at IS NOT NULL ORDER BY submitted_at DESC LIMIT 30").bind(cr.id).all(),
   ]);
-  const answers = {}; for (const r of resp.results) answers[r.role] = JSON.parse(r.answers_json);
-  const previous = (prev.results || []).map((r) => ({ role: r.role, submitted_at: r.submitted_at, superseded_at: r.superseded_at, answers: JSON.parse(r.answers_json || "{}") }));
-  return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers), previous });
+  const answers = {}, earlier = [];
+  for (const r of resp.results) {
+    if (on && r.submitted_at && String(r.submitted_at).slice(0, 10) < on) { earlier.push({ role: r.role, submitted_at: r.submitted_at, superseded_at: null, why: "before_sign_on", answers: JSON.parse(r.answers_json || "{}") }); continue; }
+    answers[r.role] = JSON.parse(r.answers_json);
+  }
+  const previous = earlier.concat((prev.results || []).map((r) => ({ role: r.role, submitted_at: r.submitted_at, superseded_at: r.superseded_at, why: "superseded", answers: JSON.parse(r.answers_json || "{}") })));
+  return json({ ok: true, requests: reqs.results, answers, prefill: mapFeedbackToScore(answers), previous, on: on || null });
 }
 // In-app contributor scoring (authenticated, NO token). Ray/Rolando/Dexter pick a crew + their
 // name in the Scoring window and submit; this writes the same feedback_response2 the token form
@@ -9421,19 +9429,20 @@ async function openScore(id){
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class="modal '+scCls+'"><div class=mh>Score Card — '+escHtml(name)+'<button onclick="mClose()">×</button></div><div class=mb>'+body+'</div></div></div>';MODAL_T=Date.now();
   if(d.lastLeg){if(d.lastLeg.on)$('#spanStart').value=d.lastLeg.on;if(d.lastLeg.off)$('#spanEnd').value=d.lastLeg.off;}
   recalcScore();
-  applyFeedback(cr.agency_id);
+  applyFeedback(cr.agency_id,$('#spanStart').value);
   applySeval(cr.agency_id);
 }
-async function applyFeedback(id){
-  var d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(id))).json();
+async function applyFeedback(id,on){
+  var d=await (await fetch('/api/feedback/crew?id='+encodeURIComponent(id)+(on?'&on='+encodeURIComponent(on):''))).json();
   if(!d||!d.ok||!document.getElementById('fbPanel'))return;
   if(!_SC||!_SC.crew||_SC.crew.agency_id!==id)return; // another crew's card opened while this was loading
   var byRole={};(d.requests||[]).forEach(function(r){byRole[r.role]=r.status;});
   var roles=[['ray','Ray'],['rolando','Rolando']];
-  var btns=roles.map(function(x){var st=byRole[x[0]]||'none';var lbl=st==='answered'?'✓ '+x[1]:st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
+  var earlierRole={};(d.previous||[]).forEach(function(x){if(x.why==='before_sign_on')earlierRole[x.role]=1;}); // an answer from before this contract: ask again
+  var btns=roles.map(function(x){var st=earlierRole[x[0]]?'earlier':(byRole[x[0]]||'none');var lbl=st==='answered'?'✓ '+x[1]:st==='earlier'?x[1]+': earlier answer \u2014 get link':st==='na'?x[1]+': N/A':st==='pending'?x[1]+': pending':x[1]+': get link';var cls=st==='answered'?'green':'ghost';return '<button class="btn '+cls+'" style="padding:6px 10px;font-size:12px" onclick="genLink(\\''+id+'\\',\\''+x[0]+'\\')">'+lbl+'</button>';}).join(' ');
   var ev=(d.prefill&&d.prefill.evidence&&d.prefill.evidence.length)?('<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Evidence from windows</b><br>'+d.prefill.evidence.map(escHtml).join('<br>')+'</div>'):'';
   // Earlier windows are kept, not used (9 Oct 2026): listed so Rita can see them, never pre-filled into this contract.
-  var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10)));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
+  var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+(x.why==='before_sign_on'?', before this contract (sign-on '+fmtDateS(String(on||'').slice(0,10))+')':', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10))));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
   document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'<span id=dexChip></span></div><div id=fbLink></div>'+ev+'<div id=autoPanel></div></div>';
   var pf=d.prefill||{};
   _PF={sliders:Object.assign({},pf.sliders||{}),rush:!!(pf.gates&&pf.gates.rush)};
@@ -9460,10 +9469,11 @@ async function applyAuto(){
   if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">Could not read the automatic inputs. Score from the evidence by hand.</div>';return;}
   var S2=a.sliders||{},prev=_AUTO.sliders,k;
   for(k in prev){if(!(k in S2)&&!_TOUCHED[k]){var e0=$('#'+k);if(e0)e0.value=(_PF.sliders[k]!=null?_PF.sliders[k]:0);}}
+  for(k in _PF.sliders){if(!(k in S2)&&!_TOUCHED[k]){var e2=$('#'+k);if(e2)e2.value=0;}} // a Windows value the read did not confirm (an answer from before this sign-on) goes back to 0
   for(k in S2){var e=$('#'+k);if(e&&!_TOUCHED[k])e.value=S2[k];}
   _AUTO.sliders=Object.assign({},S2);
   var gr=$('#gRush'),want=!!(a.gates&&a.gates.rush);
-  if(gr&&!_TOUCHED.gRush){if(want){gr.checked=true;_AUTO.rush=true;}else if(_AUTO.rush&&!_PF.rush){gr.checked=false;_AUTO.rush=false;}}
+  if(gr&&!_TOUCHED.gRush){if(want){gr.checked=true;_AUTO.rush=true;}else if(gr.checked&&(_AUTO.rush||_PF.rush)){gr.checked=false;_AUTO.rush=false;_PF.rush=false;}} // the read's gates already carry the Windows' rush when the answer is this contract's
   var gn=$('#gateNote');
   if(gn&&!_TOUCHED.gateNote){
     // the read's own lines go by their exact text (a line carries " · " itself), the user's words stay
