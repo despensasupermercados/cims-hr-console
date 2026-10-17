@@ -161,3 +161,22 @@ test("10. the dashboard paints from buildOps and a revalidation keeps the week p
 test("11. the relay names the Contract Counter as the Counter, never as the TDG file", () => {
   assert.match(APP_HTML, /a\.src==='counter'\?'per the Contract Counter'/);
 });
+
+test("12. the Score Card: the Windows are asked with the card's sign-on, and the automatic read takes back a Windows value it did not confirm", async () => {
+  const { ctx, els, pending } = pageContext();
+  const urls = []; const f0 = ctx.fetch; ctx.fetch = (u, o) => { urls.push(String(u)); return f0(u, o); };
+  ctx.openScore("SC-1"); await tick();
+  pending["/api/bonus/crew"]({ crew: { agency_id: "SC-1", first_name: "Jim", last_name: "Olid", status: "On board" }, count: 0, contracts: 2, contracts_source: "tdg", rank: "PS", base_salary_usd: 1000, baseline_set: true, nextRungIfClean: 250, outcomes: [], lastLeg: { on: "2026-10-07", off: "2027-05-07", ship: "Odyssey" } });
+  await tick(); await tick();
+  assert.ok(urls.some((u) => /\/api\/feedback\/crew\?id=SC-1&on=2026-10-07$/.test(u)), "the Windows read carries the card's sign-on: " + urls.join(" "));
+  // an answer handed back anyway (a date changed after the open): the automatic read, which applies the sign-on rule, drops it
+  pending["/api/feedback/crew"]({ ok: true, requests: [{ role: "ray", status: "answered" }], answers: { ray: { acc: "Accurate" } }, prefill: { sliders: { sAcc: 25, sPar: 15 }, gates: { rush: true }, evidence: ["Ray: ..."], gateNote: ["Rush (Ray)"] }, previous: [] });
+  await tick(); await tick();
+  assert.equal(String(els.sAcc.value), "25"); assert.equal(els.gRush.checked, true);
+  pending["/api/score/auto"]({ ok: true, sliders: { sComm: 10, sMono: 5 }, gates: {}, gateNote: [], evidence: [], audits: [] });
+  await tick(); await tick();
+  assert.equal(String(els.sAcc.value), "0", "a Windows value the read did not confirm goes back to 0");
+  assert.equal(String(els.sPar.value), "0");
+  assert.equal(els.gRush.checked, false, "a rush gate the read does not confirm is cleared");
+  assert.equal(String(els.sComm.value), "10");
+});

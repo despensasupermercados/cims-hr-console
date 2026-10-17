@@ -27,6 +27,12 @@ export const NEVER = [
 // a D1 write or schema statement added or changed anywhere in src/ = crew data or schema, never the watcher's to merge
 export const WRITE_RX = /\b(INSERT\s+(OR\s+\w+\s+)?INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|REPLACE\s+INTO|CREATE\s+(UNIQUE\s+)?(TABLE|INDEX)|ALTER\s+TABLE|DROP\s+(TABLE|INDEX))\b/i;
 export const MAX_SRC_LINES = 120;
+// THE MONEY AND AUTH PATHS LIVE INSIDE worker.js TOO (night watch, 17 Oct 2026). A change to apiBonusCrew — which contract
+// the Score Card opens on (PR #281) — printed MERGE_OK because only the FILE was judged, and worker.js is nobody's file. A
+// hunk in any src/ file is also judged by the function it lands in (git's hunk header names it) and by the symbols its
+// lines name: the bonus / Score Card / feedback-window / supervisor-evaluation path (§1) and the sign-in / session path.
+export const MONEY_RX = /\b(apiBonus\w*|computeBonusC?|mapFeedbackToScore|autoScore|auditPoints|ladderValue|crewCount|effectiveBaseline|resolveBaseline|commitEvidence|gatherAuto|listAudits|defaultScoreLeg|classifyWindow|apiScore\w*|apiFeedback\w*|loadFeedbackState|feedbackSubmittable|openScore|ledgerScore|commitBonus|applyAuto|applyFeedback|applySeval|recalcScore|sevalDirty|viewSeval|installSeval|seval\w*|bonus_outcome|bonus_policy|POLICY_VERSION|baseline_count|MONEY_USERS|isMoneyUser)\b/;
+export const AUTH_RX = /\b(signToken|verifyToken|SESSION_SECRET|BOOTSTRAP_KEY|SESSION_TTL|stillAllowed|cookieDomain|getCookie|apiLogin|apiLogout|magicLink\w*|allowlist\w*|ALLOWLIST)\b/;
 
 // files: [{ path, added: [lines], removed: [lines] }] → { ok, reasons, srcLines }
 export function judge(files) {
@@ -36,7 +42,10 @@ export function judge(files) {
     for (const [rx, why] of NEVER) if (rx.test(f.path)) { reasons.push(f.path + " — " + why); break; }
     if (f.path.startsWith("src/")) {
       srcLines += f.added.length + f.removed.length;
-      if ([...f.added, ...f.removed].some((l) => WRITE_RX.test(l))) reasons.push(f.path + " — adds or changes a D1 write or schema statement (crew data / schema)");
+      const lines = [...f.added, ...f.removed], where = [...(f.ctx || []), ...lines];
+      if (lines.some((l) => WRITE_RX.test(l))) reasons.push(f.path + " — adds or changes a D1 write or schema statement (crew data / schema)");
+      if (where.some((l) => MONEY_RX.test(l))) reasons.push(f.path + " — money: a hunk inside or naming the bonus / Score Card / supervisor-evaluation path (§1)");
+      if (where.some((l) => AUTH_RX.test(l))) reasons.push(f.path + " — auth: a hunk inside or naming the sign-in / session path");
     }
   }
   if (!files.some((f) => f.path.startsWith("test/"))) reasons.push("no test in the diff (every fix carries a failing-first test)");
@@ -49,8 +58,10 @@ export function parseDiff(text) {
   let cur = null;
   for (const line of String(text).split("\n")) {
     const m = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
-    if (m) { cur = { path: m[2], added: [], removed: [] }; files.push(cur); continue; }
+    if (m) { cur = { path: m[2], added: [], removed: [], ctx: [] }; files.push(cur); continue; }
     if (!cur || line.startsWith("+++") || line.startsWith("---")) continue;
+    const h = line.match(/^@@ [^@]*@@ ?(.*)$/); // the hunk header: git names the function the hunk lands in
+    if (h) { if (h[1].trim()) cur.ctx.push(h[1].trim()); continue; }
     if (line.startsWith("+")) cur.added.push(line.slice(1));
     else if (line.startsWith("-")) cur.removed.push(line.slice(1));
   }
