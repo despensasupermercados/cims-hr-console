@@ -158,6 +158,11 @@ field) and the board's schedule is read from them (`ship_leg_source.legsFromRegi
   legacy seq edit through the Counter position) or her **reliever card** on the same hull (its sign-on is the
   outgoing crew's sign-off); (3) **projected: embark + 7 months, Azamara 5** ("TDG does not say the sign-off
   until very late"). Every card says which (`offSource` tdg / rita / card / projected, `fileDatesNote`).
+  **Rita's typed date outranks the cross-over** (Miguel, 17 Oct 2026, on Kevin Jugao, Pursuit: the 16 Oct file has his
+  relievers aboard, Rita typed 31 Oct, TDG still lists him On board — "Rita's typed date"): a sign-off she typed for the
+  contract wins over the file's cross-over (source `rita`), the file's second crew still named as the reliever; the held
+  rule still applies once her date passes. On the 16 Oct file it moved Jugao 16 Oct → 31 Oct and Valderrama (Enchantment,
+  Suarez embarked 3 Oct) 3 Oct → 31 Jan 2027; Belhida (Apex) reads 7 Oct either way. Pinned by `test/registry_schedule.test.js`.
 - **The swap.** When the reliever's sign-on has PASSED (file row or card), the outgoing contract ends that
   day — non-current, drawn "Contract completed" underneath with who relieved them — and the reliever holds
   the seat: from the file row if the file has them, else from the card, drawn green **"ABOARD · AWAITING

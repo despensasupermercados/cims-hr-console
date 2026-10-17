@@ -2487,8 +2487,8 @@ async function rotationSections(env) {
   const schEnr = {};
   for (const h of HIST) { if (!h.ours || !h.sc || !h.is_current) continue; const cs = shipOf(h.ship); if (!cs) continue; const k = normShip(cs); (schEnr[k] = schEnr[k] || {}); const cur = schEnr[k][h.sc]; if (!cur || (h.off || "9999") > (cur.off || "9999")) schEnr[k][h.sc] = { on: h.on, off: h.off, embark: h.embark || null, disembark: h.disembark || null }; }
   // THE FILE DATES THE SEAT (Miguel, 7 Oct 2026; ship_leg_source.legsFromRegistry): the AdvancedQuery's
-  // embark is the sign-on; the sign-off is TDG's debark / cross-over, else Rita's typed date or her reliever
-  // card (newer wins), else embark + 7 months (Azamara 5). Keyed per hull and crew, ahead of the Counter —
+  // embark is the sign-on; the sign-off is TDG's debark, else Rita's typed date (over the cross-over, 17 Oct 2026), else the
+  // cross-over, else her reliever card, else embark + 7 months (Azamara 5). Keyed per hull and crew, ahead of the Counter —
   // which is history now and never dates a seat the file dates. seq = the Counter contract the file carries
   // (within ABSORB_DAYS), else the next position — the key the Edit modal saves under.
   const regEnr = {};
@@ -2979,7 +2979,8 @@ async function apiRotationCrew(env, url) {
   for (const f of ["med_exp", "sirb_exp", "pp_exp", "usv_exp", "sch_exp"]) dmerged[f] = (dov && dov[f] != null && dov[f] !== "") ? dov[f] : c[f];
   const docs = documentLines(dmerged, TODAY(), 30);
   // THE FILE'S CONTRACT (Miguel, 7 Oct 2026): sign-on = the AdvancedQuery's embark; sign-off = TDG's debark or
-  // cross-over, else Rita's typed date or her reliever card (newer wins), else embark + 7 months (Azamara 5).
+  // cross-over (Rita's typed date outranks it, 17 Oct 2026), else Rita's typed date or her reliever card (newer wins), else
+  // embark + 7 months (Azamara 5).
   const regLegs = (HIST || []).filter((h) => h && h.ours && h.sc === id && h.source === "registry");
   const fileLeg = regLegs.find((h) => h.is_current) || regLegs.sort((a, b) => (a.on < b.on ? 1 : -1))[0] || null;
   const OFF_WORD = { tdg: "TDG's own date (final)", rita: "recorded in the console", card: "your reliever card's sign-on", projected: "projected: embark + 7 months (Azamara 5) until TDG or you say otherwise" };
