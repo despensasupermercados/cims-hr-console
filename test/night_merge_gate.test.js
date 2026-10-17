@@ -37,5 +37,42 @@ test("no test, or more than the small-fix size, never merges", () => {
 
 test("the diff parser reads paths and changed lines, never the +++/--- headers", () => {
   const files = parseDiff("diff --git a/src/a.js b/src/a.js\nindex 1..2 100644\n--- a/src/a.js\n+++ b/src/a.js\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/test/a.test.js b/test/a.test.js\n+++ b/test/a.test.js\n+t\n");
-  assert.deepEqual(files, [{ path: "src/a.js", added: ["new"], removed: ["old"] }, { path: "test/a.test.js", added: ["t"], removed: [] }]);
+  assert.deepEqual(files, [{ path: "src/a.js", added: ["new"], removed: ["old"], ctx: [] }, { path: "test/a.test.js", added: ["t"], removed: [], ctx: [] }]);
+});
+
+// THE MONEY AND AUTH PATHS LIVE INSIDE worker.js TOO (night watch, 17 Oct 2026). PR #281's hunk — which contract the Score
+// Card opens on, inside apiBonusCrew — printed MERGE_OK because the gate judged the FILE, and worker.js is nobody's file.
+test("a hunk that lands inside a bonus / Score Card function never merges, whatever its lines say", () => {
+  const diff = "diff --git a/src/worker.js b/src/worker.js\n--- a/src/worker.js\n+++ b/src/worker.js\n@@ -3301,12 +3301,8 @@ async function apiBonusCrew(env, url) {\n-  const td = TODAY();\n+  const td = TODAY(); // today\ndiff --git a/test/x.test.js b/test/x.test.js\n+++ b/test/x.test.js\n+t\n";
+  const r = judge(parseDiff(diff));
+  assert.equal(r.ok, false, "a hunk inside apiBonusCrew must not merge");
+  assert.match(r.reasons.join(" "), /money/);
+});
+
+test("a hunk that names a bonus, Score Card, feedback-window or supervisor-evaluation symbol never merges", () => {
+  for (const line of ["  const sched = defaultScoreLeg(HIST, sc, td);", "  applyAuto();", "  if (isMoneyUser(email)) return x;",
+    '  await env.DB.prepare("SELECT 1 FROM bonus_outcome").first()', "  _seval.sevalGet(env, sc, off)", "  return apiFeedbackCrew(env, url);", "  recalcScore();"]) {
+    const r = judge([f("src/worker.js", [line]), f("test/x.test.js")]);
+    assert.equal(r.ok, false, line);
+    assert.match(r.reasons.join(" "), /money/, line);
+  }
+  // a removed line is a change too
+  assert.equal(judge([f("src/worker.js", [], ["  commitBonus();"]), f("test/x.test.js")]).ok, false);
+});
+
+test("a hunk inside or naming the sign-in / session path never merges; an unknown function is not auth by itself", () => {
+  assert.equal(judge([{ path: "src/worker.js", added: ["  x"], removed: [], ctx: ["function noticeHTML(title, msg) {"] }, f("test/x.test.js")]).ok, true);
+  assert.equal(judge([{ path: "src/worker.js", added: ["  x"], removed: [], ctx: ["async function stillAllowed(env, email) {"] }, f("test/x.test.js")]).ok, false);
+  for (const line of ["  const p = await verifyToken(t, env.SESSION_SECRET);", "  if (!(await stillAllowed(env, s.email))) return null;", '  getCookie(request, "s")', "  signToken({ p: \"fb\" }, env.SESSION_SECRET)"]) {
+    const r = judge([f("src/worker.js", [line]), f("test/x.test.js")]);
+    assert.equal(r.ok, false, line);
+    assert.match(r.reasons.join(" "), /auth/, line);
+  }
+});
+
+test("the diff parser keeps each hunk's function context (git's hunk header), empty when the header carries none", () => {
+  const files = parseDiff("diff --git a/src/worker.js b/src/worker.js\n--- a/src/worker.js\n+++ b/src/worker.js\n@@ -10,3 +10,3 @@ async function apiBonusCrew(env, url) {\n-a\n+b\n@@ -50,2 +50,2 @@\n-c\n+d\n");
+  assert.deepEqual(files[0].ctx, ["async function apiBonusCrew(env, url) {"]);
+  assert.deepEqual(files[0].added, ["b", "d"]);
+  assert.deepEqual(files[0].removed, ["a", "c"]);
 });

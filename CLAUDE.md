@@ -45,7 +45,7 @@ suite green locally; its new test proven to FAIL on the old code; at most one me
 `node scripts/night_merge_gate.mjs origin/main <branch>` prints `MERGE_OK` — the gate refuses money (bonus / Score Card /
 supervisor eval, §1), auth, migrations and any added or changed D1 write or schema statement in `src/` (crew data, schema),
 the TDG import paths, the intel pipeline (what is filed on a seafarer, and on whom), email templates (Miguel signs off a
-render), `wrangler.toml`, `.github/`, dependencies, a diff with no test, and more than 120 changed lines in `src/`. After a
+render), `wrangler.toml`, `.github/`, dependencies, a diff with no test, more than 120 changed lines in `src/`, and (17 Oct 2026, #281 passed by file alone) a hunk in ANY `src/` file that lands inside or names the money or auth path (`MONEY_RX` / `AUTH_RX`, git's hunk header names the function — `worker.js` holds most of both). After a
 merge it proves the deploy live (§9) and names the merge in its digest; a deploy it cannot prove, or a red main, gets a
 revert PR and a flag. Everything the gate refuses stays a draft PR for Miguel. Pinned by `test/night_merge_gate.test.js`.
 
