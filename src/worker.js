@@ -1579,6 +1579,14 @@ async function apiSgaImport(request, env, session) {
   }
   return json(await applySgaWorkbook(env, b, st, (session && session.email) || "?", b.source || "upload"));
 }
+// What a staged bill adds up to against TDG's own GRAND TOTAL — said on a held bill so Rita sees the gap before she opens it.
+function sgaGap(st) {
+  const lines = Math.round((st.summary.total || 0) * 100) / 100;
+  const others = Math.round(st.others.reduce((a, o) => a + (o.amount || 0), 0) * 100) / 100;
+  const grand = st.grand_total == null ? null : Math.round(st.grand_total * 100) / 100;
+  return { year: st.period.year, month: st.period.month, lines_total: lines, others, grand_total: grand,
+    gap: grand == null ? null : Math.round((grand - lines - others) * 100) / 100, rows: st.lines.length };
+}
 // The ONE path that loads a month of the bill — the Upload page and the SharePoint sync both come here (§10j).
 // `st` is sgaStage's result (staged once, applied once); `b` carries the file's name / hash for sga_file.
 async function applySgaWorkbook(env, b, st, by, source) {
@@ -1655,7 +1663,15 @@ function syncDeps(env) {
       seen: async (ids) => { const m = new Map(); if (!ids.length) return m; const r = await env.DB.prepare("SELECT item_id, etag FROM sp_sync WHERE status='ok' AND item_id IN (" + ids.map(() => "?").join(",") + ") ORDER BY at").bind(...ids).all(); for (const x of r.results) m.set(x.item_id, x.etag); return m; },
       record: async (r) => env.DB.prepare("INSERT INTO sp_sync (id,item_id,path,name,etag,modified,kind,year,month,status,detail,at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind("sp_" + crypto.randomUUID(), r.item_id, r.path, r.name, r.etag, r.modified, r.kind, r.year, r.month, r.status, r.detail, r.at).run(),
     },
-    applySga: async (sheets, meta) => { const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source, path: meta.path || null }; const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail }; return applySgaWorkbook(env, b, st, meta.by, meta.source); },
+    applySga: async (sheets, meta) => {
+      const b = { sheets, name: meta.name, hash: meta.hash, source: meta.source, path: meta.path || null };
+      const st = await sgaStage(env, b); if (st.error) return { error: st.error, detail: st.detail };
+      // HELD FOR RITA (Miguel, 17 Oct 2026: "Hold it for Rita"): a bill that arrives by itself (the inbox: the mail intake
+      // and the agent's rows) whose lines do not add up to TDG's GRAND TOTAL loads nothing. The Upload page — the dry-run,
+      // its amber chip, then Apply — is how she loads it after checking. A summary-only file has no total to miss (null).
+      if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
+      return applySgaWorkbook(env, b, st, meta.by, meta.source);
+    },
     applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
   };
 }
@@ -1731,8 +1747,14 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
     const rec = { item_id: h.item_id, path: h.path, name: h.name, etag: h.modified, modified: h.modified, kind: h.kind, year: h.year, month: h.month || null, at: now };
     const mark = async (status, detail) => { for (let i = 0; i < ids.length; i += 50) await env.DB.prepare("UPDATE sp_inbox SET status=?, detail=?, applied_at=? WHERE id IN (" + ids.slice(i, i + 50).map(() => "?").join(",") + ")").bind(status, String(detail || "").slice(0, 2000), now, ...ids.slice(i, i + 50)).run(); };
     try {
-      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup", path: h.path };
+      const meta = { name: h.name, hash: fileKey, source: "agent", by: h.written_by || "sharepoint-pickup", path: h.path, holdUnreconciled: true };
       const res = h.kind === "sga" ? await deps.applySga(sheets, meta) : h.kind === "travel" ? await deps.applyTravel(sheets, +h.year, meta) : { error: "unknown_kind", detail: h.kind };
+      if (res && res.held) {   // loads nothing; the rows stay as they arrived, named on the Travel tab (apiSga `held`)
+        await deps.db.record({ ...rec, status: "held", detail: JSON.stringify(res).slice(0, 2000) });
+        await mark("unreconciled", JSON.stringify(res));
+        report.held = report.held || []; report.held.push({ file_key: fileKey, name: h.name, ...res });
+        continue;
+      }
       const bad = res && res.error;
       await deps.db.record({ ...rec, status: bad ? "error" : "ok", detail: JSON.stringify(res || null).slice(0, 2000) });
       await mark(bad ? "error" : "ok", bad ? res.error + (res.detail ? ": " + res.detail : "") : JSON.stringify(res));
@@ -1744,7 +1766,8 @@ async function applyInbox(env, limit = INBOX_FILES_PER_RUN) {
       report.errors.push({ file_key: fileKey, name: h.name, error: msg });
     }
   }
-  if (report.loaded.length || report.errors.length) await logData(env, "sharepoint inbox", report.loaded.length, "loaded " + report.loaded.length + ", errors " + report.errors.length + ", waiting " + report.waiting);
+  const heldN = (report.held || []).length;
+  if (report.loaded.length || report.errors.length || heldN) await logData(env, "sharepoint inbox", report.loaded.length, "loaded " + report.loaded.length + ", errors " + report.errors.length + ", waiting " + report.waiting + (heldN ? ", HELD " + heldN + " (does not reconcile with TDG's grand total: " + report.held.map((x) => x.name).join(", ") + ")" : ""));
   return report;
 }
 // ---- THE MAIL INTAKE (src/mail_intake.js) ----
@@ -1836,13 +1859,15 @@ async function apiInboxApply(env, session) {
 // The bill as loaded: every line placed on the roster, the months on file, the training costs. One wave (§12).
 async function apiSga(env) {
   await ensureSga(env);
-  const [linesRes, filesRes, trRes, crewRes, sumRes, srcRes] = await Promise.all([
+  const [linesRes, filesRes, trRes, crewRes, sumRes, srcRes, heldRes] = await Promise.all([
     env.DB.prepare("SELECT * FROM sga_line ORDER BY year DESC, month DESC, brand, vessel, seq").all(),
     env.DB.prepare("SELECT * FROM sga_file ORDER BY year DESC, month DESC, loaded_at DESC").all(),
     env.DB.prepare("SELECT * FROM training_cost ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
     env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, source, by, at, file_key, note FROM sga_source_file ORDER BY at DESC").all(),
+    // bills the inbox HELD (17 Oct 2026): their lines do not add up to TDG's grand total; Rita loads them by hand
+    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' GROUP BY file_key").all().catch(() => ({ results: [] })),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -1853,7 +1878,17 @@ async function apiSga(env) {
   // the newest file per month is the one that counts; older loads of the same month stay on sga_file as history
   // (a summary-only load — rows 0 — never hides a month's lines)
   const latest = {}; for (const f of filesRes.results) { const k = f.year + "-" + f.month; if (!latest[k] && f.rows > 0) latest[k] = f.id; }
-  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, cols: SGA_COL_KEYS, today: TODAY() });
+  // a held bill stops being named once a bill for its month was loaded after it (Rita's Upload, or a corrected re-send)
+  const byFileKey = {}; for (const x of srcRes.results) if (x.file_key && !byFileKey[x.file_key]) byFileKey[x.file_key] = x;
+  const held = [];
+  for (const r of heldRes.results || []) {
+    let d = {}; try { d = JSON.parse(r.detail || "{}"); } catch {}
+    if (filesRes.results.some((f) => f.year === d.year && f.month === d.month && f.loaded_at > (r.held_at || ""))) continue;
+    const src = byFileKey[r.file_key];
+    held.push({ file_key: r.file_key, name: r.name, held_at: r.held_at, year: d.year || null, month: d.month || null, lines_total: d.lines_total ?? null,
+      others: d.others ?? null, grand_total: d.grand_total ?? null, gap: d.gap ?? null, rows: d.rows ?? null, hash: src && src.r2_key ? src.hash : null });
+  }
+  return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, held, cols: SGA_COL_KEYS, today: TODAY() });
 }
 
 // THE OPERATIONAL DASHBOARD (13 Oct 2026, mock-up B v4 "each fact once", Miguel: "deploy"). One wave: the Keyman
@@ -6614,6 +6649,14 @@ function tvDecisions(ctx){
     // a closed month of the year with workbook spend but no bill on file
     var billed=new Set(B.months);for(var mm=1;mm<=P.lastMo;mm++){if(P.mo&&mm!==P.mo)continue;if(!billed.has(mm)&&tSum(sc,LY,[mm],null)>0&&((SGA.files||[]).length))out.push({sev:'info',t:'No TDG bill on file for '+TMN[mm]+' '+LY,w:'Finance sends it to sga@cims.work once a month; until then the workbook is the only number.',go:'',gl:''});}
   }
+  // 0. a bill the inbox HELD (Miguel, 17 Oct 2026: "Hold it for Rita"): its lines do not add up to TDG's GRAND TOTAL, so it
+  // loaded nothing. Named in every view of its year until a bill for that month is loaded after it.
+  var c2=function(n){return '$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});};   // a bill reconciles to the cent
+  ((SGA&&SGA.held)||[]).filter(function(x){return x.year===LY;}).forEach(function(x){
+    out.push({sev:'crit',t:'TDG’s bill for '+TMN[x.month]+' '+x.year+' is held: its lines do not add up',
+      w:'Lines '+c2(x.lines_total)+(x.others?' + '+c2(x.others)+' other':'')+' against TDG’s grand total '+c2(x.grand_total)+(x.gap!=null?' · '+c2(Math.abs(x.gap))+(x.gap>0?' missing':' too much'):'')+'. It arrived on '+fmtDateS(String(x.held_at||'').slice(0,10))+' and loaded nothing. Check it with Finance, then drop it on Upload data to load it.',
+      go:x.hash?'window.open(&quot;/api/sga/file?hash='+x.hash+'&quot;)':'',gl:x.hash?'Download':''});
+  });
   // 4. names the roster cannot place: their spend never reaches a profile
   var un=(TRV.unmatched||[]).filter(function(u){return u.years.indexOf(LY)>=0;});
   if(un.length&&TF.kind!=='shoreside'){var ut=un.reduce(function(a,u){return a+(+u.total||0);},0);out.push({sev:'warn',t:un.length+' name'+(un.length===1?'':'s')+' the crew registry cannot place',w:usd0(ut)+' that never reaches a profile. Fix the spelling in the workbook and re-upload, or leave the NCL preps as they are.',go:'tvOpen(&quot;tvnames&quot;)',gl:'See names'});}
