@@ -644,8 +644,10 @@ movable; the commit is a money user's click; committed outcomes are never touche
   (`defaultScoreLeg`, why `ended_unscored`), else the running one (`current` / `held`), else the most recent, else the next;
   the commit refuses (`commitBlock`, 409, `apiBonusCommit`, before the evidence read and every write) a sign-off still ahead
   (`not_ended`), a contract TDG still has On board past the sign-off (`held_by_tdg`: Belhida, Apex, 7 Oct) or still running
-  past a projected one (`still_aboard`), a visit (`visit`), and a newer contract while an older one inside the window has no
-  outcome (`older_first`). `/api/bonus/crew` returns `scoring: { why, block }` and the card prints the reason in words
+  past a projected one (`still_aboard`), a visit (`visit`), a newer contract while an older one inside the window has no
+  outcome (`older_first`), and a span overlapping an outcome already recorded (`already_scored`: one outcome per contract —
+  the exact span stays the duplicate path; a span moved by a day, or Radiance's Counter contract from 6 Mar beside the
+  file's from 5 Oct, used to pay twice). `/api/bonus/crew` returns `scoring: { why, block }` and the card prints the reason in words
   (`scBlockMsg`) before the click and after a refusal. The night watch's first cut (#281) opened a running contract ending
   sooner before an older unscored one; Miguel chose the other order. (5) **A training visitor is never charged a miss**:
   `aboardOn` skips `visit` legs, so the seat aboard is the one charged, whoever typed the order. (6) Simulated on the

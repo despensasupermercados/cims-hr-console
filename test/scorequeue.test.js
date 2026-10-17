@@ -190,6 +190,21 @@ test("apiBonusCommit refuses on commitBlock BEFORE it writes anything, and the p
   assert.match(body, /if \(blk\) return json\(blk, 409\);/);
   const crew = src.slice(src.indexOf("async function apiBonusCrew("), src.indexOf("\nasync function apiContracts("));
   assert.match(crew, /scoring: \{ why: pickd\.why, block \}/);
-  for (const e of ["not_ended", "held_by_tdg", "still_aboard", "visit", "older_first"]) assert.ok(src.includes("e.error==='" + e + "'"), "the page words " + e);
+  for (const e of ["not_ended", "held_by_tdg", "still_aboard", "visit", "older_first", "already_scored"]) assert.ok(src.includes("e.error==='" + e + "'"), "the page words " + e);
   assert.match(src, /alert\(msgs\[res\.error\]\|\|scBlockMsg\(res\)\|\|/);
+});
+
+test("commitBlock: one outcome per contract — a span overlapping a recorded outcome is refused (moved by a day, or TDG's two files)", () => {
+  // Radiance on the 17 Oct 2026 board: the Counter's contract from 6 Mar and the file's from 5 Oct, both to 14 Nov
+  const RAD = [
+    { ship: "Radiance", sc: "SC-0045824", ours: true, on: "2026-03-06", off: "2026-11-14", is_current: false, source: "counter" },
+    { ship: "Radiance", sc: "SC-0045824", ours: true, on: "2026-10-05", off: "2026-11-14", is_current: false, source: "registry", offSource: "rita" },
+  ];
+  const T = "2026-11-20", outs = [{ span_start: "2026-03-06", span_end: "2026-11-14" }];
+  assert.equal(scoreContracts(RAD, "SC-0045824").length, 2, "the overlap is not merged (§11d)");
+  const blk = commitBlock(RAD, "SC-0045824", T, outs, "2026-10-05", "2026-11-14");
+  assert.equal(blk.error, "already_scored"); assert.equal(blk.on, "2026-03-06");
+  assert.equal(commitBlock(RAD, "SC-0045824", T, outs, "2026-03-07", "2026-11-14").error, "already_scored", "a day moved is the same contract");
+  assert.equal(defaultScoreLeg(RAD, "SC-0045824", T, { outcomes: outs }).why, "ended", "nothing left unscored");
+  assert.equal(commitBlock(RAD, "SC-0045824", T, [{ span_start: "2025-01-01", span_end: "2025-08-01" }], "2026-03-06", "2026-11-14"), null, "an earlier contract's outcome blocks nothing");
 });

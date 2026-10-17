@@ -75,9 +75,14 @@ export function defaultScoreLeg(legs, sc, today, opts = {}) {
 //   held_by_tdg   — TDG still lists the crew On board past the sign-off ("Wait for TDG": Belhida, Apex, 7 Oct);
 //   still_aboard  — the contract is still running per the schedule (past a projected sign-off: overdue, not gone);
 //   visit         — a training visit is not a contract;
-//   older_first   — an older ended contract within SCORE_RECENT_DAYS has no outcome yet ("oldest first").
+//   older_first   — an older ended contract within SCORE_RECENT_DAYS has no outcome yet ("oldest first");
+//   already_scored — an outcome already covers part of these dates: one outcome per contract. The exact span is the
+//                    commit's duplicate path (returns the outcome, pays nothing); a span moved by a day used to slip past
+//                    it and pay the contract twice (Radiance: the Counter's 6 Mar contract and the file's 5 Oct one).
 export function commitBlock(legs, sc, today, outcomes, spanStart, spanEnd) {
   if (!ISO.test(spanStart || "") || !ISO.test(spanEnd || "")) return null;   // the commit's own span checks answer that
+  const prior = (outcomes || []).find((o) => o && o.span_start && o.span_end && spanStart <= o.span_end && spanEnd >= o.span_start);
+  if (prior) return { error: "already_scored", on: prior.span_start, off: prior.span_end };
   if (spanEnd > today) return { error: "not_ended", off: spanEnd };
   const all = (legs || []).filter((h) => h && h.ours && h.sc === sc && ISO.test(h.on || ""));
   const hits = all.filter((h) => h.on <= spanEnd && (h.off || "9999") >= spanStart);

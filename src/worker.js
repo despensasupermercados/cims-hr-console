@@ -9681,6 +9681,7 @@ function scBlockMsg(e){
   if(e.error==='still_aboard')return 'This contract is still running'+(sh?' on '+sh:'')+(e.off?' (sign-off '+fmtDateS(e.off)+', not confirmed by TDG)':'')+'. It is scored once TDG ends it.';
   if(e.error==='visit')return 'These dates are a training visit, not a contract. Visits are not scored.';
   if(e.error==='older_first')return 'An older contract has no outcome yet'+(sh?': '+sh:'')+', '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. Score that one first.';
+  if(e.error==='already_scored')return 'A bonus is already recorded for '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+', which overlaps these dates. One outcome per contract.';
   return '';
 }
 async function openScore(id){
