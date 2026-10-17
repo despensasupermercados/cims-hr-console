@@ -105,7 +105,7 @@ const inSpan = (d, on, off) => { const x = day(d); return !!x && (!on || x >= on
 // (a report at 08:00 and Ray's answer at 15:00 the same day: Ray answered AFTER it).
 const instant = (v) => { const t = Date.parse(String(v || "").trim().replace(" ", "T")); return isNaN(t) ? null : t; };
 // in: { signOn, signOff, answers:{ray,rolando,dexter}, rayAt (ISO the answer was given), misses:[{ref,at,total}],
-//       handover:{signedAt,id}|null, audits:[{score,at,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null,
+//       handover:{signedAt,id}|null, audits:[{score,at (graded),requestedAt,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null,
 //       today (ISO day; default the clock) }
 // Without a sign-on nothing dated is counted (a blank start read every miss in the ship's history); a contract whose
 // sign-off is still ahead (or blank) is running, so its handover is not due yet and keeps the window's value.
@@ -134,7 +134,11 @@ export function autoScore(inp) {
     sliders.sHand = x.handover ? FW.sHand : 0;
     evidence.push({ factor: "sHand", text: x.handover ? "HON handover signed " + day(x.handover.signedAt) : "No signed HON handover for this sign-off", source: "HON" });
   }
-  const audits = (x.audits || []).filter((a) => a.score != null && inSpan(a.at, on, off ? addDays(off, 30) : ""));
+  // THE AUDIT BELONGS TO THE CONTRACT IT WAS REQUESTED IN (Miguel, 17 Oct 2026: "The one it was requested in"), whenever
+  // Dexter grades it: a request sent in the last days of a contract and graded after the next one began scored the NEXT
+  // contract, and one graded more than 30 days after the sign-off scored none. An audit with no request date keeps the
+  // grading window (sign-on to sign-off + 30 days).
+  const audits = (x.audits || []).filter((a) => a.score != null && (a.requestedAt ? inSpan(a.requestedAt, on, off) : inSpan(a.at, on, off ? addDays(off, 30) : "")));
   const worst = audits.length ? Math.min(...audits.map((a) => Number(a.score))) : null;
   sliders.sComm = auditPoints(worst);
   evidence.push({ factor: "sComm", text: worst == null ? "No audit in this contract: full points" : "Dexter's audit " + worst + "/5" + (audits.length > 1 ? " (lowest of " + audits.length + ")" : ""), source: "Audit" });

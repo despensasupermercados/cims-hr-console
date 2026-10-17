@@ -652,7 +652,14 @@ movable; the commit is a money user's click; committed outcomes are never touche
   sooner before an older unscored one; Miguel chose the other order. (5) **A training visitor is never charged a miss**:
   `aboardOn` skips `visit` legs, so the seat aboard is the one charged, whoever typed the order. (6) Simulated on the
   16 Oct 2026 file's legs: the card opens on 7 ended contracts nobody has scored (Agbada, Estandian, Madrinico, Ramos, Reyes,
-  Sison, Villacortes), 49 running ones are refused until their sign-off, Belhida is held, no transfer to merge there. Pinned by
+  Sison, Villacortes), 49 running ones are refused until their sign-off, Belhida is held, no transfer to merge there.
+  (7) **An audit belongs to the contract it was REQUESTED in** (his second round, "The one it was requested in"), whenever
+  Dexter grades it: `autoScore` reads `requestedAt` (`COALESCE(audit_request.sent_at, created_at)`, `gatherAuto`) inside the
+  contract's sign-on to sign-off; an audit with no request date keeps the grading window (sign-off + 30 days). A request sent
+  in a contract's last days and graded after the next one began scored the NEXT contract; one graded 30+ days late scored none.
+  (8) **Jonathan Placer Alonzo's full contracts are scored** ("Score full contracts", replacing the morning's "not scored",
+  given when he was described only as staff): his Rhapsody / Symphony contract (Dec 2025 – Sep 2026) gets a Score Card like
+  any printer's; his training visits are never scored and never charged a miss (Brain rec3g5Cx8YWu1ANyn). Pinned by
   `test/scorequeue.test.js`, `test/feedback.test.js`, `test/score_auto.test.js`.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
