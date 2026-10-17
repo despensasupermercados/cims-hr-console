@@ -2634,7 +2634,7 @@ async function rotationSections(env) {
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
-  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore  })); };
+  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending" || regOf(x.asgId).verdict === "earmarked")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore  })); };
   const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
@@ -2686,7 +2686,12 @@ async function rotationSections(env) {
     }
     const sc = c.agency_id, w = fileOf[sc] || null, cards = (inForce[sc] || []).filter((a) => !overriddenAsg.has(a.asgId || cardAsg[sc + "|" + a.key]));
     let seatKey = null;
-    if (w && w.status === "On board" && w.known && !absentSince[sc]) {
+    // EARMARKED FOR THE SHIP HE IS ABOARD (Miguel, 17 Oct 2026, on Ida Purnama, Xcel: "remember that Ida is onboard"): TDG
+    // lists him "Earmarked Xcel" — his NEXT contract there (Rita's card for 24 Jan 2027) — while his current one runs to
+    // Rita's 21 Nov. The schedule already keeps that contract current (the file gives it no dates, foldCounterHistory);
+    // the board now seats him too instead of ending it "per the TDG file". Only a leg already running on THAT hull.
+    const earmarkedHere = !!(w && w.status === "Earmarked" && w.known && !absentSince[sc] && liveLeg.has(sc + "|" + w.key));
+    if (w && (w.status === "On board" || earmarkedHere) && w.known && !absentSince[sc]) {
       const off = completedOff(HIST, sc, w.key, today, keyOf);
       if (off) completedBy[sc + "|" + w.key] = off;          // KNOWN completed: drawn underneath (6 Oct 2026: not a row)
       else {
@@ -2735,7 +2740,9 @@ async function rotationSections(env) {
   // the file predates the sign-on, or has no word), is the seafarer aboard per the console: drawn green,
   // "awaiting the TDG file", which absorbs the card when it carries them. A card the file contradicts is off
   // the board (overriddenAsg); a confirmed one is the seat itself.
-  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending"); };
+  // TDG earmarking him for this very hull is TDG having the plan, not the embark yet (17 Oct 2026, Corpin on Grandeur:
+  // "turn green") — the same as no word: aboard per the console, awaiting the file.
+  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked"); };
   const projByShip = {};
   for (const a of pendingProjections(canonAsg, drawn)) {
     const ship = a.ship;
@@ -2850,6 +2857,7 @@ async function rotationSections(env) {
       // On board HERE keeps the leg; On board a hull the console cannot read keeps it too — a typo in TDG's
       // vessel cell is an unknown_ship row for Rita, never a contract ended on the board.
       if (!w || !w.status || (w.status === "On board" && (w.key === k || !w.known))) return null;
+      if (w.status === "Earmarked" && w.key === k) return null;   // his next contract HERE: the running one is not ended (Purnama, 17 Oct 2026)
       return w.at || today;
     };
     const history = scheduleLegs
