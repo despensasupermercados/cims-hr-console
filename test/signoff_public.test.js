@@ -17,6 +17,11 @@ import { signToken, verifyToken } from "../src/auth.js";
 // other on a security rule, this fails rather than leaving the weaker one unnoticed.
 
 const SECRET = "test-secret-not-a-real-key";
+// The leg's sign-off is DERIVED FROM TODAY, never a calendar date (night watch, 18 Oct 2026). It read "2026-11-20": since the
+// instructions route refuses a sign-off already past (signoff_passed, 17 Oct 2026), every "instr" issue in this file would
+// have gone red on main on 21 Nov 2026 — seven tests, and a red main deploys nothing. Five weeks ahead keeps the leg a
+// future sign-off on any day the suite runs (scripts/clock_shift.mjs, +400 days).
+const OFF = new Date(Date.now() + 35 * 864e5).toISOString().slice(0, 10);
 
 // ---- a small in-memory D1 stand-in -----------------------------------------------------------
 function fakeDb() {
@@ -43,7 +48,7 @@ function fakeDb() {
       };
       stmt.first = async () => {
         if (/FROM (ack_request|instr_ack) WHERE token_hash=\?/.test(sql)) return rows.find((x) => x.token_hash === stmt.args[0]) || null;
-        if (/FROM keyman_contract3/.test(sql)) return { sc: stmt.args[0], seq: stmt.args[1], ship: "Reflection", proj_off: "2026-11-20", act_off: null };
+        if (/FROM keyman_contract3/.test(sql)) return { sc: stmt.args[0], seq: stmt.args[1], ship: "Reflection", proj_off: OFF, act_off: null };
         if (/FROM contract_edit/.test(sql)) return null;
         if (/FROM crew_override/.test(sql)) return null;
         if (/FROM crew WHERE agency_id=\?/.test(sql)) return crew;
@@ -149,7 +154,7 @@ for (const [label, install, purpose, formPath, submitPath, requestPath] of VARIA
     // Verified: with the row seeded, removing the purpose check makes this test fail.
     h.env.DB.rows.push({ id: "seeded", sc: "SC-1", seq: 1, crew_id: "crew_1", token_hash: await sha256hex(wrong),
       status: "pending", crew_name: "Ana Cruz", vessel: "Reflection", port: "Fort Lauderdale",
-      sign_off_date: "2026-11-20", requested_by: "test", requested_at: "2026-09-10", ack_at: null });
+      sign_off_date: OFF, requested_by: "test", requested_at: "2026-09-10", ack_at: null });
 
     const r = await h.handle(formPath, GET, h.env, new URL("https://cims.work" + formPath + "?t=" + encodeURIComponent(wrong)));
     assert.equal(r.status, 401, "a validly-signed token from the other flow must not be accepted here");
