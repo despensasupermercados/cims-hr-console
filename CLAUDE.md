@@ -1315,7 +1315,9 @@ sequence of writes is the point), and the suites named below.
   `test/bughunt_1016_plumbing.test.js`.
 - **The dated fixtures hold on every calendar day** (`scripts/clock_shift.mjs`, SHIFT_DAYS; `docs/NIGHT_WATCH.md`): four tests were
   time bombs (a DST-dependent gate hour in `sbm.test.js`, `mock.timers` in the earmark and board tests). The night watch runs the suite
-  with the clock pushed +30 / +60 / +90 days once a month.
+  with the clock pushed +30 days every night, and +120 / +400 on the first night of each month. 18 Oct 2026: `signoff_public.test.js`
+  dated its leg's sign-off "2026-11-20"; once `signoff_passed` landed (17 Oct) seven tests would have gone red on main on 21 Nov — the
+  sign-off is now derived from today.
 
 ## 11f. Invariants from the 17 Oct 2026 logic review (Miguel: "review the code and the goal here .. if u see anything u dont understand for the logic let me know")
 Five readers (Keyman schedule, Score Card, TDG imports + status, what the crew are told, travel / bill / audit), every

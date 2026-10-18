@@ -52,9 +52,11 @@ It replaces the GitHub Action `nightly-self-maintenance` as the watcher. That Ac
 D1 production is `cims-hr-console`, id `f0ac8b6a-deac-4214-8f42-e22b202d7d7d`.
 
 1. **The suite on main.** Run `npm ci && npm test`.
-   **On the first night of each month, also run it with the clock pushed ahead**: `SHIFT_DAYS=30`, `120` and `400` with
-   `node --import ./scripts/clock_shift.mjs --test`. A dated fixture is a time bomb (16 Oct 2026: four tests would have gone red on
-   main on 25 Oct, 29 Nov, 10 Jan and 1 Feb — a red main deploys nothing). A failure is fixed by pinning that test's clock
+   **Every night, also run it with the clock pushed ahead 30 days** (`SHIFT_DAYS=30`, about 15 seconds), **and on the first night
+   of each month at `120` and `400` too**, with `node --import ./scripts/clock_shift.mjs --test`. A dated fixture is a time bomb
+   (16 Oct 2026: four tests would have gone red on main on 25 Oct, 29 Nov, 10 Jan and 1 Feb — a red main deploys nothing; 18 Oct
+   2026: a rule merged the day before, "never instruct a passed sign-off", turned a fixture's 20 Nov sign-off into seven red tests
+   due on 21 Nov — a fuse of five weeks, which a monthly run can miss). A failure is fixed by pinning that test's clock
    (`mock.timers.enable({ apis: ["Date"], now })`) or deriving the fixture from today, in a PR like any other bug.
    - If it is red on an untouched main, that is the night's first finding.
    - Reproduce it, find the cause, and fix it in a PR. A dated fixture that expired is a real fix: run it on its day with `mock.timers`.
