@@ -25,7 +25,8 @@ const btnG = (href, t) => `<table role="presentation" width="100%" cellpadding="
 // a soft navy pill (a solid tint, never rgba) with an arrow: quieter than the one green button, still a button
 // The solid navy button (Miguel, 19 Oct 2026, option A for the Expense Report: words only, no icon, no arrow).
 const btnN = (href, t) => `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${C.navy}" style="background:${C.navy};border-radius:10px;"><a href="${href}" target="_blank" style="display:inline-block;font-family:${FB};font-size:14px;font-weight:700;line-height:18px;color:#FFFFFF;text-decoration:none;padding:12px 22px;border-radius:10px;">${t}</a></td></tr></table>`;
-const btnS = (href, t, arrow = "&rarr;") => `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#E8EEF5" style="background:#E8EEF5;border-radius:999px;"><a href="${href}" target="_blank" style="display:inline-block;font-family:${FB};font-size:13px;font-weight:700;line-height:18px;color:${C.navy};text-decoration:none;padding:9px 16px;border-radius:999px;">${t} ${arrow}</a></td></tr></table>`;
+// The light pill button. No arrow (Miguel, 19 Oct 2026); an optional 16px icon before the words, e.g. the calendar.
+const btnS = (href, t, icon) => `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#E8EEF5" style="background:#E8EEF5;border-radius:999px;"><a href="${href}" target="_blank" style="display:inline-block;font-family:${FB};font-size:13px;font-weight:700;line-height:18px;color:${C.navy};text-decoration:none;padding:9px 16px;border-radius:999px;">${icon ? `<img src="${icon}" width="16" height="16" alt="" style="display:inline-block;width:16px;height:16px;border:0;vertical-align:-3px;margin-right:7px;">` : ""}${t}</a></td></tr></table>`;
 const secTitle = (t, when) => `<tr><td class="px" style="padding:30px 32px 6px 32px;">
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
   <td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:${C.gink};">${t}</td>
@@ -73,6 +74,7 @@ export const RITA_BOOK_URL = "https://bookings.cloud.microsoft/book/DG3RitaBeren
 //       today, nextPay, links: { hub (required), expense, training, onboarding, review, sops, book } }  — dates already "18 Oct 2026"
 export function welcomeEmail(d) {
   const L = Object.assign({ hon: HON_URL, jd: JD_URL, book: RITA_BOOK_URL }, d.links || {});
+  const CAL = L.icons ? L.icons + "/calendar.png" : "";
   const P = d.prev && d.prev.name ? { name: esc(d.prev.name), first: esc(d.prev.first || d.prev.name), since: esc(d.prev.since || "") } : null;
   const D = { first: esc(d.first), name: esc(d.name), pos: esc(d.position || "Printer Specialist"), ship: esc(d.ship), shipShort: esc(d.shipShort || d.ship),
     code: esc(d.code || ""), port: esc(d.port || ""), on: esc(d.on), off: esc(d.off), months: esc(d.months || ""), today: esc(d.today),
@@ -127,7 +129,7 @@ export function welcomeEmail(d) {
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.gink};">WELCOME ABOARD</td>
     <td align="right" style="font-family:${FB};font-size:13px;color:${C.slate};">${D.today}</td></tr></table>
-   <div class="h1" style="font-family:${FH};font-size:34px;font-weight:600;letter-spacing:-0.6px;line-height:38px;color:${C.navy};padding-top:14px;">Welcome aboard, ${D.first}.<br><span style="color:${C.grey};">${D.shipShort} is yours from today.</span></div>
+   <div class="h1" style="font-family:${FH};font-size:34px;font-weight:600;letter-spacing:-0.6px;line-height:38px;color:${C.navy};padding-top:14px;">Welcome aboard, ${D.first}.<br><span style="color:${C.grey};">${D.shipShort} is yours ${esc(d.yours || "from today")}.</span></div>
    <div style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};padding-top:14px;">We are glad you are here. Everything for your first weeks is on this one page, and the Onboard Support Team is one message away.</div>
   </td></tr>
   ${pass}
@@ -135,8 +137,8 @@ export function welcomeEmail(d) {
   ${secTitle("Your first 15 days", "four things")}
   ${step("TODAY", "Count the inventory and sign it", "Your own count, signed in your Digital Handover Notes. Use the green button above. It protects you.", "")}
   ${step("WEEK 1", "Finish the cruise line's training", "Log in to their app and complete every module. The cruise line checks it.", L.training ? btnS(L.training, "Open the training") : "")}
-  ${step("DAY 7", "Onboarding call with Rita", "15 minutes. How is it going, what do you need. Here is Rita&rsquo;s calendar: book a time with her whenever you need.", btnS(L.onboarding || L.book, "Book a time with Rita"))}
-  ${step("DAY 15", "Expectations call", "What a good contract looks like, agreed together. Then one call a month." + (L.review ? "" : " Rita sends you a time."), L.review ? btnS(L.review, "Pick a time") : "")}
+  ${step("DAY 7", "Onboarding call with Rita", "15 minutes. How is it going, what do you need. Here is Rita&rsquo;s calendar: book a time with her whenever you need.", btnS(L.onboarding || L.book, "Book a time with Rita", CAL))}
+  ${step("DAY 15", "Expectations call", "What a good contract looks like, agreed together. Then one call a month. Book it on Rita&rsquo;s calendar.", btnS(L.review || L.book, "Book a time with Rita", CAL))}
   
   ${secTitle("Who to message", "")}
   <tr><td class="px" style="padding:4px 32px 0 32px;">
@@ -190,13 +192,13 @@ export function welcomeEmail(d) {
   </table></td></tr></table></body></html>`;
   
   const text = [
-    `Welcome aboard, ${d.first}. ${d.shipShort || d.ship} is yours from today.`, "",
+    `Welcome aboard, ${d.first}. ${d.shipShort || d.ship} is yours ${d.yours || "from today"}.`, "",
     `Ship: ${d.ship}${d.port ? " (joined in " + d.port + ")" : ""}`, `Signed on: ${d.on}`, `Sign-off: ${d.off} (${d.offSource === "tdg" ? "confirmed by TDG" : "TDG confirms it later"})`,
     ...(d.prev && d.prev.name ? [`You take over from: ${d.prev.name}`] : []), "",
     `Today: open the Digital Handover Notes (${HON_URL}), count the inventory and sign it.`,
     "Week 1: finish the cruise line's training. The cruise line checks it.",
     `Day 7: onboarding call with Rita, 15 minutes. Book a time on her calendar whenever you need: ${L.onboarding || L.book}`,
-    `Day 15: expectations call. ${L.review ? "Pick a time: " + L.review : "Rita sends you a time."}`, "",
+    `Day 15: expectations call. Book it on Rita's calendar: ${L.review || L.book}`, "",
     `Uniforms: ${uniformAsk(d.brand)}`, "",
     `Your Crew Hub: ${L.hub}`, ...(L.expense ? [`Expense Report: ${L.expense}`] : []), `Job description: ${L.jd}`, "",
     "One address reaches the whole team: onboardsupport@dg3.com", "", "Rita Berenyi, Manager, People & Culture, Rita.Berenyi@dg3.com",

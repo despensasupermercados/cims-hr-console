@@ -48,6 +48,8 @@ export function welcomeContext({ crew, legs, today, links }) {
     port: leg.embark || null, on: dmy(leg.on), off: dmy(leg.off), offSource: leg.offSource || "projected",
     months: p ? (p.d ? mdShort(leg.on, leg.off) : `${p.m} months`) : "",
     prev: prev && prev.name ? prev : null, today: dmy(today),
+    // "from today" only when read on the sign-on day; a catch-up send says "since", a preview before it "from".
+    yours: !iso(today) || today === leg.on ? "from today" : today > leg.on ? `since ${dmy(leg.on)}` : `from ${dmy(leg.on)}`,
     nextPay: np ? `${WD[new Date(day(np.paid)).getUTCDay()]} ${+np.paid.slice(8, 10)} ${MON[+np.paid.slice(5, 7) - 1]}` : null,
     links: links || {},
   };
