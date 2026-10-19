@@ -882,7 +882,17 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   the comparison fold), the category up most on last year
   (≥ 20% and ≥ $1,000), a closed month with spend and no bill on file, the names the roster cannot place, single movements
   above 2.5× the usual — each says what it means and opens the place that holds it (`tvGo` sets one filter, `tvOpen`
-  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". Then Month by month (`tBars`),
+  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". **Acknowledge** (Miguel, 19 Oct 2026: "once acknowledge
+  .. they should disappear"): every row but a HELD bill carries Acknowledge; the row leaves the list for everyone
+  (`travel_ack`, migrations/0036, its own memoized guard `ensureTravelAck`; `POST /api/travel/ack` with Undo, audited;
+  `/api/travel` returns `acks` in its one wave). The key names the fact AND its figure (`over:2026-8:15655`,
+  `gap:2026:Jan–Sep:Air:-1420`), so a changed number is a new fact and comes back; "N acknowledged · show" lists them struck
+  through with who, when and Undo. A held bill loaded nothing, so it stays until Rita loads it. **Rita imports nothing for the
+  Travel tab** (Miguel, same day: "I don't want Rita to be importing anything, since we already import everything from the TDG
+  console"): her two training groups (#1 the centre, #2 per person) are NOT built — TDG's workbook carries the training cost by
+  month and category only (TRAINREL: rental, utilities, hotel, planefare, other), no names, and its one HOTEL column mixes the
+  trainees' hotel with the team's; 2026 total $28,324.15 = her $28,323.53. Do not re-propose the split unless TDG's file
+  gains the names. Pinned by `test/travel_filters.test.js`, `test/travel_ack.test.js`. Then Month by month (`tBars`),
   Where it goes (bars, last year pale, click = that category) beside Who (top 8, initials, click = their history), and three
   folds: TDG's bill against the workbook (its summary says the year's bill and workbook totals; `sgaBillOf` is the ONE
   definition of the bill per month, read by the table and the decisions), the names the roster cannot place (the year
