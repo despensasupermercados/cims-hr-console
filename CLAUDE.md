@@ -1522,12 +1522,26 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   app" — only the request half had been built, and the 15 Oct grade screen stood in for the whole visit). Once the
   documents are in, the request opens on **Before the visit** (A8: what the reads and the count found, amber, each to
   confirm on board) and **Start the audit** — seven steps, one per screen: Workstation (starts full, tap what is missing),
-  Machines & tools (per press: Test pattern / Scan to email / Collaboration, the Pattern 43 mark "Seen / Not seen", parts
-  past rated life as information, a press the crew reported down "Still down / Running now", tools not on inventory),
-  **Inventory** (the crew's blind count against the OBP the documents-in email compared it with — `audit_obp_at_count` —
-  Dexter checks each line on the shelf and types what is there, adds any OBP line, confirms the crew's items not in OBP),
-  Ratings, Crew (training, uniform & PPE, HON app, the dispatch rating for Rita — never in the score), Overall (optional;
-  strengths, to improve, agreed; Oasis/Icon recommendation; a follow-up with an owner and a date), Review and File. The
+  Machines & tools (per press: Test pattern / Scan to email / Collaboration, the Pattern 43 mark, parts past rated life as
+  information, a press the crew reported down, tools not on inventory), **Inventory** (the crew's blind count against the
+  OBP the documents-in email compared it with — `audit_obp_at_count` — Dexter types what the shelf holds where it is not the
+  crew's count, adds any OBP line, marks a crew item not in OBP he cannot find), Ratings, Crew (training, uniform & PPE, HON
+  app, the dispatch rating for Rita — never in the score), Overall (optional; strengths, to improve, agreed; Oasis/Icon
+  recommendation; a follow-up with an owner and a date), Review and File. **ONE WAY TO ANSWER, NEVER A PAIR** (Miguel, 19
+  Oct 2026, on the Workstation's Yes / No: "i dont like this game of dual stuff.. make it one .. defualted to all present ..
+  so he cna mark ehat is not there"; on the machine card: "this isconfusing to opperate"; on Inventory's "Yes, accurate /
+  No, discrepancies": "again .. the dual thing .. not my favotire"): every row starts in its normal state with a green
+  tick, Dexter taps only what is wrong (red, the word in a pill) and taps again to undo (`tapRow`, one row shape for the
+  desk, the labels, each press check, the Pattern 43 mark — "Not seen" until tapped "Seen" —, the crew-reported-down press
+  — "Running now" until tapped "Still down", which hides its checks —, a repair item "Not found", HON "Not in use", a
+  last-visit follow-up "Fixed"). **What the app can measure is never asked**: "Does the OBP match the shelf?" is the lines
+  themselves (`obpMatches`: every gap line's shelf — typed, else the crew's count — equals OBP, every added line's shelf
+  equals its OBP; timing lines never count), shown as "OBP matches the shelf" / "OBP is off on N lines" and filed as
+  `inv.accurate`. `fillVisit` (in `makeRules`, so page and server agree) writes the normal answers onto a new draft AND a
+  draft kept on the phone from before, never over an answer given (`inv.accurate` alone is re-measured on every tap); `visitProblems` / `normalizeVisit` are unchanged, so a
+  raw body without the answers is still refused, and `VISIT_VERSION` is not bumped (Dexter's drafts survive). Stated to
+  Miguel: an untapped Pattern 43 mark files "not seen", an untapped reported-down press files "running again", HON "N/A"
+  is no longer offered (a stored "na" is kept). Pinned by `test/audit_visit.test.js`, `test/audit_page_boot.test.js`. The
   rules that hold Next and File are `src/audit_steps.js`, serialized into the page (`AUDIT_RULES_JS`), and the server
   re-checks with the same functions. Filed ONCE in one batch: `audit_visit`, the SAME `audit_eval` row and score rule the
   Score Card reads (unchanged, §1), `audit_visit_data` (the steps + what the documents said), `audit_followup`. The next

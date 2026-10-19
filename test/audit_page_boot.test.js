@@ -6,6 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { AUDIT_HTML } from "../src/audit_ui.js";
+import { startVisit } from "../src/audit_steps.js";
 
 function fakeEl(id) {
   const cls = new Set();
@@ -157,4 +158,97 @@ test("a lost connection on the boot read: tried twice, then said, with Try again
   await settle();
   assert.equal(P.calls.filter((c) => c === "/api/audit/ships").length, 2);
   assert.match(P.$("main").innerHTML, /Could not load: no connection\.<\/span><button class="retry" data-retry>Try again/);
+});
+
+// 19 Oct 2026, Miguel, on the Workstation step's "All present / Something missing" switch: "i dont like this game of dual
+// stuff .. make it one .. defaulted to all present .. so he can mark what is not there". One list; the line under the
+// question says the state and is not a control.
+const VISIT = { id: "ar_9", ship: "Oasis", crew: "John Gorre", status: "complete", today: "2026-10-19", machines: [], count: { diff: [], extras: [] }, followups: [], photos: [], previous: null };
+const STEP_API = { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/visit": VISIT };
+
+test("the Workstation step is one list, everything present until tapped: no All present / Something missing switch", async () => {
+  const P = boot("#a=ar_9|1", STEP_API);
+  await settle();
+  assert.deepEqual(P.errors, []);
+  const main = P.$("main").innerHTML;
+  assert.match(main, /What is not on the desktop\?/);
+  assert.match(main, /class="wsum">.*All present<\/div>/);
+  assert.doesNotMatch(main, /Something missing|data-a="ws-all"|class="seg"/, "no second control");
+  assert.doesNotMatch(main, /class="(cell|itm) (bad|miss)/, "nothing starts missing");
+  assert.match(main, /data-a="ws" data-k="sops"/, "each item is tappable");
+});
+
+test("what Dexter marked missing is said once, in red, and the item reads Missing", async () => {
+  const d = startVisit({ machines: [], diff: [] }); d.ws.missing = ["sops"];
+  const P = boot("#a=ar_9|1", STEP_API, { store: { "aud:d:ar_9": JSON.stringify(d) } });
+  await settle();
+  const main = P.$("main").innerHTML;
+  assert.match(main, /class="wsum bad">.*1 missing<\/div>/);
+  assert.match(main, /class="itm miss" data-a="ws" data-k="sops"/);
+});
+
+// The same evening, on the machine card ("this is confusing to operate .. think about it") and the inventory ("the dual thing ..
+// not my favorite"): ONE way to answer on every step. A row starts in its normal state, one tap marks it wrong, a second tap
+// takes it back; OBP against the shelf is measured from the lines. No two-button question is left anywhere in the audit.
+const VISIT2 = Object.assign({}, VISIT, {
+  machines: [{ serial: "AC58011020823", label: "Print shop", model: "C4070", down: null, p43: { state: "findings", items: [{ head: "LINES ALONG THE FEED IN CYAN", where: "cyan half tone · green", part: "CYAN DRUM OR CHARGING POLE" }] }, life: [] },
+    { serial: "S2", label: "MFD deck 5", model: "bizhub", down: "Paper feed error", p43: null, life: [] }],
+  count: { total: 116, asOf: "2026-10-16", diff: [{ part_no: "ACF0033", obp: 2, counted: 1, kind: "gap" }], extras: [{ id: "x1", text: "Fusing gears", counted: 2 }] },
+  parts: [{ part_no: "ACF0033", description: "TNP75 BLACK TONER", obp: 2, counted: 1 }],
+  followups: [{ id: "f1", text: "Confirm the cyan line", owner: "Rolando", due: "2099-01-01", at: "2026-09-01T10:00:00Z", crew: "John Gorre", carried: 0 }] });
+const API2 = { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/visit": VISIT2 };
+const noDual = (main) => assert.doesNotMatch(main, /class="seg"|Yes, accurate|No, discrepancies|>Still open<\/button>|>Fixed<\/button>|class="ck/, "no two-button question");
+
+test("Machines: one list per machine, every row working until tapped; the Pattern 43 mark says Not seen; no Past life cell", async () => {
+  const P = boot("#a=ar_9|2", API2);
+  await settle();
+  assert.deepEqual(P.errors, []);
+  const main = P.$("main").innerHTML; noDual(main);
+  assert.match(main, /What is not working\?/);
+  assert.match(main, /data-a="labeled"[^>]*aria-pressed="false"><span class="tx">All hardware labeled/);
+  assert.match(main, /data-a="chk" data-k="test" data-s="AC58011020823"[^>]*><span class="tx">Test pattern prints clean/);
+  assert.match(main, /data-a="p43"[^>]*><span class="tx">Lines along the feed in cyan<span class="sm">.*Print one and look; Rolando confirms\.<\/span><\/span><span class="st m">Not seen<\/span>/);
+  assert.match(main, /data-a="down"[^>]*data-s="S2"[^>]*><span class="tx">Reported down by John<span class="sm">“Paper feed error”<\/span><\/span><span class="st m">Running now<\/span>/);
+  assert.doesNotMatch(main, />Past life</, "past rated life is information, never a check");
+  assert.equal((main.match(/class="st g">Working</g) || []).length, 2, "both machines read Working until something is tapped");
+});
+
+test("Machines: a mark seen on the print or a machine still down reads red and asks for one sentence", async () => {
+  const d = startVisit({ machines: VISIT2.machines, diff: VISIT2.count.diff, extras: VISIT2.count.extras });
+  d.hw.machines.AC58011020823.p43 = "seen"; d.hw.machines.S2.down = "still";
+  const P = boot("#a=ar_9|2", API2, { store: { "aud:d:ar_9": JSON.stringify(d) } });
+  await settle();
+  const main = P.$("main").innerHTML;
+  assert.match(main, /class="itm miss" data-a="p43"[^>]*>.*<span class="st r">Seen<\/span>/);
+  assert.match(main, /class="st r">Problem</); assert.match(main, /class="st r">Down</);
+  assert.match(main, /class="itm miss" data-a="down"[^>]*>.*<span class="st r">Still down<\/span>/);
+  assert.doesNotMatch(main.split('data-s="S2"')[2] || "", /Scan to email works/, "a machine still down asks nothing it cannot do");
+  assert.equal((main.match(/What you found/g) || []).length, 2);
+});
+
+test("Inventory: OBP against the shelf is measured, not asked; one shelf box per line, no tick; the repair item is one row", async () => {
+  const P = boot("#a=ar_9|3", API2);
+  await settle();
+  let main = P.$("main").innerHTML; noDual(main);
+  assert.match(main, /id="obpv">.*OBP is off on 1 line<\/div>/, "Kevin counted 1 where OBP says 2");
+  assert.match(main, /data-shelf="ACF0033"[^>]*placeholder="1"/);
+  assert.match(main, /data-a="rep" data-k="x1"[^>]*><span class="tx">Fusing gears<span class="sm">John counted 2/);
+  const d = startVisit({ machines: VISIT2.machines, diff: VISIT2.count.diff, extras: VISIT2.count.extras }); d.inv.lines.ACF0033 = { shelf: 2, checked: true };
+  const Q = boot("#a=ar_9|3", API2, { store: { "aud:d:ar_9": JSON.stringify(d) } });
+  await settle();
+  main = Q.$("main").innerHTML;
+  assert.match(main, /class="wsum" id="obpv">.*OBP matches the shelf<\/div>/, "the shelf says OBP was right");
+  assert.equal(JSON.parse(Q.store.get("aud:d:ar_9")).inv.accurate, true, "the kept draft carries the measured answer");
+});
+
+test("Crew: the HON app is one row; Review: an open follow-up stays open until tapped Fixed", async () => {
+  const P = boot("#a=ar_9|5", API2);
+  await settle();
+  let main = P.$("main").innerHTML; noDual(main);
+  assert.match(main, /data-a="hon"[^>]*aria-pressed="false"><span class="tx">Uses the HON app/);
+  const R = boot("#a=ar_9|7", API2);
+  await settle();
+  main = R.$("main").innerHTML; noDual(main);
+  assert.match(main, /tap what is fixed/);
+  assert.match(main, /data-a="close" data-k="f1" aria-pressed="false"><span class="tx">Confirm the cyan line<span class="sm">Rolando · by Jan 1, 2099.*<span class="st a">Still open<\/span>/);
 });
