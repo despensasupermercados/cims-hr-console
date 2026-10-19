@@ -10,7 +10,7 @@ import { ensureAuditTables } from "../src/audit_store.js";
 import { installAuditRequest } from "../src/audit_request.js";
 import { applyOverride } from "../src/override.js";
 import { auditScore } from "../src/audit.js";
-import { startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, AUDIT_RULES_JS, WORKSTATION, TOOLS } from "../src/audit_steps.js";
+import { startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, AUDIT_RULES_JS, WORKSTATION, TOOLS, fillVisit, obpMatches } from "../src/audit_steps.js";
 
 /* ------------------------------------------------ harness ------------------------------------------------ */
 function d1() {
@@ -91,9 +91,17 @@ test("the clean start: every checklist full, inventory starts on what the crew's
 test("what holds Next: each reason in its own step, under its own field", () => {
   const d = startVisit(CTX);
   const by = (step) => visitProblems(d, CTX, "2026-10-19").filter((p) => p.step === step).map((p) => p.field);
-  assert.deepEqual(by("workstation"), [], "a full desktop is one tap");
-  assert.deepEqual(by("machines").sort(), ["down:S2", "p43:S1"], "a Pattern 43 mark to confirm, a machine the crew reported down");
-  assert.deepEqual(by("inventory"), ["repair:x1"], "a repair item the crew found is confirmed or not found");
+  assert.deepEqual(by("workstation"), [], "a full desktop needs no tap");
+  // ONE way to answer (Miguel, 19 Oct 2026: "the dual thing .. not my favorite"): every answer starts in its normal state
+  assert.deepEqual(by("machines"), [], "the machine the crew reported down starts running again, the Pattern 43 mark starts not seen");
+  assert.deepEqual([d.hw.machines.S2.down, d.hw.machines.S1.p43], ["running", "not_seen"]);
+  assert.deepEqual(by("inventory"), [], "the repair item the crew found starts on the shelf");
+  assert.equal(d.inv.repairs.x1, "confirmed");
+  // the server's guard stays for whatever arrives without them (the site is open: a stranger's input)
+  const raw = JSON.parse(JSON.stringify(d)); raw.hw.machines.S1.p43 = null; raw.hw.machines.S2.down = null; delete raw.inv.repairs.x1;
+  const rby = (step) => visitProblems(raw, CTX).filter((p) => p.step === step).map((p) => p.field);
+  assert.deepEqual(rby("machines").sort(), ["down:S2", "p43:S1"]);
+  assert.deepEqual(rby("inventory"), ["repair:x1"]);
   assert.deepEqual(by("ratings"), ["inventory", "technical", "collaterals"]);
   assert.deepEqual(by("overall"), ["strengths", "improve"], "Overall is optional; strengths and to improve are not");
   d.hw.machines.S1.p43 = "seen";
@@ -109,6 +117,24 @@ test("what holds Next: each reason in its own step, under its own field", () => 
   assert.deepEqual(visitProblems(d, CTX, "2026-10-19").filter((p) => p.field.startsWith("fu_")).map((p) => p.field), ["fu_owner", "fu_due", "fu_text"], "an owner, a date not passed, what");
   d.inv.accurate = false; const noGaps = Object.assign({}, CTX, { diff: [] });
   assert.ok(visitProblems(d, noGaps).some((p) => p.field === "lines"), "'discrepancies' with no line says which");
+});
+
+test("the OBP verdict is measured from the lines, never asked; a kept draft gets the same normal answers, never over one given", () => {
+  const d = startVisit(CTX);
+  assert.equal(obpMatches(d, CTX), false, "the crew counted 0 where OBP says 5");
+  assert.equal(d.inv.accurate, false);
+  d.inv.lines.B2 = { shelf: 5 };
+  assert.equal(obpMatches(d, CTX), true, "the shelf says OBP is right after all");
+  d.inv.added.push({ part_no: "C3", shelf: 2 });
+  assert.equal(obpMatches(d, Object.assign({}, CTX, { obp: { C3: 4 } })), false, "a line Dexter adds is off unless its shelf is OBP's number");
+  assert.equal(obpMatches(d, Object.assign({}, CTX, { obp: { C3: 2 } })), true);
+  assert.equal(obpMatches({ inv: {} }, { diff: [{ kind: "timing", part_no: "T", obp: 2, counted: 1 }] }), true, "a timing line is not a discrepancy (1 Oct rule)");
+  const old = { hw: { labeled: null, machines: { S1: { checks: {}, p43: null } } }, inv: { lines: {}, added: [], repairs: {} }, crew: { hon: null } };
+  fillVisit(old, CTX);
+  assert.deepEqual([old.hw.labeled, old.hw.machines.S1.p43, old.hw.machines.S2.down, old.inv.repairs.x1, old.inv.accurate, old.crew.hon], [true, "not_seen", "running", "confirmed", false, "yes"], "a draft kept from before the change");
+  const kept = { hw: { labeled: false, machines: { S1: { p43: "seen" }, S2: { down: "still" } } }, inv: { repairs: { x1: "not_found" } }, crew: { hon: "na" } };
+  fillVisit(kept, CTX);
+  assert.deepEqual([kept.hw.labeled, kept.hw.machines.S1.p43, kept.hw.machines.S2.down, kept.inv.repairs.x1, kept.crew.hon], [false, "seen", "still", "not_found", "na"], "an answer given is never overwritten");
 });
 
 test("the score is the Score Card's own rule, and the note carries every reason", () => {
@@ -242,7 +268,8 @@ test("filing: refused with the reasons and nothing written; then the visit, the 
   const t = setup();
   const id = await completeRequest(t);
   const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
-  const bad = await t.call("POST", "/api/audit/request/grade", { id, visit: startVisit({ machines: v.machines, diff: v.count.diff }) });
+  const unanswered = startVisit({ machines: v.machines, diff: v.count.diff }); unanswered.hw.machines.S1.p43 = null; // what a stranger's POST may carry
+  const bad = await t.call("POST", "/api/audit/request/grade", { id, visit: unanswered });
   assert.equal(bad.status, 400);
   const bj = await bad.json();
   assert.ok(bj.problems.some((p) => p.field === "p43:S1") && bj.problems.some((p) => p.field === "inventory"));

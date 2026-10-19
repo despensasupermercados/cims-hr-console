@@ -206,11 +206,6 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .stp button.on::before{background:var(--green)}
 .q{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.3}
 .hint{font-size:13px;color:var(--mut);margin-top:2px}
-.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;padding:4px;border-radius:14px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2)}
-.card .seg{background:var(--bg);box-shadow:none;margin-top:10px}
-.fnd .seg{background:var(--card);box-shadow:none;margin-top:10px}
-.seg button{min-height:44px;border:0;border-radius:10px;background:none;font-weight:600;font-size:14px;color:var(--ink2);cursor:pointer;padding:0 6px}
-.seg button.on{background:var(--navy);color:#fff}
 .grp{display:flex;justify-content:space-between;align-items:baseline;padding:14px 16px 6px;font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.4px;text-transform:uppercase}
 .grp em{font-style:normal;text-transform:none;letter-spacing:0;font-size:12.5px}.grp em.bad{color:var(--red)}
 .itm{display:flex;align-items:center;gap:10px;min-height:52px;padding:10px 16px;border:0;border-top:1px solid var(--line);width:100%;background:none;text-align:left;font-size:15px;color:inherit;cursor:pointer}
@@ -219,15 +214,12 @@ div.itm{cursor:default}
 .itm .tx{flex:1;min-width:0}.itm .tx .sm{display:block}.itm .sub{color:var(--mut);font-size:13px}
 .itm>.ic{width:22px;height:22px}.itm .ic.ok{color:var(--green-d)}.itm .ic.bad{color:var(--red)}.itm .ic.warn{color:var(--amber)}
 .itm.miss .tx{color:var(--red)}
-.kv2{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line);font-size:15px}
-.card>.kv2:first-child{border-top:0}
-.card .kv2 .seg{margin:0;min-width:150px}
 .card>.mach:first-child{border-top:0}
 .cells{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 16px 12px}
 .cell{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border-radius:12px;border:0;background:var(--bg);font-size:13.5px;font-weight:600;color:var(--ink2);cursor:pointer;text-align:left}
 .cell .ic{width:18px;height:18px}.cell.ok .ic{color:var(--green-d)}
 .cell.bad{background:var(--redbg);color:var(--red)}
-span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)}
+.wsum{display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:13.5px;font-weight:600;color:var(--green-d)}.wsum .ic{width:18px;height:18px}.wsum.bad{color:var(--red)}
 .fnd{display:flex;gap:10px;align-items:flex-start;margin:0 16px 12px;padding:12px;border-radius:12px;background:var(--bg);font-size:14px}
 .fnd>.ic{width:18px;height:18px;margin-top:2px;flex:none}
 .fnd>div{flex:1;min-width:0}
@@ -235,7 +227,7 @@ span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)
 .fnd .src{display:block;font-size:12.5px;color:var(--mut);margin-top:2px}
 .fnd.a{background:var(--amberbg)}.fnd.a>.ic,.fnd.a b{color:var(--amber)}
 .fnd.r{background:var(--redbg)}.fnd.r>.ic,.fnd.r b{color:var(--red)}
-.ln{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.ln{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
 .ch+.ln,.ch+.empty{border-top:0}
 .ln .nm{font-weight:600;font-size:14.5px;line-height:1.25;overflow-wrap:anywhere}
 .ln .mono{font-size:12px}
@@ -243,8 +235,6 @@ span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)
 .ln .d{font-family:var(--fh);font-weight:600;font-size:16px;color:var(--amber);min-width:28px;text-align:right}.ln .d.p{color:var(--nfg)}.ln .d.z{color:var(--green-d)}
 .shelf{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--mut)}
 .shelf input{width:56px;min-height:40px;border:0;border-radius:10px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);text-align:center;font:600 16px var(--fh);color:var(--ink)}
-.ck{width:40px;height:40px;border-radius:50%;border:0;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);display:grid;place-items:center;color:var(--line2);cursor:pointer;margin-top:14px}
-.ck .ic{width:18px;height:18px}.ck.on{background:var(--greenbg);color:var(--green-d);box-shadow:none}
 .addl{padding:12px 16px;border-top:1px solid var(--line)}
 .addl .search{background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);min-height:46px}
 #addr .row{padding:10px 4px;min-height:52px}
@@ -687,15 +677,15 @@ label.btn{position:relative}
   }
   function draftOf(id, v) {
     var d = lsGet("aud:d:" + id);
-    if (!d || d.v !== AR.VISIT_VERSION) d = AR.startVisit({ machines: v.machines, diff: v.count.diff });
+    if (!d || d.v !== AR.VISIT_VERSION) d = AR.startVisit(ctxOf(v));
+    AR.fillVisit(d, ctxOf(v));
     if (!d.openedAt) d.openedAt = new Date().toISOString();
     return d;
   }
   function keep(id, d) { if (!lsSet("aud:d:" + id, d)) toast("This phone could not keep the draft. Keep the app open until you file."); }
-  function ctxOf(v) { return { machines: v.machines, diff: v.count.diff, extras: v.count.extras, followups: v.followups }; }
+  function ctxOf(v) { var obp = {}; (v.parts || []).forEach(function (p) { obp[p.part_no] = p.obp; }); return { machines: v.machines, diff: v.count.diff, extras: v.count.extras, followups: v.followups, obp: obp }; }
   function toast(t) { var n = $("toast"); if (!n) { n = document.createElement("div"); n.id = "toast"; n.className = "toast"; document.body.appendChild(n); } n.textContent = t; n.classList.add("on"); clearTimeout(toast._t); toast._t = setTimeout(function () { n.classList.remove("on"); }, 3600); }
   function stepBar(n) { var h = ""; for (var i = 1; i <= 7; i++) h += '<button class="' + (i <= n ? "on" : "") + '" data-step="' + i + '" aria-label="Step ' + i + ": " + esc(AR.STEPS[i - 1].title) + '"></button>'; $("stp").innerHTML = h; $("stp").hidden = false; }
-  function seg(act, opts, cur) { return '<div class="seg">' + opts.map(function (o) { return '<button type="button" data-a="' + act + '" data-k="' + esc(o[0]) + '" class="' + (String(cur) === String(o[0]) ? "on" : "") + '" aria-pressed="' + (String(cur) === String(o[0])) + '">' + esc(o[1]) + "</button>"; }).join("") + "</div>"; }
   function rateRow(act, k, cur, label) { var h = '<div class="rate">'; for (var n = 1; n <= 5; n++) h += '<button type="button" data-a="' + act + '" data-k="' + k + '" data-v="' + n + '" class="' + (cur === n ? "on" + (n <= 3 ? " lo" : "") : "") + '" aria-pressed="' + (cur === n) + '" aria-label="' + esc(label) + " " + n + '">' + n + "</button>"; return h + "</div>"; }
   function box(field, val, ph, rows) { return '<textarea class="gnote' + (rows === 1 ? " one" : "") + '" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
   function whyMsg(probs, field) { var p = probs.filter(function (x) { return x.field === field; })[0]; return p && S.err.show ? '<div class="why">' + ic("warning-circle") + esc(p.say) + "</div>" : ""; }
@@ -703,6 +693,14 @@ label.btn{position:relative}
     var pill = missing ? (times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : '<span class="st r">Missing</span>') : prevMissing ? '<span class="st m">Missing last time</span>' : "";
     return '<button type="button" class="itm' + (missing ? " miss" : "") + '" data-a="' + act + '" data-k="' + esc(key) + '" aria-pressed="' + !!missing + '"><span class="tx">' + esc(label) + (sub ? ' <span class="sub">· ' + esc(sub) + "</span>" : "") + "</span>" + pill + ic(missing ? "f:x-circle" : "f:check-circle", missing ? "bad" : "ok") + "</button>";
   }
+  /* ONE way to answer in the audit (Miguel, 19 Oct 2026, three screens: "the dual thing .. not my favorite"). A row starts in its
+     normal state and says so; one tap marks what is wrong (red), a second tap takes it back. words = [normal, wrong]: the normal
+     word is printed (muted) only where the label names a problem ("Not seen" beside a Pattern 43 mark). */
+  function tapRow(act, key, label, sub, bad, words, attrs) {
+    var pill = bad ? '<span class="st r">' + esc(words[1]) + "</span>" : words[0] ? '<span class="st m">' + esc(words[0]) + "</span>" : "";
+    return '<button type="button" class="itm' + (bad ? " miss" : "") + '" data-a="' + act + '" data-k="' + esc(key) + '"' + (attrs || "") + ' aria-pressed="' + !!bad + '"><span class="tx">' + esc(label) + (sub ? '<span class="sm">' + sub + "</span>" : "") + "</span>" + pill + ic(bad ? "f:x-circle" : "f:check-circle", bad ? "bad" : "ok") + "</button>";
+  }
+  var CHECK_SAY = { test: "Test pattern prints clean", scan: "Scan to email works", collab: "Collaboration works" };
   function prevMissing(v, k) { return !!(v.previous && (v.previous.missing || []).indexOf(k) >= 0); }
   function timesFor(v, k) { return prevMissing(v, k) ? ((v.previous.repeat || {})[k] || 1) + 1 : 1; }
   function toggle(list, k) { var i = list.indexOf(k); if (i >= 0) list.splice(i, 1); else list.push(k); }
@@ -781,7 +779,10 @@ label.btn{position:relative}
   /* ---- the steps ---- */
   var STEP = {};
   STEP.workstation = function (v, d, probs) {
-    var miss = d.ws.missing, h = '<div><div class="q">Is everything on the desktop?</div><div class="hint">It starts full. Tap only what is missing.</div></div>' + seg("ws-all", [["all", "All present"], ["some", "Something missing"]], miss.length || S.wsSome ? "some" : "all");
+    /* ONE list, everything present until Dexter taps it (Miguel, 19 Oct 2026: "i dont like this game of dual stuff .. make it
+       one .. defaulted to all present .. so he can mark what is not there"). The line under the question only says the state. */
+    var miss = d.ws.missing, h = '<div><div class="q">What is not on the desktop?</div><div class="hint">Everything starts as present. Tap only what is missing; tap it again to put it back.</div>'
+      + '<div class="wsum' + (miss.length ? " bad" : "") + '">' + ic(miss.length ? "f:x-circle" : "f:check-circle") + (miss.length ? miss.length + " missing" : "All present") + "</div></div>";
     h += '<div class="card">';
     AR.WORKSTATION.forEach(function (g) {
       var n = g.items.filter(function (i) { return miss.indexOf(i.key) >= 0; }).length;
@@ -794,25 +795,27 @@ label.btn{position:relative}
     return h + "</div>" + photoStrip(v, "workstation");
   };
   STEP.machines = function (v, d, probs) {
-    var h = '<div class="card"><div class="kv2"><span>All hardware labeled</span>' + seg("labeled", [["yes", "Yes"], ["no", "No"]], d.hw.labeled === true ? "yes" : d.hw.labeled === false ? "no" : "") + "</div>" + whyMsg(probs, "labeled") + "</div>";
+    var h = '<div><div class="q">What is not working?</div><div class="hint">Everything starts as working. Tap only what is wrong; tap it again to put it back.</div></div>';
+    h += '<div class="card">' + tapRow("labeled", "all", "All hardware labeled", "", d.hw.labeled === false, ["", "Not labeled"]) + "</div>";
     v.machines.forEach(function (m) {
       var a = d.hw.machines[m.serial] || (d.hw.machines[m.serial] = { checks: {}, p43: null, down: null, note: "" });
       var stillDown = a.down === "still", finding = AR.MACHINE_CHECKS.some(function (c) { return a.checks[c.key] === "finding"; }) || a.p43 === "seen";
-      var open = (m.down && !a.down) || (m.p43 && m.p43.state === "findings" && !a.p43 && !stillDown);
-      var pill = stillDown ? '<span class="st r">Down</span>' : finding ? '<span class="st r">Finding</span>' : open ? '<span class="st a">To check</span>' : (m.life || []).length ? '<span class="st a">Past life</span>' : '<span class="st g">Pass</span>';
+      var pill = stillDown ? '<span class="st r">Down</span>' : finding ? '<span class="st r">Problem</span>' : '<span class="st g">Working</span>';
       h += '<div class="card"><div class="mach"><div class="mh"><b>' + esc(m.label) + (m.model ? ' <span class="sm" style="display:inline">· ' + esc(m.model) + "</span>" : "") + "</b>" + pill + '</div><div class="mono">' + esc(m.serial) + "</div></div>";
-      if (m.down) h += '<div class="fnd a">' + ic("wrench") + '<div><b>Reported down by ' + esc(first(v.crew)) + '</b><span class="src">“' + esc(m.down) + "” · verify on board</span>" + seg("down:" + m.serial, [["still", "Still down"], ["running", "Running now"]], a.down || "") + whyMsg(probs, "down:" + m.serial) + "</div></div>";
+      var ser = ' data-s="' + esc(m.serial) + '"';
+      if (m.down) h += tapRow("down", "x", "Reported down by " + first(v.crew), "“" + esc(m.down) + "”", stillDown, ["Running now", "Still down"], ser);
       if (!stillDown) {
-        h += '<div class="cells">';
-        AR.MACHINE_CHECKS.forEach(function (c) { var bad = a.checks[c.key] === "finding"; h += '<button type="button" class="cell' + (bad ? " bad" : " ok") + '" data-a="chk" data-s="' + esc(m.serial) + '" data-k="' + c.key + '" aria-pressed="' + bad + '">' + ic(bad ? "f:x-circle" : "f:check-circle") + esc(c.label) + "</button>"; });
-        h += '<span class="cell' + ((m.life || []).length ? " warn" : " ok") + '">' + ic((m.life || []).length ? "f:warning-circle" : "f:check-circle") + "Past life</span></div>";
-        ((m.p43 && m.p43.items) || []).forEach(function (it) {
-          h += '<div class="fnd' + (a.p43 === "seen" ? " r" : " a") + '">' + ic("printer") + "<div><b>" + esc(sentence(it.head)) + "</b>" + '<span class="src">' + esc([it.where, it.part ? "points to " + sentence(it.part) : ""].filter(Boolean).join(" · ")) + "</span>" + '<span class="src">Pattern 43 · provisional, Rolando confirms · see it on the machine</span>' + seg("p43:" + m.serial, [["seen", "Seen"], ["not_seen", "Not seen"]], a.p43 || "") + whyMsg(probs, "p43:" + m.serial) + "</div></div>";
-        });
+        AR.MACHINE_CHECKS.forEach(function (c) { h += tapRow("chk", c.key, CHECK_SAY[c.key] || c.label, "", a.checks[c.key] === "finding", ["", "Problem"], ser); });
+        var items = (m.p43 && m.p43.items) || [];
+        if (items.length) {
+          var one = items.length === 1 ? items[0] : null;
+          var sub = (one ? esc([one.where, one.part ? "points to " + sentence(one.part) : ""].filter(Boolean).join(" · ")) + "<br>" : items.map(function (it) { return esc(sentence(it.head)); }).join("<br>") + "<br>") + "Pattern 43 showed it. Print one and look; Rolando confirms.";
+          h += tapRow("p43", "x", one ? sentence(one.head) : items.length + " Pattern 43 marks", sub, a.p43 === "seen", ["Not seen", "Seen"], ser);
+        }
         if ((m.life || []).length) {
-          h += '<div class="fnd a">' + ic("clock") + "<div><b>" + m.life.length + (m.life.length === 1 ? " part" : " parts") + " past rated life · copy quality decides</b>";
+          h += '<div class="fnd a">' + ic("clock") + "<div><b>" + m.life.length + (m.life.length === 1 ? " part" : " parts") + " past rated life · information</b>";
           m.life.forEach(function (x) { h += '<span class="src">' + esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " · " + esc(x.cover).replace(/ (\d)/g, "&nbsp;$1") : " · not on the OBP list") + "</span>"; });
-          h += '<span class="src">Information, never a replacement by itself. Have the part on board for when it goes.</span></div></div>';
+          h += '<span class="src">Copy quality decides, never the counter. Have the part on board for when it goes.</span></div></div>';
         }
       }
       if (finding || stillDown) h += '<div class="pad" style="padding-top:4px"><div class="lab">What you found' + (finding ? " · required" : "") + "</div>" + box("m:" + m.serial, a.note, "One sentence, what you saw on " + m.label) + whyMsg(probs, "note:" + m.serial) + "</div>";
@@ -827,12 +830,20 @@ label.btn{position:relative}
   function lineRow(v, d, pn, obp, crew, kindTxt) {
     var L = d.inv.lines[pn] || {}, p = partOf(v, pn), shelf = L.shelf == null ? "" : L.shelf;
     var diff = obp == null ? NaN : (L.shelf != null ? L.shelf : crew) - obp;
-    return '<div class="ln"><div class="tx"><div class="nm">' + esc(p.description || pn) + '</div><div class="mono">' + esc(pn) + '</div><div class="num">OBP <b>' + esc(obp) + "</b> · " + esc(first(v.crew)) + " <b>" + esc(crew == null ? "–" : crew) + "</b>" + (kindTxt ? " · " + esc(kindTxt) : "") + '</div></div><span class="d' + (diff > 0 ? " p" : !diff ? " z" : "") + '">' + (isNaN(diff) ? "–" : !diff ? "0" : (diff > 0 ? "+" : "−") + Math.abs(diff)) + '</span><label class="shelf"><span>Shelf</span><input inputmode="numeric" pattern="[0-9]*" maxlength="5" data-shelf="' + esc(pn) + '" value="' + esc(shelf) + '" placeholder="' + esc(crew == null ? "" : crew) + '"></label><button type="button" class="ck' + (L.checked ? " on" : "") + '" data-a="chkline" data-k="' + esc(pn) + '" aria-pressed="' + !!L.checked + '" aria-label="Checked on the shelf">' + ic("check") + "</button></div>";
+    return '<div class="ln"><div class="tx"><div class="nm">' + esc(p.description || pn) + '</div><div class="mono">' + esc(pn) + '</div><div class="num">OBP <b>' + esc(obp) + "</b> · " + esc(first(v.crew)) + " <b>" + esc(crew == null ? "–" : crew) + "</b>" + (kindTxt ? " · " + esc(kindTxt) : "") + '</div></div><span class="d' + diffCls(diff) + '" data-obp="' + esc(obp) + '" data-crew="' + esc(crew == null ? "" : crew) + '">' + diffTxt(diff) + '</span><label class="shelf"><span>Shelf</span><input inputmode="numeric" pattern="[0-9]*" maxlength="5" data-shelf="' + esc(pn) + '" value="' + esc(shelf) + '" placeholder="' + esc(crew == null ? "" : crew) + '" aria-label="On the shelf"></label></div>';
+  }
+  function diffCls(diff) { return diff > 0 ? " p" : !diff ? " z" : ""; }
+  function diffTxt(diff) { return isNaN(diff) ? "–" : !diff ? "0" : (diff > 0 ? "+" : "−") + Math.abs(diff); }
+  /* the answer to "Does the OBP match the shelf?" is read from the lines (AR.obpMatches), never a second control */
+  function obpVerdict(v, d) {
+    var off = v.count.diff.filter(function (x) { return x.kind === "gap" && !AR.obpMatches({ inv: { lines: d.inv.lines, added: [] } }, { diff: [x] }); }).length
+      + d.inv.added.filter(function (a) { return !AR.obpMatches({ inv: { lines: {}, added: [a] } }, { diff: [], obp: ctxOf(v).obp }); }).length;
+    return '<div class="wsum' + (off ? " bad" : "") + '" id="obpv">' + ic(off ? "f:x-circle" : "f:check-circle") + (off ? "OBP is off on " + off + (off === 1 ? " line" : " lines") : "OBP matches the shelf") + "</div>";
   }
   STEP.inventory = function (v, d, probs) {
     var gaps = v.count.diff.filter(function (x) { return x.kind === "gap"; }), timing = v.count.diff.filter(function (x) { return x.kind === "timing"; }), ex = v.count.extras;
-    var h = '<div><div class="q">Does the OBP match the shelf?</div><div class="hint">' + esc(first(v.crew)) + " counted " + esc(v.count.total) + " lines blind" + (gaps.length ? " · " + gaps.length + " differ" : " · all agree") + (ex.length ? " · " + ex.length + " not in OBP" : "") + (v.count.asOf ? " · OBP of " + fmtD(v.count.asOf, true) : "") + "</div></div>";
-    h += seg("acc", [["yes", "Yes, accurate"], ["no", "No, discrepancies"]], d.inv.accurate === true ? "yes" : d.inv.accurate === false ? "no" : "") + whyMsg(probs, "accurate") + whyMsg(probs, "lines");
+    var h = '<div><div class="q">Does the OBP match the shelf?</div><div class="hint">' + esc(first(v.crew)) + " counted " + esc(v.count.total) + " lines blind" + (gaps.length ? " · " + gaps.length + " differ" : " · all agree") + (ex.length ? " · " + ex.length + " not in OBP" : "") + (v.count.asOf ? " · OBP of " + fmtD(v.count.asOf, true) : "") + "</div>"
+      + (gaps.length || d.inv.added.length ? '<div class="hint">Count each line on the shelf. Type a number only where the shelf is not ' + esc(first(v.crew)) + "'s count.</div>" : "") + obpVerdict(v, d) + "</div>";
     h += '<div class="card"><div class="ch">' + ic("package") + 'Lines to check on the shelf<span class="r">' + (gaps.length + d.inv.added.length) + "</span></div>";
     if (!gaps.length && !d.inv.added.length) h += '<div class="empty" style="padding:14px 16px">' + ic("f:check-circle") + "The crew's count agrees with OBP on every line.</div>";
     gaps.forEach(function (x) { h += lineRow(v, d, x.part_no, x.obp, x.counted); });
@@ -845,7 +856,7 @@ label.btn{position:relative}
     }
     if (ex.length) {
       h += '<div class="card"><div class="ch">' + ic("wrench") + 'Repair items not in OBP<span class="r">from ' + esc(first(v.crew)) + "'s count</span></div>";
-      ex.forEach(function (x) { h += '<div class="pad" style="border-top:1px solid var(--line)"><div class="t" style="font-weight:600">' + esc(x.text) + (x.counted != null ? ' <span class="sm" style="display:inline">· ' + esc(x.counted) + "</span>" : "") + "</div>" + seg("rep:" + x.id, [["confirmed", "On the shelf"], ["not_found", "Not found"]], d.inv.repairs[x.id] || "") + whyMsg(probs, "repair:" + x.id) + "</div>"; });
+      ex.forEach(function (x) { h += tapRow("rep", x.id, x.text, x.counted != null ? esc(first(v.crew)) + " counted " + esc(x.counted) : "", d.inv.repairs[x.id] === "not_found", ["", "Not found"]); });
       h += "</div>";
     }
     h += '<div class="card pad"><div class="lab">Note on the stock · optional</div>' + box("inv-note", d.inv.note, "Anything else the counts do not say") + "</div>";
@@ -877,7 +888,7 @@ label.btn{position:relative}
     var pm = d.crew.ppe.missing;
     h += '<div class="card"><div class="grp"><span>Uniform &amp; PPE</span><em' + (pm.length ? ' class="bad">' + pm.length + " missing" : ">" + AR.PPE.length + " of " + AR.PPE.length) + "</em></div>";
     AR.PPE.forEach(function (p) { var was = v.previous && v.previous.sameCrew && (v.previous.ppeMissing || []).indexOf(p.key) >= 0; h += itemRow("ppe", p.key, p.label, "", pm.indexOf(p.key) >= 0, was, 1); });
-    h += '<div class="kv2"><span>HON app in use</span>' + seg("hon", [["yes", "Yes"], ["no", "No"], ["na", "N/A"]], d.crew.hon || "") + "</div>" + whyMsg(probs, "hon") + "</div>";
+    h += "</div>" + '<div class="card">' + tapRow("hon", "x", "Uses the HON app", "", d.crew.hon === "no", ["", "Not in use"]) + "</div>";
     var t = AR.RATING_TEXT.dispatch;
     h += '<div class="card pad"><div class="q">' + esc(t.label) + ' <span class="sm" style="display:inline">· optional</span></div><div class="hint">' + esc(t.hint) + "</div>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label) + "</div>";
     return h + photoStrip(v, "crew");
@@ -917,10 +928,12 @@ label.btn{position:relative}
     if (low.length) h += '<div class="itm"><span class="tx">Comment on the ' + (low.length === 1 ? "low rating" : low.length + " low ratings") + '<span class="sm">' + esc(low.join(" · ")) + "</span></span>" + ic("f:check-circle", "ok") + "</div>";
     h += '<div class="itm"><span class="tx">' + (sent + wait ? sent + wait + (sent + wait === 1 ? " photo" : " photos") + (wait ? " · " + wait + " waits for signal" : "") : "No photos") + '<span class="sm">' + (wait ? "The audit files now; the photos follow when there is signal." : "Photos are optional.") + "</span></span>" + ic(wait ? "f:warning-circle" : "f:check-circle", wait ? "warn" : "ok") + "</div></div>";
     if (v.followups.length) {
-      h += '<div class="card"><div class="ch">' + ic("flag") + 'Still open on this ship<span class="r">' + v.followups.length + "</span></div>";
+      h += '<div class="card"><div class="ch">' + ic("flag") + 'Still open on this ship<span class="r">tap what is fixed</span></div>';
       v.followups.forEach(function (f) {
         var c = d.close[f.id] || "open", late = f.due && f.due < v.today, times = (f.carried || 0) + 1;
-        h += '<div class="pad" style="border-top:1px solid var(--line)"><div class="mh"><b style="font-size:15px">' + esc(f.text) + "</b>" + (times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : late ? '<span class="st r">Overdue</span>' : '<span class="st a">Open</span>') + '</div><div class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : "") + " · " + esc(f.crew || "") + ", " + fmtD(f.at, true) + "</div>" + seg("close:" + f.id, [["fixed", "Fixed"], ["open", "Still open"]], c) + "</div>";
+        var fixed = c === "fixed";
+        h += '<button type="button" class="itm" data-a="close" data-k="' + esc(f.id) + '" aria-pressed="' + fixed + '"><span class="tx">' + esc(f.text) + '<span class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : "") + " · " + esc(f.crew || "") + ", " + fmtD(f.at, true) + "</span></span>"
+          + (fixed ? '<span class="st g">Fixed</span>' : times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : late ? '<span class="st r">Overdue</span>' : '<span class="st a">Still open</span>') + ic(fixed ? "f:check-circle" : "circle", fixed ? "ok" : "") + "</button>";
       });
       h += "</div>";
     }
@@ -976,34 +989,39 @@ label.btn{position:relative}
         var b = ev.target.closest("[data-a]"); if (!b) return;
         var a = b.getAttribute("data-a"), k = b.getAttribute("data-k"), s = b.getAttribute("data-s");
         if (a === "ws") toggle(d.ws.missing, k);
-        else if (a === "ws-all") { if (k === "all") { d.ws.missing = []; S.wsSome = false; } else { S.wsSome = true; toast("Tap what is missing."); } }
-        else if (a === "labeled") d.hw.labeled = k === "yes";
-        else if (a.indexOf("down:") === 0) d.hw.machines[a.slice(5)].down = k;
-        else if (a.indexOf("p43:") === 0) d.hw.machines[a.slice(4)].p43 = k;
+        else if (a === "labeled") d.hw.labeled = d.hw.labeled === false;
+        else if (a === "down") d.hw.machines[s].down = d.hw.machines[s].down === "still" ? "running" : "still";
+        else if (a === "p43") d.hw.machines[s].p43 = d.hw.machines[s].p43 === "seen" ? "not_seen" : "seen";
         else if (a === "chk") { var mc = d.hw.machines[s].checks; if (mc[k] === "finding") delete mc[k]; else mc[k] = "finding"; }
         else if (a === "tool") toggle(d.hw.tools.missing, k);
-        else if (a === "acc") d.inv.accurate = k === "yes";
-        else if (a === "chkline") { var L = d.inv.lines[k] || (d.inv.lines[k] = { shelf: null, checked: false }); L.checked = !L.checked; }
-        else if (a === "addline") { d.inv.added.push({ part_no: k, shelf: null }); d.inv.accurate = false; S.addq = ""; }
-        else if (a.indexOf("rep:") === 0) d.inv.repairs[a.slice(4)] = k;
+        else if (a === "addline") { d.inv.added.push({ part_no: k, shelf: null }); S.addq = ""; }
+        else if (a === "rep") d.inv.repairs[k] = d.inv.repairs[k] === "not_found" ? "confirmed" : "not_found";
         else if (a === "rt") { var r = Number(b.getAttribute("data-v")); d.rt[k] = d.rt[k] === r ? null : r; }
         else if (a === "train") toggle(d.crew.training, k);
         else if (a === "train-other") { S.trainOther = !(S.trainOther || d.crew.trainingOther); if (!S.trainOther) d.crew.trainingOther = ""; }
         else if (a === "ppe") toggle(d.crew.ppe.missing, k);
-        else if (a === "hon") d.crew.hon = k;
+        else if (a === "hon") d.crew.hon = d.crew.hon === "no" ? "yes" : "no";
         else if (a === "disp") { var r2 = Number(b.getAttribute("data-v")); d.crew.dispatch = d.crew.dispatch === r2 ? null : r2; }
         else if (a === "ov") { var r3 = Number(b.getAttribute("data-v")); d.ov.overall = d.ov.overall === r3 ? null : r3; }
         else if (a === "block") d.ov.recommendBlock = !d.ov.recommendBlock;
         else if (a === "fu") d.ov.followup = d.ov.followup ? null : { owner: "", due: AR.plusDays(v.today, AR.FOLLOW_DAYS), text: "" };
         else if (a === "fu-owner") d.ov.followup.owner = k;
-        else if (a.indexOf("close:") === 0) d.close[a.slice(6)] = k;
+        else if (a === "close") d.close[k] = d.close[k] === "fixed" ? "open" : "fixed";
         else return;
-        keep(id, d); draw();
+        AR.fillVisit(d, ctx); keep(id, d); draw();
       };
       M.oninput = function (ev) {
         var t = ev.target, f = t.getAttribute("data-f"), sh = t.getAttribute("data-shelf");
         if (t.id === "addq") { S.addq = t.value; addResults(v, d); return; }
-        if (sh) { var L = d.inv.lines[sh] || (d.inv.lines[sh] = { shelf: null, checked: false }); var val = String(t.value).trim(); L.shelf = /^\d{1,5}$/.test(val) ? Number(val) : null; if (L.shelf != null) L.checked = true; var ad = d.inv.added.filter(function (x) { return x.part_no === sh; })[0]; if (ad) ad.shelf = L.shelf; keep(id, d); return; }
+        if (sh) {
+          var L = d.inv.lines[sh] || (d.inv.lines[sh] = { shelf: null, checked: false }); var val = String(t.value).trim(); L.shelf = /^\d{1,5}$/.test(val) ? Number(val) : null; L.checked = L.shelf != null;
+          var ad = d.inv.added.filter(function (x) { return x.part_no === sh; })[0]; if (ad) ad.shelf = L.shelf;
+          AR.fillVisit(d, ctx); keep(id, d);
+          var row = t.closest(".ln"), dc = row && row.querySelector(".d");
+          if (dc) { var o = dc.getAttribute("data-obp"), cr = dc.getAttribute("data-crew"), base = L.shelf != null ? L.shelf : cr === "" ? NaN : Number(cr), df = o === "" ? NaN : base - Number(o); dc.className = "d" + diffCls(df); dc.textContent = diffTxt(df); }
+          var vd = $("obpv"); if (vd) vd.outerHTML = obpVerdict(v, d);
+          return;
+        }
         if (!f) return;
         if (f.indexOf("m:") === 0) d.hw.machines[f.slice(2)].note = t.value;
         else if (f === "inv-note") d.inv.note = t.value;
