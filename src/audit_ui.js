@@ -3,10 +3,12 @@
 // The same design language as the seafarer's upload page (src/audit_upload_ui.js): a deep navy header that says where
 // you are, white cards on a grey page, Phosphor icons (src/audit_icons.js, generated, never hand-drawn), status said in
 // sentence case with an icon and a colour, a progress bar wherever there is a "N of M", one primary button at the
-// bottom. Screens: Ships (open requests first) -> who -> the briefing -> the request -> waiting / everything is in.
+// bottom. Screens: Ships (open requests first) -> who -> the briefing -> the request -> waiting / everything is in ->
+// the audit on the ship, seven steps (19 Oct 2026) -> the filed audit.
 // String.raw keeps the client script's backslashes literal; nothing in it may use a backtick or a dollar-brace —
 // scripts/verify_client_scripts.mjs parses this script on every build and test run.
 import { ICONS } from "./audit_icons.js";
+import { AUDIT_RULES_JS } from "./audit_steps.js";
 
 export const AUDIT_MANIFEST = (onAuditHost) => JSON.stringify({
   name: "CIMS Printshop Audit", short_name: "Audit", start_url: onAuditHost ? "/" : "/audit", scope: onAuditHost ? "/" : "/audit",
@@ -181,7 +183,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .empty .ic{width:28px;height:28px;color:var(--line2)}
 .dock{position:fixed;left:0;right:0;bottom:0;z-index:5;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06)}
 .dock .in{max-width:608px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
-.dock .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dock .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.dock .two.nx{grid-template-columns:1fr 2fr}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 18px;border-radius:14px;border:0;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;cursor:pointer;width:100%;transition:transform .12s,opacity .2s}
 .btn:active{transform:scale(.98)}.btn .ic{width:20px;height:20px}
 .btn.green{background:var(--fill)}
@@ -194,15 +196,92 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .sk{height:64px;border-top:1px solid var(--line);background:linear-gradient(90deg,var(--card),var(--bg),var(--card));background-size:200% 100%;animation:sk 1.2s infinite}
 .sk:first-child{border-top:0}
 @keyframes sk{to{background-position:-200% 0}}
-@media (prefers-reduced-motion:reduce){.sk{animation:none}.track i,.btn,.row,.bk{transition:none}}
+/* the audit on the ship (B1–B7), 19 Oct 2026 */
+.stp{max-width:608px;margin:8px auto 0;display:grid;grid-template-columns:repeat(7,1fr);gap:4px}.stp[hidden]{display:none}
+.stp button{height:16px;padding:6px 0;border:0;background:none;cursor:pointer;display:block}
+.stp button::before{content:"";display:block;height:4px;border-radius:99px;background:rgba(255,255,255,.2)}
+.stp button.on::before{background:var(--green)}
+.q{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.3}
+.hint{font-size:13px;color:var(--mut);margin-top:2px}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;padding:4px;border-radius:14px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2)}
+.card .seg{background:var(--bg);box-shadow:none;margin-top:10px}
+.fnd .seg{background:var(--card);box-shadow:none;margin-top:10px}
+.seg button{min-height:44px;border:0;border-radius:10px;background:none;font-weight:600;font-size:14px;color:var(--ink2);cursor:pointer;padding:0 6px}
+.seg button.on{background:var(--navy);color:#fff}
+.grp{display:flex;justify-content:space-between;align-items:baseline;padding:14px 16px 6px;font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.4px;text-transform:uppercase}
+.grp em{font-style:normal;text-transform:none;letter-spacing:0;font-size:12.5px}.grp em.bad{color:var(--red)}
+.itm{display:flex;align-items:center;gap:10px;min-height:52px;padding:10px 16px;border:0;border-top:1px solid var(--line);width:100%;background:none;text-align:left;font-size:15px;color:inherit;cursor:pointer}
+.grp+.itm,.card>.itm:first-child{border-top:0}
+div.itm{cursor:default}
+.itm .tx{flex:1;min-width:0}.itm .tx .sm{display:block}.itm .sub{color:var(--mut);font-size:13px}
+.itm>.ic{width:22px;height:22px}.itm .ic.ok{color:var(--green-d)}.itm .ic.bad{color:var(--red)}.itm .ic.warn{color:var(--amber)}
+.itm.miss .tx{color:var(--red)}
+.kv2{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid var(--line);font-size:15px}
+.card>.kv2:first-child{border-top:0}
+.card .kv2 .seg{margin:0;min-width:150px}
+.card>.mach:first-child{border-top:0}
+.cells{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 16px 12px}
+.cell{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border-radius:12px;border:0;background:var(--bg);font-size:13.5px;font-weight:600;color:var(--ink2);cursor:pointer;text-align:left}
+.cell .ic{width:18px;height:18px}.cell.ok .ic{color:var(--green-d)}
+.cell.bad{background:var(--redbg);color:var(--red)}
+span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)}
+.fnd{display:flex;gap:10px;align-items:flex-start;margin:0 16px 12px;padding:12px;border-radius:12px;background:var(--bg);font-size:14px}
+.fnd>.ic{width:18px;height:18px;margin-top:2px;flex:none}
+.fnd>div{flex:1;min-width:0}
+.fnd b{display:block;font-weight:600}
+.fnd .src{display:block;font-size:12.5px;color:var(--mut);margin-top:2px}
+.fnd.a{background:var(--amberbg)}.fnd.a>.ic,.fnd.a b{color:var(--amber)}
+.fnd.r{background:var(--redbg)}.fnd.r>.ic,.fnd.r b{color:var(--red)}
+.ln{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
+.ch+.ln,.ch+.empty{border-top:0}
+.ln .nm{font-weight:600;font-size:14.5px;line-height:1.25;overflow-wrap:anywhere}
+.ln .mono{font-size:12px}
+.ln .num{font-size:12.5px;color:var(--mut);margin-top:2px}.ln .num b{color:var(--ink);font-weight:600}
+.ln .d{font-family:var(--fh);font-weight:600;font-size:16px;color:var(--amber);min-width:28px;text-align:right}.ln .d.p{color:var(--nfg)}.ln .d.z{color:var(--green-d)}
+.shelf{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--mut)}
+.shelf input{width:56px;min-height:40px;border:0;border-radius:10px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);text-align:center;font:600 16px var(--fh);color:var(--ink)}
+.ck{width:40px;height:40px;border-radius:50%;border:0;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);display:grid;place-items:center;color:var(--line2);cursor:pointer;margin-top:14px}
+.ck .ic{width:18px;height:18px}.ck.on{background:var(--greenbg);color:var(--green-d);box-shadow:none}
+.addl{padding:12px 16px;border-top:1px solid var(--line)}
+.addl .search{background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);min-height:46px}
+#addr .row{padding:10px 4px;min-height:52px}
+.field{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 14px;font:inherit;font-size:16px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink);margin-top:10px}
+.lab{font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:6px}
+.why{display:flex;gap:6px;align-items:flex-start;font-size:13px;color:var(--red);margin-top:8px;font-weight:500}.why .ic{width:16px;height:16px;margin-top:1px}
+.anch{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:6px}
+.scoreln{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}.scoreln b{font-family:var(--fh);color:var(--ink)}
+.tog{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:56px;padding:0 16px;border:0;border-top:1px solid var(--line);background:none;font-size:15px;color:inherit;text-align:left;cursor:pointer}
+.tog:first-child{border-top:0}
+.sw{position:relative;width:46px;height:28px;border-radius:99px;background:var(--line2);flex:none;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .15s}
+.sw.on{background:var(--fill)}.sw.on::after{transform:translateX(18px)}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.tile{background:var(--card);border-radius:12px;box-shadow:0 0 0 1px var(--line);padding:12px 2px 10px;text-align:center;min-width:0}
+.tile b{display:block;font-family:var(--fh);font-weight:600;font-size:24px;line-height:1.1}
+.tile small{display:block;font-size:10.5px;color:var(--mut);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile.main{background:var(--navy);box-shadow:none;color:#fff}.tile.main small{color:#B9C6D6}
+.card.soft{background:var(--bg);box-shadow:0 0 0 1px var(--line)}
+.went{display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:center;padding:8px 16px 16px;font-size:14px}
+.went i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center}.went i .ic{width:14px;height:14px}
+.went i.y{background:var(--greenbg);color:var(--green-d)}.went i.n{background:var(--card);color:var(--mut)}
+.phs{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 0}
+.th{width:72px;height:72px;border-radius:12px;background:var(--bg) center/cover no-repeat;position:relative;display:block}
+.th.q::after{content:"";position:absolute;right:5px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 2px #fff}
+.vh{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden}
+label.btn{position:relative}
+.need .ib.a{background:var(--amberbg);color:var(--amber)}
+.toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom));transform:translate(-50%,20px);z-index:9;max-width:calc(100% - 32px);background:var(--deep);color:#fff;padding:12px 16px;border-radius:14px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+@media (prefers-reduced-motion:reduce){.sk{animation:none}.track i,.btn,.row,.bk,.sw,.sw::after,.toast{transition:none}}
 </style>
 </head><body>
-<header class="top"><div class="in"><button class="bk" id="bk" hidden aria-label="Back"></button><div style="min-width:0"><div class="tt" id="tt"><span class="brand">CIMS</span></div><div class="ts" id="ts"></div></div><span class="tk" id="tk"></span></div></header>
+<header class="top"><div class="in"><button class="bk" id="bk" hidden aria-label="Back"></button><div style="min-width:0"><div class="tt" id="tt"><span class="brand">CIMS</span></div><div class="ts" id="ts"></div></div><span class="tk" id="tk"></span></div><div class="stp" id="stp" hidden></div></header>
 <div id="heroslot"></div>
 <div class="offl" id="offl" hidden><div>No signal. What you see was loaded earlier.</div></div>
 <main id="main"><div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
 <div id="dockslot"></div>
 <script>window.__IC=` + JSON.stringify(ICONS) + String.raw`;</script>
+<script>` + AUDIT_RULES_JS + String.raw`</script>
 <script>
 (function () {
   "use strict";
@@ -234,6 +313,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
     $("ts").textContent = s || ""; $("ts").hidden = !s;
     var tk = $("tk"); tk.className = "tk" + (kcls ? " " + kcls : ""); tk.innerHTML = k || "";
     $("bk").hidden = !back;
+    $("stp").hidden = true; $("stp").innerHTML = "";
   }
   function hero(html, cls) { $("heroslot").innerHTML = html ? '<section class="hero' + (cls ? " " + cls : "") + '"><div class="in">' + html + "</div></section>" : ""; }
   function dock(html) { $("dockslot").innerHTML = html ? '<div class="dock"><div class="in">' + html + "</div></div>" : ""; }
@@ -499,8 +579,18 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       h += "</div>";
       h += '<div class="card"><div class="ch">' + ic("package") + 'Blind count<span class="r">' + d.count.done + " of " + d.count.total + '</span></div><div class="pad" style="padding-top:4px">' + '<div class="track' + (done ? "" : " navy") + '"><i style="width:' + pct(d.count.done, d.count.total) + '%"></i></div>' + (d.extras ? '<div class="sm" style="margin-top:8px">' + d.extras + (d.extras === 1 ? " item found that is" : " items found that are") + " not on the OBP list</div>" : "") + "</div></div>";
       if (d.grade) h = gradeCard(d.grade) + h;
+      var pend = lsGet("aud:p:" + id);
+      if (pend && !d.grade) h = '<div class="ban a">' + ic("cloud-slash") + "<span>The audit is filed on this phone. It sends itself when there is signal.</span></div>" + h;
       $("main").innerHTML = h;
-      if (done && !d.grade && !d.test) dock('<button class="btn green" data-go="g=' + esc(id) + '">' + ic("clipboard-text") + "Grade the audit</button>");
+      /* A8: once the documents are in, what they found leads the screen (each item comes up in the audit to confirm);
+         once filed, the audit itself */
+      if (done) (d.grade ? api("/api/audit/visit?id=" + encodeURIComponent(id)) : loadVisit(id)).then(function (v) {
+        if (S.view !== key) return;
+        if (d.grade) { var gc = $("main").querySelector(".card"); if (gc) gc.insertAdjacentHTML("afterend", filedCard(v)); }
+        else { S.v[id] = v; $("main").insertAdjacentHTML("afterbegin", beforeCard(v)); }
+      }).catch(function () {});
+      var at = lsGet("aud:s:" + id) || 1, started = !!lsGet("aud:d:" + id);
+      if (done && !d.grade && !d.test) dock(pend ? "" : '<button class="btn green" data-go="a=' + esc(id) + "|" + at + '">' + ic("clipboard-text") + (started ? "Continue the audit · " + esc(AR.STEPS[at - 1].title) : "Start the audit") + "</button>");
       else if (sent) {
         dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + 'Add 24 h</button></div><button class="btn txt" id="cx">Cancel request</button>');
         /* one action at a time: a double tap on Add 24 h added 48, a double Resend sent two emails */
@@ -517,78 +607,431 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
       }
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
-  /* ---------------- A5 · Dexter's grade (15 Oct 2026) ---------------- */
+  /* ---------------- Dexter's grade, as filed (15 Oct 2026; since 19 Oct the audit's Ratings and Overall steps) ---------------- */
   var RATINGS = [["inventory", "Inventory", "OBP matches the shelf, par kept, parts life tracked"], ["technical", "Technical", "Machines, error codes, maintenance, test prints"], ["collaterals", "Customer collaterals", "Quality of what the ship prints for guests"], ["overall", "Overall", "Leave blank to use the average of the three above"]];
-  function scoreOf(g) {
-    var ok = function (v) { return v >= 1 && v <= 5 ? v : null; };
-    if (ok(g.overall)) return { score: g.overall, from: "overall" };
-    var p = [g.inventory, g.technical, g.collaterals].filter(ok);
-    return p.length ? { score: Math.floor(p.reduce(function (a, b) { return a + b; }, 0) / p.length), from: "average" } : { score: null, from: null };
-  }
   function gradeCard(g) {
     var h = '<div class="card"><div class="pad"><div class="gsum"><span class="ib ' + (g.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + '</span><div><div class="n">' + esc(g.score) + "<small> / 5</small></div>" + '<div class="sm">Audit score · ' + (g.from === "overall" ? "Overall rating" : "average of the ratings, rounded down") + " · filed " + fmtD(g.at, true) + "</div></div></div></div>";
     RATINGS.forEach(function (r) { var v = g[r[0]]; h += '<div class="gline"><span>' + esc(r[1]) + "</span><b>" + (v ? esc(v) + " / 5" : "Not given") + "</b></div>"; });
     if (g.note) h += '<div class="feed"><div class="w">What needs to improve</div><div class="pl">' + esc(g.note) + "</div></div>";
     return h + "</div>";
   }
-  function gradeView(id) {
-    top("Grade the audit", "", "", "", true); hero(""); dock("");
-    $("main").innerHTML = skel(4);
-    var key = "g" + id; S.view = key;
-    var G = { inventory: null, technical: null, collaterals: null, overall: null, note: "" }, filing = false;
-    api("/api/audit/request?id=" + encodeURIComponent(id)).then(function (d) {
-      if (S.view !== key) return;
-      if (d.grade || d.status !== "complete") { location.replace("#q=" + id); return; }
-      top(d.ship, d.crew, "", "", true);
-      var h = '<div class="card">';
-      RATINGS.forEach(function (r) {
-        h += '<div class="rt"><div class="t">' + esc(r[1]) + (r[0] === "overall" ? ' <span class="sm">· optional</span>' : "") + '</div><div class="s">' + esc(r[2]) + '</div><div class="rate" data-k="' + r[0] + '">';
-        for (var n = 1; n <= 5; n++) h += '<button type="button" data-v="' + n + '" aria-label="' + esc(r[1]) + " " + n + '">' + n + "</button>";
-        h += "</div></div>";
+  function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
+
+  /* ================= B · the audit on the ship (B1–B7), 19 Oct 2026 =================
+     Seven steps, one per screen (docs/AUDIT_DESIGN.md Phase B, mock-up v12). The rules that hold Next and File are
+     audit_steps.js itself, serialized into this page as window.AR — the server re-checks with the same functions.
+     The draft lives on this phone at every tap (localStorage), photos wait in IndexedDB for signal, and a filing made
+     without signal is kept and sent when the phone sees the server. */
+  var AR = window.AR;
+  S.v = {}; S.q = {}; S.err = {};
+  function lsGet(k) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+  function loadVisit(id) {
+    return api("/api/audit/visit?id=" + encodeURIComponent(id)).then(function (v) { lsSet("aud:v:" + id, v); return v; })
+      .catch(function (e) { var c = lsGet("aud:v:" + id); if (c && (navigator.onLine === false || e instanceof TypeError)) { c._offline = true; return c; } throw e; });
+  }
+  function draftOf(id, v) {
+    var d = lsGet("aud:d:" + id);
+    if (!d || d.v !== AR.VISIT_VERSION) d = AR.startVisit({ machines: v.machines, diff: v.count.diff });
+    if (!d.openedAt) d.openedAt = new Date().toISOString();
+    return d;
+  }
+  function keep(id, d) { if (!lsSet("aud:d:" + id, d)) toast("This phone could not keep the draft. Keep the app open until you file."); }
+  function ctxOf(v) { return { machines: v.machines, diff: v.count.diff, extras: v.count.extras, followups: v.followups }; }
+  function toast(t) { var n = $("toast"); if (!n) { n = document.createElement("div"); n.id = "toast"; n.className = "toast"; document.body.appendChild(n); } n.textContent = t; n.classList.add("on"); clearTimeout(toast._t); toast._t = setTimeout(function () { n.classList.remove("on"); }, 3600); }
+  function stepBar(n) { var h = ""; for (var i = 1; i <= 7; i++) h += '<button class="' + (i <= n ? "on" : "") + '" data-step="' + i + '" aria-label="Step ' + i + ": " + esc(AR.STEPS[i - 1].title) + '"></button>'; $("stp").innerHTML = h; $("stp").hidden = false; }
+  function seg(act, opts, cur) { return '<div class="seg">' + opts.map(function (o) { return '<button type="button" data-a="' + act + '" data-k="' + esc(o[0]) + '" class="' + (String(cur) === String(o[0]) ? "on" : "") + '" aria-pressed="' + (String(cur) === String(o[0])) + '">' + esc(o[1]) + "</button>"; }).join("") + "</div>"; }
+  function rateRow(act, k, cur, label) { var h = '<div class="rate">'; for (var n = 1; n <= 5; n++) h += '<button type="button" data-a="' + act + '" data-k="' + k + '" data-v="' + n + '" class="' + (cur === n ? "on" + (n <= 3 ? " lo" : "") : "") + '" aria-pressed="' + (cur === n) + '" aria-label="' + esc(label) + " " + n + '">' + n + "</button>"; return h + "</div>"; }
+  function box(field, val, ph, rows) { return '<textarea class="gnote' + (rows === 1 ? " one" : "") + '" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
+  function whyMsg(probs, field) { var p = probs.filter(function (x) { return x.field === field; })[0]; return p && S.err.show ? '<div class="why">' + ic("warning-circle") + esc(p.say) + "</div>" : ""; }
+  function itemRow(act, key, label, sub, missing, prevMissing, times) {
+    var pill = missing ? (times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : '<span class="st r">Missing</span>') : prevMissing ? '<span class="st m">Missing last time</span>' : "";
+    return '<button type="button" class="itm' + (missing ? " miss" : "") + '" data-a="' + act + '" data-k="' + esc(key) + '" aria-pressed="' + !!missing + '"><span class="tx">' + esc(label) + (sub ? ' <span class="sub">· ' + esc(sub) + "</span>" : "") + "</span>" + pill + ic(missing ? "f:x-circle" : "f:check-circle", missing ? "bad" : "ok") + "</button>";
+  }
+  function prevMissing(v, k) { return !!(v.previous && (v.previous.missing || []).indexOf(k) >= 0); }
+  function timesFor(v, k) { return prevMissing(v, k) ? ((v.previous.repeat || {})[k] || 1) + 1 : 1; }
+  function toggle(list, k) { var i = list.indexOf(k); if (i >= 0) list.splice(i, 1); else list.push(k); }
+
+  /* ---- photos: shrunk on the phone (1600px, JPEG), queued in IndexedDB, sent when there is signal ---- */
+  var IDB = null;
+  function idb() {
+    if (IDB) return IDB;
+    IDB = new Promise(function (res, rej) { try { var r = indexedDB.open("cims-audit", 1); r.onupgradeneeded = function () { r.result.createObjectStore("photos", { keyPath: "k" }); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; } catch (e) { rej(e); } });
+    IDB.catch(function () {});
+    return IDB;
+  }
+  function idbDo(mode, fn) { return idb().then(function (db) { return new Promise(function (res, rej) { var tx = db.transaction("photos", mode), st = tx.objectStore("photos"), out = fn(st); tx.oncomplete = function () { res(out && out.result !== undefined ? out.result : out); }; tx.onerror = function () { rej(tx.error); }; }); }); }
+  function queued(rid) { return idbDo("readonly", function (st) { return st.getAll(); }).then(function (all) { return (all || []).filter(function (r) { return r.rid === rid; }); }).catch(function () { return S.q[rid] || []; }); }
+  function shrink(file) {
+    return new Promise(function (res) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, s = Math.min(1, 1600 / Math.max(w, h || 1));
+        var c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        c.toBlob(function (b) { res(b && b.size ? b : file); }, "image/jpeg", 0.8);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); res(file); };
+      img.src = url;
+    });
+  }
+  function addPhoto(rid, step, file) {
+    return shrink(file).then(function (b) {
+      var rec = { k: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10), rid: rid, step: step, type: b.type || file.type || "image/jpeg", blob: b, at: new Date(file.lastModified || Date.now()).toISOString() };
+      (S.q[rid] = S.q[rid] || []).push(rec);
+      return idbDo("readwrite", function (st) { return st.put(rec); }).catch(function () { toast("This phone cannot keep photos offline. Keep the app open until it is sent."); }).then(function () { return flushPhotos(rid); });
+    });
+  }
+  function flushPhotos(rid) {
+    if (flushPhotos._busy) return Promise.resolve();
+    flushPhotos._busy = true;
+    return queued(rid).then(function (list) {
+      S.q[rid] = list;
+      var chain = Promise.resolve();
+      list.forEach(function (rec) {
+        chain = chain.then(function () {
+          return fetch("/api/audit/visit/photo?id=" + encodeURIComponent(rid) + "&step=" + encodeURIComponent(rec.step) + "&k=" + encodeURIComponent(rec.k), { method: "POST", credentials: "same-origin", headers: { "Content-Type": rec.type, "X-Taken-At": rec.at }, body: rec.blob })
+            .then(function (r) { return r.json(); }).then(function (j) {
+              if (!j || !j.ok) return;
+              var v = S.v[rid]; if (v && !v.photos.some(function (p) { return p.id === j.id; })) { v.photos.push({ id: j.id, step: rec.step, at: new Date().toISOString() }); lsSet("aud:v:" + rid, v); }
+              S.q[rid] = (S.q[rid] || []).filter(function (x) { return x.k !== rec.k; });
+              return idbDo("readwrite", function (st) { return st.delete(rec.k); }).catch(function () {});
+            }).catch(function () {});
+        });
+      });
+      return chain;
+    }).then(function () { flushPhotos._busy = false; if (S.redraw) S.redraw(); }, function () { flushPhotos._busy = false; });
+  }
+  function photoStrip(v, step) {
+    var sent = (v.photos || []).filter(function (p) { return p.step === step; }), wait = (S.q[v.id] || []).filter(function (p) { return p.step === step; });
+    var h = '<div class="card"><div class="ch">' + ic("camera") + 'Photos<span class="r">' + (sent.length + wait.length ? sent.length + wait.length + (wait.length ? " · " + wait.length + " waits for signal" : "") : "optional") + "</span></div>";
+    if (sent.length || wait.length) {
+      h += '<div class="phs">';
+      sent.forEach(function (p) { h += '<a class="th" href="/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" style="background-image:url(&quot;/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '&quot;)" aria-label="Photo"></a>'; });
+      wait.forEach(function (p) { var u = p._u || (p._u = URL.createObjectURL(p.blob)); h += '<span class="th q" style="background-image:url(&quot;' + u + '&quot;)" title="Waits for signal"></span>'; });
+      h += "</div>";
+    }
+    return h + '<div class="pad" style="padding-top:8px"><label class="btn ghost">' + ic("camera") + 'Take photo<input class="vh" type="file" accept="image/*" capture="environment" data-photo="' + step + '"></label></div></div>';
+  }
+
+  /* ---- A8 · the documents are in: what they found, as items the audit will ask to confirm ---- */
+  function beforeCard(v) {
+    var b = v.before || [];
+    var h = '<div class="card"><div class="ch">' + ic("list-checks") + 'Before the visit<span class="r">from the documents</span></div>';
+    if (!b.length) h += '<div class="need"><span class="ib">' + ic("f:check-circle") + '</span><div class="tx"><div class="t">Nothing found in the documents</div><div class="s">Pattern 43 clean, no part past rated life, the count agrees with OBP</div></div></div>';
+    b.forEach(function (x) { h += '<div class="need"><span class="ib ' + (x.tone === "a" ? "a" : "") + '">' + ic(x.step === "inventory" ? "package" : "printer") + '</span><div class="tx"><div class="t">' + esc(x.t) + '</div><div class="s">' + esc(x.s) + "</div></div></div>"; });
+    return h + '<div class="foot">' + ic("clipboard-text") + "<span>Each one comes up in the audit for you to confirm on board.</span></div></div>";
+  }
+
+  /* ---- the steps ---- */
+  var STEP = {};
+  STEP.workstation = function (v, d, probs) {
+    var miss = d.ws.missing, h = '<div><div class="q">Is everything on the desktop?</div><div class="hint">It starts full. Tap only what is missing.</div></div>' + seg("ws-all", [["all", "All present"], ["some", "Something missing"]], miss.length || S.wsSome ? "some" : "all");
+    h += '<div class="card">';
+    AR.WORKSTATION.forEach(function (g) {
+      var n = g.items.filter(function (i) { return miss.indexOf(i.key) >= 0; }).length;
+      h += '<div class="grp"><span>' + esc(g.grp) + "</span><em" + (n ? ' class="bad">' + n + " missing" : ">" + g.items.length + " of " + g.items.length) + "</em></div>";
+      /* a group of short names with no sub-line (the bookmarks) is a grid of cells: six rows read as a list nobody scans */
+      if (g.items.length >= 4 && g.items.every(function (i) { return !i.sub; })) {
+        h += '<div class="cells">' + g.items.map(function (i) { var bad = miss.indexOf(i.key) >= 0; return '<button type="button" class="cell' + (bad ? " bad" : " ok") + '" data-a="ws" data-k="' + esc(i.key) + '" aria-pressed="' + bad + '">' + ic(bad ? "f:x-circle" : "f:check-circle") + esc(i.label) + (bad && prevMissing(v, i.key) ? " · " + esc(AR.ordinal(timesFor(v, i.key))) : "") + "</button>"; }).join("") + "</div>";
+      } else g.items.forEach(function (i) { h += itemRow("ws", i.key, i.label, i.sub, miss.indexOf(i.key) >= 0, prevMissing(v, i.key), timesFor(v, i.key)); });
+    });
+    return h + "</div>" + photoStrip(v, "workstation");
+  };
+  STEP.machines = function (v, d, probs) {
+    var h = '<div class="card"><div class="kv2"><span>All hardware labeled</span>' + seg("labeled", [["yes", "Yes"], ["no", "No"]], d.hw.labeled === true ? "yes" : d.hw.labeled === false ? "no" : "") + "</div>" + whyMsg(probs, "labeled") + "</div>";
+    v.machines.forEach(function (m) {
+      var a = d.hw.machines[m.serial] || (d.hw.machines[m.serial] = { checks: {}, p43: null, down: null, note: "" });
+      var stillDown = a.down === "still", finding = AR.MACHINE_CHECKS.some(function (c) { return a.checks[c.key] === "finding"; }) || a.p43 === "seen";
+      var open = (m.down && !a.down) || (m.p43 && m.p43.state === "findings" && !a.p43 && !stillDown);
+      var pill = stillDown ? '<span class="st r">Down</span>' : finding ? '<span class="st r">Finding</span>' : open ? '<span class="st a">To check</span>' : (m.life || []).length ? '<span class="st a">Past life</span>' : '<span class="st g">Pass</span>';
+      h += '<div class="card"><div class="mach"><div class="mh"><b>' + esc(m.label) + (m.model ? ' <span class="sm" style="display:inline">· ' + esc(m.model) + "</span>" : "") + "</b>" + pill + '</div><div class="mono">' + esc(m.serial) + "</div></div>";
+      if (m.down) h += '<div class="fnd a">' + ic("wrench") + '<div><b>Reported down by ' + esc(first(v.crew)) + '</b><span class="src">“' + esc(m.down) + "” · verify on board</span>" + seg("down:" + m.serial, [["still", "Still down"], ["running", "Running now"]], a.down || "") + whyMsg(probs, "down:" + m.serial) + "</div></div>";
+      if (!stillDown) {
+        h += '<div class="cells">';
+        AR.MACHINE_CHECKS.forEach(function (c) { var bad = a.checks[c.key] === "finding"; h += '<button type="button" class="cell' + (bad ? " bad" : " ok") + '" data-a="chk" data-s="' + esc(m.serial) + '" data-k="' + c.key + '" aria-pressed="' + bad + '">' + ic(bad ? "f:x-circle" : "f:check-circle") + esc(c.label) + "</button>"; });
+        h += '<span class="cell' + ((m.life || []).length ? " warn" : " ok") + '">' + ic((m.life || []).length ? "f:warning-circle" : "f:check-circle") + "Past life</span></div>";
+        ((m.p43 && m.p43.items) || []).forEach(function (it) {
+          h += '<div class="fnd' + (a.p43 === "seen" ? " r" : " a") + '">' + ic("printer") + "<div><b>" + esc(sentence(it.head)) + "</b>" + '<span class="src">' + esc([it.where, it.part ? "points to " + sentence(it.part) : ""].filter(Boolean).join(" · ")) + "</span>" + '<span class="src">Pattern 43 · provisional, Rolando confirms · see it on the machine</span>' + seg("p43:" + m.serial, [["seen", "Seen"], ["not_seen", "Not seen"]], a.p43 || "") + whyMsg(probs, "p43:" + m.serial) + "</div></div>";
+        });
+        if ((m.life || []).length) {
+          h += '<div class="fnd a">' + ic("clock") + "<div><b>" + m.life.length + (m.life.length === 1 ? " part" : " parts") + " past rated life · copy quality decides</b>";
+          m.life.forEach(function (x) { h += '<span class="src">' + esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " · " + esc(x.cover).replace(/ (\d)/g, "&nbsp;$1") : " · not on the OBP list") + "</span>"; });
+          h += '<span class="src">Information, never a replacement by itself. Have the part on board for when it goes.</span></div></div>';
+        }
+      }
+      if (finding || stillDown) h += '<div class="pad" style="padding-top:4px"><div class="lab">What you found' + (finding ? " · required" : "") + "</div>" + box("m:" + m.serial, a.note, "One sentence, what you saw on " + m.label) + whyMsg(probs, "note:" + m.serial) + "</div>";
+      h += "</div>";
+    });
+    var tm = d.hw.tools.missing;
+    h += '<div class="card"><div class="grp"><span>Tools not on inventory</span><em' + (tm.length ? ' class="bad">' + tm.length + " missing" : ">" + AR.TOOLS.length + " of " + AR.TOOLS.length) + "</em></div>";
+    AR.TOOLS.forEach(function (t) { h += itemRow("tool", t.key, t.label, "", tm.indexOf(t.key) >= 0, prevMissing(v, t.key), timesFor(v, t.key)); });
+    return h + "</div>" + photoStrip(v, "machines");
+  };
+  function partOf(v, pn) { return (v.parts || []).filter(function (p) { return p.part_no === pn; })[0] || { part_no: pn }; }
+  function lineRow(v, d, pn, obp, crew, kindTxt) {
+    var L = d.inv.lines[pn] || {}, p = partOf(v, pn), shelf = L.shelf == null ? "" : L.shelf;
+    var diff = obp == null ? NaN : (L.shelf != null ? L.shelf : crew) - obp;
+    return '<div class="ln"><div class="tx"><div class="nm">' + esc(p.description || pn) + '</div><div class="mono">' + esc(pn) + '</div><div class="num">OBP <b>' + esc(obp) + "</b> · " + esc(first(v.crew)) + " <b>" + esc(crew == null ? "–" : crew) + "</b>" + (kindTxt ? " · " + esc(kindTxt) : "") + '</div></div><span class="d' + (diff > 0 ? " p" : !diff ? " z" : "") + '">' + (isNaN(diff) ? "–" : !diff ? "0" : (diff > 0 ? "+" : "−") + Math.abs(diff)) + '</span><label class="shelf"><span>Shelf</span><input inputmode="numeric" pattern="[0-9]*" maxlength="5" data-shelf="' + esc(pn) + '" value="' + esc(shelf) + '" placeholder="' + esc(crew == null ? "" : crew) + '"></label><button type="button" class="ck' + (L.checked ? " on" : "") + '" data-a="chkline" data-k="' + esc(pn) + '" aria-pressed="' + !!L.checked + '" aria-label="Checked on the shelf">' + ic("check") + "</button></div>";
+  }
+  STEP.inventory = function (v, d, probs) {
+    var gaps = v.count.diff.filter(function (x) { return x.kind === "gap"; }), timing = v.count.diff.filter(function (x) { return x.kind === "timing"; }), ex = v.count.extras;
+    var h = '<div><div class="q">Does the OBP match the shelf?</div><div class="hint">' + esc(first(v.crew)) + " counted " + esc(v.count.total) + " lines blind" + (gaps.length ? " · " + gaps.length + " differ" : " · all agree") + (ex.length ? " · " + ex.length + " not in OBP" : "") + (v.count.asOf ? " · OBP of " + fmtD(v.count.asOf, true) : "") + "</div></div>";
+    h += seg("acc", [["yes", "Yes, accurate"], ["no", "No, discrepancies"]], d.inv.accurate === true ? "yes" : d.inv.accurate === false ? "no" : "") + whyMsg(probs, "accurate") + whyMsg(probs, "lines");
+    h += '<div class="card"><div class="ch">' + ic("package") + 'Lines to check on the shelf<span class="r">' + (gaps.length + d.inv.added.length) + "</span></div>";
+    if (!gaps.length && !d.inv.added.length) h += '<div class="empty" style="padding:14px 16px">' + ic("f:check-circle") + "The crew's count agrees with OBP on every line.</div>";
+    gaps.forEach(function (x) { h += lineRow(v, d, x.part_no, x.obp, x.counted); });
+    d.inv.added.forEach(function (a) { var p = partOf(v, a.part_no); var L = d.inv.lines[a.part_no]; h += lineRow(v, d, a.part_no, p.obp, p.counted, "added by you") + whyMsg(probs, "added:" + a.part_no); });
+    h += '<div class="addl"><div class="sbox" style="margin:0">' + ic("magnifying-glass") + '<input class="search" id="addq" type="search" placeholder="+ Add a line: part or description" autocomplete="off" value="' + esc(S.addq || "") + '"></div><div id="addr"></div></div></div>';
+    if (timing.length) {
+      h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("clock") + '</span><div class="tx"><div class="nm" style="font-size:15px">One unit off, OBP moved that day</div><div class="sm">' + timing.length + " · timing (1 Oct rule), flagged only if it does not close</div></div>" + ic("caret-right", "go") + "</summary>";
+      timing.forEach(function (x) { h += lineRow(v, d, x.part_no, x.obp, x.counted, "timing"); });
+      h += "</details>";
+    }
+    if (ex.length) {
+      h += '<div class="card"><div class="ch">' + ic("wrench") + 'Repair items not in OBP<span class="r">from ' + esc(first(v.crew)) + "'s count</span></div>";
+      ex.forEach(function (x) { h += '<div class="pad" style="border-top:1px solid var(--line)"><div class="t" style="font-weight:600">' + esc(x.text) + (x.counted != null ? ' <span class="sm" style="display:inline">· ' + esc(x.counted) + "</span>" : "") + "</div>" + seg("rep:" + x.id, [["confirmed", "On the shelf"], ["not_found", "Not found"]], d.inv.repairs[x.id] || "") + whyMsg(probs, "repair:" + x.id) + "</div>"; });
+      h += "</div>";
+    }
+    h += '<div class="card pad"><div class="lab">Note on the stock · optional</div>' + box("inv-note", d.inv.note, "Anything else the counts do not say") + "</div>";
+    return h + photoStrip(v, "inventory");
+  };
+  function addResults(v, d) {
+    var q = String(S.addq || "").toLowerCase().trim(), out = $("addr"); if (!out) return;
+    if (q.length < 2) { out.innerHTML = ""; return; }
+    var have = {}; v.count.diff.forEach(function (x) { if (x.kind === "gap") have[x.part_no] = 1; }); d.inv.added.forEach(function (a) { have[a.part_no] = 1; });
+    var hits = (v.parts || []).filter(function (p) { return !have[p.part_no] && (p.part_no + " " + (p.description || "")).toLowerCase().indexOf(q) >= 0; }).slice(0, 6);
+    out.innerHTML = hits.length ? hits.map(function (p) { return '<button type="button" class="row" data-a="addline" data-k="' + esc(p.part_no) + '" style="min-height:52px"><div class="tx"><div class="nm" style="font-size:14.5px">' + esc(p.description || p.part_no) + '</div><div class="sm">' + esc(p.part_no) + " · OBP " + esc(p.obp == null ? "–" : p.obp) + " · counted " + esc(p.counted == null ? "–" : p.counted) + "</div></div>" + ic("plus", "go") + "</button>"; }).join("") : '<div class="sm" style="padding:8px 2px">No OBP line matches.</div>';
+  }
+  STEP.ratings = function (v, d, probs) {
+    var h = "";
+    ["inventory", "technical", "collaterals"].forEach(function (k) {
+      var t = AR.RATING_TEXT[k], r = d.rt[k];
+      h += '<div class="card pad"><div class="q">' + esc(t.label) + '</div><div class="hint">' + esc(t.hint) + "</div>" + rateRow("rt", k, r, t.label) + whyMsg(probs, k);
+      if (r != null && r <= 3) h += '<div class="lab" style="margin-top:12px">Say why · required</div>' + box("why:" + k, d.rt.why[k], "One sentence") + whyMsg(probs, "why:" + k);
+      h += "</div>";
+    });
+    return h;
+  };
+  STEP.crew = function (v, d, probs) {
+    var h = '<div class="card pad"><div class="q">Training needed</div><div class="hint">Tap what ' + esc(first(v.crew)) + ' needs. Nothing tapped: no training needed.</div><div class="chips" style="margin-top:10px">';
+    AR.TRAINING.forEach(function (t) { var on = d.crew.training.indexOf(t.key) >= 0; h += '<button type="button" class="chip' + (on ? " on" : "") + '" data-a="train" data-k="' + t.key + '" aria-pressed="' + on + '">' + esc(t.label) + "</button>"; });
+    h += '<button type="button" class="chip' + (S.trainOther || d.crew.trainingOther ? " on" : "") + '" data-a="train-other">+ Other</button></div>';
+    if (S.trainOther || d.crew.trainingOther) h += '<input class="field" data-f="train-other" placeholder="Which training" value="' + esc(d.crew.trainingOther) + '" maxlength="120">';
+    h += "</div>";
+    var pm = d.crew.ppe.missing;
+    h += '<div class="card"><div class="grp"><span>Uniform &amp; PPE</span><em' + (pm.length ? ' class="bad">' + pm.length + " missing" : ">" + AR.PPE.length + " of " + AR.PPE.length) + "</em></div>";
+    AR.PPE.forEach(function (p) { var was = v.previous && v.previous.sameCrew && (v.previous.ppeMissing || []).indexOf(p.key) >= 0; h += itemRow("ppe", p.key, p.label, "", pm.indexOf(p.key) >= 0, was, 1); });
+    h += '<div class="kv2"><span>HON app in use</span>' + seg("hon", [["yes", "Yes"], ["no", "No"], ["na", "N/A"]], d.crew.hon || "") + "</div>" + whyMsg(probs, "hon") + "</div>";
+    var t = AR.RATING_TEXT.dispatch;
+    h += '<div class="card pad"><div class="q">' + esc(t.label) + ' <span class="sm" style="display:inline">· optional</span></div><div class="hint">' + esc(t.hint) + "</div>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label) + "</div>";
+    return h + photoStrip(v, "crew");
+  };
+  STEP.overall = function (v, d, probs) {
+    var o = d.ov.overall, e = AR.evalOf(d), t = AR.RATING_TEXT.overall;
+    var h = '<div class="card pad"><div class="q">' + esc(t.label) + ' <span class="sm" style="display:inline">· optional</span></div>' + rateRow("ov", "overall", o, t.label) + '<div class="anch"><span>Needs intervention</span><span>Runs itself</span></div>';
+    h += '<div class="scoreln">' + (e.score.score == null ? "Rate the three on the Ratings step first." : "Audit score <b>" + e.score.score + " / 5</b> · " + (e.score.from === "overall" ? "from the Overall rating" : "no Overall: the average of the three, rounded down")) + "</div>";
+    if (o != null && o <= 3) h += '<div class="lab" style="margin-top:12px">Say why · required</div>' + box("ov-why", d.ov.why, "One sentence") + whyMsg(probs, "why");
+    h += "</div>";
+    h += '<div class="card pad"><div class="lab">Strengths</div>' + box("strengths", d.ov.strengths, "What " + first(v.crew) + " does well") + whyMsg(probs, "strengths") +
+      '<div class="lab" style="margin-top:14px">To improve</div>' + box("improve", d.ov.improve, "What needs to change") + whyMsg(probs, "improve") +
+      '<div class="lab" style="margin-top:14px">Agreed with the crew · optional</div>' + box("agreed", d.ov.agreed, "What you agreed with " + first(v.crew)) + "</div>";
+    var f = d.ov.followup;
+    h += '<div class="card"><button type="button" class="tog" data-a="block" aria-pressed="' + !!d.ov.recommendBlock + '"><span>Recommend for Oasis / Icon class</span><i class="sw' + (d.ov.recommendBlock ? " on" : "") + '"></i></button>' +
+      '<button type="button" class="tog" data-a="fu" aria-pressed="' + !!f + '"><span>Needs follow-up</span><i class="sw' + (f ? " on" : "") + '"></i></button>';
+    if (f) {
+      var owners = AR.FOLLOW_OWNERS.concat([first(v.crew)]);
+      h += '<div class="pad" style="padding-top:4px"><div class="lab">Who</div><div class="chips">' + owners.map(function (n) { return '<button type="button" class="chip' + (f.owner === n ? " on" : "") + '" data-a="fu-owner" data-k="' + esc(n) + '" aria-pressed="' + (f.owner === n) + '">' + esc(n) + "</button>"; }).join("") + "</div>" + whyMsg(probs, "fu_owner") +
+        '<div class="lab" style="margin-top:12px">By</div><input class="field" type="date" data-f="fu-due" value="' + esc(f.due || "") + '" min="' + esc(v.today) + '">' + whyMsg(probs, "fu_due") +
+        '<div class="lab" style="margin-top:12px">What</div>' + box("fu-text", f.text, "What has to happen") + whyMsg(probs, "fu_text") + "</div>";
+    }
+    return h + "</div>";
+  };
+  STEP.review = function (v, d, probs) {
+    var e = AR.evalOf(d), tile = function (val, label, main) { return '<div class="tile' + (main ? " main" : "") + '"><b>' + (val == null ? "–" : esc(val)) + "</b><small>" + esc(label) + "</small></div>"; };
+    var h = '<div class="tiles">' + tile(d.ov.overall, "Overall", true) + tile(d.rt.inventory, "Inventory") + tile(d.rt.technical, "Technical") + tile(d.rt.collaterals, "Collaterals") + tile(d.crew.dispatch, "Dispatch") + "</div>";
+    h += '<div class="card pad"><div class="gsum"><span class="ib ' + (e.score.score == null ? "n" : e.score.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + '</span><div><div class="n">' + (e.score.score == null ? "–" : esc(e.score.score)) + '<small> / 5</small></div><div class="sm">Audit score · ' + (e.score.from === "overall" ? "the Overall rating" : e.score.from ? "average of the three, rounded down" : "not rated yet") + "</div></div></div></div>";
+    var ws = d.ws.missing.length, tools = d.hw.tools.missing.length, finds = v.machines.filter(function (m) { var a = d.hw.machines[m.serial] || {}; return a.down === "still" || a.p43 === "seen" || AR.MACHINE_CHECKS.some(function (c) { return (a.checks || {})[c.key] === "finding"; }); }).length;
+    var lines = v.count.diff.filter(function (x) { return x.kind === "gap"; }).length + d.inv.added.length;
+    var sum = [ws + (ws === 1 ? " missing item" : " missing items"), finds + (finds === 1 ? " finding" : " findings"), lines + (lines === 1 ? " OBP line" : " OBP lines"), tools + (tools === 1 ? " tool" : " tools") + " missing"].join(" · ");
+    var low = ["inventory", "technical", "collaterals"].filter(function (k) { return d.rt[k] != null && d.rt[k] <= 3; }).map(function (k) { return AR.RATING_TEXT[k].label; });
+    if (d.ov.overall != null && d.ov.overall <= 3) low.push("Overall");
+    var sent = (v.photos || []).length, wait = (S.q[v.id] || []).length;
+    h += '<div class="card">';
+    h += '<button type="button" class="itm" data-step="' + (probs.length ? stepNo(probs[0].step) : 7) + '"><span class="tx">' + (probs.length ? probs.length + (probs.length === 1 ? " answer missing" : " answers missing") : "Every step answered") + '<span class="sm">' + esc(probs.length ? probs[0].say : sum) + "</span></span>" + ic(probs.length ? "f:warning-circle" : "f:check-circle", probs.length ? "bad" : "ok") + "</button>";
+    if (low.length) h += '<div class="itm"><span class="tx">Comment on the ' + (low.length === 1 ? "low rating" : low.length + " low ratings") + '<span class="sm">' + esc(low.join(" · ")) + "</span></span>" + ic("f:check-circle", "ok") + "</div>";
+    h += '<div class="itm"><span class="tx">' + (sent + wait ? sent + wait + (sent + wait === 1 ? " photo" : " photos") + (wait ? " · " + wait + " waits for signal" : "") : "No photos") + '<span class="sm">' + (wait ? "The audit files now; the photos follow when there is signal." : "Photos are optional.") + "</span></span>" + ic(wait ? "f:warning-circle" : "f:check-circle", wait ? "warn" : "ok") + "</div></div>";
+    if (v.followups.length) {
+      h += '<div class="card"><div class="ch">' + ic("flag") + 'Still open on this ship<span class="r">' + v.followups.length + "</span></div>";
+      v.followups.forEach(function (f) {
+        var c = d.close[f.id] || "open", late = f.due && f.due < v.today, times = (f.carried || 0) + 1;
+        h += '<div class="pad" style="border-top:1px solid var(--line)"><div class="mh"><b style="font-size:15px">' + esc(f.text) + "</b>" + (times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : late ? '<span class="st r">Overdue</span>' : '<span class="st a">Open</span>') + '</div><div class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : "") + " · " + esc(f.crew || "") + ", " + fmtD(f.at, true) + "</div>" + seg("close:" + f.id, [["fixed", "Fixed"], ["open", "Still open"]], c) + "</div>";
       });
       h += "</div>";
-      h += '<div class="card pad"><div class="t" style="font-family:var(--fh);font-weight:600">What needs to improve</div><div class="sm" id="nh" style="margin:2px 0 10px">Required when any rating is 3 or below.</div><textarea class="gnote" id="gn" placeholder="What you saw, and what was agreed with ' + esc(first(d.crew)) + '"></textarea></div>';
-      h += '<div class="card pad"><div class="gsum"><span class="ib n" id="gi">' + ic("clipboard-text") + '</span><div><div class="n" id="gs">–<small> / 5</small></div><div class="sm" id="gf">Rate Inventory, Technical and Customer collaterals.</div></div></div></div>';
-      $("main").innerHTML = h;
+    }
+    var again = d.ws.missing.concat(d.hw.tools.missing).filter(function (k) { return prevMissing(v, k); });
+    if (again.length) h += '<div class="ban r">' + ic("f:warning-circle") + "<span>Missing again since the last visit: " + esc(again.map(labelOf).join(", ")) + ".</span></div>";
+    var fu = d.ov.followup;
+    h += '<div class="card soft"><div class="ch">' + ic("paper-plane-tilt") + 'Where it goes</div><div class="went">' +
+      '<i class="y">' + ic("check") + "</i><span>" + esc(first(v.crew)) + "'s Score Card · Dexter's audit factor reads the score</span>" +
+      (fu ? '<i class="y">' + ic("check") + "</i><span>Follow-up to " + esc(fu.owner || "…") + (fu.due ? " · by " + fmtD(fu.due, true) : "") + "</span>" : "") +
+      (sent + wait ? '<i class="y">' + ic("check") + "</i><span>Photos · audit bucket · " + esc(v.ship) + "</span>" : "") +
+      '<i class="y">' + ic("check") + "</i><span>The next audit of " + esc(v.ship) + " opens with what is missing and still open</span>" +
+      '<i class="n">' + ic("minus") + "</i><span>Never to the crew.</span></div></div>";
+    return h;
+  };
+  function labelOf(k) { var all = []; AR.WORKSTATION.forEach(function (g) { all = all.concat(g.items); }); all = all.concat(AR.TOOLS); var x = all.filter(function (i) { return i.key === k; })[0]; return x ? x.label : k; }
+  function stepNo(key) { for (var i = 0; i < AR.STEPS.length; i++) if (AR.STEPS[i].key === key) return i + 1; return 7; }
+  function sentence(t) { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+  function stepView(id, n) {
+    n = Math.max(1, Math.min(7, Number(n) || 1));
+    var key = "a" + id + "|" + n; S.view = key; S.err = {}; S.addq = "";
+    top(AR.STEPS[n - 1].title, "", n + " / 7", "", true); hero(""); dock("");
+    $("main").innerHTML = skel(4);
+    (S.v[id] ? Promise.resolve(S.v[id]) : loadVisit(id)).then(function (v) {
+      if (S.view !== key) return;
+      S.v[id] = v;
+      /* the gate, once more: no audit before the documents are in; a filed one is the record; a TEST request is a rehearsal */
+      if (v.filed || v.status !== "complete" || v.test) { location.replace("#q=" + id); return; }
+      var d = draftOf(id, v); keep(id, d);
+      var st = AR.STEPS[n - 1], ctx = ctxOf(v);
+      top(st.title, v.ship + " · " + v.crew, n + " / 7", n === 7 ? "done" : "", true);
+      stepBar(n);
       var draw = function () {
-        Array.prototype.forEach.call(document.querySelectorAll(".rate"), function (row) {
-          var k = row.getAttribute("data-k");
-          Array.prototype.forEach.call(row.children, function (b) { var v = +b.getAttribute("data-v"); b.className = (G[k] === v ? "on" : "") + (G[k] === v && v <= 3 ? " lo" : ""); b.setAttribute("aria-pressed", String(G[k] === v)); });
-        });
-        var sc = scoreOf(G), low = RATINGS.some(function (r) { return G[r[0]] != null && G[r[0]] <= 3; });
-        var all = G.inventory && G.technical && G.collaterals, noteOk = !low || G.note.trim().length >= 10;
-        $("gs").innerHTML = (sc.score == null ? "–" : sc.score) + "<small> / 5</small>";
-        $("gf").textContent = !all ? "Rate Inventory, Technical and Customer collaterals." : sc.from === "overall" ? "Score from the Overall rating." : "No Overall: the average of the three, rounded down.";
-        $("gi").className = "ib " + (sc.score == null ? "n" : sc.score <= 3 ? "r" : "g");
-        $("nh").textContent = low ? "Required: a rating is 3 or below. One sentence, at least 10 characters." : "Optional. Required when any rating is 3 or below.";
-        $("gn").classList.toggle("err", low && !noteOk && G.note.length > 0);
-        var btn = $("gb"); if (btn) btn.disabled = filing || !(all && noteOk);
+        if (S.view !== key) return;
+        var y = window.scrollY, probs = AR.visitProblems(d, ctx, v.today), mine = probs.filter(function (p) { return p.step === st.key; });
+        $("main").innerHTML = (v._offline ? '<div class="ban a">' + ic("cloud-slash") + "<span>No signal. Working from the copy on this phone; everything you do is kept.</span></div>" : "") + STEP[st.key](v, d, st.key === "review" ? probs : mine);
+        if (st.key === "inventory") addResults(v, d);
+        window.scrollTo(0, y);
+        if (n < 7) dock('<div class="two nx"><button class="btn ghost" id="sb">' + ic("caret-left") + 'Back</button><button class="btn" id="sn">' + (n === 6 ? "Review" : "Next · " + esc(AR.STEPS[n].short)) + ic("caret-right") + "</button></div>");
+        else dock('<div class="two nx"><button class="btn ghost" id="sb">' + ic("caret-left") + 'Back</button><button class="btn green" id="sf"' + (probs.length || S.filing ? " disabled" : "") + ">" + ic("check") + (S.filing ? "Filing" : "File audit") + "</button></div>" + '<div class="note">' + (probs.length ? esc(probs[0].say) : "Filed once. It cannot be changed afterwards.") + "</div>");
+        $("sb").onclick = function () { location.replace(n === 1 ? "#q=" + id : "#a=" + id + "|" + (n - 1)); };
+        if ($("sn")) $("sn").onclick = function () {
+          /* the answers as they are NOW: typing does not redraw, so the list drawn with the screen can be stale */
+          var left = AR.visitProblems(d, ctx, v.today).filter(function (p) { return p.step === st.key; });
+          if (left.length) { S.err.show = true; draw(); var w = document.querySelector(".why"); if (w) w.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
+          location.replace("#a=" + id + "|" + (n + 1));
+        };
+        if ($("sf")) $("sf").onclick = function () { fileAudit(id, v, d); };
       };
-      document.querySelectorAll(".rate").forEach(function (row) {
-        row.addEventListener("click", function (e) {
-          var b = e.target.closest("button"); if (!b) return;
-          var k = row.getAttribute("data-k"), v = +b.getAttribute("data-v");
-          G[k] = G[k] === v && k === "overall" ? null : v; draw();
-        });
-      });
-      $("gn").addEventListener("input", function () { G.note = $("gn").value; draw(); });
-      dock('<button class="btn green" id="gb" disabled>' + ic("check") + "File the grade</button>" + '<div class="note">Filed once. It cannot be changed afterwards.</div>');
-      $("gb").onclick = function () {
-        var sc = scoreOf(G);
-        if (!confirm("File " + first(d.crew) + "'s audit with a score of " + sc.score + " / 5? It cannot be changed afterwards.")) return;
-        filing = true; $("gb").disabled = true;
-        var back = function () { filing = false; if (S.view === key) draw(); };
-        post("/api/audit/request/grade", { id: id, inventory: G.inventory, technical: G.technical, collaterals: G.collaterals, overall: G.overall, note: G.note }).then(function (r) {
-          if (!r.ok) { alert(r.error === "already_filed" ? "This audit was already graded." : r.error === "invalid" ? "Check the ratings and the note." : (r.detail || r.error || "Not filed")); if (r.error === "already_filed") { location.replace("#q=" + id); return; } back(); return; }
-          reloadShips(); S.brief = {};
-          /* back to the request this screen was opened from, without leaving a second copy of it in the history */
-          if (S.prev === "q=" + id) history.back(); else location.replace("#q=" + id);
-        }).catch(function () { alert("No connection. Nothing was filed; try again."); back(); });
+      S.redraw = draw;
+      var M = $("main");
+      M.onclick = function (ev) {
+        var b = ev.target.closest("[data-a]"); if (!b) return;
+        var a = b.getAttribute("data-a"), k = b.getAttribute("data-k"), s = b.getAttribute("data-s");
+        if (a === "ws") toggle(d.ws.missing, k);
+        else if (a === "ws-all") { if (k === "all") { d.ws.missing = []; S.wsSome = false; } else { S.wsSome = true; toast("Tap what is missing."); } }
+        else if (a === "labeled") d.hw.labeled = k === "yes";
+        else if (a.indexOf("down:") === 0) d.hw.machines[a.slice(5)].down = k;
+        else if (a.indexOf("p43:") === 0) d.hw.machines[a.slice(4)].p43 = k;
+        else if (a === "chk") { var mc = d.hw.machines[s].checks; if (mc[k] === "finding") delete mc[k]; else mc[k] = "finding"; }
+        else if (a === "tool") toggle(d.hw.tools.missing, k);
+        else if (a === "acc") d.inv.accurate = k === "yes";
+        else if (a === "chkline") { var L = d.inv.lines[k] || (d.inv.lines[k] = { shelf: null, checked: false }); L.checked = !L.checked; }
+        else if (a === "addline") { d.inv.added.push({ part_no: k, shelf: null }); d.inv.accurate = false; S.addq = ""; }
+        else if (a.indexOf("rep:") === 0) d.inv.repairs[a.slice(4)] = k;
+        else if (a === "rt") { var r = Number(b.getAttribute("data-v")); d.rt[k] = d.rt[k] === r ? null : r; }
+        else if (a === "train") toggle(d.crew.training, k);
+        else if (a === "train-other") { S.trainOther = !(S.trainOther || d.crew.trainingOther); if (!S.trainOther) d.crew.trainingOther = ""; }
+        else if (a === "ppe") toggle(d.crew.ppe.missing, k);
+        else if (a === "hon") d.crew.hon = k;
+        else if (a === "disp") { var r2 = Number(b.getAttribute("data-v")); d.crew.dispatch = d.crew.dispatch === r2 ? null : r2; }
+        else if (a === "ov") { var r3 = Number(b.getAttribute("data-v")); d.ov.overall = d.ov.overall === r3 ? null : r3; }
+        else if (a === "block") d.ov.recommendBlock = !d.ov.recommendBlock;
+        else if (a === "fu") d.ov.followup = d.ov.followup ? null : { owner: "", due: AR.plusDays(v.today, AR.FOLLOW_DAYS), text: "" };
+        else if (a === "fu-owner") d.ov.followup.owner = k;
+        else if (a.indexOf("close:") === 0) d.close[a.slice(6)] = k;
+        else return;
+        keep(id, d); draw();
       };
-      draw();
+      M.oninput = function (ev) {
+        var t = ev.target, f = t.getAttribute("data-f"), sh = t.getAttribute("data-shelf");
+        if (t.id === "addq") { S.addq = t.value; addResults(v, d); return; }
+        if (sh) { var L = d.inv.lines[sh] || (d.inv.lines[sh] = { shelf: null, checked: false }); var val = String(t.value).trim(); L.shelf = /^\d{1,5}$/.test(val) ? Number(val) : null; if (L.shelf != null) L.checked = true; var ad = d.inv.added.filter(function (x) { return x.part_no === sh; })[0]; if (ad) ad.shelf = L.shelf; keep(id, d); return; }
+        if (!f) return;
+        if (f.indexOf("m:") === 0) d.hw.machines[f.slice(2)].note = t.value;
+        else if (f === "inv-note") d.inv.note = t.value;
+        else if (f.indexOf("why:") === 0) d.rt.why[f.slice(4)] = t.value;
+        else if (f === "train-other") d.crew.trainingOther = t.value;
+        else if (f === "ov-why") d.ov.why = t.value;
+        else if (f === "strengths" || f === "improve" || f === "agreed") d.ov[f] = t.value;
+        else if (f === "fu-due") d.ov.followup.due = t.value;
+        else if (f === "fu-text") d.ov.followup.text = t.value;
+        keep(id, d);
+      };
+      /* a typed number redraws on leaving the box (the diff and the tick follow it), never while typing */
+      M.onchange = function (ev) { var t = ev.target; if (t.getAttribute("data-shelf") || t.getAttribute("data-f") === "fu-due") draw(); if (t.getAttribute("data-photo")) { var file = t.files && t.files[0]; t.value = ""; if (file) { toast("Photo kept on this phone. Sending."); addPhoto(id, t.getAttribute("data-photo"), file).then(draw); } } };
+      queued(id).then(function (q) { S.q[id] = q; draw(); if (q.length && navigator.onLine !== false) flushPhotos(id); });
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
-  function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
+
+  /* ---- filing: once; without signal it is kept on the phone and sent when the server answers ---- */
+  function fileAudit(id, v, d) {
+    var e = AR.evalOf(d);
+    if (!confirm("File " + first(v.crew) + "'s audit with a score of " + e.score.score + " / 5? It cannot be changed afterwards.")) return;
+    S.filing = true; if (S.redraw) S.redraw();
+    var body = { id: id, visit: d };
+    sendFiling(body).then(function (r) {
+      S.filing = false;
+      if (r.pending) { lsSet("aud:p:" + id, { body: body, at: new Date().toISOString() }); toast("No signal. The audit is filed on this phone and sends when there is signal."); location.replace("#q=" + id); return; }
+      if (!r.ok && r.error !== "already_filed") {
+        if (r.problems && r.problems.length) { S.err.show = true; alert("Not filed: " + r.problems[0].say); location.replace("#a=" + id + "|" + stepNo(r.problems[0].step)); return; }
+        alert("Not filed: " + (r.detail || r.error || "try again")); if (S.redraw) S.redraw(); return;
+      }
+      done(id);
+      if (r.error === "already_filed") alert("This audit was already filed.");
+      if (S.prev && S.prev.indexOf("q=" + id) === 0) history.back(); else location.replace("#q=" + id);
+    });
+  }
+  function sendFiling(body) {
+    return post("/api/audit/request/grade", body).catch(function () { return { pending: true }; });
+  }
+  function done(id) { lsSet("aud:d:" + id, null); lsSet("aud:v:" + id, null); lsSet("aud:p:" + id, null); delete S.v[id]; S.brief = {}; reloadShips(); }
+  function flushFilings() {
+    var keys = []; try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf("aud:p:") === 0) keys.push(k); } } catch (e) { return; }
+    keys.forEach(function (k) {
+      var p = lsGet(k); if (!p || !p.body) { lsSet(k, null); return; }
+      sendFiling(p.body).then(function (r) {
+        if (r.pending) return;
+        if (r.ok || r.error === "already_filed") { done(p.body.id); toast("The audit kept on this phone is filed."); if (S.cur === "q=" + p.body.id) route(); return; }
+        /* refused (an answer the server needs): never re-sent for ever — the draft is still on the phone to finish */
+        lsSet(k, null); toast("The audit kept on this phone was not filed: " + ((r.problems && r.problems[0] && r.problems[0].say) || r.error || "open it and file again") + ".");
+        if (S.cur === "q=" + p.body.id) route();
+      });
+    });
+    Object.keys(S.q).forEach(function (rid) { if ((S.q[rid] || []).length) flushPhotos(rid); });
+  }
+  window.addEventListener("online", flushFilings);
+
+  /* ---- the filed audit, read back on the request ---- */
+  function filedCard(v) {
+    var F = v.filed, D = F && F.data; if (!D) return "";
+    var h = "", line = function (k, val) { return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + val + "</span></div>"; };
+    var miss = (D.ws.missing || []).concat(D.hw.tools.missing || []).map(function (k) { var t = (D.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? ' <span class="st r">' + esc(AR.ordinal(t)) + " time</span>" : ""); });
+    h += '<div class="card"><div class="ch">' + ic("clipboard-text") + 'The audit<span class="r">' + fmtD(F.grade.at, true) + "</span></div>";
+    h += line("Missing", miss.length ? miss.join("<br>") : "Nothing");
+    h += line("Hardware labeled", D.hw.labeled === false ? '<span class="st r">No</span>' : "Yes");
+    ((D.ctx && D.ctx.machines) || v.machines).forEach(function (m) {
+      var a = (D.hw.machines || {})[m.serial] || {}, bad = AR.MACHINE_CHECKS.filter(function (c) { return (a.checks || {})[c.key] === "finding"; }).map(function (c) { return c.label; });
+      if (a.p43 === "seen") bad.push("Pattern 43 mark seen");
+      h += line(m.label, (a.down === "still" ? '<span class="st r">Down</span>' : bad.length ? '<span class="st r">' + esc(bad.join(" · ")) + "</span>" : '<span class="st g">Pass</span>') + (a.note ? '<div class="sm">' + esc(a.note) + "</div>" : ""));
+    });
+    var lines = Object.keys(D.inv.lines || {}).filter(function (k) { return D.inv.lines[k].shelf != null || D.inv.lines[k].checked; });
+    h += line("OBP vs shelf", D.inv.accurate ? "Accurate" : '<span class="st a">Discrepancies</span>' + (lines.length ? '<div class="sm">' + lines.map(function (k) { var L = D.inv.lines[k]; return esc(k) + (L.shelf != null ? " · shelf " + esc(L.shelf) : " · checked") ; }).join("<br>") + "</div>" : ""));
+    var tr = (D.crew.training || []).map(function (k) { var t = AR.TRAINING.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; }); if (D.crew.trainingOther) tr.push(D.crew.trainingOther);
+    h += line("Training needed", tr.length ? esc(tr.join(" · ")) : "None");
+    var ppe = (D.crew.ppe.missing || []).map(function (k) { var t = AR.PPE.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; });
+    h += line("Uniform & PPE", ppe.length ? '<span class="st r">' + esc(ppe.join(" · ")) + " missing</span>" : "Complete");
+    h += line("HON app", { yes: "In use", no: '<span class="st a">Not in use</span>', na: "N/A" }[D.crew.hon] || "–");
+    if (D.crew.dispatch != null) h += line("Dispatch", esc(D.crew.dispatch) + " / 5");
+    if (D.ov.recommendBlock) h += line("Oasis / Icon class", "Recommended");
+    h += "</div>";
+    h += '<div class="card">' + [["Strengths", D.ov.strengths], ["To improve", D.ov.improve], ["Agreed with the crew", D.ov.agreed]].filter(function (x) { return x[1]; }).map(function (x) { return '<div class="feed"><div class="w">' + esc(x[0]) + '</div><div class="pl">' + esc(x[1]) + "</div></div>"; }).join("") + "</div>";
+    if ((F.followups || []).length) h += '<div class="card"><div class="ch">' + ic("flag") + "Follow-up</div>" + F.followups.map(function (f) { return '<div class="kv"><span class="k">' + esc(f.owner) + (f.due ? " · " + fmtD(f.due, true) : "") + '</span><span class="v">' + esc(f.text) + '<div class="sm">' + (f.status === "fixed" ? "Fixed " + fmtD(f.closed_at, true) : "Open") + "</div></span></div>"; }).join("") + "</div>";
+    if ((v.photos || []).length) h += '<div class="card"><div class="ch">' + ic("camera") + 'Photos<span class="r">' + v.photos.length + '</span></div><div class="phs">' + v.photos.map(function (p) { return '<a class="th" href="/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" style="background-image:url(&quot;/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '&quot;)" aria-label="Photo"></a>'; }).join("") + "</div></div>";
+    return h;
+  }
 
   /* ---------------- router ---------------- */
   function go(h) { location.hash = h; }
@@ -601,13 +1044,17 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }
     if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
-    if (h.indexOf("g=") === 0) return gradeView(h.slice(2));
+    if (h.indexOf("a=") === 0) { var p3 = h.slice(2).split("|"); lsSet("aud:s:" + p3[0], Number(p3[1]) || 1); return stepView(p3[0], p3[1]); }
+    /* the 15 Oct grade screen is the audit's Ratings step now: an old link opens the audit */
+    if (h.indexOf("g=") === 0) { location.replace("#a=" + h.slice(2) + "|1"); return; }
     shipsView();
   }
   $("bk").innerHTML = ic("caret-left");
   window.addEventListener("hashchange", route);
   $("bk").addEventListener("click", function () { history.length > 1 ? history.back() : go(""); });
   document.addEventListener("click", function (e) {
+    var sp = e.target.closest("[data-step]");
+    if (sp && S.cur && S.cur.indexOf("a=") === 0) { location.replace("#a=" + S.cur.slice(2).split("|")[0] + "|" + sp.getAttribute("data-step")); return; }
     var g = e.target.closest("[data-go]");
     if (g) { if (g.disabled) return; go(g.getAttribute("data-go")); return; }
     var t = e.target.closest("[data-brand],[data-sc],[data-ship]");
@@ -622,6 +1069,7 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
   if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("/audit/sw.js", { scope: location.pathname.indexOf("/audit") === 0 ? "/audit" : "/" }).catch(function () {}); } catch (e) {} }
 
   route();
+  flushFilings();
   Promise.all([api("/api/me"), api("/api/audit/ships")]).then(function (r) {
     S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships;
     var h = location.hash.replace(/^#/, ""); if (!h) shipsList(); else if (h.indexOf("s=") === 0) route();
