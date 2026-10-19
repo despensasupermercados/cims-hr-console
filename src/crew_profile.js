@@ -235,6 +235,19 @@ export function buildCrewProfile(input) {
     feed.push({ at: r.submitted_at, kind: "feedback", src: "feedback", role: r.role, who: (FB.find((f) => f.role === r.role) || {}).label || r.role, answers: ans, superseded: !!r.superseded_at });
   }
   for (const s of A(I.sbm)) feed.push({ at: s.submitted_at, kind: "review", src: "feedback", who: "Shipboard review", rating: s.rating != null ? Number(s.rating) : null, ship: s.ship || null, text: s.q_final || "" });
+  // Dexter's printshop audit (19 Oct 2026, the audit app's P1 card): the grade as filed and, for an audit filed through
+  // the seven steps, what was missing, the boxes and the follow-up. Its score reaches the Score Card through audit_eval
+  // (§10j), never through this feed; the crew's statement and email never print it.
+  const auFu = A(I.auditFollowups);
+  for (const a of A(I.audits)) {
+    let D = null; try { D = a.data_json ? JSON.parse(a.data_json) : null; } catch (e) { D = null; }
+    const O = (D && D.ov) || {};
+    feed.push({ at: a.filed_at, kind: "audit", src: "feedback", who: "Dexter · Audit", ship: a.ship || null, request: a.request_id || null,
+      ratings: { inventory: a.r_inventory, technical: a.r_technical, collaterals: a.r_collaterals, overall: a.r_overall }, score: a.score != null ? Number(a.score) : null, from: a.score_from || null,
+      strengths: O.strengths || null, improve: O.improve || null, agreed: O.agreed || null, note: D ? null : (a.note || null),
+      missing: D ? A(D.ws && D.ws.missing).length + A(D.hw && D.hw.tools && D.hw.tools.missing).length : null,
+      followups: auFu.filter((f) => f.request_id === a.request_id).map((f) => ({ owner: f.owner, due: f.due || null, text: f.text, status: f.status, closed: day(f.closed_at) })) });
+  }
   feed.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
   const slots = FB.map((f) => {
     const live = resp.filter((r) => r.role === f.role && !r.superseded_at).sort((a, b) => String(b.submitted_at).localeCompare(String(a.submitted_at)))[0];
@@ -243,6 +256,11 @@ export function buildCrewProfile(input) {
   });
   const lastReview = sbmReq.slice().sort((a, b) => String(b.sent_at || b.created_at).localeCompare(String(a.sent_at || a.created_at)))[0];
   const reviewAnswered = A(I.sbm).length > 0;
+  // Dexter's slot is his AUDIT since 15 Oct 2026 (it replaced his feedback, §10j): answered = an audit filed, pending = a
+  // request whose documents are out or in and not yet audited; with neither, his old feedback slot stands as it was.
+  const dx = slots.find((x) => x.role === "dexter"), lastAudit = A(I.audits)[0], openAudit = A(I.auditOpen)[0];
+  if (dx && lastAudit) Object.assign(dx, { label: "Dexter · Audit", state: "answered", at: day(lastAudit.filed_at) });
+  else if (dx && openAudit) Object.assign(dx, { label: "Dexter · Audit", state: "pending", at: day(openAudit.sent_at || openAudit.created_at) });
   slots.push({ role: "sbm", label: "Shipboard review", state: reviewAnswered ? "answered" : lastReview ? "pending" : "never", at: day(reviewAnswered ? A(I.sbm)[0].submitted_at : lastReview ? (lastReview.sent_at || lastReview.created_at) : null) });
 
   // ---- rotation: earmarks still to come, TDG earmarks removed, what went to Joy
@@ -348,7 +366,7 @@ export function feedbackFile(profile, today) {
   const P = profile || {}, t = iso(today) || new Date().toISOString().slice(0, 10);
   const K = (Array.isArray(P.contracts) ? P.contracts : []).filter((k) => k && iso(k.on));
   const feed = (P.people && Array.isArray(P.people.feed)) ? P.people.feed : [];
-  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review" };
+  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review", audit: "Printshop audit" };
   const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.current ? t : (k.off && k.off < t ? k.off : t))) || null; // a running contract (overdue / held) runs to today
   const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, earlyText: k.earlyText || "", end: k.end || null }, items: [] }));
   const between = { key: "between", contract: null, items: [] };
@@ -367,6 +385,13 @@ export function feedbackFile(profile, today) {
       item.tags = f.rating != null ? [["Rating", f.rating + "/5"]] : [];
       if (f.ship) item.tags.push(["Ship", f.ship]);
       if (f.text) item.lines = [{ label: null, text: String(f.text) }];
+    } else if (f.kind === "audit") {
+      const R = f.ratings || {};
+      item.tags = [["Score", f.score != null ? f.score + "/5" : "-"], ["Inventory", R.inventory], ["Technical", R.technical], ["Collaterals", R.collaterals], ["Overall", R.overall]]
+        .filter((t) => t[1] != null && t[1] !== "").map((t) => [t[0], String(t[1]) + (t[0] !== "Score" ? "/5" : "")]);
+      if (f.ship) item.tags.push(["Ship", f.ship]);
+      item.lines = [["Strengths", f.strengths], ["To improve", f.improve], ["Agreed", f.agreed], [null, f.note]].filter((x) => x[1]).map((x) => ({ label: x[0], text: String(x[1]) }))
+        .concat((Array.isArray(f.followups) ? f.followups : []).map((u) => ({ label: "Follow-up", text: u.owner + (u.due ? " by " + u.due : "") + ": " + u.text + (u.status === "fixed" ? " (fixed " + (u.closed || "") + ")" : " (open)") })));
     } else item.lines = [{ label: null, text: String(f.text || "") }];
     (k ? groups.find((g) => g.key === k.on) : between).items.push(item);
   }

@@ -330,3 +330,60 @@ test("a TEST request is a rehearsal: no audit is filed on it", async () => {
   const r = await t.call("POST", "/api/audit/request/grade", { id, visit: cleanVisit(v) });
   assert.equal(r.status, 409); assert.equal((await r.json()).error, "test_request");
 });
+
+/* ------------------------------------------------ P1 · the audit on the crew profile ------------------------------------------------ */
+import { buildCrewProfile, feedbackFile } from "../src/crew_profile.js";
+const PROFILE = (extra) => Object.assign({
+  today: "2026-10-19",
+  crew: { agency_id: "SC-0039935", status: "On board", first_name: "Kevin", last_name: "Jugao" }, override: null,
+  snap: { agency_id: "SC-0039935", status: "On board", raw_status: "On board", vessel: "Azamara Pursuit", run_at: "2026-10-16T09:00:00Z", embarked_at: "2026-05-24", debarked_at: null },
+  count: null, countAdded: 0, grade: null,
+  legs: [{ ship: "Pursuit", sc: "SC-0039935", ours: true, on: "2026-05-24", off: "2026-10-31", is_current: true, source: "registry", offSource: "rita", brand: "Azamara" }],
+  counter: [], edits: [], notes: [], ready: null, intel: [], fbReqs: [], fbResp: [], sbmRequests: [], sbm: [], cards: [], deploys: [], dismissals: [],
+  statusRows: [], travel: [], activity: [], instr: [], links: [],
+}, extra || {});
+const AUDIT_ROW = { request_id: "ar_1", ship: "Pursuit", r_inventory: 3, r_technical: 4, r_collaterals: 5, r_overall: null, score: 4, score_from: "average", note: "Inventory management (3): OBP lags.\nTo improve: Book changes the same day.", filed_at: "2026-10-19T15:00:00.000Z",
+  data_json: JSON.stringify({ ws: { missing: ["sops"] }, hw: { tools: { missing: ["head_lamp", "fiery_hdd"] } }, ov: { strengths: "Knows the C4070.", improve: "Book changes the same day.", agreed: "Count every Monday." } }) };
+
+test("P1: a filed audit is on the profile's What people said, with the score, the boxes and the follow-up; Dexter's slot is his audit", () => {
+  const p = buildCrewProfile(PROFILE({ audits: [AUDIT_ROW], auditFollowups: [{ request_id: "ar_1", owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "open", closed_at: null }] }));
+  const a = p.people.feed.find((f) => f.kind === "audit");
+  assert.ok(a, "the audit is in the feed");
+  assert.deepEqual([a.score, a.from, a.ratings.inventory, a.ship, a.request, a.missing], [4, "average", 3, "Pursuit", "ar_1", 3]);
+  assert.deepEqual([a.strengths, a.improve, a.agreed, a.note], ["Knows the C4070.", "Book changes the same day.", "Count every Monday.", null], "the boxes, not the composed note, for an audit filed through the steps");
+  assert.deepEqual(a.followups, [{ owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "open", closed: null }]);
+  const dx = p.people.slots.find((s) => s.role === "dexter");
+  assert.deepEqual([dx.label, dx.state, dx.at], ["Dexter · Audit", "answered", "2026-10-19"]);
+  // a 15 Oct grade (no steps): its note stands in for the boxes
+  const old = buildCrewProfile(PROFILE({ audits: [Object.assign({}, AUDIT_ROW, { data_json: null })] })).people.feed.find((f) => f.kind === "audit");
+  assert.equal(old.note, AUDIT_ROW.note); assert.equal(old.missing, null);
+  // a request not yet audited: pending; nothing at all: the old feedback slot, untouched
+  assert.equal(buildCrewProfile(PROFILE({ auditOpen: [{ id: "ar_2", sent_at: "2026-10-16T10:34:54Z" }] })).people.slots.find((s) => s.role === "dexter").state, "pending");
+  assert.deepEqual(buildCrewProfile(PROFILE()).people.slots.find((s) => s.role === "dexter"), { role: "dexter", label: "Dexter · Field", state: "never", at: null });
+});
+
+test("P1: the internal crew file prints the audit under its contract; the crew-facing statement never reads the feed", () => {
+  const p = buildCrewProfile(PROFILE({ audits: [AUDIT_ROW], auditFollowups: [{ request_id: "ar_1", owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "fixed", closed_at: "2026-11-02T10:00:00Z" }] }));
+  const f = feedbackFile(p, "2026-10-19");
+  const it = f.groups.flatMap((g) => g.items).find((x) => x.kind === "audit");
+  assert.equal(it.label, "Printshop audit");
+  assert.deepEqual(it.tags, [["Score", "4/5"], ["Inventory", "3/5"], ["Technical", "4/5"], ["Collaterals", "5/5"], ["Ship", "Pursuit"]]);
+  assert.deepEqual(it.lines.map((l) => l.label), ["Strengths", "To improve", "Agreed", "Follow-up"]);
+  assert.match(it.lines[3].text, /^Rolando by 2026-11-18: MFD refresher \(fixed 2026-11-02\)$/);
+  // the statement (crew-facing) is composed from contracts, documents and the bonus standing only — never people.feed
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const g = W.slice(W.indexOf("async function gatherStatement"), W.indexOf("\n}\n", W.indexOf("async function gatherStatement")));
+  assert.ok(g.length > 100, "found gatherStatement");
+  assert.doesNotMatch(g, /audit_eval|audit_visit|people\.feed/, "the crew's statement never reads an audit");
+});
+
+test("P1: the profile's data wave reads the audits with the rest (§12), never a TEST request's", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const one = W.slice(W.indexOf("async function apiCrewOne"), W.indexOf("async function apiCrewSave"));
+  const at = one.indexOf("auditFuRes] = await Promise.all([");
+  assert.ok(at > 0, "the audits ride the profile's one data wave");
+  const wave = one.slice(at, one.indexOf("\n  ]);", at));
+  assert.match(wave, /FROM audit_eval e .*COALESCE\(r\.test_mode, 0\) = 0/);
+  assert.match(wave, /FROM audit_followup WHERE agency_id=\?/);
+  assert.match(one, /audits: auditRes\.results, auditOpen: auditOpenRes\.results, auditFollowups: auditFuRes\.results/);
+});
