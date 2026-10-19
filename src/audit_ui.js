@@ -259,10 +259,10 @@ span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)
 .door{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 14px;border:0;border-radius:var(--r);background:var(--card);box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line);text-align:left;cursor:pointer;color:inherit;min-width:0}
 .door .tx{flex:1;min-width:0;display:flex;flex-direction:column}.door .nm{font-weight:600;font-size:15px}.door .sm{font-size:12.5px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.door .sm.a{color:var(--amber);font-weight:600}
 .door:active{transform:scale(.98)}
-.rts{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px}
-.rt{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut)}
-.rq{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--greenbg);color:var(--green-d)}
-.rq.lo{background:var(--redbg);color:var(--red)}.rq.x,.rq.p{background:var(--bg);color:var(--ink2)}.rq.x{color:var(--mut)}
+.grd{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px}
+.gi{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut)}
+.gq{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--greenbg);color:var(--green-d)}
+.gq.lo{background:var(--redbg);color:var(--red)}.gq.x,.gq.p{background:var(--bg);color:var(--ink2)}.gq.x{color:var(--mut)}
 .fu{border-top:1px solid var(--line)}.card>.fu:first-child{border-top:0}.empty>span{font-size:13px}
 .fubtn{display:flex;gap:8px;margin-top:12px}.fubtn .btn{min-height:44px;font-size:14.5px;flex:1}.fubtn .btn .ic{width:18px;height:18px}
 .btn.sure{background:var(--fill)}
@@ -1059,7 +1059,7 @@ label.btn{position:relative}
   }
   /* one rating as a square: 3 or below is the problem line everywhere in the audit (it needs a sentence, it is 0 on the
      Score Card); the dispatch rating is Rita's, about the travel, never the specialist's, so it is never coloured */
-  function rq(label, v, plain) { return '<span class="rt"><b class="rq' + (v == null ? " x" : plain ? " p" : v <= 3 ? " lo" : "") + '">' + (v == null ? "–" : esc(v)) + "</b>" + esc(label) + "</span>"; }
+  function gq(label, v, plain) { return '<span class="gi"><b class="gq' + (v == null ? " x" : plain ? " p" : v <= 3 ? " lo" : "") + '">' + (v == null ? "–" : esc(v)) + "</b>" + esc(label) + "</span>"; }
   function visitWhen(a) {
     var o = String(a.openedAt || "").slice(0, 10), f = String(a.filedAt || "").slice(0, 10);
     if (!o || o === f) return fmtD(f, true);
@@ -1102,7 +1102,7 @@ label.btn{position:relative}
       return '<button class="row" data-go="q=' + esc(a.id) + '" style="align-items:flex-start"><div class="tx">'
         + '<div class="mh"><div class="nm">' + esc(a.ship) + '</div><span class="st ' + (a.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + esc(a.score) + "/5</span></div>"
         + '<div class="sm">' + (a.crew ? esc(a.crew) + " · " : "") + visitWhen(a) + "</div>"
-        + '<div class="rts">' + rq("Inventory", R.inventory) + rq("Technical", R.technical) + rq("Collaterals", R.collaterals) + rq("Overall", R.overall) + (R.dispatch != null ? rq("Dispatch", R.dispatch, true) : "") + "</div>"
+        + '<div class="grd">' + gq("Inventory", R.inventory) + gq("Technical", R.technical) + gq("Collaterals", R.collaterals) + gq("Overall", R.overall) + (R.dispatch != null ? gq("Dispatch", R.dispatch, true) : "") + "</div>"
         + '<div class="sm" style="margin-top:6px">' + missTxt + "</div>"
         + (tags.length ? '<div class="stl">' + tags.join("") + "</div>" : "")
         + "</div>" + ic("caret-right", "go") + "</button>";
