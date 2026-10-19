@@ -186,6 +186,19 @@ test("the page gates with the SAME functions the server re-checks (serialized, n
   assert.doesNotMatch(page, /function visitProblems|function evalOf/, "no second copy in the page");
 });
 
+test("the rules still run in the page after wrangler's bundle (esbuild keepNames adds __name calls)", async () => {
+  // 19 Oct 2026: live on audit.cims.work the stepper threw "__name is not defined" — wrangler bundles with keepNames, and
+  // Function.prototype.toString of a bundled function carries the helper call. Node never adds it, so only a bundle shows it.
+  const { build } = await import("esbuild");
+  const r = await build({ entryPoints: [new URL("../src/audit_steps.js", import.meta.url).pathname], bundle: true, format: "esm", keepNames: true, write: false, platform: "neutral" });
+  const m = await import("data:text/javascript;base64," + Buffer.from(r.outputFiles[0].text).toString("base64"));
+  assert.match(m.AUDIT_RULES_JS, /__name\(/, "the bundle does carry the helper call this guards against");
+  const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(m.AUDIT_RULES_JS, ctx);
+  const d = ctx.window.AR.startVisit(CTX);
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.AR.visitProblems(d, CTX, "2026-10-19"))), visitProblems(startVisit(CTX), CTX, "2026-10-19"));
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.AR.evalOf(d))), JSON.parse(JSON.stringify(evalOf(startVisit(CTX)))));
+});
+
 /* ------------------------------------------------ the routes ------------------------------------------------ */
 test("the visit: closed before the documents are in; then the reads, the count against OBP, the items to confirm", async () => {
   const t = setup();
