@@ -111,6 +111,11 @@ test("the daily run: only at 08:00 Budapest, only when switched on, each contrac
 test("wiring: the morning run is in scheduled(), the send route before the hub's, and nothing is attached anywhere", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   assert.match(W, /ctx\.waitUntil\(_welcome\.run\(env, event\)\.catch\(/);
+  // The Automation rail names what each switch sends, in the order they go out (Miguel, 19 Oct 2026: "instruction of what ??").
+  const rail = W.slice(W.indexOf("<div class=rauto>"), W.indexOf("<div class=rauto>") + 2000);
+  const at = (t) => rail.indexOf(t);
+  assert.ok(at(">Welcome email <input") > 0 && at(">Sign-off instructions <input") > at(">Welcome email <input") && at(">Sign-off link <input") > at(">Sign-off instructions <input"));
+  assert.doesNotMatch(rail, />Instructions <input|>Welcome <input/);
   assert.match(W, /const _w = await _welcome\.handle\(p, request, env, url, session\); if \(_w\) return _w; const _h = await _hub/);
   const S = readFileSync(new URL("../src/welcome_send.js", import.meta.url), "utf8");
   assert.doesNotMatch(S, /attachments\s*:/);
