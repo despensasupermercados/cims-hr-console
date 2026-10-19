@@ -48,14 +48,14 @@ export const INSTR_HTML = `<!DOCTYPE html>
    <div id="loading" class="spin">Recording your receipt&hellip;</div>
    <div id="done" style="display:none">
      <div class="ok"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#3E8E2A" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-     <h1>Opening HON&hellip;</h1>
-     <p>Thank you, <b id="who">&mdash;</b>. Your receipt of the sign-off instructions is recorded. HON opens now: select your ship and start your digital handover notes.</p>
-     <p style="margin-top:14px"><a id="hon" href="https://hon.cims.work" style="color:var(--navy);font-weight:700">Open HON</a></p>
+     <h1>Opening your Digital Handover Notes&hellip;</h1>
+     <p>Thank you, <b id="who">&mdash;</b>. Your receipt of the sign-off instructions is recorded. Your notes open now: select your ship and start.</p>
+     <p style="margin-top:14px"><a id="hon" href="https://hon.cims.work" style="color:var(--navy);font-weight:700">Open my Digital Handover Notes</a></p>
      <div class="stamp" id="stamp"></div>
    </div>
    <div id="bad" style="display:none">
      <h1 style="color:var(--navy)">Link invalid or expired</h1>
-     <p>Please ask CIMS Crew Operations for a new link. Your handover notes are still open in HON: <a href="https://hon.cims.work" style="color:var(--navy);font-weight:700">hon.cims.work</a></p>
+     <p>Please ask CIMS Crew Operations for a new link. Your Digital Handover Notes are still open at <a href="https://hon.cims.work" style="color:var(--navy);font-weight:700">hon.cims.work</a></p>
    </div>
  </div>
 </div>
@@ -68,7 +68,7 @@ export const INSTR_HTML = `<!DOCTYPE html>
    try {
      var res = await fetch('/api/instr/submit', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ t: T }) });
      var r = await res.json();
-     // The email's one button is Open HON (16 Oct 2026): record the receipt, then go to HON.
+     // The email's one button opens the notes (16 Oct 2026; named "Open my Digital Handover Notes" since 19 Oct): record the receipt, then go to HON.
      if (r && r.ok){ recorded(r.crew_name, r.ack_at || new Date().toISOString()); setTimeout(function(){ location.replace('https://hon.cims.work'); }, 900); }
      else { show('bad'); }
    } catch (e){ document.getElementById('loading').textContent = 'Could not record \\u2014 please refresh.'; }
@@ -112,7 +112,7 @@ export function installInstr(deps) {
     if (!deps.boardLegs) return null;
     var legs = (await deps.boardLegs(env).catch(function () { return null; })) || [];
     var cur = legs.filter(function (l) { return l && l.ours && l.sc === sc && l.is_current && l.off; }).sort(function (a, b) { return a.on < b.on ? 1 : -1; })[0];
-    return cur ? { sc: sc, seq: seq, ship: cur.ship, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true } : null;
+    return cur ? { sc: sc, seq: seq, ship: cur.ship, on: cur.on || null, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true } : null;
   }
   async function resolveInstr(env, sc, seq, ovr) {
     var leg = ovr || await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
@@ -128,7 +128,9 @@ export function installInstr(deps) {
     // or itinerary port read "You sign off … in Miami" while seatContexts had refused that seed.
     var port = ed.disembark || (ovr && ovr.port) || null;
     var name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
-    return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, first_name: firstWord(c.first_name) || null, email: c.email || null, vessel: vessel, port: port, sign_off_date: sign_off };
+    // The pass prints the name as the crew would say it (first word of the first name + the last name) and TDG's position.
+    var passName = [firstWord(c.first_name), c.last_name].filter(Boolean).join(" ").trim();
+    return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, pass_name: passName || name, position: c.rank_override || c.rank_observed || null, first_name: firstWord(c.first_name) || null, email: c.email || null, vessel: vessel, port: port, sign_on_date: (ovr && ovr.on) || null, sign_off_date: sign_off };
   }
 
   // POST /api/instructions/request  (session-gated) — issue the instructions email
@@ -211,11 +213,18 @@ export function installInstr(deps) {
     return /^\d{4}-\d{2}-\d{2}$/.test(off) && off < new Date().toISOString().slice(0, 10) ? off : null;
   }
   // The reliever as the crew would say it: first word of the first name + the last name (the board joins every given name).
+  // Their mobile and email ride along ONLY when TDG has them (rel.tdg, signoff_context.relieverInTdg): the pass prints them
+  // so the two can be in touch (Miguel, 19 Oct 2026), and a plan only the console holds must reach nobody (§10d).
   async function relieverName(env, rel) {
     if (!rel || !rel.sc) return rel || null;
     try {
-      var row = await env.DB.prepare("SELECT COALESCE(NULLIF(o.first_name,''), c.first_name) AS fn, COALESCE(NULLIF(o.last_name,''), c.last_name) AS ln FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id WHERE c.agency_id=?").bind(rel.sc).first();
-      if (row && (row.fn || row.ln)) { var f = firstWord(row.fn); return Object.assign({}, rel, { name: [f, row.ln].filter(Boolean).join(" "), first: f || rel.first }); }
+      var row = await env.DB.prepare("SELECT COALESCE(NULLIF(o.first_name,''), c.first_name) AS fn, COALESCE(NULLIF(o.last_name,''), c.last_name) AS ln, COALESCE(NULLIF(o.phone,''), c.phone) AS phone, COALESCE(NULLIF(o.email,''), c.email) AS email FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id WHERE c.agency_id=?").bind(rel.sc).first();
+      if (row && (row.fn || row.ln)) {
+        var f = firstWord(row.fn);
+        var out = Object.assign({}, rel, { name: [f, row.ln].filter(Boolean).join(" "), first: f || rel.first });
+        if (rel.tdg) { out.phone = row.phone || null; out.email = row.email || null; }
+        return out;
+      }
     } catch (e) {}
     return rel;
   }
@@ -224,9 +233,9 @@ export function installInstr(deps) {
     if (!env.MAILER) throw new Error("no_mailer");
     var r = o.r || {}, ctx = o.ctx || {};
     var mail = instructionsEmail({
-      firstName: r.first_name || firstWord(r.crew_name),
+      firstName: r.first_name || firstWord(r.crew_name), crewName: r.pass_name || r.crew_name, position: r.position || null,
       ship: ctx.ship || r.vessel, brand: ctx.brand || null,
-      signOff: ctx.off || r.sign_off_date, port: ctx.port || r.port,
+      signOn: ctx.on || r.sign_on_date || null, signOff: ctx.off || r.sign_off_date, port: ctx.port || r.port,
       reliever: await relieverName(env, ctx.reliever || null),
       link: o.link, today: new Date().toISOString().slice(0, 10),
     });

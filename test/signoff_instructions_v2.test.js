@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { instructionsEmail, shipFullName, portName, managerOf, HON_URL, TEMPLATE_ID } from "../src/emails/hr.signoff.instructions.v2.js";
-import { seatContexts } from "../src/signoff_context.js";
+import { instructionsEmail, shipFullName, portName, managerOf, HON_URL, TEMPLATE_ID, phoneOf, toGo } from "../src/emails/hr.signoff.instructions.v2.js";
+import { seatContexts, relieverInTdg } from "../src/signoff_context.js";
 import { installInstr, INSTR_HTML } from "../src/signoff_instructions.js";
 import { installAutoSend } from "../src/auto_send.js";
 import { signToken, verifyToken } from "../src/auth.js";
@@ -13,20 +13,21 @@ import { signToken, verifyToken } from "../src/auth.js";
 
 const KEVIN = { firstName: "Kevin", ship: "Pursuit", brand: "Azamara", signOff: "2026-10-31", port: "HONG KONG, CHINA",
   reliever: { name: "A.J. Baleña", first: "A.J.", on: null }, link: "https://cims.work/instr?t=abc", today: "2026-10-17" };
-const text = (h) => h.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").replace(/ ([.,:;])/g, "$1");
+const text = (h) => h.replace(/<style>[^]*?<\/style>/, "").replace(/<wbr>/g, "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&middot;/g, "·").replace(/&ndash;/g, "–").replace(/&amp;/g, "&").replace(/\s+/g, " ").replace(/ ([.,:;])/g, "$1");
 
 test("Kevin's email: first name, Azamara title, the ship as HON lists it, the port in words, no promise to meet", () => {
   const { html, subject } = instructionsEmail(KEVIN);
   const t = text(html);
-  assert.match(t, /Dear Kevin,/);
-  assert.doesNotMatch(t, /Mr\. Jugao/);
-  assert.match(t, /You sign off 31 Oct in Hong Kong\./);
-  assert.match(t, /Digital Handover Notes\./);
+  assert.match(t, /Two weeks to go, Kevin\. Here is your sign-off pass\./, "a headline in words, greeted by first name (19 Oct 2026)");
+  assert.doesNotMatch(t, /Dear Kevin|formal notice|Mr\. Jugao/);
+  assert.match(t, /SIGN-OFF PASS 14 DAYS TO GO/);
+  assert.match(t, /From PR Azamara Pursuit/, "the cruise line's own ship code (ship_codes.js)");
+  assert.match(t, /To HOME via Hong Kong/);
   assert.match(t, /select Azamara Pursuit\. No login\./);
   assert.match(t, /your BOM \(Business Operations Manager\)/);
-  assert.match(t, /You may or may not see A\.J\. aboard, so your notes must carry everything\./);
+  assert.match(t, /You may or may not meet A\.J\. aboard, so your notes must carry everything\./);
   assert.doesNotMatch(t, /in person/i, "never promise an in-person handover (rec2dsh7hh8mIYwgV)");
-  assert.match(t, /A short printed copy still stays onboard for A\.J\. and your BOM/);
+  assert.match(t, /leave one for A\.J\. and give one to your BOM/);
   assert.match(t, /Ray Guerra and Jonathan Placer Alonzo receive it/);
   assert.match(t, /Daily Planner/);
   assert.doesNotMatch(t, /Compass|Joemar/);
@@ -34,13 +35,24 @@ test("Kevin's email: first name, Azamara title, the ship as HON lists it, the po
   assert.match(subject, /Azamara Pursuit · 31 Oct 2026 · Hong Kong/);
 });
 
-test("one call to action: Open HON is the acknowledgment link; no 'I have read' button", () => {
+test("one call to action: the pass's button is the acknowledgment link; no 'I have read' button", () => {
   const { html } = instructionsEmail(KEVIN);
   assert.doesNotMatch(html, /I have read and understood/);
-  assert.equal((html.match(/>Open HON</g) || []).length, 1, "one button");
-  const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]).filter((h) => !h.startsWith("mailto:"));
-  assert.ok(hrefs.length >= 2 && hrefs.every((h) => h === KEVIN.link), "every link to HON goes through the acknowledgment: " + hrefs);
-  assert.match(text(html), /Opening HON from this email also confirms you received these instructions\./);
+  assert.equal((html.match(/>Open my Digital Handover Notes</g) || []).length, 1, "one button");
+  const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]).filter((h) => !/^(mailto:|tel:|https:\/\/wa\.me\/)/.test(h));
+  assert.ok(hrefs.length >= 2 && hrefs.every((h) => h === KEVIN.link), "every link to the notes goes through the acknowledgment: " + hrefs);
+  assert.match(text(html), /Opening them from this email also tells Rita you have these instructions\./);
+});
+
+// 19 Oct 2026, Miguel: "people dont know what HON is .. u can replace that by Digital Hand Over notes .. across the email".
+test("the crew never reads 'HON': the product is Digital Handover Notes, hon.cims.work stays once as the address", () => {
+  for (const d of [KEVIN, { ...KEVIN, signOff: "2026-11-02" }, { ...KEVIN, reliever: null }]) {
+    const m = instructionsEmail(d);
+    const words = text(m.html).replace(/hon\.cims\.work/g, "");
+    assert.doesNotMatch(words, /\bHON\b/, "HTML");
+    assert.doesNotMatch(m.text, /\bHON\b/, "plain text");
+    assert.match(m.html, />hon\.cims\.work</);
+  }
 });
 
 test("the CIMS email standard: canonical letterhead, no rgba, no gradients, bgcolor paired", () => {
@@ -68,12 +80,14 @@ test("the manager title and the ship name follow the brand", () => {
 
 test("an overlap says so, and only then does the email talk about being aboard together", () => {
   const t = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-10-26" } }).html);
-  assert.match(t, /You and A\.J\. Baleña overlap aboard for 5 days from 26 Oct: use them to walk A\.J\. through the ship\./);
-  assert.match(t, /walk A\.J\. through it while you are both aboard/);
-  assert.doesNotMatch(t, /may or may not see/);
+  assert.match(t, /Aboard with you from 26 Oct · 5 days together/);
+  assert.match(t, /You are aboard together from 26 October: use those days to walk A\.J\. through the ship and through your notes\./);
+  assert.match(t, /walk A\.J\. through them while you are both aboard/);
+  assert.doesNotMatch(t, /may or may not/);
   // a reliever who joins ON the sign-off day, or after, is no overlap
   const same = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-10-31" } }).html);
-  assert.match(same, /may or may not see A\.J\. aboard/);
+  assert.match(same, /may or may not meet A\.J\. aboard/);
+  assert.match(same, /Joins Azamara Pursuit on 31 Oct 2026/);
 });
 
 test("the HON bonus box shows only for sign-offs on or after 1 Nov 2026", () => {
@@ -82,11 +96,14 @@ test("the HON bonus box shows only for sign-offs on or after 1 Nov 2026", () => 
 });
 
 test("no reliever named yet: the email still reads, and never invents a name", () => {
-  const t = text(instructionsEmail({ ...KEVIN, reliever: null }).html);
-  assert.match(t, /Your reliever is not named yet\./);
-  assert.match(t, /Relieved by Not named yet/);
+  const m = instructionsEmail({ ...KEVIN, reliever: null });
+  const t = text(m.html);
+  assert.match(t, /Relieved by Not named yet Rita will tell you who takes over\./);
+  assert.match(t, /You may not meet your reliever aboard, so your notes must carry everything\./);
   assert.match(t, /Your reliever must not inherit a shortage/);
   assert.match(t, /leave one for your reliever and give one to your BOM/);
+  assert.doesNotMatch(t, /IN TDG|Mobile|WhatsApp/);
+  assert.match(m.text, /Your reliever is not named yet\./);
 });
 
 test("names and ports are text, never markup", () => {
@@ -131,7 +148,7 @@ function senderHarness(opts = {}) {
     st.bind = (...a) => { st.args = a; return st; };
     st.run = async () => ({ meta: { changes: 1 } });
     st.first = async () => {
-      if (/COALESCE\(NULLIF\(o\.first_name/.test(sql)) return { fn: "A.J. Lorenzo", ln: "Baleña" };
+      if (/COALESCE\(NULLIF\(o\.first_name/.test(sql)) return { fn: "A.J. Lorenzo", ln: "Baleña", phone: "0917-555-0142", email: "aj.balena@example.com" };
       if (/FROM crew WHERE agency_id=\?/.test(sql)) return { id: "crew_k", agency_id: opts.sc || "SC-K", first_name: "Kevin Leif", last_name: "Jugao", email: "kevin@example.com" };
       return null;
     };
@@ -164,8 +181,18 @@ test("the T-14 send: v2 template, CC onboardsupport@dg3.com, reply to Rita, reli
   assert.equal(e.templateId, TEMPLATE_ID);
   assert.equal(e.critical, true);
   const t = text(e.html);
-  assert.match(t, /Dear Kevin,/);
-  assert.match(t, /Your reliever is A\.J\. Baleña\./, "first word of the first name + the surname, not every given name");
+  assert.match(t, /Two weeks to go, Kevin\./);
+  assert.match(t, /Relieved by A\.J\. Baleña/, "first word of the first name + the surname, not every given name");
+  assert.doesNotMatch(t, /Lorenzo/);
+  assert.match(t, /Seafarer Kevin Jugao/, "the pass names the crew as they say it");
+  assert.match(t, /Signed on 2 May 2026 Sign-off 31 Oct 2026 Audit 17–24 Oct/);
+  // TDG earmarks A.J. for Pursuit: IN TDG, and his mobile and email are on the pass so the two can be in touch
+  assert.match(t, /IN TDG/);
+  assert.match(t, /Mobile \+63 917 555 0142 · WhatsApp Email aj\.balena@example\.com/);
+  assert.match(e.html, /href="tel:\+639175550142"/);
+  assert.match(e.html, /href="https:\/\/wa\.me\/639175550142"/);
+  assert.match(e.html, /href="mailto:aj\.balena@example\.com"/);
+  assert.match(e.text, /Mobile: \+63 917 555 0142\nEmail: aj\.balena@example\.com/);
   assert.match(e.html, /href="https:\/\/cims\.work\/instr\?t=/);
 });
 
@@ -180,8 +207,9 @@ test("the manual send from the crew page reads the same board context", async (t
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0].cc, ["onboardsupport@dg3.com"]);
   const t = text(sent[0].html);
-  assert.match(t, /You sign off 31 Oct in Hong Kong\./);
-  assert.match(t, /Your reliever is A\.J\. Baleña\./);
+  assert.match(t, /To HOME via Hong Kong/);
+  assert.match(t, /Sign-off 31 Oct 2026/);
+  assert.match(t, /Relieved by A\.J\. Baleña/);
   assert.match(t, /select Azamara Pursuit\./);
 });
 
@@ -215,7 +243,7 @@ test("a sign-off already past is never instructed: the crew page is refused, the
 
 test("/instr records the receipt, then forwards to HON; an expired link still points to HON", () => {
   assert.match(INSTR_HTML, /location\.replace\('https:\/\/hon\.cims\.work'\)/);
-  assert.match(INSTR_HTML, /Your handover notes are still open in HON/);
+  assert.match(INSTR_HTML, /Your Digital Handover Notes are still open at <a href="https:\/\/hon\.cims\.work"/);
   assert.ok(!INSTR_HTML.includes("${"), "a static page: no template interpolation");
   assert.equal(HON_URL, "https://hon.cims.work");
 });
@@ -331,9 +359,9 @@ test("seatContexts: a second printer aboard for months is a colleague, not the r
 
 test("the overlap is said in the email's own words for a span (months and days past a month), from one definition", () => {
   const long = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-09-21" } }).html);
-  assert.match(long, /overlap aboard for 1 month 10 days from 21 Sep/);
+  assert.match(long, /Aboard with you from 21 Sep · 1 month 10 days together/);
   const short = text(instructionsEmail({ ...KEVIN, reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-10-26" } }).html);
-  assert.match(short, /overlap aboard for 5 days from 26 Oct/);
+  assert.match(short, /Aboard with you from 26 Oct · 5 days together/);
 });
 
 // 17 Oct 2026, Miguel: a training visit is a trip, not a contract (visits.js). Jonathan Placer Alonzo (SC-0041465), a
@@ -382,4 +410,78 @@ test("a training visit: never instructed, no sign-off link, never the reliever; 
   assert.deepEqual(h.calls.link, ["SC-B"], "no sign-off link for a visit either");
   assert.ok(!/not_instructed/.test(JSON.stringify(h.digests)), "no daily digest alert for a visit");
   assert.doesNotMatch(readFileSync(new URL("../src/signoff_context.js", import.meta.url), "utf-8"), /SC-0041465/, "no person's id decides it any more");
+});
+
+// ---- the sign-off pass (Miguel, 19 Oct 2026: "add .. the name .. phone and email of the incoming crew .. so they can be in
+// contact"; "convert all this to something similar to a digital airline pass"; "I like it now")
+test("the reliever's phone and email are printed only when TDG has the reliever", () => {
+  const base = { name: "Francis Pintucan", first: "Francis", on: null, phone: "09175550142", email: "francis@example.com" };
+  const plan = text(instructionsEmail({ ...KEVIN, reliever: { ...base, tdg: false } }).html);
+  assert.doesNotMatch(plan, /IN TDG|Mobile|WhatsApp|francis@example\.com|555/, "a plan only the console holds reaches nobody (§10d)");
+  assert.match(plan, /Relieved by Francis Pintucan Joining date to be confirmed/);
+  const inTdg = instructionsEmail({ ...KEVIN, reliever: { ...base, tdg: true } });
+  assert.match(text(inTdg.html), /IN TDG Mobile \+63 917 555 0142 · WhatsApp Email francis@example\.com/);
+  assert.match(text(inTdg.html), /A short message before you leave helps: introduce yourself/);
+  // TDG has them but the crew row carries nothing usable: no empty rows, no "Mobile -"
+  const bare = text(instructionsEmail({ ...KEVIN, reliever: { ...base, tdg: true, phone: "-", email: "n/a" } }).html);
+  assert.match(bare, /IN TDG/);
+  assert.doesNotMatch(bare, /Mobile|Email francis|short message/);
+});
+
+test("relieverInTdg: TDG's Earmarked row, a seat from the file, or a card the file confirms or earmarks; never a plan alone", () => {
+  assert.equal(relieverInTdg({ tdgEarmark: true }), true);
+  assert.equal(relieverInTdg({ state: "green" }), true);
+  assert.equal(relieverInTdg({ state: "yellow", registry: { verdict: "earmarked" } }), true);
+  assert.equal(relieverInTdg({ state: "yellow", confirmed: true }), true);
+  assert.equal(relieverInTdg({ state: "yellow" }), false, "Rita's card only");
+  assert.equal(relieverInTdg({ state: "yellow", deployedAt: "2026-10-10", registry: { verdict: "pending" } }), false, "told Joy is not yet in TDG");
+  assert.equal(relieverInTdg({ state: "yellow", ship: "Wonder", file: { status: "Earmarked", ship: "Wonder" } }), true, "the file earmarks them here");
+  assert.equal(relieverInTdg({ state: "yellow", ship: "Wonder", file: { status: "Earmarked", ship: "Allure" } }), false, "earmarked elsewhere");
+  assert.equal(relieverInTdg(null), false);
+  const X = seatContexts(SECTIONS);
+  assert.equal(X["SC-K"].reliever.tdg, true);
+  assert.equal(X["SC-V"].reliever.tdg, false, "Pintucan's card on Wonder is Rita's plan");
+  assert.equal(X["SC-K"].on, "2026-05-02", "the seat carries its sign-on for the pass");
+});
+
+test("phoneOf: a Philippine mobile reads +63 917 555 0142 with WhatsApp; anything else as written, tel: only", () => {
+  assert.deepEqual(phoneOf("09175550142"), { shown: "+63 917 555 0142", tel: "+639175550142", wa: "https://wa.me/639175550142" });
+  assert.deepEqual(phoneOf("+63 917 555 0142"), phoneOf("639175550142"));
+  assert.deepEqual(phoneOf("+1 (305) 555-0100"), { shown: "+1 (305) 555-0100", tel: "+13055550100", wa: null });
+  assert.equal(phoneOf(""), null);
+  assert.equal(phoneOf("-"), null, "TDG's blank");
+  assert.equal(phoneOf("n/a"), null);
+});
+
+test("the pass: ship code to HOME, the three dates, the days to go said once in words and once on the pass", () => {
+  const m = instructionsEmail({ ...KEVIN, ship: "Ovation", brand: "Royal", port: "LOS ANGELES, CALIFORNIA", signOn: "2026-04-22",
+    signOff: "2026-11-02", today: "2026-10-19", crewName: "Christjhelen Racho", position: "Printer Specialist", firstName: "Christjhelen",
+    reliever: { name: "Francis Pintucan", first: "Francis", on: null, tdg: true, phone: "09175550142", email: "f@example.com" } });
+  const t = text(m.html);
+  assert.match(t, /Two weeks to go, Christjhelen\. Here is your sign-off pass\./);
+  assert.match(t, /SIGN-OFF PASS 14 DAYS TO GO From OV Ovation of the Seas To HOME via Los Angeles/);
+  assert.match(t, /Seafarer Christjhelen Racho Printer Specialist Signed on 22 Apr 2026 Sign-off 2 Nov 2026 Audit 19–26 Oct/);
+  assert.match(t, /Relieved by Francis Pintucan Joining date to be confirmed IN TDG/);
+  assert.equal((m.html.match(/Open my Digital Handover Notes/g) || []).length, 1);
+  assert.match(m.html, /margin-right:-1\.6px;">To</, "a right-aligned spaced label is pulled back by its spacing");
+  // no port, no sign-on: said, never guessed
+  const bare = text(instructionsEmail({ ...KEVIN, port: null }).html);
+  assert.match(bare, /To HOME Port to be confirmed/);
+  assert.match(bare, /Signed on – Sign-off 31 Oct 2026/);
+});
+
+test("toGo: the headline and the pass say the same days, in words", () => {
+  assert.deepEqual(toGo(14), ["Two weeks to go", "14 DAYS TO GO"]);
+  assert.deepEqual(toGo(7), ["One week to go", "7 DAYS TO GO"]);
+  assert.deepEqual(toGo(9), ["9 days to go", "9 DAYS TO GO"]);
+  assert.deepEqual(toGo(1), ["One day to go", "1 DAY TO GO"]);
+  assert.deepEqual(toGo(0), ["Sign-off day", "SIGN-OFF TODAY"]);
+  assert.equal(toGo(-1), null);
+  assert.match(text(instructionsEmail({ ...KEVIN, today: "2026-10-22" }).html), /9 days to go, Kevin\./);
+});
+
+test("the page the button opens says Digital Handover Notes, never HON", () => {
+  const words = INSTR_HTML.replace(/<script>[^]*?<\/script>/g, "").replace(/<style>[^]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/hon\.cims\.work/g, "");
+  assert.doesNotMatch(words, /\bHON\b/);
+  assert.match(words, /Opening your Digital Handover Notes/);
 });
