@@ -44,7 +44,7 @@ export function welcomeContext({ crew, legs, today, links }) {
   const prev = predecessorOf(legs, leg);
   return {
     sc, first: firstWord(crew.first_name), name: [crew.first_name, crew.last_name].filter(Boolean).join(" ").trim(),
-    position: crew.rank_observed || "Printer Specialist", ship: leg.ship, shipShort: cap(shipWord(leg.ship)), code: shipCode(leg.ship),
+    position: crew.rank_observed || "Printer Specialist", brand: leg.brand || null, ship: leg.ship, shipShort: cap(shipWord(leg.ship)), code: shipCode(leg.ship),
     port: leg.embark || null, on: dmy(leg.on), off: dmy(leg.off), offSource: leg.offSource || "projected",
     months: p ? (p.d ? mdShort(leg.on, leg.off) : `${p.m} months`) : "",
     prev: prev && prev.name ? prev : null, today: dmy(today),

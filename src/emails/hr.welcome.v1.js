@@ -3,6 +3,7 @@
 // (data) => { subject, html, text }. Filled from the board's schedule (src/welcome_context.js). Never a placeholder: a link
 // not given is no button; no predecessor on record is no "You take over from"; the sign-off says where its date comes
 // from (§10d). Canonical letterhead (cims-mast.js). Pinned by test/welcome_email.test.js.
+import { MANAGER } from "./hr.signoff.instructions.v2.js";
 import { mastRows } from "../cims-mast.js";
 const C = { navy: "#1B3A5C", deep: "#142D48", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB",
   body: "#374151", grey: "#9CA3AF", sub: "#95A0AD", gtint: "#EAF4E6", amber: "#B7791F", atint: "#F6EEE1" };
@@ -61,6 +62,9 @@ export const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").repl
 export const HON_URL = "https://hon.cims.work";
 export const JD_URL = "https://support.onboardprint.com/hc/en-us/articles/8731895883805-RCCL-Printer-Specialist";
 // Rita's Microsoft Bookings page (Miguel, 19 Oct 2026: "here is Ritas calendar .. u can book a time with her any time you need").
+// Uniforms come from the shipboard manager (Miguel, 19 Oct 2026: the person handing over has usually left before the new
+// crew arrives). The title is the brand's, as in the sign-off instructions (MANAGER); an unknown brand reads the plain role.
+const uniformAsk = (brand) => { const m = MANAGER[brand]; return `ask ${m ? `your ${m[0]} (${m[1]})` : "your shipboard manager"} for the Uniform Request Form.`; };
 export const RITA_BOOK_URL = "https://bookings.cloud.microsoft/book/DG3RitaBerenyi@dg3.com/?ismsaljsauthenabled=true";
 
 // d = { first, name, position, ship, shipShort, code, port, on, off, months, offSource, prev: { name, first, since } | null,
@@ -169,7 +173,7 @@ export function welcomeEmail(d) {
   </td></tr>
   <tr><td class="px" style="padding:14px 32px 0 32px;">
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${C.atint}" style="background:${C.atint};border-left:3px solid ${C.amber};border-radius:0 10px 10px 0;padding:12px 16px;font-family:${FB};font-size:14px;line-height:21px;color:${C.body};"><b style="color:${C.navy};">Safety first.</b> Follow the ship's safety policies; the Safety Officer answers any question. We all go home the way we came aboard.</td></tr></table>
-   <div style="font-family:${FB};font-size:13px;line-height:20px;color:${C.slate};padding-top:12px;">Uniforms: ${P ? `ask ${P.first} for the Uniform Request Form before ${P.first} signs off.` : "ask the storekeeper for the Uniform Request Form."} The Seafarer&rsquo;s Handbook is coming to Zendesk.</div>
+   <div style="font-family:${FB};font-size:13px;line-height:20px;color:${C.slate};padding-top:12px;">Uniforms: ${uniformAsk(d.brand)} The Seafarer&rsquo;s Handbook is coming to Zendesk.</div>
   </td></tr>
   
   <tr><td class="px" style="padding:26px 32px 28px 32px;">
@@ -191,6 +195,7 @@ export function welcomeEmail(d) {
     "Week 1: finish the cruise line's training. The cruise line checks it.",
     `Day 7: onboarding call with Rita, 15 minutes. Book a time on her calendar whenever you need: ${L.onboarding || L.book}`,
     `Day 15: expectations call. ${L.review ? "Pick a time: " + L.review : "Rita sends you a time."}`, "",
+    `Uniforms: ${uniformAsk(d.brand)}`, "",
     `Your Crew Hub: ${L.hub}`, ...(L.expense ? [`Expense Report: ${L.expense}`] : []), `Job description: ${L.jd}`, "",
     "One address reaches the whole team: onboardsupport@dg3.com", "", "Rita Berenyi, Manager, People & Culture, Rita.Berenyi@dg3.com",
   ].join("\n");

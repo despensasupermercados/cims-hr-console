@@ -64,7 +64,14 @@ test("template: no predecessor on record drops the block; TDG's date says so; na
   const h = welcomeEmail(c).html;
   assert.doesNotMatch(h, /You take over from|TAKE OVER/i);
   assert.match(h, /Read the handover notes/);
-  assert.match(h, /ask the storekeeper for the Uniform Request Form/);
+  // Uniforms come from the shipboard manager by the brand's title, never the person handing over (Miguel, 19 Oct 2026).
+  assert.match(h, /Uniforms: ask your GSM \(Guest Services Manager\) for the Uniform Request Form\./);
+  assert.doesNotMatch(welcomeEmail(welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-19", links: LINKS })).html, /ask Mark for the Uniform|before Mark signs off/);
+  const cel = welcomeEmail(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], brand: "Celebrity" }], today: "2026-10-19", links: LINKS }));
+  assert.match(cel.html, /ask your DCM \(Digital Communication Manager\)/);
+  assert.match(cel.text, /Uniforms: ask your DCM \(Digital Communication Manager\) for the Uniform Request Form\./);
+  assert.match(welcomeEmail(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], brand: "Azamara" }], today: "2026-10-19", links: LINKS })).html, /ask your BOM \(Business Operations Manager\)/);
+  assert.match(welcomeEmail(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], brand: null }], today: "2026-10-19", links: LINKS })).html, /ask your shipboard manager for the Uniform Request Form/);
   assert.match(h, /Sign-off confirmed by TDG\./);
   assert.doesNotMatch(h, /<b>Ann<\/b>/);
   assert.match(h, /&lt;b&gt;Ann&lt;\/b&gt;/);
