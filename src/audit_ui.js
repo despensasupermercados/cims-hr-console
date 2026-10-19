@@ -255,6 +255,17 @@ span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)
 .sw{position:relative;width:46px;height:28px;border-radius:99px;background:var(--line2);flex:none;transition:background .15s}
 .sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .15s}
 .sw.on{background:var(--fill)}.sw.on::after{transform:translateX(18px)}
+.doors{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.door{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 14px;border:0;border-radius:var(--r);background:var(--card);box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line);text-align:left;cursor:pointer;color:inherit;min-width:0}
+.door .tx{flex:1;min-width:0;display:flex;flex-direction:column}.door .nm{font-weight:600;font-size:15px}.door .sm{font-size:12.5px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.door .sm.a{color:var(--amber);font-weight:600}
+.door:active{transform:scale(.98)}
+.rts{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px}
+.rt{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut)}
+.rq{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--greenbg);color:var(--green-d)}
+.rq.lo{background:var(--redbg);color:var(--red)}.rq.x,.rq.p{background:var(--bg);color:var(--ink2)}.rq.x{color:var(--mut)}
+.fu{border-top:1px solid var(--line)}.card>.fu:first-child{border-top:0}.empty>span{font-size:13px}
+.fubtn{display:flex;gap:8px;margin-top:12px}.fubtn .btn{min-height:44px;font-size:14.5px;flex:1}.fubtn .btn .ic{width:18px;height:18px}
+.btn.sure{background:var(--fill)}
 .tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 .tile{background:var(--card);border-radius:12px;box-shadow:0 0 0 1px var(--line);padding:12px 2px 10px;text-align:center;min-width:0}
 .tile b{display:block;font-family:var(--fh);font-weight:600;font-size:24px;line-height:1.1}
@@ -285,7 +296,7 @@ label.btn{position:relative}
 <script>
 (function () {
   "use strict";
-  var S = { me: null, today: null, ships: null, brand: "All", q: "", brief: {} };
+  var S = { me: null, today: null, ships: null, counts: null, hist: null, hf: "All", brand: "All", q: "", brief: {} };
   var IC = window.__IC || {};
   var $ = function (id) { return document.getElementById(id); };
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -372,7 +383,10 @@ label.btn{position:relative}
     });
     var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null && !s.last.test)); });
     var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
-    var h = '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b === "Royal Caribbean" ? "Royal" : b) + "</button>"; }).join("") + "</div>";
+    var c = S.counts, h = "";
+    if (c && !q) h += '<div class="doors"><button class="door" data-go="hist"><span class="sq">' + ic("clock-counter-clockwise") + '</span><span class="tx"><span class="nm">History</span><span class="sm">' + (c.filed ? c.filed + (c.filed === 1 ? " audit filed" : " audits filed") : "None filed yet") + "</span></span></button>"
+      + '<button class="door" data-go="fu"><span class="sq' + (c.openFollowups ? " a" : "") + '">' + ic("flag") + '</span><span class="tx"><span class="nm">Follow-ups</span><span class="sm' + (c.openFollowups ? " a" : "") + '">' + (c.openFollowups ? c.openFollowups + " open" : "None open") + "</span></span></button></div>";
+    h += '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b === "Royal Caribbean" ? "Royal" : b) + "</button>"; }).join("") + "</div>";
     if (open.length) {
       h += '<div class="sh">Open requests<span>' + open.length + "</span></div>";
       h += '<div class="card">' + open.map(function (s) { return shipRow(s, true); }).join("") + "</div>";
@@ -615,7 +629,7 @@ label.btn{position:relative}
     if (g.note) h += '<div class="feed"><div class="w">What needs to improve</div><div class="pl">' + esc(g.note) + "</div></div>";
     return h + "</div>";
   }
-  function reloadShips() { api("/api/audit/ships").then(function (r) { S.ships = r.ships; }).catch(function () {}); }
+  function reloadShips() { S.hist = null; api("/api/audit/ships").then(function (r) { S.ships = r.ships; S.counts = r.counts || S.counts; }).catch(function () {}); }
 
   /* ================= B · the audit on the ship (B1–B7), 19 Oct 2026 =================
      Seven steps, one per screen (docs/AUDIT_DESIGN.md Phase B, mock-up v12). The rules that hold Next and File are
@@ -880,7 +894,7 @@ label.btn{position:relative}
       '<i class="n">' + ic("minus") + "</i><span>Never to the crew.</span></div></div>";
     return h;
   };
-  function labelOf(k) { var all = []; AR.WORKSTATION.forEach(function (g) { all = all.concat(g.items); }); all = all.concat(AR.TOOLS); var x = all.filter(function (i) { return i.key === k; })[0]; return x ? x.label : k; }
+  function labelOf(k) { var all = []; AR.WORKSTATION.forEach(function (g) { all = all.concat(g.items); }); all = all.concat(AR.TOOLS, AR.PPE); var x = all.filter(function (i) { return i.key === k; })[0]; return x ? x.label : k; }
   function stepNo(key) { for (var i = 0; i < AR.STEPS.length; i++) if (AR.STEPS[i].key === key) return i + 1; return 7; }
   function sentence(t) { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); }
 
@@ -1033,6 +1047,117 @@ label.btn{position:relative}
     return h;
   }
 
+  /* ---------------- History · Follow-ups (19 Oct 2026; docs/AUDIT_DESIGN.md "History", W1's rail) ----------------
+     Every filed audit by ship, crew and date, and every follow-up with its state. The page reads what the filing wrote and
+     decides nothing. A follow-up closes from the list when it was done before the next visit; it says who closed it. */
+  function shipBrand(ship) { var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0]; return s ? brandOf(s) : ""; }
+  function byName(e) {
+    var s = String(e || ""), open = s.indexOf("(open site") >= 0;
+    s = s.replace(/\s*\(open site[^)]*\)/, "").split("@")[0];
+    var n = s.split(/[._]+/).filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join(" ");
+    return (n || "Someone") + (open ? " · open site" : "");
+  }
+  /* one rating as a square: 3 or below is the problem line everywhere in the audit (it needs a sentence, it is 0 on the
+     Score Card); the dispatch rating is Rita's, about the travel, never the specialist's, so it is never coloured */
+  function rq(label, v, plain) { return '<span class="rt"><b class="rq' + (v == null ? " x" : plain ? " p" : v <= 3 ? " lo" : "") + '">' + (v == null ? "–" : esc(v)) + "</b>" + esc(label) + "</span>"; }
+  function visitWhen(a) {
+    var o = String(a.openedAt || "").slice(0, 10), f = String(a.filedAt || "").slice(0, 10);
+    if (!o || o === f) return fmtD(f, true);
+    if (o.slice(0, 7) === f.slice(0, 7)) return MON[+o.slice(5, 7) - 1] + " " + +o.slice(8, 10) + "–" + +f.slice(8, 10) + ", " + esc(f.slice(0, 4));
+    return fmtD(o) + " – " + fmtD(f, true);
+  }
+  function loadHist() {
+    return api("/api/audit/history").then(function (r) {
+      S.hist = r;
+      S.counts = { filed: r.audits.length, openFollowups: r.followups.filter(function (f) { return f.status === "open"; }).length };
+      return r;
+    });
+  }
+  function historyView() {
+    top("History", "Every filed audit", "", "", true); hero(""); dock("");
+    $("main").innerHTML = S.hist ? "" : skel(4);
+    if (S.hist) historyList();
+    var at = S.cur;
+    loadHist().then(function () { if (S.cur === at) historyList(); }).catch(function (e) { if (S.cur === at && !S.hist) fail(e); });
+  }
+  function historyList() {
+    var H = S.hist, f = S.hf || "All";
+    if (!H.audits.length) { $("main").innerHTML = '<div class="card"><div class="empty">' + ic("clipboard-text") + "No audit filed yet.<span>An audit is filed from its request, once the crew's documents are in.</span></div></div>"; return; }
+    var list = H.audits.filter(function (a) {
+      if (f === "Follow-up open") return a.followups.open > 0;
+      return f === "All" || shipBrand(a.ship) === f;
+    });
+    var h = '<div class="chips">' + ["All", "Royal Caribbean", "Celebrity", "Azamara", "Follow-up open"].map(function (c) { return '<button class="chip' + (f === c ? " on" : "") + '" aria-pressed="' + (f === c) + '" data-hf="' + esc(c) + '">' + esc(c === "Royal Caribbean" ? "Royal" : c) + "</button>"; }).join("") + "</div>";
+    var span = list.length ? fmtD(list[list.length - 1].filedAt, true) + (list.length > 1 ? " → " + fmtD(list[0].filedAt, true) : "") : "";
+    h += '<div class="sh">' + (list.length === 1 ? "1 audit" : list.length + " audits") + "<span>" + span + "</span></div>";
+    if (!list.length) { $("main").innerHTML = h + '<div class="card"><div class="empty">' + ic("clipboard-text") + "No audit matches this filter.</div></div>"; return; }
+    h += '<div class="card">' + list.map(function (a) {
+      var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools) : null, tags = [];
+      var missTxt = miss == null ? "Graded before the audit had steps · nothing recorded on the desk or the tools"
+        : miss.length ? "Missing: " + miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? " (" + esc(AR.ordinal(t)) + " time)" : ""); }).join(" · ")
+        : "Nothing missing on the desk or the tools";
+      if (a.followups.open) tags.push('<span class="st a">' + ic("flag") + (a.followups.open === 1 ? "Follow-up open" : a.followups.open + " follow-ups open") + "</span>");
+      else if (a.followups.fixed) tags.push('<span class="st g">' + ic("flag") + "Follow-up fixed</span>");
+      if (a.photos) tags.push('<span class="st m">' + ic("camera") + a.photos + (a.photos === 1 ? " photo" : " photos") + "</span>");
+      return '<button class="row" data-go="q=' + esc(a.id) + '" style="align-items:flex-start"><div class="tx">'
+        + '<div class="mh"><div class="nm">' + esc(a.ship) + '</div><span class="st ' + (a.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + esc(a.score) + "/5</span></div>"
+        + '<div class="sm">' + (a.crew ? esc(a.crew) + " · " : "") + visitWhen(a) + "</div>"
+        + '<div class="rts">' + rq("Inventory", R.inventory) + rq("Technical", R.technical) + rq("Collaterals", R.collaterals) + rq("Overall", R.overall) + (R.dispatch != null ? rq("Dispatch", R.dispatch, true) : "") + "</div>"
+        + '<div class="sm" style="margin-top:6px">' + missTxt + "</div>"
+        + (tags.length ? '<div class="stl">' + tags.join("") + "</div>" : "")
+        + "</div>" + ic("caret-right", "go") + "</button>";
+    }).join("") + "</div>";
+    $("main").innerHTML = h;
+  }
+  function followupsView() {
+    top("Follow-ups", "Asked at an audit, open until done", "", "", true); hero(""); dock("");
+    $("main").innerHTML = S.hist ? "" : skel(3);
+    if (S.hist) followupsList();
+    var at = S.cur;
+    loadHist().then(function () { if (S.cur === at) followupsList(); }).catch(function (e) { if (S.cur === at && !S.hist) fail(e); });
+  }
+  function fuItem(f, today) {
+    var late = f.status === "open" && f.due && f.due < today, times = (f.carried || 0) + 1;
+    var pill = f.status === "fixed" ? '<span class="st g">' + ic("f:check-circle") + "Fixed</span>"
+      : times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : late ? '<span class="st r">Overdue</span>' : '<span class="st a">Open</span>';
+    var h = '<div class="pad fu"><div class="mh"><b>' + esc(f.text) + "</b>" + pill + "</div>"
+      + '<div class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : " · no date set") + "</div>"
+      + '<div class="sm">' + esc(f.ship) + (f.crew ? " · " + esc(f.crew) : "") + " · asked " + fmtD(f.createdAt, true) + "</div>";
+    if (f.status === "fixed") h += '<div class="sm">Fixed ' + fmtD(f.closedAt, true) + " by " + esc(byName(f.closedBy)) + (f.closedOnVisit ? " at the next audit" : " from this list") + "</div>";
+    h += '<div class="fubtn"><button class="btn ghost" data-go="q=' + esc(f.request) + '">' + ic("clipboard-text") + "Open the audit</button>"
+      + (f.status === "open" ? '<button class="btn" data-fix="' + esc(f.id) + '">' + ic("check") + "Mark fixed</button>" : "") + "</div>";
+    return h + "</div>";
+  }
+  function followupsList() {
+    var F = S.hist.followups, today = S.hist.today || S.today;
+    var open = F.filter(function (f) { return f.status === "open"; }).sort(function (a, b) {
+      var la = !!(a.due && a.due < today), lb = !!(b.due && b.due < today);
+      return (lb - la) || String(a.due || "9999").localeCompare(String(b.due || "9999")) || String(a.createdAt).localeCompare(String(b.createdAt));
+    });
+    var fixed = F.filter(function (f) { return f.status === "fixed"; }).sort(function (a, b) { return String(b.closedAt || "").localeCompare(String(a.closedAt || "")); });
+    var h = '<div class="sh">Open<span>' + open.length + "</span></div>";
+    h += open.length ? '<div class="card">' + open.map(function (f) { return fuItem(f, today); }).join("") + "</div>"
+      : '<div class="card"><div class="empty">' + ic("f:check-circle") + "Nothing open.<span>A follow-up is asked in the audit's last step, with an owner and a date.</span></div></div>";
+    if (fixed.length) h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("f:check-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">Fixed</div><div class="sm">' + fixed.length + " · newest first</div></div>" + ic("caret-right", "go") + "</summary>" + fixed.map(function (f) { return fuItem(f, today); }).join("") + "</details>";
+    $("main").innerHTML = h;
+  }
+  /* two taps: the first asks, the second closes (a follow-up closed by a stray thumb would never come back at the next visit) */
+  function fixFollowup(b) {
+    if (b.disabled) return;
+    var reset = function () { b.disabled = false; b.classList.remove("sure"); b.innerHTML = ic("check") + "Mark fixed"; };
+    if (!b.classList.contains("sure")) {
+      b.classList.add("sure"); b.innerHTML = ic("check") + "Tap again to confirm";
+      setTimeout(function () { if (b.isConnected && !b.disabled && b.classList.contains("sure")) reset(); }, 4000);
+      return;
+    }
+    b.disabled = true; b.innerHTML = "Saving…";
+    var at = S.cur;
+    post("/api/audit/followup/close", { id: b.getAttribute("data-fix") }).then(function (r) {
+      if (r.ok || r.error === "already_closed") { toast(r.ok ? "Marked fixed." : "It was already closed."); reloadShips(); if (S.cur === at) followupsView(); return; }
+      reset(); toast("Not saved: " + (r.error || "try again") + ".");
+    }).catch(function () { reset(); toast("No signal. Nothing was saved; try again."); });
+  }
+
   /* ---------------- router ---------------- */
   function go(h) { location.hash = h; }
   function route() {
@@ -1047,6 +1172,8 @@ label.btn{position:relative}
     if (h.indexOf("a=") === 0) { var p3 = h.slice(2).split("|"); lsSet("aud:s:" + p3[0], Number(p3[1]) || 1); return stepView(p3[0], p3[1]); }
     /* the 15 Oct grade screen is the audit's Ratings step now: an old link opens the audit */
     if (h.indexOf("g=") === 0) { location.replace("#a=" + h.slice(2) + "|1"); return; }
+    if (h === "hist") return historyView();
+    if (h === "fu") return followupsView();
     shipsView();
   }
   $("bk").innerHTML = ic("caret-left");
@@ -1057,6 +1184,10 @@ label.btn{position:relative}
     if (sp && S.cur && S.cur.indexOf("a=") === 0) { location.replace("#a=" + S.cur.slice(2).split("|")[0] + "|" + sp.getAttribute("data-step")); return; }
     var g = e.target.closest("[data-go]");
     if (g) { if (g.disabled) return; go(g.getAttribute("data-go")); return; }
+    var hf = e.target.closest("[data-hf]");
+    if (hf) { S.hf = hf.getAttribute("data-hf"); historyList(); return; }
+    var fx = e.target.closest("[data-fix]");
+    if (fx) { fixFollowup(fx); return; }
     var t = e.target.closest("[data-brand],[data-sc],[data-ship]");
     if (!t) return;
     /* a brand chip browses the brand: it clears a search left in the box ("qu" + Azamara showed only Quest, 15 Oct 2026) */
@@ -1071,8 +1202,8 @@ label.btn{position:relative}
   route();
   flushFilings();
   Promise.all([api("/api/me"), api("/api/audit/ships")]).then(function (r) {
-    S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships;
-    var h = location.hash.replace(/^#/, ""); if (!h) shipsList(); else if (h.indexOf("s=") === 0) route();
+    S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships; S.counts = r[1].counts || null;
+    var h = location.hash.replace(/^#/, ""); if (!h) shipsList(); else if (h.indexOf("s=") === 0) route(); else if (h === "hist" && S.hist) historyList();
   }).catch(fail);
 })();
 </script>
