@@ -418,3 +418,12 @@ export function hubGonePage() {
 <body><div class="r"><i></i><i></i></div><div class="t"><div class="w">CIMS<i></i></div></div><div class="c"><h1>This link is not active.</h1>
 <p>Ask Rita for your Crew Hub link: <a href="mailto:Rita.Berenyi@dg3.com">Rita.Berenyi@dg3.com</a></p></div></body></html>`;
 }
+
+// hub.cims.work with no personal link (Miguel, 19 Oct 2026: "still cant access hub.cims.work"): the bare domain served the
+// console's login. On the hub host every path but /hub/... is this page — the console is never served there.
+export const HUB_HOST = "hub.cims.work";
+export function hubHomePage() {
+  return hubGonePage().replace("<h1>This link is not active.</h1>", "<h1>Your CIMS Crew Hub</h1>")
+    .replace("<p>Ask Rita for your Crew Hub link: <a href=\"mailto:Rita.Berenyi@dg3.com\">Rita.Berenyi@dg3.com</a></p>",
+      "<p>Your own Crew Hub link is in your welcome-aboard email. It opens your page with no login: your paydays, pay and benefits, the bonus ladder, the Staff House and who to ask.</p><p>Lost the link? Ask Rita: <a href=\"mailto:Rita.Berenyi@dg3.com\">Rita.Berenyi@dg3.com</a></p><p><a href=\"/hub/expense.xlsx\">Download the Expense Report</a></p>");
+}
