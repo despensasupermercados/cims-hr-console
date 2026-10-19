@@ -620,6 +620,58 @@ export function installAuditRequest(deps) {
   const nameOf = (email) => String(email || "").split("@")[0].split(".").map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : "")).join(" ");
 
   /* ---------------------------------- dispatch ---------------------------------- */
+  // History (19 Oct 2026; docs/AUDIT_DESIGN.md "History" and W1's rail: History · Open follow-ups): every filed audit by
+  // ship, crew and date, and every follow-up with its state. It reads only what a filing wrote (the grade, the visit, its
+  // steps, its photos) and decides nothing; a TEST request is a rehearsal and is never listed. One wave (§12).
+  async function history(env) {
+    await ensureAudit(env);
+    const NOT_TEST = "COALESCE(r.test_mode, 0) = 0";
+    const [ev, fu, ph] = await Promise.all([
+      env.DB.prepare("SELECT e.request_id, e.ship, e.agency_id, e.r_inventory, e.r_technical, e.r_collaterals, e.r_overall, e.score, e.score_from, e.filed_by, e.filed_at, r.crew_name, v.opened_at, d.data_json FROM audit_eval e JOIN audit_request r ON r.id = e.request_id LEFT JOIN audit_visit v ON v.id = e.visit_id LEFT JOIN audit_visit_data d ON d.request_id = e.request_id WHERE " + NOT_TEST + " ORDER BY e.filed_at DESC LIMIT 500").all(),
+      env.DB.prepare("SELECT f.id, f.request_id, f.ship, f.agency_id, f.crew_name, f.owner, f.due, f.text, f.status, f.carried, f.created_by, f.created_at, f.closed_at, f.closed_by, f.closed_visit_id FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE " + NOT_TEST + " ORDER BY f.created_at DESC LIMIT 500").all(),
+      env.DB.prepare("SELECT request_id, COUNT(*) AS n FROM audit_file GROUP BY request_id").all().catch(() => ({ results: [] })),
+    ]);
+    const photos = new Map((ph.results || []).map((x) => [x.request_id, Number(x.n) || 0]));
+    const fuOf = {};
+    for (const f of fu.results || []) (fuOf[f.request_id] = fuOf[f.request_id] || []).push(f.status);
+    const audits = (ev.results || []).map((e) => {
+      const d = J(e.data_json, null), st = fuOf[e.request_id] || [];
+      const hw = (d && d.hw) || {}, crew = (d && d.crew) || {};
+      return {
+        id: e.request_id, ship: e.ship, sc: e.agency_id, crew: e.crew_name || null, filedAt: e.filed_at, openedAt: e.opened_at || null, filedBy: e.filed_by || null,
+        ratings: { inventory: e.r_inventory, technical: e.r_technical, collaterals: e.r_collaterals, overall: e.r_overall, dispatch: crew.dispatch != null ? crew.dispatch : null },
+        score: e.score, from: e.score_from,
+        // a grade filed on the 15 Oct screen has no steps: nothing to say about the desk or the tools, never "none missing"
+        steps: !!d,
+        missing: d ? { ws: (d.ws && d.ws.missing) || [], tools: (hw.tools && hw.tools.missing) || [], ppe: (crew.ppe && crew.ppe.missing) || [] } : null,
+        repeat: (d && d.repeat) || {},
+        photos: photos.get(e.request_id) || 0,
+        followups: { open: st.filter((x) => x === "open").length, fixed: st.filter((x) => x === "fixed").length },
+      };
+    });
+    const followups = (fu.results || []).map((f) => ({ id: f.id, request: f.request_id, ship: f.ship, sc: f.agency_id, crew: f.crew_name || null, owner: f.owner, due: f.due || null, text: f.text,
+      status: f.status, carried: Number(f.carried) || 0, createdAt: f.created_at, createdBy: f.created_by || null, closedAt: f.closed_at || null, closedBy: f.closed_by || null, closedOnVisit: !!f.closed_visit_id }));
+    return json({ today: now().slice(0, 10), audits, followups });
+  }
+
+  // A follow-up closed from the list: the person it was asked of did it before the next visit. The next visit's own
+  // Fixed / Still open is unchanged; either way a follow-up closes ONCE and says who closed it and when.
+  async function closeFollowup(request, env, session) {
+    let b = {};
+    try { b = await request.json(); } catch (e) { b = {}; }
+    const id = typeof (b && b.id) === "string" ? b.id.slice(0, 80) : "";
+    if (!id) return json({ ok: false, error: "id_required" }, 400);
+    await ensureAudit(env);
+    const f = await env.DB.prepare("SELECT f.id, f.status, f.ship, r.test_mode FROM audit_followup f LEFT JOIN audit_request r ON r.id = f.request_id WHERE f.id=?").bind(id).first();
+    if (!f || f.test_mode) return json({ ok: false, error: "not_found" }, 404);
+    if (f.status !== "open") return json({ ok: false, error: "already_closed" }, 409);
+    const by = session.open ? session.email + " (open site, no sign-in)" : session.email, at = now();
+    const r = await env.DB.prepare("UPDATE audit_followup SET status='fixed', closed_at=?, closed_by=? WHERE id=? AND status='open'").bind(at, by, id).run();
+    if (!(r && r.meta && r.meta.changes)) return json({ ok: false, error: "already_closed" }, 409);
+    await logActivity(env, session.email, "audit_followup_close", id + " " + f.ship + (session.open ? " (open site)" : ""));
+    return json({ ok: true, id, closedAt: at, closedBy: by });
+  }
+
   async function handle(p, request, env, url, session) {
     // the seafarer's page and its API: token only, never a session
     const pm = p.match(/^\/audit\/u\/([A-Za-z0-9_-]{16,64})$/);
@@ -658,6 +710,12 @@ export function installAuditRequest(deps) {
       if (p === "/api/audit/visit" && request.method === "GET") return visitView(env, url, session);
       if (p === "/api/audit/visit/photo" && request.method === "POST") return savePhoto(request, env, url, session);
       if (p === "/api/audit/visit/photo" && request.method === "GET") return servePhoto(env, url);
+      return json({ error: "not found" }, 404);
+    }
+    if (p === "/api/audit/history" || p === "/api/audit/followup/close") {
+      if (!session) return json({ error: "unauthorized" }, 401);
+      if (p === "/api/audit/history" && request.method === "GET") return history(env);
+      if (p === "/api/audit/followup/close" && request.method === "POST") return closeFollowup(request, env, session);
       return json({ error: "not found" }, 404);
     }
     return null;

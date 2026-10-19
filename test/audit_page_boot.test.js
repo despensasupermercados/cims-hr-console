@@ -57,3 +57,33 @@ test("the page script keeps one meaning per state key: the search text S.q is on
   for (const m of src.matchAll(/\bS\.q\s*=(?!=)\s*([^;]+);/g)) assert.match(m[1], /^(""|qi\.value)$/, "S.q = " + m[1]);
   assert.doesNotMatch(src, /\bS\.q\[/, "the photo queue is S.pq");
 });
+
+const HIST = { today: "2026-10-19", audits: [
+  { id: "ar_2", ship: "Oasis", sc: "SC-1", crew: "John Gorre", filedAt: "2026-10-14T18:00:00Z", openedAt: "2026-10-12T09:00:00Z", ratings: { inventory: 3, technical: 4, collaterals: 5, overall: 4, dispatch: 2 }, score: 4, from: "overall", steps: true, missing: { ws: ["sops"], tools: ["fiery_hdd"], ppe: ["shoes"] }, repeat: { sops: 2 }, photos: 2, followups: { open: 1, fixed: 0 } },
+  { id: "ar_1", ship: "Pursuit", sc: "SC-9", crew: "Kevin Jugao", filedAt: "2026-07-02T15:00:00Z", openedAt: null, ratings: { inventory: 4, technical: 4, collaterals: 4, overall: null, dispatch: null }, score: 4, from: "average", steps: false, missing: null, repeat: {}, photos: 0, followups: { open: 0, fixed: 0 } }],
+  followups: [
+  { id: "f1", request: "ar_2", ship: "Oasis", sc: "SC-1", crew: "John Gorre", owner: "Rolando", due: "2026-10-01", text: "Confirm the cyan line", status: "open", carried: 0, createdAt: "2026-10-14T18:00:00Z" },
+  { id: "f2", request: "ar_2", ship: "Oasis", sc: "SC-1", crew: "John Gorre", owner: "Ray", due: "2026-11-01", text: "Labels on the presses", status: "fixed", carried: 0, createdAt: "2026-10-14T18:00:00Z", closedAt: "2026-10-16T10:00:00Z", closedBy: "Dexter.Lawrence@dg3.com (open site, no sign-in)", closedOnVisit: false }] };
+
+test("History opens on every filed audit: the ratings, what was missing (2nd time), a grade with no steps said so", async () => {
+  const P = boot("#hist", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/history": HIST });
+  await settle();
+  assert.deepEqual(P.errors, []);
+  const main = P.$("main").innerHTML;
+  assert.match(main, /2 audits/); assert.match(main, /Oct 12–14, 2026/);
+  assert.match(main, /class="gq lo">3<\/b>Inventory/, "3 or below is the problem line");
+  assert.match(main, /class="gq p">2<\/b>Dispatch/, "the dispatch rating is Rita's, never coloured");
+  assert.match(main, /Missing: SOPs · ordering &amp; transfers \(2nd time\), 2-Fiery back-up HDD, Safety shoes/);
+  assert.match(main, /Graded before the audit had steps/);
+  assert.match(main, /data-go="q=ar_2"/, "a row opens its audit");
+});
+
+test("Follow-ups: the late one first, its owner and date, two buttons; the fixed one folded with who closed it", async () => {
+  const P = boot("#fu", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/history": HIST });
+  await settle();
+  assert.deepEqual(P.errors, []);
+  const main = P.$("main").innerHTML;
+  assert.match(main, /Confirm the cyan line<\/b><span class="st r">Overdue/);
+  assert.match(main, /data-fix="f1"/); assert.doesNotMatch(main, /data-fix="f2"/, "a fixed follow-up has nothing to close");
+  assert.match(main, /Fixed Oct 16, 2026 by Dexter Lawrence · open site from this list/);
+});

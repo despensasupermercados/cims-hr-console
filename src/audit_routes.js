@@ -66,9 +66,11 @@ export function installAudit(deps) {
   // A1 · Ships: who is aboard every hull (the board's ONE schedule, §10d), and when each was last asked for an audit.
   async function ships(env, session) {
     await ensureAudit(env);
-    const [board, reqs] = await Promise.all([
+    const [board, reqs, cnt] = await Promise.all([
       rotationSections(env),
       env.DB.prepare("SELECT r.id, r.ship, r.agency_id, r.crew_name, r.status, r.created_at, r.sent_at, r.due_at, r.overdue_at, r.complete_at, r.test_mode, e.score AS grade FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.status != 'cancelled' ORDER BY r.created_at DESC").all().catch(() => ({ results: [] })),
+      // the home's two doors (History · Follow-ups): how many audits are filed and how many follow-ups are open, TEST never
+      env.DB.prepare("SELECT (SELECT COUNT(*) FROM audit_eval e JOIN audit_request r ON r.id = e.request_id WHERE COALESCE(r.test_mode, 0) = 0) AS filed, (SELECT COUNT(*) FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE f.status = 'open' AND COALESCE(r.test_mode, 0) = 0) AS open_fu").first().catch(() => null),
     ]);
     const lastBy = {};
     for (const r of reqs.results || []) { const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r; }
@@ -82,7 +84,7 @@ export function installAudit(deps) {
       out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
-    return json({ today: TODAY(), auditor: session.email, ships: out });
+    return json({ today: TODAY(), auditor: session.email, ships: out, counts: cnt ? { filed: Number(cnt.filed) || 0, openFollowups: Number(cnt.open_fu) || 0 } : null });
   }
 
   // A2 · The briefing: the crew profile the console already builds (ONE wave inside apiCrewOne) folded to what an

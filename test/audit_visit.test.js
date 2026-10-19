@@ -387,3 +387,89 @@ test("P1: the profile's data wave reads the audits with the rest (§12), never a
   assert.match(wave, /FROM audit_followup WHERE agency_id=\?/);
   assert.match(one, /audits: auditRes\.results, auditOpen: auditOpenRes\.results, auditFollowups: auditFuRes\.results/);
 });
+
+/* ------------------------------------------------ History · Follow-ups ------------------------------------------------ */
+test("History: every filed audit, newest first, with what the filing wrote; a TEST request never; a 15 Oct grade says it has no steps", async () => {
+  const t = setup();
+  assert.deepEqual(await (await t.call("GET", "/api/audit/history")).json(), { today: new Date().toISOString().slice(0, 10), audits: [], followups: [] });
+  const id1 = await completeRequest(t, "SC-1");
+  const v1 = await (await t.call("GET", "/api/audit/visit?id=" + id1)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id1);
+  const d1v = cleanVisit(v1); d1v.ws.missing = ["sops"]; d1v.hw.tools.missing = ["fiery_hdd"]; d1v.crew.ppe.missing = ["shoes"]; d1v.crew.dispatch = 2;
+  d1v.ov.followup = { owner: "Ray", due: "2099-01-01", text: "Resend the SOPs folder" };
+  assert.equal((await t.call("POST", "/api/audit/visit/photo?id=" + id1 + "&step=inventory&k=phonekey01", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]), undefined, { "content-type": "image/jpeg" })).status, 200);
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: d1v })).json()).ok, true);
+  // a grade filed on the 15 Oct screen (no steps): listed, and said so, never "nothing missing"
+  const id2 = await completeRequest(t, "SC-2");
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id2, inventory: 3, technical: 3, collaterals: 4, note: "Counts from the printer, not the shelf." })).json()).ok, true);
+  t.db.prepare("UPDATE audit_eval SET filed_at=? WHERE request_id=?").run(new Date(Date.now() + 60e3).toISOString(), id2);
+  const H = await (await t.call("GET", "/api/audit/history")).json();
+  assert.deepEqual(H.audits.map((a) => a.id), [id2, id1], "newest first");
+  const a1 = H.audits[1];
+  assert.deepEqual([a1.ship, a1.sc, a1.crew, a1.score, a1.from, a1.steps, a1.photos], ["Oasis", "SC-1", "John Gorre", 4, "average", true, 1]);
+  assert.deepEqual(a1.ratings, { inventory: 4, technical: 5, collaterals: 5, overall: null, dispatch: 2 }, "the dispatch rating is shown, it was never in the score");
+  assert.deepEqual(a1.missing, { ws: ["sops"], tools: ["fiery_hdd"], ppe: ["shoes"] });
+  assert.deepEqual(a1.followups, { open: 1, fixed: 0 });
+  assert.ok(a1.openedAt && a1.openedAt < a1.filedAt, "the visit's two stamps");
+  const a2 = H.audits[0];
+  assert.deepEqual([a2.steps, a2.missing, a2.score, a2.ratings.dispatch], [false, null, 3, null]);
+  assert.deepEqual(H.followups.map((f) => [f.text, f.owner, f.status, f.ship, f.crew, f.carried, f.request]), [["Resend the SOPs folder", "Ray", "open", "Oasis", "John Gorre", 0, id1]]);
+  // a request turned into a TEST one is a rehearsal: off the history, its follow-up too
+  t.db.prepare("UPDATE audit_request SET test_mode=1 WHERE id=?").run(id1);
+  const H2 = await (await t.call("GET", "/api/audit/history")).json();
+  assert.deepEqual([H2.audits.map((a) => a.id), H2.followups.length], [[id2], 0]);
+});
+
+test("Follow-ups: closed from the list once, said who and when; the next audit no longer carries it; a TEST one is not found", async () => {
+  const t = setup();
+  const id1 = await completeRequest(t, "SC-1");
+  const v1 = await (await t.call("GET", "/api/audit/visit?id=" + id1)).json();
+  const d1v = cleanVisit(v1); d1v.ov.followup = { owner: "Rolando", due: "2099-11-15", text: "MFD refresher" };
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id1);
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: d1v })).json()).ok, true);
+  const fid = t.db.prepare("SELECT id FROM audit_followup").get().id;
+  assert.equal((await t.call("POST", "/api/audit/followup/close", {})).status, 400);
+  assert.equal((await t.call("POST", "/api/audit/followup/close", { id: "nope" })).status, 404);
+  assert.equal((await t.call("GET", "/api/audit/followup/close")).status, 404, "a close is a POST");
+  assert.equal((await t.call("POST", "/api/audit/followup/close", { id: fid }, null)).status, 401, "a session (open mode supplies one)");
+  const ok = await (await t.call("POST", "/api/audit/followup/close", { id: fid }, { email: "Dexter.Lawrence@dg3.com", open: true })).json();
+  assert.deepEqual([ok.ok, ok.closedBy], [true, "Dexter.Lawrence@dg3.com (open site, no sign-in)"]);
+  assert.deepEqual({ ...t.db.prepare("SELECT status, closed_by, closed_visit_id FROM audit_followup").get() }, { status: "fixed", closed_by: "Dexter.Lawrence@dg3.com (open site, no sign-in)", closed_visit_id: null });
+  const again = await t.call("POST", "/api/audit/followup/close", { id: fid });
+  assert.deepEqual([again.status, (await again.json()).error], [409, "already_closed"], "closed once");
+  const H = await (await t.call("GET", "/api/audit/history")).json();
+  assert.deepEqual([H.followups[0].status, H.followups[0].closedOnVisit, H.audits[0].followups], ["fixed", false, { open: 0, fixed: 1 }]);
+  const id2 = await completeRequest(t, "SC-2");
+  assert.deepEqual((await (await t.call("GET", "/api/audit/visit?id=" + id2)).json()).followups, [], "the next audit of the ship no longer carries it");
+  // a follow-up on a TEST request (a rehearsal) cannot be reached from the list
+  t.db.prepare("UPDATE audit_followup SET status='open' WHERE id=?").run(fid);
+  t.db.prepare("UPDATE audit_request SET test_mode=1 WHERE id=?").run(id1);
+  assert.equal((await t.call("POST", "/api/audit/followup/close", { id: fid })).status, 404);
+});
+
+test("the home's two doors: the ships route counts the filed audits and the open follow-ups, TEST never (one wave)", async () => {
+  const { installAudit } = await import("../src/audit_routes.js");
+  const t = setup();
+  const H = installAudit({ json, htmlResponse: (b) => new Response(b), ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => BOARD, TODAY: () => "2026-10-19",
+    crewProfile: async () => null, sendViaMailer: async () => ({ ok: true }) });
+  const ships = async () => { const u = new URL("https://audit.cims.work/api/audit/ships"); return (await H(u.pathname, new Request(u), t.env, u, { email: "d@dg3.com" })).json(); };
+  assert.deepEqual((await ships()).counts, { filed: 0, openFollowups: 0 });
+  const id1 = await completeRequest(t, "SC-1");
+  const v1 = await (await t.call("GET", "/api/audit/visit?id=" + id1)).json();
+  const d1v = cleanVisit(v1); d1v.ov.followup = { owner: "Ray", due: "2099-01-01", text: "Labels on the presses" };
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id1);
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: d1v })).json()).ok, true);
+  assert.deepEqual((await ships()).counts, { filed: 1, openFollowups: 1 });
+  t.db.prepare("UPDATE audit_request SET test_mode=1 WHERE id=?").run(id1);
+  assert.deepEqual((await ships()).counts, { filed: 0, openFollowups: 0 });
+  const src = readFileSync(new URL("../src/audit_routes.js", import.meta.url), "utf8");
+  const body = src.slice(src.indexOf("async function ships("), src.indexOf("async function brief("));
+  assert.equal((body.match(/await /g) || []).length, 2, "ensureAudit, then ONE Promise.all (§12)");
+});
+
+test("the page: History and Follow-ups are routes, the doors are on the home, a close takes two taps", () => {
+  const src = readFileSync(new URL("../src/audit_ui.js", import.meta.url), "utf8");
+  for (const s of ['if (h === "hist") return historyView();', 'if (h === "fu") return followupsView();', 'data-go="hist"', 'data-go="fu"', '"/api/audit/followup/close"', 'b.classList.contains("sure")'])
+    assert.ok(src.includes(s), s);
+  return import("../src/audit_ui.js").then((m) => { new Function(m.AUDIT_HTML.split("<script>").slice(-1)[0].split("</script>")[0]); });
+});
