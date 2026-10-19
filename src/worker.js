@@ -333,6 +333,7 @@ export default {
         if (p === "/api/billing/month") return apiBillingMonth(env);
         if (p === "/api/travel")     return apiTravel(env, url);
         if (p === "/api/travel/import" && request.method === "POST") return apiTravelImport(request, env, session);
+        if (p === "/api/travel/ack" && request.method === "POST") return apiTravelAck(request, env, session);
         if (p === "/api/sga")        return apiSga(env);
         if (p === "/api/sga/import" && request.method === "POST") return apiSgaImport(request, env, session);
         if (p === "/api/sga/archive" && request.method === "POST") return apiSgaArchive(request, env, session);
@@ -1493,8 +1494,11 @@ async function ensureTravelImpl(env) {
 }
 // The ledger with every row placed on the roster (src/travel_match.js): agency_id, how it matched, the cruise line.
 // One wave (§12): the rows, the years and the roster leave together.
+// Needs a decision · acknowledged (19 Oct 2026, migrations/0036): one row per fact Rita has seen; the key carries the figure.
+// Its own guard, memoized like the rest (§12), so the travel table's cold-start wave stays as test/ensure_travel.test.js pins it.
+const ensureTravelAck = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_ack (key TEXT PRIMARY KEY, label TEXT, ack_by TEXT, ack_at TEXT NOT NULL)").run(); });
 async function apiTravel(env, url) {
-  await ensureTravel(env);
+  await Promise.all([ensureTravel(env), ensureTravelAck(env).catch(() => null)]);
   const year = url.searchParams.get("year"), kind = url.searchParams.get("kind");
   let sql = "SELECT year,month,leg,kind,crew_name,ship,air,hotel,medical,visa,food,transport,other,total FROM travel_expense";
   const where = [], bind = [];
@@ -1502,16 +1506,32 @@ async function apiTravel(env, url) {
   if (kind) { where.push("kind=?"); bind.push(kind); }
   if (where.length) sql += " WHERE " + where.join(" AND ");
   sql += " ORDER BY year DESC, month, crew_name";
-  const [rowsRes, yearsRes, crewRes] = await Promise.all([
+  const [rowsRes, yearsRes, crewRes, ackRes] = await Promise.all([
     env.DB.prepare(sql).bind(...bind).all(),
     env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
+    env.DB.prepare("SELECT key, label, ack_by, ack_at FROM travel_ack ORDER BY ack_at DESC").all().catch(() => ({ results: [] })),
   ]);
   const records = annotateTravel(rowsRes.results, crewRes.results);
   const years = yearsRes.results.map(r => r.year);
   const today = TODAY(); // the DATA basis (UTC), like the dashboard — test/date_basis.test.js
   const closed = Object.fromEntries(years.map((y) => [y, closedMonths(today, y)]));
-  return json({ years, today, closed, budgetMo: TRAVEL_BUDGET_MO, summary: travelSummarize(records), records, unmatched: unmatchedTravel(records) });
+  return json({ years, today, closed, budgetMo: TRAVEL_BUDGET_MO, summary: travelSummarize(records), records, unmatched: unmatchedTravel(records), acks: ackRes.results || [] });
+}
+// Needs a decision · Acknowledge / Undo (Miguel, 19 Oct 2026: "once acknowledge .. they should disappear"). The key names the
+// fact AND its figure (the page builds it), so a changed number is a new key and the row comes back. Audited. Not money (§1).
+async function apiTravelAck(request, env, session) {
+  await ensureTravelAck(env);
+  const b = await request.json().catch(() => ({}));
+  const key = typeof b.key === "string" ? b.key.trim() : "";
+  if (!key || key.length > 200) return json({ error: "key_required" }, 400);
+  const by = (session && session.email) || "?";
+  if (b.undo) await env.DB.prepare("DELETE FROM travel_ack WHERE key=?").bind(key).run();
+  else await env.DB.prepare("INSERT OR REPLACE INTO travel_ack (key, label, ack_by, ack_at) VALUES (?,?,?,?)")
+    .bind(key, String(b.label || "").slice(0, 300), by, new Date().toISOString()).run();
+  await logActivity(env, by, b.undo ? "travel_ack_undo" : "travel_ack", JSON.stringify({ key, label: String(b.label || "").slice(0, 300) }));
+  const acks = (await env.DB.prepare("SELECT key, label, ack_by, ack_at FROM travel_ack ORDER BY ack_at DESC").all()).results || [];
+  return json({ ok: true, acks });
 }
 async function apiTravelImport(request, env, session) {
   await ensureTravel(env);
@@ -4507,6 +4527,14 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
 .tvdi>i{width:8px;height:8px;border-radius:50%}
 .tvdi .t{font-size:13.5px;font-weight:600;color:var(--ink)}
 .tvdi .w{font-size:12.5px;color:var(--mut);margin-top:2px;line-height:1.4}
+.tvacts{display:flex;align-items:center;gap:2px;flex-wrap:wrap;justify-content:flex-end}
+.tvack{all:unset;cursor:pointer;font-size:12px;font-weight:600;color:var(--mut);white-space:nowrap;padding:6px 10px;border-radius:9px;border:1px solid var(--line-2)}
+.tvack:hover{color:var(--ink);border-color:var(--mut)}
+.tvacked{margin-top:8px;border-top:1px solid #F0F3F7;padding-top:8px}
+.tvackt{all:unset;cursor:pointer;font-size:12px;color:var(--mut);font-weight:600}
+.tvackl{display:flex;flex-direction:column;margin-top:4px}
+.tvacki{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:6px 0;font-size:12.5px;color:var(--mut)}
+.tvacki .t{text-decoration:line-through;text-decoration-color:#C9D1DC}
 .tvgo{all:unset;cursor:pointer;font-size:12.5px;font-weight:700;color:var(--royal);white-space:nowrap;padding:7px 10px;border-radius:9px}
 .tvgo:hover{background:#EEF4FC}.tvgo:focus-visible{outline:2px solid var(--royal)}
 .tvok{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13.5px;color:#1F6B3A;font-weight:600}
@@ -6748,10 +6776,10 @@ var TV_GAP_MIN=150; // a bill-vs-workbook gap smaller than this is not a decisio
 function tvDecisions(ctx){
   var out=[],sc=ctx.sc,LY=ctx.LY,PY=ctx.PY,P=ctx.P,cat=ctx.cat;
   // 1. a closed month over the $15,000 (the budgeted view only: crew travel, every category, every cruise line)
-  if(ctx.budgeted){for(var m=1;m<=P.lastMo;m++){if(P.mo&&m!==P.mo)continue;var a=tSum(sc,LY,[m],null);if(a>TBUD)out.push({sev:'crit',t:TMN[m]+' ran '+usd0(a-TBUD)+' over the '+usd0(TBUD)+' budget',w:usd0(a)+' of crew travel in '+TMN[m]+' '+LY+'.',go:'tvGo(&quot;month&quot;,'+m+')',gl:'Open '+TMN[m]});}}
+  if(ctx.budgeted){for(var m=1;m<=P.lastMo;m++){if(P.mo&&m!==P.mo)continue;var a=tSum(sc,LY,[m],null);if(a>TBUD)out.push({k:'over:'+LY+'-'+m+':'+Math.round(a),sev:'crit',t:TMN[m]+' ran '+usd0(a-TBUD)+' over the '+usd0(TBUD)+' budget',w:usd0(a)+' of crew travel in '+TMN[m]+' '+LY+'.',go:'tvGo(&quot;month&quot;,'+m+')',gl:'Open '+TMN[m]});}}
   // 2. the category that grew most against last year's same months (only when every category is shown)
   if(!cat&&ctx.hasPY){var best=null;TCATS.forEach(function(c){var l=tSum(sc,LY,P.months,c),p=tSum(sc,PY,P.months,c),d=l-p;if(p>0&&d>=1000&&d/p>=0.2&&(!best||d>best.d))best={c:c,l:l,p:p,d:d};});
-    if(best)out.push({sev:'warn',t:TCATLAB[best.c]+' is up '+Math.round(best.d/best.p*100)+'% on '+PY,w:usd0(best.l)+' against '+usd0(best.p)+' in '+P.span+' '+PY+' · '+usd0(best.d)+' more.',go:'tvGo(&quot;cat&quot;,&quot;'+best.c+'&quot;)',gl:'See '+TCATLAB[best.c]});}
+    if(best)out.push({k:'grow:'+LY+':'+P.span+':'+best.c+':'+Math.round(best.d),sev:'warn',t:TCATLAB[best.c]+' is up '+Math.round(best.d/best.p*100)+'% on '+PY,w:usd0(best.l)+' against '+usd0(best.p)+' in '+P.span+' '+PY+' · '+usd0(best.d)+' more.',go:'tvGo(&quot;cat&quot;,&quot;'+best.c+'&quot;)',gl:'See '+TCATLAB[best.c]});}
   // 3. TDG's bill against the workbook (crew view, every cruise line): ONE net gap per category over the months the bill
   // covers (Miguel, 17 Oct 2026: "Net per year") — a charge typed into a neighbouring month cancels out here; each month
   // stays in the comparison fold. A chosen month is that month alone.
@@ -6760,9 +6788,9 @@ function tvDecisions(ctx){
     var bm=B.months,spanB=bm.length?(bm.length===1?TMN[bm[0]]:TMN[bm[0]]+'–'+TMN[bm[bm.length-1]]):'';
     TV_BILL_CATS.forEach(function(c){if(cat&&c[0]!==cat)return;var s=0,w=0,off=0;bm.forEach(function(m){var sm=B.sum(m,c[0]),wm=wbOf(m,c[0]);s+=sm;w+=wm;if(Math.abs(wm-sm)>=TV_GAP_MIN)off++;});var d=w-s;if(Math.abs(d)>=TV_GAP_MIN)gaps.push({c:c[1],d:d,s:s,w:w,off:off});});
     gaps.sort(function(a,b){return Math.abs(b.d)-Math.abs(a.d);});
-    gaps.forEach(function(g){out.push({sev:g.d<0?'crit':'warn',t:g.c+' · '+(bm.length===1?TMN[bm[0]]+' '+LY:spanB+' '+LY)+': '+(g.d<0?'TDG billed '+usd0(-g.d)+' the workbook does not have':'the workbook has '+usd0(g.d)+' TDG did not bill'),w:'Bill '+usd0(g.s)+' · workbook '+usd0(g.w)+(bm.length>1?' over the '+bm.length+' months on the bill ('+g.off+' differ'+(g.off===1?'s':'')+' by '+usd0(TV_GAP_MIN)+'+)':'')+'. '+(g.d<0?'A TDG charge nobody typed: ask TDG what it is, or add it to the workbook.':'Paid by DG3 directly, or not billed yet: check with Rita’s receipts.'),go:'tvOpen(&quot;tvsga&quot;)',gl:'Compare'});});
+    gaps.forEach(function(g){out.push({k:'gap:'+LY+':'+(bm.length===1?bm[0]:spanB)+':'+g.c+':'+Math.round(g.d),sev:g.d<0?'crit':'warn',t:g.c+' · '+(bm.length===1?TMN[bm[0]]+' '+LY:spanB+' '+LY)+': '+(g.d<0?'TDG billed '+usd0(-g.d)+' the workbook does not have':'the workbook has '+usd0(g.d)+' TDG did not bill'),w:'Bill '+usd0(g.s)+' · workbook '+usd0(g.w)+(bm.length>1?' over the '+bm.length+' months on the bill ('+g.off+' differ'+(g.off===1?'s':'')+' by '+usd0(TV_GAP_MIN)+'+)':'')+'. '+(g.d<0?'A TDG charge nobody typed: ask TDG what it is, or add it to the workbook.':'Paid by DG3 directly, or not billed yet: check with Rita’s receipts.'),go:'tvOpen(&quot;tvsga&quot;)',gl:'Compare'});});
     // a closed month of the year with workbook spend but no bill on file
-    var billed=new Set(B.months);for(var mm=1;mm<=P.lastMo;mm++){if(P.mo&&mm!==P.mo)continue;if(!billed.has(mm)&&tSum(sc,LY,[mm],null)>0&&((SGA.files||[]).length))out.push({sev:'info',t:'No TDG bill on file for '+TMN[mm]+' '+LY,w:'Finance sends it to sga@cims.work once a month; until then the workbook is the only number.',go:'',gl:''});}
+    var billed=new Set(B.months);for(var mm=1;mm<=P.lastMo;mm++){if(P.mo&&mm!==P.mo)continue;if(!billed.has(mm)&&tSum(sc,LY,[mm],null)>0&&((SGA.files||[]).length))out.push({k:'nobill:'+LY+'-'+mm,sev:'info',t:'No TDG bill on file for '+TMN[mm]+' '+LY,w:'Finance sends it to sga@cims.work once a month; until then the workbook is the only number.',go:'',gl:''});}
   }
   // 0. a bill the inbox HELD (Miguel, 17 Oct 2026: "Hold it for Rita"): its lines do not add up to TDG's GRAND TOTAL, so it
   // loaded nothing. Named in every view of its year until a bill for that month is loaded after it.
@@ -6774,15 +6802,31 @@ function tvDecisions(ctx){
   });
   // 4. names the roster cannot place: their spend never reaches a profile
   var un=(TRV.unmatched||[]).filter(function(u){return u.years.indexOf(LY)>=0;});
-  if(un.length&&TF.kind!=='shoreside'){var ut=un.reduce(function(a,u){return a+(+u.total||0);},0);out.push({sev:'warn',t:un.length+' name'+(un.length===1?'':'s')+' the crew registry cannot place',w:usd0(ut)+' that never reaches a profile. Fix the spelling in the workbook and re-upload, or leave the NCL preps as they are.',go:'tvOpen(&quot;tvnames&quot;)',gl:'See names'});}
+  if(un.length&&TF.kind!=='shoreside'){var ut=un.reduce(function(a,u){return a+(+u.total||0);},0);out.push({k:'names:'+LY+':'+un.length+':'+Math.round(ut),sev:'warn',t:un.length+' name'+(un.length===1?'':'s')+' the crew registry cannot place',w:usd0(ut)+' that never reaches a profile. Fix the spelling in the workbook and re-upload, or leave the NCL preps as they are.',go:'tvOpen(&quot;tvnames&quot;)',gl:'See names'});}
   // 5. single movements far above the usual
-  if(ctx.outs.length)out.push({sev:'info',t:ctx.outs.length+' single movement'+(ctx.outs.length===1?'':'s')+' above '+usd0(ctx.med*2.5),w:'Two and a half times the usual '+(cat?TCATLAB[cat].toLowerCase()+' ':'')+'movement ('+usd0(ctx.med)+'). Worth a look before the next booking.',go:'tvOpen(&quot;tvanom&quot;)',gl:'Review'});
+  if(ctx.outs.length)out.push({k:'outl:'+LY+':'+P.span+':'+(cat||'all')+':'+ctx.outs.length+':'+Math.round(ctx.med),sev:'info',t:ctx.outs.length+' single movement'+(ctx.outs.length===1?'':'s')+' above '+usd0(ctx.med*2.5),w:'Two and a half times the usual '+(cat?TCATLAB[cat].toLowerCase()+' ':'')+'movement ('+usd0(ctx.med)+'). Worth a look before the next booking.',go:'tvOpen(&quot;tvanom&quot;)',gl:'Review'});
   var sevO={crit:0,warn:1,info:2};out.sort(function(a,b){return sevO[a.sev]-sevO[b.sev];});
+  // Acknowledged (Miguel, 19 Oct 2026: "once acknowledge .. they should disappear"): a row whose key is on travel_ack is hidden;
+  // the key carries the figure, so a changed number comes back. A HELD bill has no key: it loads nothing until Rita loads it.
+  var AK={};(TRV.acks||[]).forEach(function(a){AK[a.key]=a;});
+  var acked=out.filter(function(d){return d.k&&AK[d.k];}).map(function(d){return Object.assign({},d,{ack:AK[d.k]});});
+  out=out.filter(function(d){return !(d.k&&AK[d.k]);});
+  TVDEC=out.concat(acked);
   var COL={crit:'#D92D20',warn:'#E8A13A',info:'#9FB0C6'};
-  var h='<div class=tvcard><div class=tvh>Needs a decision <small>'+(out.length?out.length+' item'+(out.length===1?'':'s'):'')+'</small></div>';
-  if(!out.length)return h+'<div class=tvok><i></i>Nothing needs a decision in '+P.span+' '+LY+'.</div></div>';
-  h+='<div class=tvdec>'+out.map(function(d){return '<div class=tvdi><i style="background:'+COL[d.sev]+'"></i><div><div class=t>'+escHtml(d.t)+'</div><div class=w>'+escHtml(d.w)+'</div></div>'+(d.go?'<button class=tvgo onclick="'+d.go+'">'+escHtml(d.gl)+' →</button>':'<span></span>')+'</div>';}).join('')+'</div></div>';
+  var h='<div class=tvcard id=tvdeccard><div class=tvh>Needs a decision <small>'+(out.length?out.length+' item'+(out.length===1?'':'s'):'')+'</small></div>';
+  var ackBox=acked.length?'<div class=tvacked><button class=tvackt onclick="TVACKOPEN=!TVACKOPEN;paintTravel()">'+acked.length+' acknowledged · '+(TVACKOPEN?'hide':'show')+'</button>'+
+    (TVACKOPEN?'<div class=tvackl>'+acked.map(function(d,j){return '<div class=tvacki><span class=t>'+escHtml(d.t)+'</span><span class=b>'+escHtml(String(d.ack.ack_by||'').split('@')[0])+' · '+fmtDateS(String(d.ack.ack_at||'').slice(0,10))+'</span><button class=tvgo onclick="tvAck('+(out.length+j)+',true)">Undo</button></div>';}).join('')+'</div>':'')+'</div>':'';
+  if(!out.length)return h+'<div class=tvok><i></i>Nothing needs a decision in '+P.span+' '+LY+'.</div>'+ackBox+'</div>';
+  h+='<div class=tvdec>'+out.map(function(d,i){return '<div class=tvdi><i style="background:'+COL[d.sev]+'"></i><div><div class=t>'+escHtml(d.t)+'</div><div class=w>'+escHtml(d.w)+'</div></div><span class=tvacts>'+(d.go?'<button class=tvgo onclick="'+d.go+'">'+escHtml(d.gl)+' →</button>':'')+(d.k?'<button class=tvack onclick="tvAck('+i+')" title="Seen and handled: hide it until the number changes">Acknowledge</button>':'')+'</span></div>';}).join('')+'</div>'+ackBox+'</div>';
   return h;
+}
+var TVDEC=[],TVACKOPEN=false;
+async function tvAck(i,undo){
+  var d=TVDEC[i];if(!d||!d.k)return;
+  try{var r=await (await fetch('/api/travel/ack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:d.k,label:d.t,undo:!!undo})})).json();
+    if(!r||!r.ok)throw new Error((r&&r.error)||'not saved');
+    TRV.acks=r.acks;var c=API_CACHE['/api/travel'];if(c&&c.data)c.data.acks=r.acks;paintTravel();
+  }catch(e){alert('Could not save: '+e.message);}
 }
 function tvInitials(s){var p=String(s||'').replace(/[^A-Za-zÀ-ÿ ,]/g,' ').split(/[ ,]+/).filter(Boolean);return ((p[0]||'?')[0]+((p[1]||'')[0]||'')).toUpperCase();}
 function paintTravel(){
@@ -7736,7 +7780,7 @@ async function renderRotation(){
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
-    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome <input type=checkbox id="welToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span></div></div>'
     +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'

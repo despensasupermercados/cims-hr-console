@@ -191,3 +191,28 @@ test("Needs a decision names a bill the inbox HELD (Miguel, 17 Oct 2026: \"Hold 
   p.run("TF.kind='crew';TF.year='2025';paintTravel()");
   assert.doesNotMatch(dec(p.body()), /is held/, "another year does not carry it");
 });
+
+test("Acknowledge hides a decision for everyone until its number changes (Miguel, 19 Oct 2026: \"once acknowledge .. they should disappear\")", async () => {
+  const p = await openTravel();
+  const dec = (b) => b.slice(b.indexOf("Needs a decision"), b.indexOf("Month by month"));
+  let d = dec(p.body());
+  assert.match(d, /Aug ran \$2,000 over the \$15,000 budget/);
+  assert.match(d, /class=tvack onclick="tvAck\(\d+\)"[^>]*>Acknowledge</, "every keyed row carries Acknowledge");
+  const i = p.run("TVDEC.findIndex(function(x){return /^Aug ran/.test(x.t);})");
+  const key = p.run("TVDEC[" + i + "].k");
+  assert.equal(key, "over:2026-8:17000", "the key names the fact AND its figure");
+  p.run("tvAck(" + i + ")"); await tick();
+  assert.ok(p.pending["/api/travel/ack"], "Acknowledge posts to the server: shared by Rita and Miguel, not one browser");
+  p.pending["/api/travel/ack"]({ ok: true, acks: [{ key, label: "Aug ran $2,000 over the $15,000 budget", ack_by: "rita@dg3.com", ack_at: "2026-10-19T10:00:00Z" }] }); await tick();
+  d = dec(p.body());
+  assert.doesNotMatch(d, /<div class=t>Aug ran/, "an acknowledged row leaves the list");
+  assert.match(d, /1 acknowledged · show/);
+  p.run("TVACKOPEN=true;paintTravel()");
+  d = dec(p.body());
+  assert.match(d, /class=tvacki><span class=t>Aug ran \$2,000 over the \$15,000 budget<\/span><span class=b>rita · Oct 19, 2026<\/span><button class=tvgo onclick="tvAck\(\d+,true\)">Undo/);
+  // the same fact with another number (a corrected workbook) is a new key: it comes back
+  p.run("TRV.acks=[{key:'over:2026-8:16500',label:'x',ack_by:'rita@dg3.com',ack_at:'2026-10-19T10:00:00Z'}];paintTravel()");
+  assert.match(dec(p.body()), /<div class=t>Aug ran \$2,000 over/, "a changed figure is not the fact Rita acknowledged");
+  // a held bill is never acknowledged away: it loaded nothing until Rita loads it
+  assert.doesNotMatch(fn("tvDecisions"), /out\.push\(\{k:[^}]*is held/);
+});

@@ -882,7 +882,17 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   the comparison fold), the category up most on last year
   (≥ 20% and ≥ $1,000), a closed month with spend and no bill on file, the names the roster cannot place, single movements
   above 2.5× the usual — each says what it means and opens the place that holds it (`tvGo` sets one filter, `tvOpen`
-  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". Then Month by month (`tBars`),
+  opens a fold); it settles nothing (§6); none → "Nothing needs a decision in <period>". **Acknowledge** (Miguel, 19 Oct 2026: "once acknowledge
+  .. they should disappear"): every row but a HELD bill carries Acknowledge; the row leaves the list for everyone
+  (`travel_ack`, migrations/0036, its own memoized guard `ensureTravelAck`; `POST /api/travel/ack` with Undo, audited;
+  `/api/travel` returns `acks` in its one wave). The key names the fact AND its figure (`over:2026-8:15655`,
+  `gap:2026:Jan–Sep:Air:-1420`), so a changed number is a new fact and comes back; "N acknowledged · show" lists them struck
+  through with who, when and Undo. A held bill loaded nothing, so it stays until Rita loads it. **Rita imports nothing for the
+  Travel tab** (Miguel, same day: "I don't want Rita to be importing anything, since we already import everything from the TDG
+  console"): her two training groups (#1 the centre, #2 per person) are NOT built — TDG's workbook carries the training cost by
+  month and category only (TRAINREL: rental, utilities, hotel, planefare, other), no names, and its one HOTEL column mixes the
+  trainees' hotel with the team's; 2026 total $28,324.15 = her $28,323.53. Do not re-propose the split unless TDG's file
+  gains the names. Pinned by `test/travel_filters.test.js`, `test/travel_ack.test.js`. Then Month by month (`tBars`),
   Where it goes (bars, last year pale, click = that category) beside Who (top 8, initials, click = their history), and three
   folds: TDG's bill against the workbook (its summary says the year's bill and workbook totals; `sgaBillOf` is the ONE
   definition of the bill per month, read by the table and the decisions), the names the roster cannot place (the year
@@ -996,7 +1006,7 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   names the recipients, then one confirm. The **daily run** (`_welcome.run` in `scheduled`, **07:00 Miami time** — `WELCOME_TZ` America/New_York,
   `WELCOME_HOUR`; Miguel, 19 Oct 2026: "the same day that the crew sign on .. 7am miami time") welcomes contracts that signed on today, catching up `WELCOME_CATCHUP_DAYS` = 2 for a missed run; never a training
   visit; a mail that did not go is not recorded, so the next morning retries; failures land in the activity log
-  (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome"** (`/api/hub/welcome/auto`, `welcome_auto_enabled`
+  (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome email"** (Keyman tab, left rail, under the filters; renamed 19 Oct 2026 — Miguel: "instruction of what ?? welcome should be Welcome email" — the rail reads, in the order they send: Welcome email · Sign-off instructions · Sign-off link · GSM review) (`/api/hub/welcome/auto`, `welcome_auto_enabled`
   + `welcome_auto_since`): OFF until switched on, and switching on never emails a contract that started before that day. The
   missing training / day-7 / day-15 / SOP / booking links block nothing: no link = no button ("Rita sends you a time").
   Pinned by `test/crew_hub.test.js`, `test/welcome_email.test.js`, `test/welcome_send.test.js`.
@@ -1542,6 +1552,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   "(open site, no sign-in)" when open; the next visit no longer carries it). TEST requests never. **The page is booted
   in a test** (`test/audit_page_boot.test.js`, node:vm, a small fake DOM): #299 named the photo queue `S.q`, the home's
   search text, and audit.cims.work opened on "Could not load" while every route test was green (#304, the queue is `S.pq`).
+  **The home never waits for ever, and paints at once** (Miguel, 19 Oct 2026, a screenshot of the home on its placeholders:
+  "something is broken or taking way to long to load"; the server had answered in under a second every time, perf_log).
+  Every read has a ceiling (`api(u, ms)`, 30 s; the boot's `/api/me` + `/api/audit/ships` 15 s, tried twice, "Still
+  loading the ships" past 3 s), and past it fails like a lost connection (a TypeError, read by name, said "no connection",
+  never "Failed to fetch"), so `loadVisit` falls back to what the phone kept. Any error card carries **Try again**
+  (`data-retry`, a reload). The home paints from the last list the phone was given (`aud:ships`, written on every fresh
+  answer) and the fresh one replaces it; it says so only while the fresh one is late ("Updating. This is the list from
+  18:27.") or failed ("Could not update: …" + Try again). The boot re-draws whatever the home shows (`S.view = "home"`),
+  never only an empty address (`#zz` stayed on its placeholders). Measured live the same day: the worker runs at the
+  visitor's edge (`cf-placement: local-EWR / local-MIA`), not beside D1 in Prague, so each schema check and read crosses
+  the Atlantic (~100 ms a trip) — reported to Miguel, not changed here. Pinned by `test/audit_page_boot.test.js`.
   **The filed and dispatch emails are rendered, NOT wired** (`hr.audit.filed.v1` to Miguel, cc Rita, Ray, Rolando:
   the score in words and how it was reached, each rating with its sentence, the three boxes, the follow-up and what this
   visit settled from the last one, the desk and the tools with "2nd time", each machine against what the documents said,
