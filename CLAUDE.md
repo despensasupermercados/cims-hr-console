@@ -1552,6 +1552,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   "(open site, no sign-in)" when open; the next visit no longer carries it). TEST requests never. **The page is booted
   in a test** (`test/audit_page_boot.test.js`, node:vm, a small fake DOM): #299 named the photo queue `S.q`, the home's
   search text, and audit.cims.work opened on "Could not load" while every route test was green (#304, the queue is `S.pq`).
+  **The home never waits for ever, and paints at once** (Miguel, 19 Oct 2026, a screenshot of the home on its placeholders:
+  "something is broken or taking way to long to load"; the server had answered in under a second every time, perf_log).
+  Every read has a ceiling (`api(u, ms)`, 30 s; the boot's `/api/me` + `/api/audit/ships` 15 s, tried twice, "Still
+  loading the ships" past 3 s), and past it fails like a lost connection (a TypeError, read by name, said "no connection",
+  never "Failed to fetch"), so `loadVisit` falls back to what the phone kept. Any error card carries **Try again**
+  (`data-retry`, a reload). The home paints from the last list the phone was given (`aud:ships`, written on every fresh
+  answer) and the fresh one replaces it; it says so only while the fresh one is late ("Updating. This is the list from
+  18:27.") or failed ("Could not update: …" + Try again). The boot re-draws whatever the home shows (`S.view = "home"`),
+  never only an empty address (`#zz` stayed on its placeholders). Measured live the same day: the worker runs at the
+  visitor's edge (`cf-placement: local-EWR / local-MIA`), not beside D1 in Prague, so each schema check and read crosses
+  the Atlantic (~100 ms a trip) — reported to Miguel, not changed here. Pinned by `test/audit_page_boot.test.js`.
   Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
   the import of the 61 (I1), the web rail (W1).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron

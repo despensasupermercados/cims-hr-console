@@ -18,24 +18,36 @@ function fakeEl(id) {
   };
   return el;
 }
-function boot(hash, api) {
+const HANG = Symbol("hang"), DOWN = Symbol("down");
+// opt.store seeds localStorage; opt.clock swaps the page's timers for a list the test fires by hand (fire(ms)), so a
+// 15-second ceiling is tested without waiting 15 seconds.
+function boot(hash, api, opt = {}) {
   const els = new Map(), $ = (id) => { if (!els.has(id)) els.set(id, fakeEl(id)); return els.get(id); };
-  const store = new Map(), errors = [];
+  const store = new Map(Object.entries(opt.store || {})), errors = [], calls = [];
   const json = (o, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(o) });
+  const timers = new Map(); let tid = 0;
+  const st = opt.clock ? (fn, ms) => { timers.set(++tid, { fn, ms: ms || 0 }); return tid; } : setTimeout;
+  const ct = opt.clock ? (id) => { timers.delete(id); } : clearTimeout;
+  const fire = (ms) => { for (const [id, t] of [...timers]) if (t.ms === ms) { timers.delete(id); t.fn(); } };
   const ctx = {
-    console, setTimeout, clearTimeout, Promise, Date, JSON, Math, URL, encodeURIComponent, decodeURIComponent,
+    console, setTimeout: st, clearTimeout: ct, Promise, Date, JSON, Math, URL, encodeURIComponent, decodeURIComponent,
     navigator: { onLine: true }, history: { length: 1, back() {} },
     location: { hash, pathname: "/", href: "https://audit.cims.work/" + hash, replace(h) { this.hash = h; } },
     localStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
     document: { getElementById: $, querySelector: () => $("__q"), querySelectorAll: () => [], createElement: () => fakeEl(), addEventListener() {}, body: fakeEl("body") },
-    fetch: (u) => { const p = new URL(u, "https://audit.cims.work").pathname; return p in api ? json(api[p]) : json({ error: "not found" }, 404); },
+    fetch: (u) => {
+      const p = new URL(u, "https://audit.cims.work").pathname; calls.push(p);
+      if (api[p] === HANG) return new Promise(() => {});
+      if (api[p] === DOWN) return Promise.reject(new TypeError("Failed to fetch"));
+      return p in api ? json(api[p]) : json({ error: "not found" }, 404);
+    },
     addEventListener() {}, scrollTo() {},
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   const scripts = AUDIT_HTML.split("<script>").slice(1).map((s) => s.split("</script>")[0]);
   for (const s of scripts) { try { vm.runInContext(s, ctx); } catch (e) { errors.push(e.message); } }
-  return { $, errors };
+  return { $, errors, store, calls, fire, timers };
 }
 const SHIPS = { today: "2026-10-19", counts: { filed: 0, openFollowups: 0 }, ships: [
   { ship: "Oasis", brand: "Royal", aboard: [{ sc: "SC-1", name: "John Gorre", contract: "3 completed · on contract 4", signOn: "2026-06-02", signOff: "2027-01-03" }], last: null },
@@ -86,4 +98,63 @@ test("Follow-ups: the late one first, its owner and date, two buttons; the fixed
   assert.match(main, /Confirm the cyan line<\/b><span class="st r">Overdue/);
   assert.match(main, /data-fix="f1"/); assert.doesNotMatch(main, /data-fix="f2"/, "a fixed follow-up has nothing to close");
   assert.match(main, /Fixed Oct 16, 2026 by Dexter Lawrence · open site from this list/);
+});
+
+// 19 Oct 2026, Miguel, a screenshot of the home on its placeholders: "something is broken or taking way to long to load".
+// The server answered in under a second every time (perf_log); the page had no ceiling on a read, drew nothing until the
+// whole fleet's board came back, and re-drew the home only for an empty address.
+const KEPT = { at: "2026-10-19T10:42:00Z", today: "2026-10-19", counts: { filed: 3, openFollowups: 1 }, ships: [SHIPS.ships[0]] };
+
+test("a read that never answers ends: one more try, then 'Could not load' with Try again, never placeholders for ever", async () => {
+  const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": HANG }, { clock: true });
+  await settle();
+  assert.match(P.$("main").innerHTML, /class="sk"/, "the placeholders while it waits");
+  P.fire(3000);
+  assert.match(P.$("main").innerHTML, /Still loading the ships/, "past 3 s it says it is still loading");
+  P.fire(15000); await settle();
+  assert.equal(P.calls.filter((c) => c === "/api/audit/ships").length, 2, "a second try before anything is said");
+  P.fire(15000); await settle();
+  const main = P.$("main").innerHTML;
+  assert.match(main, /Could not load: no answer in 15 s\./);
+  assert.match(main, /data-retry>Try again</);
+  assert.equal(P.timers.size, 0, "nothing left running");
+});
+
+test("the home paints at once from the list this phone kept, and says so only while the fresh one is late", async () => {
+  const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": HANG }, { clock: true, store: { "aud:ships": JSON.stringify(KEPT) } });
+  let main = P.$("main").innerHTML;
+  assert.match(main, /Oasis/, "drawn before any answer"); assert.doesNotMatch(main, /class="sk"/);
+  assert.match(main, /3 audits filed/); assert.doesNotMatch(main, /Updating/, "quiet while the fresh list is on time");
+  P.fire(3000);
+  assert.match(P.$("main").innerHTML, /Updating\. This is the list from \d\d:\d\d|Updating\. This is the list from Oct 19, \d\d:\d\d/);
+  P.fire(15000); await settle(); P.fire(15000); await settle();
+  main = P.$("main").innerHTML;
+  assert.match(main, /Oasis/, "a failed update keeps the kept list on screen");
+  assert.match(main, /Could not update: no answer in 15 s\. This is the list from/);
+  assert.match(main, /data-retry>Try again</);
+});
+
+test("the fresh list replaces the kept one and is kept for the next open", async () => {
+  const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS }, { store: { "aud:ships": JSON.stringify(KEPT) } });
+  await settle();
+  const main = P.$("main").innerHTML;
+  assert.match(main, /Pursuit/); assert.match(main, /None filed yet/); assert.doesNotMatch(main, /This is the list from/);
+  const k = JSON.parse(P.store.get("aud:ships"));
+  assert.equal(k.ships.length, 2); assert.ok(Date.parse(k.at) > Date.parse(KEPT.at));
+});
+
+test("an address the page does not know opens the home and fills it when the list lands", async () => {
+  for (const h of ["#zz", "#q", "#%E0%A4%A"]) {
+    const P = boot(h, { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS });
+    await settle();
+    assert.deepEqual(P.errors, []);
+    assert.match(P.$("main").innerHTML, /Oasis/, h);
+  }
+});
+
+test("a lost connection on the boot read: tried twice, then said, with Try again", async () => {
+  const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": DOWN });
+  await settle();
+  assert.equal(P.calls.filter((c) => c === "/api/audit/ships").length, 2);
+  assert.match(P.$("main").innerHTML, /Could not load: no connection\.<\/span><button class="retry" data-retry>Try again/);
 });

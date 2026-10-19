@@ -193,6 +193,9 @@ main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-
 .note{font-size:12.5px;color:var(--mut);text-align:center}
 .err{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:var(--redbg);color:var(--red);border-radius:14px;font-size:13.5px;font-weight:500}
 .err .ic{width:18px;height:18px;margin-top:1px}
+.err .retry{margin-left:auto;flex:none;border:0;background:none;color:var(--red);font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0 0 0 6px;white-space:nowrap}
+.kept{display:flex;gap:8px;align-items:center;margin:0 2px 12px;font-size:12.5px;color:var(--mut)}.kept .ic{width:16px;height:16px;flex:none}
+.kept.bad{color:var(--red)}.kept .retry{margin-left:auto;flex:none;border:0;background:none;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0 0 0 6px;white-space:nowrap}
 .sk{height:64px;border-top:1px solid var(--line);background:linear-gradient(90deg,var(--card),var(--bg),var(--card));background-size:200% 100%;animation:sk 1.2s infinite}
 .sk:first-child{border-top:0}
 @keyframes sk{to{background-position:-200% 0}}
@@ -331,11 +334,19 @@ label.btn{position:relative}
   function skel(n) { var h = '<div class="card">'; for (var i = 0; i < (n || 3); i++) h += '<div class="sk"></div>'; return h + "</div>"; }
   function prog(label, a, b, cls) { return '<div class="prog"><div class="lb"><span>' + label + "</span><b>" + a + " of " + b + '</b></div><div class="track' + (cls ? " " + cls : "") + '"><i style="width:' + pct(a, b) + '%"></i></div></div>'; }
 
-  function api(u) {
-    return fetch(u, { credentials: "same-origin", cache: "no-store" }).then(function (r) {
+  /* Every read has a ceiling (19 Oct 2026, Miguel: "something is broken or taking way to long to load"). A request that
+     never answers (a stalled connection, a laptop woken from sleep) left the home on its placeholders for ever: fetch has
+     no limit of its own. Past the ceiling it fails the way a lost connection does (a TypeError), so a screen that falls
+     back to what the phone kept does so, and the others say it with Try again. */
+  function api(u, ms) {
+    ms = ms || 30000;
+    var ctl = typeof AbortController === "function" ? new AbortController() : null, tm = null;
+    var req = fetch(u, { credentials: "same-origin", cache: "no-store", signal: ctl ? ctl.signal : undefined }).then(function (r) {
       if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); }
       return r.json().then(function (j) { if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status)); return j; });
     });
+    var limit = new Promise(function (ok, no) { tm = setTimeout(function () { if (ctl) ctl.abort(); no(new TypeError("no answer in " + Math.round(ms / 1000) + " s")); }, ms); });
+    return Promise.race([req, limit]).then(function (v) { clearTimeout(tm); return v; }, function (e) { clearTimeout(tm); throw e; });
   }
   function post(u, body) {
     return fetch(u, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })
@@ -343,7 +354,9 @@ label.btn{position:relative}
   }
   var WHY = { no_ship_mailbox: "No printshop mailbox for this ship in the ship contacts.", hon_unavailable: "HON did not answer. The machines and the OBP list come from it; try again in a minute.",
     no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console.", no_obp_list: "HON has no OBP stock list for this ship, so there is nothing to count.", not_aboard: "The board does not have this seafarer aboard this ship." };
-  function fail(e) { hero(""); $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(e && e.message || e) + ". Reopen to try again.</span></div>"; dock(""); }
+  /* a lost connection reads as one, never the browser's "Failed to fetch" */
+  function why(e) { var m = String((e && e.message) || e || ""); return e && e.name === "TypeError" && m.indexOf("no answer") !== 0 ? "no connection" : m; }
+  function fail(e) { hero(""); $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(why(e)) + ".</span>" + '<button class="retry" data-retry>Try again</button></div>'; dock(""); }
 
   // One status word per request, said the same way on every screen.
   function reqStatus(r) {
@@ -365,7 +378,7 @@ label.btn{position:relative}
     return '<button class="row' + (s.aboard.length || openReq ? "" : " off") + '"' + go + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + (openReq && s.last ? ic("user") + esc(s.last.crew) : who) + "</div>" + (openReq ? '<div class="stl">' + reqStatus(s.last) + "</div>" : "") + "</div>" + ic("caret-right", "go") + "</button>";
   }
   function shipsView() {
-    top("", "", "", "", false); dock("");
+    S.view = "home"; top("", "", "", "", false); dock("");
     hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
     var qi = $("q"), qx = $("qx");
     qi.addEventListener("input", function () { S.q = qi.value; qx.hidden = !S.q; shipsList(); });
@@ -373,7 +386,7 @@ label.btn{position:relative}
     shipsList();
   }
   function shipsList() {
-    if (!S.ships) { $("main").innerHTML = skel(4); return; }
+    if (!S.ships) { $("main").innerHTML = (S.slow ? '<div class="kept">' + ic("hourglass-medium") + "<span>Still loading the ships.</span></div>" : "") + skel(4); return; }
     var brands = ["All", "Royal Caribbean", "Celebrity", "Azamara"];
     var q = S.q.toLowerCase().trim();
     var list = S.ships.filter(function (s) {
@@ -383,7 +396,7 @@ label.btn{position:relative}
     });
     var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null && !s.last.test)); });
     var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
-    var c = S.counts, h = "";
+    var c = S.counts, h = keptLine();
     if (c && !q) h += '<div class="doors"><button class="door" data-go="hist"><span class="sq">' + ic("clock-counter-clockwise") + '</span><span class="tx"><span class="nm">History</span><span class="sm">' + (c.filed ? c.filed + (c.filed === 1 ? " audit filed" : " audits filed") : "None filed yet") + "</span></span></button>"
       + '<button class="door" data-go="fu"><span class="sq' + (c.openFollowups ? " a" : "") + '">' + ic("flag") + '</span><span class="tx"><span class="nm">Follow-ups</span><span class="sm' + (c.openFollowups ? " a" : "") + '">' + (c.openFollowups ? c.openFollowups + " open" : "None open") + "</span></span></button></div>";
     h += '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b === "Royal Caribbean" ? "Royal" : b) + "</button>"; }).join("") + "</div>";
@@ -629,7 +642,35 @@ label.btn{position:relative}
     if (g.note) h += '<div class="feed"><div class="w">What needs to improve</div><div class="pl">' + esc(g.note) + "</div></div>";
     return h + "</div>";
   }
-  function reloadShips() { S.hist = null; api("/api/audit/ships").then(function (r) { S.ships = r.ships; S.counts = r.counts || S.counts; }).catch(function () {}); }
+  function keepShips(r) { lsSet("aud:ships", { at: new Date().toISOString(), today: r.today || null, ships: r.ships, counts: r.counts || null }); }
+  function keptWhen(at) {
+    var d = new Date(at); if (isNaN(d.getTime())) return "earlier";
+    var t = ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2), n = new Date();
+    return d.toDateString() === n.toDateString() ? t : MON[d.getMonth()] + " " + d.getDate() + ", " + t;
+  }
+  function keptLine() {
+    if (!S.keptAt || !(S.loadErr || S.slow)) return "";
+    if (S.loadErr) return '<div class="kept bad">' + ic("cloud-slash") + "<span>Could not update: " + esc(S.loadErr) + ". This is the list from " + esc(keptWhen(S.keptAt)) + '.</span><button class="retry" data-retry>Try again</button></div>';
+    return '<div class="kept">' + ic("arrow-clockwise") + "<span>Updating. This is the list from " + esc(keptWhen(S.keptAt)) + ".</span></div>";
+  }
+  /* the boot read: a ceiling of 15 s, one more try before anything is said, "Still loading" past 3 s */
+  function loadHome(again) {
+    S.loadErr = null;
+    var slow = setTimeout(function () { S.slow = true; if (S.view === "home") shipsList(); }, 3000);
+    Promise.all([api("/api/me", 15000), api("/api/audit/ships", 15000)]).then(function (r) {
+      clearTimeout(slow); S.slow = false; S.keptAt = null;
+      S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships; S.counts = r[1].counts || null; keepShips(r[1]);
+      if (S.view === "home") shipsList(); else if ((S.cur || "").indexOf("s=") === 0) route(); else if (S.cur === "hist" && S.hist) historyList();
+    }, function (e) {
+      clearTimeout(slow);
+      if (e && e.message === "signed out") return;
+      if (!again) return loadHome(true);
+      S.slow = false; S.loadErr = why(e);
+      if (S.ships) { if (S.view === "home") shipsList(); }
+      else if (S.view === "home" || (S.cur || "").indexOf("s=") === 0) fail(e);
+    });
+  }
+  function reloadShips() { S.hist = null; api("/api/audit/ships").then(function (r) { S.ships = r.ships; S.counts = r.counts || S.counts; keepShips(r); }).catch(function () {}); }
 
   /* ================= B · the audit on the ship (B1–B7), 19 Oct 2026 =================
      Seven steps, one per screen (docs/AUDIT_DESIGN.md Phase B, mock-up v12). The rules that hold Next and File are
@@ -1183,6 +1224,7 @@ label.btn{position:relative}
   document.addEventListener("click", function (e) {
     var sp = e.target.closest("[data-step]");
     if (sp && S.cur && S.cur.indexOf("a=") === 0) { location.replace("#a=" + S.cur.slice(2).split("|")[0] + "|" + sp.getAttribute("data-step")); return; }
+    if (e.target.closest("[data-retry]")) { location.reload(); return; }
     var g = e.target.closest("[data-go]");
     if (g) { if (g.disabled) return; go(g.getAttribute("data-go")); return; }
     var hf = e.target.closest("[data-hf]");
@@ -1200,12 +1242,14 @@ label.btn{position:relative}
   window.addEventListener("online", net); window.addEventListener("offline", net); net();
   if ("serviceWorker" in navigator) { try { navigator.serviceWorker.register("/audit/sw.js", { scope: location.pathname.indexOf("/audit") === 0 ? "/audit" : "/" }).catch(function () {}); } catch (e) {} }
 
+  /* The home paints at once from the last list this phone was given, and the fresh one replaces it about a second
+     later (19 Oct 2026: the page waited on the whole fleet's board before drawing a row). The kept list is said only
+     while the fresh one is late or failed: "Updating", or "Could not update" with Try again. */
+  var kept = lsGet("aud:ships");
+  if (kept && Array.isArray(kept.ships)) { S.ships = kept.ships; S.counts = kept.counts || null; S.today = kept.today || null; S.keptAt = kept.at || null; }
   route();
   flushFilings();
-  Promise.all([api("/api/me"), api("/api/audit/ships")]).then(function (r) {
-    S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships; S.counts = r[1].counts || null;
-    var h = location.hash.replace(/^#/, ""); if (!h) shipsList(); else if (h.indexOf("s=") === 0) route(); else if (h === "hist" && S.hist) historyList();
-  }).catch(fail);
+  loadHome(false);
 })();
 </script>
 </body></html>`;
