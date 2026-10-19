@@ -1524,9 +1524,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   audit of the ship lists the follow-ups still open (Fixed / Still open, "2nd time") and an item missing again ("2nd
   time"). Photos (`audit_file`, R2 `visit/<request>/<step>/<sha>`) are shrunk on the phone and wait in IndexedDB for
   signal; the draft lives on the phone at every tap; a filing without signal is kept and sent when the server answers.
-  No manual mono % (mono is OBP's clicks, §10j). Migration 0035. Pinned by `test/audit_visit.test.js`. Still to build:
-  the audit card on the crew profile (P1), the history page, the filed / dispatch emails (render first, Miguel signs
-  off), Rolando's Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
+  No manual mono % (mono is OBP's clicks, §10j). Migration 0035. Pinned by `test/audit_visit.test.js`. **The page's copy of
+  the rules is the server's function, serialized** (`makeRules().toString()`): wrangler's esbuild adds `__name(...)` calls
+  (keepNames) and renames a top-level name that collides with another module's (`txt` → `txt2`), so `makeRules` is
+  self-contained (every helper inside it) and the page defines a no-op `__name` — both broke the live page once (#300,
+  #302). The test bundles `src/worker.js` itself as the entry, the only way to see the rename. **The profile** (P1):
+  "What people said" carries each filed audit (`buildCrewProfile` feed kind `audit`: the score and how it was reached, the
+  four ratings with 3 or below in red, strengths / to improve / agreed, items missing, each follow-up open or fixed, "Open
+  the audit"), the Dexter slot reads the audit (answered, or asked while a request waits), the Notes window lists it under
+  Feedback, and the internal crew file prints it under its contract — never the statement or anything the crew reads; read
+  in `apiCrewOne`'s one wave, TEST requests never. Still to build: the history page, the filed / dispatch emails (render
+  first, Miguel signs off), Rolando's Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

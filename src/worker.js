@@ -2190,7 +2190,7 @@ async function apiCrewOne(env, url, session) {
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
   const today = TODAY();
   const none = () => ({ results: [] });
-  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes, trainerRow] = await Promise.all([
+  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes, trainerRow, auditRes, auditOpenRes, auditFuRes] = await Promise.all([
     env.DB.prepare("SELECT crew.*, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE crew.agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
@@ -2222,6 +2222,10 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all().catch(none),
     env.DB.prepare("SELECT on_key, reason, note, set_by, set_at FROM contract_end WHERE sc=?").bind(id).all().catch(none), // why it ended (13 Oct 2026)
     env.DB.prepare("SELECT 1 AS t FROM crew_trainer WHERE sc=?").bind(id).first().catch(() => null), // the trainer tag (17 Oct 2026)
+    // Dexter's printshop audits, filed (never a TEST request's), his requests not yet audited, their follow-ups (19 Oct 2026)
+    env.DB.prepare("SELECT e.request_id, e.ship, e.r_inventory, e.r_technical, e.r_collaterals, e.r_overall, e.score, e.score_from, e.note, e.filed_at, d.data_json FROM audit_eval e LEFT JOIN audit_visit_data d ON d.request_id = e.request_id LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT r.id, r.ship, r.status, r.sent_at, r.created_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND r.test_mode = 0 AND r.status IN ('sent','complete') AND e.request_id IS NULL ORDER BY r.created_at DESC").bind(id).all().catch(none),
+    env.DB.prepare("SELECT request_id, owner, due, text, status, closed_at FROM audit_followup WHERE agency_id=? ORDER BY created_at").bind(id).all().catch(none),
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
@@ -2239,7 +2243,7 @@ async function apiCrewOne(env, url, session) {
     edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
     sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
     statusRows: statusRes.results, travel: travelRowsFor(travelRes.results, { agency_id: id }, namesRes.results), activity: actRes.results, instr: instrRes.results, links: linkRes.results,
-    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
+    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, audits: auditRes.results, auditOpen: auditOpenRes.results, auditFollowups: auditFuRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
   // `tdg` = the crew row as the last import wrote it, `override` = what a person typed over it: the Edit crew window
   // shows TDG's value under every field someone changed, with Reset to TDG (12 Oct 2026).
@@ -4723,7 +4727,7 @@ details.tvfold[open]>summary::after{transform:rotate(-135deg);margin-top:4px}
 .pf2dt{width:100%;border-collapse:collapse;margin-top:10px}.pf2dt th{font-size:11px;font-weight:600;color:var(--mut);text-align:left;padding:6px 8px 6px 0}.pf2dt td{padding:7px 8px 7px 0;border-top:1px solid var(--line);font-size:12.5px}
 .pf2ho{display:flex;justify-content:space-between;gap:6px 16px;flex-wrap:wrap;margin-top:8px;font-size:12.5px;color:var(--ink)}.pf2ho span:last-child{text-align:right;margin-left:auto}.pf2ho em{font-style:normal;color:var(--mut);font-size:11.5px}.pf2who{font-weight:700;color:var(--deep);text-decoration:none}.pf2who:hover{text-decoration:underline}.pf2warn{color:var(--amber);font-weight:600}
 .pf2tri{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}.pf2tri>div{background:#F6F8FB;border-radius:10px;padding:10px 12px;font-size:12.5px;min-width:0}.pf2tri .pflbl{margin-bottom:6px;display:flex;justify-content:space-between;gap:6px}
-.pf2tk{display:flex;flex-wrap:wrap;gap:5px}.pf2tick{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:11.5px;color:var(--mut);white-space:nowrap}.pf2tick.on{background:#EAF5E4;border-color:#CFE6C6;color:var(--green-d);font-weight:600}
+.pf2tk{display:flex;flex-wrap:wrap;gap:5px}.pf2tick{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:11.5px;color:var(--mut);white-space:nowrap}.pf2tick.on{background:#EAF5E4;border-color:#CFE6C6;color:var(--green-d);font-weight:600}.pf2tick.lo{background:#FCEDEA;border-color:#F3CFC8;color:#B4382A;font-weight:600}
 .pf2er{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);font-size:12.5px}.pf2er:first-of-type{border-top:0}.pf2er b{color:var(--deep);min-width:110px}.pf2er span{color:var(--mut)}
 .pf2tl{position:relative;height:74px;margin:6px 0 0}
 .pf2cb{position:absolute;top:22px;height:16px;border-radius:8px;background:#2E9E5B;color:#fff;font-size:10.5px;font-weight:700;line-height:16px;padding-left:8px;box-sizing:border-box;overflow:hidden;white-space:nowrap}
@@ -9089,19 +9093,33 @@ var PF_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontim
 function pfPeople(PE,sc){
   var sl=(PE.slots||[]).map(function(s){var lab=String(s.label).split(' · ')[0];return '<div class="pf2slot '+s.state+'"><b>'+escHtml(lab)+'</b><span>'+(s.state==='answered'?('Answered '+fmtDateS(s.at)):(s.state==='pending'?('Asked '+fmtDateS(s.at)):(s.state==='na'?'Not assessed':'Never asked')))+'</span></div>';}).join('');
   var fd=(PE.feed||[]).map(function(f){
-    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='comment'?'Comment':'Note')));
-    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'?'feedback':'typed');
+    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='audit'?'Audit':(f.kind==='comment'?'Comment':'Note'))));
+    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'||f.kind==='audit'?'feedback':'typed');
     var body='';
     if(f.kind==='intel'){var ps=f.parts||[];var head=pfIntelHead(f);var rest=ps.filter(function(p){return p.label!=='Summary';});
       body='<div>'+escHtml(head)+'</div>'+(rest.length?'<details class=pf2more><summary>Full report</summary>'+rest.map(function(p){return '<div style="margin-top:6px">'+(p.label?'<b>'+escHtml(p.label)+':</b> ':'')+escHtml(p.text)+'</div>';}).join('')+'</details>':'')
         +'<div class=pf2mut style="margin-top:4px">'+escHtml([f.who?('From '+f.who):'',f.via?('by '+f.via):'',f.confidence?(f.confidence+' match'):'',f.contractNo!=null?('contract '+f.contractNo):'','never scored'].filter(Boolean).join(' · '))+'</div>';}
     else if(f.kind==='feedback'){var a=f.answers||{};body='<div class=pf2tk>'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((PF_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div style="margin-top:4px">“'+escHtml(a.note)+'”</div>':'')+(f.superseded?'<div class=pf2mut>Earlier answer · kept, not used</div>':'');}
     else if(f.kind==='review')body='<div><b>'+(f.rating!=null?f.rating+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'</div>'+(f.text?'<div>“'+escHtml(f.text)+'”</div>':'');
+    else if(f.kind==='audit')body=pfAudit(f);
     else body='<div style="font-size:14px">“'+escHtml(f.text)+'”</div>';
     return '<div class=pf2fd><div><b>'+fmtDateS(String(f.at||'').slice(0,10))+'</b>'+pfSrc(src,kind+(f.who&&f.kind!=='intel'?(' · '+String(f.who).split(' · ')[0]):''))+'</div><div>'+body+'</div></div>';
   }).join('');
   return '<div class=pfsec><div class=pf2ch><span class=pflbl style="margin:0">What people said</span><span class=pf2mut>'+(PE.feed||[]).length+' · newest first</span><a href="#" style="margin-left:auto;font-size:12.5px" onclick="notesModal(\\''+escHtml(sc)+'\\');return false">+ Add note</a></div>'
     +'<div class=pf2slots>'+sl+'</div>'+(fd||'<div class=pf2mut style="padding-top:8px">Nothing said yet.</div>')+'</div>';
+}
+// Dexter's printshop audit on the profile (19 Oct 2026, P1): the score and how it was reached, the four ratings, the three
+// boxes, the follow-up with its state, and the way back to the whole audit on the audit app. Never the crew's to read.
+function pfAudit(f){
+  var R=f.ratings||{},rt=function(l,v){return v==null?'':'<span class="pf2tick'+(v<=3?' lo':' on')+'">'+l+' · '+escHtml(v)+'</span>';};
+  var h='<div><b>'+(f.score!=null?escHtml(f.score)+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'<span class=pf2mut> · '+(f.from==='overall'?'the Overall rating':'average of the three, rounded down')+'</span></div>'
+    +'<div class=pf2tk style="margin-top:6px">'+rt('Inventory',R.inventory)+rt('Technical',R.technical)+rt('Collaterals',R.collaterals)+rt('Overall',R.overall)+'</div>';
+  [['Strengths',f.strengths],['To improve',f.improve],['Agreed',f.agreed]].forEach(function(x){if(x[1])h+='<div style="margin-top:4px"><b>'+x[0]+':</b> '+escHtml(x[1])+'</div>';});
+  if(f.note)h+='<div style="margin-top:4px">“'+escHtml(f.note)+'”</div>';
+  if(f.missing)h+='<div class=pf2mut style="margin-top:4px">'+escHtml(f.missing)+' item'+(f.missing===1?'':'s')+' missing on the desktop or the tools</div>';
+  (f.followups||[]).forEach(function(u){h+='<div style="margin-top:4px"><span class="pf2tick'+(u.status==='fixed'?' on':'')+'">Follow-up · '+(u.status==='fixed'?'fixed '+fmtDateS(u.closed):'open')+'</span> '+escHtml(u.owner)+(u.due?' by '+fmtDateS(u.due):'')+': '+escHtml(u.text)+'</div>';});
+  if(f.request)h+='<div style="margin-top:6px"><a href="/audit#q='+encodeURIComponent(f.request)+'" target="_blank" rel="noopener">Open the audit</a></div>';
+  return h;
 }
 // Documents: everything TDG sent (number, issuer, issue and expiry), read against the running contract, else a
 // 7-month contract from today — the same three words as the contract modal (expired / lapses during / valid).
@@ -9434,7 +9452,7 @@ async function ntLoad(){
   var items=[];
   (rs[1].notes||[]).forEach(function(n){items.push({kind:'note',at:n.ts,id:n.id,text:n.text,who:n.created_by?ntWho(n.created_by):null,archived:n.archived_at,archivedBy:n.archived_by});});
   (rs[2].intel||[]).forEach(function(x){items.push({kind:'intel',at:x.ts,id:x.id,text:x.summary,who:x.reporter,confidence:x.confidence,contractNo:x.contract_no,edited:x.edited_at});});
-  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});});
+  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});else if(f.kind==='audit')items.push({kind:'audit',at:f.at,who:'Dexter',audit:f});});
   // a note written before authors were recorded: the activity row of the same second names them (as on the profile)
   var feedNotes=((P.people&&P.people.feed)||[]).filter(function(f){return f.kind==='note'&&f.who;});
   items.forEach(function(it){if(it.kind==='note'&&!it.who){var m=feedNotes.filter(function(f){return f.at===it.at;})[0];if(m)it.who=m.who;}});
@@ -9447,10 +9465,10 @@ function ntGroup(day){var K=NOTES_STATE.contracts||[],today=new Date().toISOStri
 function ntDraw(){
   var S=NOTES_STATE,w=document.getElementById('crewmodal');if(!S||!w)return;
   var _dr=document.getElementById('newNote');if(_dr)S.draft=_dr.value; // the draft survives a chip or an archive (13 Oct 2026)
-  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'?'feedback':it.kind]++;});
+  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'||it.kind==='audit'?'feedback':it.kind]++;});
   var chip=function(k,l){return '<button class="ntchip'+(S.filter===k?' sel':'')+'" onclick="NOTES_STATE.filter=\\''+k+'\\';ntDraw()">'+l+' · '+cnt[k]+'</button>';};
   var cur=(S.contracts||[]).filter(function(k){return k.current;})[0]||(S.contracts||[])[0]||null;
-  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&it.kind==='review');});
+  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&(it.kind==='review'||it.kind==='audit'));});
   var body='',lastKey=null;
   shown.forEach(function(it){
     var day=String(it.at||'').slice(0,10),k=ntGroup(day),key=k?(k.ship+k.on):'none';
@@ -9468,14 +9486,15 @@ function ntDraw(){
 var NT_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontime:'On time',acc:'Accuracy',par:'PAR',audit:'Audit'};
 function ntItem(it){
   var when=fmtDateS(String(it.at||'').slice(0,10))+(it.kind==='note'&&it.at&&String(it.at).length>10?' · '+new Date(it.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'');
-  var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6']}[it.kind];
-  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review'}[it.kind];
+  var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6'],audit:['#F1ECFA','#5A3FA6']}[it.kind];
+  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop audit'}[it.kind];
   var body='',acts='';
   if(it.kind==='note'){body='<div class=nttext>'+escHtml(it.text)+'</div>';
     acts=it.archived?('<div class=ntacts><span>Archived '+fmtDateS(String(it.archived).slice(0,10))+(it.archivedBy?' by '+escHtml(ntWho(it.archivedBy)):'')+'</span><a href="#" onclick="ntArchive('+it.id+',true);return false">Restore</a></div>'):('<div class=ntacts><a href="#" onclick="ntArchive('+it.id+',false);return false">Archive</a></div>');}
   else if(it.kind==='intel'){body='<div class=nttext id=ictext_'+escHtml(it.id)+'>'+escHtml(it.text||'').split('\\n').join('<br>')+'</div>';
     acts='<div class=ntacts><span>'+escHtml([it.confidence?it.confidence+' match':'',it.contractNo!=null?'contract '+it.contractNo:'','never scored',it.edited?'edited':''].filter(Boolean).join(' · '))+'</span><a href="#" onclick="intelEdit(NOTES_STATE.id,\\''+escHtml(it.id)+'\\');return false">Edit summary</a></div>';}
   else if(it.kind==='feedback'){var a=it.answers||{};body='<div class=pf2tk style="margin-top:6px">'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((NT_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div class=nttext>“'+escHtml(a.note)+'”</div>':'')+(it.superseded?'<div class=echint>Earlier answer · kept, not used</div>':'');}
+  else if(it.kind==='audit')body='<div class=nttext>'+pfAudit(it.audit)+'</div>';
   else body='<div class=nttext><b>'+(it.rating!=null?it.rating+'/5':'')+'</b>'+(it.ship?' · '+escHtml(niceShip(it.ship)):'')+(it.text?' — “'+escHtml(it.text)+'”':'')+'</div>';
   return '<div class="ntitem'+(it.archived?' ntarch':'')+'"><div style="flex:1;min-width:0">'
     +'<div class=nthead><b>'+escHtml(it.who||'Author not recorded')+'</b><span class=pfsrc><i style="background:'+col[1]+'"></i>'+tag+'</span><span class=ntwhen>'+when+'</span></div>'+body+acts+'</div></div>';

@@ -186,17 +186,33 @@ test("the page gates with the SAME functions the server re-checks (serialized, n
   assert.doesNotMatch(page, /function visitProblems|function evalOf/, "no second copy in the page");
 });
 
-test("the rules still run in the page after wrangler's bundle (esbuild keepNames adds __name calls)", async () => {
-  // 19 Oct 2026: live on audit.cims.work the stepper threw "__name is not defined" — wrangler bundles with keepNames, and
-  // Function.prototype.toString of a bundled function carries the helper call. Node never adds it, so only a bundle shows it.
+test("the rules run in the page out of the REAL Worker bundle (wrangler renames colliding names, keepNames adds __name)", async () => {
+  // 19 Oct 2026, twice live on audit.cims.work: "__name is not defined" (keepNames), then "txt2 is not defined" (the real
+  // bundle renames a top-level `txt` that collides with another module's). Node never does either, and a bundle of
+  // audit_steps.js alone has nothing to collide with — only the whole Worker shows it. So: bundle src/worker.js the way
+  // wrangler does, take AUDIT_RULES_JS out of THAT bundle, run it like the page and compare with the module.
+  // The entry must be src/worker.js itself, as wrangler's: the module order decides which colliding name gets the
+  // suffix (a wrapper entry moved the rename onto another module and the old code passed). The rules are taken out of the
+  // bundle through a footer export of whatever name the bundle gave them.
   const { build } = await import("esbuild");
-  const r = await build({ entryPoints: [new URL("../src/audit_steps.js", import.meta.url).pathname], bundle: true, format: "esm", keepNames: true, write: false, platform: "neutral" });
-  const m = await import("data:text/javascript;base64," + Buffer.from(r.outputFiles[0].text).toString("base64"));
-  assert.match(m.AUDIT_RULES_JS, /__name\(/, "the bundle does carry the helper call this guards against");
-  const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(m.AUDIT_RULES_JS, ctx);
-  const d = ctx.window.AR.startVisit(CTX);
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.AR.visitProblems(d, CTX, "2026-10-19"))), visitProblems(startVisit(CTX), CTX, "2026-10-19"));
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.AR.evalOf(d))), JSON.parse(JSON.stringify(evalOf(startVisit(CTX)))));
+  const r = await build({ entryPoints: [new URL("../src/worker.js", import.meta.url).pathname], bundle: true, format: "esm", keepNames: true, write: false,
+    platform: "neutral", external: ["cloudflare:*", "node:*"], conditions: ["workerd", "worker", "browser"], mainFields: ["module", "main"], logLevel: "error" });
+  let text = r.outputFiles[0].text;
+  assert.match(text, /\btxt2\b/, "the real bundle does rename a colliding top-level `txt`");
+  const name = (text.match(/\bvar (AUDIT_RULES_JS\d*) = /) || [])[1];
+  assert.ok(name, "the rules are in the bundle");
+  text += "\nexport { " + name + " as __AR };\n";
+  const m = await import("data:text/javascript;base64," + Buffer.from(text).toString("base64"));
+  assert.match(m.__AR, /__name\(/, "and the serialized rules do carry keepNames' helper");
+  const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(m.__AR, ctx);
+  const AR = ctx.window.AR;
+  const d = startVisit(CTX), p = AR.startVisit(CTX);
+  for (const mut of [() => {}, (x) => { x.rt = { inventory: 3, technical: 4, collaterals: 5, why: { inventory: "short" } }; x.ov.followup = { owner: "", due: "x", text: "" }; }, (x) => { x.hw.machines.S1.checks.test = "finding"; x.ov.overall = 2; }]) {
+    mut(d); mut(p);
+    assert.deepEqual(JSON.parse(JSON.stringify(AR.visitProblems(p, CTX, "2026-10-19"))), visitProblems(d, CTX, "2026-10-19"));
+    assert.deepEqual(JSON.parse(JSON.stringify(AR.evalOf(p))), JSON.parse(JSON.stringify(evalOf(d))));
+  }
+  assert.deepEqual([AR.ordinal(2), AR.plusDays("2026-10-19", 30), AR.partName("Drum Unit/K (%)")], ["2nd", "2026-11-18", "Drum Unit/K"]);
 });
 
 /* ------------------------------------------------ the routes ------------------------------------------------ */
@@ -313,4 +329,61 @@ test("a TEST request is a rehearsal: no audit is filed on it", async () => {
   assert.equal(v.test, true);
   const r = await t.call("POST", "/api/audit/request/grade", { id, visit: cleanVisit(v) });
   assert.equal(r.status, 409); assert.equal((await r.json()).error, "test_request");
+});
+
+/* ------------------------------------------------ P1 · the audit on the crew profile ------------------------------------------------ */
+import { buildCrewProfile, feedbackFile } from "../src/crew_profile.js";
+const PROFILE = (extra) => Object.assign({
+  today: "2026-10-19",
+  crew: { agency_id: "SC-0039935", status: "On board", first_name: "Kevin", last_name: "Jugao" }, override: null,
+  snap: { agency_id: "SC-0039935", status: "On board", raw_status: "On board", vessel: "Azamara Pursuit", run_at: "2026-10-16T09:00:00Z", embarked_at: "2026-05-24", debarked_at: null },
+  count: null, countAdded: 0, grade: null,
+  legs: [{ ship: "Pursuit", sc: "SC-0039935", ours: true, on: "2026-05-24", off: "2026-10-31", is_current: true, source: "registry", offSource: "rita", brand: "Azamara" }],
+  counter: [], edits: [], notes: [], ready: null, intel: [], fbReqs: [], fbResp: [], sbmRequests: [], sbm: [], cards: [], deploys: [], dismissals: [],
+  statusRows: [], travel: [], activity: [], instr: [], links: [],
+}, extra || {});
+const AUDIT_ROW = { request_id: "ar_1", ship: "Pursuit", r_inventory: 3, r_technical: 4, r_collaterals: 5, r_overall: null, score: 4, score_from: "average", note: "Inventory management (3): OBP lags.\nTo improve: Book changes the same day.", filed_at: "2026-10-19T15:00:00.000Z",
+  data_json: JSON.stringify({ ws: { missing: ["sops"] }, hw: { tools: { missing: ["head_lamp", "fiery_hdd"] } }, ov: { strengths: "Knows the C4070.", improve: "Book changes the same day.", agreed: "Count every Monday." } }) };
+
+test("P1: a filed audit is on the profile's What people said, with the score, the boxes and the follow-up; Dexter's slot is his audit", () => {
+  const p = buildCrewProfile(PROFILE({ audits: [AUDIT_ROW], auditFollowups: [{ request_id: "ar_1", owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "open", closed_at: null }] }));
+  const a = p.people.feed.find((f) => f.kind === "audit");
+  assert.ok(a, "the audit is in the feed");
+  assert.deepEqual([a.score, a.from, a.ratings.inventory, a.ship, a.request, a.missing], [4, "average", 3, "Pursuit", "ar_1", 3]);
+  assert.deepEqual([a.strengths, a.improve, a.agreed, a.note], ["Knows the C4070.", "Book changes the same day.", "Count every Monday.", null], "the boxes, not the composed note, for an audit filed through the steps");
+  assert.deepEqual(a.followups, [{ owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "open", closed: null }]);
+  const dx = p.people.slots.find((s) => s.role === "dexter");
+  assert.deepEqual([dx.label, dx.state, dx.at], ["Dexter · Audit", "answered", "2026-10-19"]);
+  // a 15 Oct grade (no steps): its note stands in for the boxes
+  const old = buildCrewProfile(PROFILE({ audits: [Object.assign({}, AUDIT_ROW, { data_json: null })] })).people.feed.find((f) => f.kind === "audit");
+  assert.equal(old.note, AUDIT_ROW.note); assert.equal(old.missing, null);
+  // a request not yet audited: pending; nothing at all: the old feedback slot, untouched
+  assert.equal(buildCrewProfile(PROFILE({ auditOpen: [{ id: "ar_2", sent_at: "2026-10-16T10:34:54Z" }] })).people.slots.find((s) => s.role === "dexter").state, "pending");
+  assert.deepEqual(buildCrewProfile(PROFILE()).people.slots.find((s) => s.role === "dexter"), { role: "dexter", label: "Dexter · Field", state: "never", at: null });
+});
+
+test("P1: the internal crew file prints the audit under its contract; the crew-facing statement never reads the feed", () => {
+  const p = buildCrewProfile(PROFILE({ audits: [AUDIT_ROW], auditFollowups: [{ request_id: "ar_1", owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "fixed", closed_at: "2026-11-02T10:00:00Z" }] }));
+  const f = feedbackFile(p, "2026-10-19");
+  const it = f.groups.flatMap((g) => g.items).find((x) => x.kind === "audit");
+  assert.equal(it.label, "Printshop audit");
+  assert.deepEqual(it.tags, [["Score", "4/5"], ["Inventory", "3/5"], ["Technical", "4/5"], ["Collaterals", "5/5"], ["Ship", "Pursuit"]]);
+  assert.deepEqual(it.lines.map((l) => l.label), ["Strengths", "To improve", "Agreed", "Follow-up"]);
+  assert.match(it.lines[3].text, /^Rolando by 2026-11-18: MFD refresher \(fixed 2026-11-02\)$/);
+  // the statement (crew-facing) is composed from contracts, documents and the bonus standing only — never people.feed
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const g = W.slice(W.indexOf("async function gatherStatement"), W.indexOf("\n}\n", W.indexOf("async function gatherStatement")));
+  assert.ok(g.length > 100, "found gatherStatement");
+  assert.doesNotMatch(g, /audit_eval|audit_visit|people\.feed/, "the crew's statement never reads an audit");
+});
+
+test("P1: the profile's data wave reads the audits with the rest (§12), never a TEST request's", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const one = W.slice(W.indexOf("async function apiCrewOne"), W.indexOf("async function apiCrewSave"));
+  const at = one.indexOf("auditFuRes] = await Promise.all([");
+  assert.ok(at > 0, "the audits ride the profile's one data wave");
+  const wave = one.slice(at, one.indexOf("\n  ]);", at));
+  assert.match(wave, /FROM audit_eval e .*COALESCE\(r\.test_mode, 0\) = 0/);
+  assert.match(wave, /FROM audit_followup WHERE agency_id=\?/);
+  assert.match(one, /audits: auditRes\.results, auditOpen: auditOpenRes\.results, auditFollowups: auditFuRes\.results/);
 });
