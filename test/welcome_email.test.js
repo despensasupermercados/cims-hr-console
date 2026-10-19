@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { welcomeEmail } from "../src/emails/hr.welcome.v1.js";
+import { welcomeEmail, RITA_BOOK_URL } from "../src/emails/hr.welcome.v1.js";
 import { welcomeContext, predecessorOf, currentLeg } from "../src/welcome_context.js";
 import { installHub, HUB_DDL } from "../src/crew_hub_routes.js";
 import { mastRows } from "../src/cims-mast.js";
@@ -43,14 +43,34 @@ test("template: the letterhead, the pass, the hub card, no placeholder link, no 
   const m = welcomeEmail(c);
   assert.equal(m.subject, "Welcome aboard Grandeur of the Seas, Archie");
   assert.ok(m.html.includes(mastRows()), "the canonical letterhead, byte for byte");
-  for (const s of ["Welcome aboard, Archie.", "Grandeur is yours from today.", "WELCOME PASS", "DAY 1 &middot; 18 OCT", "via Baltimore", "7 months", "18 May 2027",
+  for (const s of ["Welcome aboard, Archie.", "Grandeur is yours since 18 Oct 2026.", "WELCOME PASS", "DAY 1 &middot; 18 OCT", "via Baltimore", "7 months", "18 May 2027",
     "Sign-off projected &middot; TDG confirms it later.", "Mark Joseph Dela Rosa", "Mark&rsquo;s Digital Handover Notes are waiting for you", "Read Mark&rsquo;s notes",
-    "There is more on the other side.", "Wed 4 Nov", "Open my Crew Hub", LINKS.hub, LINKS.expense, "Rita sends you a time."]) assert.ok(m.html.includes(s), s);
+    "There is more on the other side.", "Wed 4 Nov", "Open my Crew Hub", LINKS.hub, LINKS.expense]) assert.ok(m.html.includes(s), s);
   assert.doesNotMatch(m.html, /#LINK|\bHis\b|\bhe leaves\b|rgba\(|gradient/);
-  assert.doesNotMatch(m.html, /Pick a time|Open the training|Book time with me|Standard Operating Procedures/, "a link not given is no button");
+  assert.doesNotMatch(m.html, /Pick a time|Open the training|Standard Operating Procedures/, "a link not given is no button");
+  // "from today" only on the sign-on day (the send's day since 19 Oct 2026); a catch-up says "since", a preview before it "from".
+  const onDay = welcomeEmail(welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-18", links: LINKS }));
+  assert.ok(onDay.html.includes("Grandeur is yours from today.") && onDay.text.includes("Grandeur is yours from today."));
+  assert.ok(welcomeEmail(welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-15", links: LINKS })).html.includes("Grandeur is yours from 18 Oct 2026."));
+  assert.ok(m.text.includes("Grandeur is yours since 18 Oct 2026."));
   assert.match(m.text, /Your Crew Hub: https:\/\/cims\.work\/hub\/TOKEN/);
+  // Day 7 (Miguel, 19 Oct 2026): Rita's calendar, booked whenever the crew needs, in the HTML and the plain text.
+  assert.ok(m.html.includes("Here is Rita&rsquo;s calendar: book a time with her whenever you need."));
+  assert.ok(m.html.includes('href="' + RITA_BOOK_URL + '"') && m.html.includes("Book a time with Rita"));
+  assert.ok(m.text.includes("Book a time on her calendar whenever you need: " + RITA_BOOK_URL));
+  // The Expense Report button (option A): solid navy, "Download the form", no arrow.
+  assert.match(m.html, /bgcolor="#1B3A5C"[^>]*><a href="https:\/\/cims\.work\/hub\/expense\.xlsx"[^>]*>Download the form<\/a>/);
+  assert.doesNotMatch(m.html, /Download &darr;/);
+  // Day 15 books on Rita's calendar too; the Rita buttons carry the calendar icon (served by the hub), no button has an arrow.
+  assert.ok(m.html.includes("Then one call a month. Book it on Rita&rsquo;s calendar."));
+  assert.equal((m.html.match(/>Book a time with Rita</g) || []).length, 2);
+  assert.match(m.text, /Day 15: expectations call\. Book it on Rita's calendar: https:\/\/bookings\.cloud\.microsoft\//);
+  assert.doesNotMatch(m.html, /&rarr;|&darr;|Rita sends you a time/);
+  const withIcon = welcomeEmail({ ...c, links: { ...LINKS, icons: "https://hub.cims.work/hub/i" } }).html;
+  assert.equal((withIcon.match(/<img src="https:\/\/hub\.cims\.work\/hub\/i\/calendar\.png" width="16" height="16" alt=""/g) || []).length, 2);
+  assert.match(RITA_BOOK_URL, /^https:\/\/bookings\.cloud\.microsoft\/book\/DG3RitaBerenyi@dg3\.com\//);
   const withLinks = welcomeEmail({ ...c, links: { ...LINKS, training: "https://t.example", onboarding: "https://o.example", review: "https://r.example", sops: "https://s.example", book: "https://b.example" } }).html;
-  for (const s of ["Open the training", "Pick a time", "Standard Operating Procedures", "Book time with me"]) assert.ok(withLinks.includes(s), s);
+  for (const s of ["Open the training", "https://o.example", "https://r.example", "Standard Operating Procedures", "Book time with me"]) assert.ok(withLinks.includes(s), s);
   assert.doesNotMatch(withLinks, /Rita sends you a time/);
 });
 
@@ -59,7 +79,14 @@ test("template: no predecessor on record drops the block; TDG's date says so; na
   const h = welcomeEmail(c).html;
   assert.doesNotMatch(h, /You take over from|TAKE OVER/i);
   assert.match(h, /Read the handover notes/);
-  assert.match(h, /ask the storekeeper for the Uniform Request Form/);
+  // Uniforms come from the shipboard manager by the brand's title, never the person handing over (Miguel, 19 Oct 2026).
+  assert.match(h, /Uniforms: ask your GSM \(Guest Services Manager\) for the Uniform Request Form\./);
+  assert.doesNotMatch(welcomeEmail(welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-19", links: LINKS })).html, /ask Mark for the Uniform|before Mark signs off/);
+  const cel = welcomeEmail(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], brand: "Celebrity" }], today: "2026-10-19", links: LINKS }));
+  assert.match(cel.html, /ask your DCM \(Digital Communication Manager\)/);
+  assert.match(cel.text, /Uniforms: ask your DCM \(Digital Communication Manager\) for the Uniform Request Form\./);
+  assert.match(welcomeEmail(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], brand: "Azamara" }], today: "2026-10-19", links: LINKS })).html, /ask your BOM \(Business Operations Manager\)/);
+  assert.match(welcomeEmail(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], brand: null }], today: "2026-10-19", links: LINKS })).html, /ask your shipboard manager for the Uniform Request Form/);
   assert.match(h, /Sign-off confirmed by TDG\./);
   assert.doesNotMatch(h, /<b>Ann<\/b>/);
   assert.match(h, /&lt;b&gt;Ann&lt;\/b&gt;/);
@@ -87,6 +114,12 @@ test("preview route: signed in only, no real link made (its hub button opens the
   assert.equal(d.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='crew_hub_link'").get().n, 0, "nothing written by a preview");
   assert.ok(html.includes("https://cims.work/hub/expense.xlsx"));
   assert.equal(sent, 0, "a preview sends nothing");
+  assert.ok(html.includes('src="https://cims.work/hub/i/calendar.png"'), "the preview carries the calendar icon from the hub");
+  const icon = await h("/hub/i/calendar.png", new Request("https://cims.work/hub/i/calendar.png"), env, new URL("https://cims.work/hub/i/calendar.png"), null);
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get("Content-Type"), "image/png");
+  const png = new Uint8Array(await icon.arrayBuffer());
+  assert.deepEqual([...png.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47], "a real PNG, no login");
   const R = readFileSync(new URL("../src/crew_hub_routes.js", import.meta.url), "utf8");
   assert.doesNotMatch(R, /MAILER|sendViaMailer/, "nothing in the hub module can send mail");
 });

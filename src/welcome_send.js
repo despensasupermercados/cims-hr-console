@@ -3,7 +3,8 @@
 // the exception of the excel file for expenses" — the Crew Hub carries what the PDFs did, so the email attaches NOTHING and
 // the Expense Report is a download link). To: the ship's mailbox (cims-timecard ship_contact, the audit's own rule) AND the
 // personal address; CC + reply-to Rita (it is her email today). Once per contract (welcome_send, keyed on the sign-on). The
-// daily run (08:00 Budapest, the auto-send's gate) sends on the sign-on day, catching up WELCOME_CATCHUP_DAYS if a run was
+// daily run (07:00 Miami time — Miguel, 19 Oct 2026: "the same day that the crew sign on .. 7am miami time") sends on the
+// sign-on day, catching up WELCOME_CATCHUP_DAYS if a run was
 // missed; it is OFF until switched on, and switching on never emails a contract that started before that day. A training
 // visit is never welcomed. Nothing here is money (§1). Pinned by test/welcome_send.test.js.
 import { welcomeContext, currentLeg } from "./welcome_context.js";
@@ -12,6 +13,8 @@ import { shipMailbox } from "./audit.js";
 
 export const WELCOME_TEMPLATE = "hr.welcome.v1";
 export const WELCOME_CATCHUP_DAYS = 2;
+export const WELCOME_TZ = "America/New_York";
+export const WELCOME_HOUR = "07";
 export const WELCOME_CC = "Rita.Berenyi@dg3.com";
 export const WELCOME_DDL = [
   "CREATE TABLE IF NOT EXISTS welcome_send (sc TEXT NOT NULL, on_key TEXT NOT NULL, sent_at TEXT NOT NULL, sent_by TEXT, to_json TEXT, PRIMARY KEY (sc, on_key))",
@@ -66,7 +69,7 @@ export function installWelcome(deps) {
     if (prior && !resend) return { ...out, ok: false, error: "already_sent" };
     const o = String(base || origin(env)).replace(/\/+$/, "");
     const link = await linkFor(env, sc, by);
-    const mail = welcomeEmail({ ...ctx0, links: { hub: o + "/hub/" + link.token, expense: o + "/hub/expense.xlsx" } });
+    const mail = welcomeEmail({ ...ctx0, links: { hub: o + "/hub/" + link.token, expense: o + "/hub/expense.xlsx", icons: o + "/hub/i" } });
     const res = await sendMail(env, { to: rc.to, cc: rc.cc.length ? rc.cc : undefined, replyTo: WELCOME_CC, subject: mail.subject, html: mail.html, text: mail.text,
       templateId: WELCOME_TEMPLATE, idempotencyKey: WELCOME_TEMPLATE + ":" + sc + ":" + onKey + (resend ? ":" + Date.now() : ""), critical: true });
     if (!res || res.ok === false) return { ...out, ok: false, error: "mail_failed", detail: res && res.error ? String(res.error).slice(0, 200) : null };
@@ -80,13 +83,13 @@ export function installWelcome(deps) {
   }
 
   const setting = async (env, k) => { try { const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k=?").bind(k).first(); return r ? r.v : null; } catch { return null; } };
-  const hourIn = (now) => new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Budapest", hour: "2-digit", hour12: false }).formatToParts(now).find((p) => p.type === "hour").value;
+  const hourIn = (now) => new Intl.DateTimeFormat("en-US", { timeZone: WELCOME_TZ, hour: "2-digit", hour12: false }).formatToParts(now).find((p) => p.type === "hour").value;
 
-  // The daily run: the auto-send's gate hour, the switch, the due contracts, one send each. A failed send is not logged and
+  // The daily run: 07:00 Miami time (the hourly cron's run in that hour), the switch, the due contracts, one send each. A failed send is not logged and
   // is tried again the next morning while the contract is inside the catch-up window.
   async function run(env, event) {
     const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
-    if (hourIn(now) !== "08") return { skipped: "not_gate_hour" };
+    if (hourIn(now) !== WELCOME_HOUR) return { skipped: "not_gate_hour" };
     if ((await setting(env, "welcome_auto_enabled")) !== "true") return { skipped: "disabled" };
     await ensure(env);
     const t = today(), since = await setting(env, "welcome_auto_since");

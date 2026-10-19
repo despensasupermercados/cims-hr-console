@@ -7,7 +7,7 @@
 import { hubPage, hubGonePage } from "./crew_hub.js";
 import { nextPayday } from "./payroll.js";
 import { shipCode } from "./ship_codes.js";
-import { EXPENSE_XLSX_B64 } from "./hub_assets.js";
+import { EXPENSE_XLSX_B64, CALENDAR_PNG_B64 } from "./hub_assets.js";
 import { currentLeg, welcomeContext } from "./welcome_context.js";
 import { welcomeEmail } from "./emails/hr.welcome.v1.js";
 import { shipMailbox } from "./audit.js";
@@ -87,6 +87,11 @@ export function installHub(deps) {
       return new Response(bytes, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": 'attachment; filename="Expense Report Template.xlsx"', "Cache-Control": "public, max-age=3600" } });
     }
+    if (p === "/hub/i/calendar.png" && request.method === "GET") {
+      const bin = atob(CALENDAR_PNG_B64), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Response(bytes, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" } });
+    }
     if (p.startsWith("/hub/") && request.method === "GET") {
       const token = p.slice(5);
       return TOKEN_RX.test(token) ? hubFor(env, token) : page(hubGonePage(), 404);
@@ -105,7 +110,7 @@ export function installHub(deps) {
       const ctx0 = welcomeContext({ crew, legs, today: today(), links: {} });
       if (!ctx0) return notice("No running contract on the board for this crew: there is no welcome email to show.");
       // A preview makes no link (nothing may reach the crew from a look): its hub button opens the console's preview.
-      const mail = welcomeEmail({ ...ctx0, links: { hub: url.origin + "/api/hub/preview?id=" + encodeURIComponent(sc), expense: origin + "/hub/expense.xlsx" } });
+      const mail = welcomeEmail({ ...ctx0, links: { hub: url.origin + "/api/hub/preview?id=" + encodeURIComponent(sc), expense: origin + "/hub/expense.xlsx", icons: origin + "/hub/i" } });
       return new Response(mail.html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" } });
     }
     // THE CREW VIEW (Miguel, 19 Oct 2026: "impersonating a crew .. rita can chose the person .. and then it can see audit the

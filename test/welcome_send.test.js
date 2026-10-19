@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { installWelcome, welcomeRecipients, welcomeDue, WELCOME_DDL, WELCOME_CC } from "../src/welcome_send.js";
+import { installWelcome, welcomeRecipients, welcomeDue, WELCOME_DDL, WELCOME_CC, WELCOME_TZ, WELCOME_HOUR } from "../src/welcome_send.js";
 import { installHub, HUB_DDL } from "../src/crew_hub_routes.js";
 
 let DatabaseSync;
@@ -38,7 +38,7 @@ function setup(mailOk = true) {
     sendMail: async (e, env2) => { mail.push(env2); return mailOk ? { ok: true } : { ok: false, error: "down" }; }, json, today: () => TODAY, origin: () => "https://cims.work" });
   return { d, env, w, mail };
 }
-const GATE = { scheduledTime: Date.UTC(2026, 9, 19, 6, 0) }; // 08:00 in Budapest (CEST)
+const GATE = { scheduledTime: Date.UTC(2026, 9, 19, 11, 0) }; // 07:00 Miami time (EDT) — Miguel, 19 Oct 2026
 const OFF_GATE = { scheduledTime: Date.UTC(2026, 9, 19, 9, 0) };
 
 test("node:sqlite is available, so the tests below actually run", () => assert.ok(DatabaseSync));
@@ -93,12 +93,17 @@ test("the daily run: only at 08:00 Budapest, only when switched on, each contrac
   const toggle = await (await w.handle("/api/hub/welcome/auto", new Request("https://cims.work/api/hub/welcome/auto", { method: "POST", body: JSON.stringify({ enabled: true }) }), env, new URL("https://cims.work/api/hub/welcome/auto"), sess)).json();
   assert.deepEqual(toggle, { ok: true, enabled: true, since: TODAY });
   assert.equal((await w.run(env, OFF_GATE)).skipped, "not_gate_hour");
+  assert.equal((await w.run(env, { scheduledTime: Date.UTC(2026, 9, 19, 6, 0) })).skipped, "not_gate_hour", "08:00 Budapest is no longer the hour");
+  assert.equal(WELCOME_TZ, "America/New_York");
+  assert.equal(WELCOME_HOUR, "07");
   const r1 = await w.run(env, GATE);
   assert.deepEqual(r1.sent.map((x) => x.sc), ["SC-1"], "switched on today: only today's sign-on");
   assert.deepEqual(r1.failed.map((x) => [x.sc, x.error]), [["SC-7", "no_recipient"]]);
   assert.equal(mail.length, 1);
   await w.run(env, GATE);
   assert.equal(mail.length, 1, "never twice");
+  const winter = await w.run(env, { scheduledTime: Date.UTC(2026, 11, 1, 12, 0) }); // 07:00 EST: the hour follows Miami's clock
+  assert.notEqual(winter.skipped, "not_gate_hour");
   assert.ok(d.prepare("SELECT 1 FROM activity_log WHERE action='welcome_send_failed'").get());
   assert.equal((await w.handle("/api/hub/welcome/send", new Request("https://cims.work/x", { method: "POST", body: "{}" }), env, new URL("https://cims.work/api/hub/welcome/send"), null)).status, 401);
 });
