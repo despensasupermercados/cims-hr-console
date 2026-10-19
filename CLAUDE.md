@@ -1000,6 +1000,16 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   + `welcome_auto_since`): OFF until switched on, and switching on never emails a contract that started before that day. The
   missing training / day-7 / day-15 / SOP / booking links block nothing: no link = no button ("Rita sends you a time").
   Pinned by `test/crew_hub.test.js`, `test/welcome_email.test.js`, `test/welcome_send.test.js`.
+- **THE CREW VIEW — Data › Crew view** (Miguel, 19 Oct 2026: "I wanna make sure I know what the crew is seeing";
+  "impersonating a crew .. rita can chose the person .. and then it can see audit the information"). Rita picks anyone (or one
+  example per case: aboard with a contract number, aboard with no count on record, just signed on, Azamara, between
+  contracts — `hubExamples`) and sees their Crew Hub (`/api/hub/preview?id=`) or welcome email (`/api/hub/welcome?id=`) at
+  phone or desktop width, beside **the audit** (`/api/hub/audit?id=`): every value the page shows with its source — the
+  contract and how its sign-off was set, the contract number and whether it comes from the last committed outcome or the
+  baseline (`hubCountDetail`, READ only, §1), the next payday, the hub link (made, by whom, last opened) and the welcome
+  email (sent, to whom, or who it would go to). **A look writes nothing**: the preview and the audit read the SAME model as
+  the crew's link (`modelFor`), make no link and record no visit; the welcome preview's hub button opens the console
+  preview, never a real link. **hub.cims.work** with no link is the hub's landing page (`hubHomePage`), never the console.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
