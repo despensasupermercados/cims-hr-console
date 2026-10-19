@@ -1533,8 +1533,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   four ratings with 3 or below in red, strengths / to improve / agreed, items missing, each follow-up open or fixed, "Open
   the audit"), the Dexter slot reads the audit (answered, or asked while a request waits), the Notes window lists it under
   Feedback, and the internal crew file prints it under its contract — never the statement or anything the crew reads; read
-  in `apiCrewOne`'s one wave, TEST requests never. Still to build: the history page, the filed / dispatch emails (render
-  first, Miguel signs off), Rolando's Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
+  in `apiCrewOne`'s one wave, TEST requests never. **History and Follow-ups** (the home's two doors, counted on
+  `/api/audit/ships`): `GET /api/audit/history` lists every filed audit, newest first (ship, crew, the visit's two dates,
+  the four ratings with 3 or below red, the dispatch rating uncoloured — Rita's, never the specialist's — what was missing
+  on the desk, the tools and the uniform with "2nd time", photos, follow-ups open / fixed; a grade filed on the 15 Oct
+  screen says it has no steps, never "nothing missing"), filters All / Royal / Celebrity / Azamara / Follow-up open; every
+  follow-up, the late ones first. `POST /api/audit/followup/close` closes one from the list (two taps; once; `closed_by`,
+  "(open site, no sign-in)" when open; the next visit no longer carries it). TEST requests never. **The page is booted
+  in a test** (`test/audit_page_boot.test.js`, node:vm, a small fake DOM): #299 named the photo queue `S.q`, the home's
+  search text, and audit.cims.work opened on "Could not load" while every route test was green (#304, the queue is `S.pq`).
+  Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
+  the import of the 61 (I1), the web rail (W1).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

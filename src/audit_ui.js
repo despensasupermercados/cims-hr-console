@@ -264,7 +264,7 @@ span.cell{cursor:default}.cell.warn{background:var(--amberbg);color:var(--amber)
 .gq{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--greenbg);color:var(--green-d)}
 .gq.lo{background:var(--redbg);color:var(--red)}.gq.x,.gq.p{background:var(--bg);color:var(--ink2)}.gq.x{color:var(--mut)}
 .fu{border-top:1px solid var(--line)}.card>.fu:first-child{border-top:0}.empty>span{font-size:13px}
-.fubtn{display:flex;gap:8px;margin-top:12px}.fubtn .btn{min-height:44px;font-size:14.5px;flex:1}.fubtn .btn .ic{width:18px;height:18px}
+.fubtn{display:flex;gap:8px;margin-top:12px}.fubtn .btn{min-height:44px;font-size:14.5px;flex:1;padding:0 12px;white-space:nowrap}.fubtn .btn .ic{width:18px;height:18px}.nw{white-space:nowrap}
 .btn.sure{background:var(--fill)}
 .tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 .tile{background:var(--card);border-radius:12px;box-shadow:0 0 0 1px var(--line);padding:12px 2px 10px;text-align:center;min-width:0}
@@ -1092,16 +1092,17 @@ label.btn{position:relative}
     h += '<div class="sh">' + (list.length === 1 ? "1 audit" : list.length + " audits") + "<span>" + span + "</span></div>";
     if (!list.length) { $("main").innerHTML = h + '<div class="card"><div class="empty">' + ic("clipboard-text") + "No audit matches this filter.</div></div>"; return; }
     h += '<div class="card">' + list.map(function (a) {
-      var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools) : null, tags = [];
-      var missTxt = miss == null ? "Graded before the audit had steps · nothing recorded on the desk or the tools"
-        : miss.length ? "Missing: " + miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? " (" + esc(AR.ordinal(t)) + " time)" : ""); }).join(" · ")
-        : "Nothing missing on the desk or the tools";
+      var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools, a.missing.ppe || []) : null, tags = [];
+      /* a comma between items: a label can carry its own " · " ("SOPs · ordering & transfers") */
+      var missTxt = miss == null ? "Graded before the audit had steps · nothing recorded on the desk, the tools or the uniform"
+        : miss.length ? "Missing: " + miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? " (" + esc(AR.ordinal(t)) + " time)" : ""); }).join(", ")
+        : "Nothing missing on the desk, the tools or the uniform";
       if (a.followups.open) tags.push('<span class="st a">' + ic("flag") + (a.followups.open === 1 ? "Follow-up open" : a.followups.open + " follow-ups open") + "</span>");
       else if (a.followups.fixed) tags.push('<span class="st g">' + ic("flag") + "Follow-up fixed</span>");
       if (a.photos) tags.push('<span class="st m">' + ic("camera") + a.photos + (a.photos === 1 ? " photo" : " photos") + "</span>");
       return '<button class="row" data-go="q=' + esc(a.id) + '" style="align-items:flex-start"><div class="tx">'
         + '<div class="mh"><div class="nm">' + esc(a.ship) + '</div><span class="st ' + (a.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + esc(a.score) + "/5</span></div>"
-        + '<div class="sm">' + (a.crew ? esc(a.crew) + " · " : "") + visitWhen(a) + "</div>"
+        + '<div class="sm">' + (a.crew ? esc(a.crew) + " · " : "") + '<span class="nw">' + visitWhen(a) + "</span></div>"
         + '<div class="grd">' + gq("Inventory", R.inventory) + gq("Technical", R.technical) + gq("Collaterals", R.collaterals) + gq("Overall", R.overall) + (R.dispatch != null ? gq("Dispatch", R.dispatch, true) : "") + "</div>"
         + '<div class="sm" style="margin-top:6px">' + missTxt + "</div>"
         + (tags.length ? '<div class="stl">' + tags.join("") + "</div>" : "")
@@ -1124,8 +1125,8 @@ label.btn{position:relative}
       + '<div class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : " · no date set") + "</div>"
       + '<div class="sm">' + esc(f.ship) + (f.crew ? " · " + esc(f.crew) : "") + " · asked " + fmtD(f.createdAt, true) + "</div>";
     if (f.status === "fixed") h += '<div class="sm">Fixed ' + fmtD(f.closedAt, true) + " by " + esc(byName(f.closedBy)) + (f.closedOnVisit ? " at the next audit" : " from this list") + "</div>";
-    h += '<div class="fubtn"><button class="btn ghost" data-go="q=' + esc(f.request) + '">' + ic("clipboard-text") + "Open the audit</button>"
-      + (f.status === "open" ? '<button class="btn" data-fix="' + esc(f.id) + '">' + ic("check") + "Mark fixed</button>" : "") + "</div>";
+    h += '<div class="fubtn"><button class="btn ghost" data-go="q=' + esc(f.request) + '">Open audit</button>'
+      + (f.status === "open" ? '<button class="btn" data-fix="' + esc(f.id) + '">Mark fixed</button>' : "") + "</div>";
     return h + "</div>";
   }
   function followupsList() {
@@ -1144,9 +1145,9 @@ label.btn{position:relative}
   /* two taps: the first asks, the second closes (a follow-up closed by a stray thumb would never come back at the next visit) */
   function fixFollowup(b) {
     if (b.disabled) return;
-    var reset = function () { b.disabled = false; b.classList.remove("sure"); b.innerHTML = ic("check") + "Mark fixed"; };
+    var reset = function () { b.disabled = false; b.classList.remove("sure"); b.textContent = "Mark fixed"; };
     if (!b.classList.contains("sure")) {
-      b.classList.add("sure"); b.innerHTML = ic("check") + "Tap again to confirm";
+      b.classList.add("sure"); b.innerHTML = ic("check") + "Confirm";
       setTimeout(function () { if (b.isConnected && !b.disabled && b.classList.contains("sure")) reset(); }, 4000);
       return;
     }
