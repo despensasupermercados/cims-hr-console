@@ -903,15 +903,31 @@ else TDG's undated Earmarked row). Sent by the daily auto-send (`auto_send.js`, 
 recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
 - Greeted by FIRST NAME (first word of TDG's first name). Signed by Rita; reply-to Rita; **CC onboardsupport@dg3.com**
   (the whole CIMS team's distribution list).
-- **Digital Handover Notes** in HON (open hon.cims.work, select the ship — no other click), mandatory; a short PRINTED
+- **Digital Handover Notes** (the HON app; open hon.cims.work, select the ship — no other click), mandatory; a short PRINTED
   copy still stays onboard: one for the reliever, one for the shipboard manager. The manager's title is the brand's:
   Azamara **BOM**, Royal **GSM**, Celebrity **DCM** (`MANAGER`). Never "GSM" fleet-wide.
 - **Never promise the two specialists meet** (Azamara usually overlaps; Royal / Celebrity usually do not, except a new
   hire). Only when the reliever's sign-on is BEFORE this sign-off does the email say "you overlap aboard for N days";
-  otherwise "you may or may not see <first name> aboard". No reliever: "not named yet", never a guess.
+  otherwise "you may or may not meet <first name> aboard". No reliever: "not named yet", never a guess.
 - The final count is signed in the handover notes; Ray Guerra and Jonathan Placer Alonzo receive it.
-- **One call to action**: Open HON is the acknowledgment link (`/instr?t=`), which records the receipt (`instr_ack`,
-  the onboardsupport confirmation, the profile's crew-change tick) and forwards to hon.cims.work. No "I have read" button.
+- **One call to action**: the pass's "Open my Digital Handover Notes" is the acknowledgment link (`/instr?t=`), which records
+  the receipt (`instr_ack`, the onboardsupport confirmation, the profile's crew-change tick) and forwards to hon.cims.work.
+  No "I have read" button.
+- **THE SIGN-OFF PASS** (Miguel, 19 Oct 2026: "looks too computer .. make it more human sounding"; "people dont know what
+  HON is .. replace that by Digital Hand Over notes .. across the email"; "add .. the name .. phone and email of the incoming
+  crew .. so they can be in contact"; "convert all this to something similar to a digital airline pass"; two rounds on the
+  render, desktop and phone, then "I like it now"; proofs under `docs/mockups/signoff_pass_20261019/`). The opening is a
+  headline in words ("Two weeks to go, <first name>." — `toGo`, the pass says "14 DAYS TO GO"), one sentence, and a boarding
+  pass: FROM the cruise line's ship code (`ship_codes.js`) TO HOME via the sign-off port; the seafarer (first word of the
+  first name + surname) and TDG's position; Signed on · Sign-off · Audit window (sign-off −14 to −7); a tear line; the
+  reliever; a tear line; the one button. **The crew never reads "HON"**: the product is "Digital Handover Notes";
+  hon.cims.work stays once (step a) as the address to type on a ship's computer. **The reliever's mobile and email are
+  printed ONLY when TDG has the reliever** (`signoff_context.relieverInTdg`, the IN TDG chip: TDG's Earmarked row, a seat the
+  file put aboard, Rita's card the file confirms or earmarks for that hull — the dashboard's `tdgHas` reads the same; a
+  card only the console holds, or "told Joy", is not): a plan only the console holds must reach nobody (§10d). A Philippine
+  mobile reads "+63 917 555 0142" with tel: and WhatsApp links (`phoneOf`), anything else as written; TDG's "-" prints
+  nothing. Every active crew had a phone and an email on file on 19 Oct 2026. The reliever is NOT sent the outgoing crew's
+  contact (a new email; its render is Miguel's to sign off first).
 - The HON bonus box (Ship handover factor, reczJqxZnOuzkv74X) shows only for sign-offs on or after 1 Nov 2026.
 - **One switch per email** (the rail's Automation: Instructions · Sign-off link · GSM review; `/api/autosend` with `kind`).
   Switching a kind ON stamps the day (`auto_send_instr_since` / `auto_send_link_since`): a seat already inside the

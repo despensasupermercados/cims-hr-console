@@ -104,7 +104,7 @@ test("4. the Uploads review lists what the file says that nothing changes: a rep
 test("5. the plain-text part says the overlap in months and days, like the HTML (§11e: never a bare day count)", () => {
   const m = instructionsEmail({ firstName: "Kevin", ship: "Pursuit", brand: "Azamara", signOff: "2026-10-31", port: "HONG KONG, CHINA",
     reliever: { name: "A.J. Baleña", first: "A.J.", on: "2026-09-23" }, link: "https://cims.work/instr?t=x", today: "2026-10-17" });
-  assert.match(m.text, /overlap aboard for 1 month 8 days from 23 Sep/);
+  assert.match(m.text, /aboard with you for 1 month 8 days from 23 Sep/);
   assert.doesNotMatch(m.text, /\b38 days\b/);
 });
 

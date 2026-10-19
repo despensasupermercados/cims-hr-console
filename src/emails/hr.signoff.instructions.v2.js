@@ -7,12 +7,23 @@
 // - The shipboard manager's title is the brand's own: Azamara BOM, Royal GSM, Celebrity DCM.
 // - Never promise that the two specialists meet: only when the reliever's sign-on is before this sign-off (an overlap).
 // - The final count is signed in the handover notes; Ray Guerra and Jonathan Placer Alonzo receive it.
-// - One call to action: Open HON goes through the acknowledgment link, which records the receipt and forwards to HON.
+// - One call to action: the button goes through the acknowledgment link, which records the receipt and forwards to HON.
 // - Greeted by first name. Signed by Rita.
+// THE SIGN-OFF PASS (Miguel, 19 Oct 2026: "looks too computer .. make it more human sounding"; "people dont know what HON
+// is .. replace that by Digital Hand Over notes .. across the email"; "add .. the name .. phone and email of the incoming
+// crew .. so they can be in contact"; "convert all this to something similar to a digital airline pass"; two rounds on
+// the render, desktop and phone, then "I like it now"). The opening is a headline in words ("Two weeks to go, <name>."),
+// one sentence, and a boarding pass: FROM the ship's code TO HOME via the sign-off port; the seafarer and position; signed
+// on · sign-off · audit window; a tear line; the reliever; a tear line; the one button, "Open my Digital Handover Notes".
+// The crew never reads "HON": the product is "Digital Handover Notes", hon.cims.work stays once as the address to type on a
+// ship's computer. The reliever's mobile and email are printed ONLY when TDG has the reliever (IN TDG: TDG's Earmarked row,
+// the file's own row, or Rita's card TDG also earmarks) — a plan only the console holds must reach nobody (§10d), and a
+// phone number in a crew email would reach the person before TDG has told them.
 // Built to the CIMS email standard: the canonical letterhead (cims-mast.js), tables and inline styles only, no rgba, no
 // gradients, bgcolor paired with background. Pure: (data) => { subject, html, text }.
 import { mastRows } from "../cims-mast.js";
 import { mdWords } from "../span_md.js";
+import { shipCode } from "../ship_codes.js";
 
 export const TEMPLATE_ID = "hr.signoff.instructions.v2";
 export const HON_URL = "https://hon.cims.work";
@@ -20,7 +31,7 @@ export const HON_URL = "https://hon.cims.work";
 export const HON_BONUS_FROM = "2026-11-01";
 
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB",
-  body: "#374151", amber: "#B7791F", atint: "#F6EEE1", grey: "#9CA3AF", gtint: "#EAF4E6" };
+  body: "#374151", amber: "#B7791F", atint: "#F6EEE1", grey: "#9CA3AF", gtint: "#EAF4E6", deep: "#142D48", sub: "#95A0AD" };
 const FH = "'Outfit',Helvetica,Arial,sans-serif";
 const FB = "'DM Sans',Helvetica,Arial,sans-serif";
 const MON = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -59,9 +70,32 @@ export function portName(p) {
 // The first word of the first name (TDG's "Kevin Leif" -> "Kevin"; "A.J. Lorenzo" -> "A.J.").
 export const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
 
-// d: { firstName, ship, brand, signOff, port, reliever: { name, first, on } | null, link, today }
+// The reliever's mobile as TDG keeps it ("09171234567", "+63 917 123 4567", "639171234567"): a Philippine mobile reads
+// +63 917 123 4567 with a tel: and a WhatsApp link; anything else is printed as written, with a tel: link only.
+export function phoneOf(p) {
+  const shown = String(p || "").trim();
+  if (!shown || shown === "-") return null;
+  const dg = shown.replace(/[^0-9]/g, "");
+  if (dg.length < 7) return null;
+  const ph = /^09\d{9}$/.test(dg) ? "63" + dg.slice(1) : /^639\d{9}$/.test(dg) ? dg : null;
+  if (!ph) return { shown, tel: (shown.trim().startsWith("+") ? "+" : "") + dg, wa: null };
+  return { shown: `+63 ${ph.slice(2, 5)} ${ph.slice(5, 8)} ${ph.slice(8)}`, tel: "+" + ph, wa: "https://wa.me/" + ph };
+}
+const emailOf = (e) => { const s = String(e || "").trim(); return /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(s) ? s : null; };
+// "Two weeks to go" on the day the daily run sends it (T-14); the button on the crew page can send it any day.
+export function toGo(days) {
+  if (days == null || days < 0) return null;
+  if (days === 0) return ["Sign-off day", "SIGN-OFF TODAY"];
+  if (days === 1) return ["One day to go", "1 DAY TO GO"];
+  if (days === 7) return ["One week to go", "7 DAYS TO GO"];
+  if (days === 14) return ["Two weeks to go", "14 DAYS TO GO"];
+  return [days + " days to go", days + " DAYS TO GO"];
+}
+
+// d: { firstName, crewName, position, ship, brand, signOn, signOff, port,
+//      reliever: { name, first, on, tdg, phone, email } | null, link, today }
 export function instructionsEmail(d) {
-  const off = iso(d.signOff);
+  const off = iso(d.signOff), on = iso(d.signOn);
   const today = iso(d.today) || new Date().toISOString().slice(0, 10);
   const brand = d.brand || "Royal";
   const [mgr, mgrLong] = managerOf(brand);
@@ -75,6 +109,11 @@ export function instructionsEmail(d) {
   const bonus = !!off && off >= HON_BONUS_FROM;
   const name = esc(d.firstName || "") || "colleague";
   const link = d.link || HON_URL;
+  const go = off ? toGo(dayN(off) - dayN(today)) : null;
+  // The contact, only when TDG has the reliever (see the header).
+  const inTdg = !!(rel && rel.tdg);
+  const ph = inTdg ? phoneOf(rel.phone) : null;
+  const em = inTdg ? emailOf(rel.email) : null;
 
   const li = (t) => `<tr><td valign="top" width="16" style="font-family:${FB};font-size:14px;line-height:22px;color:${C.green};padding:0 0 6px 0;">&bull;</td><td style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};padding:0 0 6px 0;">${t}</td></tr>`;
   const list = (items) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${items.map(li).join("")}</table>`;
@@ -90,23 +129,75 @@ export function instructionsEmail(d) {
  </tr></table></td></tr>`;
   const p = (t, extra = "") => `<div style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};${extra}">${t}</div>`;
   const note = (t, col, bg) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr><td bgcolor="${bg}" style="background:${bg};border-left:3px solid ${col};padding:10px 14px;font-family:${FB};font-size:13px;line-height:20px;color:${C.body};">${t}</td></tr></table>`;
-  const fact = (k, v, w) => `<td class="stack" width="${w}" valign="top" style="padding:14px 12px 14px 0;border-top:3px solid ${C.navy};"><div style="font-family:${FB};font-size:12px;color:${C.slate};padding-bottom:3px;">${k}</div><div style="font-family:${FH};font-size:17px;font-weight:600;color:${C.navy};line-height:22px;">${v}</div></td>`;
 
-  const meet = overlap
-    ? `You and <b>${esc(rel.name)}</b> overlap aboard for ${mdWords(overlap.from, off)} from ${shortDate(overlap.from)}: use them to walk ${relFirst} through the ship.`
-    : rel
-      ? `Your reliever is <b>${esc(rel.name)}</b>. You may or may not see ${relFirst} aboard, so your notes must carry everything.`
-      : `Your reliever is not named yet. You may not meet them aboard, so your notes must carry everything.`;
-  const head = off ? `You sign off ${shortDate(off)}${port ? " in " + esc(port) : ""}.` : `Your sign-off is coming up.`;
+  // ---- the pass. A letter-spaced label leaves its spacing after the last letter: a right-aligned one is pulled back by it.
+  const lab = (t, al) => `<div style="font-family:${FB};font-size:10px;font-weight:700;letter-spacing:1.6px;color:${C.slate};text-transform:uppercase;line-height:14px;${al === "right" ? "margin-right:-1.6px;" : ""}">${t}</div>`;
+  const lnk = (href, t) => `<a href="${esc(href)}" style="color:${C.navy};font-weight:700;text-decoration:none;">${t}</a>`;
+  const hair = (dashed) => `<div style="border-top:${dashed ? "2px dashed " + C.border : "1px solid " + C.border};font-size:0;line-height:0;">&nbsp;</div>`;
+  // the tear line: a cloud half-circle each side (Outlook draws squares; it still reads as a tear line)
+  const tear = `<tr><td style="padding:0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+ <td width="14" height="28" bgcolor="${C.cloud}" style="background:${C.cloud};font-size:0;line-height:0;border-radius:0 14px 14px 0;">&nbsp;</td>
+ <td style="padding:0 10px;">${hair(true)}</td>
+ <td width="14" height="28" bgcolor="${C.cloud}" style="background:${C.cloud};font-size:0;line-height:0;border-radius:14px 0 0 14px;">&nbsp;</td></tr></table></td></tr>`;
+  const cell = (k, v, w, al) => `<td class="pf" width="${w}" valign="top" align="${al}" style="text-align:${al};padding:0;">${lab(k, al)}<div class="pv" style="font-family:${FH};font-size:16px;font-weight:600;color:${C.navy};line-height:22px;padding-top:4px;">${v}</div></td>`;
+  const dot = `<td width="7" height="7" bgcolor="${C.green}" style="background:${C.green};border-radius:4px;font-size:0;line-height:0;">&nbsp;</td>`;
+  const code = (t) => `<div class="code" style="font-family:${FH};font-size:34px;font-weight:700;letter-spacing:1px;color:${C.navy};line-height:40px;padding-top:4px;white-space:nowrap;">${t}</div>`;
+  const under = (t) => `<div style="font-family:${FB};font-size:13px;line-height:18px;color:${C.slate};padding-top:2px;">${t}</div>`;
+  const crow = (k, v) => `<tr><td width="60" valign="top" style="font-family:${FB};font-size:13px;line-height:24px;color:${C.slate};">${k}</td><td valign="top" style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};word-break:break-word;">${v}</td></tr>`;
+  const relWhen = !rel ? `Rita will tell you who takes over.`
+    : overlap ? `Aboard with you from ${shortDate(overlap.from)} &middot; ${mdWords(overlap.from, off)} together`
+    : relOn ? `Joins ${esc(ship || "the ship")} on ${shortDate(relOn)} ${relOn.slice(0, 4)}` : `Joining date to be confirmed`;
+  const contact = (ph ? crow("Mobile", lnk("tel:" + ph.tel, esc(ph.shown)) + (ph.wa ? ` <span style="color:${C.grey};">&middot;</span> ` + lnk(ph.wa, "WhatsApp") : "")) : "")
+    + (em ? crow("Email", lnk("mailto:" + em, esc(em).replace("@", "<wbr>@"))) : "");
+  const relBlock = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+   <td valign="top">${lab("Relieved by")}<div style="font-family:${FH};font-size:22px;font-weight:600;color:${rel ? C.navy : C.grey};line-height:28px;padding-top:4px;">${rel ? esc(rel.name) : "Not named yet"}</div>
+    <div style="font-family:${FB};font-size:13px;line-height:20px;color:${overlap ? C.gink : C.slate};padding-top:2px;">${relWhen}</div></td>
+   ${inTdg ? `<td valign="top" align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:5px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;color:${C.gink};white-space:nowrap;">IN TDG</td></tr></table></td>` : ""}
+  </tr></table>${contact ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">${contact}</table>` : ""}`;
   const reviewFrom = off ? addDays(off, -14) : null, reviewTo = off ? addDays(off, -7) : null;
+  const crewName = esc(d.crewName || d.firstName || "");
+  const pass = `<tr><td class="px" style="padding:22px 32px 0 32px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.cloud}" style="background:${C.cloud};border-radius:20px;"><tr><td class="passpad" style="padding:14px;">
+ <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border-radius:16px;">
+  <tr><td bgcolor="${C.deep}" style="background:${C.deep};border-radius:16px 16px 0 0;padding:13px 22px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td style="font-family:${FB};font-size:11px;font-weight:700;letter-spacing:2px;line-height:16px;color:${C.sub};">SIGN-OFF PASS</td>
+    <td align="right" style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1px;line-height:16px;color:${C.green};white-space:nowrap;padding-left:14px;">${go ? go[1] : ""}</td></tr></table></td></tr>
+  <tr><td style="padding:20px 22px 0 22px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+    <td class="rside" width="34%" valign="top">${lab("From")}${code(esc(shipCode(ship) || "&nbsp;"))}${under(esc(ship || "Your ship"))}</td>
+    <td class="rmid" width="32%" valign="top" style="padding:0 10px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:36px;"><tr>${dot}<td style="padding:0 2px;">${hair(true).replace(C.border, C.grey)}</td>${dot}</tr></table></td>
+    <td class="rside" width="34%" valign="top" align="right" style="text-align:right;">${lab("To", "right")}${code("HOME").replace("white-space:nowrap;", "white-space:nowrap;margin-right:-1px;")}${under(port ? "via " + esc(port) : "Port to be confirmed")}</td>
+   </tr></table></td></tr>
+  <tr><td style="padding:18px 22px 0 22px;">${hair(false)}</td></tr>
+  <tr><td style="padding:16px 22px 0 22px;">${lab("Seafarer")}<div style="font-family:${FH};font-size:18px;font-weight:600;color:${C.navy};line-height:24px;padding-top:4px;">${crewName}</div>${d.position ? under(esc(d.position)) : ""}</td></tr>
+  <tr><td style="padding:16px 22px 20px 22px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cell("Signed on", on ? shortDate(on) + " " + on.slice(0, 4) : "&ndash;", "34%", "left")}${cell("Sign-off", off ? shortDate(off) + " " + off.slice(0, 4) : "To be confirmed", "33%", "center")}${cell("Audit", off ? range(reviewFrom, reviewTo) : "&ndash;", "33%", "right")}</tr></table></td></tr>
+  ${tear}
+  <tr><td style="padding:16px 22px 20px 22px;">${relBlock}</td></tr>
+  ${tear}
+  <tr><td align="center" style="padding:16px 22px 20px 22px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${C.green}" style="background:${C.green};border-radius:10px;"><a href="${esc(link)}" target="_blank" style="display:block;font-family:${FB};font-size:16px;font-weight:700;line-height:20px;color:#FFFFFF;text-decoration:none;padding:15px 12px;border-radius:10px;">Open my Digital Handover Notes</a></td></tr></table>
+   <div style="font-family:${FB};font-size:12px;line-height:18px;color:${C.slate};padding-top:9px;">Select ${esc(ship || "your ship")} &middot; no login. Opening them from this email also tells Rita you have these instructions.</div>
+  </td></tr>
+ </table></td></tr></table></td></tr>`;
+  // One sentence under the pass: what the reliever means for the notes. Never a promise to meet (rec2dsh7hh8mIYwgV).
+  const say = overlap
+    ? `You are aboard together from ${longDate(overlap.from).replace(/ \d{4}$/, "")}: use those days to walk ${relFirst} through the ship and through your notes.`
+    : rel
+      ? `You may or may not meet ${relFirst} aboard, so your notes must carry everything.` + (contact ? ` A short message before you leave helps: introduce yourself, and say anything that cannot wait for the notes.` : "")
+      : `You may not meet your reliever aboard, so your notes must carry everything.`;
+
+  const headA = go ? `${go[0]}, ${name}.` : `Your sign-off is coming up, ${name}.`;
+  const head = off ? `You sign off ${shortDate(off)}${port ? " in " + esc(port) : ""}.` : `Your sign-off is coming up.`;
   const steps = [
-    `Open <a href="${esc(link)}" style="color:${C.navy};font-weight:700;">hon.cims.work</a> and select <b>${esc(ship || "your ship")}</b>. No login.`,
+    `Open your notes with the button on your pass, or go to <a href="${esc(link)}" style="color:${C.navy};font-weight:700;">hon.cims.work</a> on any device, and select <b>${esc(ship || "your ship")}</b>. No login.`,
     `Complete all eleven sections and save each one: machine status, recurring issues, open tickets, stock and orders, tools, risks and active projects.`,
     `Count the inventory and tools and <b>sign your count</b>. ${RelFirst} records and signs their own count on joining; a signed count is never rewritten.`,
-    `<b>Submit your notes</b> before you leave. HON sends them to you, ${rel ? relFirst + " " : "your reliever "}and onboardsupport<wbr>@dg3.com, which reaches the whole CIMS team.`,
+    `<b>Submit your notes</b> before you leave. They go to you, ${rel ? relFirst + " " : "your reliever "}and onboardsupport<wbr>@dg3.com, which reaches the whole CIMS team.`,
     `<b>Print a short copy</b>: leave one for ${relFirst} and give one to your ${mgr} (${mgrLong}).`,
   ];
-  const bonusBox = bonus ? `<tr><td style="padding:12px 0 0 40px;">${note(`<b style="color:${C.navy};">This handover now counts toward your bonus.</b> For contracts ending on or after 1 Nov 2026, the Ship handover factor (10 points) of your Score Card is your submitted digital handover notes for this ship, signed in the 30 days before your sign-off and up to 10 days after it. No submitted notes, no points.`, C.green, C.gtint)}</td></tr>` : "";
+  const bonusBox = bonus ? `<tr><td style="padding:12px 0 0 40px;">${note(`<b style="color:${C.navy};">This handover now counts toward your bonus.</b> For contracts ending on or after 1 Nov 2026, the Ship handover factor (10 points) of your Score Card is your submitted Digital Handover Notes for this ship, signed in the 30 days before your sign-off and up to 10 days after it. No submitted notes, no points.`, C.green, C.gtint)}</td></tr>` : "";
 
   const html = `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8">
@@ -116,10 +207,10 @@ export function instructionsEmail(d) {
 <style>
  body{margin:0;padding:0;width:100%!important}table{border-collapse:collapse}
  a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}
- @media only screen and (max-width:600px){.frame{padding:0!important}.px{padding-left:20px!important;padding-right:20px!important}.stack{display:block!important;width:auto!important}.h1{font-size:28px!important;line-height:32px!important}}
+ @media only screen and (max-width:600px){.frame{padding:0!important}.px{padding-left:20px!important;padding-right:20px!important}.h1{font-size:28px!important;line-height:32px!important}.passpad{padding:10px!important}.code{font-size:30px!important;line-height:36px!important}.pf .pv{font-size:15px!important}.rside{width:42%!important}.rmid{width:16%!important}}
 </style></head>
 <body style="margin:0;padding:0;background:${C.cloud};-webkit-text-size-adjust:100%;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${C.cloud};">${head} Digital handover notes: complete them in HON before you leave.</div>
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${C.cloud};">${go ? go[0] + ". " : ""}${head} Your Digital Handover Notes are due before you leave.</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.cloud}" style="background:${C.cloud};"><tr><td class="frame" align="center" style="padding:24px 12px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="width:100%;max-width:600px;background:#FFFFFF;">
 ${mastRows()}
@@ -127,13 +218,13 @@ ${mastRows()}
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
   <td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.gink};">SIGN-OFF INSTRUCTIONS</td>
   <td align="right" style="font-family:${FB};font-size:13px;color:${C.slate};">${shortDate(today)} ${today.slice(0, 4)}</td></tr></table>
- <div class="h1" style="font-family:${FH};font-size:34px;font-weight:600;letter-spacing:-0.6px;line-height:38px;color:${C.navy};padding-top:14px;">${head}<br><span style="color:${C.grey};">Digital Handover Notes.</span></div>
- <div style="font-family:${FB};font-size:15px;line-height:23px;color:${C.body};padding-top:14px;">Dear ${name}, this is your formal notice to prepare your handover. ${meet} Your handover notes are completed in <b>HON</b> and are mandatory: they are the record of the ship we keep. A short printed copy still stays onboard for ${relFirst} and your ${mgr}.</div>
+ <div class="h1" style="font-family:${FH};font-size:34px;font-weight:600;letter-spacing:-0.6px;line-height:38px;color:${C.navy};padding-top:14px;">${headA}<br><span style="color:${C.grey};">Here is your sign-off pass.</span></div>
+ <div style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};padding-top:14px;">Thank you for your work on ${esc(ship || "board")}. The first thing to start is your <b>Digital Handover Notes</b>: they are how ${relFirst} will get to know the ship, and the record of the ship we keep.</div>
 </td></tr>
-<tr><td class="px" style="padding:20px 32px 0 32px;">
- <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-  ${fact("Sign-off", off ? longDate(off) : "To be confirmed", "34%")}${fact("Port", port ? esc(port) : "To be confirmed", "28%")}${fact("Relieved by", rel ? esc(rel.name) : "Not named yet", "38%")}
- </tr></table></td></tr>
+${pass}
+<tr><td class="px" style="padding:18px 32px 0 32px;">
+ <div style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};">${say}</div>
+</td></tr>
 
 ${phase("Start now", "from " + shortDate(today))}
 <tr><td class="px" style="padding:16px 32px 0 32px;">
@@ -141,14 +232,12 @@ ${phase("Start now", "from " + shortDate(today))}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
    <tr><td><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td valign="top" width="40"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="28" height="28" align="center" valign="middle" bgcolor="${C.green}" style="background:${C.green};border-radius:14px;font-family:${FH};font-size:14px;font-weight:700;color:#FFFFFF;">1</td></tr></table></td>
-    <td valign="top"><div style="font-family:${FH};font-size:20px;font-weight:600;color:${C.navy};line-height:26px;padding-top:1px;">Your digital handover notes</div>
-     <div style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};padding-top:6px;">You complete them in HON. They record the condition of the ship on the day you leave it, and everything ${relFirst} needs to step straight into the role, even if you never meet. Write them for someone who has never seen the room.</div></td></tr></table></td></tr>
+    <td valign="top"><div style="font-family:${FH};font-size:20px;font-weight:600;color:${C.navy};line-height:26px;padding-top:1px;">Your Digital Handover Notes</div>
+     <div style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};padding-top:6px;">They record the condition of the ship on the day you leave it, and everything ${relFirst} needs to step straight into the role, even if you never meet. Write them for someone who has never seen the room. Start now and keep them current${overlap ? ", and walk " + relFirst + " through them while you are both aboard" : ""}.</div></td></tr></table></td></tr>
    <tr><td style="padding:14px 0 0 40px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
      ${steps.map((t, i) => `<tr><td valign="top" width="22" style="font-family:${FH};font-size:13px;font-weight:700;color:${C.navy};padding:0 0 8px 0;line-height:21px;">${String.fromCharCode(97 + i)}.</td><td style="font-family:${FB};font-size:14px;line-height:21px;color:${C.body};padding:0 0 8px 0;">${t}</td></tr>`).join("")}
     </table>
-    <div style="padding-top:8px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${C.navy}" style="background:${C.navy};border-radius:8px;"><a href="${esc(link)}" target="_blank" style="display:inline-block;font-family:${FB};font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none;padding:13px 26px;border-radius:8px;">Open HON</a></td></tr></table></div>
-    <div style="font-family:${FB};font-size:12px;line-height:18px;color:${C.slate};padding-top:8px;">Start it now and keep it current${overlap ? ", and walk " + relFirst + " through it while you are both aboard" : ""}. Opening HON from this email also confirms you received these instructions.</div>
    </td></tr>
    ${bonusBox}
   </table></td></tr></table></td></tr>
@@ -200,13 +289,18 @@ ${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgr}
 </table></td></tr></table></body></html>`;
 
   const subject = "Sign-off instructions" + (ship ? " · " + ship : "") + (off ? " · " + shortDate(off) + " " + off.slice(0, 4) : "") + (port ? " · " + port : "");
+  const relLine = !rel ? "Your reliever is not named yet."
+    : "Your reliever: " + rel.name + (overlap ? `, aboard with you for ${mdWords(overlap.from, off)} from ${shortDate(overlap.from)}.` : relOn ? `, joining on ${shortDate(relOn)} ${relOn.slice(0, 4)}.` : ".");
   const text = [
-    `Dear ${d.firstName || ""},`, "",
-    head.replace(/&[a-z]+;/g, " ") + " Digital Handover Notes.",
-    (overlap ? `You and ${rel.name} overlap aboard for ${mdWords(overlap.from, off)} from ${shortDate(overlap.from)}.` : rel ? `Your reliever is ${rel.name}. You may or may not see them aboard, so your notes must carry everything.` : `Your reliever is not named yet.`),
-    "", `Complete your handover notes in HON: ${link}`,
+    `Hi ${d.firstName || ""},`, "",
+    (go ? go[0] + ". " : "") + head.replace(/&[a-z]+;/g, " "),
+    "Before you leave, complete your Digital Handover Notes. They are mandatory.",
+    "", `Open your Digital Handover Notes: ${link}`,
     `Select ${ship || "your ship"}, complete all eleven sections, sign your count, submit before you leave, and print a short copy for your reliever and your ${mgr}.`,
+    "", relLine,
+    ...(ph ? [`Mobile: ${ph.shown}`] : []), ...(em ? [`Email: ${em}`] : []),
+    (overlap ? "" : rel ? `You may or may not meet ${rel.first || firstWord(rel.name)} aboard, so your notes must carry everything.` : ""),
     "", "Thank you.", "Rita Berenyi", "Manager, People & Culture", "Rita.Berenyi@dg3.com",
-  ].join("\n");
+  ].filter((l, i, arr) => !(l === "" && arr[i - 1] === "")).join("\n");
   return { subject, html, text };
 }

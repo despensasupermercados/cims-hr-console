@@ -32,6 +32,19 @@ export function portOf(c) {
   return typed || itin || null;
 }
 
+// Does TDG have this reliever (the pass's IN TDG chip, and the gate for printing their phone and email, 19 Oct 2026)? TDG's
+// own Earmarked row, a seat the file put aboard (state green), or Rita's card the file confirms or earmarks for this hull
+// (the board's "EARMARK · TDG"; the dashboard's tdgHas reads the same). A card only the console holds, or one "sent to TDG"
+// that the file does not carry yet, is not.
+export function relieverInTdg(x) {
+  if (!x) return false;
+  if (x.tdgEarmark) return true;
+  if (x.state && x.state !== "yellow") return true;
+  const v = x.registry && x.registry.verdict;
+  if (x.confirmed || v === "confirmed" || v === "earmarked") return true;
+  return !!(x.file && x.file.status === "Earmarked" && x.file.ship && x.file.ship === x.ship);
+}
+
 export function seatContexts(sections) {
   const out = {};
   for (const s of sections || []) {
@@ -51,9 +64,10 @@ export function seatContexts(sections) {
         name: c.name || null,
         ship: c.ship || s.ship || null,
         brand: s.brand || null,
+        on: iso(c.signOn),
         off: iso(c.signOff),
         port: portOf(c),
-        reliever: pick ? { sc: pick.agency_id, name: pick.name || null, first: firstWord(pick.name), on: iso(pick.signOn), tdg: !!pick.tdgEarmark } : null,
+        reliever: pick ? { sc: pick.agency_id, name: pick.name || null, first: firstWord(pick.name), on: iso(pick.signOn), tdg: relieverInTdg(pick) } : null,
       };
     }
   }
