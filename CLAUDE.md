@@ -1508,6 +1508,25 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   visit (`audit_visit` + `audit_eval`, migration 0026, one batch, never rewritten), `POST /api/audit/request/grade`. HR
   dispatch is not rated here (it rates TDG's travel). What a score is worth on the bonus (5 = 10 pts, 4 = 8, 3 or below = 0,
   no audit = 10) lives in `bonus.js` and is Miguel's to merge (§1); this module still never imports it.
+- **THE AUDIT ON THE SHIP, B1–B7** (19 Oct 2026; Miguel: "where is the inventory count from dexter .. u missed the entire
+  app" — only the request half had been built, and the 15 Oct grade screen stood in for the whole visit). Once the
+  documents are in, the request opens on **Before the visit** (A8: what the reads and the count found, amber, each to
+  confirm on board) and **Start the audit** — seven steps, one per screen: Workstation (starts full, tap what is missing),
+  Machines & tools (per press: Test pattern / Scan to email / Collaboration, the Pattern 43 mark "Seen / Not seen", parts
+  past rated life as information, a press the crew reported down "Still down / Running now", tools not on inventory),
+  **Inventory** (the crew's blind count against the OBP the documents-in email compared it with — `audit_obp_at_count` —
+  Dexter checks each line on the shelf and types what is there, adds any OBP line, confirms the crew's items not in OBP),
+  Ratings, Crew (training, uniform & PPE, HON app, the dispatch rating for Rita — never in the score), Overall (optional;
+  strengths, to improve, agreed; Oasis/Icon recommendation; a follow-up with an owner and a date), Review and File. The
+  rules that hold Next and File are `src/audit_steps.js`, serialized into the page (`AUDIT_RULES_JS`), and the server
+  re-checks with the same functions. Filed ONCE in one batch: `audit_visit`, the SAME `audit_eval` row and score rule the
+  Score Card reads (unchanged, §1), `audit_visit_data` (the steps + what the documents said), `audit_followup`. The next
+  audit of the ship lists the follow-ups still open (Fixed / Still open, "2nd time") and an item missing again ("2nd
+  time"). Photos (`audit_file`, R2 `visit/<request>/<step>/<sha>`) are shrunk on the phone and wait in IndexedDB for
+  signal; the draft lives on the phone at every tap; a filing without signal is kept and sent when the server answers.
+  No manual mono % (mono is OBP's clicks, §10j). Migration 0035. Pinned by `test/audit_visit.test.js`. Still to build:
+  the audit card on the crew profile (P1), the history page, the filed / dispatch emails (render first, Miguel signs
+  off), Rolando's Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

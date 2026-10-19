@@ -180,7 +180,7 @@ export const AUDIT_RATINGS = [
 ];
 export const GRADE_NOTE_MIN = 10; // a 3 or below needs a sentence (the design's rule)
 // A rating is a whole 1–5, sent as a number or a one-digit string; true, " 5 ", "0x5", [5] and 4.5 are not ratings.
-const rating = (v) => {
+export const rating = (v) => {
   if (typeof v === "number") return Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
   if (typeof v === "string" && /^[1-5]$/.test(v)) return Number(v);
   return null;
