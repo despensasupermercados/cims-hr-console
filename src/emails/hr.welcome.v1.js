@@ -164,7 +164,6 @@ export function welcomeEmail(d) {
    ${doc("www", "Your Job Description", "On Zendesk. Read it this week.", L.jd, !L.sops)}
    ${L.sops ? doc("www", "Standard Operating Procedures", "Every SOP, one place.", L.sops, true) : ""}
   </table>
-   <div style="font-family:${FB};font-size:13px;line-height:20px;color:${C.slate};padding-top:10px;"><b style="color:${C.navy};">Also attached:</b> Compensation and payroll dates, Ship Tech Support Guidelines, Ergonomics, Mission and Values, the Expense Report.</div>
   </td></tr>
   <tr><td class="px" style="padding:14px 32px 0 32px;">
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${C.atint}" style="background:${C.atint};border-left:3px solid ${C.amber};border-radius:0 10px 10px 0;padding:12px 16px;font-family:${FB};font-size:14px;line-height:21px;color:${C.body};"><b style="color:${C.navy};">Safety first.</b> Follow the ship's safety policies; the Safety Officer answers any question. We all go home the way we came aboard.</td></tr></table>

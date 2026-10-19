@@ -75,6 +75,7 @@ import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 import { installHub, HUB_DDL } from "./crew_hub_routes.js";
+import { installWelcome, WELCOME_DDL } from "./welcome_send.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -102,6 +103,12 @@ const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections,
 // (src/crew_hub_routes.js). The consecutive count is READ through the same helpers the Score Card uses (§1: never written).
 const ensureHubLink = memoEnsure(async (env) => { for (const q of HUB_DDL) await env.DB.prepare(q).run(); }, HUB_DDL.join("\n"));
 const _hub = installHub({ ensure: ensureHubLink, boardLegs: (env) => boardLegs(env), bonusCount: (env, sc) => hubBonusCount(env, sc), json, today: () => TODAY() });
+// The welcome send (19 Oct 2026, src/welcome_send.js): the ship's mailbox (cims-timecard ship_contact, read only) + the
+// personal address, nothing attached; once per contract; the daily run is OFF until switched on (Automation · Welcome).
+const ensureWelcome = memoEnsure(async (env) => { await ensureHubLink(env); await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); for (const q of WELCOME_DDL) await env.DB.prepare(q).run(); }, WELCOME_DDL.join("\n"));
+const _welcome = installWelcome({ ensure: ensureWelcome, boardLegs: (env) => boardLegs(env), linkFor: (env, sc, who) => _hub.linkFor(env, sc, who),
+  contacts: (env) => (env.TIMECARD_DB ? env.TIMECARD_DB.prepare("SELECT client, ship, code, email, role FROM ship_contact").all().then((r) => r.results || []) : Promise.resolve([])),
+  sendMail: sendViaMailer, json, today: () => TODAY(), origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 // Since 16 Oct 2026 only CURRENT seats (an earmark's planned sign-off is not a sign-off to instruct), each carrying what the
@@ -267,7 +274,7 @@ export default {
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
       // The Crew Hub: /hub/<token> and /hub/expense.xlsx answer without a session (the link is the key); the two /api/hub/ routes need one.
-      if (p.startsWith("/hub/") || p.startsWith("/api/hub/")) { const _h = await _hub(p, request, env, url, session); if (_h) return _h; }
+      if (p.startsWith("/hub/") || p.startsWith("/api/hub/")) { const _w = await _welcome.handle(p, request, env, url, session); if (_w) return _w; const _h = await _hub(p, request, env, url, session); if (_h) return _h; }
       // Printshop Audit: the shell on audit.cims.work (and cims.work/audit), its manifest and service worker, and
       // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
       { const _au = await _audit(p, request, env, url, session); if (_au) return _au; }
@@ -445,6 +452,8 @@ if (p === "/api/health/send" && request.method === "POST") { await ensureRegistr
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSendMovements(env, event)); if (ctx && ctx.waitUntil) ctx.waitUntil(maybeExportBackup(env, event));
 if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => maybeSendDocRadar(env, event, { boardLegs }))); // the radar's crew read joins registry_snapshot
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
+    // The welcome-aboard email on the sign-on morning (src/welcome_send.js), when its switch is on.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(_welcome.run(env, event).catch(function (e) { console.error("welcome_send", (e && e.stack) || e); }));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
     // Printshop Audit sweep: 12-hour reminder, 24-hour overdue note to the auditor, reads that did not finish (audit_request.js).
@@ -7596,7 +7605,9 @@ async function saveNote(id){
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
 // Two switches since 16 Oct 2026, one per email: the T-14 sign-off instructions and the T-7 sign-off link (/api/autosend kind).
-async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}}
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}}
+// The welcome-aboard email (19 Oct 2026): its own switch. On = the sign-on morning, the ship's mailbox + the personal address, CC Rita; a contract that started before the switch went on is never emailed.
+async function welToggleClick(){var c=document.getElementById('welToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the welcome email ON? On the sign-on morning, the welcome-aboard email goes to the ship\\'s mailbox and the personal address, CC Rita. Crew who signed on before today are not emailed.'))return;try{var r=await (await fetch('/api/hub/welcome/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_WEL=!!r.enabled;applyChromeToggles();alert('The welcome email is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function autoToggleClick(kind){var link=kind==='signoff';var c=document.getElementById(link?'linkToggleCb':'autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm(link?'Turn the T-7 sign-off link ON? Every crew 7 days before their sign-off gets the sign-off link email. Crew already inside the 7 days are not emailed.':'Turn the sign-off instructions ON? Every crew 14 days before their sign-off gets the instructions email, CC onboardsupport@dg3.com. Crew already inside the 14 days are not emailed.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:link?'signoff':'instructions',enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();alert((link?'The T-7 sign-off link':'The sign-off instructions')+' email is now '+((link?r.signoff:r.instructions)?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 function ensureSbmToggle(){var a=document.getElementById('linkToggle')||document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
 async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();window.SBM_ON=!!r.enabled;ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
@@ -7660,7 +7671,7 @@ async function renderRotation(){
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
-    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span><span id="welToggle" onclick="welToggleClick()" title="Sign-on morning: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome <input type=checkbox id="welToggleCb" style="pointer-events:none"></span></div></div>'
     +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'
@@ -7684,7 +7695,7 @@ async function renderRotation(){
 }
 // 13 Oct 2026: every re-render rebuilt the rail with Crew auto-timing unchecked and no GSM review switch, while the
 // emails stayed armed on the server. The last known values are kept and painted back.
-function applyChromeToggles(){var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
+function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
 var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
 function rotRail(shown,total){
@@ -8744,6 +8755,7 @@ async function openCrew(id){
     +'<button class="btn ghost" onclick="downloadCrewFile()" title="The statement plus Contract feedback: every note, intel report and feedback answer, every contract. Internal — never emailed.">Crew file · internal</button>'
     +'<button class="btn ghost" id=hubbtn onclick="crewHubLink()" title="The seafarer\\'s own Crew Hub page: paydays, pay and benefits, the bonus ladder, help. No login; the link is theirs.">Crew Hub link</button>'
     +'<button class="btn ghost" onclick="if(CURRENT_CREW) window.open(\\'/api/hub/welcome?id=\\'+encodeURIComponent(CURRENT_CREW),\\'_blank\\')" title="The welcome-aboard email filled with this seafarer\\'s data. Preview only: it sends nothing.">Welcome email · preview</button>'
+    +'<button class="btn ghost" id=welbtn onclick="crewWelcomeSend()" title="Send the welcome-aboard email now: the ship\\'s mailbox and the personal address, CC Rita. You see the recipients before it goes.">Send welcome email</button>'
     +'<button class="btn ghost" id=stmtbtn onclick="emailStatement()">Email statement</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<div id=stmtout class=csub style="margin:0"></div>'
@@ -9084,6 +9096,12 @@ function exportCrewCSV(){
 }
 function downloadStatement(){ if(CURRENT_CREW) window.open('/api/crew/statement.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
 function downloadCrewFile(){ if(CURRENT_CREW) window.open('/api/crew/file.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
+// The welcome-aboard email by hand (19 Oct 2026): a dry run names the recipients, one confirm sends; a contract already welcomed asks again.
+async function crewWelcomeSend(){ if(!CURRENT_CREW) return; var o=$('#stmtout'), b=$('#welbtn'); var post=function(x){return fetch('/api/hub/welcome/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({agency_id:CURRENT_CREW},x))}).then(function(r){return r.json().catch(function(){return {error:'HTTP '+r.status};});});};
+  if(b) b.disabled=true; try{ var d=await post({dry:true}); if(!d.ok){ if(o) o.textContent='Welcome email: '+(d.error==='no_running_contract'?'no running contract on the board':d.error==='no_recipient'?'no ship mailbox and no personal email on file':(d.error||'error')); return; }
+    var msg='Send the welcome email for '+d.ship+' (signed on '+d.on+')?\\n\\nTo: '+d.to.join(', ')+(d.cc&&d.cc.length?'\\nCC: '+d.cc.join(', '):'')+(d.noShipMailbox?'\\n\\nNo ship mailbox on file: the personal address only.':'')+(d.noPersonal?'\\n\\nNo personal email on file: the ship only.':'')+(d.sent_before?'\\n\\nAlready sent '+d.sent_before.slice(0,10)+'. This sends it again.':'');
+    if(!confirm(msg)) return; var r=await post({resend:!!d.sent_before}); if(o) o.textContent=r.sent?('Welcome email sent to '+r.to.join(', ')):('Welcome email not sent: '+(r.detail||r.error||'error'));
+  }catch(e){ if(o) o.textContent='Welcome email: '+e.message; } finally{ if(b) b.disabled=false; } }
 // The Crew Hub link (19 Oct 2026): the same link every time until revoked; opened in a new tab and copied for Rita to send.
 async function crewHubLink(){ if(!CURRENT_CREW) return; var o=$('#stmtout'), b=$('#hubbtn'); if(b) b.disabled=true;
   try{ var r=await fetch('/api/hub/link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:CURRENT_CREW})}); var d=await r.json().catch(function(){return {};});

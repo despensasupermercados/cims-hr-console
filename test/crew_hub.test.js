@@ -159,7 +159,7 @@ test("the expense report served is byte for byte the approved v3 file", async ()
 
 test("wiring: the Worker routes /hub/ before the session gate, reads the count without writing it, and the guard's DDL matches the migration", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /if \(p\.startsWith\("\/hub\/"\) \|\| p\.startsWith\("\/api\/hub\/"\)\) \{ const _h = await _hub\(p, request, env, url, session\); if \(_h\) return _h; \}/);
+  assert.match(W, /if \(p\.startsWith\("\/hub\/"\) \|\| p\.startsWith\("\/api\/hub\/"\)\) \{ const _w = await _welcome\.handle\(p, request, env, url, session\); if \(_w\) return _w; const _h = await _hub\(p, request, env, url, session\); if \(_h\) return _h; \}/);
   const body = W.slice(W.indexOf("async function hubBonusCount("), W.indexOf("async function crewCount("));
   assert.doesNotMatch(body, /INSERT|UPDATE|DELETE/i, "the hub never writes the bonus count (§1)");
   const mig = readFileSync(new URL("../migrations/0034_crew_hub_link.sql", import.meta.url), "utf8");
