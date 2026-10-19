@@ -75,6 +75,7 @@ import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 import { installHub, HUB_DDL } from "./crew_hub_routes.js";
+import { hubHomePage, HUB_HOST } from "./crew_hub.js";
 import { installWelcome, WELCOME_DDL } from "./welcome_send.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
@@ -254,6 +255,10 @@ export default {
       if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png")
                                          return assetResponse(PNG180_B64, "image/png");
       if (p === "/icon-512.png")         return assetResponse(PNG512_B64, "image/png");
+
+      // hub.cims.work (19 Oct 2026): the Crew Hub's own host. Only /hub/... is served there; every other path is the hub's
+      // landing page, never the console (its login read as "the site does not work").
+      if (url.hostname === HUB_HOST && !p.startsWith("/hub/")) return new Response(hubHomePage(), { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" } });
 
       // ---- auth endpoints ----
       if (p === "/login")                return htmlResponse(isAuditHost(url.hostname) ? AUDIT_LOGIN_HTML : LOGIN_HTML);

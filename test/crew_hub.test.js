@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { hubPage, hubGonePage, HUB_UPDATED } from "../src/crew_hub.js";
+import { hubPage, hubGonePage, HUB_UPDATED, hubHomePage, HUB_HOST } from "../src/crew_hub.js";
 import { PAYROLL, payrollRows, nextPayday } from "../src/payroll.js";
 import { installHub, HUB_DDL, hubModel, currentLeg, newHubToken, TOKEN_RX } from "../src/crew_hub_routes.js";
 import { EXPENSE_XLSX_B64 } from "../src/hub_assets.js";
@@ -166,4 +166,16 @@ test("wiring: the Worker routes /hub/ before the session gate, reads the count w
   for (const c of ["token", "agency_id", "created_at", "created_by", "revoked_at", "revoked_by", "last_seen_at"]) { assert.match(mig, new RegExp(c)); assert.match(HUB_DDL[0], new RegExp(c)); }
   const R = readFileSync(new URL("../src/crew_hub_routes.js", import.meta.url), "utf8");
   assert.doesNotMatch(R, /bonus_outcome|baseline_count/, "the routes module reads no money table itself");
+});
+
+test("hub.cims.work with no link: the hub's landing page, never the console", () => {
+  const h = hubHomePage();
+  assert.match(h, /Your CIMS Crew Hub/);
+  assert.match(h, /welcome-aboard email/);
+  assert.match(h, /href="\/hub\/expense\.xlsx"/);
+  assert.doesNotMatch(h, /This link is not active/);
+  assert.equal(HUB_HOST, "hub.cims.work");
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const at = W.indexOf('if (url.hostname === HUB_HOST && !p.startsWith("/hub/")) return new Response(hubHomePage()');
+  assert.ok(at > 0 && at < W.indexOf('if (p === "/login")'), "the hub host answers before the console's login");
 });
