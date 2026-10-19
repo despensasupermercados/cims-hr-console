@@ -103,7 +103,9 @@ const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections,
 // The Crew Hub (Miguel, 19 Oct 2026, "deploy"): /hub/<token> public, /api/hub/link + /api/hub/revoke signed in
 // (src/crew_hub_routes.js). The consecutive count is READ through the same helpers the Score Card uses (§1: never written).
 const ensureHubLink = memoEnsure(async (env) => { for (const q of HUB_DDL) await env.DB.prepare(q).run(); }, HUB_DDL.join("\n"));
-const _hub = installHub({ ensure: ensureHubLink, boardLegs: (env) => boardLegs(env), bonusCount: (env, sc) => hubBonusCount(env, sc), json, today: () => TODAY() });
+const _hub = installHub({ ensure: ensureHubLink, boardLegs: (env) => boardLegs(env), bonusCount: (env, sc) => hubBonusCount(env, sc), json, today: () => TODAY(),
+  countDetail: (env, sc) => hubCountDetail(env, sc), countKnown: (env) => hubCountKnown(env),
+  contacts: (env) => (env.TIMECARD_DB ? env.TIMECARD_DB.prepare("SELECT client, ship, code, email, role FROM ship_contact").all().then((r) => r.results || []) : Promise.resolve([])) });
 // The welcome send (19 Oct 2026, src/welcome_send.js): the ship's mailbox (cims-timecard ship_contact, read only) + the
 // personal address, nothing attached; once per contract; the daily run is OFF until switched on (Automation · Welcome).
 const ensureWelcome = memoEnsure(async (env) => { await ensureHubLink(env); await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); for (const q of WELCOME_DDL) await env.DB.prepare(q).run(); }, WELCOME_DDL.join("\n"));
@@ -3386,14 +3388,24 @@ function apiFleet() {
 // outcome's count_after, else the baseline. NULL when neither exists (no baseline set, nothing committed): the hub then
 // shows the ladder only, never "contract 1" for a crew whose count is simply not recorded. READ only (§1).
 async function hubBonusCount(env, sc) {
+  const d = await hubCountDetail(env, sc);
+  return d ? d.count : null;
+}
+// The same read with where the number comes from, for the console's crew view audit (19 Oct 2026). READ only (§1).
+async function hubCountDetail(env, sc) {
   const cr = await env.DB.prepare("SELECT id, agency_id, baseline_count FROM crew WHERE agency_id=?").bind(sc).first();
   if (!cr) return null;
   const [baseline, last] = await Promise.all([
     effectiveBaseline(env, cr.agency_id, cr.baseline_count),
-    env.DB.prepare("SELECT count_after FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(cr.id).first(),
+    env.DB.prepare("SELECT count_after, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(cr.id).first(),
   ]);
-  if (last && Number.isInteger(last.count_after)) return last.count_after;
-  return Number.isInteger(baseline) ? baseline : null;
+  if (last && Number.isInteger(last.count_after)) return { count: last.count_after, source: "outcome", at: last.committed_at || null };
+  return Number.isInteger(baseline) ? { count: baseline, source: "baseline", at: null } : { count: null, source: null, at: null };
+}
+// Who has a count on record at all (a baseline or a committed outcome): the crew view's examples. One read, READ only (§1).
+async function hubCountKnown(env) {
+  const r = await env.DB.prepare("SELECT c.agency_id FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id WHERE c.baseline_count IS NOT NULL OR o.baseline_count IS NOT NULL OR EXISTS (SELECT 1 FROM bonus_outcome b WHERE b.crew_id = c.id)").all();
+  return new Set((r.results || []).map((x) => x.agency_id));
 }
 async function crewCount(env, crewRowId, baseline) {
   const last = await env.DB.prepare("SELECT count_after FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(crewRowId).first();
@@ -5660,6 +5672,7 @@ function renderData(){
      +'<div class=dssub>Cruise Industry<br>Managed Services</div>'
      +'<button class="dsnav setmenu" data-set="overview">Overview</button>'
      +'<button class="dsnav setmenu" data-set="uploads">Upload data</button>'
+     +'<button class="dsnav setmenu" data-set="crewview">Crew view</button>'
      +'<button class="dsnav setmenu" data-set="knowledge">Maria knowledge</button>'
      +'<button class="dsnav setmenu" data-set="session">Session</button>'
      +'<button class="dsnav setmenu" data-set="about">About</button>'
@@ -5671,7 +5684,50 @@ function renderData(){
   document.querySelector('.setmenu').classList.add('on');
   setShow('overview');
 }
-function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='knowledge')return setKnowledge(); if(s==='session')return setSession(); return setAbout(); }
+function setShow(s){ if(s==='overview')return dataOverview(); if(s==='uploads')return setUploads(); if(s==='crewview')return setCrewView(); if(s==='knowledge')return setKnowledge(); if(s==='session')return setSession(); return setAbout(); }
+// THE CREW VIEW (Miguel, 19 Oct 2026: "impersonating a crew .. rita can chose the person .. and then it can see audit the information"). Rita picks a person and sees exactly their Crew Hub and welcome email, with every value on it and where it comes from. A look makes no link and sends nothing.
+var CV={sc:null,what:'hub',wide:false,data:null};
+async function setCrewView(){
+  var b=$('#setbody');
+  b.innerHTML='<div class=zlabel style="margin-top:0">Crew view</div><h2 style="font-family:Outfit;font-size:22px;font-weight:600;color:var(--navy);margin:0 0 4px">See what a crew member sees</h2><div class=csub style="margin:0 0 14px">Pick a person: their Crew Hub and welcome email exactly as they get them, with every value and where it comes from. Nothing is sent and no link is made.</div><div id=cvpick class=csub>Loading the crew...</div><div id=cvbody></div>';
+  try{ var r=await fetch('/api/hub/examples'); CV.data=await r.json(); }catch(e){ $('#cvpick').textContent='Could not load the crew list.'; return; }
+  if(!CV.data||!CV.data.ok){ $('#cvpick').textContent='Could not load the crew list. '+escHtml((CV.data&&CV.data.error)||''); return; }
+  var ex=(CV.data.examples||[]).map(function(x){return '<button class="btn ghost cvex" data-sc="'+escHtml(x.sc)+'" title="'+escHtml(x.why)+'" style="padding:7px 11px;font-size:12.5px">'+escHtml(x.label)+' &middot; '+escHtml(x.name)+'</button>';}).join('');
+  var opts='<option value="">Choose a crew member</option>'+(CV.data.crew||[]).map(function(c){return '<option value="'+escHtml(c.sc)+'">'+escHtml(c.name)+(c.ship?' &middot; '+escHtml(c.ship):' &middot; between contracts')+'</option>';}).join('');
+  $('#cvpick').innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><select id=cvsel style="min-width:300px;max-width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:10px;font:500 14px DM Sans">'+opts+'</select></div>'+(ex?'<div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6B7280;margin:4px 0 6px">One of each case</div><div style="display:flex;gap:6px;flex-wrap:wrap">'+ex+'</div>':'');
+  $('#cvsel').onchange=function(){ if(this.value) cvShow(this.value); };
+  document.querySelectorAll('.cvex').forEach(function(x){ x.onclick=function(){ $('#cvsel').value=x.getAttribute('data-sc'); cvShow(x.getAttribute('data-sc')); }; });
+  if(CV.sc){ $('#cvsel').value=CV.sc; cvShow(CV.sc); }
+}
+async function cvShow(sc){
+  CV.sc=sc; var body=$('#cvbody'); if(!body) return;
+  var seg=function(k,v,l){var on=(String(CV[k])===String(v));return '<button class="btn '+(on?'':'ghost')+' cvseg" data-k="'+k+'" data-v="'+v+'" style="padding:7px 12px;font-size:12.5px">'+l+'</button>';};
+  var src=(CV.what==='hub'?'/api/hub/preview?id=':'/api/hub/welcome?id=')+encodeURIComponent(sc);
+  body.innerHTML='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:18px 0 10px">'+seg('what','hub','Crew Hub')+seg('what','mail','Welcome email')+'<span style="width:10px"></span>'+seg('wide',false,'Phone')+seg('wide',true,'Desktop')+'<a class="btn ghost" style="padding:7px 12px;font-size:12.5px;margin-left:auto;text-decoration:none" target=_blank rel=noopener href="'+src+'">Open in a new tab</a></div>'
+   +'<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">'
+   +'<div style="background:#E5E7EB;border-radius:16px;padding:10px;max-width:100%;box-sizing:border-box;overflow:hidden;'+(CV.wide?'flex:1 1 100%':'flex:none')+'"><iframe id=cvframe title="What the crew sees" src="'+src+'" style="display:block;border:0;border-radius:10px;background:#fff;width:'+(CV.wide?'100%':'390px')+';max-width:100%;height:820px"></iframe></div>'
+   +'<div id=cvaudit style="background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px;flex:1 1 260px;min-width:0;box-sizing:border-box"><div class=csub>Reading the data...</div></div></div>';
+  document.querySelectorAll('.cvseg').forEach(function(x){ x.onclick=function(){ var k=x.getAttribute('data-k'), v=x.getAttribute('data-v'); CV[k]=(k==='wide')?(v==='true'):v; cvShow(CV.sc); }; });
+  var a; try{ a=await (await fetch('/api/hub/audit?id='+encodeURIComponent(sc))).json(); }catch(e){ a={error:e.message}; }
+  if(CV.sc!==sc) return;
+  var box=$('#cvaudit'); if(!box) return;
+  box.innerHTML=(a&&a.ok)?cvAudit(a):'<div class=csub>Could not read the data. '+escHtml((a&&a.error)||'')+'</div>';
+}
+function cvAudit(a){
+  var row=function(k,v,src,warn){return '<div style="padding:9px 0;border-bottom:1px solid var(--line)"><div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6B7280">'+k+'</div><div style="font-size:14px;font-weight:600;color:'+(warn?'var(--red)':'var(--navy)')+';margin-top:2px">'+v+'</div>'+(src?'<div class=csub style="margin:2px 0 0">'+src+'</div>':'')+'</div>';};
+  var K=a.contract, C=a.count||{}, P=a.payday, L=a.link||{}, W=a.welcome||{};
+  var offSrc={tdg:'TDG file, final',rita:'typed by Rita',card:'Rita reliever card',projected:'projected: sign-on + '+((K&&String(K.brand||'').toLowerCase()==='azamara')?'5':'7')+' months'};
+  var d10=function(x){return fmtDateS(String(x||'').slice(0,10));};
+  var h='<div style="font-family:Outfit;font-size:17px;font-weight:600;color:var(--navy)">'+escHtml(a.name)+'</div><div class=csub style="margin:2px 0 6px">'+escHtml(a.sc)+' &middot; what the page shows, and from where</div>';
+  h+=K?row('Contract',escHtml(K.ship)+' &middot; '+d10(K.on)+' to '+d10(K.off),'Sign-off: '+(offSrc[K.offSource]||escHtml(K.offSource||''))+(K.fileAt?' &middot; TDG file of '+d10(K.fileAt):'')+(K.embark?' &middot; joined in '+escHtml(K.embark):''),false)
+     :row('Contract','Between contracts','No running contract on the board.',false);
+  h+=row('Contract number',C.count==null?'Not shown: ladder only':('Contract '+(C.count+1)+' in a row'),C.source==='outcome'?('Last committed bonus outcome'+(C.at?' &middot; '+d10(C.at):'')):C.source==='baseline'?'Baseline on record':'No baseline and no committed outcome',C.count==null);
+  h+=row('Next payday',P?(d10(P.paid)+' &middot; in '+P.inDays+' days'):'Not published','Payroll dates on file',!P);
+  h+=row('Crew Hub link',L.live?('Made '+d10(L.created_at)+(L.created_by?' by '+escHtml(L.created_by):'')):'Not made yet',L.live?(L.last_seen_at?('Last opened '+d10(L.last_seen_at)):'Never opened'):'Made by the Crew Hub link button or the welcome email',false);
+  var sent=(W.sent||[])[0];
+  h+=row('Welcome email',sent?('Sent '+d10(sent.at)):'Not sent',(sent&&sent.to&&sent.to.to)?('To '+escHtml(sent.to.to.join(', '))):('Would go to: '+escHtml([W.shipMailbox,W.personal].filter(Boolean).join(', ')||'nobody on file')),!sent&&!W.shipMailbox&&!W.personal);
+  return h;
+}
 function setKnowledge(){
   $('#setbody').innerHTML='<div class=kbwrap>'
    +'<div class=kbhead>Give Maria a document</div>'

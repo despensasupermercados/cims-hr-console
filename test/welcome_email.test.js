@@ -65,7 +65,7 @@ test("template: no predecessor on record drops the block; TDG's date says so; na
   assert.match(h, /&lt;b&gt;Ann&lt;\/b&gt;/);
 });
 
-test("preview route: signed in only, the crew's own hub link in it, and nothing is sent", async () => {
+test("preview route: signed in only, no real link made (its hub button opens the console preview), and nothing is sent", async () => {
   const d = new DatabaseSync(":memory:");
   d.exec("CREATE TABLE crew (id TEXT, agency_id TEXT, first_name TEXT, last_name TEXT, rank_observed TEXT, baseline_count INTEGER)");
   d.exec("CREATE TABLE activity_log (id TEXT PRIMARY KEY, user_id TEXT, action TEXT, detail TEXT, at TEXT)");
@@ -83,8 +83,8 @@ test("preview route: signed in only, the crew's own hub link in it, and nothing 
   const res = await go("SC-1", { email: "r@x" });
   assert.equal(res.status, 200);
   const html = await res.text();
-  const tok = d.prepare("SELECT token FROM crew_hub_link WHERE agency_id='SC-1'").get().token;
-  assert.ok(html.includes("https://cims.work/hub/" + tok));
+  assert.ok(html.includes("https://cims.work/api/hub/preview?id=SC-1"), "a look never makes the crew's link");
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='crew_hub_link'").get().n, 0, "nothing written by a preview");
   assert.ok(html.includes("https://cims.work/hub/expense.xlsx"));
   assert.equal(sent, 0, "a preview sends nothing");
   const R = readFileSync(new URL("../src/crew_hub_routes.js", import.meta.url), "utf8");

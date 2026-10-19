@@ -179,3 +179,61 @@ test("hub.cims.work with no link: the hub's landing page, never the console", ()
   const at = W.indexOf('if (url.hostname === HUB_HOST && !p.startsWith("/hub/")) return new Response(hubHomePage()');
   assert.ok(at > 0 && at < W.indexOf('if (p === "/login")'), "the hub host answers before the console's login");
 });
+
+test("crew view: the preview is the crew's own page, signed in only, and makes no link", async () => {
+  const { d, env, h } = hub();
+  const go = (path, sess) => h(path.split("?")[0], req(path), env, new URL("https://cims.work" + path), sess);
+  assert.equal((await go("/api/hub/preview?id=SC-1", null)).status, 401);
+  const res = await go("/api/hub/preview?id=SC-1", RITA);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /Hi Archie\./);
+  assert.match(html, /Contract 3 in a row/);
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='crew_hub_link'").get().n, 0, "a look writes nothing");
+  assert.equal((await go("/api/hub/preview?id=SC-9", RITA)).status, 404);
+});
+
+test("crew view: the audit lists each value the page shows with its source", async () => {
+  const { env, h } = hub({ countDetail: async () => ({ count: 2, source: "outcome", at: "2026-09-01T10:00:00Z" }),
+    contacts: async () => [{ ship: "Grandeur of the Seas", email: "printer.gr@rccl.com", role: "printer_specialist" }] });
+  const go = (path, sess) => h(path.split("?")[0], req(path), env, new URL("https://cims.work" + path), sess);
+  assert.equal((await go("/api/hub/audit?id=SC-1", null)).status, 401);
+  const a = await (await go("/api/hub/audit?id=SC-1", RITA)).json();
+  assert.equal(a.name, "Archie Joseph Corpin");
+  assert.equal(a.shown.contractNo, 3, "the audit reads the very model the page draws");
+  assert.deepEqual([a.contract.ship, a.contract.on, a.contract.offSource], ["Grandeur of the Seas", "2026-10-18", "projected"]);
+  assert.deepEqual(a.count, { count: 2, source: "outcome", at: "2026-09-01T10:00:00Z" });
+  assert.equal(a.payday.paid, "2026-11-04");
+  assert.equal(a.link.live, false);
+  assert.equal(a.welcome.shipMailbox, "printer.gr@rccl.com");
+  assert.deepEqual(a.welcome.sent, []);
+});
+
+test("crew view: one example per case, never invented, and everyone in the picker", async () => {
+  const { hubExamples } = await import("../src/crew_hub_routes.js");
+  const rows = [{ agency_id: "SC-1", first_name: "Archie", last_name: "Corpin" }, { agency_id: "SC-2", first_name: "Bea", last_name: "Az" },
+    { agency_id: "SC-3", first_name: "Cy", last_name: "Home" }, { agency_id: "SC-4", first_name: "Dee", last_name: "Old" }];
+  const legs = [
+    { sc: "SC-1", ship: "Grandeur of the Seas", brand: "Royal", on: "2026-10-18", off: "2027-05-18", is_current: true },
+    { sc: "SC-2", ship: "Azamara Quest", brand: "Azamara", on: "2026-06-01", off: "2026-11-01", is_current: true },
+    { sc: "SC-4", ship: "Vision of the Seas", brand: "Royal", on: "2026-04-01", off: "2026-11-01", is_current: true },
+  ];
+  const r = hubExamples(rows, legs, new Set(["SC-4"]), "2026-10-19");
+  assert.equal(r.crew.length, 4);
+  const by = Object.fromEntries(r.examples.map((x) => [x.label, x.sc]));
+  assert.equal(by["Aboard · contract number"], "SC-4");
+  assert.equal(by["Aboard · no count on record"], "SC-1");
+  assert.equal(by["Just signed on"], "SC-1");
+  assert.equal(by["Azamara"], "SC-2");
+  assert.equal(by["Between contracts"], "SC-3");
+  assert.equal(hubExamples(rows.slice(0, 1), legs, new Set(), "2026-10-19").examples.some((x) => x.label === "Between contracts"), false, "no such crew = no such example");
+});
+
+test("crew view: the Data tab carries it, and the audit and examples read no money table in the routes module", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  assert.match(W, /data-set="crewview">Crew view<\/button>/);
+  assert.match(W, /if\(s==='crewview'\)return setCrewView\(\);/);
+  assert.match(W, /async function setCrewView\(\)/);
+  const body = W.slice(W.indexOf("async function hubBonusCount("), W.indexOf("async function crewCount("));
+  assert.doesNotMatch(body, /INSERT|UPDATE|DELETE/i);
+});
