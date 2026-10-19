@@ -996,7 +996,7 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   names the recipients, then one confirm. The **daily run** (`_welcome.run` in `scheduled`, **07:00 Miami time** — `WELCOME_TZ` America/New_York,
   `WELCOME_HOUR`; Miguel, 19 Oct 2026: "the same day that the crew sign on .. 7am miami time") welcomes contracts that signed on today, catching up `WELCOME_CATCHUP_DAYS` = 2 for a missed run; never a training
   visit; a mail that did not go is not recorded, so the next morning retries; failures land in the activity log
-  (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome"** (`/api/hub/welcome/auto`, `welcome_auto_enabled`
+  (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome email"** (Keyman tab, left rail, under the filters; renamed 19 Oct 2026 — Miguel: "instruction of what ?? welcome should be Welcome email" — the rail reads, in the order they send: Welcome email · Sign-off instructions · Sign-off link · GSM review) (`/api/hub/welcome/auto`, `welcome_auto_enabled`
   + `welcome_auto_since`): OFF until switched on, and switching on never emails a contract that started before that day. The
   missing training / day-7 / day-15 / SOP / booking links block nothing: no link = no button ("Rita sends you a time").
   Pinned by `test/crew_hub.test.js`, `test/welcome_email.test.js`, `test/welcome_send.test.js`.
