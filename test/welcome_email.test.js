@@ -1,0 +1,92 @@
+// THE WELCOME ABOARD EMAIL (19 Oct 2026): the context off the board, the template, the signed-in preview. It never sends.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { welcomeEmail } from "../src/emails/hr.welcome.v1.js";
+import { welcomeContext, predecessorOf, currentLeg } from "../src/welcome_context.js";
+import { installHub, HUB_DDL } from "../src/crew_hub_routes.js";
+import { mastRows } from "../src/cims-mast.js";
+
+let DatabaseSync;
+try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted below */ }
+
+const LEGS = [
+  { sc: "SC-1", name: "Archie Corpin", ship: "Grandeur of the Seas", brand: "Royal", on: "2026-10-18", off: "2027-05-18", is_current: true, ours: true, offSource: "projected", embark: "Baltimore" },
+  { sc: "SC-2", name: "Mark Joseph Dela Rosa", ship: "Grandeur of the Seas", brand: "Royal", on: "2026-02-28", off: "2026-10-20", is_current: true, ours: true },
+  { sc: "SC-3", name: "Old Timer", ship: "Grandeur of the Seas", brand: "Royal", on: "2025-01-01", off: "2025-08-01", is_current: false, ours: true },
+  { sc: "SC-4", name: "Trainer Visit", ship: "Grandeur of the Seas", brand: "Royal", on: "2026-10-01", off: "2026-10-17", is_current: false, ours: true, visit: true },
+];
+const CREW = { agency_id: "SC-1", first_name: "Archie", last_name: "Corpin", rank_observed: null };
+const LINKS = { hub: "https://cims.work/hub/TOKEN", expense: "https://cims.work/hub/expense.xlsx" };
+
+test("node:sqlite is available, so the preview route test actually runs", () => assert.ok(DatabaseSync));
+
+test("context: the running contract, the person handing over (never a visit, never an old contract), the next payday", () => {
+  const c = welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-19", links: LINKS });
+  assert.equal(c.ship, "Grandeur of the Seas");
+  assert.equal(c.shipShort, "Grandeur");
+  assert.equal(c.code, "GR");
+  assert.equal(c.port, "Baltimore");
+  assert.equal(c.on, "18 Oct 2026");
+  assert.equal(c.off, "18 May 2027");
+  assert.equal(c.months, "7 months");
+  assert.deepEqual(c.prev, { sc: "SC-2", name: "Mark Joseph Dela Rosa", first: "Mark", since: "28 Feb 2026" });
+  assert.equal(c.nextPay, "Wed 4 Nov");
+  assert.equal(c.position, "Printer Specialist");
+  assert.equal(predecessorOf(LEGS.filter((l) => l.sc !== "SC-2"), currentLeg(LEGS, "SC-1")), null, "no one within the window: nobody is named");
+  assert.equal(welcomeContext({ crew: { ...CREW, agency_id: "SC-9" }, legs: LEGS, today: "2026-10-19" }), null, "no running contract: nothing to welcome");
+  assert.equal(welcomeContext({ crew: CREW, legs: [{ ...LEGS[0], off: "2027-03-20" }], today: "2026-10-19" }).months, "5 mo 2 d");
+});
+
+test("template: the letterhead, the pass, the hub card, no placeholder link, no gendered pronoun", () => {
+  const c = welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-19", links: LINKS });
+  const m = welcomeEmail(c);
+  assert.equal(m.subject, "Welcome aboard Grandeur of the Seas, Archie");
+  assert.ok(m.html.includes(mastRows()), "the canonical letterhead, byte for byte");
+  for (const s of ["Welcome aboard, Archie.", "Grandeur is yours from today.", "WELCOME PASS", "DAY 1 &middot; 18 OCT", "via Baltimore", "7 months", "18 May 2027",
+    "Sign-off projected &middot; TDG confirms it later.", "Mark Joseph Dela Rosa", "Mark&rsquo;s Digital Handover Notes are waiting for you", "Read Mark&rsquo;s notes",
+    "There is more on the other side.", "Wed 4 Nov", "Open my Crew Hub", LINKS.hub, LINKS.expense, "Rita sends you a time."]) assert.ok(m.html.includes(s), s);
+  assert.doesNotMatch(m.html, /#LINK|\bHis\b|\bhe leaves\b|rgba\(|gradient/);
+  assert.doesNotMatch(m.html, /Pick a time|Open the training|Book time with me|Standard Operating Procedures/, "a link not given is no button");
+  assert.match(m.text, /Your Crew Hub: https:\/\/cims\.work\/hub\/TOKEN/);
+  const withLinks = welcomeEmail({ ...c, links: { ...LINKS, training: "https://t.example", onboarding: "https://o.example", review: "https://r.example", sops: "https://s.example", book: "https://b.example" } }).html;
+  for (const s of ["Open the training", "Pick a time", "Standard Operating Procedures", "Book time with me"]) assert.ok(withLinks.includes(s), s);
+  assert.doesNotMatch(withLinks, /Rita sends you a time/);
+});
+
+test("template: no predecessor on record drops the block; TDG's date says so; names are escaped", () => {
+  const c = welcomeContext({ crew: { ...CREW, first_name: "<b>Ann</b>" }, legs: [{ ...LEGS[0], offSource: "tdg" }], today: "2026-10-19", links: LINKS });
+  const h = welcomeEmail(c).html;
+  assert.doesNotMatch(h, /You take over from|TAKE OVER/i);
+  assert.match(h, /Read the handover notes/);
+  assert.match(h, /ask the storekeeper for the Uniform Request Form/);
+  assert.match(h, /Sign-off confirmed by TDG\./);
+  assert.doesNotMatch(h, /<b>Ann<\/b>/);
+  assert.match(h, /&lt;b&gt;Ann&lt;\/b&gt;/);
+});
+
+test("preview route: signed in only, the crew's own hub link in it, and nothing is sent", async () => {
+  const d = new DatabaseSync(":memory:");
+  d.exec("CREATE TABLE crew (id TEXT, agency_id TEXT, first_name TEXT, last_name TEXT, rank_observed TEXT, baseline_count INTEGER)");
+  d.exec("CREATE TABLE activity_log (id TEXT PRIMARY KEY, user_id TEXT, action TEXT, detail TEXT, at TEXT)");
+  d.exec("INSERT INTO crew VALUES ('c1','SC-1','Archie','Corpin',NULL,NULL), ('c9','SC-9','Ashore','Crew',NULL,NULL)");
+  const stmt = (sql, args = []) => ({ bind: (...a) => stmt(sql, a), all: async () => ({ results: d.prepare(sql).all(...args) }),
+    first: async () => d.prepare(sql).get(...args) ?? null, run: async () => ({ meta: { changes: d.prepare(sql).run(...args).changes } }) });
+  const env = { DB: { prepare: (s) => stmt(s), batch: async (st) => { const o = []; for (const x of st) o.push(await x.run()); return o; } } };
+  let sent = 0;
+  env.MAILER = { fetch: async () => { sent++; return new Response("{}"); } };
+  const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s });
+  const h = installHub({ ensure: async (e) => { for (const q of HUB_DDL) await e.DB.prepare(q).run(); }, boardLegs: async () => LEGS, bonusCount: async () => null, json, today: () => "2026-10-19" });
+  const go = (id, session) => h("/api/hub/welcome", new Request("https://cims.work/api/hub/welcome?id=" + id), env, new URL("https://cims.work/api/hub/welcome?id=" + id), session);
+  assert.equal((await go("SC-1", null)).status, 401);
+  assert.equal((await go("SC-9", { email: "r@x" })).status, 404, "nobody to welcome without a running contract");
+  const res = await go("SC-1", { email: "r@x" });
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  const tok = d.prepare("SELECT token FROM crew_hub_link WHERE agency_id='SC-1'").get().token;
+  assert.ok(html.includes("https://cims.work/hub/" + tok));
+  assert.ok(html.includes("https://cims.work/hub/expense.xlsx"));
+  assert.equal(sent, 0, "a preview sends nothing");
+  const R = readFileSync(new URL("../src/crew_hub_routes.js", import.meta.url), "utf8");
+  assert.doesNotMatch(R, /MAILER|sendViaMailer/, "nothing in the hub module can send mail");
+});
