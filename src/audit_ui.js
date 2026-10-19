@@ -637,7 +637,7 @@ label.btn{position:relative}
      The draft lives on this phone at every tap (localStorage), photos wait in IndexedDB for signal, and a filing made
      without signal is kept and sent when the phone sees the server. */
   var AR = window.AR;
-  S.v = {}; S.q = {}; S.err = {};
+  S.v = {}; S.pq = {}; S.err = {}; /* the photo queue; S.q is the home's search text */
   function lsGet(k) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
   function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
   function loadVisit(id) {
@@ -675,7 +675,7 @@ label.btn{position:relative}
     return IDB;
   }
   function idbDo(mode, fn) { return idb().then(function (db) { return new Promise(function (res, rej) { var tx = db.transaction("photos", mode), st = tx.objectStore("photos"), out = fn(st); tx.oncomplete = function () { res(out && out.result !== undefined ? out.result : out); }; tx.onerror = function () { rej(tx.error); }; }); }); }
-  function queued(rid) { return idbDo("readonly", function (st) { return st.getAll(); }).then(function (all) { return (all || []).filter(function (r) { return r.rid === rid; }); }).catch(function () { return S.q[rid] || []; }); }
+  function queued(rid) { return idbDo("readonly", function (st) { return st.getAll(); }).then(function (all) { return (all || []).filter(function (r) { return r.rid === rid; }); }).catch(function () { return S.pq[rid] || []; }); }
   function shrink(file) {
     return new Promise(function (res) {
       var url = URL.createObjectURL(file), img = new Image();
@@ -692,7 +692,7 @@ label.btn{position:relative}
   function addPhoto(rid, step, file) {
     return shrink(file).then(function (b) {
       var rec = { k: "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10), rid: rid, step: step, type: b.type || file.type || "image/jpeg", blob: b, at: new Date(file.lastModified || Date.now()).toISOString() };
-      (S.q[rid] = S.q[rid] || []).push(rec);
+      (S.pq[rid] = S.pq[rid] || []).push(rec);
       return idbDo("readwrite", function (st) { return st.put(rec); }).catch(function () { toast("This phone cannot keep photos offline. Keep the app open until it is sent."); }).then(function () { return flushPhotos(rid); });
     });
   }
@@ -700,7 +700,7 @@ label.btn{position:relative}
     if (flushPhotos._busy) return Promise.resolve();
     flushPhotos._busy = true;
     return queued(rid).then(function (list) {
-      S.q[rid] = list;
+      S.pq[rid] = list;
       var chain = Promise.resolve();
       list.forEach(function (rec) {
         chain = chain.then(function () {
@@ -708,7 +708,7 @@ label.btn{position:relative}
             .then(function (r) { return r.json(); }).then(function (j) {
               if (!j || !j.ok) return;
               var v = S.v[rid]; if (v && !v.photos.some(function (p) { return p.id === j.id; })) { v.photos.push({ id: j.id, step: rec.step, at: new Date().toISOString() }); lsSet("aud:v:" + rid, v); }
-              S.q[rid] = (S.q[rid] || []).filter(function (x) { return x.k !== rec.k; });
+              S.pq[rid] = (S.pq[rid] || []).filter(function (x) { return x.k !== rec.k; });
               return idbDo("readwrite", function (st) { return st.delete(rec.k); }).catch(function () {});
             }).catch(function () {});
         });
@@ -717,7 +717,7 @@ label.btn{position:relative}
     }).then(function () { flushPhotos._busy = false; if (S.redraw) S.redraw(); }, function () { flushPhotos._busy = false; });
   }
   function photoStrip(v, step) {
-    var sent = (v.photos || []).filter(function (p) { return p.step === step; }), wait = (S.q[v.id] || []).filter(function (p) { return p.step === step; });
+    var sent = (v.photos || []).filter(function (p) { return p.step === step; }), wait = (S.pq[v.id] || []).filter(function (p) { return p.step === step; });
     var h = '<div class="card"><div class="ch">' + ic("camera") + 'Photos<span class="r">' + (sent.length + wait.length ? sent.length + wait.length + (wait.length ? " · " + wait.length + " waits for signal" : "") : "optional") + "</span></div>";
     if (sent.length || wait.length) {
       h += '<div class="phs">';
@@ -870,7 +870,7 @@ label.btn{position:relative}
     var sum = [ws + (ws === 1 ? " missing item" : " missing items"), finds + (finds === 1 ? " finding" : " findings"), lines + (lines === 1 ? " OBP line" : " OBP lines"), tools + (tools === 1 ? " tool" : " tools") + " missing"].join(" · ");
     var low = ["inventory", "technical", "collaterals"].filter(function (k) { return d.rt[k] != null && d.rt[k] <= 3; }).map(function (k) { return AR.RATING_TEXT[k].label; });
     if (d.ov.overall != null && d.ov.overall <= 3) low.push("Overall");
-    var sent = (v.photos || []).length, wait = (S.q[v.id] || []).length;
+    var sent = (v.photos || []).length, wait = (S.pq[v.id] || []).length;
     h += '<div class="card">';
     h += '<button type="button" class="itm" data-step="' + (probs.length ? stepNo(probs[0].step) : 7) + '"><span class="tx">' + (probs.length ? probs.length + (probs.length === 1 ? " answer missing" : " answers missing") : "Every step answered") + '<span class="sm">' + esc(probs.length ? probs[0].say : sum) + "</span></span>" + ic(probs.length ? "f:warning-circle" : "f:check-circle", probs.length ? "bad" : "ok") + "</button>";
     if (low.length) h += '<div class="itm"><span class="tx">Comment on the ' + (low.length === 1 ? "low rating" : low.length + " low ratings") + '<span class="sm">' + esc(low.join(" · ")) + "</span></span>" + ic("f:check-circle", "ok") + "</div>";
@@ -976,7 +976,7 @@ label.btn{position:relative}
       };
       /* a typed number redraws on leaving the box (the diff and the tick follow it), never while typing */
       M.onchange = function (ev) { var t = ev.target; if (t.getAttribute("data-shelf") || t.getAttribute("data-f") === "fu-due") draw(); if (t.getAttribute("data-photo")) { var file = t.files && t.files[0]; t.value = ""; if (file) { toast("Photo kept on this phone. Sending."); addPhoto(id, t.getAttribute("data-photo"), file).then(draw); } } };
-      queued(id).then(function (q) { S.q[id] = q; draw(); if (q.length && navigator.onLine !== false) flushPhotos(id); });
+      queued(id).then(function (q) { S.pq[id] = q; draw(); if (q.length && navigator.onLine !== false) flushPhotos(id); });
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
 
@@ -1014,7 +1014,7 @@ label.btn{position:relative}
         if (S.cur === "q=" + p.body.id) route();
       });
     });
-    Object.keys(S.q).forEach(function (rid) { if ((S.q[rid] || []).length) flushPhotos(rid); });
+    Object.keys(S.pq).forEach(function (rid) { if ((S.pq[rid] || []).length) flushPhotos(rid); });
   }
   window.addEventListener("online", flushFilings);
 
