@@ -959,6 +959,36 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   `test/visits.test.js`. A sign-off already past is never instructed (`signoff_passed`, 17 Oct 2026).
 Pinned by `test/signoff_instructions_v2.test.js`.
 
+## 10k. THE CREW HUB AND THE WELCOME EMAIL — Miguel, 19 Oct 2026
+"what if we have this as a 'good to know' and you build something similar ... the landing page that they can read"; his
+answers: per-crew link, keep the six attachments, fix the Expense Report's errors and keep its look, mock-ups first; the
+bonus wording approved as written ("ok cool"), then "deploy". Proofs under `docs/mockups/welcome_20261019/`.
+- **The Crew Hub** (`src/crew_hub.js` page, `src/crew_hub_routes.js` routes): `GET /hub/<token>` opens one seafarer's page with
+  NO login — the link is the key (`crew_hub_link`, migrations/0034: 24 random bytes, never derived from the crew id; revocable;
+  `last_seen_at`). Signed in: `POST /api/hub/link` (the same link until revoked; the profile's "Crew Hub link" copies and opens
+  it) and `POST /api/hub/revoke` (the next request makes a new one), both audited. `HUB_ORIGIN` (unset = the request's origin)
+  moves the links to hub.cims.work once that custom domain exists in Cloudflare. Headers: no-store, noindex, no-referrer.
+- **What it shows, from where**: the running contract from the board's ONE schedule (`currentLeg`, never a training visit), its
+  sign-off's source said (TDG / Rita / projected, §10d); the next payday from `src/payroll.js`; the contract number = the
+  consecutive count + 1, READ through the Score Card's own helpers (`hubBonusCount`: the last committed `count_after`, else the
+  baseline) — §1: never written. **No baseline and no committed outcome = no personal number**: the ladder only, never
+  "contract 1" for a crew whose count is simply not recorded. The ladder and FLOOR are read from `bonus.js`; the page says
+  "up to" — the payout is the step times the Score Card score, at 80 or more (his draft said "finish without a reset and you
+  earn $500", which the engine does not do). The bonus wording is Miguel's approved text; changing it is his call.
+- **Payroll dates are data** (`PAYROLL` in `src/payroll.js`, twelve [month, paid on] pairs per year, from payroll's own PDF):
+  2027 is one more list, never derived; with no next date published the page says so, never a guess.
+- **The Expense Report v3** is served at `/hub/expense.xlsx` (`src/hub_assets.js`, byte for byte
+  `docs/mockups/welcome_20261019/expense_report_v3.xlsx`): Legend, Star, Symphony, Xcel on the ship list (now dropdowns, warning
+  only), Mary Joy named, every line blank until used (v2's line 11 had no formula but was summed), and the rate's direction
+  stated (USD for 1 unit of the receipt's currency — "1 USD = 58 PHP" typed into v2 overclaimed ~3,000x).
+- **The welcome email** (`src/emails/hr.welcome.v1.js`, filled by `src/welcome_context.js`): the pass, the first 15 days, who to
+  message, the Crew Hub card (one green button), the Expense Report download. Never a placeholder: a link not given is no
+  button ("Rita sends you a time"); no predecessor within `RELIEF_WINDOW_DAYS` of the sign-on is no "You take over from"; the
+  predecessor is named by first name, never "his". `GET /api/hub/welcome?id=` previews it with the crew's real data and their
+  hub link (the profile's "Welcome email · preview"). **It sends nothing yet**: the send (sign-on morning, the personal address
+  AND the ship's mailbox, the six attachments) waits for the six files and the training / day-7 / day-15 / SOP / booking links
+  from Miguel; its switch ships OFF. Pinned by `test/crew_hub.test.js`, `test/welcome_email.test.js`.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS

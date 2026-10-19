@@ -74,6 +74,7 @@ import { installAudit } from "./audit_routes.js";
 import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
+import { installHub, HUB_DDL } from "./crew_hub_routes.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -97,6 +98,10 @@ const ensureAudit = memoEnsure(ensureAuditTables, AUDIT_DDL.join("\n"));
 const _audit = installAudit({ json, htmlResponse, ensureAudit, rotationSections, sendViaMailer, logActivity, applyOverride, TODAY: () => TODAY(),
   rushOrders: installRushOrders({ boardLegs: (env) => boardLegs(env) }),
   crewProfile: async (env, sc, session) => (await apiCrewOne(env, new URL("https://cims.work/api/crew/get?id=" + encodeURIComponent(sc)), session)).json() });
+// The Crew Hub (Miguel, 19 Oct 2026, "deploy"): /hub/<token> public, /api/hub/link + /api/hub/revoke signed in
+// (src/crew_hub_routes.js). The consecutive count is READ through the same helpers the Score Card uses (§1: never written).
+const ensureHubLink = memoEnsure(async (env) => { for (const q of HUB_DDL) await env.DB.prepare(q).run(); }, HUB_DDL.join("\n"));
+const _hub = installHub({ ensure: ensureHubLink, boardLegs: (env) => boardLegs(env), bonusCount: (env, sc) => hubBonusCount(env, sc), json, today: () => TODAY() });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 // Since 16 Oct 2026 only CURRENT seats (an earmark's planned sign-off is not a sign-off to instruct), each carrying what the
@@ -261,6 +266,8 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
+      // The Crew Hub: /hub/<token> and /hub/expense.xlsx answer without a session (the link is the key); the two /api/hub/ routes need one.
+      if (p.startsWith("/hub/") || p.startsWith("/api/hub/")) { const _h = await _hub(p, request, env, url, session); if (_h) return _h; }
       // Printshop Audit: the shell on audit.cims.work (and cims.work/audit), its manifest and service worker, and
       // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
       { const _au = await _audit(p, request, env, url, session); if (_au) return _au; }
@@ -3361,6 +3368,19 @@ function apiFleet() {
 }
 
 /* ----------------------- bonus engine (locked SOP) ----------------------- */
+// The Crew Hub's contract number (19 Oct 2026): the consecutive count as the Score Card reads it — the last committed
+// outcome's count_after, else the baseline. NULL when neither exists (no baseline set, nothing committed): the hub then
+// shows the ladder only, never "contract 1" for a crew whose count is simply not recorded. READ only (§1).
+async function hubBonusCount(env, sc) {
+  const cr = await env.DB.prepare("SELECT id, agency_id, baseline_count FROM crew WHERE agency_id=?").bind(sc).first();
+  if (!cr) return null;
+  const [baseline, last] = await Promise.all([
+    effectiveBaseline(env, cr.agency_id, cr.baseline_count),
+    env.DB.prepare("SELECT count_after FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(cr.id).first(),
+  ]);
+  if (last && Number.isInteger(last.count_after)) return last.count_after;
+  return Number.isInteger(baseline) ? baseline : null;
+}
 async function crewCount(env, crewRowId, baseline) {
   const last = await env.DB.prepare("SELECT count_after FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC LIMIT 1").bind(crewRowId).first();
   return last ? last.count_after : (baseline == null ? 0 : baseline);
@@ -8722,6 +8742,8 @@ async function openCrew(id){
     +'<div class=pfgl>Statement</div>'
     +'<button class="btn ghost" onclick="downloadStatement()">Download statement</button>'
     +'<button class="btn ghost" onclick="downloadCrewFile()" title="The statement plus Contract feedback: every note, intel report and feedback answer, every contract. Internal — never emailed.">Crew file · internal</button>'
+    +'<button class="btn ghost" id=hubbtn onclick="crewHubLink()" title="The seafarer\\'s own Crew Hub page: paydays, pay and benefits, the bonus ladder, help. No login; the link is theirs.">Crew Hub link</button>'
+    +'<button class="btn ghost" onclick="if(CURRENT_CREW) window.open(\\'/api/hub/welcome?id=\\'+encodeURIComponent(CURRENT_CREW),\\'_blank\\')" title="The welcome-aboard email filled with this seafarer\\'s data. Preview only: it sends nothing.">Welcome email · preview</button>'
     +'<button class="btn ghost" id=stmtbtn onclick="emailStatement()">Email statement</button>'
     +'<button class="btn ghost" onclick="exportCrewCSV()">Export CSV</button>'
     +'<div id=stmtout class=csub style="margin:0"></div>'
@@ -9062,6 +9084,14 @@ function exportCrewCSV(){
 }
 function downloadStatement(){ if(CURRENT_CREW) window.open('/api/crew/statement.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
 function downloadCrewFile(){ if(CURRENT_CREW) window.open('/api/crew/file.pdf?id='+encodeURIComponent(CURRENT_CREW),'_blank'); }
+// The Crew Hub link (19 Oct 2026): the same link every time until revoked; opened in a new tab and copied for Rita to send.
+async function crewHubLink(){ if(!CURRENT_CREW) return; var o=$('#stmtout'), b=$('#hubbtn'); if(b) b.disabled=true;
+  try{ var r=await fetch('/api/hub/link',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:CURRENT_CREW})}); var d=await r.json().catch(function(){return {};});
+    if(!r.ok||!d.url){ if(o) o.textContent='Crew Hub link: '+(d.error||('HTTP '+r.status)); return; }
+    try{ await navigator.clipboard.writeText(d.url); }catch(e){}
+    if(o) o.innerHTML='Crew Hub link copied: <a href="'+escHtml(d.url)+'" target=_blank rel=noopener>open</a>';
+    window.open(d.url,'_blank','noopener');
+  }catch(e){ if(o) o.textContent='Crew Hub link: '+e.message; } finally{ if(b) b.disabled=false; } }
 // THE STATEMENT EMAIL (12 Oct 2026): says who it goes to before it goes, and goes once — Miguel's click sent Ian Alega's
 // statement three times in three seconds. The server refuses a repeat inside 10 minutes (already_sent) unless resent.
 async function emailStatement(resend){
