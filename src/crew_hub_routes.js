@@ -69,7 +69,7 @@ export function installHub(deps) {
     return { token, created: true };
   }
 
-  return async function handleHub(p, request, env, url, session) {
+  const handleHub = async function handleHub(p, request, env, url, session) {
     if (p === "/hub/expense.xlsx" && request.method === "GET") {
       const bin = atob(EXPENSE_XLSX_B64), bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -120,4 +120,6 @@ export function installHub(deps) {
     }
     return null;
   };
+  handleHub.linkFor = linkFor; // the welcome send reuses the ONE link per crew
+  return handleHub;
 }

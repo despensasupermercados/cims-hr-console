@@ -93,6 +93,10 @@ AUDIT_LIVE = "true"
 # the HR console keeps its login. Remove both lines to put the login back.
 AUDIT_OPEN = "true"
 AUDIT_OPEN_AS = "Dexter.Lawrence@dg3.com"
+# The Crew Hub's address (19 Oct 2026): hub.cims.work was added as a custom domain on this Worker the same day (Miguel, in
+# the Cloudflare dashboard; the expense download answered over HTTPS). New hub links and the welcome email point here; links
+# already given out on cims.work/hub/... keep working (the route answers on every host). Production only.
+HUB_ORIGIN = "https://hub.cims.work"
 
 # Central transport — all email goes through cims-mailer (service binding).
 # This worker builds content only; cims-mailer owns the Resend key,

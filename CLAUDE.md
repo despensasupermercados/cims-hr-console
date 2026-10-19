@@ -961,13 +961,16 @@ Pinned by `test/signoff_instructions_v2.test.js`.
 
 ## 10k. THE CREW HUB AND THE WELCOME EMAIL — Miguel, 19 Oct 2026
 "what if we have this as a 'good to know' and you build something similar ... the landing page that they can read"; his
-answers: per-crew link, keep the six attachments, fix the Expense Report's errors and keep its look, mock-ups first; the
-bonus wording approved as written ("ok cool"), then "deploy". Proofs under `docs/mockups/welcome_20261019/`.
+answers: per-crew link, fix the Expense Report's errors and keep its look, mock-ups first; the bonus wording approved as
+written ("ok cool"), then "deploy". **No attachments** (the same evening: "we change the way we do it .. no more files with
+the exception of the excel file for expenses .. u are drifting"): the Crew Hub carries what the five PDFs did (payroll
+dates, compensation, tech support, ergonomics, mission and values); the email attaches NOTHING and the Expense Report is a
+download link. An earlier "keep the six" answer is superseded — never attach files to this email again. Proofs under `docs/mockups/welcome_20261019/`.
 - **The Crew Hub** (`src/crew_hub.js` page, `src/crew_hub_routes.js` routes): `GET /hub/<token>` opens one seafarer's page with
   NO login — the link is the key (`crew_hub_link`, migrations/0034: 24 random bytes, never derived from the crew id; revocable;
   `last_seen_at`). Signed in: `POST /api/hub/link` (the same link until revoked; the profile's "Crew Hub link" copies and opens
-  it) and `POST /api/hub/revoke` (the next request makes a new one), both audited. `HUB_ORIGIN` (unset = the request's origin)
-  moves the links to hub.cims.work once that custom domain exists in Cloudflare. Headers: no-store, noindex, no-referrer.
+  it) and `POST /api/hub/revoke` (the next request makes a new one), both audited. `HUB_ORIGIN` = "https://hub.cims.work"
+  (production `[vars]`; the custom domain exists since 19 Oct 2026; unset = the request's origin, as on staging). Headers: no-store, noindex, no-referrer.
 - **What it shows, from where**: the running contract from the board's ONE schedule (`currentLeg`, never a training visit), its
   sign-off's source said (TDG / Rita / projected, §10d); the next payday from `src/payroll.js`; the contract number = the
   consecutive count + 1, READ through the Score Card's own helpers (`hubBonusCount`: the last committed `count_after`, else the
@@ -985,9 +988,18 @@ bonus wording approved as written ("ok cool"), then "deploy". Proofs under `docs
   message, the Crew Hub card (one green button), the Expense Report download. Never a placeholder: a link not given is no
   button ("Rita sends you a time"); no predecessor within `RELIEF_WINDOW_DAYS` of the sign-on is no "You take over from"; the
   predecessor is named by first name, never "his". `GET /api/hub/welcome?id=` previews it with the crew's real data and their
-  hub link (the profile's "Welcome email · preview"). **It sends nothing yet**: the send (sign-on morning, the personal address
-  AND the ship's mailbox, the six attachments) waits for the six files and the training / day-7 / day-15 / SOP / booking links
-  from Miguel; its switch ships OFF. Pinned by `test/crew_hub.test.js`, `test/welcome_email.test.js`.
+  hub link (the profile's "Welcome email · preview").
+- **The send** (`src/welcome_send.js`): To = the ship's mailbox (cims-timecard `ship_contact`, `audit.shipMailbox`, read only)
+  AND the personal address (Rita's override first), never the same address twice; CC + reply-to Rita (`WELCOME_CC`); no
+  ship mailbox = the personal address alone, neither = `no_recipient`, never sent. **Once per contract** (`welcome_send`,
+  keyed sc + the sign-on), a resend is a deliberate second click. The profile's **Send welcome email** runs a dry run that
+  names the recipients, then one confirm. The **daily run** (`_welcome.run` in `scheduled`, the auto-send's 08:00 Budapest
+  gate) welcomes contracts that signed on today, catching up `WELCOME_CATCHUP_DAYS` = 2 for a missed run; never a training
+  visit; a mail that did not go is not recorded, so the next morning retries; failures land in the activity log
+  (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome"** (`/api/hub/welcome/auto`, `welcome_auto_enabled`
+  + `welcome_auto_since`): OFF until switched on, and switching on never emails a contract that started before that day. The
+  missing training / day-7 / day-15 / SOP / booking links block nothing: no link = no button ("Rita sends you a time").
+  Pinned by `test/crew_hub.test.js`, `test/welcome_email.test.js`, `test/welcome_send.test.js`.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
