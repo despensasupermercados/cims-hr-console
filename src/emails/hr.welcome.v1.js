@@ -60,11 +60,13 @@ const docBtn = (kind, title, why, btn) => `<tr><td style="padding:8px 0;border-b
 export const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 export const HON_URL = "https://hon.cims.work";
 export const JD_URL = "https://support.onboardprint.com/hc/en-us/articles/8731895883805-RCCL-Printer-Specialist";
+// Rita's Microsoft Bookings page (Miguel, 19 Oct 2026: "here is Ritas calendar .. u can book a time with her any time you need").
+export const RITA_BOOK_URL = "https://bookings.cloud.microsoft/book/DG3RitaBerenyi@dg3.com/?ismsaljsauthenabled=true";
 
 // d = { first, name, position, ship, shipShort, code, port, on, off, months, offSource, prev: { name, first, since } | null,
 //       today, nextPay, links: { hub (required), expense, training, onboarding, review, sops, book } }  — dates already "18 Oct 2026"
 export function welcomeEmail(d) {
-  const L = Object.assign({ hon: HON_URL, jd: JD_URL }, d.links || {});
+  const L = Object.assign({ hon: HON_URL, jd: JD_URL, book: RITA_BOOK_URL }, d.links || {});
   const P = d.prev && d.prev.name ? { name: esc(d.prev.name), first: esc(d.prev.first || d.prev.name), since: esc(d.prev.since || "") } : null;
   const D = { first: esc(d.first), name: esc(d.name), pos: esc(d.position || "Printer Specialist"), ship: esc(d.ship), shipShort: esc(d.shipShort || d.ship),
     code: esc(d.code || ""), port: esc(d.port || ""), on: esc(d.on), off: esc(d.off), months: esc(d.months || ""), today: esc(d.today),
@@ -127,7 +129,7 @@ export function welcomeEmail(d) {
   ${secTitle("Your first 15 days", "four things")}
   ${step("TODAY", "Count the inventory and sign it", "Your own count, signed in your Digital Handover Notes. Use the green button above. It protects you.", "")}
   ${step("WEEK 1", "Finish the cruise line's training", "Log in to their app and complete every module. The cruise line checks it.", L.training ? btnS(L.training, "Open the training") : "")}
-  ${step("DAY 7", "Onboarding call with Rita", "15 minutes. How is it going, what do you need." + (L.onboarding ? "" : " Rita sends you a time."), L.onboarding ? btnS(L.onboarding, "Pick a time") : "")}
+  ${step("DAY 7", "Onboarding call with Rita", "15 minutes. How is it going, what do you need. Here is Rita&rsquo;s calendar: book a time with her whenever you need.", btnS(L.onboarding || L.book, "Book a time with Rita"))}
   ${step("DAY 15", "Expectations call", "What a good contract looks like, agreed together. Then one call a month." + (L.review ? "" : " Rita sends you a time."), L.review ? btnS(L.review, "Pick a time") : "")}
   
   ${secTitle("Who to message", "")}
@@ -187,7 +189,8 @@ export function welcomeEmail(d) {
     ...(d.prev && d.prev.name ? [`You take over from: ${d.prev.name}`] : []), "",
     `Today: open the Digital Handover Notes (${HON_URL}), count the inventory and sign it.`,
     "Week 1: finish the cruise line's training. The cruise line checks it.",
-    "Day 7: onboarding call with Rita. Day 15: expectations call.", "",
+    `Day 7: onboarding call with Rita, 15 minutes. Book a time on her calendar whenever you need: ${L.onboarding || L.book}`,
+    `Day 15: expectations call. ${L.review ? "Pick a time: " + L.review : "Rita sends you a time."}`, "",
     `Your Crew Hub: ${L.hub}`, ...(L.expense ? [`Expense Report: ${L.expense}`] : []), `Job description: ${L.jd}`, "",
     "One address reaches the whole team: onboardsupport@dg3.com", "", "Rita Berenyi, Manager, People & Culture, Rita.Berenyi@dg3.com",
   ].join("\n");

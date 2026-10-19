@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { welcomeEmail } from "../src/emails/hr.welcome.v1.js";
+import { welcomeEmail, RITA_BOOK_URL } from "../src/emails/hr.welcome.v1.js";
 import { welcomeContext, predecessorOf, currentLeg } from "../src/welcome_context.js";
 import { installHub, HUB_DDL } from "../src/crew_hub_routes.js";
 import { mastRows } from "../src/cims-mast.js";
@@ -47,8 +47,13 @@ test("template: the letterhead, the pass, the hub card, no placeholder link, no 
     "Sign-off projected &middot; TDG confirms it later.", "Mark Joseph Dela Rosa", "Mark&rsquo;s Digital Handover Notes are waiting for you", "Read Mark&rsquo;s notes",
     "There is more on the other side.", "Wed 4 Nov", "Open my Crew Hub", LINKS.hub, LINKS.expense, "Rita sends you a time."]) assert.ok(m.html.includes(s), s);
   assert.doesNotMatch(m.html, /#LINK|\bHis\b|\bhe leaves\b|rgba\(|gradient/);
-  assert.doesNotMatch(m.html, /Pick a time|Open the training|Book time with me|Standard Operating Procedures/, "a link not given is no button");
+  assert.doesNotMatch(m.html, /Pick a time|Open the training|Standard Operating Procedures/, "a link not given is no button");
   assert.match(m.text, /Your Crew Hub: https:\/\/cims\.work\/hub\/TOKEN/);
+  // Day 7 (Miguel, 19 Oct 2026): Rita's calendar, booked whenever the crew needs, in the HTML and the plain text.
+  assert.ok(m.html.includes("Here is Rita&rsquo;s calendar: book a time with her whenever you need."));
+  assert.ok(m.html.includes('href="' + RITA_BOOK_URL + '"') && m.html.includes("Book a time with Rita"));
+  assert.ok(m.text.includes("Book a time on her calendar whenever you need: " + RITA_BOOK_URL));
+  assert.match(RITA_BOOK_URL, /^https:\/\/bookings\.cloud\.microsoft\/book\/DG3RitaBerenyi@dg3\.com\//);
   const withLinks = welcomeEmail({ ...c, links: { ...LINKS, training: "https://t.example", onboarding: "https://o.example", review: "https://r.example", sops: "https://s.example", book: "https://b.example" } }).html;
   for (const s of ["Open the training", "Pick a time", "Standard Operating Procedures", "Book time with me"]) assert.ok(withLinks.includes(s), s);
   assert.doesNotMatch(withLinks, /Rita sends you a time/);
