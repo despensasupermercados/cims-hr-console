@@ -969,8 +969,8 @@ download link. An earlier "keep the six" answer is superseded — never attach f
 - **The Crew Hub** (`src/crew_hub.js` page, `src/crew_hub_routes.js` routes): `GET /hub/<token>` opens one seafarer's page with
   NO login — the link is the key (`crew_hub_link`, migrations/0034: 24 random bytes, never derived from the crew id; revocable;
   `last_seen_at`). Signed in: `POST /api/hub/link` (the same link until revoked; the profile's "Crew Hub link" copies and opens
-  it) and `POST /api/hub/revoke` (the next request makes a new one), both audited. `HUB_ORIGIN` (unset = the request's origin)
-  moves the links to hub.cims.work once that custom domain exists in Cloudflare. Headers: no-store, noindex, no-referrer.
+  it) and `POST /api/hub/revoke` (the next request makes a new one), both audited. `HUB_ORIGIN` = "https://hub.cims.work"
+  (production `[vars]`; the custom domain exists since 19 Oct 2026; unset = the request's origin, as on staging). Headers: no-store, noindex, no-referrer.
 - **What it shows, from where**: the running contract from the board's ONE schedule (`currentLeg`, never a training visit), its
   sign-off's source said (TDG / Rita / projected, §10d); the next payday from `src/payroll.js`; the contract number = the
   consecutive count + 1, READ through the Score Card's own helpers (`hubBonusCount`: the last committed `count_after`, else the
