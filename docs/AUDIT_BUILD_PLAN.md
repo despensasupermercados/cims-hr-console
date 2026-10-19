@@ -136,7 +136,8 @@ alone and the audit on paper, once.
 - 19 Oct 2026: PR D, first half: the audit on the ship (A8 + B1–B7), filing once, follow-ups and "2nd time", photos
   (Miguel found it missing: "u missed the entire app"). Then the profile card (P1, #303), the home's crash fixed (#304:
   the photo queue had taken the search text's name), History and Follow-ups (every filed audit; a follow-up closed from
-  the list). Still in D: the filed and dispatch emails (renders for Miguel's sign-off). Then E (the 61), F (W1), R1.
+  the list). The filed and dispatch emails are rendered (docs/mockups/audit_filed_20261019/) and wait on Miguel's
+  sign-off before the send is wired. Then E (the 61), F (W1), R1.
 - 14 Oct 2026: PR C built with the reads of G wired in (request, upload page, HON reads at upload, blind count, gate, documents-in email, 12 h reminder, 24 h overdue, read retries). Emails in TEST MODE until Miguel signs off the renders. Still to do in G: Ordering Schedule due dates in the assessment, OBP `update_date` from HON for the 1 Oct timing rule, Rolando's confirm page (R1).
 
 ## 4. Checklist before PR A can merge (what I need, and from whom)

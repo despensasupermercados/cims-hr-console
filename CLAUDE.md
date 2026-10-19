@@ -1542,8 +1542,15 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   "(open site, no sign-in)" when open; the next visit no longer carries it). TEST requests never. **The page is booted
   in a test** (`test/audit_page_boot.test.js`, node:vm, a small fake DOM): #299 named the photo queue `S.q`, the home's
   search text, and audit.cims.work opened on "Could not load" while every route test was green (#304, the queue is `S.pq`).
-  Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
-  the import of the 61 (I1), the web rail (W1).
+  **The filed and dispatch emails are rendered, NOT wired** (`hr.audit.filed.v1` to Miguel, cc Rita, Ray, Rolando:
+  the score in words and how it was reached, each rating with its sentence, the three boxes, the follow-up and what this
+  visit settled from the last one, the desk and the tools with "2nd time", each machine against what the documents said,
+  the count against OBP then the shelf, the crew — never a replacement, points, money or the dispatch rating;
+  `hr.audit.dispatch.v1` to Rita alone: the crew's 1–5 on TDG's travel, hotel and joining and, new on the Crew step, an
+  optional note in their words, kept only beside a rating), built from what the filing stored; proofs under
+  `docs/mockups/audit_filed_20261019/`. Wiring the send waits on Miguel's sign-off of the renders (CIMS email standard §5;
+  `test/audit_filed_email.test.js` fails if anything outside `src/emails` imports them). Still to build: Rolando's
+  Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,
