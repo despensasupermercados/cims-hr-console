@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>CIMS Crew Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--gink:#3E7F2E;--slate:#6B7280;--cloud:#F3F4F6;--border:#E5E7EB;--body:#374151;--grey:#9CA3AF;--sub:#95A0AD;--gtint:#EAF4E6;--amber:#B7791F;--atint:#F6EEE1;--red:#96281B;--rtint:#F4E5E3;--ntint:#E8EEF5;
+--fh:'Outfit',Helvetica,Arial,sans-serif;--fb:'DM Sans',Helvetica,Arial,sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--cloud);color:var(--body);font:15px/1.55 var(--fb)}
+a{color:var(--navy)}h1,h2,h3{font-family:var(--fh);color:var(--navy);margin:0}
+.ic{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.rule{display:flex;height:4px}.rule i{flex:60;background:var(--navy)}.rule i+i{flex:40;background:var(--green)}
+.top{background:var(--deep);color:#fff;padding:0 16px 88px}
+.wrap{max-width:1120px;margin:0 auto}
+.brand{display:flex;align-items:center;justify-content:space-between;padding:20px 0 0}
+.wm{font:700 20px/1 var(--fh);letter-spacing:5px;color:#fff}.wm i{display:block;width:78px;height:2px;background:var(--green);margin:7px 0 5px}
+.wm small{display:block;font:600 7px/1 var(--fb);letter-spacing:2.2px;color:var(--sub)}
+.hubtag{font:700 11px/1 var(--fb);letter-spacing:2px;color:var(--sub);border:1px solid #2C4A6B;border-radius:999px;padding:8px 12px}
+.hello{padding:44px 0 0}.hello h1{color:#fff;font-size:44px;font-weight:600;letter-spacing:-.8px;line-height:1.05}
+.hello p{margin:12px 0 0;color:#C9D1DB;font-size:17px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.hello .code{font:700 12px/1 var(--fb);letter-spacing:1px;background:#21405F;color:#fff;border-radius:6px;padding:5px 7px}
+.cards{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:16px;margin:-64px auto 0;padding:0 16px;max-width:1152px}
+.card{display:flex;flex-direction:column;background:#fff;border-radius:20px;padding:22px 24px;box-shadow:0 1px 2px rgba(20,45,72,.06),0 8px 24px rgba(20,45,72,.06)}
+.lab{font:700 11px/1 var(--fb);letter-spacing:1.6px;text-transform:uppercase;color:var(--slate)}
+.lab.g{color:var(--gink)}
+.big{font:600 40px/1.05 var(--fh);color:var(--navy);letter-spacing:-.6px;margin-top:12px}
+.mid{font:600 21px/1.2 var(--fh);color:var(--navy);margin-top:12px}
+.muted{color:var(--slate);font-size:14px}
+.pill{display:inline-flex;align-items:center;gap:6px;font:700 12px/1 var(--fb);border-radius:999px;padding:7px 11px;background:var(--gtint);color:var(--gink)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.track{height:6px;border-radius:6px;background:var(--cloud);margin:16px 0 8px;overflow:hidden}.track i{display:block;height:100%;background:var(--green);border-radius:6px}
+.ends{display:flex;justify-content:space-between;font-size:13px;color:var(--slate)}.ends b{color:var(--navy);font-weight:700}
+.spark{display:flex;align-items:flex-end;gap:4px;height:40px;margin-top:14px}.spark i{flex:1;background:var(--ntint);border-radius:3px 3px 1px 1px}.spark i.d{background:#C4D0DD}.spark i.n{background:var(--green)}
+.go{align-self:flex-start;margin-top:auto!important;padding-top:14px;display:inline-flex;align-items:center;gap:6px;font:700 13px/1 var(--fb);color:var(--navy);text-decoration:none;margin-top:14px}.go .ic{width:16px;height:16px}
+.quick{max-width:1152px;margin:16px auto 0;padding:0 16px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;list-style:none}
+.quick li{display:flex}.quick a{flex:1;display:flex;align-items:center;gap:14px;background:#fff;border-radius:16px;padding:16px 18px;text-decoration:none;border:1px solid var(--border);min-height:76px}
+.quick a:hover{border-color:#C4D0DD}
+.qi{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;background:var(--ntint);color:var(--navy);flex:none}
+.qi.g{background:var(--gtint);color:var(--gink)}
+.qt{font:600 16px/1.2 var(--fh);color:var(--navy)}.qs{font-size:13px;color:var(--slate);line-height:1.35;margin-top:2px}
+.quick .ic.ar{width:18px;height:18px;margin-left:auto;color:var(--grey)}
+.layout{max-width:1152px;margin:28px auto 0;padding:0 16px 40px;display:grid;grid-template-columns:200px 1fr;gap:28px;align-items:start}
+nav.rail{position:sticky;top:16px}
+nav.rail a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:var(--body);text-decoration:none;font-weight:500;font-size:14px}
+nav.rail a .ic{width:18px;height:18px;color:var(--slate)}nav.rail a:hover{background:#fff;color:var(--navy)}
+main{min-width:0}main section{background:#fff;border-radius:20px;padding:28px 30px;margin-bottom:16px;scroll-margin-top:16px;border:1px solid var(--border)}
+.sh{margin-bottom:20px}.eb{font:700 12px/1 var(--fb);letter-spacing:1.4px;text-transform:uppercase;color:var(--gink)}
+.sh h2{font-size:28px;font-weight:600;letter-spacing:-.4px;margin-top:10px;line-height:1.15}.lead{margin:8px 0 0;font-size:15px;color:var(--body);max-width:640px}
+ol,ul{margin:0;padding:0;list-style:none}
+.pay{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.pt{position:relative;border:1px solid var(--border);border-radius:14px;padding:14px 12px 12px;display:flex;flex-direction:column;gap:2px;min-height:96px}
+.pm{font-size:12px;color:var(--slate);font-weight:500}.pd{font:600 22px/1.15 var(--fh);color:var(--navy);margin-top:6px}.pw{font-size:12px;color:var(--slate)}
+.pt.past{background:var(--cloud);border-color:var(--cloud)}.pt.past .pd{color:var(--grey)}
+.pt.next{border:2px solid var(--green);padding:13px 11px 11px;background:#F7FBF5}.pt.next .pw{color:var(--gink);font-weight:700}
+.tag{position:absolute;top:12px;right:10px;font:700 10px/1 var(--fb);letter-spacing:1px;text-transform:uppercase;background:var(--green);color:#fff;border-radius:999px;padding:4px 7px}
+.tick{position:absolute;top:10px;right:10px;color:var(--grey)}.tick .ic{width:16px;height:16px}
+.note{display:flex;gap:10px;margin-top:16px;font-size:13.5px;color:var(--slate);line-height:1.5}.note .ic{width:18px;height:18px;margin-top:1px}
+.grp{font:700 12px/1 var(--fb);letter-spacing:1.4px;text-transform:uppercase;color:var(--slate);margin:24px 0 12px}.grp:first-of-type{margin-top:0}
+.bens{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.bn{border:1px solid var(--border);border-radius:14px;padding:15px 16px}.bh{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.bv{font:600 18px/1.2 var(--fh);color:var(--gink);white-space:nowrap}.bt{font-weight:700;color:var(--navy);font-size:15px;line-height:1.3}.bl{font-size:13.5px;color:var(--slate);line-height:1.45;margin-top:4px}
+details{margin-top:8px;font-size:13.5px}summary{cursor:pointer;color:var(--navy);font-weight:700;list-style:none}summary::-webkit-details-marker{display:none}summary:after{content:" +";color:var(--grey)}details[open] summary:after{content:" \2212"}
+details ul{margin-top:6px}details li{padding:3px 0;color:var(--body)}details li b{color:var(--navy)}
+.ladder{display:grid;grid-template-columns:repeat(9,1fr);gap:8px;height:220px;align-items:end;padding:26px 0 0}
+.lb{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+.lb .bar{height:var(--p);width:100%;max-width:56px;background:var(--ntint);border-radius:8px 8px 3px 3px}.lb.done .bar{background:#C4D0DD}.lb.now .bar{background:var(--green)}
+.lv{display:flex;flex-direction:column;align-items:center;gap:6px;font:600 13px/1 var(--fh);color:var(--navy);margin-bottom:6px;white-space:nowrap}.lb.now .lv{color:var(--gink);font-size:15px}
+.ln{font-size:12px;color:var(--slate);margin-top:8px;font-weight:700}
+.you{font:700 10px/1 var(--fb);letter-spacing:1px;text-transform:uppercase;background:var(--navy);color:#fff;border-radius:999px;padding:4px 8px}
+.axis{display:flex;justify-content:space-between;font-size:12px;color:var(--slate);border-top:1px solid var(--border);margin-top:8px;padding-top:8px}
+.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}
+.rl{border-radius:14px;padding:14px 16px;font-size:14px;line-height:1.5;border-left:3px solid}
+.rl b{display:block;color:var(--navy);font-family:var(--fh);font-size:16px;font-weight:600;margin-bottom:4px}
+.rl.g{background:var(--gtint);border-color:var(--green)}.rl.a{background:var(--atint);border-color:var(--amber)}.rl.r{background:var(--rtint);border-color:var(--red)}
+.small{font-size:13px;color:var(--slate);margin-top:14px}
+.house{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+.facts{display:grid;grid-template-columns:1fr;gap:9px}.facts li{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;line-height:1.4}.facts .ic{color:var(--gink);width:20px;height:20px}
+.book{background:var(--deep);color:#C9D1DB;border-radius:16px;padding:20px 22px}.book .big{color:#fff;font-size:34px;margin-top:10px}.book .lab{color:var(--sub)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;background:var(--green);color:#fff;text-decoration:none;font:700 15px/1 var(--fb);border-radius:12px;padding:15px 18px;margin-top:16px}
+.btn .ic{width:18px;height:18px}.btn.s{background:var(--ntint);color:var(--navy)}
+.hr{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.hr li{display:flex;gap:12px;align-items:flex-start;font-size:14px;line-height:1.45;background:var(--cloud);border-radius:12px;padding:12px 14px}
+.num{font:700 14px/1 var(--fh);color:#fff;background:var(--navy);border-radius:999px;width:26px;height:26px;display:grid;place-items:center;flex:none}
+.helpg{display:grid;grid-template-columns:1.1fr 1fr;gap:12px}.hstack{display:grid;gap:12px}
+.hc{border:1px solid var(--border);border-radius:16px;padding:18px;display:flex;flex-direction:column}
+.hc h3{font-size:18px;font-weight:600}.hc .muted{margin-top:4px}.hc .btn{margin-top:auto}.hstack .hc .btn{margin-top:14px}
+.hc ul{margin:12px 0 16px}.hc li{display:flex;gap:8px;font-size:13.5px;padding:3px 0}.hc li .ic{width:16px;height:16px;color:var(--gink);margin-top:2px}
+.hc.main{border:2px solid var(--green)}
+.team{display:grid;grid-template-columns:repeat(2,1fr);gap:0 24px;margin-top:8px}
+.teamh{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:28px}.pilln{display:inline-flex;align-items:center;gap:8px;font:700 13px/1 var(--fb);color:var(--navy);text-decoration:none;background:var(--ntint);border-radius:999px;padding:9px 13px}.pilln .ic{width:16px;height:16px}.tm{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border);text-decoration:none}
+.av{width:36px;height:36px;border-radius:999px;background:var(--ntint);color:var(--navy);font:700 13px/36px var(--fh);text-align:center;flex:none}
+.tm b{display:block;color:var(--navy);font-size:14.5px;line-height:1.25}.tm span span{font-size:13px;color:var(--slate)}.tm .em{margin-left:auto;font-size:13px;font-weight:700;color:var(--navy);white-space:nowrap}
+.tabs{display:inline-flex;background:var(--cloud);border-radius:12px;padding:4px;gap:4px;margin-bottom:18px}
+.tabs label{font:700 14px/1 var(--fb);color:var(--slate);padding:11px 16px;border-radius:9px;cursor:pointer}
+#t1:checked~.tabs label[for=t1],#t2:checked~.tabs label[for=t2]{background:#fff;color:var(--navy);box-shadow:0 1px 2px rgba(20,45,72,.12)}
+.tp{display:none}#t1:checked~.p1,#t2:checked~.p2{display:block}input.tr{position:absolute;opacity:0;pointer-events:none}
+.steps li{display:flex;gap:14px;align-items:flex-start;padding:10px 0;font-size:14.5px;line-height:1.5;position:relative}
+.steps li:not(:last-child):before{content:"";position:absolute;left:13px;top:38px;bottom:-6px;width:2px;background:var(--border)}
+.sn{font:700 13px/1 var(--fh);color:var(--navy);background:var(--ntint);border-radius:999px;width:28px;height:28px;display:grid;place-items:center;flex:none}
+.daily{background:var(--gtint);border-radius:16px;padding:16px 18px;margin-top:18px}.daily h3{font-size:16px;font-weight:600;margin-bottom:8px}
+.daily li{display:flex;gap:10px;font-size:14px;padding:4px 0}.daily .ic{width:18px;height:18px;color:var(--gink);margin-top:1px}
+.uni{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.uc{border:1px solid var(--border);border-radius:16px;padding:18px}.uc h3{font-size:18px;font-weight:600}.uc .muted{margin-top:2px}
+.uc li{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);font-size:14.5px}.uc li:last-child{border:0}.uc li b{color:var(--navy)}
+.warnb{display:flex;gap:12px;background:var(--atint);border-left:3px solid var(--amber);border-radius:0 12px 12px 0;padding:14px 16px;font-size:14.5px;line-height:1.5}.warnb .ic{color:var(--amber)}
+.lift{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+.lf{border:1px solid var(--border);border-radius:16px;padding:16px}.lf .n{font:600 34px/1 var(--fh);color:var(--green)}.lf p{margin:10px 0 0;font-size:14.5px;line-height:1.45;color:var(--navy);font-weight:500}
+.hit{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.hit li{font-size:13.5px;font-weight:700;color:var(--navy);background:var(--ntint);border-radius:999px;padding:8px 13px}
+.vals{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.vl{border-radius:16px;padding:18px;background:var(--cloud)}.vl b{display:block;font:600 17px/1.2 var(--fh);color:var(--navy)}.vl span{display:block;font-size:14px;line-height:1.45;margin-top:6px}
+footer{max-width:1152px;margin:0 auto;padding:8px 16px 48px;font-size:13px;color:var(--slate);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.chips{display:none}
+@media (max-width:980px){.layout{grid-template-columns:minmax(0,1fr)}nav.rail{display:none}
+ .chips{display:flex;gap:8px;overflow-x:auto;position:sticky;top:0;z-index:5;background:var(--cloud);padding:12px 16px;margin:0 -16px;scrollbar-width:none}
+ .chips::-webkit-scrollbar{display:none}
+ .chips a{flex:none;font:700 13px/1 var(--fb);color:var(--navy);text-decoration:none;background:#fff;border:1px solid var(--border);border-radius:999px;padding:10px 14px}
+ .cards{grid-template-columns:1fr 1fr}.cards .card:first-child{grid-column:1/-1}.quick{grid-template-columns:1fr 1fr}
+ .pay{grid-template-columns:repeat(4,1fr)}.lift{grid-template-columns:1fr 1fr}.helpg{grid-template-columns:1fr}.hc .btn{margin-top:4px}}
+@media (max-width:640px){body{font-size:15px}.top{padding-bottom:76px}.hello{padding-top:32px}.hello h1{font-size:34px}.hello p{font-size:15px}
+ .cards{grid-template-columns:1fr;gap:12px}.card{padding:20px}.big{font-size:36px}
+ .quick{gap:10px}.quick a{flex-direction:column;align-items:flex-start;gap:10px;padding:14px;min-height:0}.quick .ic.ar{display:none}.qt{font-size:15px}
+ .layout{margin-top:12px;gap:0}main section{padding:22px 18px;border-radius:18px;margin-bottom:12px}.sh h2{font-size:24px}
+ .pay{grid-template-columns:repeat(3,1fr);gap:8px}.pt{padding:12px 10px 10px;min-height:88px}.pt.next{padding:11px 9px 9px}.pd{font-size:19px}.pm{font-size:11.5px}
+ .tag{top:8px;right:8px;font-size:9px;padding:3px 6px}.tick{top:8px;right:8px}
+ .bens{grid-template-columns:1fr}.bn{padding:14px}.bv{font-size:17px}
+ .ladder{display:flex;flex-direction:column;align-items:stretch;height:auto;gap:6px;padding-top:4px}.lb{display:grid;grid-template-columns:14px minmax(0,1fr) 104px;align-items:center;gap:10px;height:26px}.lb .bar{grid-column:2;grid-row:1;height:100%;width:var(--p);max-width:none;border-radius:3px 7px 7px 3px}.ln{grid-column:1;grid-row:1;margin:0;text-align:right}.lv{grid-column:3;grid-row:1;flex-direction:row;justify-content:flex-end;margin:0;font-size:13px}.lb.now .lv{font-size:14px}.axis{display:none}.you{font-size:9px;padding:3px 6px}
+ .rules{grid-template-columns:1fr}.house{grid-template-columns:1fr}.facts{grid-template-columns:1fr}.hr{grid-template-columns:1fr}
+ .team{grid-template-columns:1fr}.tm .em{font-size:0}.tm .em:after{content:"\203A";font-size:22px;color:var(--grey)}
+ .tabs{display:flex}.tabs label{flex:1;text-align:center;padding:11px 8px;font-size:13px}
+ .uni{grid-template-columns:1fr}.lift{grid-template-columns:1fr 1fr}.vals{grid-template-columns:1fr}.vl{padding:14px 16px}.helpg{grid-template-columns:1fr}}
+@media (max-width:360px){.pay{grid-template-columns:repeat(2,1fr)}.lift{grid-template-columns:1fr}.hello h1{font-size:30px}.quick a{padding:12px}.qs{font-size:12.5px}}
+</style></head>
+<body>
+<div class="rule"><i></i><i></i></div>
+<div class="top"><div class="wrap">
+ <div class="brand"><div class="wm">CIMS<i></i><small>CRUISE INDUSTRY MANAGED SERVICES</small></div><span class="hubtag">CREW HUB</span></div>
+ <div class="hello"><h1>Hi Archie.</h1><p><span class="code">GR</span>Grandeur of the Seas &middot; day 2 of your contract</p></div>
+</div></div>
+
+<div class="cards">
+ <div class="card">
+  <div class="row"><span class="lab g">Next payday</span><span class="pill"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16V20H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4"/></svg>in 16 days</span></div>
+  <div class="big">Wed 4 Nov</div>
+  <div class="muted" style="margin-top:6px">Pay for October, straight to your bank or Brightwell card.</div>
+  <a class="go" href="#payday">Every 2026 payday <svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+ </div>
+ <div class="card">
+  <span class="lab">Your contract</span>
+  <div class="mid">Grandeur of the Seas</div>
+  <div class="muted" style="margin-top:4px">Day 2 of 212 &middot; 210 days to go</div>
+  <div style="margin-top:auto;padding-top:14px"><div class="track" style="margin-top:0"><i style="width:2%"></i></div>
+  <div class="ends"><span>On <b>18 Oct 2026</b></span><span>Off <b>~18 May 2027</b></span></div>
+  <div class="muted" style="padding-top:6px;font-size:12.5px">Sign-off projected. TDG confirms it later.</div></div>
+ </div>
+ <div class="card">
+  <span class="lab">Your bonus</span>
+  <div class="mid">Contract 3 in a row</div>
+  <div class="muted" style="margin-top:4px">Worth up to <b style="color:var(--navy)">$500</b>. The next one, up to $750.</div>
+  <div class="spark"><i class="d" style="height:12%"></i><i class="d" style="height:23%"></i><i class="n" style="height:34%"></i><i class="" style="height:45%"></i><i class="" style="height:56%"></i><i class="" style="height:67%"></i><i class="" style="height:78%"></i><i class="" style="height:89%"></i><i class="" style="height:100%"></i></div>
+  <a class="go" href="#bonus">How the bonus works <svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+ </div>
+</div>
+
+<ul class="quick">
+ <li><a href="https://support.onboardprint.com"><span class="qi"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.6 17.4a1.9 1.9 0 0 0 2.7 2.7l5.7-5.7a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.3-.3-2.4z"/></svg></span><span><span class="qt">Machine problem</span><span class="qs" style="display:block">Open a ticket</span></span><svg class="ic ar" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></li>
+ <li><a href="#ordering"><span class="qi"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M21 7.5 12 3 3 7.5l9 4.5 9-4.5zM3 7.5v9l9 4.5 9-4.5v-9M12 12v9"/></svg></span><span><span class="qt">Placing an order</span><span class="qs" style="display:block">Steps for your ship</span></span><svg class="ic ar" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></li>
+ <li><a href="https://house.cims.work/book"><span class="qi"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6M7 12.2a1.7 1.7 0 1 0 0-.01"/></svg></span><span><span class="qt">Staff House</span><span class="qs" style="display:block">A free bed in Manila</span></span><svg class="ic ar" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></li>
+ <li><a href="expense_report_v3.xlsx" download><span class="qi g"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span><span><span class="qt">Expense report</span><span class="qs" style="display:block">Download the form</span></span><svg class="ic ar" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></li>
+</ul>
+
+<div class="layout">
+ <nav class="rail"><a href="#payday"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16V20H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4"/></svg>Payday</a><a href="#pay"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4zM4 7l11-3.5V7M16.5 13.5h.01"/></svg>Pay &amp; benefits</a><a href="#bonus"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 16.5V21M7 4h10v5a5 5 0 0 1-10 0zM17 5.5h3V8a3 3 0 0 1-3 3M7 5.5H4V8a3 3 0 0 0 3 3"/></svg>Bonus</a><a href="#house"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6M7 12.2a1.7 1.7 0 1 0 0-.01"/></svg>Staff House</a><a href="#help"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8M12 17h.01"/></svg>Get help</a><a href="#ordering"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M21 7.5 12 3 3 7.5l9 4.5 9-4.5zM3 7.5v9l9 4.5 9-4.5v-9M12 12v9"/></svg>Ordering</a><a href="#uniform"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 3.5 4 6l1.8 4L8 9.2V20h8V9.2l2.2.8L20 6l-4.5-2.5a3.5 3.5 0 0 1-7 0z"/></svg>Uniform</a><a href="#safety"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7.5 3v6c0 4.6-3.2 7.9-7.5 9-4.3-1.1-7.5-4.4-7.5-9V6z"/></svg>Safety</a><a href="#values"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7a4.3 4.3 0 0 1 7.5 2.8C19.5 15.4 12 20 12 20z"/></svg>Our values</a></nav>
+ <main>
+  <div class="chips"><a href="#payday">Payday</a><a href="#pay">Pay &amp; benefits</a><a href="#bonus">Bonus</a><a href="#house">Staff House</a><a href="#help">Get help</a><a href="#ordering">Ordering</a><a href="#uniform">Uniform</a><a href="#safety">Safety</a><a href="#values">Our values</a></div>
+
+  <section id="payday"><header class="sh"><div class="eb">Payroll calendar 2026</div><h2>When you get paid</h2><p class="lead">Each month's pay lands on the date below.</p></header>
+   <ol class="pay"><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Jan pay</span><b class="pd">4 Feb</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Feb pay</span><b class="pd">4 Mar</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Mar pay</span><b class="pd">1 Apr</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Apr pay</span><b class="pd">29 Apr</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">May pay</span><b class="pd">3 Jun</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Jun pay</span><b class="pd">1 Jul</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Jul pay</span><b class="pd">3 Aug</b><span class="pw">Mon</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Aug pay</span><b class="pd">2 Sep</b><span class="pw">Wed</span></li><li class="pt past"><span class="tick"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg></span>
+   <span class="pm">Sep pay</span><b class="pd">30 Sep</b><span class="pw">Wed</span></li><li class="pt next"><span class="tag">Next</span>
+   <span class="pm">Oct pay</span><b class="pd">4 Nov</b><span class="pw">Wed &middot; in 16 d</span></li><li class="pt ">
+   <span class="pm">Nov pay</span><b class="pd">2 Dec</b><span class="pw">Wed</span></li><li class="pt ">
+   <span class="pm">Dec pay</span><b class="pd">30 Dec</b><span class="pw">Wed</span></li></ol>
+   <div class="note"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8M12 17h.01"/></svg><span>Filipino nationals: the amount can vary with mandatory social cost and allotment. Pay starts the month after you join the ship.</span></div>
+   <div class="note"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h16V20H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4"/></svg><span>The 2027 dates appear here as soon as payroll publishes them.</span></div>
+  </section>
+
+  <section id="pay"><header class="sh"><div class="eb">Compensation package</div><h2>Your pay and benefits</h2><p class="lead">Every guest sees your work. This is what DG3 gives you in return.</p></header>
+   <div class="grp">Paid to you</div>
+   <ul class="bens">
+    <li class="bn"><div class="bh"><span class="bt">Your salary</span><b class="bv">Monthly</b></div><div class="bl">Paid in the first week after each month, starting the month after you join.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Break &amp; Fix fee</span><b class="bv">$50 / month</b></div><div class="bl">For the MFD program. Added to your shipboard pay at the end of every month, prorated.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Referral</span><b class="bv">$350</b></div><div class="bl">Refer a new hire. Paid when they finish their full 7-month contract.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Gift shop</span><b class="bv">20% off</b></div><div class="bl">Celebrity Cruises policy, on any purchase of $5 or more.</div></li>
+   </ul>
+   <div class="grp">Covered for you</div>
+   <ul class="bens">
+    <li class="bn"><div class="bh"><span class="bt">Flights and hotels</span><b class="bv">Paid by DG3</b></div><div class="bl">DG3 books and pays your trip to the ship and back home, and a hotel when needed.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Travel expenses</span><b class="bv">$30 / day</b></div><div class="bl">Meals while you travel to or from the ship. Send them on the expense report.</div><details><summary>What it covers</summary><ul><li>Taxi, bus or train with a receipt, when not pre-arranged</li><li>Meals: <b>US$30 a day</b></li><li>Visas such as Schengen and C1D</li><li><a href="expense_report_v3.xlsx" download><b>Download the expense report</b></a></li></ul></details></li>
+    <li class="bn"><div class="bh"><span class="bt">Medical exam (PEME)</span><b class="bv">Up to $250</b></div><div class="bl">DG3 pays your pre-employment medical up to US$250.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Ship's medical center</span><b class="bv">Free</b></div><div class="bl">See the ship's doctor for any health concern, at no cost.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Health insurance</span><b class="bv">PHP 100,000</b></div><div class="bl">Philippine crew and two dependents, per illness or injury.</div></li>
+    <li class="bn"><div class="bh"><span class="bt">Travel insurance</span><b class="bv">$100,000</b></div><div class="bl">Life cover for injury, disability or death.</div><details><summary>What it covers</summary><ul><li>Permanent and total disability: <b>$100,000</b></li><li>Education: <b>$7,000</b> per child, per year</li><li>Burial and cremation: <b>$3,000</b></li></ul></details></li>
+    <li class="bn"><div class="bh"><span class="bt">Training</span><b class="bv">Included</b></div><div class="bl">Konica certification and InDesign certification.</div></li>
+   </ul>
+  </section>
+
+  <section id="bonus"><header class="sh"><div class="eb">Multi Contract Bonus</div><h2>Every contract in a row is worth more</h2><p class="lead">Up to $2,000 a contract. Nine in a row add up to $9,000.</p></header>
+   <ol class="ladder"><li class="lb done" style="--p:6%"><span class="lv">$0</span><span class="bar"></span><span class="ln">1</span></li><li class="lb done" style="--p:28%"><span class="lv">$250</span><span class="bar"></span><span class="ln">2</span></li><li class="lb now" style="--p:39%"><span class="lv"><span class="you">You</span>$500</span><span class="bar"></span><span class="ln">3</span></li><li class="lb " style="--p:49%"><span class="lv">$750</span><span class="bar"></span><span class="ln">4</span></li><li class="lb " style="--p:59%"><span class="lv">$1,000</span><span class="bar"></span><span class="ln">5</span></li><li class="lb " style="--p:69%"><span class="lv">$1,250</span><span class="bar"></span><span class="ln">6</span></li><li class="lb " style="--p:80%"><span class="lv">$1,500</span><span class="bar"></span><span class="ln">7</span></li><li class="lb " style="--p:90%"><span class="lv">$1,750</span><span class="bar"></span><span class="ln">8</span></li><li class="lb " style="--p:100%"><span class="lv">$2,000</span><span class="bar"></span><span class="ln">9</span></li></ol>
+   <div class="axis"><span>Contracts in a row</span><span>Bonus per contract, up to</span></div>
+   <div class="rules">
+    <div class="rl g"><b>Score 80 or more</b>You are paid the step, times your score. A score of 90 on a $500 step pays $450.</div>
+    <div class="rl a"><b>Evaluation below 3</b>No bonus for this contract. Your count stays where it is.</div>
+    <div class="rl r"><b>Back to contract 1</b>Not finishing the contract, a rush order from a missed order, or a failed inventory audit.</div>
+   </div>
+   <div class="small">A compassionate sign-off does not reset you. Full rules: the Contract Completion Bonus SOP on <a href="https://support.onboardprint.com/hc/en-us">Zendesk</a> and your seafarer agreement.</div>
+  </section>
+
+  <section id="house"><header class="sh"><div class="eb">Staff House Manila</div><h2>A free bed next to the airport</h2><p class="lead">A furnished studio across from Manila airport, for the long trips and the early flights. Those nights are on us.</p></header>
+   <div class="house">
+    <ul class="facts">
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-6.1-6.5-11a6.5 6.5 0 0 1 13 0c0 4.9-6.5 11-6.5 11zM12 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4z"/></svg><span>7 minutes to the airport by taxi or Grab</span></li>
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19V6M3 15h18v4M21 15v-3a3 3 0 0 0-3-3h-7v6M7 12.2a1.7 1.7 0 1 0 0-.01"/></svg><span>Bunk beds for four, plus a sofa bed</span></li>
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Bathroom and kitchenette</span></li>
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Fresh towels and linens</span></li>
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Cleaned and restocked every Friday</span></li>
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Pool in the building</span></li>
+     <li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>No fixed check-in or check-out</span></li>
+    </ul>
+    <div class="book"><span class="lab">Book every stay</span><div class="big">4 beds a night</div>
+     <div style="margin-top:6px;font-size:14px">First booked, first served. No booking, no bed. A problem? Contact Joy.</div>
+     <a class="btn" href="https://house.cims.work/book">Book at house.cims.work <svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a></div>
+   </div>
+   <ol class="hr">
+    <li><span class="num">1</span><span>Take your trash out and leave the unit tidy.</span></li>
+    <li><span class="num">2</span><span>Strip your bed and leave it ready for the next crewmate.</span></li>
+    <li><span class="num">3</span><span>Keep the noise low. Someone is always resting for a flight.</span></li>
+   </ol>
+  </section>
+
+  <section id="help"><header class="sh"><div class="eb">Ship technical support</div><h2>Get help fast</h2><p class="lead">Pick the right channel the first time.</p></header>
+   <div class="helpg">
+    <div class="hc main"><h3>Machine problem</h3><div class="muted">Error codes, jams, power, colour, network.</div>
+     <ul><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Cruise line and machine type</li><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg>The machine's serial number</li><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg>The problem, and can you repeat it?</li><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg>Photos of the bad print</li></ul>
+     <a class="btn" href="https://support.onboardprint.com">Open a ticket <svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+     <div class="small" style="margin-top:10px">Ohji, Joemar and Rolando answer every ticket. Sent one? Don't email as well.</div></div>
+    <div class="hstack"><div class="hc"><h3>Anything else</h3><div class="muted">Not a machine fault.</div><a class="btn s" href="mailto:Shipsupport@DG3.com"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6h17v12h-17zM3.5 7l8.5 6 8.5-6"/></svg>Shipsupport@DG3.com</a></div>
+    <div class="hc"><h3>Orders and deliveries</h3><div class="muted">Logistics and inventory questions.</div><a class="btn s" href="mailto:Ray.Guerra@dg3.com"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6h17v12h-17zM3.5 7l8.5 6 8.5-6"/></svg>Ask Ray Guerra</a></div></div>
+   </div>
+   <div class="teamh"><div class="grp" style="margin:0">Your team</div><a class="pilln" href="mailto:onboardsupport@dg3.com"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6h17v12h-17zM3.5 7l8.5 6 8.5-6"/></svg>onboardsupport@dg3.com reaches everyone</a></div>
+   <ul class="team"><li><a class="tm" href="mailto:Rolando.Abellan@dg3.com"><span class="av">RA</span><span><b>Rolando Abellan</b><span>Head of Tech Support</span></span><span class="em">Email</span></a></li><li><a class="tm" href="mailto:Ohji.Miranda@dg3.com"><span class="av">OM</span><span><b>Ohji Miranda</b><span>Technical Operations</span></span><span class="em">Email</span></a></li><li><a class="tm" href="mailto:Ray.Guerra@dg3.com"><span class="av">RG</span><span><b>Ray Guerra</b><span>Inventory &amp; supplies</span></span><span class="em">Email</span></a></li><li><a class="tm" href="mailto:Jonathan.Alonzo@dg3.com"><span class="av">JA</span><span><b>Jonathan Alonzo</b><span>Inventory Operations</span></span><span class="em">Email</span></a></li><li><a class="tm" href="mailto:Joemar.Deleon@dg3.com"><span class="av">JD</span><span><b>Joemar De Leon</b><span>Training</span></span><span class="em">Email</span></a></li><li><a class="tm" href="mailto:Dexter.Lawrence@dg3.com"><span class="av">DL</span><span><b>Dexter Lawrence</b><span>Traveling Manager</span></span><span class="em">Email</span></a></li><li><a class="tm" href="mailto:Rita.Berenyi@dg3.com"><span class="av">RB</span><span><b>Rita Berenyi</b><span>HR &amp; scheduling</span></span><span class="em">Email</span></a></li></ul>
+  </section>
+
+  <section id="ordering"><header class="sh"><div class="eb">Inventory and supply chain</div><h2>Placing your orders</h2><p class="lead">Check the inventory team's ordering schedule first, so your order catches a container with time for review, approval and delivery.</p></header>
+   <input class="tr" type="radio" name="t" id="t1" checked><input class="tr" type="radio" name="t" id="t2">
+   <div class="tabs"><label for="t1">Royal &amp; Celebrity</label><label for="t2">Azamara</label></div>
+   <ol class="steps tp p1"><li><span class="sn">1</span><span>Get the order schedule from inventory management onboard, every week.</span></li><li><span class="sn">2</span><span>Review last month's consumption and today's counts onboard.</span></li><li><span class="sn">3</span><span>Build your statistics file with everything you gathered.</span></li><li><span class="sn">4</span><span>Create the order on OBP by the schedule's due date. US ships keep the next 3 months on OBP, international ships the next 6.</span></li><li><span class="sn">5</span><span>One order a month is best. A spare container? Split the order to balance stock.</span></li><li><span class="sn">6</span><span>Tell shoreside management about any request, change or approval.</span></li><li><span class="sn">7</span><span>DG3 shoreside approves. Then the order is created in CrunchTime, approved by the GSM / DCM and the IM (MOT).</span></li><li><span class="sn">8</span><span>DG3 receives the PO two weeks before delivery to Weston; the order goes into a container and comes onboard.</span></li><li><span class="sn">9</span><span>Inspect and accept the whole delivery on OBP within 24 hours. Report any shortage with backup data, per the SOP.</span></li></ol>
+   <ol class="steps tp p2"><li><span class="sn">1</span><span>DG3 sends the ordering schedule every two weeks or monthly. Review it.</span></li><li><span class="sn">2</span><span>DG3 orders toner and paper for the Konica C4070.</span></li><li><span class="sn">3</span><span>You create the orders for Konica C4070 parts. MFD toners and parts are sent as the ship needs them.</span></li><li><span class="sn">4</span><span>Tell shoreside management about any request, change or approval.</span></li><li><span class="sn">5</span><span>DG3 approves your order, gets the PO and processes it. It goes to the Blue Water Shipping warehouse, then onboard.</span></li><li><span class="sn">6</span><span>Inspect and accept the whole delivery on OBP within 24 hours. Report any shortage with backup data, per the SOP.</span></li></ol>
+   <div class="daily"><h3>Every day, every ship</h3><ul><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Update OBP every day with any change in toner, paper and parts.</span></li><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Keep your printer logs up to date. They are your backup data.</span></li><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Check your usage once a week, so you never need an emergency order.</span></li><li><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7"/></svg><span>Can't avoid an emergency order? Raise it early, with the documents.</span></li></ul></div>
+  </section>
+
+  <section id="uniform"><header class="sh"><div class="eb">Uniform</div><h2>One full set, on day one</h2><p class="lead">Collect it from the storekeeper after safety training, with your uniform sheet. Anything more is yours to buy.</p></header>
+   <div class="uni">
+    <div class="uc"><h3>Every 2 years</h3><ul><li><span>Jacket</span><b>&times; 1</b></li><li><span>Sweater</span><b>&times; 1</b></li><li><span>Belt</span><b>&times; 1</b></li><li><span>Tie</span><b>&times; 1</b></li><li><span>Stripes (epaulettes)</span><b>&times; 2</b></li></ul></div>
+    <div class="uc"><h3>Every year</h3><ul><li><span>Day shirt</span><b>&times; 2</b></li><li><span>Night shirt</span><b>&times; 2</b></li><li><span>Pants or skirt</span><b>&times; 2</b></li><li><span>Safety shoes</span><b>&times; 1</b></li><li><span>Coveralls</span><b>&times; 1</b></li></ul></div>
+   </div>
+   <div class="small">Full rules: the Printer Specialist Uniform SOP on <a href="https://support.onboardprint.com/hc/en-us">Zendesk</a>.</div>
+  </section>
+
+  <section id="safety"><header class="sh"><div class="eb">Ergonomics</div><h2>Lift and work without getting hurt</h2><p class="lead">Shoulders, back and knees take the strain onboard. The goal: nobody gets hurt.</p></header>
+   <div class="warnb"><svg class="ic " viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 2.5 20h19zM12 10v4.5M12 17.5h.01"/></svg><span><b style="color:var(--navy)">Report it early.</b> Pain, swelling, stiffness, numbness, weak muscles or tiredness that does not go away.</span></div>
+   <div class="grp" style="margin-top:22px">Four rules for every lift</div>
+   <ol class="lift">
+    <li class="lf"><span class="n">1</span><p>Keep the load close to your body.</p></li>
+    <li class="lf"><span class="n">2</span><p>Keep it in front of you, in line with your spine.</p></li>
+    <li class="lf"><span class="n">3</span><p>Don't twist. Turn your feet instead.</p></li>
+    <li class="lf"><span class="n">4</span><p>Feet apart, back straight, head up. Let your legs lift.</p></li>
+   </ol>
+   <div class="grp" style="margin-top:22px">The hit list: spot it, report it</div>
+   <ul class="hit"><li>Elbows out</li><li>Shoulder too high</li><li>Butts up</li><li>Twist and shout</li><li>High force</li><li>Contact</li></ul>
+   <div class="small"><b style="color:var(--navy)">Butts up is the most common.</b> If you see more backs than faces, the work is too low. Keep work above your knees, about 61 cm (24 in).</div>
+  </section>
+
+  <section id="values"><header class="sh"><div class="eb">CIMS mission and values</div><h2>What we stand for</h2></header>
+   <ul class="vals"><li class="vl"><b>One Team</b><span>Different views, one crew. That is where good ideas come from.</span></li><li class="vl"><b>People Commitment</b><span>You have a voice, and you own your growth and your career.</span></li><li class="vl"><b>Operational Excellence</b><span>Do the work well, measure it, make it better, every day.</span></li><li class="vl"><b>Passion for Results</b><span>Meet what we promised, on money, on operations and on people, the right way.</span></li><li class="vl"><b>Integrity</b><span>Honest and consistent, so every guest and client can trust us.</span></li><li class="vl"><b>Customer Focus</b><span>Know what the people we serve need, and give it to them on time.</span></li></ul>
+  </section>
+ </main>
+</div>
+<footer><span>CIMS &middot; Cruise Industry Managed Services &middot; a division of DG3</span><span>Updated 19 Oct 2026. If this page and your seafarer agreement differ, your agreement applies.</span></footer>
+</body></html>
