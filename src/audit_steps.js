@@ -263,7 +263,11 @@ export const partName = (n) => String(n || "").replace(/\s*\((?:[A-Za-z.]+\s*)?%
 const RULE_CONSTS = { VISIT_VERSION, STEPS, PHOTO_STEPS, WORKSTATION, MACHINE_CHECKS, TOOLS, TRAINING, PPE, RATING_TEXT, FOLLOW_OWNERS, TEXT_MIN, TEXT_MAX, FOLLOW_DAYS, GRADE_NOTE_MIN, AUDIT_RATINGS };
 const RULE_VARS = { rating, txt, isoDay, plusDays, ordinal, partName, sentence };
 const RULE_FNS = [startVisit, visitProblems, evalOf, gradeProblems, auditScore];
-export const AUDIT_RULES_JS = "window.AR = (function () {\n\"use strict\";\n" +
+// The Worker is bundled by wrangler's esbuild with keepNames, which rewrites a named arrow function inside these bodies as
+// __name(fn, "name") — a helper the page does not have. A no-op __name keeps the serialized rules runnable (19 Oct 2026:
+// the stepper threw "__name is not defined" on audit.cims.work while every Node test passed). Pinned by bundling the
+// module with esbuild in test/audit_visit.test.js.
+export const AUDIT_RULES_JS = "window.AR = (function () {\n\"use strict\";\nvar __name = function (f) { return f; };\n" +
   Object.entries(RULE_CONSTS).map(([k, v]) => "var " + k + " = " + JSON.stringify(v) + ";").join("\n") + "\n" +
   Object.entries(RULE_VARS).map(([k, f]) => "var " + k + " = " + f.toString() + ";").join("\n") + "\n" +
   RULE_FNS.map((f) => f.toString()).join("\n") + "\n" +
