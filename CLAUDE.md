@@ -993,8 +993,8 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   AND the personal address (Rita's override first), never the same address twice; CC + reply-to Rita (`WELCOME_CC`); no
   ship mailbox = the personal address alone, neither = `no_recipient`, never sent. **Once per contract** (`welcome_send`,
   keyed sc + the sign-on), a resend is a deliberate second click. The profile's **Send welcome email** runs a dry run that
-  names the recipients, then one confirm. The **daily run** (`_welcome.run` in `scheduled`, the auto-send's 08:00 Budapest
-  gate) welcomes contracts that signed on today, catching up `WELCOME_CATCHUP_DAYS` = 2 for a missed run; never a training
+  names the recipients, then one confirm. The **daily run** (`_welcome.run` in `scheduled`, **07:00 Miami time** — `WELCOME_TZ` America/New_York,
+  `WELCOME_HOUR`; Miguel, 19 Oct 2026: "the same day that the crew sign on .. 7am miami time") welcomes contracts that signed on today, catching up `WELCOME_CATCHUP_DAYS` = 2 for a missed run; never a training
   visit; a mail that did not go is not recorded, so the next morning retries; failures land in the activity log
   (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome"** (`/api/hub/welcome/auto`, `welcome_auto_enabled`
   + `welcome_auto_since`): OFF until switched on, and switching on never emails a contract that started before that day. The
