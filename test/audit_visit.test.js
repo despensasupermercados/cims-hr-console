@@ -186,17 +186,33 @@ test("the page gates with the SAME functions the server re-checks (serialized, n
   assert.doesNotMatch(page, /function visitProblems|function evalOf/, "no second copy in the page");
 });
 
-test("the rules still run in the page after wrangler's bundle (esbuild keepNames adds __name calls)", async () => {
-  // 19 Oct 2026: live on audit.cims.work the stepper threw "__name is not defined" — wrangler bundles with keepNames, and
-  // Function.prototype.toString of a bundled function carries the helper call. Node never adds it, so only a bundle shows it.
+test("the rules run in the page out of the REAL Worker bundle (wrangler renames colliding names, keepNames adds __name)", async () => {
+  // 19 Oct 2026, twice live on audit.cims.work: "__name is not defined" (keepNames), then "txt2 is not defined" (the real
+  // bundle renames a top-level `txt` that collides with another module's). Node never does either, and a bundle of
+  // audit_steps.js alone has nothing to collide with — only the whole Worker shows it. So: bundle src/worker.js the way
+  // wrangler does, take AUDIT_RULES_JS out of THAT bundle, run it like the page and compare with the module.
+  // The entry must be src/worker.js itself, as wrangler's: the module order decides which colliding name gets the
+  // suffix (a wrapper entry moved the rename onto another module and the old code passed). The rules are taken out of the
+  // bundle through a footer export of whatever name the bundle gave them.
   const { build } = await import("esbuild");
-  const r = await build({ entryPoints: [new URL("../src/audit_steps.js", import.meta.url).pathname], bundle: true, format: "esm", keepNames: true, write: false, platform: "neutral" });
-  const m = await import("data:text/javascript;base64," + Buffer.from(r.outputFiles[0].text).toString("base64"));
-  assert.match(m.AUDIT_RULES_JS, /__name\(/, "the bundle does carry the helper call this guards against");
-  const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(m.AUDIT_RULES_JS, ctx);
-  const d = ctx.window.AR.startVisit(CTX);
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.AR.visitProblems(d, CTX, "2026-10-19"))), visitProblems(startVisit(CTX), CTX, "2026-10-19"));
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.window.AR.evalOf(d))), JSON.parse(JSON.stringify(evalOf(startVisit(CTX)))));
+  const r = await build({ entryPoints: [new URL("../src/worker.js", import.meta.url).pathname], bundle: true, format: "esm", keepNames: true, write: false,
+    platform: "neutral", external: ["cloudflare:*", "node:*"], conditions: ["workerd", "worker", "browser"], mainFields: ["module", "main"], logLevel: "error" });
+  let text = r.outputFiles[0].text;
+  assert.match(text, /\btxt2\b/, "the real bundle does rename a colliding top-level `txt`");
+  const name = (text.match(/\bvar (AUDIT_RULES_JS\d*) = /) || [])[1];
+  assert.ok(name, "the rules are in the bundle");
+  text += "\nexport { " + name + " as __AR };\n";
+  const m = await import("data:text/javascript;base64," + Buffer.from(text).toString("base64"));
+  assert.match(m.__AR, /__name\(/, "and the serialized rules do carry keepNames' helper");
+  const ctx = { window: {} }; vm.createContext(ctx); vm.runInContext(m.__AR, ctx);
+  const AR = ctx.window.AR;
+  const d = startVisit(CTX), p = AR.startVisit(CTX);
+  for (const mut of [() => {}, (x) => { x.rt = { inventory: 3, technical: 4, collaterals: 5, why: { inventory: "short" } }; x.ov.followup = { owner: "", due: "x", text: "" }; }, (x) => { x.hw.machines.S1.checks.test = "finding"; x.ov.overall = 2; }]) {
+    mut(d); mut(p);
+    assert.deepEqual(JSON.parse(JSON.stringify(AR.visitProblems(p, CTX, "2026-10-19"))), visitProblems(d, CTX, "2026-10-19"));
+    assert.deepEqual(JSON.parse(JSON.stringify(AR.evalOf(p))), JSON.parse(JSON.stringify(evalOf(d))));
+  }
+  assert.deepEqual([AR.ordinal(2), AR.plusDays("2026-10-19", 30), AR.partName("Drum Unit/K (%)")], ["2nd", "2026-11-18", "Drum Unit/K"]);
 });
 
 /* ------------------------------------------------ the routes ------------------------------------------------ */

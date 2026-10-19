@@ -7,6 +7,9 @@
 // NOTHING HERE IS MONEY (CLAUDE.md §1). The audit never imports bonus.js, never writes bonus_outcome, never feeds a
 // contributor window or the supervisor evaluation. Pinned by test/audit_guards.test.js.
 
+import { parseCount, AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems } from "./audit_steps.js";
+export { parseCount, AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems };
+
 export const AUDIT_HOST = "audit.cims.work";
 export const REQUEST_HOURS = 24;   // Miguel, 14 Oct 2026: "about 24 hours"
 export const REMIND_HOURS = 12;    // the first nudge, half-way
@@ -77,13 +80,7 @@ export function blindLines(obpLines) {
   return out;
 }
 
-// A count is a whole number, 0 included ("0 is a count"). Blank is not a count.
-export function parseCount(v) {
-  if (v === null || v === undefined) return null;
-  const s = String(v).trim();
-  if (s === "" || !/^\d{1,5}$/.test(s)) return null;
-  return Number(s);
-}
+// A count is a whole number, 0 included ("0 is a count"). Blank is not a count. (audit_steps.js makeRules, re-exported.)
 
 export function countCompleteness(lines, counted) {
   const got = counted || {};
@@ -168,37 +165,5 @@ export function gateState({ request, machines, uploads, down, lines, counted, re
 }
 
 /* --------------------------------- the audit grade --------------------------------- */
-// Miguel, 15 Oct 2026: Dexter grades the audit 1–5; the Overall rating is the audit's score, and when Overall is left
-// blank the score is the average of the other ratings, ROUNDED DOWN ("Round down"). HR dispatch is not here: it rates
-// TDG's travel, not the seafarer (docs/AUDIT_DESIGN.md). What a score is worth on the bonus is NOT decided here — that
-// is bonus.js, a money change (§1); this module only says what Dexter graded.
-export const AUDIT_RATINGS = [
-  { key: "inventory", label: "Inventory", hint: "OBP matches the shelf, par kept, parts life tracked" },
-  { key: "technical", label: "Technical", hint: "Machines, error codes, maintenance, test prints" },
-  { key: "collaterals", label: "Customer collaterals", hint: "Quality of what the ship prints for guests" },
-  { key: "overall", label: "Overall", hint: "Leave blank to use the average of the three above", optional: true },
-];
-export const GRADE_NOTE_MIN = 10; // a 3 or below needs a sentence (the design's rule)
-// A rating is a whole 1–5, sent as a number or a one-digit string; true, " 5 ", "0x5", [5] and 4.5 are not ratings.
-export const rating = (v) => {
-  if (typeof v === "number") return Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
-  if (typeof v === "string" && /^[1-5]$/.test(v)) return Number(v);
-  return null;
-};
-export function auditScore(r) {
-  const x = r || {};
-  const o = rating(x.overall);
-  if (o != null) return { score: o, from: "overall" };
-  const parts = ["inventory", "technical", "collaterals"].map((k) => rating(x[k])).filter((v) => v != null);
-  if (!parts.length) return { score: null, from: null };
-  return { score: Math.floor(parts.reduce((a, b) => a + b, 0) / parts.length), from: "average" };
-}
-export function gradeProblems(r) {
-  const x = r || {}, out = [];
-  for (const k of ["inventory", "technical", "collaterals"]) if (rating(x[k]) == null) out.push(k);
-  if (x.overall != null && x.overall !== "" && rating(x.overall) == null) out.push("overall");
-  const low = AUDIT_RATINGS.some((a) => { const v = rating(x[a.key]); return v != null && v <= 3; });
-  if (x.note != null && typeof x.note !== "string") out.push("note");
-  else if (low && String(x.note || "").trim().length < GRADE_NOTE_MIN) out.push("note");
-  return out;
-}
+// The grade rules (AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems) live in audit_steps.js makeRules
+// since 19 Oct 2026, unchanged, so the audit page and the server run ONE definition; re-exported here for every importer.
