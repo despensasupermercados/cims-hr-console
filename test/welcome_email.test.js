@@ -53,6 +53,9 @@ test("template: the letterhead, the pass, the hub card, no placeholder link, no 
   assert.ok(m.html.includes("Here is Rita&rsquo;s calendar: book a time with her whenever you need."));
   assert.ok(m.html.includes('href="' + RITA_BOOK_URL + '"') && m.html.includes("Book a time with Rita"));
   assert.ok(m.text.includes("Book a time on her calendar whenever you need: " + RITA_BOOK_URL));
+  // The Expense Report button (option A): solid navy, "Download the form", no arrow.
+  assert.match(m.html, /bgcolor="#1B3A5C"[^>]*><a href="https:\/\/cims\.work\/hub\/expense\.xlsx"[^>]*>Download the form<\/a>/);
+  assert.doesNotMatch(m.html, /Download &darr;/);
   assert.match(RITA_BOOK_URL, /^https:\/\/bookings\.cloud\.microsoft\/book\/DG3RitaBerenyi@dg3\.com\//);
   const withLinks = welcomeEmail({ ...c, links: { ...LINKS, training: "https://t.example", onboarding: "https://o.example", review: "https://r.example", sops: "https://s.example", book: "https://b.example" } }).html;
   for (const s of ["Open the training", "Pick a time", "Standard Operating Procedures", "Book time with me"]) assert.ok(withLinks.includes(s), s);

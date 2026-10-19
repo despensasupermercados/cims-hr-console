@@ -23,6 +23,8 @@ const lnk = (href, t) => `<a href="${href}" style="color:${C.navy};font-weight:7
 const btnG = (href, t) => `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${C.green}" style="background:${C.green};border-radius:10px;"><a href="${href}" target="_blank" style="display:block;font-family:${FB};font-size:16px;font-weight:700;line-height:20px;color:#FFFFFF;text-decoration:none;padding:15px 12px;border-radius:10px;">${t}</a></td></tr></table>`;
 // a small navy outline button, Outlook-safe (a bordered cell)
 // a soft navy pill (a solid tint, never rgba) with an arrow: quieter than the one green button, still a button
+// The solid navy button (Miguel, 19 Oct 2026, option A for the Expense Report: words only, no icon, no arrow).
+const btnN = (href, t) => `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="${C.navy}" style="background:${C.navy};border-radius:10px;"><a href="${href}" target="_blank" style="display:inline-block;font-family:${FB};font-size:14px;font-weight:700;line-height:18px;color:#FFFFFF;text-decoration:none;padding:12px 22px;border-radius:10px;">${t}</a></td></tr></table>`;
 const btnS = (href, t, arrow = "&rarr;") => `<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" bgcolor="#E8EEF5" style="background:#E8EEF5;border-radius:999px;"><a href="${href}" target="_blank" style="display:inline-block;font-family:${FB};font-size:13px;font-weight:700;line-height:18px;color:${C.navy};text-decoration:none;padding:9px 16px;border-radius:999px;">${t} ${arrow}</a></td></tr></table>`;
 const secTitle = (t, when) => `<tr><td class="px" style="padding:30px 32px 6px 32px;">
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -55,7 +57,7 @@ const hubTile = (k, v) => `<td class="ht" width="48%" valign="top" bgcolor="#214
 const docBtn = (kind, title, why, btn) => `<tr><td style="padding:8px 0;border-bottom:1px solid ${C.border};">
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
   <td width="56" valign="top"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" valign="middle" width="38" height="30" bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:7px;font-family:${FB};font-size:9px;font-weight:700;letter-spacing:0.5px;color:${C.gink};">XLS</td></tr></table></td>
-  <td valign="top" style="font-family:${FB};font-size:14px;line-height:20px;color:${C.body};"><b style="color:${C.navy};">${title}</b><br><span style="font-size:13px;color:${C.slate};">${why}</span><div style="padding-top:8px;">${btn}</div></td>
+  <td valign="top" style="font-family:${FB};font-size:14px;line-height:20px;color:${C.body};"><b style="color:${C.navy};">${title}</b><br><span style="font-size:13px;color:${C.slate};">${why}</span><div style="padding-top:12px;">${btn}</div></td>
  </tr></table></td></tr>`;
 
 export const esc = (v) => String(v == null ? "" : v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -166,7 +168,7 @@ export function welcomeEmail(d) {
     <div style="font-family:${FB};font-size:12px;line-height:18px;color:${C.sub};padding-top:9px;text-align:center;">Your own link. No login. Save it on your phone.</div>
    </td></tr></table></td></tr>
   <tr><td class="px" style="padding:12px 32px 0 32px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-   ${L.expense ? docBtn("xls", "Expense Report", "Fill it in, add your receipts, email it to Mary Joy.", btnS(L.expense, "Download", "&darr;")) : ""}
+   ${L.expense ? docBtn("xls", "Expense Report", "Fill it in, add your receipts, email it to Mary Joy.", btnN(L.expense, "Download the form")) : ""}
    ${doc("www", "Your Job Description", "On Zendesk. Read it this week.", L.jd, !L.sops)}
    ${L.sops ? doc("www", "Standard Operating Procedures", "Every SOP, one place.", L.sops, true) : ""}
   </table>
