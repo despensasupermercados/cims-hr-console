@@ -115,6 +115,13 @@ When the state changes:
      (Seafarer Cost Source).
    - Never create a subject without his yes.
 
+6. **Check every citation you carry forward.**
+   - Before copying a record id from an old brief into a new one, check its Status.
+   - An Archived id re-asserts the fact it was archived for. On 20 Oct
+     recQvCOBEB3HGFUK1 made a rewritten brief say branch control was still open; it
+     had been done on 11 Oct (reclnkyXU7axfAAvH).
+   - `brain_ask` lists a subject's archived ids under "archived (superseded)".
+
 ## Never
 
 - Secrets: no keys, tokens, passwords or signed links in any record.
