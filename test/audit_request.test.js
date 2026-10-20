@@ -489,3 +489,19 @@ test("a machine list with no life row is not 'no part past its rated life'", asy
   const over = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
   assert.equal(over.say, "Read. 1 part past rated life, for the team.");
 });
+
+// Miguel, 20 Oct 2026 ("ensure all is wired"): Kevin Jugao's stored management-list read still said "Read. No part past its
+// rated life." on the request page's file list. A machine-list read with no life row says "part life not read" there too.
+test("the request page never repeats an old read's 'No part past its rated life' when the read carried no life row", async () => {
+  const t = setup();
+  const r = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json();
+  const ins = (id, json) => t.db.prepare("INSERT INTO audit_upload (id, request_id, serial, kind, r2_key, filename, content_type, bytes, at, read_state, read_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+    .run(id, r.id, "S1", "mgmt", "k/" + id, "Management_List.pdf", "application/pdf", 10, "2026-10-16T12:23:19Z", "ok", JSON.stringify(json));
+  ins("u_old", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeOver: [], version: 4 } });
+  const m = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
+  assert.equal(m.mgmt.say, "Read, but no parts-life page was found: part life not read.");
+  t.db.prepare("UPDATE audit_upload SET superseded_at='2026-10-16T13:00:00Z' WHERE id='u_old'").run();
+  ins("u_new", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeRows: 45, lifeOver: [], version: 4 } });
+  const m2 = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
+  assert.equal(m2.mgmt.say, "Read. No part past its rated life.", "a read that carried life rows keeps its own words");
+});
