@@ -250,3 +250,14 @@ test("View is ticks: one, several or all (Miguel, 20 Oct 2026: \"allow to select
   assert.equal(p.run("TF.kind"), "crew"); assert.equal(p.run("TF.withTr"), false);
   assert.match(hero(), /On budget/, "crew alone gets its budget back");
 });
+
+test("Cruise line lists all four lines, a line with nothing in the period at $0 (Miguel, 20 Oct 2026: \"u can display all 4 crusielines\")", async () => {
+  const p = await openTravel();
+  p.run("TF.kind='crew';TF.client='';TF.cat='';TF.month='';paintTravel()");
+  const keys = (p.rail().match(/data-tv="client" data-key="(\w*)"/g) || []).map(s => s.match(/data-key="(\w*)"/)[1]);
+  assert.deepEqual(keys, ["", "royal", "celebrity", "azamara", "ncl"], "All + the four lines, in order, whatever the spend");
+  assert.match(p.rail(), /data-tv="client" data-key="azamara"[^>]*>.*?Azamara<\/span><span class=n>\$0</s, "no spend reads $0, never blank");
+  // a month with Royal alone still lists the other three
+  p.run("TF.month='3';paintTravel()");
+  assert.equal((p.rail().match(/data-tv="client" data-key="\w+"/g) || []).length, 4);
+});
