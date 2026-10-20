@@ -69,6 +69,10 @@ move them. If a task seems to need a secret in code, stop and flag it.
 ## 8. Auditability
 Every change is a commit with a clear message; every agent run posts a short digest of
 what it checked, fixed, and flagged. Prefer small, reviewable PRs over large ones.
+**The Brain always knows what is happening** (Miguel, 20 Oct 2026, Brain recSxVe1ezl3ECmDh: "whatever it is that you are
+saving, it should have everything and more"): every session writes its decisions, shipped changes, data changes and
+lessons to the Brain before it ends, written so another app can use them cold, and keeps the subject's brief and open
+items current. How: `.claude/skills/brain-keeper/SKILL.md`.
 
 ## 9. Verify the deploy is LIVE, not just committed
 A green commit is not a deploy. Cloudflare Workers Builds is a separate pipeline from the
