@@ -601,8 +601,14 @@ movable; the commit is a money user's click; committed outcomes are never touche
 - **Dexter's audit (10) replaces "Communication (Rita)":** the audit score (Overall, else the average rounded down) — 5 = 10,
   4 = 8, 3 or below = 0; no audit in the contract (filed up to 30 days after the sign-off) = 10; several = the lowest.
 - **Mono (5):** presses only, under 20% of clicks over the contract = 5, else 0; no click data = 5. The data is OBP's clicks
-  table (ClicksDate, Color, Mono, is_mfd per machine); Jerwin is adding a daily month-to-date clicks file to the nightly
-  export to obp-csv@cims.work (Miguel asked 15 Oct 2026). The reader is not built yet: until then, full points.
+  table (ClicksDate, Color, Mono, is_mfd per machine); Jerwin added a daily clicks file to obp-csv@cims.work (Miguel asked
+  15 Oct 2026; first file 19 Oct: `ShipID,EquipmentID,ClicksDate,Color,Mono,TotalColor,TotalMono,is_mfd`, every machine
+  every day from 1 Jan 2026, Color / Mono = the day's clicks). The weekly-orders app reads it into cims-hon's D1
+  `weekly_obp_clicks` (weekly_orders_email PR #51; ShipID → name from OBP's own tblShips, IT's 9 Jul extract — ShipIDs 1,
+  2, 3 and 50, likely the Azamara hulls, are not on it and carry no name, so Azamara reads "no click data" until they are
+  given). `score_auto.js` reads it in the wave (`monoShare`: press mono over press colour + mono on the card's ships for the
+  contract's days, one SELECT, `HON_DB`); it is the SHIP's share (two printers on a hull share it); clicks on file that
+  begin after the sign-on say so; a failed read is said (`sources.clicksRead`), a table not created yet is no data.
 - **Supervisor evaluation (15):** unchanged (the shipboard manager review, `seval.js`).
 - **The Score Card:** feedback links for Ray and Rolando only; Dexter is a green chip ("Dexter · audit 4/5 · date") opening
   the audit when one exists, nothing when none. The Inputs page lists every audit of the seafarer ("Not applicable · no audit
