@@ -27,7 +27,7 @@ const call = (url, session = S, env = { DB: fakeDb() }) => { const u = new URL(u
 
 test("the shell: audit.cims.work/ and cims.work/audit, behind the login; cims.work/ stays the console", async () => {
   const r = await call("https://audit.cims.work/");
-  assert.equal(r.status, 200); assert.match(await r.text(), /<title>Printshop Audit<\/title>/);
+  assert.equal(r.status, 200); assert.match(await r.text(), /<title>Printshop Ops Audit<\/title>/);
   assert.equal((await call("https://cims.work/audit")).status, 200);
   assert.equal(await call("https://cims.work/"), null);
   assert.equal(await call("https://cims.work/crew"), null);

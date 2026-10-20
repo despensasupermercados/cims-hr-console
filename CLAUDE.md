@@ -1591,6 +1591,16 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   the Atlantic (~100 ms a trip) — reported to Miguel, not changed here. Pinned by `test/audit_page_boot.test.js`.
   Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
   the import of the 61 (I1), the web rail (W1).
+- **THE NAME AND THE MARK: Printshop Ops Audit** (Miguel, 20 Oct 2026: "change also the icon .. make it the right color and
+  fit in the printshop audit .. call it Printshop Ops Audit", with a clipboard-and-check reference; Brain recvkcnJgTjcpcQtJ).
+  `src/audit_brand.js` is the one definition: `AUDIT_NAME` / `AUDIT_SHORT` ("Ops Audit") and `markSvg` (the clipboard in
+  white on the CIMS navy, the check in a green circle). The icon files are RENDERED from it by `scripts/audit_icons_build.mjs`
+  into `src/audit_brand_icons.js` (generated; `SOURCE_SHA` — a changed drawing with files not re-rendered fails
+  `test/audit_brand.test.js`). Served without a sign-in at `/audit/icon-*.png` and `/audit/favicon.ico` on any host; on
+  audit.cims.work `/favicon.ico` and `/apple-touch-icon.png` answer with the mark too; cims.work keeps the CIMS icon. The
+  home-screen icon and the maskable one are full squares (iOS paints a transparent corner black). The shell, the crew's page,
+  the closed-link page, the manifest and the audit sign-in carry the name and the mark; the profile's feed reads "Printshop
+  Ops Audit". **The emails keep "Printshop audit"** until Miguel signs off a render with the new name (CIMS email standard).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

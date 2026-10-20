@@ -73,6 +73,8 @@ import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
 import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
+import { AUDIT_NAME, auditIconFor, markSvg } from "./audit_brand.js";
+import * as AUDIT_ICON_FILES from "./audit_brand_icons.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 import { installHub, HUB_DDL } from "./crew_hub_routes.js";
 import { hubHomePage, HUB_HOST } from "./crew_hub.js";
@@ -253,6 +255,9 @@ export default {
       // the await stays INSIDE this try, so the §11 error-boundary invariant is unchanged.)
       const res = await (async () => {
       // ---- public brand icons (no auth) ----
+      // Printshop Ops Audit (Miguel, 20 Oct 2026): audit.cims.work answers the icon paths with the audit's mark; cims.work
+      // keeps the CIMS icon. src/audit_brand.js holds the drawing and the paths.
+      { const ai = auditIconFor(p, isAuditHost(url.hostname)); if (ai) return assetResponse(AUDIT_ICON_FILES[ai[0]], ai[1]); }
       if (p === "/favicon.ico")          return assetResponse(ICO_B64, "image/x-icon");
       if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png")
                                          return assetResponse(PNG180_B64, "image/png");
@@ -5314,10 +5319,10 @@ const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta
 <link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${STYLE}
-#g{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--deep),var(--navy));padding:24px}
-.box{background:#fff;border-radius:16px;padding:34px 30px;width:360px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
+#g{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;background:linear-gradient(135deg,var(--deep),var(--navy));padding:24px}
+.box{box-sizing:border-box;background:#fff;border-radius:16px;padding:34px 30px;width:360px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
 .box h1{color:var(--navy);font-size:20px;margin:14px 0 4px}.box p{color:var(--mut);font-size:13px;margin-bottom:20px}
-.box input{width:100%;text-align:center}.box button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:var(--green);color:#fff;font-weight:700;font-family:'Outfit';font-size:15px;cursor:pointer}
+.box input{box-sizing:border-box;width:100%;text-align:center}.box button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:var(--green);color:#fff;font-weight:700;font-family:'Outfit';font-size:15px;cursor:pointer}
 .msg{font-size:12.5px;margin-top:12px;min-height:16px;color:var(--mut)}
 </style></head><body><div id=g><div class=box>
 <div class=brandmark style="margin:0 auto">D</div>
@@ -5358,8 +5363,11 @@ document.getElementById('email').addEventListener('keydown',e=>{if(e.key==='Ente
 </script></body></html>`;
 // audit.cims.work's sign-in: the same page and the same allowlist, saying where you are (it read "HR Operational Console",
 // which looked like the wrong site).
-const AUDIT_LOGIN_HTML = LOGIN_HTML.replace("<title>DG3 CIMS · Sign in</title>", "<title>Printshop Audit · Sign in</title>")
-  .replace("<h1>HR Operational Console</h1>", "<h1>Printshop Audit</h1>");
+const AUDIT_LOGIN_HTML = LOGIN_HTML.replace("<title>DG3 CIMS · Sign in</title>", "<title>" + AUDIT_NAME + " · Sign in</title>")
+  .replace('<link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">',
+    '<link rel=icon href="/audit/favicon.ico" sizes=any><link rel=apple-touch-icon href="/audit/icon-180.png">')
+  .replace('<div class=brandmark style="margin:0 auto">D</div>', '<div style="width:56px;margin:0 auto;line-height:0">' + markSvg(56) + "</div>")
+  .replace("<h1>HR Operational Console</h1>", "<h1>" + AUDIT_NAME + "</h1>");
 
 const FB_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>CIMS Crew Feedback</title>
@@ -9557,7 +9565,7 @@ var NT_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontim
 function ntItem(it){
   var when=fmtDateS(String(it.at||'').slice(0,10))+(it.kind==='note'&&it.at&&String(it.at).length>10?' · '+new Date(it.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'');
   var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6'],audit:['#F1ECFA','#5A3FA6']}[it.kind];
-  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop audit'}[it.kind];
+  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop Ops Audit'}[it.kind];
   var body='',acts='';
   if(it.kind==='note'){body='<div class=nttext>'+escHtml(it.text)+'</div>';
     acts=it.archived?('<div class=ntacts><span>Archived '+fmtDateS(String(it.archived).slice(0,10))+(it.archivedBy?' by '+escHtml(ntWho(it.archivedBy)):'')+'</span><a href="#" onclick="ntArchive('+it.id+',true);return false">Restore</a></div>'):('<div class=ntacts><a href="#" onclick="ntArchive('+it.id+',false);return false">Archive</a></div>');}
