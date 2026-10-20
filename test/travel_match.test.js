@@ -2,7 +2,7 @@
 // (production travel_expense, 15 Oct 2026) against the roster as TDG spells it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cleanTravelName, editDistance, buildCrewIndex, matchTravelName, annotateTravel, unmatchedTravel, travelClientOf } from "../src/travel_match.js";
+import { cleanTravelName, editDistance, buildCrewIndex, matchTravelName, annotateTravel, unmatchedTravel, travelClientOf, clientFromBill } from "../src/travel_match.js";
 
 const CREW = [
   ["SC-0038115", "Paqueo", "Bernard Winzon"], ["SC-0038090", "Villafranca", "Dave Maverick"], ["SC-0038193", "Egnisaban", "Mark Christian"],
@@ -133,4 +133,27 @@ test("annotateTravel tags every row: agency_id, how, client; unmatchedTravel lis
   assert.deepEqual(un[0].years, [2025]);
   assert.equal(travelClientOf("Celebrity Apex", ""), "celebrity");
   assert.equal(travelClientOf("", ""), null);
+});
+
+test("clientFromBill: a row with no ship takes the brand TDG billed that person under (Miguel, 20 Oct 2026: \"Use TDG's bill\")", () => {
+  const crew = [{ agency_id: "SC-1", first_name: "Haziel", last_name: "Caag" }, { agency_id: "SC-2", first_name: "Dave", last_name: "Villafranca" }, { agency_id: "SC-3", first_name: "Ana", last_name: "Mixto" }];
+  const bill = [
+    { year: 2026, month: 3, crew_name: "CAAG, HAZIEL", brand: "royal" },
+    { year: 2026, month: 5, crew_name: "VILLAFRANCA, DAVE", brand: "celebrity" },
+    { year: 2026, month: 4, crew_name: "MIXTO, ANA", brand: "royal" }, { year: 2026, month: 4, crew_name: "MIXTO, ANA", brand: "azamara" },
+  ];
+  const rows = annotateTravel([
+    { year: 2026, month: 3, kind: "crew", crew_name: "Caag, Haziel", ship: null },        // same month
+    { year: 2026, month: 4, kind: "crew", crew_name: "Villfranca, Dave", ship: null },    // the month after, a typo in the ledger
+    { year: 2026, month: 4, kind: "crew", crew_name: "Mixto, Ana", ship: null },          // two brands that month: not placed
+    { year: 2026, month: 9, kind: "crew", crew_name: "Caag, Haziel", ship: null },        // not on the bill near then: not placed
+    { year: 2026, month: 3, kind: "crew", crew_name: "Caag, Haziel", ship: "Apex" },      // Rita's ship wins
+    { year: 2026, month: 3, kind: "shoreside", crew_name: "Caag, Haziel", ship: null },   // shoreside stays shoreside
+  ], crew);
+  const out = clientFromBill(rows, bill, crew);
+  assert.deepEqual(out.map((r) => r.client), ["royal", "celebrity", null, null, "celebrity", "shoreside"]);
+  assert.deepEqual(out.map((r) => r.client_src || ""), ["bill", "bill", "", "", "", ""]);
+  // a January row reads December of the year before
+  const jan = clientFromBill(annotateTravel([{ year: 2026, month: 1, kind: "crew", crew_name: "Caag, Haziel", ship: null }], crew), [{ year: 2025, month: 12, crew_name: "CAAG, HAZIEL", brand: "azamara" }], crew);
+  assert.equal(jan[0].client, "azamara");
 });
