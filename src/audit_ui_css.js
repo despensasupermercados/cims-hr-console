@@ -308,6 +308,7 @@ svg{flex:none}
 .ftl .d.on{background:var(--navy)}.ftl .d.bad{background:var(--redm)}
 .ftl .ln{width:24px;height:2px;background:var(--line);flex:none}
 .ftl .tp{display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.foldd>summary{list-style:none;cursor:pointer}.foldd>summary::-webkit-details-marker{display:none}.foldd[open]>summary .fold .ic{transform:none}.foldd[open]>summary{border-bottom:1px solid var(--lines)}
 .how4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
 .how{display:flex;flex-direction:column;gap:10px;padding:22px;border-left:1px solid var(--lines)}
 .how:first-child{border-left:0}

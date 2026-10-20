@@ -59,10 +59,14 @@ test("the home opens on the ships, never on 'Could not load' (the photo queue is
   const P = boot("", { "/api/me": { email: "Dexter.Lawrence@dg3.com", open: true }, "/api/audit/ships": SHIPS });
   await settle();
   assert.deepEqual(P.errors, []);
-  const main = P.$("main").innerHTML;
+  // the head and the search box are drawn once in #main; the ships go under them, in #lres (redesign, 20 Oct 2026)
+  const main = P.$("main").innerHTML + P.$("lres").innerHTML;
   assert.doesNotMatch(main, /Could not load/, main.slice(0, 200));
-  assert.match(main, /Oasis/); assert.match(main, /Open requests/); assert.match(main, /Kevin Jugao/);
-  assert.doesNotMatch(P.$("heroslot").innerHTML, /\[object Object\]/, "the search box is empty, not the queue");
+  // the customer with a contract ending soonest opens first (Azamara: Pursuit ends Oct 31); every customer is a tile
+  assert.match(main, /data-cust="Royal"/); assert.match(main, /class="tile on" data-cust="Azamara"/);
+  assert.match(main, /Pursuit/); assert.match(main, /In progress · 1 request/); assert.match(main, /Kevin Jugao/);
+  assert.match(P.$("main").innerHTML, /id="q" type="search"[^>]*value=""/, "the search box is empty, not the queue");
+  assert.doesNotMatch(main, /\[object Object\]/);
 });
 
 test("the page script keeps one meaning per state key: the search text S.q is only ever a string", () => {
@@ -83,10 +87,11 @@ test("History opens on every filed audit: the ratings, what was missing (2nd tim
   await settle();
   assert.deepEqual(P.errors, []);
   const main = P.$("main").innerHTML;
-  assert.match(main, /2 audits/); assert.match(main, /Oct 12–14, 2026/);
-  assert.match(main, /class="gq lo">3<\/b>Inventory/, "3 or below is the problem line");
-  assert.match(main, /class="gq p">2<\/b>Dispatch/, "the dispatch rating is Rita's, never coloured");
-  assert.match(main, /Missing: SOPs · ordering &amp; transfers \(2nd time\), 2-Fiery back-up HDD, Safety shoes/);
+  assert.match(main, /<span class="v">2<\/span><span class="k">audits filed · 2 of 2 ships/);
+  assert.match(main, /<span class="rs4"><span class="rsq lo">3<\/span><span class="rsq">4<\/span>/, "3 or below is the problem line");
+  assert.match(main, /TDG&#8217;s travel, as the crew rated it: 2\.0 \/ 5 at 1 audit/, "the dispatch rating is Rita's, its own line");
+  assert.doesNotMatch(main, /rsq lo">2<\/span><\/span><\/td><td class="f-miss/, "and never a square beside the specialist's");
+  assert.match(main, /SOPs · ordering &amp; transfers <span class="chip r">2nd time<\/span><br>2-Fiery back-up HDD<br>Safety shoes/);
   assert.match(main, /Graded before the audit had steps/);
   assert.match(main, /data-go="q=ar_2"/, "a row opens its audit");
 });
@@ -96,7 +101,7 @@ test("Follow-ups: the late one first, its owner and date, two buttons; the fixed
   await settle();
   assert.deepEqual(P.errors, []);
   const main = P.$("main").innerHTML;
-  assert.match(main, /Confirm the cyan line<\/b><span class="st r">Overdue/);
+  assert.match(main, /Past its date[\s\S]*Confirm the cyan line<\/b><span class="chip r">Past Oct 1/, "the late one, first and red");
   assert.match(main, /data-fix="f1"/); assert.doesNotMatch(main, /data-fix="f2"/, "a fixed follow-up has nothing to close");
   assert.match(main, /Fixed Oct 16, 2026 by Dexter Lawrence · open site from this list/);
 });
@@ -109,9 +114,9 @@ const KEPT = { at: "2026-10-19T10:42:00Z", today: "2026-10-19", counts: { filed:
 test("a read that never answers ends: one more try, then 'Could not load' with Try again, never placeholders for ever", async () => {
   const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": HANG }, { clock: true });
   await settle();
-  assert.match(P.$("main").innerHTML, /class="sk"/, "the placeholders while it waits");
+  assert.match(P.$("lres").innerHTML, /class="sk"/, "the placeholders while it waits");
   P.fire(3000);
-  assert.match(P.$("main").innerHTML, /Still loading the ships/, "past 3 s it says it is still loading");
+  assert.match(P.$("lres").innerHTML, /Still loading the ships/, "past 3 s it says it is still loading");
   P.fire(15000); await settle();
   assert.equal(P.calls.filter((c) => c === "/api/audit/ships").length, 2, "a second try before anything is said");
   P.fire(15000); await settle();
@@ -123,13 +128,13 @@ test("a read that never answers ends: one more try, then 'Could not load' with T
 
 test("the home paints at once from the list this phone kept, and says so only while the fresh one is late", async () => {
   const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": HANG }, { clock: true, store: { "aud:ships": JSON.stringify(KEPT) } });
-  let main = P.$("main").innerHTML;
+  let main = P.$("lres").innerHTML;
   assert.match(main, /Oasis/, "drawn before any answer"); assert.doesNotMatch(main, /class="sk"/);
-  assert.match(main, /3 audits filed/); assert.doesNotMatch(main, /Updating/, "quiet while the fresh list is on time");
+  assert.equal(P.$("fub").textContent, "1", "the kept counts: one follow-up open on the app bar"); assert.doesNotMatch(main, /Updating/, "quiet while the fresh list is on time");
   P.fire(3000);
-  assert.match(P.$("main").innerHTML, /Updating\. This is the list from \d\d:\d\d|Updating\. This is the list from Oct 19, \d\d:\d\d/);
+  assert.match(P.$("lres").innerHTML, /Updating\. This is the list from \d\d:\d\d|Updating\. This is the list from Oct 19, \d\d:\d\d/);
   P.fire(15000); await settle(); P.fire(15000); await settle();
-  main = P.$("main").innerHTML;
+  main = P.$("lres").innerHTML;
   assert.match(main, /Oasis/, "a failed update keeps the kept list on screen");
   assert.match(main, /Could not update: no answer in 15 s\. This is the list from/);
   assert.match(main, /data-retry>Try again</);
@@ -138,8 +143,9 @@ test("the home paints at once from the list this phone kept, and says so only wh
 test("the fresh list replaces the kept one and is kept for the next open", async () => {
   const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS }, { store: { "aud:ships": JSON.stringify(KEPT) } });
   await settle();
-  const main = P.$("main").innerHTML;
-  assert.match(main, /Pursuit/); assert.match(main, /None filed yet/); assert.doesNotMatch(main, /This is the list from/);
+  // the customer on screen stays on screen (Royal, from the kept list); the fresh list adds Azamara's tile
+  const main = P.$("lres").innerHTML;
+  assert.match(main, /Oasis/); assert.match(main, /data-cust="Azamara"/); assert.match(main, /None yet · a filed audit moves the ship here/); assert.doesNotMatch(main, /This is the list from/);
   const k = JSON.parse(P.store.get("aud:ships"));
   assert.equal(k.ships.length, 2); assert.ok(Date.parse(k.at) > Date.parse(KEPT.at));
 });
@@ -149,7 +155,7 @@ test("an address the page does not know opens the home and fills it when the lis
     const P = boot(h, { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS });
     await settle();
     assert.deepEqual(P.errors, []);
-    assert.match(P.$("main").innerHTML, /Oasis/, h);
+    assert.match(P.$("lres").innerHTML, /Pursuit/, h);
   }
 });
 
@@ -171,10 +177,10 @@ test("the Workstation step is one list, everything present until tapped: no All 
   await settle();
   assert.deepEqual(P.errors, []);
   const main = P.$("main").innerHTML;
-  assert.match(main, /What is not on the desktop\?/);
-  assert.match(main, /class="wsum">.*All present<\/div>/);
+  assert.match(main, /Everything starts present\. Tap only what is missing/);
+  assert.match(main, /<span class="chip g">All present<\/span>/, "the state, said once, not a control");
   assert.doesNotMatch(main, /Something missing|data-a="ws-all"|class="seg"/, "no second control");
-  assert.doesNotMatch(main, /class="(cell|itm) (bad|miss)/, "nothing starts missing");
+  assert.doesNotMatch(main, /class="tap bad"/, "nothing starts missing");
   assert.match(main, /data-a="ws" data-k="sops"/, "each item is tappable");
 });
 
@@ -183,8 +189,8 @@ test("what Dexter marked missing is said once, in red, and the item reads Missin
   const P = boot("#a=ar_9|1", STEP_API, { store: { "aud:d:ar_9": JSON.stringify(d) } });
   await settle();
   const main = P.$("main").innerHTML;
-  assert.match(main, /class="wsum bad">.*1 missing<\/div>/);
-  assert.match(main, /class="itm miss" data-a="ws" data-k="sops"/);
+  assert.match(main, /<span class="chip r">1 missing<\/span>/);
+  assert.match(main, /class="tap bad" data-a="ws" data-k="sops"[^>]*>[\s\S]*?<span class="pill-s r">Missing<\/span>/);
 });
 
 // The same evening, on the machine card ("this is confusing to operate .. think about it") and the inventory ("the dual thing ..
@@ -204,13 +210,13 @@ test("Machines: one list per machine, every row working until tapped; the Patter
   await settle();
   assert.deepEqual(P.errors, []);
   const main = P.$("main").innerHTML; noDual(main);
-  assert.match(main, /What is not working\?/);
-  assert.match(main, /data-a="labeled"[^>]*aria-pressed="false"><span class="tx">All hardware labeled/);
-  assert.match(main, /data-a="chk" data-k="test" data-s="AC58011020823"[^>]*><span class="tx">Test pattern prints clean/);
-  assert.match(main, /data-a="p43"[^>]*><span class="tx">Lines along the feed in cyan<span class="sm">.*Print one and look; Rolando confirms\.<\/span><\/span><span class="st m">Not seen<\/span>/);
-  assert.match(main, /data-a="down"[^>]*data-s="S2"[^>]*><span class="tx">Reported down by John<span class="sm">“Paper feed error”<\/span><\/span><span class="st m">Running now<\/span>/);
+  assert.match(main, /Everything starts as working\. Tap only what is wrong/);
+  assert.match(main, /data-a="labeled"[^>]*aria-pressed="false"><span class="tk c">[\s\S]*?<b>All hardware labeled<\/b>/);
+  assert.match(main, /data-a="chk" data-k="test" data-s="AC58011020823"[^>]*><span class="tk c">[\s\S]*?<b>Test pattern prints clean<\/b>/);
+  assert.match(main, /data-a="p43"[^>]*><span class="tk o"><\/span><span class="tl"><b>Lines along the feed in cyan<\/b><span class="xs">.*Print one and look; Rolando confirms\.<\/span><\/span><span class="pill-s m">Not seen<\/span>/);
+  assert.match(main, /data-a="down"[^>]*data-s="S2"[^>]*><span class="tk c">[\s\S]*?<b>Reported down by John<\/b><span class="xs">&#8220;Paper feed error&#8221;<\/span><\/span><span class="pill-s m">Running now<\/span>/);
   assert.doesNotMatch(main, />Past life</, "past rated life is information, never a check");
-  assert.equal((main.match(/class="st g">Working</g) || []).length, 2, "both machines read Working until something is tapped");
+  assert.equal((main.match(/class="pill-s ok">Working</g) || []).length, 2, "both machines read Working until something is tapped");
 });
 
 test("Machines: a mark seen on the print or a machine still down reads red and asks for one sentence", async () => {
@@ -219,9 +225,10 @@ test("Machines: a mark seen on the print or a machine still down reads red and a
   const P = boot("#a=ar_9|2", API2, { store: { "aud:d:ar_9": JSON.stringify(d) } });
   await settle();
   const main = P.$("main").innerHTML;
-  assert.match(main, /class="itm miss" data-a="p43"[^>]*>.*<span class="st r">Seen<\/span>/);
-  assert.match(main, /class="st r">Problem</); assert.match(main, /class="st r">Down</);
-  assert.match(main, /class="itm miss" data-a="down"[^>]*>.*<span class="st r">Still down<\/span>/);
+  // the mark is an observation: seen, it reads amber on its row and makes the press a Problem (red) that needs a sentence
+  assert.match(main, /data-a="p43"[^>]*aria-pressed="true"><span class="tk w">[\s\S]*?<span class="pill-s a">Seen<\/span>/);
+  assert.match(main, /class="pill-s r">Problem</); assert.match(main, /class="pill-s r">Down</);
+  assert.match(main, /class="tap bad" data-a="down"[^>]*>[\s\S]*?<span class="pill-s r">Still down<\/span>/);
   assert.doesNotMatch(main.split('data-s="S2"')[2] || "", /Scan to email works/, "a machine still down asks nothing it cannot do");
   assert.equal((main.match(/What you found/g) || []).length, 2);
 });
@@ -230,14 +237,14 @@ test("Inventory: OBP against the shelf is measured, not asked; one shelf box per
   const P = boot("#a=ar_9|3", API2);
   await settle();
   let main = P.$("main").innerHTML; noDual(main);
-  assert.match(main, /id="obpv">.*OBP is off on 1 line<\/div>/, "Kevin counted 1 where OBP says 2");
+  assert.match(main, /id="obpv">[\s\S]*?<b class="h3">OBP is off on 1 line<\/b>/, "Kevin counted 1 where OBP says 2");
   assert.match(main, /data-shelf="ACF0033"[^>]*placeholder="1"/);
-  assert.match(main, /data-a="rep" data-k="x1"[^>]*><span class="tx">Fusing gears<span class="sm">John counted 2/);
+  assert.match(main, /data-a="rep" data-k="x1"[^>]*>[\s\S]*?<b>Fusing gears<\/b><span class="xs">John counted 2/);
   const d = startVisit({ machines: VISIT2.machines, diff: VISIT2.count.diff, extras: VISIT2.count.extras }); d.inv.lines.ACF0033 = { shelf: 2, checked: true };
   const Q = boot("#a=ar_9|3", API2, { store: { "aud:d:ar_9": JSON.stringify(d) } });
   await settle();
   main = Q.$("main").innerHTML;
-  assert.match(main, /class="wsum" id="obpv">.*OBP matches the shelf<\/div>/, "the shelf says OBP was right");
+  assert.match(main, /id="obpv">[\s\S]*?<b class="h3">OBP matches the shelf<\/b>/, "the shelf says OBP was right");
   assert.equal(JSON.parse(Q.store.get("aud:d:ar_9")).inv.accurate, true, "the kept draft carries the measured answer");
 });
 
@@ -245,10 +252,10 @@ test("Crew: the HON app is one row; Review: an open follow-up stays open until t
   const P = boot("#a=ar_9|5", API2);
   await settle();
   let main = P.$("main").innerHTML; noDual(main);
-  assert.match(main, /data-a="hon"[^>]*aria-pressed="false"><span class="tx">Uses the HON app/);
+  assert.match(main, /data-a="hon"[^>]*aria-pressed="false"><span class="tk c">[\s\S]*?<b>Uses the HON app<\/b>/);
   const R = boot("#a=ar_9|7", API2);
   await settle();
   main = R.$("main").innerHTML; noDual(main);
   assert.match(main, /tap what is fixed/);
-  assert.match(main, /data-a="close" data-k="f1" aria-pressed="false"><span class="tx">Confirm the cyan line<span class="sm">Rolando · by Jan 1, 2099.*<span class="st a">Still open<\/span>/);
+  assert.match(main, /data-a="close" data-k="f1" aria-pressed="false"><span class="tk o"><\/span><span class="tl"><b>Confirm the cyan line<\/b><span class="xs">Rolando · by Jan 1, 2099.*<span class="pill-s a">Still open<\/span>/);
 });

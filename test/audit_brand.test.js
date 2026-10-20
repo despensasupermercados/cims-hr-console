@@ -96,7 +96,7 @@ test("every audit page says the name and links the audit's icons, never the cons
     assert.match(h, /href="\/audit\/favicon\.ico"/, k);
     assert.doesNotMatch(h, /href="\/(favicon\.ico|apple-touch-icon\.png)"/, k + ": the console's icon paths");
   }
-  assert.match(AUDIT_HTML, /<h1>Printshop Ops Audit<\/h1>/);
+  for (const [k, h] of Object.entries(pages)) assert.match(h, /class="brand"[^>]*>[\s\S]*?<b>Printshop Ops Audit<\/b><\/(span|a)>/, k + ": the app bar says the name");
   assert.doesNotMatch(AUDIT_HTML, /Printshop [Aa]udit</, "no old title left");
 });
 

@@ -216,7 +216,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var cta = r.status === "complete"
       ? '<button type="button" class="btn green" data-go="a=' + esc(r.id) + '|1">Start the audit</button><button type="button" class="btn white" data-go="b=' + esc(encodeURIComponent(s.ship)) + "|" + esc(encodeURIComponent(r.sc)) + '">See the briefing' + ic("arrow-right") + "</button>"
       : '<button type="button" class="btn white" data-go="q=' + esc(r.id) + '">Open the request' + ic("arrow-right") + "</button>";
-    var st = function (cls, dot, t) { return '<div class="ck ' + cls + '"><span class="' + dot + '">' + (dot === "c" ? ic("b:check") : "") + "</span><span>" + t + "</span></div>"; };
+    var st = function (cls, dot, html) { return '<div class="ck ' + cls + '"><span class="' + dot + '">' + (dot === "c" ? ic("b:check") : "") + "</span><span>" + html + "</span></div>"; };
     var steps = st("", "c", "Asked" + ((r.sent || r.at) ? " · " + fmtD(r.sent || r.at) : ""))
       + (r.status === "complete" ? st("", "c", "Documents in" + (r.in ? " · " + fmtD(r.in) : "")) : st("cur", "o on", r.due ? "Documents · due " + fmtD(r.due) : "Documents"))
       + st(r.status === "complete" ? "cur" : "todo", r.status === "complete" ? "o on" : "o", "Audit on board") + st("todo", "o", "Filed");
@@ -300,7 +300,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   }
   /* where a request stands, as a list of steps: asked, due (or documents in), the audit on board, filed */
   function reqSteps(o) {
-    var st = function (cls, dot, t) { return '<div class="ck' + (cls ? " " + cls : "") + '"><span class="' + dot + '">' + (dot === "c" ? ic("b:check") : "") + "</span><span>" + t + "</span></div>"; };
+    var st = function (cls, dot, html) { return '<div class="ck' + (cls ? " " + cls : "") + '"><span class="' + dot + '">' + (dot === "c" ? ic("b:check") : "") + "</span><span>" + html + "</span></div>"; };
     var asked = st("", "c", "Asked" + (o.asked ? " · " + fmtD(o.asked) : ""));
     if (o.graded) return asked + st("", "c", "Documents in" + (o.inAt ? " · " + fmtD(o.inAt) : "")) + st("", "c", "Audit on board") + st("", "c", "Filed" + (o.gradedAt ? " · " + fmtD(o.gradedAt) : "") + (o.score != null ? " · " + esc(o.score) + "/5" : ""));
     if (o.status === "complete") return asked + st("", "c", "Documents in" + (o.inAt ? " · " + fmtD(o.inAt) : "")) + st("cur", "o on", "Audit on board") + st("todo", "o", "Filed");
@@ -353,11 +353,11 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (mine) {
       var late = lateOf(mine);
       var tag = mine.grade != null ? "Audited this contract" : mine.status === "complete" ? "Documents in" : late ? "Past the deadline" : mine.status === "draft" ? "Being sent" : "Waiting on " + fn;
-      var t = mine.grade != null ? "Score " + esc(mine.grade) + "/5" : mine.status === "complete" ? "Ready for the visit" : late ? fn + " has not sent everything" : "The request is out";
+      var title = mine.grade != null ? "Score " + esc(mine.grade) + "/5" : mine.status === "complete" ? "Ready for the visit" : late ? fn + " has not sent everything" : "The request is out";
       var cta = mine.grade != null ? '<button type="button" class="btn white" data-go="q=' + esc(mine.id) + '">Open the audit</button>'
         : mine.status === "complete" ? '<div class="cta hide-m"><button type="button" class="btn green" data-go="a=' + esc(mine.id) + '|1">Start the audit</button><button type="button" class="btn white" data-go="q=' + esc(mine.id) + '">Read the documents</button></div><button type="button" class="arrow only-m" data-go="q=' + esc(mine.id) + '">Read the documents' + ic("arrow-right") + "</button>"
         : '<div class="cta"><button type="button" class="btn white" data-go="q=' + esc(mine.id) + '">Open the request</button></div>';
-      return '<section class="navy sec"><span class="eyebrow">' + tag + '</span><h2 class="h3">' + t + '</h2><div class="sec tight">'
+      return '<section class="navy sec"><span class="eyebrow">' + tag + '</span><h2 class="h3">' + title + '</h2><div class="sec tight">'
         + reqSteps({ asked: mine.at, status: mine.status, late: late, due: mine.due, inAt: mine.complete, graded: mine.grade != null, gradedAt: mine.gradedAt, score: mine.grade }) + "</div>" + cta + "</section>";
     }
     return '<section class="navy sec"><span class="eyebrow">The audit</span><h2 class="h3">Ask ' + fn + " for the documents</h2>"
@@ -448,7 +448,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   /* ---------------- A3 · The ask (canvas board "Ask") ----------------
      What the seafarer sends, the email that asks for it, and every condition the request needs, each ticked or not. */
   function aboardOf(ship, sc) { var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0]; return s ? (s.aboard || []).filter(function (x) { return x.sc === sc; })[0] || null : null; }
-  function sendRow(icn, cls, t, s) { return '<div class="send line-t"><span class="fi' + (cls ? " " + cls : "") + '">' + ic(icn) + '</span><div><b class="h4">' + t + '</b><p class="sm">' + s + "</p></div></div>"; }
+  function sendRow(icn, cls, title, s) { return '<div class="send line-t"><span class="fi' + (cls ? " " + cls : "") + '">' + ic(icn) + '</span><div><b class="h4">' + title + '</b><p class="sm">' + s + "</p></div></div>"; }
   function sendsCard(fn, presses, lines) {
     return '<div class="card clip"><div class="pad-m sec-hd"><h2 class="h3">What ' + fn + ' sends</h2><span class="sm">Each file is read the moment it lands</span></div>'
       + sendRow("file-text", "", "Pattern 43", "One 12-page scan per press" + (presses ? ", " + presses + " in all" : "") + ". Read for white dots, lines and density, colour by colour.")
@@ -471,7 +471,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var n = p.machines ? p.machines.length : 0, lines = p.lines || 0;
       var who = x ? [contractNo(x) ? contractNo(x).charAt(0).toUpperCase() + contractNo(x).slice(1) : "", x.signOn ? "aboard since " + fmtD(x.signOn) : "", x.heldByFile ? "past the sign-off" : x.signOff ? "signs off " + fmtD(x.signOff) + (md(S.today, x.signOff) ? ", in " + esc(md(S.today, x.signOff)) : "") : ""].filter(Boolean).join(" · ") : "";
       var can = p.hon && n > 0 && lines > 0 && (p.shown || !p.live);
-      var ck = function (ok, t) { return '<div class="ck"><span class="' + (ok ? "c" : "x") + '">' + ic(ok ? "b:check" : "b:x") + "</span><span>" + t + "</span></div>"; };
+      var ck = function (ok, html) { return '<div class="ck"><span class="' + (ok ? "c" : "x") + '">' + ic(ok ? "b:check" : "b:x") + "</span><span>" + html + "</span></div>"; };
       var checks = ck(true, fn + " is aboard " + esc(ship) + " per the board")
         + (!p.hon ? ck(false, "HON did not answer: the presses and the OBP list come from it") : ck(n > 0, n ? n + (n === 1 ? " press" : " presses") + " on HON&#8217;s register" : "No press on HON&#8217;s register for " + esc(ship))
           + ck(lines > 0, lines ? "OBP list" + (p.obpAsOf ? " of " + fmtD(p.obpAsOf) : "") + " · " + lines + " lines" : "No OBP list on HON: nothing to count"))
@@ -605,7 +605,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         h += '<section class="sec"><div class="sec-hd"><h2 class="h2">What came in</h2><span class="sm">' + (mt === 1 ? esc(d.machines[0].label) + " · " + esc([d.machines[0].model, d.machines[0].serial].filter(Boolean).join(" · ")) : mt + " presses" + (downs ? " · " + downs + " reported down" : "")) + "</span></div>"
           + '<div class="grid3">' + docTile(d, "p43", "Pattern 43", "file-text", "") + docTile(d, "mgmt", "Machine Management List", "list", "n") + countTile(d, done) + "</div>";
         var fixes = []; d.machines.forEach(function (m) { [m.p43, m.mgmt].forEach(function (s) { if (s && s.read_state !== "ok" && s.read_state !== "pending" && s.say) fixes.push((mt > 1 ? esc(m.label) + ": " : "") + esc(s.say)); }); });
-        if (fixes.length) h += fixes.map(function (t) { return '<div class="finding">' + '<div class="hstack"><span class="chip a">To send again</span></div><p class="txt">' + t + "</p></div>"; }).join("");
+        if (fixes.length) h += fixes.map(function (html) { return '<div class="finding">' + '<div class="hstack"><span class="chip a">To send again</span></div><p class="txt">' + html + "</p></div>"; }).join("");
         h += "</section>";
       }
       h += '<div id="beforeslot"></div>';
@@ -713,7 +713,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   }
   function box(field, val, ph, rows) { return '<textarea class="ta' + (rows === 1 ? " one" : "") + '" rows="2" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
   function whyMsg(probs, field) { var p = probs.filter(function (x) { return x.field === field; })[0]; return p && S.err.show ? '<div class="why">' + ic("warning-circle") + "<span>" + esc(p.say) + "</span></div>" : ""; }
-  function lbl(t, inner) { return '<label class="lbl"><span class="xs b">' + t + "</span>" + inner + "</label>"; }
+  function lbl(title, inner) { return '<label class="lbl"><span class="xs b">' + title + "</span>" + inner + "</label>"; }
 
   /* ---- photos: shrunk on the phone (1600px, JPEG), queued in IndexedDB, sent when there is signal ---- */
   var IDB = null;
@@ -953,7 +953,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (fu) went.push("The follow-up to " + esc(fu.owner || "…") + (fu.due ? ", by " + fmtD(fu.due, true) : ""));
     if (sent + wait) went.push(sent + wait + (sent + wait === 1 ? " photo" : " photos") + " to the audit&#8217;s files" + (wait ? " · " + wait + " wait for signal" : ""));
     went.push("The next audit of " + esc(v.ship) + " opens with what is missing and still open");
-    h += '<div class="card pad-m sec tight"><span class="xs b">Where it goes</span>' + went.map(function (t) { return '<div class="wl"><span class="tk c">' + ic("b:check") + '</span><span class="sm">' + t + "</span></div>"; }).join("")
+    h += '<div class="card pad-m sec tight"><span class="xs b">Where it goes</span>' + went.map(function (html) { return '<div class="wl"><span class="tk c">' + ic("b:check") + '</span><span class="sm">' + html + "</span></div>"; }).join("")
       + '<div class="wl"><span class="tk o"></span><span class="sm">Never to the crew.</span></div></div>';
     h += '<div class="card pad-m"><div class="hstack" style="flex-wrap:nowrap;align-items:flex-start"><span class="fi n s">' + ic("wifi-slash") + '</span><div style="flex:1;min-width:0"><b class="h4">No signal? File anyway</b><div class="sm">It is kept on this phone and sent when the server answers. Filed once; it cannot be changed after.</div></div></div></div>';
     return h;
@@ -1218,7 +1218,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     // the three areas, added up
     var sum = function (f) { return withF.reduce(function (s, a) { return s + (f(a.found) || 0); }, 0); };
     var cnt = function (f) { return withF.filter(function (a) { return f(a.found); }).length; };
-    var ln = function (t, v) { return '<div class="fln"><span>' + t + "</span><b>" + v + "</b></div>"; };
+    var ln = function (label, v) { return '<div class="fln"><span>' + label + "</span><b>" + v + "</b></div>"; };
     h += '<section class="grid3">'
       + '<div class="card feat"><span class="fi n">' + ic("printer") + '</span><b class="h3">Machines</b><div>' + ln("Test pattern found a problem", one(sum(function (f) { return f.machines.test; }), "press", "presses")) + ln("Scan to email failed", one(sum(function (f) { return f.machines.scan; }), "press", "presses")) + ln("Pattern 43 mark seen on board", one(sum(function (f) { return f.machines.p43; }), "press", "presses")) + ln("Still down at the visit", one(sum(function (f) { return f.machines.down; }), "press", "presses")) + "</div></div>"
       + '<div class="card feat"><span class="fi a">' + ic("package") + '</span><b class="h3">Inventory</b><div>' + ln("OBP matched the shelf", withF.length ? matched + " of " + withF.length : "–") + ln("Lines off · shelf above OBP", sum(function (f) { return f.inv.above; })) + ln("Lines off · shelf below OBP", sum(function (f) { return f.inv.below; })) + ln("On the shelf, not in OBP", one(sum(function (f) { return f.inv.notInObp; }), "line")) + "</div></div>"
@@ -1282,11 +1282,9 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       h += '<section class="sec tight"><div class="hstack" style="gap:10px"><span class="dot ' + G[2] + '"></span><h2 class="h3">' + G[1] + '</h2><span class="sm">' + items.length + '</span></div><div class="card clip">'
         + (items.length ? items.map(function (f) { return fuItem(f, today); }).join("") : '<div class="item"><span class="sm">Nothing ' + (own === "Everyone" ? "" : "for " + esc(own) + " ") + "here.</span></div>") + "</div></section>";
     });
-    if (done.length) {
-      var shut = S.fdone !== true;
-      h += '<section class="card clip"><div class="grp-hd"><div style="flex:1;min-width:0"><b class="h3">Done</b><div class="sm">' + done.length + ' · newest first · who closed it and where</div></div><button type="button" class="fold' + (shut ? " shut" : "") + '" data-fdone aria-label="' + (shut ? "Open done" : "Fold done") + '">' + ic("caret-down") + "</button></div>"
-        + (shut ? "" : done.map(function (f) { return '<div class="item"><div class="sec tight" style="min-width:0"><b class="h4">' + esc(f.text) + '</b><p class="sm">' + esc(f.owner) + " · asked at " + esc(f.ship) + ", " + fmtD(f.createdAt, true) + "</p><p class=\"sm\">Fixed " + fmtD(f.closedAt, true) + " by " + esc(byName(f.closedBy)) + (f.closedOnVisit ? " at the next audit" : " from this list") + '</p></div><div class="acts"><span class="chip g">' + (f.closedOnVisit ? "Fixed at the next audit" : "Done by its owner") + "</span></div></div>"; }).join("")) + "</section>";
-    }
+    /* the done list folds natively (a details element): what was closed, by whom and where, is in the page either way */
+    if (done.length) h += '<details class="card clip foldd"><summary class="grp-hd"><div style="flex:1;min-width:0"><b class="h3">Done</b><div class="sm">' + done.length + ' · newest first · who closed it and where</div></div><span class="fold shut" aria-hidden="true">' + ic("caret-down") + "</span></summary>"
+      + done.map(function (f) { return '<div class="item"><div class="sec tight" style="min-width:0"><b class="h4">' + esc(f.text) + '</b><p class="sm">' + esc(f.owner) + " · asked at " + esc(f.ship) + ", " + fmtD(f.createdAt, true) + '</p><p class="sm">Fixed ' + fmtD(f.closedAt, true) + " by " + esc(byName(f.closedBy)) + (f.closedOnVisit ? " at the next audit" : " from this list") + '</p></div><div class="acts"><span class="chip g">' + (f.closedOnVisit ? "Fixed at the next audit" : "Done by its owner") + "</span></div></div>"; }).join("") + "</details>";
     h += '<section class="sec"><div class="hstack"><span class="eyebrow">How a follow-up moves</span></div><div class="card how4">'
       + '<div class="how"><span class="n">1</span><b class="h4">Asked in the audit</b><span class="sm">The last step: what, the owner (' + esc(AR.FOLLOW_OWNERS.join(", ")) + ") and a date.</span></div>"
       + '<div class="how"><span class="n">2</span><b class="h4">Shows where it matters</b><span class="sm">This page, the ship&#8217;s briefing and the audit it came from.</span></div>'
@@ -1346,7 +1344,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         + '<div><span class="v">' + one(offRows.length + (D.inv.added || []).length, "line") + '</span><span class="k">where OBP is off' + (v.count && v.count.total ? ", of " + v.count.total : "") + "</span></div>"
         + '<div><span class="v">' + fus.length + '</span><span class="k">follow-ups asked' + (fuLate.length ? " · " + fuLate.length + " past " + (fuLate.length === 1 ? "its" : "their") + " date" : "") + "</span></div></section>";
       // what the documents said, confirmed on board
-      var q = function (t, s) { return '<div class="q"><b>' + t + '</b><span class="sm">' + s + "</span></div>"; }, qs = [];
+      var q = function (title, s) { return '<div class="q"><b>' + title + '</b><span class="sm">' + s + "</span></div>"; }, qs = [];
       machines.forEach(function (m) {
         var it = (m.p43 && m.p43.items) || [];
         qs.push(q("Pattern 43 · " + esc(m.label), m.down ? "Reported down by the crew" : it.length ? esc(it.map(function (i) { return sentence(i.head); }).join("; ")) + ((D.hw.machines[m.serial] || {}).p43 === "seen" ? " · seen on board" : " · not seen on board") : "No mark found"));
@@ -1445,8 +1443,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       if (hx.hasAttribute("data-hl")) { var ev = $("every"); if (ev && ev.scrollIntoView) ev.scrollIntoView({ block: "start", behavior: "smooth" }); }
       return;
     }
-    var fo2 = e.target.closest("[data-fo],[data-fdone]");
-    if (fo2) { if (fo2.hasAttribute("data-fo")) S.fo = fo2.getAttribute("data-fo"); else S.fdone = !S.fdone; followupsList(); return; }
+    var fo2 = e.target.closest("[data-fo]");
+    if (fo2) { S.fo = fo2.getAttribute("data-fo"); followupsList(); return; }
     var fx = e.target.closest("[data-fix]");
     if (fx) { fixFollowup(fx); return; }
     var fo = e.target.closest("[data-fold]");
