@@ -1506,8 +1506,13 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   "October 8", which the first live rewrite did); no engine / refused → the summary's first sentence. The stored report stays under
   "Full report". A brand chip clears a search left in the box ("qu" + Azamara showed Quest alone). `test/audit_plain.test.js`.
   **One incident, one entry** (Miguel, same day: "if you see that it's the same problem, just merge them into one"):
-  `mergeIntel` folds field-intel reports with the same text, or the same dollar amount ($100+) within 14 days; the newer
-  leads, the header names every reporter, the others stay whole under "Full report". Deterministic, no model.
+  `mergeIntel` folds field-intel reports with the same text, or, within 14 days, the same dollar amount ($100+) or **two
+  or more of the same counts** (Miguel, 20 Oct 2026, "2. yes": Ray's two reports on Kevin Jugao, 8 and 10 Sep, "17 boxes" /
+  "35 boxes", no dollar amount; `countsOf`: whole numbers of 3+, a repeat counted again, never a date, time, year,
+  duration, size, percentage, part number or dollar amount). A shared date alone does not merge: Resposo's takeover
+  write-up and a damaged lamp both name 18 July (checked on all 19 production pairs; Lorono's one missed order, sharing
+  only its date, stays two lines). The newer leads, the header names every reporter, the others stay whole under "Full
+  report". Deterministic, no model.
 - **Rush orders this contract** (Miguel, 16 Oct 2026: "what I need to show is the stuff that has been tagged as 'miss'
   from the order portal ... if I had to spend any money on any item, as in I had to rush it because he didn't pay
   attention"). It REPLACED the same morning's OBP "Shipped this contract" card ("doesn't have any value to see what he
