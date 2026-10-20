@@ -1657,6 +1657,18 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   things (a row per press for each file, the blind count with a search, Machine won't print? with its reason), Send once
   everything is in; OBP's number never shown. Renders: scratchpad harness `aud/run.mjs` on live read-only data. Pinned by
   `test/audit_page_boot.test.js` (rewritten to the new markup, same intent), `test/audit_brand.test.js`.
+- **THE AUDITS BEFORE THE APP — the Forms survey** (Miguel, 20 Oct 2026, asked "Import the Forms survey into History?":
+  "yes to all on the 5th point"). `src/audit_forms.js` (pure) reads Miguel's export `Printshop_Audit1-61.xlsx` (Sep 2024 – Sep
+  2026) into `audit_forms` (migrations/0039, in `AUDIT_DDL`), written ONCE by the session, staging first. History lists them
+  beside the filed audits, each marked "Forms survey", and `#q=forms-N` opens one as typed (`/api/audit/forms`). Rules: the 9
+  test rows are listed by number with the reason and not imported (`FORMS_TESTS`: ships "Test"/"ABC Test", keyboard filler,
+  pasted news, Star of the Seas before she sailed); the ship from its code or name (two misspellings named, never a near
+  match); the desk counts an item missing only once the form offered it (the SOPs box first appears on row 36, 5 May 2025); the
+  score is the filed audit's rule (Overall, else the average rounded down) for reading only. **Who it was on is never
+  guessed** (§6, §10): a full name the travel name bridge places on ONE crew, or a first name the schedule has aboard that hull
+  that day; anything else keeps the name as typed, unlinked, with why. On 20 Oct 2026: 52 imported, 39 placed, 13 not.
+  **Never the Score Card**: the bonus reads `audit_eval` only; an audit from the survey counting there is a money change,
+  Miguel's to make (pinned by `test/audit_forms.test.js`). The files stay in Miguel's OneDrive (the links need a DG3 sign-in).
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

@@ -420,8 +420,8 @@ test("the documents-in email: plain text reads the crew's name as written, and a
 
 test("Dexter's page: a late error never replaces the screen moved on to, and a TEST audit offers no Grade", () => {
   const src = readFileSync(new URL("../src/audit_ui.js", import.meta.url), "utf8");
-  // the briefing, the ask (its load and its send), the request, the audit's steps and the filed report
-  assert.equal((src.match(/\}\)\.catch\(function \(e\) \{ if \(S\.view === key\) fail\(e\); \}\)/g) || []).length, 6, "every view's load");
+  // the briefing, the ask (its load and its send), the request, the audit's steps, the filed report and a Forms survey audit
+  assert.equal((src.match(/\}\)\.catch\(function \(e\) \{ if \(S\.view === key\) fail\(e\); \}\)/g) || []).length, 7, "every view's load");
   assert.match(src, /var startBtn = done && !d\.grade && !d\.test && !pend \?/, "Start the audit only on a live request whose documents are in");
   assert.match(src, /var bf = S\.brief\[ship \+ "\|" \+ sc\];/, "the request carries THIS seafarer's contract label");
 });

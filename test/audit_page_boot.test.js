@@ -278,3 +278,32 @@ test("took() says one minute, and never sixty of them", () => {
   assert.equal(took(t0, "2026-11-20T10:00:00Z"), "1 mo 4 d");
   assert.equal(took(at(60), t0), "");
 });
+
+// 20 Oct 2026: the audits before the app (the Forms survey) read in History beside the filed ones, and each opens as typed.
+const FORM = { id: "forms-61", source: "forms", ship: "Oasis", sc: "SC-1", crew: "John Gorre", filedAt: "2026-09-30", openedAt: null, filedBy: "Dexter (Forms survey)",
+  ratings: { inventory: 4, technical: 2, collaterals: 2, dispatch: 5, overall: 3 }, score: 3, from: "overall", steps: false,
+  missing: { ws: [], tools: ["fiery_hdd"], ppe: [] }, repeat: {}, found: null, photos: 0, files: 1, followups: { open: 0, fixed: 0 } };
+test("History reads the Forms survey's audits, marked; one opens as typed, linked or not", async () => {
+  const P = boot("#hist", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/history": { ...HIST, audits: [FORM].concat(HIST.audits), forms: { n: 52, source: "Forms survey · Printshop Audit (Sep 2024 – Sep 2026)" } } });
+  await settle();
+  assert.deepEqual(P.errors, []);
+  const main = P.$("main").innerHTML;
+  assert.match(main, /<td class="f-date">Sep 30<div class="xs">Forms survey<\/div><\/td>/);
+  assert.match(main, /data-go="q=forms-61"/);
+  assert.match(main, /52 audits from the Forms survey, Sep 2024 to Sep 2026, are read here beside the app&#8217;s/);
+  assert.doesNotMatch(main, /join this page once they are imported/);
+  const Q = boot("#q=forms-39", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/forms": { ok: true, today: "2026-10-20", source: "Forms survey · Printshop Audit (Sep 2024 – Sep 2026)",
+    audit: { id: "forms-39", form: 39, date: "2025-05-26", ship: "Pursuit", shipRaw: "QS - Azamara", crewRaw: "Kevin", sc: null, crew: "Kevin", placed: "none", placedWhy: "a first name only, and no schedule for that day",
+      ratings: { inventory: 3, technical: 3, collaterals: 3, dispatch: 5, overall: null }, score: 3, scoreFrom: "average", notes: { feedback: "Kevin <b>keeps</b> the shop tidy." }, labels: true,
+      deskMissing: ["bm_crunchtime"], tools: null, checks: ["Test Pattern"], files: [] } } });
+  await settle();
+  assert.deepEqual(Q.errors, []);
+  const q = Q.$("main").innerHTML;
+  assert.match(q, /Not linked to a crew/);
+  assert.match(q, /Typed on the form: Kevin/);
+  assert.match(q, /A first name only, and no schedule for that day\. The import never guesses who an audit is on\./);
+  assert.match(q, /Kevin &lt;b&gt;keeps&lt;\/b&gt; the shop tidy\./, "Dexter's words are text");
+  assert.match(q, /<b>Crunchtime<\/b>/);
+  assert.match(q, /Tools not on inventory: none listed\./);
+  assert.doesNotMatch(q, /profile in the HR console/, "no profile link for a crew the import did not place");
+});
