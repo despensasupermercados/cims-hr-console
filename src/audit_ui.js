@@ -82,7 +82,12 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   /* how long something took between two instants: hours and minutes inside a day, else months and days (never a day count) */
   function took(a, b) {
     var ms = Date.parse(b) - Date.parse(a); if (isNaN(ms) || ms < 0) return "";
-    if (ms < 864e5) { var h = Math.floor(ms / 36e5), mi = Math.round((ms % 36e5) / 6e4); return h ? h + (h === 1 ? " hour" : " hours") + (mi ? " " + mi + (mi === 1 ? " minute" : " minutes") : "") : Math.max(1, mi) + (mi === 1 ? " minute" : " minutes"); }
+    if (ms < 864e5) {
+      /* whole minutes first, at least one: "1 minutes" (under 30 seconds) and "1 hour 60 minutes" (59:30) were both shown */
+      var t = Math.max(1, Math.round(ms / 6e4)), h = Math.floor(t / 60), mi = t % 60;
+      var hs = h ? h + (h === 1 ? " hour" : " hours") : "", ms2 = mi ? mi + (mi === 1 ? " minute" : " minutes") : "";
+      return hs && ms2 ? hs + " " + ms2 : hs || ms2;
+    }
     return md(a, b);
   }
   function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }

@@ -259,3 +259,22 @@ test("Crew: the HON app is one row; Review: an open follow-up stays open until t
   assert.match(main, /tap what is fixed/);
   assert.match(main, /data-a="close" data-k="f1" aria-pressed="false"><span class="tk o"><\/span><span class="tl"><b>Confirm the cyan line<\/b><span class="xs">Rolando · by Jan 1, 2099.*<span class="pill-s a">Still open<\/span>/);
 });
+
+// 20 Oct 2026, read on the live landing after the redesign: "Kevin Leif Jugao sent everything on Oct 16, 1 minutes after
+// it was asked". took() checked the plural on the rounded minutes (0) after lifting them to 1; 59:30 read "1 hour 60
+// minutes" the same way. The function is lifted out of the page as it ships and run on its own.
+test("took() says one minute, and never sixty of them", () => {
+  const src = AUDIT_HTML;
+  const grab = (name) => { const i = src.indexOf("function " + name + "("); let d = 0, j = src.indexOf("{", i); for (; j < src.length; j++) { if (src[j] === "{") d++; else if (src[j] === "}" && --d === 0) break; } return src.slice(i, j + 1); };
+  const took = vm.runInNewContext("(function(){" + grab("md") + grab("took") + "return took;})()", { Date, Math, String, isNaN });
+  const at = (s) => new Date(Date.parse("2026-10-16T10:00:00Z") + s * 1000).toISOString();
+  const t0 = "2026-10-16T10:00:00Z";
+  assert.equal(took(t0, at(20)), "1 minute");
+  assert.equal(took(t0, at(60)), "1 minute");
+  assert.equal(took(t0, at(150)), "3 minutes");
+  assert.equal(took(t0, at(3570)), "1 hour");
+  assert.equal(took(t0, at(3600 + 60)), "1 hour 1 minute");
+  assert.equal(took(t0, at(5 * 3600 + 25 * 60)), "5 hours 25 minutes");
+  assert.equal(took(t0, "2026-11-20T10:00:00Z"), "1 mo 4 d");
+  assert.equal(took(at(60), t0), "");
+});
