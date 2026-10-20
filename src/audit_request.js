@@ -82,7 +82,10 @@ export function installAuditRequest(deps) {
   // The newest live file per machine and kind, with what the crew is told about it.
   function slot(ups, serial, kind) {
     const u = ups.filter((x) => x.serial === serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
+    // A machine list read with no life row never says "No part past its rated life" (Miguel, 20 Oct 2026: "u didnt read the
+    // files correctly"): a read filed before lifeRows was kept, or one with none, says what is true. Nothing stored changes.
+    const s = u && u.read && u.read.summary, noLife = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && !(s.lifeRows > 0));
+    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
   }
   // What the reads found per machine — ONE definition for the documents-in email and the audit's Machines step.
   function machinesRead(s, lines, intransit) {
