@@ -876,8 +876,12 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
 - **THE TRAVEL TAB, REDESIGNED** (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young,
   luxury feeling .. place the filters like we have done elsewhere on the left .. allowing rita to make decisions"; proofs
   under `docs/mockups/travel_20261017/`). **The filters are a left rail** like the Crew and Keyman tabs (`crrail` `#trrail`,
-  236px; the Filters button on a phone): Search (drawn ONCE in `renderTravel`, so it keeps its focus), View (Crew travel /
-  Shoreside team / Crew + shoreside / Training centre), Year, Month (a 12-chip grid, a month with nothing on file greyed),
+  236px; the Filters button on a phone): Search (drawn ONCE in `renderTravel`, so it keeps its focus), **View as ticks, one
+  or several** (Miguel, 20 Oct 2026: "allow to select multiple items .. u can single them out and then I can select one or
+  multiple"; Crew travel · Shoreside team · Training centre — the last tick never unticks; `tvViews` / `tvSetViews`: `TF.kind`
+  keeps 'crew' / 'shoreside' / '' (both) / 'training' (the centre alone, its own page) and `TF.withTr` adds TDG's training
+  statement to a travel view through `trS` — hero, months, rail, one "Training centre" row in Where it goes, a picked
+  category takes its matching column (air / hotel / other); no budget when it is ticked; a cruise line drops it), Year, Month (a 12-chip grid, a month with nothing on file greyed),
   Category, Cruise line — each row with its amount for the SAME period as the hero (`inPer`: the chosen month, else the
   year's closed months), repainted by `tvRail` on every `paintTravel`; Training centre keeps View + Year only. `TF` is
   unchanged, so every rule above holds. **The page answers in order**: one hero card (the number; "On budget · $X under" /
