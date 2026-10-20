@@ -5,7 +5,7 @@
 // PR A + B (this file today): the shell, the health proof, the ships list and the briefing. READ-ONLY: nothing here
 // sends an email or writes a crew-facing record. The request, the seafarer's upload page, the blind count and the
 // gate arrive in the next PR (C), the reading of the files through HON in PR G.
-import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso, aboardNow } from "./audit.js";
+import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso, aboardNow, isOpenRequest, SHIP_OPEN_SQL } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel, numbersKept, datesKept } from "./audit_plain.js";
@@ -81,7 +81,8 @@ export function installAudit(deps) {
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
-      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
+      // `open`: the request still open on this ship (one person at a time, isOpenRequest), the page's "Open requests"
+      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
     return json({ today: TODAY(), auditor: session.email, ships: out, counts: cnt ? { filed: Number(cnt.filed) || 0, openFollowups: Number(cnt.open_fu) || 0 } : null });
@@ -101,11 +102,12 @@ export function installAudit(deps) {
     // lower bound wide enough for any contract and cut to the contract below. A failed read says nothing.
     const today = TODAY(), lo = shiftDays(today, -RUSH_LOOKBACK_DAYS);
     const readRush = (from) => (rushOrders ? rushOrders.read(env, from, today) : Promise.resolve(null));
-    const [prof, reqs, board, rushRows] = await Promise.all([
+    const [prof, reqs, board, rushRows, onShip] = await Promise.all([
       crewProfile(env, sc, session),
       env.DB.prepare("SELECT r.id, r.ship, r.status, r.created_at, r.sent_at, r.complete_at, r.due_at, r.auditor, r.test_mode, e.score AS grade, e.filed_at AS graded_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? ORDER BY r.created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
       session.open ? rotationSections(env).catch(() => null) : null,
       readRush(lo),
+      ship ? env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null) : null,
     ]);
     // OPEN MODE: a seafarer the board has aboard, or one a LIVE request was made for (a cancelled or TEST row is no pass)
     const liveReq = (reqs.results || []).some((r) => r.status !== "cancelled" && !r.test_mode);
@@ -146,7 +148,9 @@ export function installAudit(deps) {
       rush,
       audits: (reqs.results || []).map((r) => ({ id: r.id, ship: r.ship, status: r.status, at: iso(r.created_at), complete: iso(r.complete_at), due: r.due_at, by: session.open ? null : r.auditor, test: !!r.test_mode, grade: r.grade != null ? Number(r.grade) : null, gradedAt: iso(r.graded_at) })),
       // the request still in motion: sent, or in and not graded yet (a graded one is finished and opens the way to the next)
-      open: ((reqs.results || []).find((r) => r.status === "sent" || r.status === "draft" || (r.status === "complete" && r.grade == null && !r.test_mode)) || {}).id || null,
+      open: ((reqs.results || []).find(isOpenRequest) || {}).id || null,
+      // one person at a time per ship (Miguel, 20 Oct 2026): another seafarer's request still open on this ship
+      shipOpen: onShip && onShip.agency_id !== sc ? { id: onShip.id, crew: personName(onShip.crew_name) } : null,
     });
   }
 

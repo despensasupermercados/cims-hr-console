@@ -1591,6 +1591,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   the Atlantic (~100 ms a trip) — reported to Miguel, not changed here. Pinned by `test/audit_page_boot.test.js`.
   Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
   the import of the 61 (I1), the web rail (W1).
+- **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
+  Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
+  for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`
+  `OPEN_REQ_SQL` / `isOpenRequest`): draft, sent, or in (complete) and not graded; a TEST request in is finished (it cannot be
+  graded). The create guard (`ship_busy` with the open request's id and crew; `already_open` for the same seafarer), the
+  preview and the briefing (`shipOpen`), and the ships list (`open`, the page no longer decides) all read it; the database
+  backs the waiting part with `ux_audit_request_open_ship` (migrations/0037; 0030's per-seafarer index stays, implied by
+  it). The page shows the other seafarer "Waits for Kevin's audit" in the picker, and no Request button: "One audit at a
+  time per ship: file Kevin's, then ask A.J." + Open Kevin's request. A request whose documents are in is finished only by
+  Dexter filing it (cancel works while it is sent), so a seafarer who signs off before the visit holds the ship until
+  it is filed. Pinned by `test/audit_request.test.js`, `test/audit.test.js`, `test/audit_routes.test.js`.
 - **THE NAME AND THE MARK: Printshop Ops Audit** (Miguel, 20 Oct 2026: "change also the icon .. make it the right color and
   fit in the printshop audit .. call it Printshop Ops Audit", with a clipboard-and-check reference; Brain recvkcnJgTjcpcQtJ).
   `src/audit_brand.js` is the one definition: `AUDIT_NAME` / `AUDIT_SHORT` ("Ops Audit") and `markSvg` (the clipboard in

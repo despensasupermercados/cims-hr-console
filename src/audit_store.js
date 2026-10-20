@@ -37,6 +37,11 @@ export const AUDIT_DDL = [
   "CREATE INDEX IF NOT EXISTS idx_audit_followup_ship ON audit_followup (normalized_ship, status)",
   "CREATE TABLE IF NOT EXISTS audit_file (id TEXT PRIMARY KEY, request_id TEXT NOT NULL, step TEXT NOT NULL, client_key TEXT NOT NULL, r2_key TEXT NOT NULL, content_type TEXT, bytes INTEGER, taken_at TEXT, uploaded_at TEXT NOT NULL, uploaded_by TEXT, UNIQUE (request_id, client_key))",
   "CREATE TABLE IF NOT EXISTS audit_obp_at_count (request_id TEXT PRIMARY KEY, as_of TEXT, lines_json TEXT NOT NULL, intransit_json TEXT, at TEXT NOT NULL)",
+  // migrations/0037_audit_one_per_ship.sql (20 Oct 2026): ONE PERSON AT A TIME PER SHIP (Miguel: "we do 1 person at the time
+  // per ship"). A second request waiting on a ship is refused by the database too, for anyone; the per-seafarer index
+  // above is now implied by it and stays (0030 made it). "In and not graded" is open too: that is the SELECT's
+  // (src/audit.js OPEN_REQ_SQL), which an index condition cannot read.
+  "CREATE UNIQUE INDEX IF NOT EXISTS ux_audit_request_open_ship ON audit_request (normalized_ship) WHERE status IN ('draft','sent')",
 ];
 
 export async function ensureAuditTables(env) {

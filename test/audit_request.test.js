@@ -424,3 +424,52 @@ test("Dexter's page: a late error never replaces the screen moved on to, and a T
   assert.match(src, /if \(done && !d\.grade && !d\.test\) dock\(/);
   assert.match(src, /var bf = S\.brief\[ship \+ "\|" \+ sc\];/, "the request carries THIS seafarer's contract label");
 });
+
+// ONE PERSON AT A TIME PER SHIP (Miguel, 20 Oct 2026: "we do 1 person at the time per ship"). Kevin's request on Pursuit
+// (documents in, not graded) means A.J., aboard the same hull, is not asked until Kevin's is filed. One definition of an
+// open request (src/audit.js OPEN_REQ_SQL / isOpenRequest) for the create guard, the preview, the briefing and the ships list.
+test("one person at a time per ship: another seafarer's open request stops the next; the grade or a cancel frees the ship", async () => {
+  const t = setup({ live: true });
+  t.db.prepare("INSERT INTO crew VALUES ('SC-2','Aj','Balena','aj@gmail.com')").run();
+  const { id } = await makeRequest(t);
+  const prev = await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-2")).json();
+  assert.deepEqual(prev.shipOpen, { id, crew: "John Gorre", sc: "SC-1" }, "the preview names the seafarer whose request is open");
+  assert.equal((await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json()).shipOpen, null, "his own is not 'another'");
+  const busy = async () => { const r = await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-2" }); return [r.status, await r.json()]; };
+  let [st, b] = await busy();
+  assert.equal(st, 409); assert.equal(b.error, "ship_busy"); assert.equal(b.id, id); assert.equal(b.crew, "John Gorre");
+  assert.equal(t.sent.length, 1, "nothing was emailed for the second");
+  // documents in, not graded: still open
+  t.db.prepare("UPDATE audit_request SET status='complete', complete_at='2026-10-20T10:00:00Z' WHERE id=?").run(id);
+  [st, b] = await busy(); assert.equal(b.error, "ship_busy", "in and not graded is still open");
+  // the same seafarer again: his own request opens, never a second one
+  const own = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json();
+  assert.equal(own.error, "already_open"); assert.equal(own.id, id);
+  // graded: the ship is free
+  t.db.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, score, score_from, filed_by, filed_at) VALUES ('av_1',?,'SC-1','Oasis',4,4,4,4,'average','dexter','2026-10-20T12:00:00Z')").run(id);
+  const next = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-2" })).json();
+  assert.equal(next.ok, true, JSON.stringify(next));
+  // a cancel frees it too
+  await t.call("POST", "/api/audit/request/cancel", { id: next.id });
+  assert.equal((await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json()).ok, true);
+});
+
+test("one per ship: a TEST request is open while it waits and finished once in (it cannot be graded)", async () => {
+  const t = setup();
+  t.db.prepare("INSERT INTO crew VALUES ('SC-2','Aj','Balena','aj@gmail.com')").run();
+  const { id } = await makeRequest(t);
+  assert.equal((await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-2" })).json()).error, "ship_busy");
+  t.db.prepare("UPDATE audit_request SET status='complete' WHERE id=?").run(id);
+  assert.equal((await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-2" })).json()).ok, true);
+});
+
+test("one per ship in the database: two requests waiting on one ship cannot both be written, whoever they are for", () => {
+  const db = new DatabaseSync(":memory:");
+  for (const s of AUDIT_DDL) db.exec(s);
+  const ins = db.prepare("INSERT INTO audit_request (id, ship, normalized_ship, agency_id, auditor, status, created_at) VALUES (?, 'Pursuit', 'pursuit', ?, 'dexter', ?, '2026-10-20')");
+  ins.run("a", "SC-1", "sent");
+  assert.throws(() => ins.run("b", "SC-2", "draft"), /UNIQUE/);
+  ins.run("c", "SC-2", "cancelled");
+  ins.run("d", "SC-3", "complete");
+  db.prepare("INSERT INTO audit_request (id, ship, normalized_ship, agency_id, auditor, status, created_at) VALUES ('e', 'Apex', 'apex', 'SC-2', 'dexter', 'sent', '2026-10-20')").run();
+});
