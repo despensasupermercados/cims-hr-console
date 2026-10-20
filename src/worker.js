@@ -14,7 +14,7 @@ import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
-import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
+import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName, clientFromBill } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, sgaPeriodFromName, SGA_COL_KEYS } from "./sga.js";
 import { archiveKey, sourceRecord, safeName, SOURCE_COLS } from "./sga_archive.js";
 import * as XLSX from "xlsx";
@@ -1506,13 +1506,15 @@ async function apiTravel(env, url) {
   if (kind) { where.push("kind=?"); bind.push(kind); }
   if (where.length) sql += " WHERE " + where.join(" AND ");
   sql += " ORDER BY year DESC, month, crew_name";
-  const [rowsRes, yearsRes, crewRes, ackRes] = await Promise.all([
+  const [rowsRes, yearsRes, crewRes, ackRes, billRes] = await Promise.all([
     env.DB.prepare(sql).bind(...bind).all(),
     env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
     env.DB.prepare("SELECT key, label, ack_by, ack_at FROM travel_ack ORDER BY ack_at DESC").all().catch(() => ({ results: [] })),
+    // the brand TDG billed each person under, per month — the cruise line of a ledger row with no ship (clientFromBill)
+    env.DB.prepare("SELECT year, month, crew_name, brand FROM sga_line WHERE brand IS NOT NULL AND brand<>''").all().catch(() => ({ results: [] })),
   ]);
-  const records = annotateTravel(rowsRes.results, crewRes.results);
+  const records = clientFromBill(annotateTravel(rowsRes.results, crewRes.results), billRes.results || [], crewRes.results);
   const years = yearsRes.results.map(r => r.year);
   const today = TODAY(); // the DATA basis (UTC), like the dashboard — test/date_basis.test.js
   const closed = Object.fromEntries(years.map((y) => [y, closedMonths(today, y)]));
@@ -6484,6 +6486,9 @@ var TLBL={};    // key -> label (the registry's spelling when matched, else the 
 function tKey(r){return r.agency_id||r.crew_name;}
 function tLabel(r){return r.crew_display||r.crew_name;}
 var TCLIENT={royal:'Royal',celebrity:'Celebrity',azamara:'Azamara',ncl:'NCL',shoreside:'Shoreside'};
+// a crew row neither its ship nor TDG's bill places (clientFromBill) is 'none': listed as Not placed, never a guessed line
+function tvPlace(rs){return rs.map(function(r){if(!r.client&&(r.kind||'crew')!=='shoreside')r.client='none';return r;});}
+TCLIENT.none='Not placed';
 var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // THE TRAVEL TAB, REDESIGNED (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young, luxury
@@ -6498,7 +6503,7 @@ async function renderTravel(){
   $('#view').innerHTML='<div class=muted style="padding:18px 2px">Loading travel…</div>';
   try{ TRV=await cachedJson('/api/travel',travelRefresh); if(TRV&&TRV.error)throw new Error(TRV.error); }
   catch(e){ if(_g!==VIEW_GEN)return; $('#view').innerHTML='<div class="tvcard"><b>Could not load travel data.</b><div style="margin-top:10px"><button class="btn" onclick="renderTravel()">Retry</button></div></div>'; return; }
-  TRVALL=TRV.records||[];
+  TRVALL=tvPlace(TRV.records||[]);
   if(TRV.budgetMo)TBUD=TRV.budgetMo;
   // TDG's bill (the SGA, §10j) rides beside the workbook: the comparison and the Training centre view read it.
   if(_g!==VIEW_GEN)return;
@@ -6534,7 +6539,7 @@ function tYears(){
 function travelRefresh(){
   var e=API_CACHE['/api/travel'],sg=API_CACHE['/api/sga'];
   if(!e||!e.data||e.data.error||!document.getElementById('trrail')){renderTravel();return;}
-  TRV=e.data;TRVALL=TRV.records||[];if(TRV.budgetMo)TBUD=TRV.budgetMo;
+  TRV=e.data;TRVALL=tvPlace(TRV.records||[]);if(TRV.budgetMo)TBUD=TRV.budgetMo;
   if(sg&&sg.data&&!sg.data.error)SGA=sg.data;
   if(TF.year&&tYears().indexOf(+TF.year)<0)TF.year='';
   paintTravel();
@@ -6592,7 +6597,8 @@ function tvRail(){
       var scC=TRVALL.filter(function(r){return r.year===LYr&&(!TF.kind||kindOf(r)===TF.kind)&&kindOf(r)!=='shoreside'&&inPer(r)&&catOk(r);});
       var CLR={royal:'#1E6FD0',celebrity:'#16293D',azamara:'#8A5A00',ncl:'#2E9E5B'};
       h+='<div><div class=crlbl style="margin-bottom:6px">Cruise line</div>'+tvRow('client','','All cruise lines',null,!TF.client,true)
-        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);return tvRow('client',c,TCLIENT[c],tvK(a)||'$0',TF.client===c,true,CLR[c]);}).join('')+'</div>';
+        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);return tvRow('client',c,TCLIENT[c],tvK(a)||'$0',TF.client===c,true,CLR[c]);}).join('')
+        +(function(){var a=scC.filter(function(r){return r.client==='none';}).reduce(function(s,r){return s+val(r);},0);return a||TF.client==='none'?tvRow('client','none','Not placed',tvK(a)||'$0',TF.client==='none',true,'#B6C1CF'):'';})()+'</div>';
     }
   }
   el.innerHTML=h;

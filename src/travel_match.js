@@ -142,6 +142,37 @@ export function annotateTravel(records, crew) {
   });
 }
 
+// The cruise line of a ledger row that carries no ship (Miguel, 20 Oct 2026: "Use TDG's bill"). Every row Rita loaded
+// before 15 Oct 2026 has a NULL ship, so only NCL-tagged names had a line. TDG's bill names the brand for each person
+// and month: the same person on the bill that month (else the month before or after) under ONE brand gives the row
+// that brand, `client_src = "bill"`. Two brands, or nobody on the bill, leaves it null ("Not placed") — never a guess.
+// A ship on the row (a re-upload of Rita's workbook) always wins. `billLines`: { year, month, crew_name, brand }.
+export function clientFromBill(records, billLines, crew) {
+  const ix = buildCrewIndex(crew);
+  const memo = new Map();
+  const by = new Map(); // agency_id -> Map("y-m" -> Set(brand))
+  for (const l of billLines || []) {
+    if (!l || !l.brand || !l.crew_name) continue;
+    let m = memo.get(l.crew_name);
+    if (!m) { m = matchTravelName(l.crew_name, ix); memo.set(l.crew_name, m); }
+    if (!m.agency_id) continue;
+    const k = l.year + "-" + l.month;
+    if (!by.has(m.agency_id)) by.set(m.agency_id, new Map());
+    const mm = by.get(m.agency_id);
+    if (!mm.has(k)) mm.set(k, new Set());
+    mm.get(k).add(String(l.brand).toLowerCase());
+  }
+  const near = (y, mo, d) => { const t = y * 12 + (mo - 1) + d; return Math.floor(t / 12) + "-" + ((t % 12) + 1); };
+  return (records || []).map((r) => {
+    if (r.client || r.kind === "shoreside" || !r.agency_id || !by.has(r.agency_id)) return r;
+    const mm = by.get(r.agency_id);
+    const same = mm.get(near(r.year, r.month, 0));
+    let set = same;
+    if (!set) { set = new Set(); for (const d of [-1, 1]) for (const b of (mm.get(near(r.year, r.month, d)) || [])) set.add(b); }
+    return set && set.size === 1 ? { ...r, client: [...set][0], client_src: "bill" } : r;
+  });
+}
+
 // For the profile: every ledger row that belongs to this crew. The candidate rows are those whose folded surname
 // is within one typo of the crew's (the caller pre-filters by SQL on the first letters; this is the final word).
 export function travelRowsFor(records, crewRow, crew) {

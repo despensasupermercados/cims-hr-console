@@ -261,3 +261,13 @@ test("Cruise line lists all four lines, a line with nothing in the period at $0 
   p.run("TF.month='3';paintTravel()");
   assert.equal((p.rail().match(/data-tv="client" data-key="\w+"/g) || []).length, 4);
 });
+
+test("a crew row neither its ship nor TDG's bill places is listed as Not placed, never a guessed line", async () => {
+  const p = await openTravel();
+  p.run("TF.kind='crew';TF.client='';TF.cat='';TF.month='';paintTravel()");
+  assert.doesNotMatch(p.rail(), /Not placed/, "nothing unplaced: no row");
+  p.run("TRVALL.push(tvPlace([{year:2026,month:3,kind:'crew',client:null,air:777,total:777,crew_name:'Nobody, Ned',leg:'on'}])[0]);paintTravel()");
+  assert.match(p.rail(), /data-tv="client" data-key="none"[^>]*>.*?Not placed<\/span><span class=n>\$777</s);
+  p.run("TF.client='none';paintTravel()");
+  assert.match(p.body(), /\$777/, "picking it shows those rows");
+});
