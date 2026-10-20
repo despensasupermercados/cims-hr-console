@@ -22,8 +22,12 @@ export function defaultProjectionDates({ ship, legs, today, brand, addMonths, mo
   // Ship names meet case-insensitively: a Counter row's "navigator" is the vessel table's "Navigator".
   const key = (s) => String(s == null ? "" : s).trim().toLowerCase();
   const day = (s) => (/^\d{4}-\d{2}-\d{2}/.test(String(s || "")) ? String(s).slice(0, 10) : null);
+  // The printer still to be relieved (night watch, 20 Oct 2026, Pursuit): never a training visit (§10i — Jonathan teaching
+  // to 24 Oct dated the bench and the one-tap card), and never a contract a FILE ROW already relieves (Jugao, relieved by
+  // Baleña aboard since 16 Oct: his 31 Oct was a second relief for one seat) — that relief is aboard on its own leg, whose
+  // sign-off is the one to follow. A relief still only a card is left to the chain below, as before.
   const offs = (legs || [])
-    .filter((l) => l && l.is_current && l.ours && key(l.ship) === key(ship) && l.off && l.off >= today)
+    .filter((l) => l && l.is_current && l.ours && !l.visit && !(l.reliever && !l.reliever.cardId) && key(l.ship) === key(ship) && l.off && l.off >= today)
     .map((l) => l.off)
     .sort();
   const n = /azamara/i.test(String(brand || "")) ? azamaraMonths : months;

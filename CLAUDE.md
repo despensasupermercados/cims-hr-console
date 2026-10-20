@@ -351,7 +351,11 @@ in the review, Rita's decision per row, the rest of the file applies regardless:
   (the review may be removing the card it would follow). On the page an earmark already drawn no longer swallows the slot
   (`nextSlot`): the list while it fits as the third item, the plain "Add earmark · FROM <date> · N AVAILABLE" slot as the
   fourth, nothing past four cards; a seat held by a card (no TDG printer on the relief board) gets the slot too. The relief
-  panel's new earmark relieves the last in the chain (`lastInChain`). Pinned by `test/earmark_chain.test.js`.
+  panel's new earmark relieves the last in the chain (`lastInChain`). **The printer it follows is the one still to be
+  relieved** (night watch, 20 Oct 2026, Pursuit: Jonathan Alonzo teaching to 24 Oct dated the bench and the one-tap card;
+  without him it was Kevin Jugao's 31 Oct, a seat A.J. Baleña aboard since 16 Oct already holds): never a training visit,
+  never a contract a FILE ROW already relieves (`leg.reliever` without a card — the relief's own leg dates it); a relief
+  still only a card is the chain's, as before. Pinned by `test/earmark_chain.test.js`.
 - **The Keyman rail: Search, and a year / month filter that works** (same day: "I looked at picking a year and month .. I
   think there is an issue"; "instead of having a find ship .. I wanna just call it search .. by ship, by city .. by name").
   `legInFilter` compares ISO strings (it parsed dates as UTC and read them in local time: a contract ending Dec 1 missed
