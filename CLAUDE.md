@@ -1669,6 +1669,21 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   that day; anything else keeps the name as typed, unlinked, with why. On 20 Oct 2026: 52 imported, 39 placed, 13 not.
   **Never the Score Card**: the bonus reads `audit_eval` only; an audit from the survey counting there is a money change,
   Miguel's to make (pinned by `test/audit_forms.test.js`). The files stay in Miguel's OneDrive (the links need a DG3 sign-in).
+- **The 20 Oct 2026 corrections** (Miguel, looking at the live app). (1) **Aboard is the Keyman board's seat** ("this is
+  wrong.. look at the hr console", Grandeur read "Nobody aboard"): `aboardOf(sec)` in `src/audit.js` — TDG's On board seat,
+  TDG's Earmarked word for the hull a contract still runs on (`earmarkedHere`, Purnama on Xcel), and Rita's card past its
+  sign-on drawn "awaiting the TDG file" (Corpin on Grandeur, a projection with `awaiting`); the landing, the open-mode pass
+  and the request guard all read it. (2) **The briefing's "Audits of <ship>" reads the Forms survey too** (`audit_forms` by
+  hull, newest first, marked "Forms survey"); it said "The 61 Forms audits are not imported yet". (3) **No clean part life
+  without life rows** ("u didnt read the files correctly"): Kevin Jugao's Pursuit list read "No part past its rated life",
+  and the copy Miguel re-sent is pages 25–50 of the 52-page Machine Management List — the life % (p5, p7–15) is not in it.
+  `mmlReadState`: a machine list whose read carries no life row is `wrong_doc` ("No parts-life page was found … upload the
+  whole list"); the summary keeps `lifeRows`; the page says "Part life not read" for `lifeRead === false` (a read filed
+  before `lifeRows` was kept counts as not read), never "No part past its rated life". (4) **A Pattern 43 mark is said in
+  full** ("elaborate a bit more on the assessment"): `p43Lines` on the page — where (each page of the bundle), what it means
+  (one colour channel, not the belt or the scanner), what it points to (the DG3 tech library) and how to tell which on
+  board — every line from HON's measurement and the library's rule, nothing guessed. Pinned by `test/audit_routes.test.js`,
+  `test/audit_request.test.js`, `test/audit_visit.test.js`.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,
