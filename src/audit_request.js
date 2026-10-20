@@ -21,6 +21,7 @@ import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
 import { auditUploadHtml, auditClosedHtml } from "./audit_upload_ui.js";
 import { normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, PHOTO_STEPS, VISIT_VERSION } from "./audit_steps.js";
+import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
 
 export const LINK_DAYS = 14;
 export const RESEND_MIN = 15;             // a request is not re-sent sooner than this              // the upload page stays open this long after the request
@@ -654,10 +655,12 @@ export function installAuditRequest(deps) {
   async function history(env) {
     await ensureAudit(env);
     const NOT_TEST = "COALESCE(r.test_mode, 0) = 0";
-    const [ev, fu, ph] = await Promise.all([
+    const [ev, fu, ph, fm] = await Promise.all([
       env.DB.prepare("SELECT e.request_id, e.ship, e.agency_id, e.r_inventory, e.r_technical, e.r_collaterals, e.r_overall, e.score, e.score_from, e.filed_by, e.filed_at, r.crew_name, v.opened_at, d.data_json FROM audit_eval e JOIN audit_request r ON r.id = e.request_id LEFT JOIN audit_visit v ON v.id = e.visit_id LEFT JOIN audit_visit_data d ON d.request_id = e.request_id WHERE " + NOT_TEST + " ORDER BY e.filed_at DESC LIMIT 500").all(),
       env.DB.prepare("SELECT f.id, f.request_id, f.ship, f.agency_id, f.crew_name, f.owner, f.due, f.text, f.status, f.carried, f.created_by, f.created_at, f.closed_at, f.closed_by, f.closed_visit_id FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE " + NOT_TEST + " ORDER BY f.created_at DESC LIMIT 500").all(),
       env.DB.prepare("SELECT request_id, COUNT(*) AS n FROM audit_file GROUP BY request_id").all().catch(() => ({ results: [] })),
+      // the audits before the app (the Forms survey, src/audit_forms.js): read beside the filed ones, never scored
+      env.DB.prepare("SELECT * FROM audit_forms ORDER BY audit_date DESC").all().catch(() => ({ results: [] })),
     ]);
     const photos = new Map((ph.results || []).map((x) => [x.request_id, Number(x.n) || 0]));
     const fuOf = {};
@@ -681,7 +684,19 @@ export function installAuditRequest(deps) {
     });
     const followups = (fu.results || []).map((f) => ({ id: f.id, request: f.request_id, ship: f.ship, sc: f.agency_id, crew: f.crew_name || null, owner: f.owner, due: f.due || null, text: f.text,
       status: f.status, carried: Number(f.carried) || 0, createdAt: f.created_at, createdBy: f.created_by || null, closedAt: f.closed_at || null, closedBy: f.closed_by || null, closedOnVisit: !!f.closed_visit_id }));
-    return json({ today: now().slice(0, 10), audits, followups });
+    const forms = (fm.results || []).map((r) => formsHistoryRow(formsFromRow(r)));
+    const all = audits.concat(forms).sort((a, b) => String(b.filedAt || "").localeCompare(String(a.filedAt || "")));
+    return json(Object.assign({ today: now().slice(0, 10), audits: all, followups }, forms.length ? { forms: { n: forms.length, source: FORMS_SOURCE } } : {}));
+  }
+
+  // One audit from the Forms survey, as typed (History's row opens it). Read only; never scored.
+  async function formsOne(env, url) {
+    const id = String(url.searchParams.get("id") || "").slice(0, 40);
+    if (!/^forms-\d{1,4}$/.test(id)) return json({ ok: false, error: "id_required" }, 400);
+    await ensureAudit(env);
+    const r = await env.DB.prepare("SELECT * FROM audit_forms WHERE id=?").bind(id).first().catch(() => null);
+    if (!r) return json({ ok: false, error: "not_found" }, 404);
+    return json({ ok: true, today: now().slice(0, 10), source: FORMS_SOURCE, audit: formsFromRow(r) });
   }
 
   // A follow-up closed from the list: the person it was asked of did it before the next visit. The next visit's own
@@ -742,9 +757,10 @@ export function installAuditRequest(deps) {
       if (p === "/api/audit/visit/photo" && request.method === "GET") return servePhoto(env, url);
       return json({ error: "not found" }, 404);
     }
-    if (p === "/api/audit/history" || p === "/api/audit/followup/close") {
+    if (p === "/api/audit/history" || p === "/api/audit/followup/close" || p === "/api/audit/forms") {
       if (!session) return json({ error: "unauthorized" }, 401);
       if (p === "/api/audit/history" && request.method === "GET") return history(env);
+      if (p === "/api/audit/forms" && request.method === "GET") return formsOne(env, url);
       if (p === "/api/audit/followup/close" && request.method === "POST") return closeFollowup(request, env, session);
       return json({ error: "not found" }, 404);
     }

@@ -1183,7 +1183,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var fuOpen = H.followups.filter(function (f) { return f.status === "open"; }), fuLate = fuOpen.filter(function (f) { return f.due && f.due < today; });
     if (!H.audits.length || !list.length) {
       h += '<section class="card pad sec tight"><b class="h3">' + (H.audits.length ? "No audit filed in this period" : "No audit filed yet") + '</b><p class="txt">' + (H.audits.length ? "Pick another customer or period." : "An audit is filed from its request, once the crew&#8217;s documents are in and Dexter has been aboard. The first one lands here with its score.") + "</p>"
-        + '<div class="before line-t" style="padding-top:14px"><span class="chip n">Before the app</span><span class="txt">The 61 audits from the Forms survey join this page once they are imported.</span></div></section>';
+        + '<div class="before line-t" style="padding-top:14px"><span class="chip n">Before the app</span><span class="txt">' + formsLine(H) + "</span></div></section>";
       $("main").innerHTML = h; return;
     }
     // the numbers, read from the filed audits in view
@@ -1221,7 +1221,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     h += '<section class="sec"><div class="sec-hd"><h2 class="h2">Keeps coming back</h2><span class="sm">Missing at two audits or more</span></div><div class="card clip">'
       + (back.length ? back.map(function (e, i) { return '<div class="kb' + (i ? " line-t" : "") + '"><div><b>' + esc(labelOf(e.k)) + '</b><div class="sm">' + esc(e.grp) + '</div></div><div class="sm">' + esc(e.ships.join(", ")) + '</div><div class="hstack kb-c"><span class="chip a">' + e.ships.length + " audits</span>" + e.again.map(function (s) { return '<span class="chip r">' + esc(s) + " · again</span>"; }).join("") + "</div></div>"; }).join("")
         : '<div class="pad-m"><p class="sm">Nothing yet: no item missing at two audits in this view.</p></div>')
-      + '<div class="pad-m line-t soft before"><span class="chip n">Before the app</span><span class="txt">The 61 audits from the Forms survey join this page once they are imported.</span></div></div></section>';
+      + '<div class="pad-m line-t soft before"><span class="chip n">Before the app</span><span class="txt">' + formsLine(H) + "</span></div></div></section>";
     // the three areas, added up
     var sum = function (f) { return withF.reduce(function (s, a) { return s + (f(a.found) || 0); }, 0); };
     var cnt = function (f) { return withF.filter(function (a) { return f(a.found); }).length; };
@@ -1243,7 +1243,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools, a.missing.ppe || []) : null, fo = a.followups;
         var missT = miss == null ? "Graded before the audit had steps" : miss.length ? miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? ' <span class="chip r">' + esc(AR.ordinal(t)) + " time</span>" : ""); }).join("<br>") : "Nothing";
         var crewS = esc(a.crew || "");
-        return '<tr data-go="q=' + esc(a.id) + '"><td class="f-date">' + fmtD(a.filedAt) + '</td><td class="f-ship"><b>' + esc(a.ship) + '</b><div class="xs">' + esc(custName(custOfShip(a.ship))) + '<span class="m-inl"> · ' + fmtD(a.filedAt) + (crewS ? " · " + crewS : "") + '</span></div></td><td class="f-crew">' + crewS + '</td><td class="f-score"><span class="chip ' + (a.score <= 3 ? "r" : "g") + '">' + esc(a.score) + " / 5</span></td>"
+        return '<tr data-go="q=' + esc(a.id) + '"><td class="f-date">' + fmtD(a.filedAt) + (a.source === "forms" ? '<div class="xs">Forms survey</div>' : "") + '</td><td class="f-ship"><b>' + esc(a.ship) + '</b><div class="xs">' + esc(custName(custOfShip(a.ship))) + '<span class="m-inl"> · ' + fmtD(a.filedAt) + (crewS ? " · " + crewS : "") + '</span></div></td><td class="f-crew">' + crewS + '</td><td class="f-score"><span class="chip ' + (a.score <= 3 ? "r" : "g") + '">' + esc(a.score) + " / 5</span></td>"
           + '<td class="f-rates" data-l="Inv · Tech · Coll · Overall"><span class="rs4">' + rsq(R.inventory) + rsq(R.technical) + rsq(R.collaterals) + rsq(R.overall) + "</span></td>"
           + '<td class="f-miss sm" data-l="Missing">' + missT + "</td>"
           + '<td class="f-fu" data-l="Follow-ups">' + (fo.open ? '<span class="chip a">' + fo.open + " open</span>" : fo.fixed ? '<span class="sm">' + fo.fixed + " done</span>" : '<span class="sm">None</span>') + "</td>"
@@ -1321,6 +1321,49 @@ export const AUDIT_HTML = String.raw`<!doctype html>
      Nothing is recomputed but the counts the page adds up from the filed steps. */
   function ckl(kind, html) { return '<div class="ck"><span class="' + kind + '">' + ic(kind === "c" ? "b:check" : kind === "x" ? "b:x" : "b:exclamation-mark") + "</span><span>" + html + "</span></div>"; }
   function shd(n, title, sub, chip) { return '<div class="shd"><span class="num">' + n + '</span><div class="shd-t"><b class="h3">' + title + '</b><div class="sm">' + sub + "</div></div>" + (chip || "") + "</div>"; }
+  /* ---------------- The audits before the app: the Forms survey, Sep 2024 to Sep 2026 (src/audit_forms.js) ---------------- */
+  function formsLine(H) {
+    return H.forms ? H.forms.n + " audits from the Forms survey, Sep 2024 to Sep 2026, are read here beside the app&#8217;s, each marked Forms survey. Kept as typed; none of them reaches the Score Card."
+      : "The audits from the Forms survey join this page once they are imported.";
+  }
+  function formsView(id) {
+    chrome("hist"); dock("");
+    $("main").innerHTML = skel(4);
+    var key = "f" + id; S.view = key;
+    withShips(api("/api/audit/forms?id=" + encodeURIComponent(id))).then(function (r) {
+      if (S.view !== key) return;
+      var a = r.audit, R = a.ratings || {}, N = a.notes || {}, sh = (S.ships || []).filter(function (x) { return x.ship === a.ship; })[0] || {};
+      var lo = a.score != null && a.score <= 3, who = a.sc ? esc(a.crew) : a.crewRaw ? esc(a.crewRaw) : "No name on the form";
+      var why = a.scoreFrom === "overall" ? "The Overall rating Dexter gave" : "Overall not given: the average of inventory, technical and collaterals, rounded down";
+      var links = '<div class="links line-t">' + (a.sc ? '<a class="arrow" href="https://cims.work/#crew/' + esc(encodeURIComponent(a.sc)) + '" target="_blank" rel="noopener">' + esc(first(a.crew)) + "&#8217;s profile in the HR console" + ic("arrow-right") + "</a>" : "")
+        + '<button type="button" class="arrow" data-go="hist">Every audit' + ic("arrow-right") + "</button></div>";
+      var h = '<section class="split hero">' + head({ back: ["hist", "History"], eyebrow: "Forms survey" + (brandOf(sh) ? " · " + brandOf(sh) : ""), title: esc(a.ship), lead: who + ". Audited " + fmtD(a.date, true) + ", filed by Dexter on the Forms survey, before the app.", more: links })
+        + '<aside class="navy sec"><div class="hstack" style="gap:18px;flex-wrap:nowrap"><div class="ring big' + (lo ? " lo" : "") + '"><b class="h">' + (a.score == null ? "–" : esc(a.score)) + '</b><span class="of">/5</span></div><div class="sec tight"><b class="h3">' + (a.score == null ? "No score" : "Score " + esc(a.score) + " of 5") + '</b><span class="sm">' + why + "</span></div></div>"
+        + '<div class="fourr">' + RT.map(function (t) { var x = R[t[0]]; return '<div><b class="h"' + (x == null ? ' style="color:#9FB2C8"' : x <= 3 ? ' style="color:#F2A99D"' : "") + ">" + (x == null ? "–" : esc(x)) + "</b><span>" + t[1] + "</span></div>"; }).join("") + "</div>"
+        + (R.dispatch != null ? '<p class="xs line-w">Dispatch, for Rita: ' + esc(R.dispatch) + " / 5 · TDG&#8217;s travel, never part of this score</p>" : "") + "</aside></section>";
+      // who it is on: placed by the rule in src/audit_forms.js, or the name as typed and why it is not placed
+      if (!a.sc) h += '<section class="help"><span class="chip n">Not linked to a crew</span><div class="t"><b class="h4">' + (a.crewRaw ? "Typed on the form: " + esc(a.crewRaw) : "No name on the form") + '</b><span class="sm">' + esc(a.placedWhy ? a.placedWhy.charAt(0).toUpperCase() + a.placedWhy.slice(1) : "") + ". The import never guesses who an audit is on.</span></div></section>";
+      // Dexter's words, as he typed them
+      var said = [["Inventory", N.inventory], ["Technical", N.technical], ["Customer collaterals", N.collaterals], ["Dispatch and arrival", N.dispatch], ["Overall", N.feedback]].filter(function (x) { return x[1]; });
+      h += '<section class="card clip">' + shd(1, "What Dexter wrote", "His words on the form, as typed", "") + '<div class="sbody">'
+        + (said.length ? said.map(function (x) { return '<div class="q"><b>' + x[0] + '</b><span class="txt">' + esc(x[1]) + "</span></div>"; }).join("") : '<p class="sm">No words beside the ratings.</p>') + "</div></section>";
+      // the desk and the tools: missing against what the form offered that day
+      var dm = a.deskMissing, tl = a.tools;
+      var b2 = (dm == null ? '<p class="sm">The desk was not answered.</p>' : dm.length ? dm.map(function (k) { return ckl("x", "<b>" + esc(labelOf(k)) + "</b>"); }).join("") : ckl("c", "Everything the form asked about was on the desk"))
+        + (a.labels == null ? "" : ckl(a.labels ? "c" : "x", a.labels ? "Hardware labeled" : "<b>Hardware not labeled</b>"))
+        + (tl == null ? '<p class="sm">Tools not on inventory: none listed.</p>' : tl.length ? tl.map(function (k) { return ckl("x", "<b>" + esc(labelOf(k)) + "</b> " + '<span class="sm">not on inventory</span>'); }).join("") : ckl("c", "Every tool on inventory"));
+      h += '<section class="card clip">' + shd(2, "Desk &amp; tools", "DG3 folder, OneNote, bookmarks, labels, the tool list", (dm && dm.length) || (tl && tl.length) ? '<span class="chip r">' + ((dm || []).length + (tl || []).length) + " missing</span>" : '<span class="chip g">All present</span>') + '<div class="sbody">' + b2 + "</div></section>";
+      // the shelf and the presses, as the form asked them
+      var b3 = [["OBP count", N.obp], ["Repair items not in OBP", N.repair]].filter(function (x) { return x[1]; }).map(function (x) { return '<div class="q"><b>' + x[0] + '</b><span class="txt">' + esc(x[1]) + "</span></div>"; }).join("")
+        + ((a.checks || []).length ? '<div class="q"><b>Machine checks run</b><span class="txt">' + esc(a.checks.join(" · ")) + "</span></div>" : "");
+      if (b3) h += '<section class="card clip">' + shd(3, "Inventory &amp; machines", "What the form asked about the shelf and the presses", "") + '<div class="sbody">' + b3 + "</div></section>";
+      var fl = a.files || [];
+      if (fl.length) h += '<section class="card pad sec tight"><b class="h3">' + one(fl.length, "file") + ' on the form</b><p class="sm">Kept in Miguel&#8217;s OneDrive (Microsoft Forms); opening one needs a DG3 sign-in.</p>'
+        + fl.map(function (u) { var n = decodeURIComponent(String(u).split("/").pop() || "file"); return '<a class="arrow" style="max-width:100%" href="' + esc(u) + '" target="_blank" rel="noopener"><span style="min-width:0;overflow-wrap:anywhere">' + esc(n) + "</span>" + ic("arrow-right") + "</a>"; }).join("") + "</section>";
+      h += '<p class="xs" style="margin:0">' + esc(r.source) + " · form " + esc(a.form) + (a.shipRaw && a.shipRaw !== a.ship ? " · ship typed &#8220;" + esc(a.shipRaw) + "&#8221;" : "") + (a.contracts ? " · contracts at DG3, as typed: " + esc(a.contracts) : "") + "</p>";
+      $("main").innerHTML = h;
+    }).catch(function (e) { if (S.view === key) fail(e); });
+  }
   function reportView(d, key) {
     api("/api/audit/visit?id=" + encodeURIComponent(d.id)).then(function (v) {
       if (S.view !== key) return;
@@ -1423,6 +1466,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (h.indexOf("s=") === 0) return shipView(h.slice(2));
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }
+    if (h.indexOf("q=forms-") === 0) return formsView(h.slice(2));
     if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
     if (h.indexOf("a=") === 0) { var p3 = h.slice(2).split("|"); lsSet("aud:s:" + p3[0], Math.max(1, Number(p3[1]) || 1)); return stepView(p3[0], p3[1]); }
     /* the 15 Oct grade screen is the audit's Ratings step now: an old link opens the audit */

@@ -42,6 +42,10 @@ export const AUDIT_DDL = [
   // above is now implied by it and stays (0030 made it). "In and not graded" is open too: that is the SELECT's
   // (src/audit.js OPEN_REQ_SQL), which an index condition cannot read.
   "CREATE UNIQUE INDEX IF NOT EXISTS ux_audit_request_open_ship ON audit_request (normalized_ship) WHERE status IN ('draft','sent')",
+  // migrations/0039_audit_forms.sql (20 Oct 2026): the audits before the app, from the Forms survey (src/audit_forms.js).
+  // History only, kept as typed: the Score Card reads audit_eval and never this table (§1).
+  "CREATE TABLE IF NOT EXISTS audit_forms (id TEXT PRIMARY KEY, form_no INTEGER NOT NULL UNIQUE, audit_date TEXT NOT NULL, ship TEXT NOT NULL, normalized_ship TEXT NOT NULL, ship_raw TEXT, crew_raw TEXT, agency_id TEXT, crew_name TEXT, placed TEXT NOT NULL, placed_why TEXT, contracts_raw TEXT, r_inventory INTEGER, r_technical INTEGER, r_collaterals INTEGER, r_dispatch INTEGER, r_overall INTEGER, score INTEGER, score_from TEXT, notes_json TEXT, labels INTEGER, desk_missing_json TEXT, tools_json TEXT, checks_json TEXT, files_json TEXT, started_raw TEXT, completed_raw TEXT, imported_at TEXT NOT NULL, imported_by TEXT NOT NULL)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_forms_ship ON audit_forms (normalized_ship, audit_date)",
 ];
 
 export async function ensureAuditTables(env) {
