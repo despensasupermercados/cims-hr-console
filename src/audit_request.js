@@ -121,7 +121,10 @@ export function installAuditRequest(deps) {
       to: live ? addr.to : [session.email], cc: live && !session.open ? addr.cc : [], shown: addr.shown, noPersonal: !!addr.noPersonal, blocked: addr.ok ? null : addr.reason,
       machines: H && H.ok ? H.presses : null, lines: H && H.ok && H.obp ? blindLines(H.obp.lines).length : null, obpAsOf: H && H.obp ? H.obp.asOf : null,
       hon: !!(H && H.ok), honError: H && !H.ok ? H.error : (H ? null : "HON did not answer"),
-      dueAt: plusHours(now(), REQUEST_HOURS), open: open || null,
+      dueAt: plusHours(now(), REQUEST_HOURS), remindAt: REMIND_HOURS, open: open || null,
+      // who is copied and who replies, by name (the addresses stay off the open site): the first of AUDIT_REQUEST_CC
+      // takes the replies when live, the auditor in test mode (sendRequest)
+      copyNames: live ? csv(env.AUDIT_REQUEST_CC).map(nameOf) : [], replyTo: nameOf(live ? (csv(env.AUDIT_REQUEST_CC)[0] || session.email) : session.email),
       // one person at a time per ship: another seafarer's request still open on this ship (Miguel, 20 Oct 2026)
       shipOpen: onShip && onShip.agency_id !== sc ? { id: onShip.id, crew: onShip.crew_name, sc: onShip.agency_id } : null,
     });

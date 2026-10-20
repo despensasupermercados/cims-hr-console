@@ -10123,7 +10123,9 @@ function mClose(){$('#modalRoot').innerHTML='';}
 // started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
 function tgFlip(id){var c=document.getElementById(id);if(!c)return;if(typeof _TOUCHED==='object')_TOUCHED[id]=1;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
 try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
-show(tabFromHash());
+// A LINK TO ONE SEAFARER (20 Oct 2026, the audit briefing's "Open the profile"): cims.work/#crew/SC-0039935 opens the Crew
+// tab, then that profile. Any other hash is a tab, as before.
+(function(){var m=/^#crew\\/(SC-[A-Za-z0-9-]+)$/.exec(String(location.hash||''));if(m)show('crew').then(function(){openCrew(m[1]);});else show(tabFromHash());})();
 prefetchTabs(1200);
 </script>
 <div id=modalRoot></div></body></html>`;

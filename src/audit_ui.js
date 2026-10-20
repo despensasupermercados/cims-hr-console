@@ -79,6 +79,12 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (d < 0) { m--; var ay = +a.slice(0, 4), am = +a.slice(5, 7) - 1 + m, ad = Math.min(+a.slice(8, 10), new Date(Date.UTC(ay, am + 1, 0)).getUTCDate()); d = Math.round((Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10)) - Date.UTC(ay, am, ad)) / 864e5); }
     return m ? m + " mo" + (d ? " " + d + " d" : "") : d + " d";
   }
+  /* how long something took between two instants: hours and minutes inside a day, else months and days (never a day count) */
+  function took(a, b) {
+    var ms = Date.parse(b) - Date.parse(a); if (isNaN(ms) || ms < 0) return "";
+    if (ms < 864e5) { var h = Math.floor(ms / 36e5), mi = Math.round((ms % 36e5) / 6e4); return h ? h + (h === 1 ? " hour" : " hours") + (mi ? " " + mi + (mi === 1 ? " minute" : " minutes") : "") : Math.max(1, mi) + (mi === 1 ? " minute" : " minutes"); }
+    return md(a, b);
+  }
   function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }
   function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
   function left(v) { var ms = Date.parse(v) - Date.now(); if (isNaN(ms)) return ""; if (ms <= 0) return "past due"; var h = Math.floor(ms / 3600000); return h >= 1 ? h + " h left" : Math.max(1, Math.round(ms / 60000)) + " min left"; }
@@ -165,7 +171,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (r.grade != null) return '<span class="chip ' + (r.grade <= 3 ? "r" : "g") + '">Score ' + esc(r.grade) + "/5</span>";
     if (r.status === "complete") return '<span class="chip n">Documents in</span>';
     if (r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()))) return '<span class="chip r">Past the deadline</span>';
-    if (r.status === "sent") return '<span class="chip n">Waiting · ' + esc(left(r.due)) + "</span>";
+    if (r.status === "sent") return '<span class="chip n">Waiting' + (r.due ? " · " + esc(left(r.due)) : "") + "</span>";
     if (r.status === "draft") return '<span class="chip m">Being sent</span>';
     return "";
   }
@@ -206,7 +212,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var s = list[0], r = s.last, fn = esc(first(r.crew)), c = (s.aboard || []).filter(function (x) { return x.sc === r.sc; })[0];
     var late = r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()));
     var title = r.status === "complete" ? esc(s.ship) + " is ready for the visit" : late ? fn + " has not sent everything" : r.status === "sent" ? "Waiting on " + fn + "'s documents" : esc(s.ship) + ": the request is being sent";
-    var sameDay = r.in && r.sent && r.in === r.sent, gap = r.in && r.sent ? md(r.sent, r.in) : "";
+    var sameDay = false, gap = r.in && r.sent ? took(r.sent, r.in) : "";
     var leadT = r.status === "complete" ? esc(r.crew) + " sent everything" + (r.in ? " on " + fmtD(r.in) : "") + (sameDay ? ", the day it was asked." : gap ? ", " + esc(gap) + " after it was asked." : ".") + (c && c.signOff ? " The contract ends " + fmtD(c.signOff) + (md(S.today, c.signOff) ? ", in " + esc(md(S.today, c.signOff)) : "") + "." : "")
       : r.status === "sent" ? "Asked " + fmtD(r.sent || r.at) + "." + (r.due ? (late ? " The deadline passed " + esc(whenUtc(r.due)) + "." : " Due " + esc(whenUtc(r.due)) + ", " + esc(left(r.due)) + ".") : "") : "";
     var cta = r.status === "complete"
@@ -277,58 +283,39 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     location.replace("#b=" + encodeURIComponent(s.ship) + "|" + encodeURIComponent(c.sc));
   }
 
-  /* ---------------- A2 · The briefing ---------------- */
-  var KIND = { feedback: "Feedback", intel: "Field intel", review: "Shipboard review", note: "Note", comment: "Comment" };
+  /* ---------------- A2 · The briefing (canvas board "Briefing") ----------------
+     Whose contract (two aboard: pick one, an audit belongs to one contract), where the request stands, the contract in
+     four numbers and its relay, what others said, the rush orders, the ship's audits and its open follow-ups. */
+  var KIND = { feedback: "Feedback", intel: "Field report", review: "Shipboard review", note: "Note", comment: "Comment", audit: "Audit" };
+  var OFF_SRC = { tdg: "TDG's date", rita: "Rita's date", card: "the reliever's sign-on", projected: "projected" };
   /* ONE PERSON AT A TIME PER SHIP (Miguel, 20 Oct 2026: "we do 1 person at the time per ship"): while another seafarer's
      request is open on this ship, there is no Request button, only the way to it */
   function stop(t) { return /[.!?]$/.test(t) ? t : t + "."; } /* "A.J." ends its own sentence */
+  function busyLine(openCrew, crew) { return "One audit at a time per ship: file " + esc(first(openCrew)) + "'s, then ask " + esc(stop(first(crew))); }
   function shipBusy(ship, openCrew, crew, id) {
-    return '<div class="note" style="margin:0 0 10px">One audit at a time per ship: file ' + esc(first(openCrew)) + "'s, then ask " + esc(stop(first(crew))) + "</div>"
-      + '<button class="btn" data-go="q=' + esc(id) + '">' + ic("hourglass-medium") + "Open " + esc(first(openCrew)) + "'s request</button>";
+    return '<button type="button" class="btn pri" data-go="q=' + esc(id) + '">Open ' + esc(first(openCrew)) + "'s request</button>" + '<div class="note">' + busyLine(openCrew, crew) + "</div>";
   }
-  function shipBusyCard(ship, openCrew) {
-    return '<div class="card"><div class="empty">' + ic("hourglass-medium") + "<span>" + esc(first(openCrew)) + "'s request is still open on " + esc(ship) + ".</span></div></div>";
+  function shipBusyCard(ship, openCrew, crew, id) {
+    return '<section class="navy sec"><span class="eyebrow">One audit at a time per ship</span><h2 class="h3">' + esc(first(crew)) + " waits for " + esc(first(openCrew)) + "'s audit</h2>"
+      + '<p class="sm">' + esc(first(openCrew)) + "'s request on " + esc(ship) + " is still open. File " + esc(first(openCrew)) + "'s, then ask " + esc(first(crew)) + " in a separate request.</p>"
+      + '<div class="cta"><button type="button" class="btn white" data-go="q=' + esc(id) + '">Open ' + esc(first(openCrew)) + "'s request</button></div></section>";
   }
-  function needCard(fn, machines, lines) {
-    var q = function (v) { return v == null ? "" : '<span class="q">' + esc(v) + "</span>"; };
-    return '<div class="card"><div class="ch">' + ic("list-checks") + "What " + esc(fn) + ' sends before you arrive</div>' +
-      '<div class="need"><span class="ib">' + ic("printer") + '</span><div class="tx"><div class="t">Pattern 43</div><div class="s">12 pages, one per machine</div></div>' + q(machines) + "</div>" +
-      '<div class="need"><span class="ib">' + ic("files") + '</span><div class="tx"><div class="t">Machine Management List</div><div class="s">The long report with the life %, one per machine</div></div>' + q(machines) + "</div>" +
-      '<div class="need"><span class="ib">' + ic("package") + '</span><div class="tx"><div class="t">Blind count</div><div class="s">Every OBP part, counted without seeing the system</div></div>' + q(lines) + "</div>" +
-      '<div class="foot">' + ic("lock-simple") + "<span>The audit opens only when all of it is in. 24 hours to upload.</span></div></div>";
+  /* where a request stands, as a list of steps: asked, due (or documents in), the audit on board, filed */
+  function reqSteps(o) {
+    var st = function (cls, dot, t) { return '<div class="ck' + (cls ? " " + cls : "") + '"><span class="' + dot + '">' + (dot === "c" ? ic("b:check") : "") + "</span><span>" + t + "</span></div>"; };
+    var asked = st("", "c", "Asked" + (o.asked ? " · " + fmtD(o.asked) : ""));
+    if (o.graded) return asked + st("", "c", "Documents in" + (o.inAt ? " · " + fmtD(o.inAt) : "")) + st("", "c", "Audit on board") + st("", "c", "Filed" + (o.gradedAt ? " · " + fmtD(o.gradedAt) : "") + (o.score != null ? " · " + esc(o.score) + "/5" : ""));
+    if (o.status === "complete") return asked + st("", "c", "Documents in" + (o.inAt ? " · " + fmtD(o.inAt) : "")) + st("cur", "o on", "Audit on board") + st("todo", "o", "Filed");
+    if (o.status === "draft") return st("cur", "o on", "Being sent") + st("todo", "o", "Documents in") + st("todo", "o", "Audit on board") + st("todo", "o", "Filed");
+    return asked + (o.late ? st("bad", "o red", "Due " + (o.due ? fmtD(o.due) + " · " : "") + "passed") : st("cur", "o on", o.due ? "Due " + esc(whenUtc(o.due)) + " · " + esc(left(o.due)) : "Waiting for the documents"))
+      + st("todo", "o", "Documents in") + st("todo", "o", "Audit on board") + st("todo", "o", "Filed");
   }
-  /* Rush orders this contract (src/rush_orders.js): what the order portal tagged as a MISS on this ship while he was
-     aboard, and what it cost. A vessel-side miss says whose it is, by the Score Card's own rule. No read = no card. */
-  var RUSH_IC = { vessel: "f:warning-circle", equipment: "wrench", shore: "anchor" };
-  function usd(v) { var n = Number(v) || 0; return n > 0 && n < 1 ? "<$1" : "$" + Math.round(n).toLocaleString("en-US"); }
-  function rushCard(r, ship, who) {
-    if (!r || !r.from) return "";
-    var h = '<div class="card rush"><div class="ch">' + ic("truck") + "Rush orders this contract" + (r.count ? '<span class="r">' + usd(r.total) + "</span>" : "") + "</div>";
-    if (!r.count) {
-      h += '<div class="need"><span class="ib g">' + ic("f:check-circle") + '</span><div class="tx"><div class="t">None</div><div class="s">No order tagged as a miss for ' + esc(ship) + " since " + fmtD(r.from) + ".</div></div></div>";
-    } else {
-      h += '<div class="facts"><div><b>' + r.count + "</b><span>" + (r.count === 1 ? "rush order" : "rush orders") + "</span></div><div><b>" + usd(r.rush) + "</b><span>freight &amp; customs</span></div>" +
-        '<div' + (r.his.count ? ' class="bad"' : "") + "><b>" + r.his.count + "</b><span>charged to " + esc(who) + "</span></div></div>";
-      r.orders.forEach(function (o) {
-        var names = o.items.map(function (i) { return i.name; });
-        var what = (names[0] || "Parts") + (names.length > 1 ? " +" + (names.length - 1) : "");
-        var tag = o.reason === "vessel" ? (o.his === true ? '<b class="rd">' + esc(o.tag) + "</b>" : o.his === null ? '<b class="am">' + esc(o.tag) + "</b>" : esc(o.tag)) : esc(o.tag);
-        h += '<details><summary class="need"><span class="ib ' + (o.reason === "vessel" && o.his ? "r" : "") + '">' + ic(RUSH_IC[o.reason] || "truck") + '</span><div class="tx"><div class="t">' + fmtD(o.at) + " · " + esc(what) + '</div><div class="s">' + tag + "</div></div>" + '<span class="q">' + usd(o.total) + "</span>" + ic("caret-right", "go") + "</summary>";
-        if (o.reason === "vessel") {
-          var v = o.his === true ? '<b class="rd">' + esc(who) + "&#8217;s miss</b>" + (o.why ? " · " + esc(o.why) : "")
-            : o.his === false ? "Another crew&#8217;s miss" + (o.owner ? ": " + esc(o.owner) : "") + (o.why ? " · " + esc(o.why) : "")
-            : '<b class="am">Check whose miss it is</b>';
-          h += '<div class="it vd"><span class="n">' + v + "</span></div>";
-        }
-        if (o.by) h += '<div class="it"><span class="n">Placed by ' + esc(o.by) + "</span></div>";
-        if (o.note) h += '<div class="it"><span class="n">&#8220;' + esc(o.note) + "&#8221;</span></div>";
-        o.items.forEach(function (i) { h += '<div class="it"><span class="n">' + esc(i.name) + '</span><span class="v">' + esc(i.qty) + " · " + usd(i.value) + "</span></div>"; });
-        if (o.rush > 0) h += '<div class="it"><span class="n">Freight &amp; customs</span><span class="v">' + usd(o.rush) + "</span></div>";
-        h += '<div class="it ref"><span class="n mono">' + esc(o.ref) + "</span></div></details>";
-      });
-    }
-    h += '<div class="foot">' + ic("clock") + "<span>Orders tagged as a miss on the order portal for " + esc(ship) + ", " + fmtD(r.from) + " to " + (r.to ? fmtD(r.to) : "today") + ". Totals include freight and customs.</span></div></div>";
-    return h;
+  function lateOf(r) { return r.status === "sent" && (!!r.overdue || (r.due && Date.parse(r.due) < Date.now())); }
+  function slotChip(s) {
+    if (s.state === "answered") return '<span class="chip g">Answered' + (s.at ? " " + fmtD(s.at) : "") + "</span>";
+    if (s.state === "pending") return '<span class="chip n">Asked' + (s.at ? " " + fmtD(s.at) : "") + "</span>";
+    if (s.state === "na") return '<span class="chip m">Not applicable</span>';
+    return '<span class="chip m">Not asked</span>';
   }
   /* the stored field-intel summary ("• Summary: … • What happened: …"), one labelled paragraph per bullet */
   function fullReport(t) {
@@ -337,156 +324,315 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       return "<p>" + (m ? "<b>" + esc(m[1]) + ".</b> " + esc(m[2]) : esc(x)) + "</p>";
     }).join("");
   }
+  function feedRow(f, i) {
+    var others = f.others || [], n = others.length + 1;
+    var dates = others.map(function (o) { return fmtD(o.at); }).filter(Boolean);
+    var chips = '<span class="chip ' + (f.kind === "intel" ? "n" : "m") + '">' + esc(KIND[f.kind] || f.kind) + "</span>" + (others.length ? '<span class="chip m">' + n + " reports · one incident</span>" : "") + (f.rating != null ? '<span class="chip m">' + esc(f.rating) + "/5</span>" : "");
+    var more = others.map(function (o) { return '<p class="also">Also reported' + (o.who ? " by " + esc(o.who) : "") + (o.at ? " · " + fmtD(o.at, true) : "") + "</p>" + fullReport(o.full); }).join("");
+    var hasFull = (f.full && f.full.trim() !== String(f.text || "").trim()) || more;
+    return '<div class="feed' + (i ? " line-t" : "") + '"><div class="fd-date"><b class="h4">' + (fmtD(f.at) || "No date") + "</b>" + (dates.length ? '<span class="xs">and ' + dates.join(", ") + "</span>" : "") + "</div>"
+      + '<div class="sec tight"><div class="hstack"><b>' + esc(f.who || "Not named") + "</b>" + chips + "</div>" + '<p class="txt">' + esc(f.text) + "</p>"
+      + (hasFull ? '<details class="rd"><summary class="ul"><span class="o1">' + (others.length ? (n === 2 ? "Read both reports" : "Read all " + n + " reports") : "Read the full report") + '</span><span class="o2">Hide the report' + (others.length ? "s" : "") + '</span></summary><div class="full">' + fullReport(f.full) + more + "</div></details>" : "")
+      + "</div></div>";
+  }
+  function rushOrders(r, who) {
+    if (!r || !r.count) return "";
+    var rows = r.orders.map(function (o) {
+      var names = o.items.map(function (i) { return i.name; }), what = (names[0] || "Parts") + (names.length > 1 ? " +" + (names.length - 1) : "");
+      var whose = o.reason !== "vessel" ? '<span class="chip m">' + esc(o.tag) + "</span>"
+        : o.his === true ? '<span class="chip r">' + esc(who) + "&#8217;s miss</span>" + (o.why ? '<div class="xs">' + esc(o.why) + "</div>" : "")
+        : o.his === false ? '<span class="chip m">Another crew&#8217;s miss</span>' + (o.owner || o.why ? '<div class="xs">' + esc([o.owner, o.why].filter(Boolean).join(" · ")) + "</div>" : "")
+        : '<span class="chip a">Check whose miss it is</span>';
+      return '<tr><td data-l="Ordered">' + fmtD(o.at) + '</td><td class="full" data-l="Parts"><b>' + esc(what) + '</b><div class="xs">' + esc([o.ref, o.by ? "placed by " + o.by : ""].filter(Boolean).join(" · ")) + "</div>" + (o.note ? '<div class="xs">&#8220;' + esc(o.note) + "&#8221;</div>" : "") + '</td><td class="full" data-l="Tag">' + (o.reason === "vessel" ? '<div class="xs" style="margin-bottom:4px">' + esc(o.tag) + "</div>" : "") + whose + '</td><td class="n" data-l="Total">' + usd(o.total) + (o.rush > 0 ? '<div class="xs">' + usd(o.rush) + " freight &amp; customs</div>" : "") + "</td></tr>";
+    }).join("");
+    return '<section class="card clip"><div class="pad-m sec-hd"><h2 class="h3">Rush orders this contract</h2><span class="sm">Tagged as a miss on the order portal · ' + fmtD(r.from) + " to " + (r.to ? fmtD(r.to) : "today") + "</span></div>"
+      + '<table class="tbl cards line-t"><thead><tr><th>Ordered</th><th>Parts</th><th>Tag</th><th class="n">Total</th></tr></thead><tbody>' + rows + "</tbody></table></section>";
+  }
+  function usd(v) { var n = Number(v) || 0; return n > 0 && n < 1 ? "&lt;$1" : "$" + Math.round(n).toLocaleString("en-US"); }
+  function briefAside(b, ship, sc, mine) {
+    var fn = esc(first(b.crew.name));
+    if (b.shipOpen) return shipBusyCard(ship, b.shipOpen.crew, b.crew.name, b.shipOpen.id);
+    if (mine) {
+      var late = lateOf(mine);
+      var tag = mine.grade != null ? "Audited this contract" : mine.status === "complete" ? "Documents in" : late ? "Past the deadline" : mine.status === "draft" ? "Being sent" : "Waiting on " + fn;
+      var t = mine.grade != null ? "Score " + esc(mine.grade) + "/5" : mine.status === "complete" ? "Ready for the visit" : late ? fn + " has not sent everything" : "The request is out";
+      var cta = mine.grade != null ? '<button type="button" class="btn white" data-go="q=' + esc(mine.id) + '">Open the audit</button>'
+        : mine.status === "complete" ? '<div class="cta hide-m"><button type="button" class="btn green" data-go="a=' + esc(mine.id) + '|1">Start the audit</button><button type="button" class="btn white" data-go="q=' + esc(mine.id) + '">Read the documents</button></div><button type="button" class="arrow only-m" data-go="q=' + esc(mine.id) + '">Read the documents' + ic("arrow-right") + "</button>"
+        : '<div class="cta"><button type="button" class="btn white" data-go="q=' + esc(mine.id) + '">Open the request</button></div>';
+      return '<section class="navy sec"><span class="eyebrow">' + tag + '</span><h2 class="h3">' + t + '</h2><div class="sec tight">'
+        + reqSteps({ asked: mine.at, status: mine.status, late: late, due: mine.due, inAt: mine.complete, graded: mine.grade != null, gradedAt: mine.gradedAt, score: mine.grade }) + "</div>" + cta + "</section>";
+    }
+    return '<section class="navy sec"><span class="eyebrow">The audit</span><h2 class="h3">Ask ' + fn + " for the documents</h2>"
+      + '<p class="sm">Pattern 43 and the Machine Management List from each press, and a blind count of every OBP line. 24 hours to send them; the audit opens once everything is in.</p>'
+      + '<div class="cta hide-m"><button type="button" class="btn green" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">Request the documents</button></div></section>';
+  }
+  /* a screen opened straight from a link reads the ships list too (the brand, who is aboard): one wave, never a wait for ever */
+  function withShips(p) { return S.ships ? p : Promise.all([p, api("/api/audit/ships").then(function (r) { if (!S.ships) { S.ships = r.ships; S.today = S.today || r.today; S.counts = r.counts || S.counts; keepShips(r); } }).catch(function () {})]).then(function (x) { return x[0]; }); }
   function briefView(ship, sc) {
-    top(ship, "Loading the briefing", "", "", true); hero(""); dock("");
+    chrome(""); dock("");
     $("main").innerHTML = skel(3);
     var key = ship + "|" + sc; S.view = key;
     var p = S.brief[key] ? Promise.resolve(S.brief[key]) : api("/api/audit/brief?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc));
-    p.then(function (b) {
+    withShips(p).then(function (b) {
       S.brief[key] = b; if (!S.today) S.today = b.today;
       if (S.view !== key) return;
-      var sh = (S.ships || []).filter(function (x) { return x.ship === ship; })[0];
-      top(ship, sh && brandOf(sh) ? brandOf(sh) : "Briefing", "", "", true);
-      var c = b.contract || {}, cur = c.current;
-      var h = '<div class="card"><div class="pad"><h2 class="who">' + esc(b.crew.name) + '</h2>' + (b.crew.position ? '<div class="sm">' + esc(b.crew.position) + "</div>" : "");
-      if (cur && cur.on && cur.off) {
-        var late = cur.of && cur.day > cur.of;
-        h += '<div class="prog"><div class="lb"><span>Contract</span><b>' + esc(md(cur.on, S.today) || "0 d") + '</b></div><div class="track' + (late ? " late" : "") + '"><i style="width:' + pct(cur.day, cur.of || cur.day) + '%"></i></div><div class="ends"><span>On ' + fmtD(cur.on) + "</span><span>" + (cur.held ? "Past sign-off, TDG has them aboard" : "Off " + fmtD(cur.off, true) + (cur.offSource === "projected" ? ", projected" : "")) + "</span></div></div>";
+      var sh = (S.ships || []).filter(function (x) { return x.ship === ship; })[0], aboard = sh ? sh.aboard : [];
+      var fn = esc(first(b.crew.name)), c = b.contract || {}, cur = c.current;
+      // THIS contract's request: the open one, else the latest asked on or after the sign-on (an audit belongs to its contract)
+      var mine = (b.audits || []).filter(function (a) { return !a.test && a.status !== "cancelled" && (b.open ? a.id === b.open : !cur || !cur.on || String(a.at || "") >= cur.on); })[0] || null;
+      var brand = sh ? custOf(sh) : "";
+      var others = aboard.filter(function (x) { return x.sc !== sc; });
+      var leadT = aboard.length > 1 ? (aboard.length === 2 ? "Two" : aboard.length) + " printer specialists are aboard. An audit belongs to one contract: pick whose."
+        : esc(b.crew.name) + (b.crew.position ? ", " + esc(b.crew.position) : "") + ". An audit belongs to this contract.";
+      var picks = "";
+      if (aboard.length > 1) {
+        picks = '<div class="picks" role="group" aria-label="Who you are auditing">' + aboard.map(function (x) {
+          var on = x.sc === sc, cn = contractNo(x);
+          var line = [cn ? cn.charAt(0).toUpperCase() + cn.slice(1) : "", x.signOn ? "since " + fmtD(x.signOn) : "", x.heldByFile ? "past the sign-off" : x.signOff ? "signs off " + fmtD(x.signOff) : ""].filter(Boolean).join(" · ");
+          var chip = x.audit && (x.audit.open || x.audit.grade != null) ? reqChip(x.audit) : b.shipOpen && x.sc !== (sh.last && sh.last.sc) && sh.open ? '<span class="chip n">Waits for ' + esc(first(b.shipOpen.crew)) + "&#8217;s audit</span>" : sh && sh.open && sh.last && sh.last.sc !== x.sc ? '<span class="chip n">Waits for ' + esc(first(sh.last.crew)) + "&#8217;s audit</span>" : "";
+          return '<button type="button" class="pick' + (on ? " on" : "") + '"' + (on ? "" : ' data-go="b=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(x.sc)) + '"') + ' aria-pressed="' + on + '"><span class="radio"><i></i></span><span class="pk-main"><b class="h4">' + esc(x.name) + '</b><span class="sm">' + line + "</span>" + (chip ? '<span class="only-m" style="margin-top:6px">' + chip + "</span>" : "") + "</span>" + (chip ? '<span class="hide-m">' + chip + "</span>" : "") + "</button>";
+        }).join("") + "</div>";
       }
-      h += "</div>";
-      var done = (String(c.label || "").match(/^(\d+)/) || [])[1]; if (done == null && /^ongoing/i.test(String(c.label || ""))) done = 0;
-      h += '<div class="facts"><div><b>' + esc(done != null ? done : "?") + '</b><span>completed</span></div><div><b>' + (cur && cur.off && md(S.today, cur.off) ? esc(md(S.today, cur.off)) : cur && cur.on ? "Past" : "?") + '</b><span>' + (cur && cur.off && md(S.today, cur.off) ? "to go" : "sign-off") + '</span></div><div><b>' + (b.audits.length || "None") + "</b><span>past audits</span></div></div></div>";
-      if (c.source) h += '<div class="note" style="text-align:left;margin:-6px 16px 0">Contracts: ' + esc(c.source).replace(/(\d{4}-\d{2}-\d{2})/g, function (d) { return fmtD(d, true); }) + "</div>";
+      var h = '<section class="split">' + head({ back: ["#", (custName(brand) || "All") + " ships"], eyebrow: (brandOf(sh || {}) ? brandOf(sh) + " · " : "") + "Ship briefing", title: esc(ship), lead: leadT, more: picks })
+        + briefAside(b, ship, sc, mine) + "</section>";
 
-      h += needCard(first(b.crew.name), b.machines, b.lines);
+      // the contract in four numbers, each with where it comes from
+      var done = (String(c.label || "").match(/^(\d+)/) || [])[1], onNo = (String(c.label || "").match(/on contract (\d+)/) || [])[1];
+      var srcShort = c.source ? String(c.source).replace(/as of (\d{4}-\d{2}-\d{2})/, function (m, d) { return fmtD(d); }) : "";
+      var aboardFor = cur && cur.on ? md(cur.on, S.today) : "";
+      var stats = [
+        (function () { var me = aboard.filter(function (x) { return x.sc === sc; })[0], bn = me ? (String(me.contract || "").match(/on contract (\d+)/) || [])[1] : null;
+          return onNo ? { v: "Contract " + onNo, k: done + " completed" + (srcShort ? " · " + esc(srcShort) : "") } : bn ? { v: "Contract " + bn, k: "Not in TDG&#8217;s count file · per the Keyman board" } : { v: cur ? "On contract" : "Not aboard", k: "Count not on file" }; })(),
+        { v: cur && cur.on ? (aboardFor || "Since today") : "–", k: cur && cur.on ? "Aboard since " + fmtD(cur.on) : "No running contract" },
+        { v: cur && cur.off ? fmtD(cur.off) : "–", k: cur && cur.held ? "Past the sign-off · TDG has them aboard" : cur && cur.off ? "Signs off · " + esc(OFF_SRC[cur.offSource] || "per the board") : "No sign-off on file" },
+        { v: b.rush && b.rush.from ? String(b.rush.count || 0) : "–", k: b.rush && b.rush.from ? "Rush orders this contract" : "Rush orders · the portal did not answer" },
+      ];
+      h += '<section class="stats" style="--n:4">' + stats.map(function (s) { return '<div><span class="v">' + s.v + '</span><span class="k">' + s.k + "</span></div>"; }).join("") + "</section>";
 
-      if (b.audits.length) {
-        h += '<div class="card"><div class="ch">' + ic("clipboard-text") + "Earlier audits</div>";
-        b.audits.forEach(function (a) { h += '<button class="row" data-go="q=' + esc(a.id) + '"><div class="tx"><div class="nm" style="font-size:15px">' + esc(a.ship) + '</div><div class="sm">' + fmtD(a.at, true) + (a.test ? " · test" : "") + "</div></div>" + reqStatus(a) + ic("caret-right", "go") + "</button>"; });
-        h += "</div>";
+      // the relay: who handed the seat over, this contract to today, who takes it next
+      if (cur && cur.on) {
+        var rl = b.relay || {}, bf = rl.before, af = rl.after, tot = cur.off ? Math.max(1, days(cur.on, cur.off)) : 0, gone = days(cur.on, S.today);
+        var afTdg = af && (af.src === "tdg" || af.src === "tdg_earmark" || af.tdg);
+        var afSub = !af ? (cur.offSource === "projected" ? "Projected sign-off, " + (brand === "Azamara" ? "5" : "7") + " months" : "") : (af.on ? (af.on <= S.today ? "Aboard since " + fmtD(af.on) : "Signs on " + fmtD(af.on)) : "No dates yet") + (afTdg ? " · in TDG" : af.told ? " · told Joy" : af.src === "earmark" ? " · console plan" : "");
+        h += '<section class="card pad sec"><div class="sec-hd"><h2 class="h3">The contract</h2><span class="sm">Keyman board · ' + fmtD(S.today) + '</span></div><div class="relay">'
+          + '<div class="rl-end"><span class="xs">Took over from</span><b class="h4">' + (bf ? esc(bf.name) : "Not on record") + '</b><span class="xs">' + (bf && bf.off ? (bf.off <= S.today ? "Signed off " : "Signs off ") + fmtD(bf.off) : "") + "</span></div>"
+          + '<div class="rl-mid"><div class="prog"><i style="width:' + (cur.held || (cur.off && cur.off < S.today) ? "100%;background:var(--redm)" : pct(gone, tot || gone) + "%") + '"></i></div><div class="xs rl-d"><span>' + fmtD(cur.on) + '</span><span class="b">Today · aboard ' + esc(aboardFor || "since today") + "</span><span>" + (cur.off ? fmtD(cur.off) : "") + "</span></div></div>"
+          + '<div class="rl-end r"><span class="xs">Hands over to</span><b class="h4">' + (af ? esc(af.name) : "No reliever yet") + '</b><span class="xs">' + esc(afSub) + "</span></div></div></section>";
       }
-      h += rushCard(b.rush, ship, first(b.crew.name));
+
+      // what others said: who has been asked, then the feed, newest first
       var feed = b.feed || [];
-      h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("chat-circle-text") + '</span><div class="tx"><div class="nm" style="font-size:15px">What others said</div><div class="sm">' + (feed.length ? feed.length + " on record · newest " + fmtD(feed[0].at, true) : "Nothing on record") + "</div></div>" + ic("caret-right", "go") + "</summary>";
-      feed.forEach(function (f) {
-        h += '<div class="feed"><div class="w">' + esc(KIND[f.kind] || f.kind) + (f.who ? " · " + esc(f.who) : "") + " · " + fmtD(f.at, true) + (f.rating != null ? " · " + esc(f.rating) + "/5" : "") + '</div><div class="pl">' + esc(f.text) + "</div>";
-        var more = (f.others || []).map(function (o) { return '<p class="also">Also reported' + (o.who ? " by " + esc(o.who) : "") + " · " + fmtD(o.at, true) + "</p>" + fullReport(o.full); }).join("");
-        if ((f.full && f.full.trim() !== String(f.text || "").trim()) || more) h += '<details class="full"><summary>Full report' + (f.others && f.others.length ? " · " + (f.others.length + 1) + " reports" : "") + "</summary><div>" + fullReport(f.full) + more + "</div></details>";
-        h += "</div>";
-      });
-      h += "</details>";
+      h += '<section class="sec"><div class="sec-hd"><h2 class="h2">What others said</h2><span class="sm">' + (feed.length ? fn + "&#8217;s record · newest first" : "Nothing on record") + "</span></div>";
+      if ((b.slots || []).length) h += '<div class="slots">' + b.slots.map(function (s) { return '<div class="slot"><span class="xs">' + esc(s.label) + "</span>" + slotChip(s) + "</div>"; }).join("") + "</div>";
+      h += feed.length ? '<div class="card clip">' + feed.map(feedRow).join("") + "</div>" : '<div class="card pad"><p class="sm">Nothing recorded on ' + fn + " yet: no feedback, field report, note or shipboard review.</p></div>";
+      h += "</section>";
+
+      // three facts about the ship and this contract
+      var r = b.rush, sa = b.shipAudits || [], fu = b.followups || [];
+      var rushT = !r || !r.from ? ["Not read", "The order portal did not answer. Nothing is assumed."] : !r.count ? ["None", fmtD(r.from) + " to today, from the order portal."] : [r.count + (r.count === 1 ? " order · " : " orders · ") + usd(r.total), (r.his.count ? r.his.count + " charged to " + fn : "None charged to " + fn) + " · listed below"];
+      var lastA = sa[0];
+      h += '<section class="grid3">'
+        + '<div class="card feat rowm"><span class="fi' + (r && r.his && r.his.count ? " r" : "") + '">' + ic("shopping-cart") + '</span><span class="xs">Rush orders this contract</span><b class="h3">' + rushT[0] + '</b><p class="sm">' + rushT[1] + "</p></div>"
+        + '<div class="card feat rowm"><span class="fi n">' + ic("list") + '</span><span class="xs">Audits of ' + esc(ship) + '</span><b class="h3">' + (lastA ? (sa.length === 1 ? "1 filed" : sa.length + " filed") : "None filed yet") + '</b><p class="sm">' + (lastA ? "Last: " + esc(lastA.crew || "") + ", " + fmtD(lastA.at, true) + (lastA.score != null ? " · score " + esc(lastA.score) + "/5" : "") : "The 61 Forms audits are not imported yet.") + "</p></div>"
+        + '<div class="card feat rowm"><span class="fi a">' + ic("flag") + '</span><span class="xs">Open follow-ups</span><b class="h3">' + (fu.length ? fu.length + " open" : "None") + '</b><p class="sm">' + (fu.length ? esc(fu[0].text) + (fu[0].owner ? " · " + esc(fu[0].owner) : "") + (fu[0].due ? " · due " + fmtD(fu[0].due) : "") : "Nothing carried over from an earlier audit of " + esc(ship) + ".") + "</p></div>"
+        + "</section>";
+      h += rushOrders(r, first(b.crew.name));
+      h += '<section class="help"><span class="fi n">' + ic("user") + '</span><div class="t"><b class="h4">Everything else on ' + fn + '</b><span class="sm">Documents, travel, notes and every earlier contract are on the profile in the HR console.</span></div><a class="arrow" href="https://cims.work/#crew/' + esc(encodeURIComponent(sc)) + '" target="_blank" rel="noopener">Open the profile' + ic("arrow-right") + "</a></section>";
       $("main").innerHTML = h;
       S.lastBrief = b;
-      if (b.open) dock('<button class="btn" data-go="q=' + esc(b.open) + '">' + ic("hourglass-medium") + "Open the request</button>");
-      else if (b.shipOpen) dock(shipBusy(ship, b.shipOpen.crew, b.crew.name, b.shipOpen.id));
-      else dock('<button class="btn green" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">' + ic("paper-plane-tilt") + "Request the documents</button>");
+      if (b.shipOpen) dock(shipBusy(ship, b.shipOpen.crew, b.crew.name, b.shipOpen.id));
+      else if (mine && mine.grade == null && mine.status === "complete") dock('<button type="button" class="btn green" data-go="a=' + esc(mine.id) + '|1">Start the audit</button>');
+      else if (mine && mine.grade == null) dock('<button type="button" class="btn pri" data-go="q=' + esc(mine.id) + '">Open the request</button>');
+      else if (!mine) dock('<button type="button" class="btn green" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">Request the documents</button>');
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
 
-  /* ---------------- A3 · The request ---------------- */
+  /* ---------------- A3 · The ask (canvas board "Ask") ----------------
+     What the seafarer sends, the email that asks for it, and every condition the request needs, each ticked or not. */
+  function aboardOf(ship, sc) { var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0]; return s ? (s.aboard || []).filter(function (x) { return x.sc === sc; })[0] || null : null; }
+  function sendRow(icn, cls, t, s) { return '<div class="send line-t"><span class="fi' + (cls ? " " + cls : "") + '">' + ic(icn) + '</span><div><b class="h4">' + t + '</b><p class="sm">' + s + "</p></div></div>"; }
+  function sendsCard(fn, presses, lines) {
+    return '<div class="card clip"><div class="pad-m sec-hd"><h2 class="h3">What ' + fn + ' sends</h2><span class="sm">Each file is read the moment it lands</span></div>'
+      + sendRow("file-text", "", "Pattern 43", "One 12-page scan per press" + (presses ? ", " + presses + " in all" : "") + ". Read for white dots, lines and density, colour by colour.")
+      + sendRow("list", "n", "Machine Management List", "Printed from each press and scanned: the Machine list (52 pages), not the User list (5 pages). Read for parts past their rated life.")
+      + sendRow("package", "a", "The shelf count", (lines ? "All " + lines + " OBP lines. " : "Every OBP line. ") + fn + " types what is on the shelf and never sees OBP&#8217;s number.") + "</div>";
+  }
   function requestView(ship, sc) {
-    top("Request documents", ship, "", "", true); hero(""); dock("");
+    chrome(""); dock("");
     $("main").innerHTML = skel(4);
     var key = "r" + ship + "|" + sc; S.view = key;
-    api("/api/audit/request/preview?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc)).then(function (p) {
+    withShips(api("/api/audit/request/preview?ship=" + encodeURIComponent(ship) + "&sc=" + encodeURIComponent(sc))).then(function (p) {
       if (S.view !== key) return;
       if (p.open) { location.replace("#q=" + p.open.id); return; }
-      top("Request documents", ship + " · " + p.crew.name, "", "", true);
-      if (p.shipOpen) { $("main").innerHTML = shipBusyCard(ship, p.shipOpen.crew); dock(shipBusy(ship, p.shipOpen.crew, p.crew.name, p.shipOpen.id)); return; }
-      var n = p.machines ? p.machines.length : 0;
-      var h = "";
-      if (!p.live) h += '<div class="ban a">' + ic("f:warning-circle") + "<span>Test mode. The email goes to you only, marked TEST. Nothing reaches the ship until Miguel switches it live.</span></div>";
+      var fn = esc(first(p.crew.name)), sh = (S.ships || []).filter(function (x) { return x.ship === ship; })[0] || {}, x = aboardOf(ship, sc);
+      var back = ["b=" + encodeURIComponent(ship) + "|" + encodeURIComponent(sc), ship + " briefing"];
+      if (p.shipOpen) {
+        $("main").innerHTML = '<section class="split">' + head({ back: back, eyebrow: (brandOf(sh) ? brandOf(sh) + " · " : "") + ship, title: "Ask " + fn + " for the documents", lead: busyLine(p.shipOpen.crew, p.crew.name) }) + shipBusyCard(ship, p.shipOpen.crew, p.crew.name, p.shipOpen.id) + "</section>";
+        dock(shipBusy(ship, p.shipOpen.crew, p.crew.name, p.shipOpen.id)); return;
+      }
+      var n = p.machines ? p.machines.length : 0, lines = p.lines || 0;
+      var who = x ? [contractNo(x) ? contractNo(x).charAt(0).toUpperCase() + contractNo(x).slice(1) : "", x.signOn ? "aboard since " + fmtD(x.signOn) : "", x.heldByFile ? "past the sign-off" : x.signOff ? "signs off " + fmtD(x.signOff) + (md(S.today, x.signOff) ? ", in " + esc(md(S.today, x.signOff)) : "") : ""].filter(Boolean).join(" · ") : "";
+      var can = p.hon && n > 0 && lines > 0 && (p.shown || !p.live);
+      var ck = function (ok, t) { return '<div class="ck"><span class="' + (ok ? "c" : "x") + '">' + ic(ok ? "b:check" : "b:x") + "</span><span>" + t + "</span></div>"; };
+      var checks = ck(true, fn + " is aboard " + esc(ship) + " per the board")
+        + (!p.hon ? ck(false, "HON did not answer: the presses and the OBP list come from it") : ck(n > 0, n ? n + (n === 1 ? " press" : " presses") + " on HON&#8217;s register" : "No press on HON&#8217;s register for " + esc(ship))
+          + ck(lines > 0, lines ? "OBP list" + (p.obpAsOf ? " of " + fmtD(p.obpAsOf) : "") + " · " + lines + " lines" : "No OBP list on HON: nothing to count"))
+        + (p.live ? ck(!!p.shown, p.shown ? "The ship&#8217;s printshop mailbox is on file" : "No printshop mailbox for " + esc(ship) + " in the ship contacts") : "")
+        + ck(true, "No open request for " + esc(ship));
+      var copy = p.live ? [p.noPersonal ? "" : fn + "&#8217;s personal email (never shown)"].concat((p.copyNames || []).map(esc)).filter(Boolean).join(" · ") : "Nobody: test mode";
+      var aside = '<aside class="card pad sec"><div class="sec-hd"><h2 class="h3">The email</h2>' + (!p.live ? '<span class="chip a">Test mode</span>' : can ? '<span class="chip g">Ready to send</span>' : '<span class="chip r">Cannot go yet</span>') + "</div>"
+        + (!p.live ? '<p class="sm">Test mode: the email goes to you only, marked TEST. Nothing reaches the ship.</p>' : "")
+        + "<div>" + '<div class="kv"><span>To</span><span class="b">' + (p.live ? (p.shown ? esc(p.shown) : "No ship mailbox") : "You, as a test" + (p.shown ? '<div class="sm">live, it goes to ' + esc(p.shown) + "</div>" : "")) + "</span></div>"
+        + '<div class="kv"><span>Copy</span><span>' + copy + "</span></div>"
+        + '<div class="kv"><span>Replies go to</span><span>' + esc(p.replyTo || "you") + "</span></div>"
+        + '<div class="kv"><span>Due</span><span>24 hours after it goes' + (p.remindAt ? " · a reminder at hour " + esc(p.remindAt) : "") + "</span></div></div>"
+        + '<div class="sec tight line-t" style="padding-top:16px">' + checks + "</div>"
+        + '<button type="button" class="btn pri hide-m sendreq"' + (can ? "" : " disabled") + ">" + (p.live ? "Send the request" : "Send the test request to me") + ic("paper-plane-tilt") + "</button>"
+        + '<p class="xs">Nobody aboard, no OBP list, or no address on file: the request cannot go, and this card says which.</p></aside>';
+      var h = '<section class="split"><div class="sec">' + head({ back: back, eyebrow: (brandOf(sh) ? brandOf(sh) + " · " : "") + ship, title: "Ask " + fn + " for the documents", lead: fn + " sends them from the ship within 24 hours. The audit opens once everything is in; there is no start without them." }).replace(/^<div class="sec">|<\/div>$/g, "")
+        + '<div class="who-card"><span class="fi n">' + ic("user") + '</span><div style="min-width:0"><b class="h4">' + esc(p.crew.name) + "</b>" + (who ? '<div class="sm">' + who + "</div>" : "") + "</div></div>"
+        + sendsCard(fn, n, lines) + "</div>" + aside + "</section>";
       if (!p.hon) h += '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY.hon_unavailable) + "</span></div>";
-      h += needCard(first(p.crew.name), n, p.lines);
-      if (n) h += '<div class="card"><div class="ch">' + ic("printer") + 'Machines<span class="r">from HON\'s register</span></div>' + p.machines.map(function (m) { return '<div class="kv"><span>' + esc(m.label) + (m.model ? ' <span class="sm">· ' + esc(m.model) + "</span>" : "") + '</span><span class="v mono">' + esc(m.serial) + "</span></div>"; }).join("") + "</div>";
-      h += '<div class="card"><div class="ch">' + ic("envelope-simple") + "The email</div>";
-      h += '<div class="kv"><span class="k">To</span><span class="v">' + (p.live ? (p.shown ? esc(p.shown) : '<span class="st r">No ship mailbox</span>') : "You, as a test") + (p.live && !p.noPersonal ? '<div class="sm">and a copy to the personal email</div>' : p.live ? '<div class="sm">no personal email on file</div>' : p.shown ? '<div class="sm">live, it goes to ' + esc(p.shown) + "</div>" : "") + "</span></div>";
-      h += '<div class="kv"><span class="k">Copy</span><span class="v">' + (p.live ? "Rolando, Ray" : '<span class="sm">nobody in test mode</span>') + "</span></div>";
-      h += '<div class="kv"><span class="k">Due</span><span class="v">' + esc(whenUtc(p.dueAt)) + '<div class="sm">24 hours from sending</div></span></div>';
-      h += '<div class="kv"><span class="k">Inventory</span><span class="v">' + (p.lines == null ? "?" : esc(p.lines)) + ' parts<div class="sm">OBP list' + (p.obpAsOf ? " of " + fmtD(p.obpAsOf, true) : "") + ", on-hand hidden</div></span></div></div>";
+      if (n) h += '<section class="card clip"><div class="sec-hd pad-m"><h2 class="h3">' + esc(ship) + '&#8217;s presses</h2><span class="sm">HON&#8217;s machine register</span></div>'
+        + p.machines.map(function (m) { return '<div class="press-row line-t"><span class="fi n s">' + ic("printer") + '</span><div><b>' + esc(m.label) + '</b><div class="sm">' + esc([m.model, m.serial].filter(Boolean).join(" · ")) + '</div></div><span class="chip m">2 files</span></div>'; }).join("")
+        + '<div class="pad-m line-t soft"><p class="sm">A press that is down: ' + fn + " says why, and that counts as explained. You check it on board.</p></div></section>";
+      h += '<section class="help"><span class="fi a">' + ic("chat-circle") + '</span><div class="t"><b class="h4">Questions from the ship reach ' + esc(p.replyTo || "you") + '</b><span class="sm">Replies to the request email go to ' + esc(first(p.replyTo || "you")) + ((p.copyNames || []).length > 1 ? "; " + (p.copyNames || []).slice(1).map(function (c) { return esc(first(c)); }).join(", ") + " in copy." : ".") + "</span></div></section>";
       $("main").innerHTML = h;
-      var can = p.hon && n > 0 && (p.shown || !p.live);
-      dock('<button class="btn green" id="sendreq"' + (can ? "" : " disabled") + ">" + ic("paper-plane-tilt") + (p.live ? "Send request" : "Send test request to me") + "</button>" + (can || !p.hon ? "" : '<div class="note">' + esc(n === 0 ? WHY.no_presses : WHY.no_ship_mailbox) + "</div>"));
-      var btn = $("sendreq");
-      if (btn) btn.onclick = function () {
-        btn.disabled = true; btn.innerHTML = ic("paper-plane-tilt") + "Sending";
+      dock('<button type="button" class="btn pri sendreq"' + (can ? "" : " disabled") + ">" + (p.live ? "Send the request" : "Send the test request to me") + ic("paper-plane-tilt") + "</button>");
+      var btns = document.querySelectorAll ? document.querySelectorAll(".sendreq") : [];
+      var send = function () {
+        for (var i = 0; i < btns.length; i++) { btns[i].disabled = true; btns[i].innerHTML = "Sending"; }
         var bf = S.brief[ship + "|" + sc]; // THIS seafarer's briefing, never the last one drawn
         var contract = bf && bf.contract ? bf.contract.label : null;
         post("/api/audit/request", { ship: ship, sc: sc, contract: contract }).then(function (r) {
           if (r.ok || r.error === "already_open") { S.brief = {}; reloadShips(); location.replace("#q=" + r.id); }
-          else if (r.error === "ship_busy") { S.brief = {}; reloadShips(); $("main").innerHTML = shipBusyCard(ship, r.crew); dock(shipBusy(ship, r.crew, p.crew.name, r.id)); }
-          else { btn.disabled = false; btn.innerHTML = ic("arrow-clockwise") + "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY[r.error] || r.detail || r.error) + "</span></div>"); }
+          else if (r.error === "ship_busy") { S.brief = {}; reloadShips(); requestView(ship, sc); }
+          else {
+            for (var i = 0; i < btns.length; i++) { btns[i].disabled = false; btns[i].innerHTML = "Try again" + ic("arrow-clockwise"); }
+            $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY[r.error] || r.detail || r.error) + "</span></div>");
+          }
         }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
       };
+      for (var i = 0; i < btns.length; i++) btns[i].onclick = send;
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
 
-  /* ---------------- A6 / A8 · Waiting, then everything is in ---------------- */
-  function docCell(s, label) {
-    if (!s) return '<div class="doc none">' + ic("cloud-arrow-up") + '<div class="tx"><div class="t">' + label + '</div><div class="s">Not sent</div></div></div>';
-    var st = s.read_state;
-    if (st === "ok") return '<div class="doc ok">' + ic("f:check-circle") + '<div class="tx"><div class="t">' + label + '</div><div class="s">Read</div></div></div>';
-    if (st === "wrong_doc" || st === "unreadable") return '<div class="doc bad">' + ic("f:warning-circle") + '<div class="tx"><div class="t">' + label + '</div><div class="s">' + (st === "wrong_doc" ? "Wrong document" : "Scan again") + "</div></div></div>";
-    return '<div class="doc wait">' + ic("hourglass-medium") + '<div class="tx"><div class="t">' + label + '</div><div class="s">Reading</div></div></div>';
-  }
+  /* ---------------- A6 / A8 · The request (canvas board "Request") ----------------
+     Waiting, past the deadline, or everything is in: what came in per document, and once in, what the documents said
+     (each item to confirm on board). Filed: the audit. */
   function machDone(m) { return !!m.down || (m.p43 && m.p43.read_state === "ok" && m.mgmt && m.mgmt.read_state === "ok"); }
+  function docTile(d, kind, name, icn, cls) {
+    var live = d.machines.filter(function (m) { return !m.down; }), slots = live.map(function (m) { return m[kind]; });
+    var ok = slots.filter(function (s) { return s && s.read_state === "ok"; }).length, bad = slots.filter(function (s) { return s && (s.read_state === "wrong_doc" || s.read_state === "unreadable" || s.read_state === "failed"); }).length;
+    var wait = slots.filter(function (s) { return s && s.read_state === "pending"; }).length, none = slots.filter(function (s) { return !s; }).length, late = lateOf({ status: d.status, overdue: d.overdueAt, due: d.dueAt });
+    var chip = !live.length ? '<span class="chip m">Every press down</span>' : ok === live.length ? '<span class="chip g">Read</span>' : bad ? '<span class="chip r">Send again</span>' : none && late ? '<span class="chip r">Missing</span>' : wait ? '<span class="chip n">Reading</span>' : '<span class="chip m">' + (ok + wait) + " of " + live.length + " in</span>";
+    var each = d.machines.map(function (m) { var s = m[kind], st = m.down ? "down" : !s ? "not sent" : s.read_state === "ok" ? "read" : s.read_state === "pending" ? "reading" : s.read_state === "wrong_doc" ? "wrong document" : "scan again"; return (d.machines.length > 1 ? esc(m.label) + " " : "") + st; });
+    var one = d.machines[0] || {}, s1 = one[kind];
+    var line = d.machines.length > 1 ? each.join(" · ") : one.down ? "Reported down: &#8220;" + esc(one.down) + "&#8221;" : !s1 ? "Nothing yet from the ship" : s1.read_state === "ok" ? "Received " + fmtD(s1.at) + " · read by HON" : s1.read_state === "pending" ? "Received " + fmtD(s1.at) + " · HON is reading it" : esc(s1.say || "Send it again");
+    return '<div class="card feat rowm"><div class="hstack" style="justify-content:space-between;align-items:flex-start"><span class="fi' + (cls ? " " + cls : "") + '">' + ic(icn) + "</span>" + chip + '</div><b class="h3">' + name + '</b><p class="sm">' + line + "</p></div>";
+  }
+  function countTile(d, done) {
+    var late = lateOf({ status: d.status, overdue: d.overdueAt, due: d.dueAt }), c = d.count, left = c.total - c.done;
+    return '<div class="card feat rowm"><div class="hstack" style="justify-content:space-between;align-items:flex-start"><span class="fi a">' + ic("package") + '</span><span class="chip ' + (c.done === c.total ? "g" : late ? "r" : "m") + '">' + c.done + " of " + c.total + '</span></div><b class="h3">The shelf count</b>'
+      + '<p class="sm">' + (c.done === c.total ? (done ? "Counted blind and sent" + (d.completeAt ? " " + fmtD(d.completeAt) : "") : "Every line counted") : left + (left === 1 ? " line " : " lines ") + (late ? "not counted" : "still to count")) + (d.extras ? " · " + d.extras + (d.extras === 1 ? " item" : " items") + " not on the OBP list" : "") + "</p>"
+      + '<div class="prog"><i style="width:' + pct(c.done, c.total) + "%;background:" + (c.done === c.total ? "var(--green)" : late ? "var(--redm)" : "var(--navy)") + '"></i></div></div>';
+  }
+  /* what the documents said, per press and for the count: each item comes up in the audit to confirm on board */
+  function beforeSec(v) {
+    var h = '<section class="sec"><div class="sec-hd"><h2 class="h2">Before the visit</h2><span class="sm">Read by HON · each item to confirm on board</span></div>';
+    (v.machines || []).forEach(function (m) {
+      var items = (m.p43 && m.p43.items) || [], life = m.life || [];
+      h += '<div class="card pad sec"><div class="hstack"><span class="fi">' + ic("printer") + '</span><div style="min-width:0"><b class="h3">' + esc(m.label) + '</b><div class="sm">' + esc([m.model, m.serial].filter(Boolean).join(" · ")) + "</div></div></div>";
+      if (m.down) h += '<div class="finding"><div class="hstack"><span class="chip a">Reported down</span><b class="h4">&#8220;' + esc(m.down) + '&#8221;</b></div><p class="sm">Verify on board: running again, or still down.</p></div>';
+      else {
+        h += items.length ? items.map(function (i) { return '<div class="finding"><div class="hstack"><span class="chip a">Pattern 43</span><b class="h4">' + esc(sentence(i.head)) + "</b></div>" + (i.where || i.detail ? '<p class="txt">' + esc(i.where || i.detail) + "</p>" : "") + (i.check ? '<p class="sm">Observation · ' + esc(i.check) + "</p>" : "") + "</div>"; }).join("")
+          : '<div class="finding ok"><div class="hstack"><span class="chip g">Pattern 43</span><b class="h4">' + (m.p43 ? "No mark found" : "Not read") + "</b></div></div>";
+        h += life.length ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">' + life.length + (life.length === 1 ? " part" : " parts") + ' past its rated life</b></div><p class="txt">' + life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%"; }).join(" · ") + "</p></div>"
+          : '<div class="finding ok"><div class="hstack"><span class="chip g">Management list</span><b class="h4">No part past its rated life</b></div></div>';
+        if (items.length || life.length) h += '<p class="txt"><b>Recommendation:</b> have this machine looked at. Parts are changed on copy quality, not on a count.</p>';
+      }
+      h += "</div>";
+    });
+    var diff = (v.count && v.count.diff) || [], extras = (v.count && v.count.extras) || [], parts = v.parts || [];
+    var counted = parts.filter(function (p) { return p.counted != null; }).length, gaps = diff.filter(function (x) { return x.kind === "gap"; }), timing = diff.filter(function (x) { return x.kind === "timing"; });
+    var nm = first(v.crew);
+    h += '<div class="card clip"><div class="pad-m sec tight"><div class="sec-hd"><h3 class="h3">The shelf count against OBP</h3><span class="sm">' + esc(nm) + "&#8217;s blind count" + (v.completeAt ? " of " + fmtD(v.completeAt) : "") + (v.count && v.count.asOf ? " · OBP of " + fmtD(v.count.asOf) : "") + "</span></div>"
+      + '<div class="minis"><div><b class="h3">' + counted + '</b><span class="xs">lines counted</span></div><div><b class="h3">' + Math.max(0, counted - diff.length) + '</b><span class="xs">matched OBP</span></div><div><b class="h3">' + timing.length + '</b><span class="xs">one off the day OBP moved</span></div><div><b class="h3"' + (gaps.length + extras.length ? ' style="color:var(--amber)"' : "") + ">" + (gaps.length + extras.length) + '</b><span class="xs">to check on board</span></div></div></div>';
+    if (diff.length || extras.length) {
+      h += '<table class="tbl cards line-t"><thead><tr><th>Part</th><th class="n">' + esc(nm) + '</th><th class="n">OBP</th><th>Reading</th></tr></thead><tbody>'
+        + diff.map(function (x) { return '<tr><td class="full"><b>' + esc(x.description || x.part_no) + '</b><div class="xs">' + esc(x.part_no) + '</div></td><td class="n" data-l="' + esc(nm) + '">' + esc(x.counted) + '</td><td class="n" data-l="OBP">' + esc(x.obp) + '</td><td class="full" data-l="Reading">' + (x.kind === "gap" ? '<span class="chip a">Check on board</span>' : '<span class="chip g">Timing</span><div class="xs">OBP moved the line ' + (x.obpMoved ? fmtD(x.obpMoved) : "the same day") + "</div>") + "</td></tr>"; }).join("")
+        + extras.map(function (x) { return '<tr><td class="full"><b>' + esc(x.text) + '</b><div class="xs">Found on the shelf, not on the OBP list</div></td><td class="n" data-l="' + esc(nm) + '">' + esc(x.counted == null ? "–" : x.counted) + '</td><td class="n" data-l="OBP">–</td><td class="full" data-l="Reading"><span class="chip a">Not in OBP</span></td></tr>'; }).join("")
+        + "</tbody></table>";
+    }
+    h += '<div class="pad-m line-t soft"><p class="sm">The 1 Oct rule: a line one unit off on the day OBP moved it is timing, not a finding. Everything else is checked on the shelf.</p></div></div>';
+    var downs = (v.machines || []).filter(function (m) { return m.down; }), fus = v.followups || [];
+    h += '<div class="grid2"><div class="card feat rowm"><span class="fi n">' + ic("wrench") + '</span><b class="h4">Presses reported down</b><p class="sm">' + (downs.length ? downs.map(function (m) { return esc(m.label) + ": &#8220;" + esc(m.down) + "&#8221;"; }).join(" · ") : "None. Every press was running when " + esc(nm) + " scanned.") + "</p></div>"
+      + '<div class="card feat rowm"><span class="fi a">' + ic("flag") + '</span><b class="h4">Follow-ups from the last audit</b><p class="sm">' + (fus.length ? fus.map(function (f) { return esc(f.text) + (f.owner ? " · " + esc(f.owner) : "") + (f.due ? " · due " + fmtD(f.due) : ""); }).join("<br>") : "None open for this ship.") + "</p></div></div>";
+    return h + "</section>";
+  }
   function requestDetail(id) {
-    top("Request", "", "", "", true); hero(""); dock("");
+    chrome(""); dock("");
     $("main").innerHTML = skel(4);
     var key = "q" + id; S.view = key;
-    api("/api/audit/request?id=" + encodeURIComponent(id)).then(function (d) {
+    withShips(api("/api/audit/request?id=" + encodeURIComponent(id))).then(function (d) {
       if (S.view !== key) return;
-      var done = d.status === "complete", sent = d.status === "sent", cancelled = d.status === "cancelled";
-      var late = sent && (d.overdueAt || Date.parse(d.dueAt) < Date.now());
-      top(d.ship, d.crew, d.grade ? ic("f:seal-check") + "Graded " + d.grade.score + "/5" : done ? ic("f:seal-check") + "Docs in" : late ? "Overdue" : sent ? ic("clock") + esc(left(d.dueAt)) : cancelled ? "Cancelled" : "", done ? "done" : late ? "late" : "", true);
-      var md = d.machines.filter(machDone).length, mt = d.machines.length;
-      var big = done ? ["g", "f:seal-check", "Everything is in", "Since " + whenUtc(d.completeAt) + ". The assessment went to " + (d.test ? "you (test)." : "Ray, Rolando, Ohji, Jonathan and Miguel.")]
-        : cancelled ? ["m", "x", "Request cancelled", "The upload link is closed."]
-        : late ? ["r", "f:warning-circle", "Past the deadline", "Was due " + whenUtc(d.dueAt) + ". Resend or give " + first(d.crew) + " 24 more hours."]
-        : ["n", "hourglass-medium", "Waiting for " + first(d.crew), "Due " + whenUtc(d.dueAt) + " · sent to " + (d.test ? "you (test)" : d.to)];
-      var h = "";
-      if (d.test) h += '<div class="ban a">' + ic("f:warning-circle") + "<span>Test request. Every email went to you only.</span></div>";
-      h += '<div class="card pad"><div class="big"><span class="ib ' + big[0] + '">' + ic(big[1]) + '</span><div style="min-width:0"><h2>' + esc(big[2]) + '</h2><div class="sm">' + esc(big[3]) + '</div></div></div><div class="bars">' + prog("Machines", md, mt, done ? "" : "navy") + prog("Count", d.count.done, d.count.total, done ? "" : "navy") + "</div></div>";
-      var miss = (d.gate && d.gate.missing) || [];
-      if (sent && miss.length) h += '<div class="card"><div class="ch">' + ic("list-checks") + 'Still missing<span class="r">' + miss.length + "</span></div>" + miss.map(function (x) { return '<div class="miss">' + esc(x.say) + "</div>"; }).join("") + "</div>";
-      h += '<div class="card"><div class="ch">' + ic("printer") + 'Machines<span class="r">' + md + " of " + mt + " in</span></div>";
-      d.machines.forEach(function (m) {
-        h += '<div class="mach"><div class="mh"><b>' + esc(m.label) + '</b><span class="mono">' + esc(m.serial) + "</span></div>";
-        if (m.down) h += '<div class="dwn">' + ic("wrench") + "<span><b>Reported down.</b> " + esc(m.down) + "</span></div>";
-        else {
-          h += '<div class="docs">' + docCell(m.p43, "Pattern 43") + docCell(m.mgmt, "Mgmt List") + "</div>";
-          [m.p43, m.mgmt].forEach(function (s) { if (s && s.read_state !== "ok" && s.read_state !== "pending" && s.say) h += '<div class="fix">' + ic("warning-circle") + "<span>" + esc(s.say) + "</span></div>"; });
-        }
-        h += "</div>";
-      });
-      h += "</div>";
-      h += '<div class="card"><div class="ch">' + ic("package") + 'Blind count<span class="r">' + d.count.done + " of " + d.count.total + '</span></div><div class="pad" style="padding-top:4px">' + '<div class="track' + (done ? "" : " navy") + '"><i style="width:' + pct(d.count.done, d.count.total) + '%"></i></div>' + (d.extras ? '<div class="sm" style="margin-top:8px">' + d.extras + (d.extras === 1 ? " item found that is" : " items found that are") + " not on the OBP list</div>" : "") + "</div></div>";
-      if (d.grade) h = gradeCard(d.grade) + h;
-      var pend = lsGet("aud:p:" + id);
-      if (pend && !d.grade) h = '<div class="ban a">' + ic("cloud-slash") + "<span>The audit is filed on this phone. It sends itself when there is signal.</span></div>" + h;
+      var done = d.status === "complete", sent = d.status === "sent", cancelled = d.status === "cancelled", fn = esc(first(d.crew));
+      var late = lateOf({ status: d.status, overdue: d.overdueAt, due: d.dueAt });
+      var sh = (S.ships || []).filter(function (x) { return x.ship === d.ship; })[0] || {};
+      var inN = d.machines.filter(machDone).length, mt = d.machines.length;
+      var gap = d.completeAt && d.sentAt ? took(d.sentAt, d.completeAt) : "";
+      var title = d.grade ? esc(d.ship) + " is audited" : done ? esc(d.ship) + " is ready for the visit" : cancelled ? "Request cancelled" : late ? fn + " has not sent everything" : "Waiting on " + fn + " · " + inN + " of " + mt + (mt === 1 ? " press" : " presses") + " in";
+      var leadT = d.grade ? "Filed " + fmtD(d.grade.at, true) + ". Score " + esc(d.grade.score) + "/5, " + (d.grade.from === "overall" ? "the Overall rating." : "the average of the ratings, rounded down.")
+        : done ? fn + " sent everything" + (d.completeAt ? " on " + fmtD(d.completeAt) : "") + (gap ? ", " + esc(gap) + " after it was asked" : "") + ". This is what the documents said."
+        : cancelled ? "The upload link is closed. Nothing more comes in."
+        : late ? "Due " + esc(whenUtc(d.dueAt)) + ". " + ((d.gate && d.gate.missing) || []).length + " things still missing."
+        : "Asked " + fmtD(d.sentAt) + ". Due " + esc(whenUtc(d.dueAt)) + ", " + esc(left(d.dueAt)) + ". Each file is read as it lands.";
+      var back = d.sc ? ["b=" + encodeURIComponent(d.ship) + "|" + encodeURIComponent(d.sc), d.ship + " briefing"] : ["#", "All ships"];
+      var more = (late ? '<div class="alert">' + ic("clock") + "<div><b>Past the deadline</b><div class=\"sm\">" + "A reminder goes to " + fn + " at hour 12, and you are told when the deadline passes. The audit stays locked until everything is in.</div></div></div>" : "")
+        + (d.test ? '<div class="alert" style="background:var(--amberbg);color:var(--amber)">' + ic("f:warning-circle") + '<div><b>Test request</b><div class="sm" style="color:inherit">Every email went to you only. A test request cannot be graded.</div></div></div>' : "");
+      var tag = d.grade ? "Filed" : done ? "Documents in" : cancelled ? "Cancelled" : late ? "Past the deadline" : "Waiting on " + fn;
+      var steps = cancelled ? '<div class="ck"><span class="x">' + ic("b:x") + "</span><span>Cancelled" + (d.status === "cancelled" ? "" : "") + "</span></div>"
+        : reqSteps({ asked: d.sentAt, status: d.status, late: late, due: d.dueAt, inAt: d.completeAt, graded: !!d.grade, gradedAt: d.grade && d.grade.at, score: d.grade && d.grade.score });
+      var pend = lsGet("aud:p:" + id), at = lsGet("aud:s:" + id) || 1, started = !!lsGet("aud:d:" + id);
+      var startBtn = done && !d.grade && !d.test && !pend ? '<button type="button" class="btn green" data-go="a=' + esc(id) + "|" + at + '">' + (started ? "Continue the audit · " + esc(AR.STEPS[at - 1].title) : "Start the audit") + "</button>" : "";
+      var aside = '<aside class="navy sec"><span class="eyebrow">' + tag + '</span><div class="sec tight">' + steps + "</div>"
+        + (startBtn ? '<div class="cta hide-m">' + startBtn + "</div>" : "")
+        + (sent ? '<div class="cta"><button type="button" class="btn green s" id="rs">Resend the email</button><button type="button" class="btn white s" id="ex">Extend 24 hours</button><button type="button" class="btn redtxt s" id="cx" style="color:#F2A99D">Cancel</button></div><p class="xs">A resend waits 15 minutes after the last email. Each one keeps the link ' + fn + " already has.</p>" : "")
+        + "</aside>";
+      var h = (pend && !d.grade ? '<div class="kept">' + ic("cloud-slash") + "<span>The audit is filed on this phone. It sends itself when there is signal.</span></div>" : "")
+        + '<section class="split">' + head({ back: back, eyebrow: (brandOf(sh) ? brandOf(sh) + " · " : "") + d.ship + " · the request", title: title, lead: leadT, more: more }) + aside + "</section>";
+      if (!cancelled) {
+        var downs = d.machines.filter(function (m) { return m.down; }).length;
+        h += '<section class="sec"><div class="sec-hd"><h2 class="h2">What came in</h2><span class="sm">' + (mt === 1 ? esc(d.machines[0].label) + " · " + esc([d.machines[0].model, d.machines[0].serial].filter(Boolean).join(" · ")) : mt + " presses" + (downs ? " · " + downs + " reported down" : "")) + "</span></div>"
+          + '<div class="grid3">' + docTile(d, "p43", "Pattern 43", "file-text", "") + docTile(d, "mgmt", "Machine Management List", "list", "n") + countTile(d, done) + "</div>";
+        var fixes = []; d.machines.forEach(function (m) { [m.p43, m.mgmt].forEach(function (s) { if (s && s.read_state !== "ok" && s.read_state !== "pending" && s.say) fixes.push((mt > 1 ? esc(m.label) + ": " : "") + esc(s.say)); }); });
+        if (fixes.length) h += fixes.map(function (t) { return '<div class="finding">' + '<div class="hstack"><span class="chip a">To send again</span></div><p class="txt">' + t + "</p></div>"; }).join("");
+        h += "</section>";
+      }
+      if (d.grade) h += gradeCard(d.grade);
+      h += '<div id="beforeslot"></div>';
       $("main").innerHTML = h;
-      /* A8: once the documents are in, what they found leads the screen (each item comes up in the audit to confirm);
-         once filed, the audit itself */
       if (done) (d.grade ? api("/api/audit/visit?id=" + encodeURIComponent(id)) : loadVisit(id)).then(function (v) {
         if (S.view !== key) return;
-        if (d.grade) { var gc = $("main").querySelector(".card"); if (gc) gc.insertAdjacentHTML("afterend", filedCard(v)); }
-        else { S.v[id] = v; $("main").insertAdjacentHTML("afterbegin", beforeCard(v)); }
+        if (d.grade) $("beforeslot").innerHTML = filedCard(v);
+        else { S.v[id] = v; $("beforeslot").innerHTML = beforeSec(v); }
       }).catch(function () {});
-      var at = lsGet("aud:s:" + id) || 1, started = !!lsGet("aud:d:" + id);
-      if (done && !d.grade && !d.test) dock(pend ? "" : '<button class="btn green" data-go="a=' + esc(id) + "|" + at + '">' + ic("clipboard-text") + (started ? "Continue the audit · " + esc(AR.STEPS[at - 1].title) : "Start the audit") + "</button>");
-      else if (sent) {
-        dock('<div class="two"><button class="btn ghost" id="rs">' + ic("arrow-clockwise") + 'Resend</button><button class="btn ghost" id="ex">' + ic("clock") + 'Add 24 h</button></div><button class="btn txt" id="cx">Cancel request</button>');
-        /* one action at a time: a double tap on Add 24 h added 48, a double Resend sent two emails */
-        var busy = false, btns = function (on) { ["rs", "ex", "cx"].forEach(function (k) { var b = $(k); if (b) b.disabled = on; }); };
+      if (startBtn) dock(startBtn);
+      else if (sent) dock('<button type="button" class="btn ghost" id="exd">Extend 24 h</button><button type="button" class="btn pri" id="rsd">Resend</button>');
+      if (sent) {
+        /* one action at a time: a double tap on Extend added 48 hours, a double Resend sent two emails */
+        var busy = false, ids = ["rs", "ex", "cx", "rsd", "exd"], btns = function (on) { ids.forEach(function (k) { var b = $(k); if (b) b.disabled = on; }); };
         var act = function (what, confirmText) { return function () {
           if (busy || (confirmText && !confirm(confirmText))) return;
           busy = true; btns(true);
           post("/api/audit/request/" + what, { id: id }).then(function (r) { if (!r.ok) alert(WHY[r.error] || r.detail || r.error || "Not done"); S.brief = {}; reloadShips(); requestDetail(id); })
             .catch(function () { busy = false; btns(false); alert("No connection. Nothing was changed; try again."); });
         }; };
-        $("rs").onclick = act("resend", "Send the request again? The old link stops working.");
-        $("ex").onclick = act("extend");
-        $("cx").onclick = act("cancel", "Cancel this request? The upload link closes.");
+        var on = function (k, f) { var b = $(k); if (b) b.onclick = f; };
+        on("rs", act("resend", "Send the request again? The link " + first(d.crew) + " has keeps working."));
+        on("rsd", act("resend", "Send the request again? The link " + first(d.crew) + " has keeps working."));
+        on("ex", act("extend")); on("exd", act("extend"));
+        on("cx", act("cancel", "Cancel this request? The upload link closes."));
       }
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
