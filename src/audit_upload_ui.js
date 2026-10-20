@@ -11,10 +11,11 @@
 // Icons are Phosphor's own glyphs (src/audit_icons.js), inlined so they survive the ship's connection.
 // String.raw keeps the client script's backslashes; no backtick or dollar-brace inside (scripts/verify_client_scripts.mjs).
 import { ICONS } from "./audit_icons.js";
+import { AUDIT_NAME, markSvg } from "./audit_brand.js";
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const HEAD = (title) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>${esc(title)}</title><meta name="robots" content="noindex"><meta name="theme-color" content="#142D48"><link rel="icon" href="/favicon.ico">
+<title>${esc(title)}</title><meta name="robots" content="noindex"><meta name="theme-color" content="#142D48"><link rel="icon" href="/audit/favicon.ico"><link rel="apple-touch-icon" href="/audit/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">`;
 
@@ -28,7 +29,8 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);f
 button{font:inherit;color:inherit}
 .top{background:var(--deep);color:#fff;padding:calc(16px + env(safe-area-inset-top)) 16px 18px}
 .top .in{max-width:1048px;margin:0 auto}
-.brand{display:flex;justify-content:space-between;align-items:center;font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:4px;opacity:.9}
+.brand{display:flex;justify-content:space-between;align-items:center;font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:4px}
+.bm{display:inline-flex;align-items:center;gap:10px}.bm>svg{display:block;flex:none;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.14)}.bm>span{opacity:.9}
 .due{display:inline-flex;align-items:center;gap:6px;font-family:var(--ff);font-size:12.5px;letter-spacing:0;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px}
 .due.late{background:#B4382A}
 .top h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:18px 0 2px;line-height:1.1}
@@ -102,8 +104,8 @@ main{max-width:1080px;margin:0 auto;padding:22px 16px 120px;display:grid;gap:28p
 </style>`;
 
 export function auditUploadHtml({ token, ship, crew }) {
-  return HEAD("Printshop audit · " + ship) + CSS + `</head><body>
-<header class="top"><div class="in"><div class="brand"><span>CIMS</span><span class="due" id="due"></span></div>
+  return HEAD(AUDIT_NAME + " · " + ship) + CSS + `</head><body>
+<header class="top"><div class="in"><div class="brand"><span class="bm">${markSvg(24)}<span>CIMS</span></span><span class="due" id="due"></span></div>
 <h1>${esc(ship)}</h1><div class="who" id="who">${esc(crew || "")}</div>
 <div class="bars"><div class="bar"><div class="lb"><span>Machines</span><b id="mp"></b></div><div class="track"><i id="mt" style="width:0"></i></div></div>
 <div class="bar"><div class="lb"><span>Count</span><b id="cp"></b></div><div class="track"><i id="ct" style="width:0"></i></div></div></div></div></header>
@@ -116,7 +118,7 @@ export function auditUploadHtml({ token, ship, crew }) {
 
 export function auditClosedHtml(why) {
   const msg = why === "cancelled" ? "This request was cancelled. Nothing more is needed." : why === "expired" ? "This link has expired. Ask Dexter or Onboard Support for a new one." : "This link is not valid. Use the newest email you received.";
-  return HEAD("Printshop audit") + CSS + `</head><body><header class="top"><div class="in"><div class="brand"><span>CIMS</span></div><h1>Link closed</h1><div class="who">${esc(msg)}</div></div></header></body></html>`;
+  return HEAD(AUDIT_NAME) + CSS + `</head><body><header class="top"><div class="in"><div class="brand"><span class="bm">${markSvg(24)}<span>CIMS</span></span></div><h1>Link closed</h1><div class="who">${esc(msg)}</div></div></header></body></html>`;
 }
 
 const SCRIPT = String.raw`

@@ -366,7 +366,7 @@ export function feedbackFile(profile, today) {
   const P = profile || {}, t = iso(today) || new Date().toISOString().slice(0, 10);
   const K = (Array.isArray(P.contracts) ? P.contracts : []).filter((k) => k && iso(k.on));
   const feed = (P.people && Array.isArray(P.people.feed)) ? P.people.feed : [];
-  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review", audit: "Printshop audit" };
+  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review", audit: "Printshop Ops Audit" };
   const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.current ? t : (k.off && k.off < t ? k.off : t))) || null; // a running contract (overdue / held) runs to today
   const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, earlyText: k.earlyText || "", end: k.end || null }, items: [] }));
   const between = { key: "between", contract: null, items: [] };

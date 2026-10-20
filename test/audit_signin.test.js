@@ -21,11 +21,12 @@ function fakeDB() {
 const env = () => ({ SESSION_SECRET: SECRET, DB: fakeDB() });
 const cookies = (res) => (res.headers.getSetCookie ? res.headers.getSetCookie() : [res.headers.get("Set-Cookie")]).filter(Boolean);
 
-test("audit.cims.work/login says Printshop Audit; cims.work/login stays the console's", async () => {
+test("audit.cims.work/login says Printshop Ops Audit, with its mark; cims.work/login stays the console's", async () => {
   const a = await worker.fetch(new Request("https://audit.cims.work/login"), env(), {});
   const at = await a.text();
   assert.equal(a.status, 200);
-  assert.match(at, /<h1>Printshop Audit<\/h1>/); assert.match(at, /<title>Printshop Audit · Sign in<\/title>/);
+  assert.match(at, /<h1>Printshop Ops Audit<\/h1>/); assert.match(at, /<title>Printshop Ops Audit · Sign in<\/title>/);
+  assert.match(at, /aria-label="Printshop Ops Audit"/, "the mark, not the D"); assert.match(at, /href="\/audit\/icon-180\.png"/);
   assert.match(at, /\/api\/auth\/request/, "the same sign-in script and route");
   const c = await (await worker.fetch(new Request("https://cims.work/login"), env(), {})).text();
   assert.match(c, /<h1>HR Operational Console<\/h1>/);

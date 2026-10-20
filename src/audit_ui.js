@@ -9,11 +9,14 @@
 // scripts/verify_client_scripts.mjs parses this script on every build and test run.
 import { ICONS } from "./audit_icons.js";
 import { AUDIT_RULES_JS } from "./audit_steps.js";
+import { AUDIT_NAME, AUDIT_SHORT, markSvg } from "./audit_brand.js";
 
 export const AUDIT_MANIFEST = (onAuditHost) => JSON.stringify({
-  name: "CIMS Printshop Audit", short_name: "Audit", start_url: onAuditHost ? "/" : "/audit", scope: onAuditHost ? "/" : "/audit",
+  name: AUDIT_NAME, short_name: AUDIT_SHORT, start_url: onAuditHost ? "/" : "/audit", scope: onAuditHost ? "/" : "/audit",
   display: "standalone", background_color: "#EEF1F6", theme_color: "#1B3A5C",
-  icons: [{ src: "/icon-512.png", sizes: "512x512", type: "image/png" }, { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  icons: [{ src: "/audit/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: "/audit/icon-512-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    { src: "/audit/icon-180.png", sizes: "180x180", type: "image/png" }],
 });
 
 // The shell opens without signal (a ship's Wi-Fi drops); the API is never cached — a stale crew list is worse than
@@ -35,14 +38,14 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Printshop Audit</title>
+<title>Printshop Ops Audit</title>
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#142D48">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Audit">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
-<link rel="icon" href="/favicon.ico">
+<meta name="apple-mobile-web-app-title" content="Ops Audit">
+<link rel="apple-touch-icon" href="/audit/icon-180.png">
+<link rel="icon" href="/audit/favicon.ico">
 <link rel="manifest" id="mf" href="/audit/manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
@@ -69,7 +72,7 @@ button{font:inherit;color:inherit}
 .hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:0;line-height:1.1}
 .hero.home{padding-top:calc(18px + env(safe-area-inset-top))}
 .ttl{display:flex;align-items:center;gap:12px;margin-bottom:4px}
-.logo{width:40px;height:40px;border-radius:11px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.logo{width:40px;height:40px;border-radius:9px;flex:none;line-height:0;box-shadow:0 0 0 1px rgba(255,255,255,.14)}.logo svg{display:block}
 .top.gone{display:none}
 .sbox{position:relative;margin-top:16px}
 .sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
@@ -284,7 +287,7 @@ label.btn{position:relative}
 <div class="offl" id="offl" hidden><div>No signal. What you see was loaded earlier.</div></div>
 <main id="main"><div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
 <div id="dockslot"></div>
-<script>window.__IC=` + JSON.stringify(ICONS) + String.raw`;</script>
+<script>window.__IC=` + JSON.stringify(ICONS) + String.raw`;window.__MARK=` + JSON.stringify(markSvg(40)) + String.raw`;</script>
 <script>` + AUDIT_RULES_JS + String.raw`</script>
 <script>
 (function () {
@@ -369,7 +372,7 @@ label.btn{position:relative}
   }
   function shipsView() {
     S.view = "home"; top("", "", "", "", false); dock("");
-    hero('<div class="ttl"><img class="logo" src="/apple-touch-icon.png" alt="CIMS"><h1>Printshop audit</h1></div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
+    hero('<div class="ttl"><span class="logo" aria-hidden="true">' + (window.__MARK || "") + '</span><h1>Printshop Ops Audit</h1></div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
     var qi = $("q"), qx = $("qx");
     qi.addEventListener("input", function () { S.q = qi.value; qx.hidden = !S.q; shipsList(); });
     qx.addEventListener("click", function () { S.q = ""; qi.value = ""; qx.hidden = true; shipsList(); qi.focus(); });

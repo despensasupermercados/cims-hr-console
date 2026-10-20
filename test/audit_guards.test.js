@@ -55,5 +55,5 @@ test("the audit's table guard is keyed on its DDL, so a new table is created in 
 test("the audit home carries no signed-in name or date line under its title", () => {
   const ui = code("audit_ui.js");
   assert.doesNotMatch(ui, /nameOf\(|todayLong\(/, "no name / date helper is called");
-  assert.doesNotMatch(ui, /<h1>Printshop audit<\/h1><\/div><div class="who">/, "the title is followed by the search box, not a subtitle");
+  assert.doesNotMatch(ui, /<h1>Printshop Ops Audit<\/h1><\/div><div class="who">/, "the title is followed by the search box, not a subtitle");
 });

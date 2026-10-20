@@ -393,7 +393,7 @@ test("P1: the internal crew file prints the audit under its contract; the crew-f
   const p = buildCrewProfile(PROFILE({ audits: [AUDIT_ROW], auditFollowups: [{ request_id: "ar_1", owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "fixed", closed_at: "2026-11-02T10:00:00Z" }] }));
   const f = feedbackFile(p, "2026-10-19");
   const it = f.groups.flatMap((g) => g.items).find((x) => x.kind === "audit");
-  assert.equal(it.label, "Printshop audit");
+  assert.equal(it.label, "Printshop Ops Audit");
   assert.deepEqual(it.tags, [["Score", "4/5"], ["Inventory", "3/5"], ["Technical", "4/5"], ["Collaterals", "5/5"], ["Ship", "Pursuit"]]);
   assert.deepEqual(it.lines.map((l) => l.label), ["Strengths", "To improve", "Agreed", "Follow-up"]);
   assert.match(it.lines[3].text, /^Rolando by 2026-11-18: MFD refresher \(fixed 2026-11-02\)$/);
