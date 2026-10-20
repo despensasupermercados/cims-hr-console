@@ -142,6 +142,15 @@ export const safeName = (s) => String(s || "file").replace(/[^A-Za-z0-9._-]+/g, 
 // line has a count. Anything short of that is listed, line by line, so Dexter and the crew see the same list.
 // A seafarer the board has aboard a ship NOW: TDG's On board seat, dated or not. A seat with no embark date yet ("No
 // contract dates yet") is still aboard per the file — it used to read "Nobody aboard" and was refused a request.
+// THE OPEN REQUEST, one definition (Miguel, 20 Oct 2026: "we do 1 person at the time per ship"). A request is open from
+// its draft until it is graded: draft, sent, or in (complete) and not graded yet. A TEST request is open while it waits and
+// finished once in (it cannot be graded, §10i). While one is open on a ship, no request is made on that ship for anyone;
+// the next is asked once it is graded or cancelled. The SQL reads `audit_request r LEFT JOIN audit_eval e ON e.request_id
+// = r.id`; the JS reads a row carrying the eval's score as `grade`.
+export const OPEN_REQ_SQL = "(r.status IN ('draft','sent') OR (r.status = 'complete' AND e.request_id IS NULL AND COALESCE(r.test_mode, 0) = 0))";
+export const SHIP_OPEN_SQL = "SELECT r.id, r.agency_id, r.crew_name, r.status FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.normalized_ship = ? AND " + OPEN_REQ_SQL + " ORDER BY r.created_at DESC LIMIT 1";
+export const isOpenRequest = (r) => !!r && (r.status === "draft" || r.status === "sent" || (r.status === "complete" && r.grade == null && !r.test_mode));
+
 export const aboardNow = (c) => !!(c && c.current && (c.aboard || !c.signOn));
 
 export function gateState({ request, machines, uploads, down, lines, counted, requireRead = true }) {

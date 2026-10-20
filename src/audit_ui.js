@@ -387,7 +387,7 @@ label.btn{position:relative}
       if (!q) return true;
       return (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase().indexOf(q) >= 0;
     });
-    var open = list.filter(function (s) { return s.last && (s.last.status === "sent" || (s.last.status === "complete" && s.last.grade == null && !s.last.test)); });
+    var open = list.filter(function (s) { return s.open; }); /* the server's one definition (isOpenRequest) */
     var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
     var c = S.counts, h = keptLine();
     if (c && !q) h += '<div class="doors"><button class="door" data-go="hist"><span class="sq">' + ic("clock-counter-clockwise") + '</span><span class="tx"><span class="nm">History</span><span class="sm">' + (c.filed ? c.filed + (c.filed === 1 ? " audit filed" : " audits filed") : "None filed yet") + "</span></span></button>"
@@ -422,13 +422,25 @@ label.btn{position:relative}
     if (!s.aboard.length) h += '<div class="empty">' + ic("user") + "The TDG file has nobody aboard " + esc(s.ship) + ".</div>";
     s.aboard.forEach(function (c) {
       var aboard = c.signOn ? md(c.signOn, S.today) : "";
-      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (aboard ? " · " + aboard + " aboard" : "") + "</div>" + contractBar(c) + "</div>" + ic("caret-right", "go") + "</button>";
+      /* one person at a time per ship (Miguel, 20 Oct 2026): while one request is open here, the other waits */
+      var busy = s.open && s.last && s.last.sc !== c.sc ? '<div class="stl"><span class="st n">' + ic("hourglass-medium") + "Waits for " + esc(first(s.last.crew)) + "'s audit</span></div>" : s.open && s.last && s.last.sc === c.sc ? '<div class="stl">' + reqStatus(s.last) + "</div>" : "";
+      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (aboard ? " · " + aboard + " aboard" : "") + "</div>" + contractBar(c) + busy + "</div>" + ic("caret-right", "go") + "</button>";
     });
     $("main").innerHTML = h + "</div>";
   }
 
   /* ---------------- A2 · The briefing ---------------- */
   var KIND = { feedback: "Feedback", intel: "Field intel", review: "Shipboard review", note: "Note", comment: "Comment" };
+  /* ONE PERSON AT A TIME PER SHIP (Miguel, 20 Oct 2026: "we do 1 person at the time per ship"): while another seafarer's
+     request is open on this ship, there is no Request button, only the way to it */
+  function stop(t) { return /[.!?]$/.test(t) ? t : t + "."; } /* "A.J." ends its own sentence */
+  function shipBusy(ship, openCrew, crew, id) {
+    return '<div class="note" style="margin:0 0 10px">One audit at a time per ship: file ' + esc(first(openCrew)) + "'s, then ask " + esc(stop(first(crew))) + "</div>"
+      + '<button class="btn" data-go="q=' + esc(id) + '">' + ic("hourglass-medium") + "Open " + esc(first(openCrew)) + "'s request</button>";
+  }
+  function shipBusyCard(ship, openCrew) {
+    return '<div class="card"><div class="empty">' + ic("hourglass-medium") + "<span>" + esc(first(openCrew)) + "'s request is still open on " + esc(ship) + ".</span></div></div>";
+  }
   function needCard(fn, machines, lines) {
     var q = function (v) { return v == null ? "" : '<span class="q">' + esc(v) + "</span>"; };
     return '<div class="card"><div class="ch">' + ic("list-checks") + "What " + esc(fn) + ' sends before you arrive</div>' +
@@ -518,6 +530,7 @@ label.btn{position:relative}
       $("main").innerHTML = h;
       S.lastBrief = b;
       if (b.open) dock('<button class="btn" data-go="q=' + esc(b.open) + '">' + ic("hourglass-medium") + "Open the request</button>");
+      else if (b.shipOpen) dock(shipBusy(ship, b.shipOpen.crew, b.crew.name, b.shipOpen.id));
       else dock('<button class="btn green" data-go="r=' + esc(encodeURIComponent(ship)) + "|" + esc(encodeURIComponent(sc)) + '">' + ic("paper-plane-tilt") + "Request the documents</button>");
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
   }
@@ -531,6 +544,7 @@ label.btn{position:relative}
       if (S.view !== key) return;
       if (p.open) { location.replace("#q=" + p.open.id); return; }
       top("Request documents", ship + " · " + p.crew.name, "", "", true);
+      if (p.shipOpen) { $("main").innerHTML = shipBusyCard(ship, p.shipOpen.crew); dock(shipBusy(ship, p.shipOpen.crew, p.crew.name, p.shipOpen.id)); return; }
       var n = p.machines ? p.machines.length : 0;
       var h = "";
       if (!p.live) h += '<div class="ban a">' + ic("f:warning-circle") + "<span>Test mode. The email goes to you only, marked TEST. Nothing reaches the ship until Miguel switches it live.</span></div>";
@@ -552,6 +566,7 @@ label.btn{position:relative}
         var contract = bf && bf.contract ? bf.contract.label : null;
         post("/api/audit/request", { ship: ship, sc: sc, contract: contract }).then(function (r) {
           if (r.ok || r.error === "already_open") { S.brief = {}; reloadShips(); location.replace("#q=" + r.id); }
+          else if (r.error === "ship_busy") { S.brief = {}; reloadShips(); $("main").innerHTML = shipBusyCard(ship, r.crew); dock(shipBusy(ship, r.crew, p.crew.name, r.id)); }
           else { btn.disabled = false; btn.innerHTML = ic("arrow-clockwise") + "Try again"; $("main").insertAdjacentHTML("afterbegin", '<div class="err">' + ic("warning-circle") + "<span>" + esc(WHY[r.error] || r.detail || r.error) + "</span></div>"); }
         }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
       };

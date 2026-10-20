@@ -14,7 +14,7 @@
 // TEST MODE until Miguel signs off the rendered emails (CIMS email standard §5): with AUDIT_LIVE unset every email goes
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
-import { aboardNow, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems } from "./audit.js";
+import { aboardNow, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
 import { p43ReadState, mmlReadState, coverFor } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
@@ -108,9 +108,10 @@ export function installAuditRequest(deps) {
     if (!ship || !sc) return json({ error: "ship_and_sc_required" }, 400);
     await ensureAudit(env);
     if (session.open && !(await aboardHere(env, ship, sc))) return json({ ok: false, error: "not_aboard", detail: "The board does not have this seafarer aboard " + ship + "." }, 422);
-    const [crew, cts, H, open] = await Promise.all([
+    const [crew, cts, H, open, onShip] = await Promise.all([
       crewOf(env, sc), contacts(env), hon(env, "ship", ship),
-      env.DB.prepare("SELECT r.id, r.status, r.sent_at, r.due_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND (r.status IN ('draft','sent') OR (r.status = 'complete' AND e.request_id IS NULL AND r.test_mode = 0)) ORDER BY r.created_at DESC LIMIT 1").bind(sc).first(),
+      env.DB.prepare("SELECT r.id, r.status, r.sent_at, r.due_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND " + OPEN_REQ_SQL + " ORDER BY r.created_at DESC LIMIT 1").bind(sc).first(),
+      env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null),
     ]);
     if (!crew) return json({ error: "crew_not_found" }, 404);
     const addr = addressFor({ contacts: cts, ship, personal: crew.email });
@@ -121,16 +122,24 @@ export function installAuditRequest(deps) {
       machines: H && H.ok ? H.presses : null, lines: H && H.ok && H.obp ? blindLines(H.obp.lines).length : null, obpAsOf: H && H.obp ? H.obp.asOf : null,
       hon: !!(H && H.ok), honError: H && !H.ok ? H.error : (H ? null : "HON did not answer"),
       dueAt: plusHours(now(), REQUEST_HOURS), open: open || null,
+      // one person at a time per ship: another seafarer's request still open on this ship (Miguel, 20 Oct 2026)
+      shipOpen: onShip && onShip.agency_id !== sc ? { id: onShip.id, crew: onShip.crew_name, sc: onShip.agency_id } : null,
     });
   }
+
+  // The request already open on the ship: this seafarer's (the page opens it) or another's (one person at a time per ship).
+  const shipTaken = (o, sc, ship) => o.agency_id === sc
+    ? json({ ok: false, error: "already_open", id: o.id }, 409)
+    : json({ ok: false, error: "ship_busy", id: o.id, crew: o.crew_name || null, detail: "One audit at a time on " + ship + ": " + (o.crew_name || "another seafarer") + "'s request is open. File it, then ask the next." }, 409);
 
   async function create(request, env, url, session) {
     const b = await request.json().catch(() => ({}));
     const ship = String(b.ship || "").trim(), sc = String(b.sc || "").trim();
     if (!ship || !sc) return json({ error: "ship_and_sc_required" }, 400);
     await ensureAudit(env);
-    const open = await env.DB.prepare("SELECT id FROM audit_request WHERE agency_id=? AND normalized_ship=? AND status IN ('draft','sent') LIMIT 1").bind(sc, normShip(ship)).first().catch(() => null);
-    if (open) return json({ ok: false, error: "already_open", id: open.id }, 409);
+    // ONE PERSON AT A TIME PER SHIP (Miguel, 20 Oct 2026): any request still open on this ship, for anyone, stops a new one
+    const onShip = await env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null);
+    if (onShip) return shipTaken(onShip, sc, ship);
     // OPEN MODE asks only a seafarer the board has aboard THAT ship: no request for any id to any ship's mailbox
     if (session.open && !(await aboardHere(env, ship, sc))) return json({ ok: false, error: "not_aboard", detail: "The board does not have this seafarer aboard " + ship + "." }, 422);
     const [crew, cts, H] = await Promise.all([crewOf(env, sc), contacts(env), hon(env, "ship", ship)]);
@@ -151,8 +160,8 @@ export function installAuditRequest(deps) {
     } catch (e) {
       // the unique open-request index: a second tap, or a second visitor, while the first request is being made
       if (/UNIQUE/i.test(String((e && e.message) || e))) {
-        const o = await env.DB.prepare("SELECT id FROM audit_request WHERE agency_id=? AND normalized_ship=? AND status IN ('draft','sent') LIMIT 1").bind(sc, normShip(ship)).first().catch(() => null);
-        return json({ ok: false, error: "already_open", id: o ? o.id : null }, 409);
+        const o = await env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null);
+        return shipTaken(o || { id: null, agency_id: sc }, sc, ship);
       }
       throw e;
     }

@@ -52,7 +52,7 @@ function boot(hash, api, opt = {}) {
 }
 const SHIPS = { today: "2026-10-19", counts: { filed: 0, openFollowups: 0 }, ships: [
   { ship: "Oasis", brand: "Royal", aboard: [{ sc: "SC-1", name: "John Gorre", contract: "3 completed · on contract 4", signOn: "2026-06-02", signOff: "2027-01-03" }], last: null },
-  { ship: "Pursuit", brand: "Azamara", aboard: [{ sc: "SC-9", name: "Kevin Jugao", contract: "2 completed", signOn: "2026-05-24", signOff: "2026-10-31" }], last: { id: "ar_1", at: "2026-10-16", status: "sent", crew: "Kevin Jugao", due: "2099-01-01T00:00:00Z" } }] };
+  { ship: "Pursuit", brand: "Azamara", aboard: [{ sc: "SC-9", name: "Kevin Jugao", contract: "2 completed", signOn: "2026-05-24", signOff: "2026-10-31" }], open: true, last: { id: "ar_1", at: "2026-10-16", status: "sent", crew: "Kevin Jugao", sc: "SC-9", due: "2099-01-01T00:00:00Z" } }] };
 const settle = () => new Promise((r) => setTimeout(r, 30));
 
 test("the home opens on the ships, never on 'Could not load' (the photo queue is not the search text)", async () => {

@@ -150,3 +150,13 @@ test("16 Oct 2026 review: an overdue contract's rush window runs to today; a fin
   const o = await (await c(null, { DB: fakeDb(rows), AUDIT_OPEN: "true", AUDIT_OPEN_AS: "Dexter.Lawrence@dg3.com" })).json();
   assert.equal(o.audits[0].by, null, "who asked is not for anonymous visitors");
 });
+
+test("ships: the server says which ship has a request still open (one person at a time per ship, isOpenRequest)", async () => {
+  const row = (o) => Object.assign({ id: "ar_1", ship: "Oasis", agency_id: "SC-1", crew_name: "John Gorre", created_at: "2026-10-16T10:00:00Z", test_mode: 0, grade: null }, o);
+  const open = async (o) => (await (await call("https://audit.cims.work/api/audit/ships", undefined, { DB: fakeDb([row(o)]) })).json()).ships.find((s) => s.ship === "Oasis").open;
+  assert.equal(await open({ status: "sent" }), true);
+  assert.equal(await open({ status: "draft" }), true, "the page's old test missed a draft");
+  assert.equal(await open({ status: "complete" }), true, "in and not graded");
+  assert.equal(await open({ status: "complete", grade: 4 }), false, "graded is finished");
+  assert.equal(await open({ status: "complete", test_mode: 1 }), false, "a TEST request in cannot be graded: finished");
+});
