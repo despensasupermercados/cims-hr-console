@@ -154,7 +154,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
      Pick the customer, and its ships line up by what Dexter has to do: contracts ending within 30 days with no audit
      first, then every other contract not audited, then the ones audited this contract, then the hulls nobody is aboard.
      An audit belongs to the contract it was asked in (Miguel, 16 Oct 2026): the server says it per seafarer (audit). */
-  var CUSTS = [["Royal", "Royal Caribbean"], ["Celebrity", "Celebrity"], ["Azamara", "Azamara"], ["NCL", "NCL"]];
+  var CUSTS = [["Royal", "Royal Caribbean"], ["Celebrity", "Celebrity"], ["Azamara", "Azamara"], ["NCL", "Norwegian"]];
   function brandOf(s) { return s.brand === "Royal" ? "Royal Caribbean" : (s.brand || ""); }
   function custOf(s) { return s.brand || "Other"; }
   function custName(k) { for (var i = 0; i < CUSTS.length; i++) if (CUSTS[i][0] === k) return CUSTS[i][1]; return k; }
@@ -232,7 +232,9 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var list = byCust[k], crewed = list.filter(function (s) { return lead(s); }).length, soon = list.filter(function (s) { return bandOf(s) === "soon"; }).length;
       return '<button type="button" class="tile' + (S.cust === k ? " on" : "") + '" data-cust="' + esc(k) + '" aria-pressed="' + (S.cust === k) + '"><span class="tile-top"><b class="tile-name">' + esc(custName(k)) + "</b></span>"
         + '<span class="sm">' + list.length + (list.length === 1 ? " ship" : " ships") + " · " + (crewed === list.length ? "all crewed" : crewed + " crewed") + "</span>"
-        + '<span class="tile-alert ' + (soon ? "a" : "g") + '">' + (soon ? soon + (soon === 1 ? " ends" : " end") + " within 30 days" : "Nothing ends within 30 days") + "</span></button>";
+        // a customer whose ships are not in service yet (Norwegian Getaway, from 16 Nov 2026) says when, not "0 crewed"
+        + (list.every(function (s) { return s.from; }) ? '<span class="tile-alert g">In service ' + esc(fmtD(list.map(function (s) { return s.from; }).sort()[0])) + "</span></button>"
+          : '<span class="tile-alert ' + (soon ? "a" : "g") + '">' + (soon ? soon + (soon === 1 ? " ends" : " end") + " within 30 days" : "Nothing ends within 30 days") + "</span></button>");
     }).join("") + "</section>";
   }
   function greeting() { var h = new Date().getHours(), nm = first(meName()); return (h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening") + (nm ? ", " + nm : ""); }

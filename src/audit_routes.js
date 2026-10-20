@@ -88,7 +88,7 @@ export function installAudit(deps) {
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
       // `open`: the request still open on this ship (one person at a time, isOpenRequest), the page's "Open requests"
-      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), sent: iso(last.sent_at), in: iso(last.complete_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
+      out.push({ ship: s.ship, brand: s.brand || null, from: s.from || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), sent: iso(last.sent_at), in: iso(last.complete_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
     return json({ today: TODAY(), auditor: session.email, ships: out, counts: cnt ? { filed: Number(cnt.filed) || 0, openFollowups: Number(cnt.open_fu) || 0 } : null });

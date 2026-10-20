@@ -2528,7 +2528,8 @@ async function rotationSections(env) {
   const tdgCount = countMapOf(_cnt);
   const tdgAdded = {}; for (const r of _cnt) if (r && r.sc) tdgAdded[r.sc] = completedSince(r.as_of, ccRowOf(r), today); // finished since the count file (8 Oct 2026)
   const shipHome = {}, shipBrand = {};
-  for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
+  const shipFrom = {}; // a hull entering service: its first day (VESSEL_REF `from`)
+  for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; if (v.from) shipFrom[k] = v.from; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : v.brand === "NCL" ? "NCL" : "Royal"); } // NCL: Norwegian Getaway, 20 Oct 2026 (it read Royal: "Getaway of the Seas", a GSM)
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
   const crewRows = crewRowsRes.results;
   const _trainers = trainerSet((trainerRes && trainerRes.results) || []);
@@ -2831,6 +2832,9 @@ async function rotationSections(env) {
   for (const a of (openAsg || [])) { const cs = shipOf(a.ship) || a.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // a ship with only a projection still gets a section
   for (const d of ((depRes && depRes.results) || [])) { const cs = shipOf(d.ship) || d.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and so does one with only a sent line
   for (const sc of earmarkSc) { const cs = fileOf[sc].ship; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and one TDG earmarks someone for
+  // ...and a hull entering service (VESSEL_REF `from`: Norwegian Getaway, 16 Nov 2026 — Miguel, 20 Oct 2026, "yes get away i the
+  // console"): it has its section before anyone is placed on it, so Rita can drag its first printer onto it.
+  for (const v of VESSEL_REF) if (v.from) { const kk = normShip(v.name); if (!shipNames[kk]) shipNames[kk] = v.name; }
   // Yellow cards that are not already standing on the board: a projection whose contract has not
   // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
   // renderer — the board no longer synthesises a second reliever list of its own.
@@ -2973,7 +2977,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off, byFile: !!h.byFile, offSource: h.offSource || null, reliever: h.reliever ? { name: h.reliever.name || null, sc: h.reliever.sc } : null }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff || x.signOff >= today) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, visits, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, visits, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history, from: shipFrom[k] && shipFrom[k] > today ? shipFrom[k] : null };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   // WHAT IS LEFT TO CLEAN UP (board_truth.boardIssues): the board applies the file; this lists only what a
@@ -2998,7 +3002,7 @@ async function rotationSections(env) {
     }).filter((x) => x.sc && cmap[x.sc]);
     const heldAboard = new Set(crew.filter((c) => c.fileRaw && c.fileRaw.status === "On board" && c.fileRaw.ship).map((c) => normShip(c.fileRaw.ship)));
     const secs = sections.map((x) => ({
-      ship: x.ship, key: normShip(x.ship),
+      ship: x.ship, key: normShip(x.ship), notYet: !!x.from, // not in service yet: no printer is no gap
       seated: x.crew.some((c) => c.state !== "yellow" || c.confirmed),
       fileAboard: heldAboard.has(normShip(x.ship)),
       aboardCards: x.crew.filter((c) => c.state === "yellow" && !c.confirmed).map((c) => (c.registry && c.registry.verdict) || "pending")
@@ -5489,7 +5493,7 @@ document.addEventListener('click',function(e){
   rows.forEach(function(r){tb.appendChild(r);});
 });
 function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Reserved':'#C9A46A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6','Not for Rehire':'#9B4D4D'}[st]||'#9aa7b6';}
-function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
+function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN')||v.includes('GETAWAY'))return'NCL';return'Royal';}
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
 // TAB SWITCHES (16 Sep 2026). Miguel: "when I change tabs still slower". Every tab refetched from
 // scratch, so going back to a tab you were just on cost a full round trip — perf_log measured 620-1100ms
@@ -7143,7 +7147,7 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
 function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
   return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
 // Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
-function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(!_n&&sec&&sec.from)return '<div class="rcard ghostslot" style="cursor:default" title="Drag a seafarer onto this ship to earmark them"><div class=gp>+</div><div class=gt>First printer</div><div class=gc>IN SERVICE '+escHtml(fmtDateS(sec.from)).toUpperCase()+' · DRAG A SEAFARER HERE</div></div>';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -7840,7 +7844,7 @@ async function renderRotation(){
 // emails stayed armed on the server. The last known values are kept and painted back.
 function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
-var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
+var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara',NCL:'Norwegian'};
 function rotRail(shown,total){
   var secs=(ROT&&ROT.sections)||[],brands={},ships={},names={},line={},yrs={};
   secs.forEach(function(s){
@@ -7948,7 +7952,7 @@ function drawRotation(){
     // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
     // (sec.deployed) and the Junior PS rule (sec.jrPsRule) were silently dropped on the way to the page:
     // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
-    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,visits:s.visits||[],history:hist};
+    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,from:s.from||null,visits:s.visits||[],history:hist};
   });
   // A status tile, a year or a month: a ship with nobody in it leaves the board (it used to stay, empty).
   if(ROT_F||ROT_YEAR||ROT_MONTHS.length)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
@@ -9366,7 +9370,7 @@ function card(c){
    +comp
    +'</div></div>';
 }
-var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brilliance","Constellation","Eclipse","Edge","Enchantment","Equinox","Explorer","Freedom","Grandeur","Harmony","Icon","Independence","Infinity","Jewel","Legend","Liberty","Mariner","Millennium","Navigator","Oasis","Odyssey","Ovation","Quantum","Radiance","Reflection","Rhapsody","Serenade","Silhouette","Spectrum","Star","Summit","Symphony","Utopia","Vision","Voyager","Wonder","Xcel","Azamara Journey","Azamara Onward","Azamara Pursuit","Azamara Quest"];
+var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brilliance","Constellation","Eclipse","Edge","Enchantment","Equinox","Explorer","Freedom","Grandeur","Harmony","Icon","Independence","Infinity","Jewel","Legend","Liberty","Mariner","Millennium","Navigator","Oasis","Odyssey","Ovation","Quantum","Radiance","Reflection","Rhapsody","Serenade","Silhouette","Spectrum","Star","Summit","Symphony","Utopia","Vision","Voyager","Wonder","Xcel","Azamara Journey","Azamara Onward","Azamara Pursuit","Azamara Quest","Norwegian Getaway"];
 function shipOptions(sel){return '<option value="">—</option>'+SHIP_LIST.map(function(s){var full='MV '+s.toUpperCase();var m=(sel&&(sel===full||sel===s||sel.toUpperCase().indexOf(s.toUpperCase())>=0));return '<option value="'+full+'"'+(m?' selected':'')+'>'+s+'</option>';}).join('');}
 // "" = Auto (let the app derive status from the schedule). A named pick becomes a manual override that
 // wins (e.g. Rita pulling an auto-retired crew back to Earmarked).

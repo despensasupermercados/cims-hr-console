@@ -26,7 +26,7 @@ export function auditShellPath(host, path) {
 export const auditBase = (host) => (isAuditHost(host) ? "/" : "/audit");
 
 /* --------------------------------- names and dates --------------------------------- */
-export const normShip = (s) => String(s || "").toLowerCase().replace(/^(celebrity|azamara|royal caribbean)\s+/i, "")
+export const normShip = (s) => String(s || "").toLowerCase().replace(/^(celebrity|azamara|royal caribbean|norwegian)\s+/i, "") /* "Norwegian Getaway" = "Getaway" (20 Oct 2026) */
   .replace(/\bof the seas\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 export const iso = (d) => (d ? String(d).slice(0, 10) : null);
 export function plusHours(at, h) { const t = Date.parse(at); return isNaN(t) ? null : new Date(t + h * 3600 * 1000).toISOString(); }

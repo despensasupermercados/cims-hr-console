@@ -1033,6 +1033,25 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   the crew's link (`modelFor`), make no link and record no visit; the welcome preview's hub button opens the console
   preview, never a real link. **hub.cims.work** with no link is the hub's landing page (`hubHomePage`), never the console.
 
+## 10l. NORWEGIAN GETAWAY — NCL's pilot hull on the console (Miguel, 20 Oct 2026: "yes get away i the console")
+In service **16 Nov 2026** (Brain rec2lUszqqzau4xns, which supersedes the tracker's 15 Nov and the 12 Nov anchor; the ship's
+auto-brief still reads 16 Oct, flagged to Miguel); the first printer, Joe Art Eresmas (SC-0038131, now aboard Solstice), signs
+on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
+- **One hull, brand NCL**: `VESSEL_REF` row `Getaway` (brand `NCL`, Breakaway, Miami, `from: "2026-11-16"`), the D1 `vessel`
+  row `ves_getaway` (`migrations/0038`: projection.js refuses an unknown ship), "Norwegian Getaway" on Edit crew's ship list.
+- **"Getaway" alone is Norwegian, never Royal Caribbean.** Every path that decided a cruise line read the bare name as Royal:
+  the board's `brandFor` (VESSEL_REF brand `NCL` → `NCL`), `clientOf` (`NCL_SHORT`), `travelClientOf`, the page's `brandOf`,
+  the GSM review's `sbmBrandForShip` (NCL: no recipient configured → skipped and logged, never Royal Caribbean's).
+- **The crew's words**: the sign-off instructions say "Norwegian Getaway" and "your shipboard manager" (`managerOf(NCL)` is
+  null — no title on record; never Royal's GSM). Royal, Celebrity and Azamara read exactly as before.
+- **Before service**: the hull has its section with nobody on it (anchored by VESSEL_REF `from`), drawn "First printer · in
+  service Nov 16, 2026 · drag a seafarer here"; it is no "empty hull" row until that day (`boardIssues` `notYet`). Rita places
+  Joe Art by dragging his card onto it (the relief panel's slot needs a printer to follow). The Keyman rail groups it under
+  "Norwegian"; the audit landing has a "Norwegian" tile saying "In service Nov 16".
+- **Open, Miguel's to answer**: the pilot term is 45 + 45 days (rec98ZTCYo7X2PkPO) but a projection is 7 months (Rita types the
+  date); the earmark bench lists everyone for an NCL hull (no NCL brand rule); NCL's ship code (the pass reads "GE");
+  NCL's ordering steps on the Crew Hub (it shows Royal & Celebrity's); NCL's shipboard manager title.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS
