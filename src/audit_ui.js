@@ -698,25 +698,36 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function keep(id, d) { if (!lsSet("aud:d:" + id, d)) toast("This phone could not keep the draft. Keep the app open until you file."); }
   function ctxOf(v) { var obp = {}; (v.parts || []).forEach(function (p) { obp[p.part_no] = p.obp; }); return { machines: v.machines, diff: v.count.diff, extras: v.count.extras, followups: v.followups, obp: obp }; }
   function toast(t) { var n = $("toast"); if (!n) { n = document.createElement("div"); n.id = "toast"; n.className = "toast"; document.body.appendChild(n); } n.textContent = t; n.classList.add("on"); clearTimeout(toast._t); toast._t = setTimeout(function () { n.classList.remove("on"); }, 3600); }
-  function stepBar(n) { var h = ""; for (var i = 1; i <= 7; i++) h += '<button class="' + (i <= n ? "on" : "") + '" data-step="' + i + '" aria-label="Step ' + i + ": " + esc(AR.STEPS[i - 1].title) + '"></button>'; $("stp").innerHTML = h; $("stp").hidden = false; }
-  function rateRow(act, k, cur, label) { var h = '<div class="rate">'; for (var n = 1; n <= 5; n++) h += '<button type="button" data-a="' + act + '" data-k="' + k + '" data-v="' + n + '" class="' + (cur === n ? "on" + (n <= 3 ? " lo" : "") : "") + '" aria-pressed="' + (cur === n) + '" aria-label="' + esc(label) + " " + n + '">' + n + "</button>"; return h + "</div>"; }
-  function box(field, val, ph, rows) { return '<textarea class="gnote' + (rows === 1 ? " one" : "") + '" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
-  function whyMsg(probs, field) { var p = probs.filter(function (x) { return x.field === field; })[0]; return p && S.err.show ? '<div class="why">' + ic("warning-circle") + esc(p.say) + "</div>" : ""; }
-  function itemRow(act, key, label, sub, missing, prevMissing, times) {
-    var pill = missing ? (times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : '<span class="st r">Missing</span>') : prevMissing ? '<span class="st m">Missing last time</span>' : "";
-    return '<button type="button" class="itm' + (missing ? " miss" : "") + '" data-a="' + act + '" data-k="' + esc(key) + '" aria-pressed="' + !!missing + '"><span class="tx">' + esc(label) + (sub ? ' <span class="sub">· ' + esc(sub) + "</span>" : "") + "</span>" + pill + ic(missing ? "f:x-circle" : "f:check-circle", missing ? "bad" : "ok") + "</button>";
-  }
   /* ONE way to answer in the audit (Miguel, 19 Oct 2026, three screens: "the dual thing .. not my favorite"). A row starts in its
-     normal state and says so; one tap marks what is wrong (red), a second tap takes it back. words = [normal, wrong]: the normal
-     word is printed (muted) only where the label names a problem ("Not seen" beside a Pattern 43 mark). */
-  function tapRow(act, key, label, sub, bad, words, attrs) {
-    var pill = bad ? '<span class="st r">' + esc(words[1]) + "</span>" : words[0] ? '<span class="st m">' + esc(words[0]) + "</span>" : "";
-    return '<button type="button" class="itm' + (bad ? " miss" : "") + '" data-a="' + act + '" data-k="' + esc(key) + '"' + (attrs || "") + ' aria-pressed="' + !!bad + '"><span class="tx">' + esc(label) + (sub ? '<span class="sm">' + sub + "</span>" : "") + "</span>" + pill + ic(bad ? "f:x-circle" : "f:check-circle", bad ? "bad" : "ok") + "</button>";
+     normal state with a green tick; one tap marks what is wrong (red, the word in a pill), a second tap takes it back. The
+     redesign of 20 Oct 2026 draws it as the canvas's tap row: the tick, the label over its line, the word. */
+  function tapBtn(o) {
+    var tk = o.tk, mark = tk === "c" ? ic("b:check") : tk === "x" ? ic("b:x") : tk === "w" ? ic("b:exclamation-mark") : "";
+    return '<button type="button" class="tap' + (o.bad ? " bad" : "") + '" data-a="' + o.act + '" data-k="' + esc(o.key) + '"' + (o.attrs || "") + ' aria-pressed="' + !!o.pressed + '"><span class="tk ' + tk + '">' + mark + '</span><span class="tl"><b>' + esc(o.label) + "</b>" + (o.sub ? '<span class="xs">' + o.sub + "</span>" : "") + "</span>" + (o.word ? '<span class="pill-s ' + o.pill + '">' + esc(o.word) + "</span>" : "") + "</button>";
+  }
+  function itemRow(act, key, label, sub, missing, prevMissing, times) {
+    return tapBtn({ act: act, key: key, label: label, sub: sub ? esc(sub) : "", bad: missing, pressed: missing, tk: missing ? "x" : "c",
+      word: missing ? (times > 1 ? AR.ordinal(times) + " time" : "Missing") : prevMissing ? "Missing last time" : "", pill: missing ? "r" : "m" });
+  }
+  /* words = [normal, wrong]: the normal word is printed (muted) only where the label names a problem ("Not seen" beside a
+     Pattern 43 mark). obs: an observation to confirm, not a fault (the Pattern 43 mark): an open circle until seen, then amber. */
+  function tapRow(act, key, label, sub, bad, words, attrs, obs) {
+    return tapBtn({ act: act, key: key, label: label, sub: sub, bad: bad && !obs, pressed: bad, attrs: attrs, tk: obs ? (bad ? "w" : "o") : bad ? "x" : "c",
+      word: bad ? words[1] : words[0], pill: bad ? (obs ? "a" : "r") : "m" });
   }
   var CHECK_SAY = { test: "Test pattern prints clean", scan: "Scan to email works", collab: "Collaboration works" };
   function prevMissing(v, k) { return !!(v.previous && (v.previous.missing || []).indexOf(k) >= 0); }
   function timesFor(v, k) { return prevMissing(v, k) ? ((v.previous.repeat || {})[k] || 1) + 1 : 1; }
   function toggle(list, k) { var i = list.indexOf(k); if (i >= 0) list.splice(i, 1); else list.push(k); }
+  function rateRow(act, k, cur, label, blank) {
+    var h = '<div class="scale' + (blank ? " six" : "") + '" role="group" aria-label="' + esc(label) + '">';
+    for (var n = 1; n <= 5; n++) h += '<button type="button" class="sc' + (cur === n ? " on" + (n <= 3 && act !== "disp" ? " lo" : "") : "") + '" data-a="' + act + '" data-k="' + k + '" data-v="' + n + '" aria-pressed="' + (cur === n) + '" aria-label="' + esc(label) + " " + n + '">' + n + "</button>";
+    if (blank) h += '<button type="button" class="sc blank' + (cur == null ? " on" : "") + '" data-a="' + act + '-blank" data-k="' + k + '" aria-pressed="' + (cur == null) + '">Blank</button>';
+    return h + "</div>";
+  }
+  function box(field, val, ph, rows) { return '<textarea class="ta' + (rows === 1 ? " one" : "") + '" rows="2" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
+  function whyMsg(probs, field) { var p = probs.filter(function (x) { return x.field === field; })[0]; return p && S.err.show ? '<div class="why">' + ic("warning-circle") + "<span>" + esc(p.say) + "</span></div>" : ""; }
+  function lbl(t, inner) { return '<label class="lbl"><span class="xs b">' + t + "</span>" + inner + "</label>"; }
 
   /* ---- photos: shrunk on the phone (1600px, JPEG), queued in IndexedDB, sent when there is signal ---- */
   var IDB = null;
@@ -769,73 +780,66 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     }).then(function () { flushPhotos._busy = false; if (S.redraw) S.redraw(); }, function () { flushPhotos._busy = false; });
   }
   function photoStrip(v, step) {
-    var sent = (v.photos || []).filter(function (p) { return p.step === step; }), wait = (S.pq[v.id] || []).filter(function (p) { return p.step === step; });
-    var h = '<div class="card"><div class="ch">' + ic("camera") + 'Photos<span class="r">' + (sent.length + wait.length ? sent.length + wait.length + (wait.length ? " · " + wait.length + " waits for signal" : "") : "optional") + "</span></div>";
-    if (sent.length || wait.length) {
+    var sent = (v.photos || []).filter(function (p) { return p.step === step; }), wait = (S.pq[v.id] || []).filter(function (p) { return p.step === step; }), n = sent.length + wait.length;
+    var h = '<div class="card clip"><div class="grp"><span>Photos</span><em>' + (n ? n + (wait.length ? " · " + wait.length + " wait for signal" : "") : "optional") + "</em></div>";
+    if (n) {
       h += '<div class="phs">';
       sent.forEach(function (p) { h += '<a class="th" href="/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" style="background-image:url(&quot;/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '&quot;)" aria-label="Photo"></a>'; });
       wait.forEach(function (p) { var u = p._u || (p._u = URL.createObjectURL(p.blob)); h += '<span class="th q" style="background-image:url(&quot;' + u + '&quot;)" title="Waits for signal"></span>'; });
       h += "</div>";
     }
-    return h + '<div class="pad" style="padding-top:8px"><label class="btn ghost">' + ic("camera") + 'Take photo<input class="vh" type="file" accept="image/*" capture="environment" data-photo="' + step + '"></label></div></div>';
+    return h + '<div class="pad-m line-t"><label class="btn ghost s">' + ic("camera") + 'Take a photo<input class="vh" type="file" accept="image/*" capture="environment" data-photo="' + step + '"></label></div></div>';
   }
 
-  /* ---- A8 · the documents are in: what they found, as items the audit will ask to confirm ---- */
-  function beforeCard(v) {
-    var b = v.before || [];
-    var h = '<div class="card"><div class="ch">' + ic("list-checks") + 'Before the visit<span class="r">from the documents</span></div>';
-    if (!b.length) h += '<div class="need"><span class="ib">' + ic("f:check-circle") + '</span><div class="tx"><div class="t">Nothing found in the documents</div><div class="s">Pattern 43 clean, no part past rated life, the count agrees with OBP</div></div></div>';
-    b.forEach(function (x) { h += '<div class="need"><span class="ib ' + (x.tone === "a" ? "a" : "") + '">' + ic(x.step === "inventory" ? "package" : "printer") + '</span><div class="tx"><div class="t">' + esc(x.t) + '</div><div class="s">' + esc(x.s) + "</div></div></div>"; });
-    return h + '<div class="foot">' + ic("clipboard-text") + "<span>Each one comes up in the audit for you to confirm on board.</span></div></div>";
-  }
-
-  /* ---- the steps ---- */
+  /* ---- the steps (0 = before you start: what the documents said; 1–7 = AR.STEPS) ---- */
   var STEP = {};
-  STEP.workstation = function (v, d, probs) {
+  STEP.before = function (v) {
+    var b = v.before || [];
+    var h = b.length ? b.map(function (x) { return '<div class="card pad-m sec tight"><div class="hstack"><span class="chip ' + (x.tone === "a" ? "a" : "m") + '">' + (x.step === "inventory" ? "Count" : "Machines") + '</span><b class="h4">' + esc(x.t) + '</b></div><p class="sm">' + esc(x.s) + "</p></div>"; }).join("")
+      : '<div class="card pad-m sec tight"><div class="hstack"><span class="chip g">The documents</span><b class="h4">Nothing found</b></div><p class="sm">Pattern 43 clean, no part past its rated life, the count agrees with OBP.</p></div>';
+    return h + '<p class="sm">Every step saves on this phone as you tap. No signal: it is kept here and sent when the server answers.</p><button type="button" class="ul" data-go="q=' + esc(v.id) + '">Open what the documents said</button>';
+  };
+  STEP.workstation = function (v, d) {
     /* ONE list, everything present until Dexter taps it (Miguel, 19 Oct 2026: "i dont like this game of dual stuff .. make it
-       one .. defaulted to all present .. so he can mark what is not there"). The line under the question only says the state. */
-    var miss = d.ws.missing, h = '<div><div class="q">What is not on the desktop?</div><div class="hint">Everything starts as present. Tap only what is missing; tap it again to put it back.</div>'
-      + '<div class="wsum' + (miss.length ? " bad" : "") + '">' + ic(miss.length ? "f:x-circle" : "f:check-circle") + (miss.length ? miss.length + " missing" : "All present") + "</div></div>";
-    h += '<div class="card">';
+       one .. defaulted to all present .. so he can mark what is not there"). */
+    var miss = d.ws.missing, h = "";
     AR.WORKSTATION.forEach(function (g) {
       var n = g.items.filter(function (i) { return miss.indexOf(i.key) >= 0; }).length;
-      h += '<div class="grp"><span>' + esc(g.grp) + "</span><em" + (n ? ' class="bad">' + n + " missing" : ">" + g.items.length + " of " + g.items.length) + "</em></div>";
-      /* a group of short names with no sub-line (the bookmarks) is a grid of cells: six rows read as a list nobody scans */
-      if (g.items.length >= 4 && g.items.every(function (i) { return !i.sub; })) {
-        h += '<div class="cells">' + g.items.map(function (i) { var bad = miss.indexOf(i.key) >= 0; return '<button type="button" class="cell' + (bad ? " bad" : " ok") + '" data-a="ws" data-k="' + esc(i.key) + '" aria-pressed="' + bad + '">' + ic(bad ? "f:x-circle" : "f:check-circle") + esc(i.label) + (bad && prevMissing(v, i.key) ? " · " + esc(AR.ordinal(timesFor(v, i.key))) : "") + "</button>"; }).join("") + "</div>";
-      } else g.items.forEach(function (i) { h += itemRow("ws", i.key, i.label, i.sub, miss.indexOf(i.key) >= 0, prevMissing(v, i.key), timesFor(v, i.key)); });
+      h += '<div class="card clip"><div class="grp"><span>' + esc(g.grp) + "</span><em" + (n ? ' class="bad">' + n + " missing" : ">" + g.items.length + " of " + g.items.length) + "</em></div>";
+      g.items.forEach(function (i) { h += itemRow("ws", i.key, i.label, i.sub, miss.indexOf(i.key) >= 0, prevMissing(v, i.key), timesFor(v, i.key)); });
+      h += "</div>";
     });
-    return h + "</div>" + photoStrip(v, "workstation");
+    return h + photoStrip(v, "workstation");
   };
+  function machState(d, m) {
+    var a = d.hw.machines[m.serial] || {};
+    return a.down === "still" ? "down" : (AR.MACHINE_CHECKS.some(function (c) { return (a.checks || {})[c.key] === "finding"; }) || a.p43 === "seen") ? "problem" : "ok";
+  }
   STEP.machines = function (v, d, probs) {
-    var h = '<div><div class="q">What is not working?</div><div class="hint">Everything starts as working. Tap only what is wrong; tap it again to put it back.</div></div>';
-    h += '<div class="card">' + tapRow("labeled", "all", "All hardware labeled", "", d.hw.labeled === false, ["", "Not labeled"]) + "</div>";
+    var h = '<div class="card clip">' + tapRow("labeled", "all", "All hardware labeled", "", d.hw.labeled === false, ["", "Not labeled"]) + "</div>";
     v.machines.forEach(function (m) {
       var a = d.hw.machines[m.serial] || (d.hw.machines[m.serial] = { checks: {}, p43: null, down: null, note: "" });
-      var stillDown = a.down === "still", finding = AR.MACHINE_CHECKS.some(function (c) { return a.checks[c.key] === "finding"; }) || a.p43 === "seen";
-      var pill = stillDown ? '<span class="st r">Down</span>' : finding ? '<span class="st r">Problem</span>' : '<span class="st g">Working</span>';
-      h += '<div class="card"><div class="mach"><div class="mh"><b>' + esc(m.label) + (m.model ? ' <span class="sm" style="display:inline">· ' + esc(m.model) + "</span>" : "") + "</b>" + pill + '</div><div class="mono">' + esc(m.serial) + "</div></div>";
+      var stillDown = a.down === "still", ms = machState(d, m), finding = ms === "problem";
+      h += '<div class="card clip"><div class="grp"><span>' + esc(m.label) + (m.model || m.serial ? " · " + esc([m.model, m.serial].filter(Boolean).join(" · ")) : "") + "</span>" + (ms === "down" ? '<span class="pill-s r">Down</span>' : finding ? '<span class="pill-s r">Problem</span>' : '<span class="pill-s ok">Working</span>') + "</div>";
       var ser = ' data-s="' + esc(m.serial) + '"';
-      if (m.down) h += tapRow("down", "x", "Reported down by " + first(v.crew), "“" + esc(m.down) + "”", stillDown, ["Running now", "Still down"], ser);
+      if (m.down) h += tapRow("down", "x", "Reported down by " + first(v.crew), "&#8220;" + esc(m.down) + "&#8221;", stillDown, ["Running now", "Still down"], ser);
       if (!stillDown) {
         AR.MACHINE_CHECKS.forEach(function (c) { h += tapRow("chk", c.key, CHECK_SAY[c.key] || c.label, "", a.checks[c.key] === "finding", ["", "Problem"], ser); });
         var items = (m.p43 && m.p43.items) || [];
         if (items.length) {
           var one = items.length === 1 ? items[0] : null;
           var sub = (one ? esc([one.where, one.part ? "points to " + sentence(one.part) : ""].filter(Boolean).join(" · ")) + "<br>" : items.map(function (it) { return esc(sentence(it.head)); }).join("<br>") + "<br>") + "Pattern 43 showed it. Print one and look; Rolando confirms.";
-          h += tapRow("p43", "x", one ? sentence(one.head) : items.length + " Pattern 43 marks", sub, a.p43 === "seen", ["Not seen", "Seen"], ser);
+          h += tapRow("p43", "x", one ? sentence(one.head) : items.length + " Pattern 43 marks", sub, a.p43 === "seen", ["Not seen", "Seen"], ser, true);
         }
-        if ((m.life || []).length) {
-          h += '<div class="fnd a">' + ic("clock") + "<div><b>" + m.life.length + (m.life.length === 1 ? " part" : " parts") + " past rated life · information</b>";
-          m.life.forEach(function (x) { h += '<span class="src">' + esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " · " + esc(x.cover).replace(/ (\d)/g, "&nbsp;$1") : " · not on the OBP list") + "</span>"; });
-          h += '<span class="src">Copy quality decides, never the counter. Have the part on board for when it goes.</span></div></div>';
-        }
+        if (!m.down) h += (m.life || []).length
+          ? '<div class="info line-t"><span class="xs">Management list · ' + m.life.length + (m.life.length === 1 ? " part" : " parts") + ' past rated life · information</span><span class="sm">' + m.life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " (" + esc(x.cover) + ")" : " (not on the OBP list)"); }).join(" · ") + ". Copy quality decides, never the counter.</span></div>"
+          : '<div class="info line-t"><span class="xs">Management list</span><span class="sm">No part past its rated life. Parts are changed on copy quality, not on a count.</span></div>';
       }
-      if (finding || stillDown) h += '<div class="pad" style="padding-top:4px"><div class="lab">What you found' + (finding ? " · required" : "") + "</div>" + box("m:" + m.serial, a.note, "One sentence, what you saw on " + m.label) + whyMsg(probs, "note:" + m.serial) + "</div>";
+      if (finding || stillDown) h += '<div class="pad-m line-t sec tight">' + lbl("What you found" + (finding ? " · required" : ""), box("m:" + m.serial, a.note, "One sentence, what you saw on " + m.label)) + whyMsg(probs, "note:" + m.serial) + "</div>";
       h += "</div>";
     });
     var tm = d.hw.tools.missing;
-    h += '<div class="card"><div class="grp"><span>Tools not on inventory</span><em' + (tm.length ? ' class="bad">' + tm.length + " missing" : ">" + AR.TOOLS.length + " of " + AR.TOOLS.length) + "</em></div>";
+    h += '<div class="card clip"><div class="grp"><span>Tools not on inventory</span><em' + (tm.length ? ' class="bad">' + tm.length + " missing" : ">" + AR.TOOLS.length + " of " + AR.TOOLS.length) + "</em></div>";
     AR.TOOLS.forEach(function (t) { h += itemRow("tool", t.key, t.label, "", tm.indexOf(t.key) >= 0, prevMissing(v, t.key), timesFor(v, t.key)); });
     return h + "</div>" + photoStrip(v, "machines");
   };
@@ -843,7 +847,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function lineRow(v, d, pn, obp, crew, kindTxt) {
     var L = d.inv.lines[pn] || {}, p = partOf(v, pn), shelf = L.shelf == null ? "" : L.shelf;
     var diff = obp == null ? NaN : (L.shelf != null ? L.shelf : crew) - obp;
-    return '<div class="ln"><div class="tx"><div class="nm">' + esc(p.description || pn) + '</div><div class="mono">' + esc(pn) + '</div><div class="num">OBP <b>' + esc(obp) + "</b> · " + esc(first(v.crew)) + " <b>" + esc(crew == null ? "–" : crew) + "</b>" + (kindTxt ? " · " + esc(kindTxt) : "") + '</div></div><span class="d' + diffCls(diff) + '" data-obp="' + esc(obp) + '" data-crew="' + esc(crew == null ? "" : crew) + '">' + diffTxt(diff) + '</span><label class="shelf"><span>Shelf</span><input inputmode="numeric" pattern="[0-9]*" maxlength="5" data-shelf="' + esc(pn) + '" value="' + esc(shelf) + '" placeholder="' + esc(crew == null ? "" : crew) + '" aria-label="On the shelf"></label></div>';
+    return '<div class="iline line-t"><div style="min-width:0"><b>' + esc(p.description || pn) + '</b><div class="xs">' + esc(pn) + " · " + esc(first(v.crew)) + " " + esc(crew == null ? "–" : crew) + " · OBP " + esc(obp == null ? "–" : obp) + (kindTxt ? " · " + esc(kindTxt) : "") + '</div></div><span class="d' + diffCls(diff) + '" data-obp="' + esc(obp == null ? "" : obp) + '" data-crew="' + esc(crew == null ? "" : crew) + '" title="Shelf against OBP">' + diffTxt(diff) + '</span><label class="qty' + (L.shelf != null ? " on" : "") + '"><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" data-shelf="' + esc(pn) + '" value="' + esc(shelf) + '" placeholder="' + esc(crew == null ? "" : crew) + '" aria-label="On the shelf, ' + esc(p.description || pn) + '"></label></div>';
   }
   function diffCls(diff) { return diff > 0 ? " p" : !diff ? " z" : ""; }
   function diffTxt(diff) { return isNaN(diff) ? "–" : !diff ? "0" : (diff > 0 ? "+" : "−") + Math.abs(diff); }
@@ -851,28 +855,25 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function obpVerdict(v, d) {
     var off = v.count.diff.filter(function (x) { return x.kind === "gap" && !AR.obpMatches({ inv: { lines: d.inv.lines, added: [] } }, { diff: [x] }); }).length
       + d.inv.added.filter(function (a) { return !AR.obpMatches({ inv: { lines: {}, added: [a] } }, { diff: [], obp: ctxOf(v).obp }); }).length;
-    return '<div class="wsum' + (off ? " bad" : "") + '" id="obpv">' + ic(off ? "f:x-circle" : "f:check-circle") + (off ? "OBP is off on " + off + (off === 1 ? " line" : " lines") : "OBP matches the shelf") + "</div>";
+    var tot = v.count.total || 0;
+    return '<div class="card pad-m measure" id="obpv"><span class="fi' + (off ? " a" : "") + '">' + ic("package") + '</span><div><b class="h3">' + (off ? "OBP is off on " + off + (off === 1 ? " line" : " lines") : "OBP matches the shelf") + '</b><div class="sm">' + esc(first(v.crew)) + "&#8217;s count, with the shelf you type where it differs" + (tot ? ": " + Math.max(0, tot - off) + " of " + tot + " lines match" : "") + "</div></div></div>";
   }
   STEP.inventory = function (v, d, probs) {
-    var gaps = v.count.diff.filter(function (x) { return x.kind === "gap"; }), timing = v.count.diff.filter(function (x) { return x.kind === "timing"; }), ex = v.count.extras;
-    var h = '<div><div class="q">Does the OBP match the shelf?</div><div class="hint">' + esc(first(v.crew)) + " counted " + esc(v.count.total) + " lines blind" + (gaps.length ? " · " + gaps.length + " differ" : " · all agree") + (ex.length ? " · " + ex.length + " not in OBP" : "") + (v.count.asOf ? " · OBP of " + fmtD(v.count.asOf, true) : "") + "</div>"
-      + (gaps.length || d.inv.added.length ? '<div class="hint">Count each line on the shelf. Type a number only where the shelf is not ' + esc(first(v.crew)) + "'s count.</div>" : "") + obpVerdict(v, d) + "</div>";
-    h += '<div class="card"><div class="ch">' + ic("package") + 'Lines to check on the shelf<span class="r">' + (gaps.length + d.inv.added.length) + "</span></div>";
-    if (!gaps.length && !d.inv.added.length) h += '<div class="empty" style="padding:14px 16px">' + ic("f:check-circle") + "The crew's count agrees with OBP on every line.</div>";
+    var gaps = v.count.diff.filter(function (x) { return x.kind === "gap"; }), timing = v.count.diff.filter(function (x) { return x.kind === "timing"; }), ex = v.count.extras, fn = esc(first(v.crew));
+    var h = obpVerdict(v, d);
+    h += '<div class="card clip"><div class="grp"><span>' + fn + "&#8217;s count against OBP" + (v.count.asOf ? " of " + fmtD(v.count.asOf) : "") + " · type what the shelf holds</span><em>" + (gaps.length + d.inv.added.length) + "</em></div>";
+    if (!gaps.length && !d.inv.added.length) h += '<div class="info line-t"><span class="sm">' + fn + "&#8217;s count agrees with OBP on every line.</span></div>";
     gaps.forEach(function (x) { h += lineRow(v, d, x.part_no, x.obp, x.counted); });
-    d.inv.added.forEach(function (a) { var p = partOf(v, a.part_no); var L = d.inv.lines[a.part_no]; h += lineRow(v, d, a.part_no, p.obp, p.counted, "added by you") + whyMsg(probs, "added:" + a.part_no); });
-    h += '<div class="addl"><div class="sbox" style="margin:0">' + ic("magnifying-glass") + '<input class="search" id="addq" type="search" placeholder="+ Add a line: part or description" autocomplete="off" value="' + esc(S.addq || "") + '"></div><div id="addr"></div></div></div>';
-    if (timing.length) {
-      h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("clock") + '</span><div class="tx"><div class="nm" style="font-size:15px">One unit off, OBP moved that day</div><div class="sm">' + timing.length + " · timing (1 Oct rule), flagged only if it does not close</div></div>" + ic("caret-right", "go") + "</summary>";
-      timing.forEach(function (x) { h += lineRow(v, d, x.part_no, x.obp, x.counted, "timing"); });
-      h += "</details>";
-    }
+    d.inv.added.forEach(function (a) { var p = partOf(v, a.part_no); h += lineRow(v, d, a.part_no, p.obp, p.counted, "added by you") + whyMsg(probs, "added:" + a.part_no); });
+    if (timing.length) h += '<details class="rd info line-t"><summary><span class="xs">Timing · not counted</span><span class="sm" style="display:block">' + timing.length + (timing.length === 1 ? " line" : " lines") + " one unit off on the day OBP moved " + (timing.length === 1 ? "it" : "them") + ": " + esc(timing.map(function (x) { return x.description || x.part_no; }).join(", ")) + '. Flagged only if it does not close. <span class="ul" style="min-height:0;display:inline"><span class="o1">Check them anyway</span><span class="o2">Hide</span></span></span></summary>'
+      + timing.map(function (x) { return lineRow(v, d, x.part_no, x.obp, x.counted, "timing"); }).join("") + "</details>";
+    h += '<div class="pad-m line-t sec tight"><div class="search" style="height:48px;box-shadow:none">' + ic("magnifying-glass") + '<input id="addq" type="search" placeholder="Add a line: part or name" autocomplete="off" value="' + esc(S.addq || "") + '" aria-label="Add a line"></div><div id="addr"></div></div></div>';
     if (ex.length) {
-      h += '<div class="card"><div class="ch">' + ic("wrench") + 'Repair items not in OBP<span class="r">from ' + esc(first(v.crew)) + "'s count</span></div>";
-      ex.forEach(function (x) { h += tapRow("rep", x.id, x.text, x.counted != null ? esc(first(v.crew)) + " counted " + esc(x.counted) : "", d.inv.repairs[x.id] === "not_found", ["", "Not found"]); });
+      h += '<div class="card clip"><div class="grp"><span>Repair items not in OBP · from ' + fn + "&#8217;s count</span><em>" + ex.length + "</em></div>";
+      ex.forEach(function (x) { h += tapRow("rep", x.id, x.text, x.counted != null ? fn + " counted " + esc(x.counted) : "", d.inv.repairs[x.id] === "not_found", ["", "Not found"]); });
       h += "</div>";
     }
-    h += '<div class="card pad"><div class="lab">Note on the stock · optional</div>' + box("inv-note", d.inv.note, "Anything else the counts do not say") + "</div>";
+    h += '<div class="card pad-m">' + lbl("Note on the stock · optional", box("inv-note", d.inv.note, "Anything else the counts do not say")) + "</div>";
     return h + photoStrip(v, "inventory");
   };
   function addResults(v, d) {
@@ -880,121 +881,168 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (q.length < 2) { out.innerHTML = ""; return; }
     var have = {}; v.count.diff.forEach(function (x) { if (x.kind === "gap") have[x.part_no] = 1; }); d.inv.added.forEach(function (a) { have[a.part_no] = 1; });
     var hits = (v.parts || []).filter(function (p) { return !have[p.part_no] && (p.part_no + " " + (p.description || "")).toLowerCase().indexOf(q) >= 0; }).slice(0, 6);
-    out.innerHTML = hits.length ? hits.map(function (p) { return '<button type="button" class="row" data-a="addline" data-k="' + esc(p.part_no) + '" style="min-height:52px"><div class="tx"><div class="nm" style="font-size:14.5px">' + esc(p.description || p.part_no) + '</div><div class="sm">' + esc(p.part_no) + " · OBP " + esc(p.obp == null ? "–" : p.obp) + " · counted " + esc(p.counted == null ? "–" : p.counted) + "</div></div>" + ic("plus", "go") + "</button>"; }).join("") : '<div class="sm" style="padding:8px 2px">No OBP line matches.</div>';
+    out.innerHTML = hits.length ? '<div class="card clip">' + hits.map(function (p) { return tapBtn({ act: "addline", key: p.part_no, label: p.description || p.part_no, sub: esc(p.part_no) + " · OBP " + esc(p.obp == null ? "–" : p.obp) + " · counted " + esc(p.counted == null ? "–" : p.counted), tk: "o", word: "Add", pill: "m" }); }).join("") + "</div>" : '<p class="sm">No OBP line matches.</p>';
   }
   STEP.ratings = function (v, d, probs) {
     var h = "";
     ["inventory", "technical", "collaterals"].forEach(function (k) {
       var t = AR.RATING_TEXT[k], r = d.rt[k];
-      h += '<div class="card pad"><div class="q">' + esc(t.label) + '</div><div class="hint">' + esc(t.hint) + "</div>" + rateRow("rt", k, r, t.label) + whyMsg(probs, k);
-      if (r != null && r <= 3) h += '<div class="lab" style="margin-top:12px">Say why · required</div>' + box("why:" + k, d.rt.why[k], "One sentence") + whyMsg(probs, "why:" + k);
+      h += '<div class="card pad-m sec tight"><b class="h4">' + esc(t.label) + '</b><span class="xs">' + esc(t.hint) + "</span>" + rateRow("rt", k, r, t.label) + whyMsg(probs, k);
+      if (r != null && r <= 3) h += lbl("Say why · required", box("why:" + k, d.rt.why[k], "One sentence")) + whyMsg(probs, "why:" + k);
       h += "</div>";
     });
     return h;
   };
   STEP.crew = function (v, d, probs) {
-    var h = '<div class="card pad"><div class="q">Training needed</div><div class="hint">Tap what ' + esc(first(v.crew)) + ' needs. Nothing tapped: no training needed.</div><div class="chips" style="margin-top:10px">';
-    AR.TRAINING.forEach(function (t) { var on = d.crew.training.indexOf(t.key) >= 0; h += '<button type="button" class="chip' + (on ? " on" : "") + '" data-a="train" data-k="' + t.key + '" aria-pressed="' + on + '">' + esc(t.label) + "</button>"; });
-    h += '<button type="button" class="chip' + (S.trainOther || d.crew.trainingOther ? " on" : "") + '" data-a="train-other">+ Other</button></div>';
-    if (S.trainOther || d.crew.trainingOther) h += '<input class="field" data-f="train-other" placeholder="Which training" value="' + esc(d.crew.trainingOther) + '" maxlength="120">';
+    var fn = esc(first(v.crew)), h = '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">Training needed</b><span class="xs">Tap what ' + fn + ' needs · nothing tapped, none needed</span></div><div class="pills wrapit">';
+    AR.TRAINING.forEach(function (t) { var on = d.crew.training.indexOf(t.key) >= 0; h += '<button type="button" class="pill' + (on ? " on" : "") + '" data-a="train" data-k="' + t.key + '" aria-pressed="' + on + '">' + esc(t.label) + "</button>"; });
+    h += '<button type="button" class="pill' + (S.trainOther || d.crew.trainingOther ? " on" : "") + '" data-a="train-other">+ Other</button></div>';
+    if (S.trainOther || d.crew.trainingOther) h += '<input class="fld" data-f="train-other" placeholder="Which training" value="' + esc(d.crew.trainingOther) + '" maxlength="120" aria-label="Which training">';
     h += "</div>";
     var pm = d.crew.ppe.missing;
-    h += '<div class="card"><div class="grp"><span>Uniform &amp; PPE</span><em' + (pm.length ? ' class="bad">' + pm.length + " missing" : ">" + AR.PPE.length + " of " + AR.PPE.length) + "</em></div>";
+    h += '<div class="card clip"><div class="grp"><span>Uniform &amp; PPE · the HON app</span><em' + (pm.length ? ' class="bad">' + pm.length + " missing" : ">" + AR.PPE.length + " of " + AR.PPE.length) + "</em></div>";
     AR.PPE.forEach(function (p) { var was = v.previous && v.previous.sameCrew && (v.previous.ppeMissing || []).indexOf(p.key) >= 0; h += itemRow("ppe", p.key, p.label, "", pm.indexOf(p.key) >= 0, was, 1); });
-    h += "</div>" + '<div class="card">' + tapRow("hon", "x", "Uses the HON app", "", d.crew.hon === "no", ["", "Not in use"]) + "</div>";
+    h += tapRow("hon", "x", "Uses the HON app", "", d.crew.hon === "no", ["", "Not in use"]) + "</div>";
     var t = AR.RATING_TEXT.dispatch;
-    h += '<div class="card pad"><div class="q">' + esc(t.label) + ' <span class="sm" style="display:inline">· optional</span></div><div class="hint">' + esc(t.hint) + "</div>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label) + "</div>";
+    h += '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">' + esc(t.label) + '</b><span class="chip m">For Rita · in no score</span></div><span class="xs">' + esc(t.hint) + "</span>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label) + "</div>";
     return h + photoStrip(v, "crew");
   };
+  function scoreWhy(d) {
+    var e = AR.evalOf(d), r = d.rt;
+    if (e.score.score == null) return "Rate the three on the Ratings step first.";
+    return e.score.from === "overall" ? "The Overall rating you gave." : "Overall left blank: the average of " + r.inventory + ", " + r.technical + " and " + r.collaterals + ", rounded down.";
+  }
   STEP.overall = function (v, d, probs) {
-    var o = d.ov.overall, e = AR.evalOf(d), t = AR.RATING_TEXT.overall;
-    var h = '<div class="card pad"><div class="q">' + esc(t.label) + ' <span class="sm" style="display:inline">· optional</span></div>' + rateRow("ov", "overall", o, t.label) + '<div class="anch"><span>Needs intervention</span><span>Runs itself</span></div>';
-    h += '<div class="scoreln">' + (e.score.score == null ? "Rate the three on the Ratings step first." : "Audit score <b>" + e.score.score + " / 5</b> · " + (e.score.from === "overall" ? "from the Overall rating" : "no Overall: the average of the three, rounded down")) + "</div>";
-    if (o != null && o <= 3) h += '<div class="lab" style="margin-top:12px">Say why · required</div>' + box("ov-why", d.ov.why, "One sentence") + whyMsg(probs, "why");
+    var o = d.ov.overall, e = AR.evalOf(d), t = AR.RATING_TEXT.overall, fn = esc(first(v.crew));
+    var h = '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">' + esc(t.label) + '</b><span class="xs">Optional</span></div>' + rateRow("ov", "overall", o, t.label, true)
+      + '<p class="xs">' + (e.score.score == null ? "Rate the three on the Ratings step first." : "Audit score " + esc(e.score.score) + " / 5 · " + esc(scoreWhy(d))) + "</p>";
+    if (o != null && o <= 3) h += lbl("Say why · required", box("ov-why", d.ov.why, "One sentence")) + whyMsg(probs, "why");
     h += "</div>";
-    h += '<div class="card pad"><div class="lab">Strengths</div>' + box("strengths", d.ov.strengths, "What " + first(v.crew) + " does well") + whyMsg(probs, "strengths") +
-      '<div class="lab" style="margin-top:14px">To improve</div>' + box("improve", d.ov.improve, "What needs to change") + whyMsg(probs, "improve") +
-      '<div class="lab" style="margin-top:14px">Agreed with the crew · optional</div>' + box("agreed", d.ov.agreed, "What you agreed with " + first(v.crew)) + "</div>";
-    var f = d.ov.followup;
-    h += '<div class="card"><button type="button" class="tog" data-a="block" aria-pressed="' + !!d.ov.recommendBlock + '"><span>Recommend for Oasis / Icon class</span><i class="sw' + (d.ov.recommendBlock ? " on" : "") + '"></i></button>' +
-      '<button type="button" class="tog" data-a="fu" aria-pressed="' + !!f + '"><span>Needs follow-up</span><i class="sw' + (f ? " on" : "") + '"></i></button>';
+    h += '<div class="card pad-m sec">' + lbl("Strengths", box("strengths", d.ov.strengths, "What " + first(v.crew) + " does well")) + whyMsg(probs, "strengths")
+      + lbl("To improve", box("improve", d.ov.improve, "What needs to change")) + whyMsg(probs, "improve")
+      + lbl("Agreed with " + fn + " · optional", box("agreed", d.ov.agreed, "What you agreed with " + first(v.crew))) + "</div>";
+    var f = d.ov.followup, rb = !!d.ov.recommendBlock;
+    h += '<div class="card clip">' + tapBtn({ act: "block", key: "x", label: "Recommend for Oasis / Icon class", sub: rb ? "" : "Tap to recommend", pressed: rb, tk: rb ? "c" : "o", word: rb ? "Recommended" : "Not now", pill: rb ? "ok" : "m" })
+      + tapBtn({ act: "fu", key: "x", label: "Needs a follow-up", sub: f ? "Who owns it, by when" : "Tap to add one", pressed: !!f, tk: f ? "c" : "o", word: f ? "Follow-up" : "None", pill: f ? "ok" : "m" });
     if (f) {
       var owners = AR.FOLLOW_OWNERS.concat([first(v.crew)]);
-      h += '<div class="pad" style="padding-top:4px"><div class="lab">Who</div><div class="chips">' + owners.map(function (n) { return '<button type="button" class="chip' + (f.owner === n ? " on" : "") + '" data-a="fu-owner" data-k="' + esc(n) + '" aria-pressed="' + (f.owner === n) + '">' + esc(n) + "</button>"; }).join("") + "</div>" + whyMsg(probs, "fu_owner") +
-        '<div class="lab" style="margin-top:12px">By</div><input class="field" type="date" data-f="fu-due" value="' + esc(f.due || "") + '" min="' + esc(v.today) + '">' + whyMsg(probs, "fu_due") +
-        '<div class="lab" style="margin-top:12px">What</div>' + box("fu-text", f.text, "What has to happen") + whyMsg(probs, "fu_text") + "</div>";
+      h += '<div class="pad-m line-t sec tight"><span class="xs b">Who</span><div class="pills wrapit">' + owners.map(function (n) { return '<button type="button" class="pill' + (f.owner === n ? " on" : "") + '" data-a="fu-owner" data-k="' + esc(n) + '" aria-pressed="' + (f.owner === n) + '">' + esc(n) + "</button>"; }).join("") + "</div>" + whyMsg(probs, "fu_owner")
+        + lbl("By", '<input class="fld" type="date" data-f="fu-due" value="' + esc(f.due || "") + '" min="' + esc(v.today) + '">') + whyMsg(probs, "fu_due")
+        + lbl("What", box("fu-text", f.text, "What has to happen")) + whyMsg(probs, "fu_text") + "</div>";
     }
     return h + "</div>";
   };
   STEP.review = function (v, d, probs) {
-    var e = AR.evalOf(d), tile = function (val, label, main) { return '<div class="tile' + (main ? " main" : "") + '"><b>' + (val == null ? "–" : esc(val)) + "</b><small>" + esc(label) + "</small></div>"; };
-    var h = '<div class="tiles">' + tile(d.ov.overall, "Overall", true) + tile(d.rt.inventory, "Inventory") + tile(d.rt.technical, "Technical") + tile(d.rt.collaterals, "Collaterals") + tile(d.crew.dispatch, "Dispatch") + "</div>";
-    h += '<div class="card pad"><div class="gsum"><span class="ib ' + (e.score.score == null ? "n" : e.score.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + '</span><div><div class="n">' + (e.score.score == null ? "–" : esc(e.score.score)) + '<small> / 5</small></div><div class="sm">Audit score · ' + (e.score.from === "overall" ? "the Overall rating" : e.score.from ? "average of the three, rounded down" : "not rated yet") + "</div></div></div></div>";
-    var ws = d.ws.missing.length, tools = d.hw.tools.missing.length, finds = v.machines.filter(function (m) { var a = d.hw.machines[m.serial] || {}; return a.down === "still" || a.p43 === "seen" || AR.MACHINE_CHECKS.some(function (c) { return (a.checks || {})[c.key] === "finding"; }); }).length;
-    var lines = v.count.diff.filter(function (x) { return x.kind === "gap"; }).length + d.inv.added.length;
-    var sum = [ws + (ws === 1 ? " missing item" : " missing items"), finds + (finds === 1 ? " finding" : " findings"), lines + (lines === 1 ? " OBP line" : " OBP lines"), tools + (tools === 1 ? " tool" : " tools") + " missing"].join(" · ");
-    var low = ["inventory", "technical", "collaterals"].filter(function (k) { return d.rt[k] != null && d.rt[k] <= 3; }).map(function (k) { return AR.RATING_TEXT[k].label; });
-    if (d.ov.overall != null && d.ov.overall <= 3) low.push("Overall");
-    var sent = (v.photos || []).length, wait = (S.pq[v.id] || []).length;
-    h += '<div class="card">';
-    h += '<button type="button" class="itm" data-step="' + (probs.length ? stepNo(probs[0].step) : 7) + '"><span class="tx">' + (probs.length ? probs.length + (probs.length === 1 ? " answer missing" : " answers missing") : "Every step answered") + '<span class="sm">' + esc(probs.length ? probs[0].say : sum) + "</span></span>" + ic(probs.length ? "f:warning-circle" : "f:check-circle", probs.length ? "bad" : "ok") + "</button>";
-    if (low.length) h += '<div class="itm"><span class="tx">Comment on the ' + (low.length === 1 ? "low rating" : low.length + " low ratings") + '<span class="sm">' + esc(low.join(" · ")) + "</span></span>" + ic("f:check-circle", "ok") + "</div>";
-    h += '<div class="itm"><span class="tx">' + (sent + wait ? sent + wait + (sent + wait === 1 ? " photo" : " photos") + (wait ? " · " + wait + " waits for signal" : "") : "No photos") + '<span class="sm">' + (wait ? "The audit files now; the photos follow when there is signal." : "Photos are optional.") + "</span></span>" + ic(wait ? "f:warning-circle" : "f:check-circle", wait ? "warn" : "ok") + "</div></div>";
+    var e = AR.evalOf(d), sc = e.score.score, fn = esc(first(v.crew));
+    var h = '<div class="navy score"><div class="ring"><b class="h">' + (sc == null ? "–" : esc(sc)) + '</b><span class="of">/5</span></div><div class="sec tight"><b class="h3">' + (sc == null ? "Not rated yet" : "Score " + esc(sc) + " of 5") + '</b><span class="sm">' + esc(scoreWhy(d)) + "</span></div></div>";
+    if (probs.length) h += '<div class="alert">' + ic("warning-circle") + "<div><b>" + probs.length + (probs.length === 1 ? " answer missing" : " answers missing") + '</b><div class="sm">' + esc(probs[0].say) + '</div><button type="button" class="ul" style="color:inherit" data-step="' + stepNo(probs[0].step) + '">Go to ' + esc(AR.STEPS[stepNo(probs[0].step) - 1].title) + "</button></div></div>";
+    var ws = d.ws.missing, tools = d.hw.tools.missing;
+    var finds = v.machines.filter(function (m) { return machState(d, m) !== "ok"; });
+    var off = v.count.diff.filter(function (x) { return x.kind === "gap" && !AR.obpMatches({ inv: { lines: d.inv.lines, added: [] } }, { diff: [x] }); }).length + d.inv.added.length;
+    var nf = Object.keys(d.inv.repairs || {}).filter(function (k) { return d.inv.repairs[k] === "not_found"; }).length;
+    var tr = (d.crew.training || []).map(function (k) { var t = AR.TRAINING.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; }); if (d.crew.trainingOther) tr.push(d.crew.trainingOther);
+    var pm = (d.crew.ppe.missing || []).map(labelOf), fu = d.ov.followup;
+    var rows = [
+      [1, "Workstation", ws.length ? "Missing: " + ws.map(labelOf).join(", ") : "Everything present"],
+      [2, "Machines & tools", (finds.length ? finds.map(function (m) { return m.label + (machState(d, m) === "down" ? " down" : " · a problem"); }).join(", ") : "Every press working") + (tools.length ? " · tools missing: " + tools.map(labelOf).join(", ") : "") + (d.hw.labeled === false ? " · not labeled" : "")],
+      [3, "Inventory", (off ? "OBP is off on " + off + (off === 1 ? " line" : " lines") : "OBP matches the shelf") + (nf ? " · " + nf + " repair " + (nf === 1 ? "item" : "items") + " not found" : "")],
+      [4, "Ratings", ["inventory", "technical", "collaterals"].map(function (k) { return ({ inventory: "Inventory", technical: "Technical", collaterals: "Collaterals" })[k] + " " + (d.rt[k] == null ? "–" : d.rt[k]); }).join(" · ")],
+      [5, "Crew", (tr.length ? "Training: " + tr.join(", ") : "No training needed") + (pm.length ? " · missing: " + pm.join(", ") : "") + (d.crew.hon === "no" ? " · HON app not in use" : "") + (d.crew.dispatch != null ? " · dispatch " + d.crew.dispatch + "/5" : "")],
+      [6, "Overall", (d.ov.overall != null ? "Overall " + d.ov.overall + "/5" : "Overall blank") + (fu ? " · follow-up to " + (fu.owner || "nobody yet") + (fu.due ? " by " + fmtD(fu.due) : "") : "") + (d.ov.recommendBlock ? " · recommended for Oasis / Icon" : "")],
+    ];
+    h += '<div class="card clip">' + rows.map(function (r) { return '<div class="rv line-t"><div style="min-width:0"><b class="h4">' + esc(r[1]) + '</b><div class="sm">' + esc(r[2]) + '</div></div><button type="button" class="btn quiet s" data-step="' + r[0] + '">Edit</button></div>'; }).join("") + "</div>";
     if (v.followups.length) {
-      h += '<div class="card"><div class="ch">' + ic("flag") + 'Still open on this ship<span class="r">tap what is fixed</span></div>';
+      h += '<div class="card clip"><div class="grp"><span>Still open on ' + esc(v.ship) + "</span><em>tap what is fixed</em></div>";
       v.followups.forEach(function (f) {
-        var c = d.close[f.id] || "open", late = f.due && f.due < v.today, times = (f.carried || 0) + 1;
-        var fixed = c === "fixed";
-        h += '<button type="button" class="itm" data-a="close" data-k="' + esc(f.id) + '" aria-pressed="' + fixed + '"><span class="tx">' + esc(f.text) + '<span class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : "") + " · " + esc(f.crew || "") + ", " + fmtD(f.at, true) + "</span></span>"
-          + (fixed ? '<span class="st g">Fixed</span>' : times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : late ? '<span class="st r">Overdue</span>' : '<span class="st a">Still open</span>') + ic(fixed ? "f:check-circle" : "circle", fixed ? "ok" : "") + "</button>";
+        var fixed = (d.close[f.id] || "open") === "fixed", late = f.due && f.due < v.today, times = (f.carried || 0) + 1;
+        h += tapBtn({ act: "close", key: f.id, label: f.text, sub: esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : "") + " · " + esc(f.crew || "") + ", " + fmtD(f.at, true), pressed: fixed, tk: fixed ? "c" : "o",
+          word: fixed ? "Fixed" : times > 1 ? AR.ordinal(times) + " time" : late ? "Overdue" : "Still open", pill: fixed ? "ok" : times > 1 || late ? "r" : "a" });
       });
       h += "</div>";
     }
     var again = d.ws.missing.concat(d.hw.tools.missing).filter(function (k) { return prevMissing(v, k); });
-    if (again.length) h += '<div class="ban r">' + ic("f:warning-circle") + "<span>Missing again since the last visit: " + esc(again.map(labelOf).join(", ")) + ".</span></div>";
-    var fu = d.ov.followup;
-    h += '<div class="card soft"><div class="ch">' + ic("paper-plane-tilt") + 'Where it goes</div><div class="went">' +
-      '<i class="y">' + ic("check") + "</i><span>" + esc(first(v.crew)) + "'s Score Card · Dexter's audit factor reads the score</span>" +
-      (fu ? '<i class="y">' + ic("check") + "</i><span>Follow-up to " + esc(fu.owner || "…") + (fu.due ? " · by " + fmtD(fu.due, true) : "") + "</span>" : "") +
-      (sent + wait ? '<i class="y">' + ic("check") + "</i><span>Photos · audit bucket · " + esc(v.ship) + "</span>" : "") +
-      '<i class="y">' + ic("check") + "</i><span>The next audit of " + esc(v.ship) + " opens with what is missing and still open</span>" +
-      '<i class="n">' + ic("minus") + "</i><span>Never to the crew.</span></div></div>";
+    if (again.length) h += '<div class="alert">' + ic("f:warning-circle") + "<div><b>Missing again since the last visit</b><div class=\"sm\">" + esc(again.map(labelOf).join(", ")) + ".</div></div></div>";
+    var sent = (v.photos || []).length, wait = (S.pq[v.id] || []).length;
+    var went = [fn + "&#8217;s Score Card: Dexter&#8217;s audit factor reads the score"];
+    if (fu) went.push("The follow-up to " + esc(fu.owner || "…") + (fu.due ? ", by " + fmtD(fu.due, true) : ""));
+    if (sent + wait) went.push(sent + wait + (sent + wait === 1 ? " photo" : " photos") + " to the audit&#8217;s files" + (wait ? " · " + wait + " wait for signal" : ""));
+    went.push("The next audit of " + esc(v.ship) + " opens with what is missing and still open");
+    h += '<div class="card pad-m sec tight"><span class="xs b">Where it goes</span>' + went.map(function (t) { return '<div class="wl"><span class="tk c">' + ic("b:check") + '</span><span class="sm">' + t + "</span></div>"; }).join("")
+      + '<div class="wl"><span class="tk o"></span><span class="sm">Never to the crew.</span></div></div>';
+    h += '<div class="card pad-m"><div class="hstack" style="flex-wrap:nowrap;align-items:flex-start"><span class="fi n s">' + ic("wifi-slash") + '</span><div style="flex:1;min-width:0"><b class="h4">No signal? File anyway</b><div class="sm">It is kept on this phone and sent when the server answers. Filed once; it cannot be changed after.</div></div></div></div>';
     return h;
   };
   function labelOf(k) { var all = []; AR.WORKSTATION.forEach(function (g) { all = all.concat(g.items); }); all = all.concat(AR.TOOLS, AR.PPE); var x = all.filter(function (i) { return i.key === k; })[0]; return x ? x.label : k; }
   function stepNo(key) { for (var i = 0; i < AR.STEPS.length; i++) if (AR.STEPS[i].key === key) return i + 1; return 7; }
   function sentence(t) { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); }
 
+  /* the side of the stepper on a wide screen: what the documents said, the seafarer, the ship's last audit */
+  function visitSide(v) {
+    var b = v.before || [], fn = first(v.crew), x = aboardOf(v.ship, v.sc);
+    var h = '<aside class="sec side hide-m"><div class="card pad-m sec tight"><span class="xs b">From the documents' + (v.completeAt ? " · " + fmtD(v.completeAt) : "") + "</span>"
+      + (b.length ? b.map(function (i) { return '<div class="wl"><span class="tk ' + (i.tone === "a" ? "w" : "c") + '">' + ic(i.tone === "a" ? "b:exclamation-mark" : "b:check") + '</span><span class="sm">' + esc(i.t) + "</span></div>"; }).join("") : '<div class="wl"><span class="tk c">' + ic("b:check") + '</span><span class="sm">Nothing found in the documents</span></div>')
+      + '<button type="button" class="ul" data-go="q=' + esc(v.id) + '">Open what the documents said</button></div>';
+    h += '<div class="card pad-m sec tight"><span class="xs b">' + esc(v.crew) + "</span>";
+    if (x) {
+      var tot = x.signOn && x.signOff ? Math.max(1, days(x.signOn, x.signOff)) : 0;
+      h += '<span class="sm">' + esc([contractNo(x) ? contractNo(x).charAt(0).toUpperCase() + contractNo(x).slice(1) : "", x.signOn ? "aboard " + (md(x.signOn, S.today) || "since today") : "", x.signOff ? "signs off " + fmtD(x.signOff) : ""].filter(Boolean).join(" · ")) + "</span>"
+        + (tot ? '<div class="prog thin"><i style="width:' + pct(days(x.signOn, S.today), tot) + '%"></i></div>' : "");
+    }
+    h += (v.sc ? '<button type="button" class="ul" data-go="b=' + esc(encodeURIComponent(v.ship)) + "|" + esc(encodeURIComponent(v.sc)) + '">Open the briefing</button>' : "") + "</div>";
+    var p = v.previous;
+    h += '<div class="card pad-m sec tight"><span class="xs b">Last audit of ' + esc(v.ship) + '</span><span class="sm">' + (p ? esc(p.crew || "") + ", " + fmtD(p.at, true) + ((p.missing || []).length ? " · " + p.missing.length + " missing then" : " · nothing missing") : "None: nothing carried over.") + (v.followups.length ? " · " + v.followups.length + (v.followups.length === 1 ? " follow-up" : " follow-ups") + " still open" : "") + "</span></div>";
+    return h + "</aside>";
+  }
+  function stepSum(key, v, d) {
+    if (key === "workstation") { var n = d.ws.missing.length; return n ? '<span class="chip r">' + n + " missing</span>" : '<span class="chip g">All present</span>'; }
+    if (key === "machines") { var f = v.machines.filter(function (m) { return machState(d, m) !== "ok"; }).length; return f ? '<span class="chip r">' + f + (f === 1 ? " press with a problem" : " presses with a problem") + "</span>" : '<span class="chip g">Every press working</span>'; }
+    return "";
+  }
   function stepView(id, n) {
-    n = Math.max(1, Math.min(7, Number(n) || 1));
+    n = Number(n); n = isNaN(n) ? 1 : Math.max(0, Math.min(7, n));
     var key = "a" + id + "|" + n; S.view = key; S.err = {}; S.addq = "";
-    top(AR.STEPS[n - 1].title, "", n + " / 7", "", true); hero(""); dock("");
+    chrome(""); dock("");
     $("main").innerHTML = skel(4);
-    (S.v[id] ? Promise.resolve(S.v[id]) : loadVisit(id)).then(function (v) {
+    withShips(S.v[id] ? Promise.resolve(S.v[id]) : loadVisit(id)).then(function (v) {
       if (S.view !== key) return;
       S.v[id] = v;
       /* the gate, once more: no audit before the documents are in; a filed one is the record; a TEST request is a rehearsal */
       if (v.filed || v.status !== "complete" || v.test) { location.replace("#q=" + id); return; }
       var d = draftOf(id, v); keep(id, d);
-      var st = AR.STEPS[n - 1], ctx = ctxOf(v);
-      top(st.title, v.ship + " · " + v.crew, n + " / 7", n === 7 ? "done" : "", true);
-      stepBar(n);
+      var st = n ? AR.STEPS[n - 1] : { key: "before" }, ctx = ctxOf(v), fn = esc(first(v.crew));
+      var titles = ["Before you start"].concat(AR.STEPS.map(function (t) { return t.title; })); titles[7] = "Review and file";
+      var hints = ["What " + fn + "&#8217;s documents said, each to confirm on board.", "Everything starts present. Tap only what is missing; tap it again to put it back.", "Everything starts as working. Tap only what is wrong; tap it again to put it back.",
+        fn + "&#8217;s blind count against OBP. Type a number only where the shelf is not " + fn + "&#8217;s count.", "1 to 5. A 3 or below needs one sentence.", "Training, uniform and PPE, the HON app, dispatch.", "What you and " + fn + " agreed, and who follows up.", "Filed once, with every photo. It cannot be changed afterwards."];
       var draw = function () {
         if (S.view !== key) return;
         var y = window.scrollY, probs = AR.visitProblems(d, ctx, v.today), mine = probs.filter(function (p) { return p.step === st.key; });
-        $("main").innerHTML = (v._offline ? '<div class="ban a">' + ic("cloud-slash") + "<span>No signal. Working from the copy on this phone; everything you do is kept.</span></div>" : "") + STEP[st.key](v, d, st.key === "review" ? probs : mine);
+        var okAt = function (i) { return i === 0 || !probs.some(function (p) { return stepNo(p.step) === i; }); };
+        var rail = '<nav class="rail card hide-m" aria-label="Audit steps"><div class="rail-hd"><b class="h4">' + esc(v.ship) + " · " + fn + '</b><span class="xs">The audit on board</span></div>'
+          + titles.map(function (t, i) { var done = i < n && okAt(i); return '<button type="button" class="rs' + (i === n ? " cur" : done ? " done" : "") + '" data-step="' + i + '"' + (i === n ? ' aria-current="step"' : "") + '><span class="rn">' + (done ? ic("b:check") : i === 0 ? "i" : i) + '</span><span class="rt">' + esc(t) + "</span></button>"; }).join("") + "</nav>";
+        var bars = titles.map(function (t, i) { return '<i class="' + (i === n ? "cur" : i < n ? "done" : "") + '"></i>'; }).join("");
+        var stepOf = n ? "Step " + n + " of 7" : "Before you start";
+        var body = STEP[st.key](v, d, st.key === "review" ? probs : mine);
+        var back = '<button type="button" class="btn ghost" id="sb2">' + ic("arrow-left") + "Back</button>";
+        var next = n < 7 ? '<button type="button" class="btn pri" id="sn2">' + (n === 0 ? "Start · Workstation" : n === 6 ? "Review" : "Next · " + esc(AR.STEPS[n].short)) + ic("arrow-right") + "</button>"
+          : '<button type="button" class="btn green" id="sf2"' + (probs.length || S.filing ? " disabled" : "") + ">" + (S.filing ? "Filing" : "File the audit") + "</button>";
+        $("main").innerHTML = (v._offline ? '<div class="kept">' + ic("cloud-slash") + "<span>No signal. Working from the copy on this phone; everything you do is kept.</span></div>" : "")
+          + '<section class="visit">' + rail + '<div class="sec stage"><div class="only-m mhd"><div class="mhd-top"><span class="xs b">' + stepOf + '</span><span class="xs">' + esc(v.ship) + " · " + fn + '</span></div><div class="bars">' + bars + "</div></div>"
+          + '<div class="sec tight"><div class="hstack hide-m"><span class="eyebrow">' + stepOf + "</span>" + stepSum(st.key, v, d) + '</div><h1 class="h2">' + esc(titles[n]) + '</h1><p class="sm">' + hints[n] + "</p>" + (stepSum(st.key, v, d) ? '<div class="only-m">' + stepSum(st.key, v, d) + "</div>" : "") + "</div>"
+          + body + '<div class="navrow hide-m">' + back + '<span style="flex:1"></span>' + next + "</div>" + (n === 7 ? '<p class="xs hide-m">' + (probs.length ? esc(probs[0].say) : "Filed once. It cannot be changed afterwards.") + "</p>" : "") + "</div>" + visitSide(v) + "</section>";
         if (st.key === "inventory") addResults(v, d);
         window.scrollTo(0, y);
-        if (n < 7) dock('<div class="two nx"><button class="btn ghost" id="sb">' + ic("caret-left") + 'Back</button><button class="btn" id="sn">' + (n === 6 ? "Review" : "Next · " + esc(AR.STEPS[n].short)) + ic("caret-right") + "</button></div>");
-        else dock('<div class="two nx"><button class="btn ghost" id="sb">' + ic("caret-left") + 'Back</button><button class="btn green" id="sf"' + (probs.length || S.filing ? " disabled" : "") + ">" + ic("check") + (S.filing ? "Filing" : "File audit") + "</button></div>" + '<div class="note">' + (probs.length ? esc(probs[0].say) : "Filed once. It cannot be changed afterwards.") + "</div>");
-        $("sb").onclick = function () { location.replace(n === 1 ? "#q=" + id : "#a=" + id + "|" + (n - 1)); };
-        if ($("sn")) $("sn").onclick = function () {
+        if (n < 7) dock('<button type="button" class="btn ghost" id="sb">Back</button><button type="button" class="btn pri" id="sn">' + (n === 0 ? "Start" : n === 6 ? "Review" : "Next · " + esc(AR.STEPS[n].short)) + "</button>");
+        else dock('<button type="button" class="btn ghost" id="sb">Back</button><button type="button" class="btn green" id="sf"' + (probs.length || S.filing ? " disabled" : "") + ">" + (S.filing ? "Filing" : "File the audit") + "</button>" + '<div class="note">' + (probs.length ? esc(probs[0].say) : "Filed once. It cannot be changed afterwards.") + "</div>");
+        var onBack = function () { location.replace(n === 0 ? "#q=" + id : "#a=" + id + "|" + (n - 1)); };
+        var onNext = function () {
           /* the answers as they are NOW: typing does not redraw, so the list drawn with the screen can be stale */
-          var left = AR.visitProblems(d, ctx, v.today).filter(function (p) { return p.step === st.key; });
+          var left = n ? AR.visitProblems(d, ctx, v.today).filter(function (p) { return p.step === st.key; }) : [];
           if (left.length) { S.err.show = true; draw(); var w = document.querySelector(".why"); if (w) w.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
           location.replace("#a=" + id + "|" + (n + 1));
         };
-        if ($("sf")) $("sf").onclick = function () { fileAudit(id, v, d); };
+        ["sb", "sb2"].forEach(function (k) { if ($(k)) $(k).onclick = onBack; });
+        ["sn", "sn2"].forEach(function (k) { if ($(k)) $(k).onclick = onNext; });
+        ["sf", "sf2"].forEach(function (k) { if ($(k)) $(k).onclick = function () { fileAudit(id, v, d); }; });
       };
       S.redraw = draw;
       var M = $("main");
@@ -1016,6 +1064,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         else if (a === "hon") d.crew.hon = d.crew.hon === "no" ? "yes" : "no";
         else if (a === "disp") { var r2 = Number(b.getAttribute("data-v")); d.crew.dispatch = d.crew.dispatch === r2 ? null : r2; }
         else if (a === "ov") { var r3 = Number(b.getAttribute("data-v")); d.ov.overall = d.ov.overall === r3 ? null : r3; }
+        else if (a === "ov-blank") d.ov.overall = null;
         else if (a === "block") d.ov.recommendBlock = !d.ov.recommendBlock;
         else if (a === "fu") d.ov.followup = d.ov.followup ? null : { owner: "", due: AR.plusDays(v.today, AR.FOLLOW_DAYS), text: "" };
         else if (a === "fu-owner") d.ov.followup.owner = k;
@@ -1030,8 +1079,9 @@ export const AUDIT_HTML = String.raw`<!doctype html>
           var L = d.inv.lines[sh] || (d.inv.lines[sh] = { shelf: null, checked: false }); var val = String(t.value).trim(); L.shelf = /^\d{1,5}$/.test(val) ? Number(val) : null; L.checked = L.shelf != null;
           var ad = d.inv.added.filter(function (x) { return x.part_no === sh; })[0]; if (ad) ad.shelf = L.shelf;
           AR.fillVisit(d, ctx); keep(id, d);
-          var row = t.closest(".ln"), dc = row && row.querySelector(".d");
+          var row = t.closest(".iline"), dc = row && row.querySelector(".d");
           if (dc) { var o = dc.getAttribute("data-obp"), cr = dc.getAttribute("data-crew"), base = L.shelf != null ? L.shelf : cr === "" ? NaN : Number(cr), df = o === "" ? NaN : base - Number(o); dc.className = "d" + diffCls(df); dc.textContent = diffTxt(df); }
+          var q = t.closest(".qty"); if (q) q.className = "qty" + (L.shelf != null ? " on" : "");
           var vd = $("obpv"); if (vd) vd.outerHTML = obpVerdict(v, d);
           return;
         }
@@ -1242,7 +1292,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }
     if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
-    if (h.indexOf("a=") === 0) { var p3 = h.slice(2).split("|"); lsSet("aud:s:" + p3[0], Number(p3[1]) || 1); return stepView(p3[0], p3[1]); }
+    if (h.indexOf("a=") === 0) { var p3 = h.slice(2).split("|"); lsSet("aud:s:" + p3[0], Math.max(1, Number(p3[1]) || 1)); return stepView(p3[0], p3[1]); }
     /* the 15 Oct grade screen is the audit's Ratings step now: an old link opens the audit */
     if (h.indexOf("g=") === 0) { location.replace("#a=" + h.slice(2) + "|1"); return; }
     if (h === "hist") return historyView();
