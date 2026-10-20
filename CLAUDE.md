@@ -1284,7 +1284,11 @@ Pinned by `test/bughunt_1008.test.js`.
   (Miguel, 9 Oct 2026).
 - **Only what Rita changes is written.** Edit crew posts changed fields only (`crewEditBody` vs `CREW_EDIT_INIT`); the
   contract modal sends a PROJECTED sign-off only when changed (`offToSave`) — an untouched projection posted back became
-  "Rita's" date. Saves report a refused response and keep the modal open.
+  "Rita's" date. Saves report a refused response and keep the modal open. **The ports too** (night watch, 20 Oct 2026: the
+  modal posted both port selects as they stood, so a tick saved the homeport seed as Rita's port — production held eight,
+  Noche's disembark "San Juan" among them, and a saved port reads `disembarkSrc` "rita"): a port is sent when she changed
+  it, else the port already saved for that contract (`/api/rotation/crew` returns `ports`; `savedPorts`, `portToSave`),
+  else nothing. The eight rows already saved are data for Miguel, never repaired by the watcher.
 - **Contributor answers, crew names and ports are text** (`escHtml`, `fbEsc`, `rEsc`): the Score Card's evidence ran HTML
   from the public `/fb` link inside a money user's session.
 - **Dates are calendar dates**: month arithmetic clamps to the month's end (`addMonthsISO`, `plusMonths`); the page compares

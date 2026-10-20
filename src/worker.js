@@ -3110,7 +3110,7 @@ async function apiRotationCrew(env, url) {
     env.DB.prepare("SELECT agency_id, first_name, middle_name, last_name, status, rank_observed, rank_override, vessel_observed, province, dob, med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     env.DB.prepare("SELECT eccr, air, hotel, note FROM crew_ready WHERE agency_id=?").bind(id).first(),
-    env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit WHERE sc=?").bind(id).all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT sc, seq, sign_on, sign_off, ship, on_key, embark, disembark, updated_at FROM contract_edit WHERE sc=?").bind(id).all().catch(() => ({ results: [] })),
     boardLegs(env), // the ONE schedule: the file's current leg for this crew, with its resolved sign-off (7 Oct 2026)
     env.DB.prepare("SELECT status, raw_status, vessel, embarked_at, debarked_at, run_at FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT med_exp, sirb_exp, pp_exp, usv_exp, sch_exp FROM crew_override WHERE agency_id=?").bind(id).first().catch(() => null), // the modal's document tags (8 Oct 2026)
@@ -3161,7 +3161,10 @@ async function apiRotationCrew(env, url) {
       sign_off_is_projected: !leg.act_off && !(hasEdit && e.sign_off),
     };
   });
-  return json({ crew: c, legs, resolved, file, docs, notes: (notesRes && notesRes.results) || [], ready: r || { eccr: 0, air: 0, hotel: 0, note: "" } });
+  // The ports Rita saved per contract (night watch, 20 Oct 2026): the modal re-sends a saved port it did not change, and
+  // never writes back a port it only displayed (the homeport seed, the itinerary's port on the day).
+  const ports = (editRes.results || []).map((e) => ({ seq: e.seq, on_key: e.on_key || null, embark: e.embark || null, disembark: e.disembark || null }));
+  return json({ crew: c, legs, resolved, file, docs, notes: (notesRes && notesRes.results) || [], ready: r || { eccr: 0, air: 0, hotel: 0, note: "" }, ports });
 }
 async function apiNote(request, env, session) {
   const b = await request.json().catch(() => ({}));
@@ -7589,6 +7592,7 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
       _pq=fetch('/api/relief/ports?ship='+encodeURIComponent(e.ship||'')).then(function(r){return r.json();}).then(function(j){return (j&&j.ports)||[];}).catch(function(){return [];});
   var d={},P=[];try{d=(await _dq)||{};P=(await _pq)||[];}finally{window._rotOpening=0;}
   var note=String((d.ready&&d.ready.note)||'').replace(/</g,'&lt;');
+  var _sp=savedPorts(d.ports,e.onKey,seq);
   var ships={};(ROT.sections||[]).forEach(function(s){ships[s.ship]=1;});if(e.ship)ships[e.ship]=1;
   var shipOpts=Object.keys(ships).sort().map(function(s){return '<option'+(s===e.ship?' selected':'')+'>'+s+'</option>';}).join('');
   // The wrapper handles the tap (tgFlip) and the checkbox is pointer-events:none, so a tap can only
@@ -7656,8 +7660,8 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
    +'<div class=modhd><div><div class=cname>Edit contract — '+escHtml(e.name)+'</div><div class=csub>'+id+'<span class=ecpill>contract #'+seq+'</span></div></div><button class="btn ghost" onclick="closeRotModal()">Close ✕</button></div>'
    +fileLine+'<input type=hidden id=eKey value="'+escHtml(e.onKey||'')+'">'
    +'<div class=ecgrid>'
-   +fld('Embark port · itinerary','<select id=eEmb onchange="pickPort(this)">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
-   +fld('Disembark port · itinerary','<select id=eDis onchange="pickPort(this)">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
+   +fld('Embark port · itinerary','<select id=eEmb data-saved="'+escHtml(_sp.embark||'')+'" onchange="pickPort(this)">'+portOptions(P,e.signOn,e.on_city||e.embark)+'</select>')
+   +fld('Disembark port · itinerary','<select id=eDis data-saved="'+escHtml(_sp.disembark||'')+'" onchange="pickPort(this)">'+portOptions(P,e.signOff,e.off_city||e.disembark)+'</select>')
    +fld('Sign-on','<input id=eOn type=date value="'+(e.signOn||'')+'">')
    +fld('Sign-off','<input id=eOff type=date value="'+(e.signOff||'')+'" data-init="'+(e.signOff||'')+'" data-proj="'+((fc&&fc.off_source==='projected')?'1':'')+'">')
    +'<div style="grid-column:1/3">'+fld('Ship','<select id=eShip>'+shipOpts+'</select>')+'</div>'
@@ -7679,7 +7683,14 @@ function portOptions(ports,date,current){var ta=(ports||[]).filter(function(p){r
   w.onclick=function(ev){if(ev.target===w)closeRotModal();};
   window.rotEscHandler=function(ev){if(ev.key==='Escape')closeRotModal();};document.addEventListener('keydown',window.rotEscHandler);
   document.body.appendChild(w);
+  ['eEmb','eDis'].forEach(function(x){var s=document.getElementById(x);if(s)s.setAttribute('data-init',s.value||'');});
 }
+// A PORT the modal only displayed is not Rita's (night watch, 20 Oct 2026): Save posted both selects as they stood, so a
+// tick on a seat whose sign-off is not a turnaround day saved the homeport seed as her typed port (contract_edit:
+// Noche, Constellation, disembark "San Juan"; seven embark seeds) and the sign-off email would print it (§11e, §11f). A
+// port is sent when Rita changed it; unchanged, the port already saved for this contract is sent again, else nothing.
+function savedPorts(list,onKey,seq){var L=list||[],h=null;if(onKey)for(var i=0;i<L.length;i++)if(L[i].on_key===onKey){h=L[i];break;}if(!h)for(var j=0;j<L.length;j++)if(!L[j].on_key&&Number(L[j].seq)===Number(seq)){h=L[j];break;}return h||{};}
+function portToSave(el){if(!el)return null;var v=el.value||'';if(v!==(el.getAttribute('data-init')||''))return v;return el.getAttribute('data-saved')||null;}
 // A PROJECTED sign-off the modal only displayed is not Rita's date (8 Oct 2026): saving a tick or a comment used to post
 // it back as contract_edit.sign_off, so the card turned "Sign-off yours", stopped following the turnaround and ENDED the
 // contract when it passed instead of reading overdue (§10d). It is sent only when changed, or when it was already hers.
@@ -7688,7 +7699,7 @@ async function saveContract(id,seq){
   var g=function(x){return document.getElementById(x);};
   if(g('eOn').value&&g('eOff').value&&g('eOff').value<g('eOn').value){g('cmtmsg').textContent='Sign-off is before sign-on.';return;}
   g('cmtmsg').textContent='Saving…';
-  var body={sc:id,seq:seq,on_key:(g('eKey')&&g('eKey').value)||null,embark:g('eEmb').value,disembark:g('eDis').value,sign_on:g('eOn').value,sign_off:offToSave(g('eOff')),ship:g('eShip').value,eccr:g('cEccr').checked,air:g('cAir').checked,hotel:g('cHotel').checked,on_conf:g('cOn').checked,off_conf:g('cOff').checked};
+  var body={sc:id,seq:seq,on_key:(g('eKey')&&g('eKey').value)||null,embark:portToSave(g('eEmb')),disembark:portToSave(g('eDis')),sign_on:g('eOn').value,sign_off:offToSave(g('eOff')),ship:g('eShip').value,eccr:g('cEccr').checked,air:g('cAir').checked,hotel:g('cHotel').checked,on_conf:g('cOn').checked,off_conf:g('cOff').checked};
   try{
     // A refused save says so and keeps the modal open (8 Oct 2026: a 400/500 closed it as if it had saved).
     var r1=await fetch('/api/rotation/contract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});var j1=await r1.json().catch(function(){return {};});
