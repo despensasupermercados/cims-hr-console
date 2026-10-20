@@ -10,6 +10,7 @@
 import { ICONS } from "./audit_icons.js";
 import { AUDIT_RULES_JS } from "./audit_steps.js";
 import { AUDIT_NAME, AUDIT_SHORT, markSvg } from "./audit_brand.js";
+import { AUDIT_CSS } from "./audit_ui_css.js";
 
 export const AUDIT_MANIFEST = (onAuditHost) => JSON.stringify({
   name: AUDIT_NAME, short_name: AUDIT_SHORT, start_url: onAuditHost ? "/" : "/audit", scope: onAuditHost ? "/" : "/audit",
@@ -49,250 +50,18 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 <link rel="manifest" id="mf" href="/audit/manifest.webmanifest">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
-<style>
-:root{--nfg:#1B3A5C;--fill:#2F7A22;--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--green-d:#2F7A22;--greenbg:#EEF7EA;--red:#B4382A;--redbg:#FCEDEA;--amber:#9A6412;--amberbg:#FBF3E4;--navybg:#E9EFF6;
---ink:#14243A;--ink2:#46566B;--mut:#5B6A7D;--line:#E6EBF1;--line2:#D3DCE6;--bg:#F2F5F9;--card:#FFFFFF;--fh:'Outfit',Helvetica,Arial,sans-serif;--ff:'DM Sans',Helvetica,Arial,sans-serif;--fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--r:16px}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#E9EEF5;--ink2:#B6C2D2;--mut:#8C9AAE;--line:#24344A;--line2:#2F4259;--bg:#0D1828;--card:#14233A;--greenbg:#16301F;--redbg:#3A1C18;--amberbg:#352812;--navybg:#1C2F47;--green-d:#7CCB66;--red:#F08A7C;--amber:#E2AE5A;--navy:#2B5A8C;--nfg:#9CC0E8;color-scheme:dark}}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
-button{font:inherit;color:inherit}
-.ic{width:1.15em;height:1.15em;flex:none;vertical-align:-.18em}
-.top{position:sticky;top:0;z-index:6;background:var(--deep);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 12px}
-.top .in{max-width:608px;margin:0 auto;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;min-height:40px}
-.bk{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.1);display:grid;place-items:center;border:0;color:#fff;cursor:pointer;transition:transform .12s}
-.bk:active{transform:scale(.95)}.bk .ic{width:20px;height:20px}
-.bk[hidden]{display:none}
-.brand{font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:4px;opacity:.9}
-.tt{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ts{font-size:12.5px;color:#B9C6D6;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px;white-space:nowrap}
-.tk:empty{display:none}.tk.late{background:#B4382A}.tk.done{background:var(--fill)}
-.hero{background:var(--deep);color:#fff;padding:4px 16px 22px}
-.hero .in{max-width:608px;margin:0 auto}
-.hero h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:0;line-height:1.1}
-.hero.home{padding-top:calc(18px + env(safe-area-inset-top))}
-.ttl{display:flex;align-items:center;gap:12px;margin-bottom:4px}
-.logo{width:40px;height:40px;border-radius:9px;flex:none;line-height:0;box-shadow:0 0 0 1px rgba(255,255,255,.14)}.logo svg{display:block}
-.top.gone{display:none}
-.sbox{position:relative;margin-top:16px}
-.sbox .ic{position:absolute;left:14px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--mut)}
-.search::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}
-.search{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 46px 0 42px;font-size:16px;background:#fff;color:#14243A;font-family:var(--ff)}
-.search:focus{outline:2px solid var(--green);outline-offset:1px}
-main{max-width:640px;margin:0 auto;padding:18px 16px calc(176px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:14px}
-.offl{max-width:640px;margin:12px auto 0;padding:0 16px}.offl div{display:flex;gap:8px;align-items:center;background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
-.offl[hidden]{display:none}
-.chips{display:flex;flex-wrap:wrap;gap:8px}
-.chips::-webkit-scrollbar{display:none}
-.chip{flex:none;min-height:40px;padding:0 14px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink2);font-size:13.5px;font-weight:600;cursor:pointer}
-.chip.on{background:var(--navy);color:#fff;box-shadow:none}
-.sh{display:flex;justify-content:space-between;align-items:baseline;margin:8px 2px -4px;font-family:var(--fh);font-weight:600;font-size:16px}
-.sh span{font-family:var(--ff);font-weight:500;font-size:13px;color:var(--mut)}
-.card{background:var(--card);border-radius:var(--r);box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line);overflow:hidden}
-.pad{padding:16px}
-.ch{display:flex;align-items:center;gap:10px;padding:14px 16px 4px;font-family:var(--fh);font-weight:600;font-size:15px}
-.ch .ic{width:20px;height:20px;color:var(--nfg)}
-.ch .r{margin-left:auto;font-family:var(--ff);font-weight:500;font-size:13px;color:var(--mut)}
-.row{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 16px;border:0;border-top:1px solid var(--line);width:100%;background:none;text-align:left;cursor:pointer;color:inherit;transition:background .15s}
-.row:first-child,.ch+.row{border-top:0}
-.row:active{background:var(--bg)}
-.row.off{opacity:.5}
-.sq{width:40px;height:40px;border-radius:12px;background:var(--bg);color:var(--ink2);display:grid;place-items:center;flex:none}.sq .ic{width:20px;height:20px}.sq.a{background:var(--amberbg);color:var(--amber)}
-.stl{margin-top:8px}
-.row .tx{flex:1;min-width:0}
-.nm{font-family:var(--fh);font-weight:600;font-size:16px;line-height:1.25}
-.sm{font-size:13px;color:var(--mut);margin-top:2px}
-.sm .ic{width:14px;height:14px;margin-right:4px}
-.go{color:var(--line2);width:20px;height:20px}
-.st{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:999px;white-space:nowrap}
-.st .ic{width:14px;height:14px}
-.st.n{background:var(--navybg);color:var(--nfg)}.st.g{background:var(--greenbg);color:var(--green-d)}.st.r{background:var(--redbg);color:var(--red)}.st.a{background:var(--amberbg);color:var(--amber)}.st.m{background:var(--bg);color:var(--mut)}
-.prog{margin-top:12px}
-.prog .lb{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mut);margin-bottom:6px}.prog .lb b{color:var(--ink);font-weight:600}
-.track{height:6px;border-radius:99px;background:var(--line);overflow:hidden}.track i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .5s cubic-bezier(.16,1,.3,1)}
-.track.navy i{background:var(--navy)}.track.late i{background:var(--red)}
-.hero .track{background:rgba(255,255,255,.14)}.hero .prog .lb{color:#B9C6D6}.hero .prog .lb b{color:#fff}
-.bars{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:4px}
-.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:6px}
-.facts{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
-.facts div{padding:12px 8px;text-align:center}.facts div+div{border-left:1px solid var(--line)}
-.facts b{display:block;font-family:var(--fh);font-weight:600;font-size:16px}.facts span{font-size:12px;color:var(--mut)}
-.need{display:flex;gap:12px;align-items:center;padding:12px 16px;border-top:1px solid var(--line)}
-.ch+.need{border-top:0}
-.need .ib{width:40px;height:40px;border-radius:12px;background:var(--navybg);color:var(--nfg);display:grid;place-items:center;flex:none}
-.need .ib .ic{width:20px;height:20px}
-.need .tx{flex:1;min-width:0}.need .t{font-weight:600;font-size:14.5px}.need .s{font-size:12.5px;color:var(--mut)}
-.need .q{font-family:var(--fh);font-weight:600;font-size:20px;min-width:34px;text-align:right}
-.rush details>summary{list-style:none;cursor:pointer}.rush details>summary::-webkit-details-marker{display:none}
-.rush summary .go{width:16px;height:16px;color:var(--mut);flex:none;transition:transform .15s}.rush details[open]>summary .go{transform:rotate(90deg)}
-.rush .need .t{overflow-wrap:anywhere}.rush .need .s b{font-weight:600}.rush .need .s .rd{color:var(--red)}.rush .need .s .am{color:var(--amber)}
-.rush .need .q{font-size:17px;min-width:0;white-space:nowrap}.rush .ch .r{font-family:var(--fh);font-weight:600;font-size:15px;color:var(--ink)}
-.rush .ib.r{background:var(--redbg);color:var(--red)}.rush .ib.g{background:var(--greenbg);color:var(--green-d)}
-.rush .facts{border-top:0}.rush .facts .bad b{color:var(--red)}.rush .facts+details>.need{border-top:1px solid var(--line)}
-.rush .it{display:flex;justify-content:space-between;gap:12px;padding:8px 16px 8px 68px;border-top:1px solid var(--line);font-size:13px}
-.rush .it .n{min-width:0;overflow-wrap:anywhere}.rush .it .v{flex:none;color:var(--mut);font-variant-numeric:tabular-nums;white-space:nowrap}
-.rush .it.ref .n{color:var(--mut)}.rush .it .rd{color:var(--red)}.rush .it .am{color:var(--amber)}
-.foot{display:flex;gap:8px;align-items:flex-start;padding:12px 16px;background:var(--bg);font-size:13px;color:var(--ink2)}
-.foot .ic{width:16px;height:16px;margin-top:2px;color:var(--nfg)}
-.kv{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
-.ch+.kv,.kv:first-child{border-top:0}
-.kv .k{color:var(--mut);flex:none}.kv .v{text-align:right;font-weight:600;min-width:0;overflow-wrap:anywhere}.kv .v .sm{font-weight:400}
-.mono,.kv .v.mono{font-family:var(--fm);font-size:12.5px;color:var(--mut);font-weight:400}
-.ban{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;font-size:13.5px;font-weight:500}
-.ban .ic{width:18px;height:18px;margin-top:1px}
-.ban.a{background:var(--amberbg);color:var(--amber)}.ban.r{background:var(--redbg);color:var(--red)}.ban.g{background:var(--greenbg);color:var(--green-d)}.ban.n{background:var(--navybg);color:var(--nfg)}
-.big{display:flex;gap:14px;align-items:center}
-.big .ib{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;flex:none}
-.big .ib .ic{width:28px;height:28px}
-.big .ib.n{background:var(--navybg);color:var(--nfg)}.big .ib.g{background:var(--greenbg);color:var(--green-d)}.big .ib.r{background:var(--redbg);color:var(--red)}.big .ib.m{background:var(--bg);color:var(--mut)}
-.big h2,h2.who{margin:0;font-family:var(--fh);font-weight:600;font-size:20px;line-height:1.2}
-.mach{padding:14px 16px;border-top:1px solid var(--line)}
-.ch+.mach{border-top:0}
-.mh{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-.mh b{font-family:var(--fh);font-weight:600;font-size:15.5px}
-.docs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.doc{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:12px;background:var(--bg);font-size:13px;min-width:0}
-.doc .ic{width:18px;height:18px}
-.doc .tx{min-width:0}.doc .t{font-weight:600;font-size:13px;line-height:1.2}.doc .s{font-size:12px;color:var(--mut)}
-.doc.ok{background:var(--greenbg)}.doc.ok .ic{color:var(--green-d)}.doc.ok .s{color:var(--green-d)}
-.doc.bad{background:var(--redbg)}.doc.bad .ic,.doc.bad .s{color:var(--red)}
-.doc.wait .ic{color:var(--nfg)}.doc.none .ic{color:var(--mut)}
-.fix{margin-top:8px;font-size:13px;color:var(--red);display:flex;gap:8px}.fix .ic{width:16px;height:16px;margin-top:2px}
-.dwn{margin-top:10px;display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:var(--amberbg);color:var(--amber);font-size:13.5px}
-.dwn .ic{width:18px;height:18px;margin-top:1px}
-.miss{padding:10px 16px 10px 46px;border-top:1px solid var(--line);font-size:14px}
-.ch+.miss{border-top:0}
-.fold>summary{list-style:none;cursor:pointer}.fold>summary::-webkit-details-marker{display:none}
-.fold .go{transition:transform .2s}.fold[open] .go{transform:rotate(90deg)}
-.feed{padding:12px 16px;border-top:1px solid var(--line);font-size:14px}
-.feed .w{font-size:12px;color:var(--mut);font-weight:600;margin-bottom:3px}
-.feed .pl{font-size:15px;line-height:1.45}
-.rt{padding:14px 16px;border-top:1px solid var(--line)}.rt:first-of-type{border-top:0}
-.rt .t{font-family:var(--fh);font-weight:600;font-size:15px}.rt .s{font-size:13px;color:var(--mut);margin-top:2px}
-.rate{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:10px}
-.rate button{min-height:44px;border:0;border-radius:12px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);font-family:var(--fh);font-weight:600;font-size:16px;color:var(--ink2);cursor:pointer}
-.rate button.on{background:var(--navy);color:#fff;box-shadow:none}.rate button.on.lo{background:#B4382A}
-.gnote{width:100%;min-height:96px;border:0;border-radius:12px;padding:12px 14px;font:inherit;font-size:16px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink);resize:vertical}
-.gnote.err{box-shadow:inset 0 0 0 2px var(--red)}
-.gsum{display:flex;align-items:center;gap:12px}.gsum .ib{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;flex:none}.gsum .ib .ic{width:26px;height:26px}
-.gsum .ib.n{background:var(--navybg);color:var(--nfg)}.gsum .ib.g{background:var(--greenbg);color:var(--green-d)}.gsum .ib.r{background:var(--redbg);color:var(--red)}.gsum .n{font-family:var(--fh);font-weight:700;font-size:34px;line-height:1}.gsum .n small{font-size:16px;color:var(--mut);font-weight:600}
-.gline{display:flex;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--line);font-size:14px}.gline b{font-family:var(--fh)}
-.full{margin-top:6px}.full>summary{display:inline-flex;align-items:center;min-height:40px;padding-right:12px;font-size:13px;font-weight:600;color:var(--nfg);cursor:pointer}
-.full>div p.also{margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--line);font-weight:600;color:var(--ink)}
-.full>div{font-size:13px;line-height:1.5;color:var(--mut);padding-top:2px}.full>div p{margin:0 0 6px}.full>div b{color:var(--ink);font-weight:600}
-.sbox .clr{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:40px;height:40px;padding:0;border:0;background:none;color:var(--mut);display:flex;align-items:center;justify-content:center;border-radius:10px;cursor:pointer}
-.sbox .clr[hidden]{display:none}.sbox .clr .ic{position:static;transform:none;width:18px;height:18px}
-.empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;text-align:center;color:var(--mut);font-size:14px}
-.empty .ic{width:28px;height:28px;color:var(--line2)}
-.dock{position:fixed;left:0;right:0;bottom:0;z-index:5;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06)}
-.dock .in{max-width:608px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
-.dock .two{display:grid;grid-template-columns:1fr 1fr;gap:8px}.dock .two.nx{grid-template-columns:1fr 2fr}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 18px;border-radius:14px;border:0;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;font-size:16px;cursor:pointer;width:100%;transition:transform .12s,opacity .2s}
-.btn:active{transform:scale(.98)}.btn .ic{width:20px;height:20px}
-.btn.green{background:var(--fill)}
-.btn.ghost{background:transparent;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line2);min-height:46px;font-size:15px}
-.btn.txt{background:none;color:var(--red);min-height:44px;font-size:14px;font-family:var(--ff);font-weight:600}
-.btn[disabled]{opacity:.45;cursor:default;transform:none}
-.note{font-size:12.5px;color:var(--mut);text-align:center}
-.err{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:var(--redbg);color:var(--red);border-radius:14px;font-size:13.5px;font-weight:500}
-.err .ic{width:18px;height:18px;margin-top:1px}
-.err .retry{margin-left:auto;flex:none;border:0;background:none;color:var(--red);font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0 0 0 6px;white-space:nowrap}
-.kept{display:flex;gap:8px;align-items:center;margin:0 2px 12px;font-size:12.5px;color:var(--mut)}.kept .ic{width:16px;height:16px;flex:none}
-.kept.bad{color:var(--red)}.kept .retry{margin-left:auto;flex:none;border:0;background:none;color:inherit;font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;padding:0 0 0 6px;white-space:nowrap}
-.sk{height:64px;border-top:1px solid var(--line);background:linear-gradient(90deg,var(--card),var(--bg),var(--card));background-size:200% 100%;animation:sk 1.2s infinite}
-.sk:first-child{border-top:0}
-@keyframes sk{to{background-position:-200% 0}}
-/* the audit on the ship (B1–B7), 19 Oct 2026 */
-.stp{max-width:608px;margin:8px auto 0;display:grid;grid-template-columns:repeat(7,1fr);gap:4px}.stp[hidden]{display:none}
-.stp button{height:16px;padding:6px 0;border:0;background:none;cursor:pointer;display:block}
-.stp button::before{content:"";display:block;height:4px;border-radius:99px;background:rgba(255,255,255,.2)}
-.stp button.on::before{background:var(--green)}
-.q{font-family:var(--fh);font-weight:600;font-size:17px;line-height:1.3}
-.hint{font-size:13px;color:var(--mut);margin-top:2px}
-.grp{display:flex;justify-content:space-between;align-items:baseline;padding:14px 16px 6px;font-size:12px;font-weight:600;color:var(--mut);letter-spacing:.4px;text-transform:uppercase}
-.grp em{font-style:normal;text-transform:none;letter-spacing:0;font-size:12.5px}.grp em.bad{color:var(--red)}
-.itm{display:flex;align-items:center;gap:10px;min-height:52px;padding:10px 16px;border:0;border-top:1px solid var(--line);width:100%;background:none;text-align:left;font-size:15px;color:inherit;cursor:pointer}
-.grp+.itm,.card>.itm:first-child{border-top:0}
-div.itm{cursor:default}
-.itm .tx{flex:1;min-width:0}.itm .tx .sm{display:block}.itm .sub{color:var(--mut);font-size:13px}
-.itm>.ic{width:22px;height:22px}.itm .ic.ok{color:var(--green-d)}.itm .ic.bad{color:var(--red)}.itm .ic.warn{color:var(--amber)}
-.itm.miss .tx{color:var(--red)}
-.card>.mach:first-child{border-top:0}
-.cells{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 16px 12px}
-.cell{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border-radius:12px;border:0;background:var(--bg);font-size:13.5px;font-weight:600;color:var(--ink2);cursor:pointer;text-align:left}
-.cell .ic{width:18px;height:18px}.cell.ok .ic{color:var(--green-d)}
-.cell.bad{background:var(--redbg);color:var(--red)}
-.wsum{display:inline-flex;align-items:center;gap:6px;margin-top:8px;font-size:13.5px;font-weight:600;color:var(--green-d)}.wsum .ic{width:18px;height:18px}.wsum.bad{color:var(--red)}
-.fnd{display:flex;gap:10px;align-items:flex-start;margin:0 16px 12px;padding:12px;border-radius:12px;background:var(--bg);font-size:14px}
-.fnd>.ic{width:18px;height:18px;margin-top:2px;flex:none}
-.fnd>div{flex:1;min-width:0}
-.fnd b{display:block;font-weight:600}
-.fnd .src{display:block;font-size:12.5px;color:var(--mut);margin-top:2px}
-.fnd.a{background:var(--amberbg)}.fnd.a>.ic,.fnd.a b{color:var(--amber)}
-.fnd.r{background:var(--redbg)}.fnd.r>.ic,.fnd.r b{color:var(--red)}
-.ln{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
-.ch+.ln,.ch+.empty{border-top:0}
-.ln .nm{font-weight:600;font-size:14.5px;line-height:1.25;overflow-wrap:anywhere}
-.ln .mono{font-size:12px}
-.ln .num{font-size:12.5px;color:var(--mut);margin-top:2px}.ln .num b{color:var(--ink);font-weight:600}
-.ln .d{font-family:var(--fh);font-weight:600;font-size:16px;color:var(--amber);min-width:28px;text-align:right}.ln .d.p{color:var(--nfg)}.ln .d.z{color:var(--green-d)}
-.shelf{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:var(--mut)}
-.shelf input{width:56px;min-height:40px;border:0;border-radius:10px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);text-align:center;font:600 16px var(--fh);color:var(--ink)}
-.addl{padding:12px 16px;border-top:1px solid var(--line)}
-.addl .search{background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);min-height:46px}
-#addr .row{padding:10px 4px;min-height:52px}
-.field{width:100%;min-height:48px;border:0;border-radius:12px;padding:0 14px;font:inherit;font-size:16px;background:var(--bg);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink);margin-top:10px}
-.lab{font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:6px}
-.why{display:flex;gap:6px;align-items:flex-start;font-size:13px;color:var(--red);margin-top:8px;font-weight:500}.why .ic{width:16px;height:16px;margin-top:1px}
-.anch{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:6px}
-.scoreln{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:13.5px;color:var(--ink2)}.scoreln b{font-family:var(--fh);color:var(--ink)}
-.tog{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:56px;padding:0 16px;border:0;border-top:1px solid var(--line);background:none;font-size:15px;color:inherit;text-align:left;cursor:pointer}
-.tog:first-child{border-top:0}
-.sw{position:relative;width:46px;height:28px;border-radius:99px;background:var(--line2);flex:none;transition:background .15s}
-.sw::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .15s}
-.sw.on{background:var(--fill)}.sw.on::after{transform:translateX(18px)}
-.doors{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.door{display:flex;align-items:center;gap:12px;min-height:64px;padding:12px 14px;border:0;border-radius:var(--r);background:var(--card);box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line);text-align:left;cursor:pointer;color:inherit;min-width:0}
-.door .tx{flex:1;min-width:0;display:flex;flex-direction:column}.door .nm{font-weight:600;font-size:15px}.door .sm{font-size:12.5px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.door .sm.a{color:var(--amber);font-weight:600}
-.door:active{transform:scale(.98)}
-.grd{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px}
-.gi{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut)}
-.gq{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;font-weight:700;font-size:13px;background:var(--greenbg);color:var(--green-d)}
-.gq.lo{background:var(--redbg);color:var(--red)}.gq.x,.gq.p{background:var(--bg);color:var(--ink2)}.gq.x{color:var(--mut)}
-.fu{border-top:1px solid var(--line)}.card>.fu:first-child{border-top:0}.empty>span{font-size:13px}
-.fubtn{display:flex;gap:8px;margin-top:12px}.fubtn .btn{min-height:44px;font-size:14.5px;flex:1;padding:0 12px;white-space:nowrap}.fubtn .btn .ic{width:18px;height:18px}.nw{white-space:nowrap}
-.btn.sure{background:var(--fill)}
-.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
-.tile{background:var(--card);border-radius:12px;box-shadow:0 0 0 1px var(--line);padding:12px 2px 10px;text-align:center;min-width:0}
-.tile b{display:block;font-family:var(--fh);font-weight:600;font-size:24px;line-height:1.1}
-.tile small{display:block;font-size:10.5px;color:var(--mut);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile.main{background:var(--navy);box-shadow:none;color:#fff}.tile.main small{color:#B9C6D6}
-.card.soft{background:var(--bg);box-shadow:0 0 0 1px var(--line)}
-.went{display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:center;padding:8px 16px 16px;font-size:14px}
-.went i{width:26px;height:26px;border-radius:50%;display:grid;place-items:center}.went i .ic{width:14px;height:14px}
-.went i.y{background:var(--greenbg);color:var(--green-d)}.went i.n{background:var(--card);color:var(--mut)}
-.phs{display:flex;flex-wrap:wrap;gap:8px;padding:8px 16px 0}
-.th{width:72px;height:72px;border-radius:12px;background:var(--bg) center/cover no-repeat;position:relative;display:block}
-.th.q::after{content:"";position:absolute;right:5px;top:5px;width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 2px #fff}
-.vh{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden}
-label.btn{position:relative}
-.need .ib.a{background:var(--amberbg);color:var(--amber)}
-.toast{position:fixed;left:50%;bottom:calc(150px + env(safe-area-inset-bottom));transform:translate(-50%,20px);z-index:9;max-width:calc(100% - 32px);background:var(--deep);color:#fff;padding:12px 16px;border-radius:14px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s}
-.toast.on{opacity:1;transform:translate(-50%,0)}
-@media (prefers-reduced-motion:reduce){.sk{animation:none}.track i,.btn,.row,.bk,.sw,.sw::after,.toast{transition:none}}
-</style>
+<style>` + AUDIT_CSS + String.raw`</style>
 </head><body>
-<header class="top"><div class="in"><button class="bk" id="bk" hidden aria-label="Back"></button><div style="min-width:0"><div class="tt" id="tt"><span class="brand">CIMS</span></div><div class="ts" id="ts"></div></div><span class="tk" id="tk"></span></div><div class="stp" id="stp" hidden></div></header>
-<div id="heroslot"></div>
+<header class="appbar"><div class="appbar-in"><a class="brand" href="#" aria-label="Printshop Ops Audit, home">` + markSvg(36) + String.raw`<b>Printshop Ops Audit</b></a><span class="who" id="who"></span><button class="ib" id="ibh" data-go="hist" aria-label="History" title="History"></button><button class="ib" id="ibf" data-go="fu" aria-label="Follow-ups" title="Follow-ups"></button></div></header>
 <div class="offl" id="offl" hidden><div>No signal. What you see was loaded earlier.</div></div>
-<main id="main"><div class="card"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
+<main class="wrap" id="main"><div class="card clip"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
 <div id="dockslot"></div>
 <script>window.__IC=` + JSON.stringify(ICONS) + String.raw`;window.__MARK=` + JSON.stringify(markSvg(40)) + String.raw`;</script>
 <script>` + AUDIT_RULES_JS + String.raw`</script>
 <script>
 (function () {
   "use strict";
-  var S = { me: null, today: null, ships: null, counts: null, hist: null, hf: "All", brand: "All", q: "", brief: {} };
+  var S = { me: null, today: null, ships: null, counts: null, hist: null, hf: "All", q: "", brief: {}, cust: null, shut: {}, more: {} };
   var IC = window.__IC || {};
   var $ = function (id) { return document.getElementById(id); };
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -314,18 +83,28 @@ label.btn{position:relative}
   function whenUtc(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
   function left(v) { var ms = Date.parse(v) - Date.now(); if (isNaN(ms)) return ""; if (ms <= 0) return "past due"; var h = Math.floor(ms / 3600000); return h >= 1 ? h + " h left" : Math.max(1, Math.round(ms / 60000)) + " min left"; }
 
-  function top(t, s, k, kcls, back) {
-    document.querySelector(".top").classList.toggle("gone", !t);
-    $("tt").textContent = t || "";
-    $("ts").textContent = s || ""; $("ts").hidden = !s;
-    var tk = $("tk"); tk.className = "tk" + (kcls ? " " + kcls : ""); tk.innerHTML = k || "";
-    $("bk").hidden = !back;
-    $("stp").hidden = true; $("stp").innerHTML = "";
+  /* THE SHELL (the redesign of 20 Oct 2026, canvas 45Hsjnr7Vr6f1BPussctg3): a white app bar with the mark and the name,
+     who is signed in and today, History and Follow-ups as two icon buttons; every screen draws its own head inside the
+     page. The main action sits in the page on a computer and in a bar at the bottom on a phone (dock). */
+  function meName() { var s = String(S.me || "").split("@")[0]; return s.split(/[._]+/).filter(Boolean).map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); }).join(" "); }
+  function chrome(on) {
+    var nm = first(meName());
+    $("who").textContent = (nm ? nm + " · " : "") + (S.today ? fmtD(S.today, true) : "");
+    $("ibh").className = "ib" + (on === "hist" ? " on" : "");
+    $("ibf").className = "ib" + (on === "fu" ? " on" : "");
+    var n = S.counts && S.counts.openFollowups ? S.counts.openFollowups : 0, b = $("fub");
+    if (b) { b.hidden = !n; b.textContent = n ? String(n) : ""; }
+    $("ibf").setAttribute("aria-label", n ? "Follow-ups, " + n + " open" : "Follow-ups");
   }
-  function hero(html, cls) { $("heroslot").innerHTML = html ? '<section class="hero' + (cls ? " " + cls : "") + '"><div class="in">' + html + "</div></section>" : ""; }
-  function dock(html) { $("dockslot").innerHTML = html ? '<div class="dock"><div class="in">' + html + "</div></div>" : ""; }
-  function skel(n) { var h = '<div class="card">'; for (var i = 0; i < (n || 3); i++) h += '<div class="sk"></div>'; return h + "</div>"; }
-  function prog(label, a, b, cls) { return '<div class="prog"><div class="lb"><span>' + label + "</span><b>" + a + " of " + b + '</b></div><div class="track' + (cls ? " " + cls : "") + '"><i style="width:' + pct(a, b) + '%"></i></div></div>'; }
+  function head(o) {
+    return '<div class="sec' + (o.tight ? " tight" : "") + '">' + (o.back ? '<button type="button" class="arrow" data-go="' + esc(o.back[0]) + '">' + ic("arrow-left") + esc(o.back[1]) + "</button>" : "")
+      + (o.eyebrow ? '<span class="eyebrow">' + esc(o.eyebrow) + "</span>" : "") + (o.title ? '<h1 class="h1">' + o.title + "</h1>" : "") + (o.lead ? '<p class="lead">' + o.lead + "</p>" : "") + (o.more || "") + "</div>";
+  }
+  function top() {} /* the screens not redrawn yet; removed with the last of them */
+  function hero() {}
+  function dock(html) { $("dockslot").innerHTML = html ? '<div class="dock">' + html + "</div>" : ""; }
+  function skel(n) { var h = '<div class="card clip">'; for (var i = 0; i < (n || 3); i++) h += '<div class="sk"></div>'; return h + "</div>"; }
+  function prog(label, a, b, cls) { return '<div class="sec tight"><div class="hstack" style="justify-content:space-between"><span class="xs">' + label + '</span><span class="xs b">' + a + " of " + b + '</span></div><div class="prog"><i style="width:' + pct(a, b) + '%' + (cls === "late" ? ";background:var(--redm)" : cls === "navy" ? ";background:var(--navy)" : "") + '"></i></div></div>'; }
 
   /* Every read has a ceiling (19 Oct 2026, Miguel: "something is broken or taking way to long to load"). A request that
      never answers (a stalled connection, a laptop woken from sleep) left the home on its placeholders for ever: fetch has
@@ -349,7 +128,7 @@ label.btn{position:relative}
     no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console.", no_obp_list: "HON has no OBP stock list for this ship, so there is nothing to count.", not_aboard: "The board does not have this seafarer aboard this ship." };
   /* a lost connection reads as one, never the browser's "Failed to fetch" */
   function why(e) { var m = String((e && e.message) || e || ""); return e && e.name === "TypeError" && m.indexOf("no answer") !== 0 ? "no connection" : m; }
-  function fail(e) { hero(""); $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(why(e)) + ".</span>" + '<button class="retry" data-retry>Try again</button></div>'; dock(""); }
+  function fail(e) { $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(why(e)) + ".</span>" + '<button class="retry" data-retry>Try again</button></div>'; dock(""); }
 
   // One status word per request, said the same way on every screen.
   function reqStatus(r) {
@@ -362,71 +141,140 @@ label.btn{position:relative}
     return "";
   }
 
-  /* ---------------- A1 · Ships ---------------- */
+  /* ---------------- A1 · The landing (canvas board "Main") ----------------
+     Pick the customer, and its ships line up by what Dexter has to do: contracts ending within 30 days with no audit
+     first, then every other contract not audited, then the ones audited this contract, then the hulls nobody is aboard.
+     An audit belongs to the contract it was asked in (Miguel, 16 Oct 2026): the server says it per seafarer (audit). */
+  var CUSTS = [["Royal", "Royal Caribbean"], ["Celebrity", "Celebrity"], ["Azamara", "Azamara"], ["NCL", "NCL"]];
   function brandOf(s) { return s.brand === "Royal" ? "Royal Caribbean" : (s.brand || ""); }
-  function shipRow(s, openReq) {
-    var who = s.aboard.length ? ic("user") + s.aboard.map(function (c) { return esc(c.name); }).join(", ") : "Nobody aboard per the TDG file";
-    /* one crew aboard: the row already names him, so it opens his briefing (Miguel, 15 Oct 2026) */
-    var go = openReq && s.last ? ' data-go="q=' + esc(s.last.id) + '"' : ' data-ship="' + esc(s.ship) + '"' + (s.aboard.length === 1 ? ' data-sc="' + esc(s.aboard[0].sc) + '"' : "");
-    return '<button class="row' + (s.aboard.length || openReq ? "" : " off") + '"' + go + '><div class="tx"><div class="nm">' + esc(s.ship) + '</div><div class="sm">' + (openReq && s.last ? ic("user") + esc(s.last.crew) : who) + "</div>" + (openReq ? '<div class="stl">' + reqStatus(s.last) + "</div>" : "") + "</div>" + ic("caret-right", "go") + "</button>";
+  function custOf(s) { return s.brand || "Other"; }
+  function custName(k) { for (var i = 0; i < CUSTS.length; i++) if (CUSTS[i][0] === k) return CUSTS[i][1]; return k; }
+  function contractNo(c) { var m = /on contract (\d+)/i.exec(c.contract || ""); return m ? "contract " + m[1] : String(c.contract || "").toLowerCase(); }
+  /* the seafarer a ship's line is about: the one aboard longest, whose contract ends first; the other is "with" them */
+  function lead(s) { return (s.aboard || []).slice().sort(function (a, b) { return String(a.signOn || "9999").localeCompare(String(b.signOn || "9999")); })[0] || null; }
+  function bandOf(s) {
+    var c = lead(s); if (!c) return "empty";
+    if (c.audit && c.audit.grade != null) return "done";
+    if (c.heldByFile || (c.signOff && c.signOff < S.today)) return "soon";
+    if (c.signOff && S.today && days(S.today, c.signOff) <= 30) return "soon";
+    return "later";
   }
+  function goOf(s) { var c = lead(s); return c ? ' data-ship="' + esc(s.ship) + '" data-sc="' + esc(c.sc) + '"' : ""; }
+  function reqChip(r) {
+    if (!r) return "";
+    if (r.grade != null) return '<span class="chip ' + (r.grade <= 3 ? "r" : "g") + '">Score ' + esc(r.grade) + "/5</span>";
+    if (r.status === "complete") return '<span class="chip n">Documents in</span>';
+    if (r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()))) return '<span class="chip r">Past the deadline</span>';
+    if (r.status === "sent") return '<span class="chip n">Waiting · ' + esc(left(r.due)) + "</span>";
+    if (r.status === "draft") return '<span class="chip m">Being sent</span>';
+    return "";
+  }
+  function shipLine(s) {
+    var c = lead(s), band = bandOf(s);
+    if (!c) return '<div class="frow off"><div style="min-width:0"><b class="h4">' + esc(s.ship) + '</b><div class="sm">Nobody aboard per the TDG file</div></div><div class="mid"></div><div class="end"><span class="chip m">Nobody aboard</span></div></div>';
+    var others = s.aboard.filter(function (x) { return x.sc !== c.sc; });
+    var chips = (c.audit && c.audit.grade == null ? reqChip(c.audit) : "") + (others.length ? '<span class="chip m">' + (others.length + 1) + " aboard</span>" : "");
+    var who = esc(c.name) + (contractNo(c) ? " · " + esc(contractNo(c)) : "") + (others.length ? " · with " + others.map(function (o) { return esc(o.name) + (o.signOn ? " since " + fmtD(o.signOn) : ""); }).join(", ") : "");
+    var past = c.heldByFile || (c.signOff && c.signOff < S.today), tot = c.signOn && c.signOff ? Math.max(1, days(c.signOn, c.signOff)) : 0;
+    var p = past ? 100 : tot ? pct(days(c.signOn, S.today), tot) : 0, inSpan = c.signOff && !past ? md(S.today, c.signOff) : "";
+    var bar = past ? "var(--redm)" : band === "soon" ? "var(--amberm)" : "var(--green)";
+    var leftT = c.signOn ? "Aboard " + (md(c.signOn, S.today) || "since today") : "";
+    var rightT = past ? "Was due " + fmtD(c.signOff) + " · TDG still has them aboard" : c.signOff ? "Ends " + fmtD(c.signOff) : "";
+    var end = band === "done" ? reqChip(c.audit) : past ? '<span class="chip r">Past the sign-off</span>' : inSpan ? '<span class="chip ' + (band === "soon" ? "a" : "m") + '">Ends in ' + esc(inSpan) + "</span>" : "";
+    return '<button type="button" class="frow"' + goOf(s) + '><div style="min-width:0"><div class="hstack" style="gap:8px"><b class="h4">' + esc(s.ship) + "</b>" + chips + '</div><div class="sm ell">' + who + "</div></div>"
+      + '<div class="mid"><div class="xs mid-t"><span>' + esc(leftT) + "</span><span>" + esc(rightT) + (inSpan ? '<span class="m-inl"> · in ' + esc(inSpan) + "</span>" : "") + '</span></div><div class="prog thin"><i style="width:' + p + "%;background:" + bar + '"></i></div></div>'
+      + '<div class="end">' + end + '<span class="chev">' + ic("caret-right") + "</span></div></button>";
+  }
+  function soonest(a, b) { var x = lead(a), y = lead(b); return String(x && x.signOff || "9999").localeCompare(String(y && y.signOff || "9999")) || a.ship.localeCompare(b.ship); }
+  function group(key, dot, title, sub, list, cap, startShut) {
+    if (!list.length && key !== "done") return "";
+    var shut = S.shut[key] == null ? !!startShut : S.shut[key], more = !!S.more[key], canMore = !!cap && list.length > cap, off = !list.length;
+    var h = '<div class="card clip"><div class="grp-hd"><span class="dot ' + dot + '"></span><div><b class="h4">' + esc(title) + '</b><div class="sm">' + sub + "</div></div>"
+      + '<button type="button" class="fold' + (off ? " off" : shut ? " shut" : "") + '"' + (off ? " disabled" : ' data-fold="' + key + '"') + ' aria-label="' + (off ? "Nothing to open" : (shut ? "Open " : "Fold ") + esc(title)) + '" aria-expanded="' + (!shut && !off) + '">' + ic("caret-down") + "</button></div>";
+    if (!shut && !off) {
+      h += (canMore && !more ? list.slice(0, cap) : list).map(shipLine).join("");
+      if (canMore) h += '<button type="button" class="more" data-more="' + key + '">' + (more ? "Show fewer" : "Show all " + list.length) + ic("arrow-right") + "</button>";
+    }
+    return h + "</div>";
+  }
+  function inProgress(list) {
+    if (!list.length) return "";
+    if (list.length > 1) {
+      return '<section class="navy sec"><span class="eyebrow">In progress · ' + list.length + ' requests</span><h2 class="h2">One request open per ship</h2><div class="ipl">'
+        + list.map(function (s) { var r = s.last; return '<button type="button" class="ipr arrow" data-go="q=' + esc(r.id) + '" style="min-height:0;font-weight:400"><span><b class="h4">' + esc(s.ship) + '</b><span class="sm" style="display:block">' + esc(r.crew) + "</span></span>" + reqChip(r) + "</button>"; }).join("") + "</div></section>";
+    }
+    var s = list[0], r = s.last, fn = esc(first(r.crew)), c = (s.aboard || []).filter(function (x) { return x.sc === r.sc; })[0];
+    var late = r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()));
+    var title = r.status === "complete" ? esc(s.ship) + " is ready for the visit" : late ? fn + " has not sent everything" : r.status === "sent" ? "Waiting on " + fn + "'s documents" : esc(s.ship) + ": the request is being sent";
+    var sameDay = r.in && r.sent && r.in === r.sent, gap = r.in && r.sent ? md(r.sent, r.in) : "";
+    var leadT = r.status === "complete" ? esc(r.crew) + " sent everything" + (r.in ? " on " + fmtD(r.in) : "") + (sameDay ? ", the day it was asked." : gap ? ", " + esc(gap) + " after it was asked." : ".") + (c && c.signOff ? " The contract ends " + fmtD(c.signOff) + (md(S.today, c.signOff) ? ", in " + esc(md(S.today, c.signOff)) : "") + "." : "")
+      : r.status === "sent" ? "Asked " + fmtD(r.sent || r.at) + "." + (r.due ? (late ? " The deadline passed " + esc(whenUtc(r.due)) + "." : " Due " + esc(whenUtc(r.due)) + ", " + esc(left(r.due)) + ".") : "") : "";
+    var cta = r.status === "complete"
+      ? '<button type="button" class="btn green" data-go="a=' + esc(r.id) + '|1">Start the audit</button><button type="button" class="btn white" data-go="b=' + esc(encodeURIComponent(s.ship)) + "|" + esc(encodeURIComponent(r.sc)) + '">See the briefing' + ic("arrow-right") + "</button>"
+      : '<button type="button" class="btn white" data-go="q=' + esc(r.id) + '">Open the request' + ic("arrow-right") + "</button>";
+    var st = function (cls, dot, t) { return '<div class="ck ' + cls + '"><span class="' + dot + '">' + (dot === "c" ? ic("b:check") : "") + "</span><span>" + t + "</span></div>"; };
+    var steps = st("", "c", "Asked" + ((r.sent || r.at) ? " · " + fmtD(r.sent || r.at) : ""))
+      + (r.status === "complete" ? st("", "c", "Documents in" + (r.in ? " · " + fmtD(r.in) : "")) : st("cur", "o on", r.due ? "Documents · due " + fmtD(r.due) : "Documents"))
+      + st(r.status === "complete" ? "cur" : "todo", r.status === "complete" ? "o on" : "o", "Audit on board") + st("todo", "o", "Filed");
+    return '<section class="navy inprog"><div class="sec tight"><span class="eyebrow">In progress · 1 request</span><h2 class="h2">' + title + '</h2><p class="lead">' + leadT + '</p><div class="cta" style="margin-top:8px">' + cta + '</div></div><div class="steps">' + steps + "</div></section>";
+  }
+  function custTiles(byCust, keys) {
+    return '<section class="tiles' + (keys.length % 2 ? " odd" : "") + '" aria-label="Customers" style="--n:' + Math.max(1, Math.min(4, keys.length)) + '">' + keys.map(function (k) {
+      var list = byCust[k], crewed = list.filter(function (s) { return lead(s); }).length, soon = list.filter(function (s) { return bandOf(s) === "soon"; }).length;
+      return '<button type="button" class="tile' + (S.cust === k ? " on" : "") + '" data-cust="' + esc(k) + '" aria-pressed="' + (S.cust === k) + '"><span class="tile-top"><b class="tile-name">' + esc(custName(k)) + "</b></span>"
+        + '<span class="sm">' + list.length + (list.length === 1 ? " ship" : " ships") + " · " + (crewed === list.length ? "all crewed" : crewed + " crewed") + "</span>"
+        + '<span class="tile-alert ' + (soon ? "a" : "g") + '">' + (soon ? soon + (soon === 1 ? " ends" : " end") + " within 30 days" : "Nothing ends within 30 days") + "</span></button>";
+    }).join("") + "</section>";
+  }
+  function greeting() { var h = new Date().getHours(), nm = first(meName()); return (h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening") + (nm ? ", " + nm : ""); }
+  /* the head and the search box are drawn once; typing redraws the list under them, never the box (a redrawn box closes
+     the phone's keyboard) */
   function shipsView() {
-    S.view = "home"; top("", "", "", "", false); dock("");
-    hero('<div class="ttl"><span class="logo" aria-hidden="true">' + (window.__MARK || "") + '</span><h1>Printshop Ops Audit</h1></div><div class="sbox">' + ic("magnifying-glass") + '<input class="search" id="q" type="search" placeholder="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div>', "home");
+    S.view = "home"; chrome(""); dock("");
+    $("main").innerHTML = '<section class="sec" style="max-width:760px"><span class="eyebrow" id="greet">' + esc(greeting()) + '</span><h1 class="h1">Which customer are we auditing?</h1><p class="lead">Pick one and its ships line up by what is due. Or search any ship or crew across every customer.</p>'
+      + '<div class="search">' + ic("magnifying-glass") + '<input id="q" type="search" placeholder="Search ship or crew" aria-label="Search ship or crew" autocomplete="off" value="' + esc(S.q) + '"><button type="button" class="clr" id="qx" aria-label="Clear search"' + (S.q ? "" : " hidden") + ">" + ic("x") + '</button></div></section><div class="sec" id="lres" style="gap:40px"></div>';
     var qi = $("q"), qx = $("qx");
-    qi.addEventListener("input", function () { S.q = qi.value; qx.hidden = !S.q; shipsList(); });
-    qx.addEventListener("click", function () { S.q = ""; qi.value = ""; qx.hidden = true; shipsList(); qi.focus(); });
+    if (qi && qi.addEventListener) qi.addEventListener("input", function () { S.q = qi.value; if (qx) qx.hidden = !S.q; shipsList(); });
+    if (qx && qx.addEventListener) qx.addEventListener("click", function () { S.q = ""; qi.value = ""; qx.hidden = true; shipsList(); if (qi.focus) qi.focus(); });
     shipsList();
   }
   function shipsList() {
-    if (!S.ships) { $("main").innerHTML = (S.slow ? '<div class="kept">' + ic("hourglass-medium") + "<span>Still loading the ships.</span></div>" : "") + skel(4); return; }
-    var brands = ["All", "Royal Caribbean", "Celebrity", "Azamara"];
-    var q = S.q.toLowerCase().trim();
-    var list = S.ships.filter(function (s) {
-      if (S.brand !== "All" && brandOf(s) !== S.brand) return false;
-      if (!q) return true;
-      return (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase().indexOf(q) >= 0;
-    });
-    var open = list.filter(function (s) { return s.open; }); /* the server's one definition (isOpenRequest) */
-    var rest = list.slice().sort(function (a, b) { return (b.aboard.length > 0) - (a.aboard.length > 0) || a.ship.localeCompare(b.ship); });
-    var c = S.counts, h = keptLine();
-    if (c && !q) h += '<div class="doors"><button class="door" data-go="hist"><span class="sq">' + ic("clock-counter-clockwise") + '</span><span class="tx"><span class="nm">History</span><span class="sm">' + (c.filed ? c.filed + (c.filed === 1 ? " audit filed" : " audits filed") : "None filed yet") + "</span></span></button>"
-      + '<button class="door" data-go="fu"><span class="sq' + (c.openFollowups ? " a" : "") + '">' + ic("flag") + '</span><span class="tx"><span class="nm">Follow-ups</span><span class="sm' + (c.openFollowups ? " a" : "") + '">' + (c.openFollowups ? c.openFollowups + " open" : "None open") + "</span></span></button></div>";
-    h += '<div class="chips">' + brands.map(function (b) { return '<button class="chip' + (S.brand === b ? " on" : "") + '" aria-pressed="' + (S.brand === b) + '" data-brand="' + esc(b) + '">' + esc(b === "Royal Caribbean" ? "Royal" : b) + "</button>"; }).join("") + "</div>";
-    if (open.length) {
-      h += '<div class="sh">Open requests<span>' + open.length + "</span></div>";
-      h += '<div class="card">' + open.map(function (s) { return shipRow(s, true); }).join("") + "</div>";
+    var q = S.q.toLowerCase().trim(), h = keptLine();
+    if (!S.ships) { $("lres").innerHTML = h + (S.slow ? '<div class="kept">' + ic("hourglass-medium") + "<span>Still loading the ships.</span></div>" : "") + skel(4); return; }
+    var byCust = {}, keys = [];
+    S.ships.forEach(function (s) { var k = custOf(s); if (!byCust[k]) { byCust[k] = []; keys.push(k); } byCust[k].push(s); });
+    keys.sort(function (a, b) { var ia = CUSTS.map(function (c) { return c[0]; }).indexOf(a), ib = CUSTS.map(function (c) { return c[0]; }).indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+    if (!S.cust || !byCust[S.cust]) S.cust = keys.filter(function (k) { return byCust[k].some(function (s) { return bandOf(s) === "soon"; }); })[0] || keys[0];
+    h += custTiles(byCust, keys);
+    if (q) {
+      var hits = S.ships.filter(function (s) { return (s.ship + " " + s.aboard.map(function (c) { return c.name; }).join(" ")).toLowerCase().indexOf(q) >= 0; }).sort(soonest);
+      h += '<section class="sec"><div class="sec-hd"><h2 class="h2">' + (hits.length ? hits.length + (hits.length === 1 ? " ship matches" : " ships match") : "No ship matches") + " “" + esc(S.q) + "”</h2>" + '<span class="sm">Across every customer</span></div>'
+        + (hits.length ? '<div class="card clip">' + hits.map(shipLine).join("") + "</div>" : '<div class="card"><div class="empty">' + ic("boat") + "Try a ship or a crew name.</div></div>") + "</section>";
+    } else {
+      h += inProgress(S.ships.filter(function (s) { return s.open && s.last; }));
+      var mine = byCust[S.cust] || [], by = function (b) { return mine.filter(function (s) { return bandOf(s) === b; }).sort(soonest); };
+      var soon = by("soon"), later = by("later"), done = by("done"), empty = by("empty");
+      h += '<section class="sec"><div class="sec-hd"><h2 class="h2">' + esc(custName(S.cust)) + ' ships</h2><span class="sm">An audit belongs to the contract: each line says whether this contract has one</span></div>'
+        + group("soon", "a", "Ends within 30 days, not audited", soon.length + (soon.length === 1 ? " contract" : " contracts") + " · soonest first · ask for documents now", soon, 0, false)
+        + group("later", "m", "Not audited this contract", later.length + " · soonest sign-off first", later, 5, false)
+        + group("done", "g", "Audited this contract", done.length ? done.length + " · with the score" : "None yet · a filed audit moves the ship here with its score", done, 0, false)
+        + group("empty", "m", "Nobody aboard", empty.map(function (s) { return esc(s.ship); }).join(", ") + " · per the TDG file", empty, 0, true)
+        + "</section>";
     }
-    h += '<div class="sh">' + (open.length ? "All ships" : "Ships") + "<span>" + rest.length + "</span></div>";
-    h += '<div class="card">';
-    if (!rest.length) h += '<div class="empty">' + ic("boat") + "No ship matches " + (q ? "“" + esc(S.q) + "”" : "this filter") + ".</div>";
-    h += rest.map(function (s) { return shipRow(s, false); }).join("");
-    h += "</div>";
-    $("main").innerHTML = h;
+    $("lres").innerHTML = h;
   }
 
-  /* ---------------- Who ---------------- */
+  /* ---------------- Who: an old link to a ship opens the briefing of the seafarer whose contract ends first ---------------- */
   function contractBar(c) {
     if (!c.signOn || !c.signOff) return "";
     var tot = Math.max(1, days(c.signOn, c.signOff)), d = Math.max(0, days(c.signOn, S.today));
-    return '<div class="prog"><div class="track' + (d > tot ? " late" : "") + '"><i style="width:' + pct(d, tot) + '%"></i></div><div class="ends"><span>' + fmtD(c.signOn) + "</span><span>" + (c.heldByFile ? "past " : "") + fmtD(c.signOff) + "</span></div></div>";
+    return '<div class="prog thin"><i style="width:' + pct(d, tot) + "%" + (d > tot ? ";background:var(--redm)" : "") + '"></i></div>';
   }
   function shipView(ship) {
-    /* a reload on #s= arrives before the ships list: wait for it (the load re-routes), never bounce home */
-    if (!S.ships) { top(ship, "", "", "", true); hero(""); dock(""); $("main").innerHTML = skel(3); return; }
-    var s = S.ships.filter(function (x) { return x.ship === ship; })[0];
-    if (!s) { location.replace("#"); return; }
-    if (s.aboard.length === 1) { location.replace("#b=" + encodeURIComponent(s.ship) + "|" + encodeURIComponent(s.aboard[0].sc)); return; }
-    top(s.ship, brandOf(s), "", "", true); hero(""); dock("");
-    var h = '<div class="sh">Who are you auditing?</div><div class="card">';
-    if (!s.aboard.length) h += '<div class="empty">' + ic("user") + "The TDG file has nobody aboard " + esc(s.ship) + ".</div>";
-    s.aboard.forEach(function (c) {
-      var aboard = c.signOn ? md(c.signOn, S.today) : "";
-      /* one person at a time per ship (Miguel, 20 Oct 2026): while one request is open here, the other waits */
-      var busy = s.open && s.last && s.last.sc !== c.sc ? '<div class="stl"><span class="st n">' + ic("hourglass-medium") + "Waits for " + esc(first(s.last.crew)) + "'s audit</span></div>" : s.open && s.last && s.last.sc === c.sc ? '<div class="stl">' + reqStatus(s.last) + "</div>" : "";
-      h += '<button class="row" data-sc="' + esc(c.sc) + '" data-ship="' + esc(s.ship) + '" style="align-items:flex-start"><div class="tx"><div class="nm">' + esc(c.name) + '</div><div class="sm">' + esc(c.contract) + (aboard ? " · " + aboard + " aboard" : "") + "</div>" + contractBar(c) + busy + "</div>" + ic("caret-right", "go") + "</button>";
-    });
-    $("main").innerHTML = h + "</div>";
+    if (!S.ships) { chrome(""); dock(""); $("main").innerHTML = skel(3); return; }
+    var s = S.ships.filter(function (x) { return x.ship === ship; })[0], c = s && lead(s);
+    if (!s || !c) { location.replace("#"); return; }
+    location.replace("#b=" + encodeURIComponent(s.ship) + "|" + encodeURIComponent(c.sc));
   }
 
   /* ---------------- A2 · The briefing ---------------- */
@@ -667,7 +515,8 @@ label.btn{position:relative}
     var slow = setTimeout(function () { S.slow = true; if (S.view === "home") shipsList(); }, 3000);
     Promise.all([api("/api/me", 15000), api("/api/audit/ships", 15000)]).then(function (r) {
       clearTimeout(slow); S.slow = false; S.keptAt = null;
-      S.me = r[0].email; S.today = r[1].today; S.ships = r[1].ships; S.counts = r[1].counts || null; keepShips(r[1]);
+      S.me = r[0].email; lsSet("aud:me", S.me); S.today = r[1].today; S.ships = r[1].ships; S.counts = r[1].counts || null; keepShips(r[1]);
+      chrome(S.cur === "hist" ? "hist" : S.cur === "fu" ? "fu" : ""); var gr = $("greet"); if (gr && S.view === "home") gr.textContent = greeting();
       if (S.view === "home") shipsList(); else if ((S.cur || "").indexOf("s=") === 0) route(); else if (S.cur === "hist" && S.hist) historyList();
     }, function (e) {
       clearTimeout(slow);
@@ -1254,9 +1103,9 @@ label.btn{position:relative}
     if (h === "fu") return followupsView();
     shipsView();
   }
-  $("bk").innerHTML = ic("caret-left");
+  $("ibh").innerHTML = ic("clock-counter-clockwise");
+  $("ibf").innerHTML = ic("flag") + '<span class="bdg" id="fub" hidden></span>';
   window.addEventListener("hashchange", route);
-  $("bk").addEventListener("click", function () { history.length > 1 ? history.back() : go(""); });
   document.addEventListener("click", function (e) {
     var sp = e.target.closest("[data-step]");
     if (sp && S.cur && S.cur.indexOf("a=") === 0) { location.replace("#a=" + S.cur.slice(2).split("|")[0] + "|" + sp.getAttribute("data-step")); return; }
@@ -1267,10 +1116,14 @@ label.btn{position:relative}
     if (hf) { S.hf = hf.getAttribute("data-hf"); historyList(); return; }
     var fx = e.target.closest("[data-fix]");
     if (fx) { fixFollowup(fx); return; }
-    var t = e.target.closest("[data-brand],[data-sc],[data-ship]");
+    var fo = e.target.closest("[data-fold]");
+    if (fo) { var fk = fo.getAttribute("data-fold"), wasShut = fo.className.indexOf("shut") >= 0; S.shut[fk] = !wasShut; shipsList(); return; }
+    var mo = e.target.closest("[data-more]");
+    if (mo) { var mk = mo.getAttribute("data-more"); S.more[mk] = !S.more[mk]; shipsList(); return; }
+    var t = e.target.closest("[data-cust],[data-sc],[data-ship]");
     if (!t) return;
-    /* a brand chip browses the brand: it clears a search left in the box ("qu" + Azamara showed only Quest, 15 Oct 2026) */
-    if (t.hasAttribute("data-brand")) { S.brand = t.getAttribute("data-brand"); if (S.q) { S.q = ""; var qi = $("q"), qx = $("qx"); if (qi) qi.value = ""; if (qx) qx.hidden = true; } shipsList(); return; }
+    /* a customer tile browses the customer: it clears a search left in the box ("qu" + Azamara showed only Quest, 15 Oct 2026) */
+    if (t.hasAttribute("data-cust")) { S.cust = t.getAttribute("data-cust"); lsSet("aud:cust", S.cust); if (S.q) { S.q = ""; var qi = $("q"), qx = $("qx"); if (qi) qi.value = ""; if (qx) qx.hidden = true; } shipsList(); return; }
     if (t.hasAttribute("data-sc")) { go("b=" + encodeURIComponent(t.getAttribute("data-ship")) + "|" + encodeURIComponent(t.getAttribute("data-sc"))); return; }
     if (t.hasAttribute("data-ship")) go("s=" + encodeURIComponent(t.getAttribute("data-ship")));
   });
@@ -1283,6 +1136,7 @@ label.btn{position:relative}
      while the fresh one is late or failed: "Updating", or "Could not update" with Try again. */
   var kept = lsGet("aud:ships");
   if (kept && Array.isArray(kept.ships)) { S.ships = kept.ships; S.counts = kept.counts || null; S.today = kept.today || null; S.keptAt = kept.at || null; }
+  S.cust = lsGet("aud:cust") || null; S.me = lsGet("aud:me") || null;
   route();
   flushFilings();
   loadHome(false);

@@ -72,17 +72,23 @@ export function installAudit(deps) {
       // the home's two doors (History · Follow-ups): how many audits are filed and how many follow-ups are open, TEST never
       env.DB.prepare("SELECT (SELECT COUNT(*) FROM audit_eval e JOIN audit_request r ON r.id = e.request_id WHERE COALESCE(r.test_mode, 0) = 0) AS filed, (SELECT COUNT(*) FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE f.status = 'open' AND COALESCE(r.test_mode, 0) = 0) AS open_fu").first().catch(() => null),
     ]);
-    const lastBy = {};
-    for (const r of reqs.results || []) { const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r; }
+    const lastBy = {}, bySc = {};
+    for (const r of reqs.results || []) {
+      const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r;
+      if (!r.test_mode) (bySc[r.agency_id] = bySc[r.agency_id] || []).push(r);
+    }
+    // THIS contract's audit (an audit belongs to the contract it was asked in, Miguel 16 Oct 2026): the newest live request
+    // for the seafarer made on or after the contract's sign-on. The landing sorts by it: not audited first.
+    const auditOf = (sc, on) => { const r = (bySc[sc] || []).find((x) => !on || iso(x.created_at) >= on); return r ? { id: r.id, status: r.status, at: iso(r.created_at), grade: r.grade != null ? Number(r.grade) : null, open: isOpenRequest(r) } : null; };
     const out = [];
     for (const s of (board && board.sections) || []) {
       const aboard = (s.crew || []).filter((c) => aboardNow(c) && c.agency_id)
-        .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile }));
+        .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile, audit: auditOf(c.agency_id, iso(c.signOn)) }));
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
       // `open`: the request still open on this ship (one person at a time, isOpenRequest), the page's "Open requests"
-      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
+      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), sent: iso(last.sent_at), in: iso(last.complete_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
     return json({ today: TODAY(), auditor: session.email, ships: out, counts: cnt ? { filed: Number(cnt.filed) || 0, openFollowups: Number(cnt.open_fu) || 0 } : null });
