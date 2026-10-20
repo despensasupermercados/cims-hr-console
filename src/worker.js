@@ -6592,7 +6592,7 @@ function tvRail(){
       var scC=TRVALL.filter(function(r){return r.year===LYr&&(!TF.kind||kindOf(r)===TF.kind)&&kindOf(r)!=='shoreside'&&inPer(r)&&catOk(r);});
       var CLR={royal:'#1E6FD0',celebrity:'#16293D',azamara:'#8A5A00',ncl:'#2E9E5B'};
       h+='<div><div class=crlbl style="margin-bottom:6px">Cruise line</div>'+tvRow('client','','All cruise lines',null,!TF.client,true)
-        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);if(!a&&TF.client!==c)return '';return tvRow('client',c,TCLIENT[c],tvK(a),TF.client===c,true,CLR[c]);}).join('')+'</div>';
+        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);return tvRow('client',c,TCLIENT[c],tvK(a)||'$0',TF.client===c,true,CLR[c]);}).join('')+'</div>';
     }
   }
   el.innerHTML=h;
