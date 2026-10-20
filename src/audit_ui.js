@@ -106,8 +106,6 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     return '<div class="sec' + (o.tight ? " tight" : "") + '">' + (o.back ? '<button type="button" class="arrow" data-go="' + esc(o.back[0]) + '">' + ic("arrow-left") + esc(o.back[1]) + "</button>" : "")
       + (o.eyebrow ? '<span class="eyebrow">' + esc(o.eyebrow) + "</span>" : "") + (o.title ? '<h1 class="h1">' + o.title + "</h1>" : "") + (o.lead ? '<p class="lead">' + o.lead + "</p>" : "") + (o.more || "") + "</div>";
   }
-  function top() {} /* the screens not redrawn yet; removed with the last of them */
-  function hero() {}
   function dock(html) { $("dockslot").innerHTML = html ? '<div class="dock">' + html + "</div>" : ""; }
   function skel(n) { var h = '<div class="card clip">'; for (var i = 0; i < (n || 3); i++) h += '<div class="sk"></div>'; return h + "</div>"; }
   function prog(label, a, b, cls) { return '<div class="sec tight"><div class="hstack" style="justify-content:space-between"><span class="xs">' + label + '</span><span class="xs b">' + a + " of " + b + '</span></div><div class="prog"><i style="width:' + pct(a, b) + '%' + (cls === "late" ? ";background:var(--redm)" : cls === "navy" ? ";background:var(--navy)" : "") + '"></i></div></div>'; }
@@ -576,6 +574,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var key = "q" + id; S.view = key;
     withShips(api("/api/audit/request?id=" + encodeURIComponent(id))).then(function (d) {
       if (S.view !== key) return;
+      if (d.grade) { reportView(d, key); return; } // filed: the audit itself
       var done = d.status === "complete", sent = d.status === "sent", cancelled = d.status === "cancelled", fn = esc(first(d.crew));
       var late = lateOf({ status: d.status, overdue: d.overdueAt, due: d.dueAt });
       var sh = (S.ships || []).filter(function (x) { return x.ship === d.ship; })[0] || {};
@@ -609,14 +608,9 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         if (fixes.length) h += fixes.map(function (t) { return '<div class="finding">' + '<div class="hstack"><span class="chip a">To send again</span></div><p class="txt">' + t + "</p></div>"; }).join("");
         h += "</section>";
       }
-      if (d.grade) h += gradeCard(d.grade);
       h += '<div id="beforeslot"></div>';
       $("main").innerHTML = h;
-      if (done) (d.grade ? api("/api/audit/visit?id=" + encodeURIComponent(id)) : loadVisit(id)).then(function (v) {
-        if (S.view !== key) return;
-        if (d.grade) $("beforeslot").innerHTML = filedCard(v);
-        else { S.v[id] = v; $("beforeslot").innerHTML = beforeSec(v); }
-      }).catch(function () {});
+      if (done) loadVisit(id).then(function (v) { if (S.view !== key) return; S.v[id] = v; $("beforeslot").innerHTML = beforeSec(v); }).catch(function () {});
       if (startBtn) dock(startBtn);
       else if (sent) dock('<button type="button" class="btn ghost" id="exd">Extend 24 h</button><button type="button" class="btn pri" id="rsd">Resend</button>');
       if (sent) {
@@ -635,14 +629,6 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         on("cx", act("cancel", "Cancel this request? The upload link closes."));
       }
     }).catch(function (e) { if (S.view === key) fail(e); }); // a late error never replaces the screen moved on to
-  }
-  /* ---------------- Dexter's grade, as filed (15 Oct 2026; since 19 Oct the audit's Ratings and Overall steps) ---------------- */
-  var RATINGS = [["inventory", "Inventory", "OBP matches the shelf, par kept, parts life tracked"], ["technical", "Technical", "Machines, error codes, maintenance, test prints"], ["collaterals", "Customer collaterals", "Quality of what the ship prints for guests"], ["overall", "Overall", "Leave blank to use the average of the three above"]];
-  function gradeCard(g) {
-    var h = '<div class="card"><div class="pad"><div class="gsum"><span class="ib ' + (g.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + '</span><div><div class="n">' + esc(g.score) + "<small> / 5</small></div>" + '<div class="sm">Audit score · ' + (g.from === "overall" ? "Overall rating" : "average of the ratings, rounded down") + " · filed " + fmtD(g.at, true) + "</div></div></div></div>";
-    RATINGS.forEach(function (r) { var v = g[r[0]]; h += '<div class="gline"><span>' + esc(r[1]) + "</span><b>" + (v ? esc(v) + " / 5" : "Not given") + "</b></div>"; });
-    if (g.note) h += '<div class="feed"><div class="w">What needs to improve</div><div class="pl">' + esc(g.note) + "</div></div>";
-    return h + "</div>";
   }
   function keepShips(r) { lsSet("aud:ships", { at: new Date().toISOString(), today: r.today || null, ships: r.ships, counts: r.counts || null }); }
   function keptWhen(at) {
@@ -1141,34 +1127,6 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   window.addEventListener("online", flushFilings);
 
   /* ---- the filed audit, read back on the request ---- */
-  function filedCard(v) {
-    var F = v.filed, D = F && F.data; if (!D) return "";
-    var h = "", line = function (k, val) { return '<div class="kv"><span class="k">' + esc(k) + '</span><span class="v">' + val + "</span></div>"; };
-    var miss = (D.ws.missing || []).concat(D.hw.tools.missing || []).map(function (k) { var t = (D.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? ' <span class="st r">' + esc(AR.ordinal(t)) + " time</span>" : ""); });
-    h += '<div class="card"><div class="ch">' + ic("clipboard-text") + 'The audit<span class="r">' + fmtD(F.grade.at, true) + "</span></div>";
-    h += line("Missing", miss.length ? miss.join("<br>") : "Nothing");
-    h += line("Hardware labeled", D.hw.labeled === false ? '<span class="st r">No</span>' : "Yes");
-    ((D.ctx && D.ctx.machines) || v.machines).forEach(function (m) {
-      var a = (D.hw.machines || {})[m.serial] || {}, bad = AR.MACHINE_CHECKS.filter(function (c) { return (a.checks || {})[c.key] === "finding"; }).map(function (c) { return c.label; });
-      if (a.p43 === "seen") bad.push("Pattern 43 mark seen");
-      h += line(m.label, (a.down === "still" ? '<span class="st r">Down</span>' : bad.length ? '<span class="st r">' + esc(bad.join(" · ")) + "</span>" : '<span class="st g">Pass</span>') + (a.note ? '<div class="sm">' + esc(a.note) + "</div>" : ""));
-    });
-    var lines = Object.keys(D.inv.lines || {}).filter(function (k) { return D.inv.lines[k].shelf != null || D.inv.lines[k].checked; });
-    h += line("OBP vs shelf", D.inv.accurate ? "Accurate" : '<span class="st a">Discrepancies</span>' + (lines.length ? '<div class="sm">' + lines.map(function (k) { var L = D.inv.lines[k]; return esc(k) + (L.shelf != null ? " · shelf " + esc(L.shelf) : " · checked") ; }).join("<br>") + "</div>" : ""));
-    var tr = (D.crew.training || []).map(function (k) { var t = AR.TRAINING.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; }); if (D.crew.trainingOther) tr.push(D.crew.trainingOther);
-    h += line("Training needed", tr.length ? esc(tr.join(" · ")) : "None");
-    var ppe = (D.crew.ppe.missing || []).map(function (k) { var t = AR.PPE.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; });
-    h += line("Uniform & PPE", ppe.length ? '<span class="st r">' + esc(ppe.join(" · ")) + " missing</span>" : "Complete");
-    h += line("HON app", { yes: "In use", no: '<span class="st a">Not in use</span>', na: "N/A" }[D.crew.hon] || "–");
-    if (D.crew.dispatch != null) h += line("Dispatch", esc(D.crew.dispatch) + " / 5");
-    if (D.ov.recommendBlock) h += line("Oasis / Icon class", "Recommended");
-    h += "</div>";
-    h += '<div class="card">' + [["Strengths", D.ov.strengths], ["To improve", D.ov.improve], ["Agreed with the crew", D.ov.agreed]].filter(function (x) { return x[1]; }).map(function (x) { return '<div class="feed"><div class="w">' + esc(x[0]) + '</div><div class="pl">' + esc(x[1]) + "</div></div>"; }).join("") + "</div>";
-    if ((F.followups || []).length) h += '<div class="card"><div class="ch">' + ic("flag") + "Follow-up</div>" + F.followups.map(function (f) { return '<div class="kv"><span class="k">' + esc(f.owner) + (f.due ? " · " + fmtD(f.due, true) : "") + '</span><span class="v">' + esc(f.text) + '<div class="sm">' + (f.status === "fixed" ? "Fixed " + fmtD(f.closed_at, true) : "Open") + "</div></span></div>"; }).join("") + "</div>";
-    if ((v.photos || []).length) h += '<div class="card"><div class="ch">' + ic("camera") + 'Photos<span class="r">' + v.photos.length + '</span></div><div class="phs">' + v.photos.map(function (p) { return '<a class="th" href="/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" style="background-image:url(&quot;/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '&quot;)" aria-label="Photo"></a>'; }).join("") + "</div></div>";
-    return h;
-  }
-
   /* ---------------- History · Follow-ups (19 Oct 2026; docs/AUDIT_DESIGN.md "History", W1's rail) ----------------
      Every filed audit by ship, crew and date, and every follow-up with its state. The page reads what the filing wrote and
      decides nothing. A follow-up closes from the list when it was done before the next visit; it says who closed it. */
@@ -1181,12 +1139,17 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   }
   /* one rating as a square: 3 or below is the problem line everywhere in the audit (it needs a sentence, it is 0 on the
      Score Card); the dispatch rating is Rita's, about the travel, never the specialist's, so it is never coloured */
-  function gq(label, v, plain) { return '<span class="gi"><b class="gq' + (v == null ? " x" : plain ? " p" : v <= 3 ? " lo" : "") + '">' + (v == null ? "–" : esc(v)) + "</b>" + esc(label) + "</span>"; }
-  function visitWhen(a) {
-    var o = String(a.openedAt || "").slice(0, 10), f = String(a.filedAt || "").slice(0, 10);
-    if (!o || o === f) return fmtD(f, true);
-    if (o.slice(0, 7) === f.slice(0, 7)) return MON[+o.slice(5, 7) - 1] + " " + +o.slice(8, 10) + "–" + +f.slice(8, 10) + ", " + esc(f.slice(0, 4));
-    return fmtD(o) + " – " + fmtD(f, true);
+  function rsq(v, plain) { return '<span class="rsq' + (v == null ? " na" : !plain && v <= 3 ? " lo" : "") + '">' + (v == null ? "–" : esc(v)) + "</span>"; }
+  function custOfShip(ship) { var s = (S.ships || []).filter(function (x) { return x.ship === ship; })[0]; return s ? custOf(s) : "Other"; }
+  function avg(list) { return list.length ? list.reduce(function (a, b) { return a + b; }, 0) / list.length : null; }
+  function one(n, w, ws) { return n + " " + (n === 1 ? w : ws || w + "s"); }
+  var RT = [["inventory", "Inventory"], ["technical", "Technical"], ["collaterals", "Collaterals"], ["overall", "Overall"]];
+  var PERIODS = [["year", "This year"], ["90", "Last 90 days"], ["all", "All time"]];
+  function inPeriod(a, p) {
+    var d = String(a.filedAt || "").slice(0, 10), t = S.hist.today || S.today || "";
+    if (p === "all") return true;
+    if (p === "year") return d.slice(0, 4) === t.slice(0, 4);
+    return days(d, t) <= 90;
   }
   function loadHist() {
     return api("/api/audit/history").then(function (r) {
@@ -1196,89 +1159,253 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     });
   }
   function historyView() {
-    top("History", "Every filed audit", "", "", true); hero(""); dock("");
+    chrome("hist"); dock("");
     $("main").innerHTML = S.hist ? "" : skel(4);
     if (S.hist) historyList();
     var at = S.cur;
-    loadHist().then(function () { if (S.cur === at) historyList(); }).catch(function (e) { if (S.cur === at && !S.hist) fail(e); });
+    withShips(loadHist()).then(function () { if (S.cur === at) historyList(); }).catch(function (e) { if (S.cur === at && !S.hist) fail(e); });
   }
   function historyList() {
-    var H = S.hist, f = S.hf || "All";
-    if (!H.audits.length) { $("main").innerHTML = '<div class="card"><div class="empty">' + ic("clipboard-text") + "No audit filed yet.<span>An audit is filed from its request, once the crew's documents are in.</span></div></div>"; return; }
-    var list = H.audits.filter(function (a) {
-      if (f === "Follow-up open") return a.followups.open > 0;
-      return f === "All" || shipBrand(a.ship) === f;
+    var H = S.hist, today = H.today || S.today, cust = S.hc || "All", per = S.hp || "year", hl = S.hl || "";
+    var custs = []; H.audits.forEach(function (a) { var k = custOfShip(a.ship); if (custs.indexOf(k) < 0) custs.push(k); });
+    custs.sort(function (a, b) { var o = CUSTS.map(function (c) { return c[0]; }); return (o.indexOf(a) < 0 ? 9 : o.indexOf(a)) - (o.indexOf(b) < 0 ? 9 : o.indexOf(b)); });
+    var list = H.audits.filter(function (a) { return (cust === "All" || custOfShip(a.ship) === cust) && inPeriod(a, per); });
+    var pills = '<div class="pills" style="margin-top:4px">' + ["All"].concat(custs).map(function (c) { return '<button type="button" class="pill' + (cust === c ? " on" : "") + '" data-hc="' + esc(c) + '" aria-pressed="' + (cust === c) + '">' + esc(c === "All" ? "All customers" : custName(c)) + "</button>"; }).join("")
+      + '<span class="vr"></span>' + PERIODS.map(function (p) { return '<button type="button" class="pill' + (per === p[0] ? " on" : "") + '" data-hp="' + p[0] + '" aria-pressed="' + (per === p[0]) + '">' + p[1] + "</button>"; }).join("") + "</div>";
+    var h = head({ eyebrow: "History", title: "What the audits found", lead: "Every audit Dexter filed, read together. Pick a customer and a period; every number opens the audits behind it.", more: pills });
+    var fuOpen = H.followups.filter(function (f) { return f.status === "open"; }), fuLate = fuOpen.filter(function (f) { return f.due && f.due < today; });
+    if (!H.audits.length || !list.length) {
+      h += '<section class="card pad sec tight"><b class="h3">' + (H.audits.length ? "No audit filed in this period" : "No audit filed yet") + '</b><p class="txt">' + (H.audits.length ? "Pick another customer or period." : "An audit is filed from its request, once the crew&#8217;s documents are in and Dexter has been aboard. The first one lands here with its score.") + "</p>"
+        + '<div class="before line-t" style="padding-top:14px"><span class="chip n">Before the app</span><span class="txt">The 61 audits from the Forms survey join this page once they are imported.</span></div></section>';
+      $("main").innerHTML = h; return;
+    }
+    // the numbers, read from the filed audits in view
+    var ships = {}; list.forEach(function (a) { ships[a.ship] = 1; });
+    var scores = list.map(function (a) { return a.score; }), low = list.filter(function (a) { return a.score <= 3; });
+    var withF = list.filter(function (a) { return a.found; }), matched = withF.filter(function (a) { return a.found.inv.accurate === true; }).length;
+    var fleet = (S.ships || []).length;
+    h += '<section class="stats" style="--n:5">'
+      + '<div><span class="v">' + list.length + '</span><span class="k">' + (list.length === 1 ? "audit" : "audits") + " filed · " + Object.keys(ships).length + (fleet ? " of " + fleet : "") + " ships</span></div>"
+      + '<div><span class="v">' + avg(scores).toFixed(1) + ' / 5</span><span class="k">average score</span></div>'
+      + '<div><span class="v"' + (low.length ? ' style="color:var(--red)"' : "") + ">" + low.length + '</span><span class="k">scored 3 or below' + (low.length ? " · " + esc(low.slice(0, 3).map(function (a) { return a.ship; }).join(", ")) : "") + "</span></div>"
+      + '<div><span class="v">' + fuOpen.length + ' open</span><span class="k">follow-ups' + (fuLate.length ? " · " + one(fuLate.length, "past its date", "past their date") : "") + "</span></div>"
+      + '<div><span class="v">' + (withF.length ? matched + " of " + withF.length : "–") + '</span><span class="k">OBP matched the shelf</span></div></section>';
+    // the ratings: how each spread, the weakest named
+    var COL = { 1: "var(--redm)", 2: "var(--redm)", 3: "#E59B8F", 4: "#A9D79A", 5: "var(--green)" };
+    var rows = RT.map(function (r) {
+      var vals = list.map(function (a) { return a.ratings[r[0]]; }).filter(function (v) { return v != null; }), cnt = {};
+      vals.forEach(function (v) { cnt[v] = (cnt[v] || 0) + 1; });
+      var bar = [1, 2, 3, 4, 5].map(function (v) { return cnt[v] ? '<i style="width:' + (cnt[v] * 100 / vals.length) + "%;background:" + COL[v] + '"></i>' : ""; }).join("");
+      return { k: r[0], name: r[1], n: vals.length, avg: avg(vals), low: vals.filter(function (v) { return v <= 3; }).length, html: '<div class="rate"><span class="b">' + r[1] + '</span><span class="track">' + bar + '</span><b class="h4 tnum">' + (vals.length ? avg(vals).toFixed(1) : "–") + "</b></div>" };
     });
-    var h = '<div class="chips">' + ["All", "Royal Caribbean", "Celebrity", "Azamara", "Follow-up open"].map(function (c) { return '<button class="chip' + (f === c ? " on" : "") + '" aria-pressed="' + (f === c) + '" data-hf="' + esc(c) + '">' + esc(c === "Royal Caribbean" ? "Royal" : c) + "</button>"; }).join("") + "</div>";
-    var span = list.length ? fmtD(list[list.length - 1].filedAt, true) + (list.length > 1 ? " → " + fmtD(list[0].filedAt, true) : "") : "";
-    h += '<div class="sh">' + (list.length === 1 ? "1 audit" : list.length + " audits") + "<span>" + span + "</span></div>";
-    if (!list.length) { $("main").innerHTML = h + '<div class="card"><div class="empty">' + ic("clipboard-text") + "No audit matches this filter.</div></div>"; return; }
-    h += '<div class="card">' + list.map(function (a) {
-      var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools, a.missing.ppe || []) : null, tags = [];
-      /* a comma between items: a label can carry its own " · " ("SOPs · ordering & transfers") */
-      var missTxt = miss == null ? "Graded before the audit had steps · nothing recorded on the desk, the tools or the uniform"
-        : miss.length ? "Missing: " + miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? " (" + esc(AR.ordinal(t)) + " time)" : ""); }).join(", ")
-        : "Nothing missing on the desk, the tools or the uniform";
-      if (a.followups.open) tags.push('<span class="st a">' + ic("flag") + (a.followups.open === 1 ? "Follow-up open" : a.followups.open + " follow-ups open") + "</span>");
-      else if (a.followups.fixed) tags.push('<span class="st g">' + ic("flag") + "Follow-up fixed</span>");
-      if (a.photos) tags.push('<span class="st m">' + ic("camera") + a.photos + (a.photos === 1 ? " photo" : " photos") + "</span>");
-      return '<button class="row" data-go="q=' + esc(a.id) + '" style="align-items:flex-start"><div class="tx">'
-        + '<div class="mh"><div class="nm">' + esc(a.ship) + '</div><span class="st ' + (a.score <= 3 ? "r" : "g") + '">' + ic("f:seal-check") + esc(a.score) + "/5</span></div>"
-        + '<div class="sm">' + (a.crew ? esc(a.crew) + " · " : "") + '<span class="nw">' + visitWhen(a) + "</span></div>"
-        + '<div class="grd">' + gq("Inventory", R.inventory) + gq("Technical", R.technical) + gq("Collaterals", R.collaterals) + gq("Overall", R.overall) + (R.dispatch != null ? gq("Dispatch", R.dispatch, true) : "") + "</div>"
-        + '<div class="sm" style="margin-top:6px">' + missTxt + "</div>"
-        + (tags.length ? '<div class="stl">' + tags.join("") + "</div>" : "")
-        + "</div>" + ic("caret-right", "go") + "</button>";
-    }).join("") + "</div>";
+    var three = rows.slice(0, 3).filter(function (r) { return r.n; }).sort(function (a, b) { return a.avg - b.avg; }), weak = three[0];
+    h += '<section class="card pad rates"><div class="sec">' + rows.map(function (r) { return r.html; }).join("")
+      + '<div class="legend xs"><span><i style="background:var(--redm)"></i>1–2</span><span><i style="background:#E59B8F"></i>3</span><span><i style="background:#A9D79A"></i>4</span><span><i style="background:var(--green)"></i>5</span><span>Overall given at ' + rows[3].n + " of " + list.length + "</span></div></div>"
+      + '<div class="sec tight"><span class="eyebrow">Ratings</span><h2 class="h2">' + (weak ? esc(weak.name) + " is the weakest area" : "No ratings yet") + "</h2>"
+      + (weak ? '<p class="txt">' + (weak.low ? one(weak.low, "audit") + " rated it 3 or below, each with Dexter&#8217;s sentence. " : "No audit rated it 3 or below. ") + three.slice(1).map(function (r) { return esc(r.name) + " averages " + r.avg.toFixed(1); }).join(", ") + ".</p>"
+        + (weak.low ? '<div class="line-t" style="padding-top:6px;margin-top:6px"><button type="button" class="arrow" data-hl="low:' + weak.k + '">See the ' + one(weak.low, "audit") + ic("arrow-right") + "</button></div>" : "") : "") + "</div></section>";
+    // what keeps coming back: missing at two audits or more
+    var seen = {};
+    withF.concat(list.filter(function (a) { return !a.found && a.missing; })).forEach(function (a) {
+      if (!a.missing) return;
+      [["ws", "Desk"], ["tools", "Tools"], ["ppe", "Uniform & PPE"]].forEach(function (g) { (a.missing[g[0]] || []).forEach(function (k) { var e = seen[k] || (seen[k] = { k: k, grp: g[1], ships: [], again: [] }); e.ships.push(a.ship); if ((a.repeat || {})[k] > 1) e.again.push(a.ship); }); });
+    });
+    var back = Object.keys(seen).map(function (k) { return seen[k]; }).filter(function (e) { return e.ships.length >= 2; }).sort(function (a, b) { return b.ships.length - a.ships.length; });
+    h += '<section class="sec"><div class="sec-hd"><h2 class="h2">Keeps coming back</h2><span class="sm">Missing at two audits or more</span></div><div class="card clip">'
+      + (back.length ? back.map(function (e, i) { return '<div class="kb' + (i ? " line-t" : "") + '"><div><b>' + esc(labelOf(e.k)) + '</b><div class="sm">' + esc(e.grp) + '</div></div><div class="sm">' + esc(e.ships.join(", ")) + '</div><div class="hstack kb-c"><span class="chip a">' + e.ships.length + " audits</span>" + e.again.map(function (s) { return '<span class="chip r">' + esc(s) + " · again</span>"; }).join("") + "</div></div>"; }).join("")
+        : '<div class="pad-m"><p class="sm">Nothing yet: no item missing at two audits in this view.</p></div>')
+      + '<div class="pad-m line-t soft before"><span class="chip n">Before the app</span><span class="txt">The 61 audits from the Forms survey join this page once they are imported.</span></div></div></section>';
+    // the three areas, added up
+    var sum = function (f) { return withF.reduce(function (s, a) { return s + (f(a.found) || 0); }, 0); };
+    var cnt = function (f) { return withF.filter(function (a) { return f(a.found); }).length; };
+    var ln = function (t, v) { return '<div class="fln"><span>' + t + "</span><b>" + v + "</b></div>"; };
+    h += '<section class="grid3">'
+      + '<div class="card feat"><span class="fi n">' + ic("printer") + '</span><b class="h3">Machines</b><div>' + ln("Test pattern found a problem", one(sum(function (f) { return f.machines.test; }), "press", "presses")) + ln("Scan to email failed", one(sum(function (f) { return f.machines.scan; }), "press", "presses")) + ln("Pattern 43 mark seen on board", one(sum(function (f) { return f.machines.p43; }), "press", "presses")) + ln("Still down at the visit", one(sum(function (f) { return f.machines.down; }), "press", "presses")) + "</div></div>"
+      + '<div class="card feat"><span class="fi a">' + ic("package") + '</span><b class="h3">Inventory</b><div>' + ln("OBP matched the shelf", withF.length ? matched + " of " + withF.length : "–") + ln("Lines off · shelf above OBP", sum(function (f) { return f.inv.above; })) + ln("Lines off · shelf below OBP", sum(function (f) { return f.inv.below; })) + ln("On the shelf, not in OBP", one(sum(function (f) { return f.inv.notInObp; }), "line")) + "</div></div>"
+      + '<div class="card feat"><span class="fi">' + ic("user") + '</span><b class="h3">Crew</b><div>' + ln("Training asked", one(cnt(function (f) { return f.crew.training.length || f.crew.trainingOther; }), "audit")) + ln("Uniform &amp; PPE incomplete", one(cnt(function (f) { return f.crew.ppe; }), "audit")) + ln("HON app not in use", one(cnt(function (f) { return f.crew.hon === "no"; }), "audit")) + ln("Recommended for Oasis / Icon", one(cnt(function (f) { return f.crew.block; }), "crew", "crew")) + "</div></div></section>";
+    // Rita's: TDG's travel as the crew rated it, never the specialist's score
+    var disp = list.map(function (a) { return a.ratings.dispatch; }).filter(function (v) { return v != null; }), dlow = disp.filter(function (v) { return v <= 2; }).length;
+    if (disp.length) h += '<section class="help"><span class="chip m">For Rita</span><div class="t"><b class="h4">TDG&#8217;s travel, as the crew rated it: ' + avg(disp).toFixed(1) + " / 5 at " + one(disp.length, "audit") + '</b><span class="sm">' + (dlow ? dlow + " rated it 2 or below. " : "") + "It rates TDG&#8217;s dispatch, never the specialist, and is in no score.</span></div>" + (dlow ? '<button type="button" class="arrow" data-hl="dispatch">See the ' + dlow + ic("arrow-right") + "</button>" : "") + "</section>";
+    // every audit, a row opening its record
+    var shown = list.filter(function (a) { return !hl || (hl === "dispatch" ? a.ratings.dispatch != null && a.ratings.dispatch <= 2 : hl.indexOf("low:") === 0 ? a.ratings[hl.slice(4)] != null && a.ratings[hl.slice(4)] <= 3 : true); });
+    var cap = S.hmore ? shown.length : 12;
+    h += '<section class="sec" id="every"><div class="sec-hd"><h2 class="h2">Every audit</h2><span class="sm">' + shown.length + " · newest first · a row opens the full record</span></div>"
+      + (hl ? '<div class="hstack"><span class="chip n">' + (hl === "dispatch" ? "Dispatch 2 or below" : esc((RT.filter(function (r) { return "low:" + r[0] === hl; })[0] || ["", ""])[1]) + " 3 or below") + '</span><button type="button" class="ul" data-hl="">Show every audit</button></div>' : "")
+      + '<div class="card clip"><table class="tbl cards audits"><thead><tr><th>Filed</th><th>Ship</th><th>Crew</th><th>Score</th><th>Inv · Tech · Coll · Overall</th><th>Missing</th><th>Follow-ups</th><th></th></tr></thead><tbody>'
+      + shown.slice(0, cap).map(function (a) {
+        var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools, a.missing.ppe || []) : null, fo = a.followups;
+        var missT = miss == null ? "Graded before the audit had steps" : miss.length ? miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? ' <span class="chip r">' + esc(AR.ordinal(t)) + " time</span>" : ""); }).join("<br>") : "Nothing";
+        var crewS = esc(a.crew || "");
+        return '<tr data-go="q=' + esc(a.id) + '"><td class="f-date">' + fmtD(a.filedAt) + '</td><td class="f-ship"><b>' + esc(a.ship) + '</b><div class="xs">' + esc(custName(custOfShip(a.ship))) + '<span class="m-inl"> · ' + fmtD(a.filedAt) + (crewS ? " · " + crewS : "") + '</span></div></td><td class="f-crew">' + crewS + '</td><td class="f-score"><span class="chip ' + (a.score <= 3 ? "r" : "g") + '">' + esc(a.score) + " / 5</span></td>"
+          + '<td class="f-rates" data-l="Inv · Tech · Coll · Overall"><span class="rs4">' + rsq(R.inventory) + rsq(R.technical) + rsq(R.collaterals) + rsq(R.overall) + "</span></td>"
+          + '<td class="f-miss sm" data-l="Missing">' + missT + "</td>"
+          + '<td class="f-fu" data-l="Follow-ups">' + (fo.open ? '<span class="chip a">' + fo.open + " open</span>" : fo.fixed ? '<span class="sm">' + fo.fixed + " done</span>" : '<span class="sm">None</span>') + "</td>"
+          + '<td class="go"><span class="chev">' + ic("caret-right") + "</span></td></tr>";
+      }).join("") + "</tbody></table>"
+      + (shown.length > 12 ? '<div class="pad-m line-t" style="padding-top:6px;padding-bottom:6px"><button type="button" class="ul" data-hmore>' + (S.hmore ? "Show fewer" : "Show all " + shown.length) + "</button></div>" : "") + "</div></section>";
+    if (fuOpen.length) h += '<section class="navy band"><div class="sec tight" style="flex:1 1 420px"><h2 class="h2">' + one(fuOpen.length, "follow-up is", "follow-ups are") + ' still open</h2><p class="lead">' + (fuLate.length ? one(fuLate.length, "is", "are") + " past " + (fuLate.length === 1 ? "its" : "their") + " date" + (fuLate.length === 1 ? ". " + esc(fuLate[0].ship) + ": &#8220;" + esc(fuLate[0].text) + "&#8221;, with " + esc(fuLate[0].owner) + " since " + fmtD(fuLate[0].createdAt) : "") + "." : "None is past its date.") + '</p></div><button type="button" class="btn green" data-go="fu">Open follow-ups</button></section>';
     $("main").innerHTML = h;
   }
+  /* ---------------- Follow-ups (canvas board "Follow-ups") ---------------- */
   function followupsView() {
-    top("Follow-ups", "Asked at an audit, open until done", "", "", true); hero(""); dock("");
+    chrome("fu"); dock("");
     $("main").innerHTML = S.hist ? "" : skel(3);
     if (S.hist) followupsList();
     var at = S.cur;
-    loadHist().then(function () { if (S.cur === at) followupsList(); }).catch(function (e) { if (S.cur === at && !S.hist) fail(e); });
+    withShips(loadHist()).then(function () { if (S.cur === at) followupsList(); }).catch(function (e) { if (S.cur === at && !S.hist) fail(e); });
   }
+  function fuGroup(f, today) { return !f.due ? "nodate" : f.due < today ? "late" : days(today, f.due) <= 14 ? "soon" : "later"; }
   function fuItem(f, today) {
-    var late = f.status === "open" && f.due && f.due < today, times = (f.carried || 0) + 1;
-    var pill = f.status === "fixed" ? '<span class="st g">' + ic("f:check-circle") + "Fixed</span>"
-      : times > 1 ? '<span class="st r">' + esc(AR.ordinal(times)) + " time</span>" : late ? '<span class="st r">Overdue</span>' : '<span class="st a">Open</span>';
-    var h = '<div class="pad fu"><div class="mh"><b>' + esc(f.text) + "</b>" + pill + "</div>"
-      + '<div class="sm">' + esc(f.owner) + (f.due ? " · by " + fmtD(f.due, true) : " · no date set") + "</div>"
-      + '<div class="sm">' + esc(f.ship) + (f.crew ? " · " + esc(f.crew) : "") + " · asked " + fmtD(f.createdAt, true) + "</div>";
-    if (f.status === "fixed") h += '<div class="sm">Fixed ' + fmtD(f.closedAt, true) + " by " + esc(byName(f.closedBy)) + (f.closedOnVisit ? " at the next audit" : " from this list") + "</div>";
-    h += '<div class="fubtn"><button class="btn ghost" data-go="q=' + esc(f.request) + '">Open audit</button>'
-      + (f.status === "open" ? '<button class="btn" data-fix="' + esc(f.id) + '">Mark fixed</button>' : "") + "</div>";
-    return h + "</div>";
+    var g = fuGroup(f, today), times = (f.carried || 0) + 1, aboard = (S.ships || []).filter(function (s) { return s.ship === f.ship; })[0];
+    var still = aboard && (aboard.aboard || []).some(function (c) { return c.sc === f.sc; });
+    var chip = g === "late" ? '<span class="chip r">Past ' + fmtD(f.due) + (md(f.due, today) ? " · " + esc(md(f.due, today)) : "") + "</span>" : g === "soon" ? '<span class="chip a">By ' + fmtD(f.due) + (md(today, f.due) ? " · in " + esc(md(today, f.due)) : "") + "</span>" : g === "later" ? '<span class="chip m">By ' + fmtD(f.due, true) + "</span>" : '<span class="chip m">No date set</span>';
+    return '<div class="item"><div class="sec tight" style="min-width:0"><div class="hstack"><b class="h4">' + esc(f.text) + "</b>" + chip + (times > 1 ? '<span class="chip r">' + esc(AR.ordinal(times)) + " time</span>" : "") + "</div>"
+      + '<p class="sm">' + esc(f.owner) + " · asked at the " + esc(f.ship) + " audit, " + fmtD(f.createdAt, true) + "</p>"
+      + (f.crew ? '<p class="sm">' + esc(f.crew) + (still ? " · still aboard " + esc(f.ship) : " · the follow-up stays with " + esc(f.ship)) + "</p>" : "")
+      + '<div class="ftl"><span class="tp"><span class="d on"></span>Asked ' + fmtD(f.createdAt) + '</span><span class="ln"></span><span class="tp"><span class="d' + (g === "late" ? " bad" : "") + '"></span>' + (f.due ? "Due " + fmtD(f.due) : "No date") + '</span><span class="ln"></span><span class="tp"><span class="d"></span>Next ' + esc(f.ship) + " audit</span></div></div>"
+      + '<div class="acts"><button type="button" class="btn pri s" data-fix="' + esc(f.id) + '">Mark done</button><button type="button" class="arrow" data-go="q=' + esc(f.request) + '">Open the audit' + ic("arrow-right") + "</button></div></div>";
   }
   function followupsList() {
-    var F = S.hist.followups, today = S.hist.today || S.today;
-    var open = F.filter(function (f) { return f.status === "open"; }).sort(function (a, b) {
-      var la = !!(a.due && a.due < today), lb = !!(b.due && b.due < today);
-      return (lb - la) || String(a.due || "9999").localeCompare(String(b.due || "9999")) || String(a.createdAt).localeCompare(String(b.createdAt));
+    var F = S.hist.followups, today = S.hist.today || S.today, own = S.fo || "Everyone";
+    var open = F.filter(function (f) { return f.status === "open"; });
+    var done = F.filter(function (f) { return f.status === "fixed"; }).sort(function (a, b) { return String(b.closedAt || "").localeCompare(String(a.closedAt || "")); });
+    var month = String(today).slice(0, 7), monthName = MON[+String(today).slice(5, 7) - 1] || "";
+    var owners = ["Everyone"].concat(AR.FOLLOW_OWNERS); open.forEach(function (f) { if (owners.indexOf(f.owner) < 0) owners.push(f.owner); });
+    var h = head({ eyebrow: "Follow-ups", title: "What we asked for, until it is done", lead: "Every follow-up Dexter asked at an audit, with who owns it and by when. It closes once: here by its owner, or at the next audit of that ship." });
+    h += '<section class="stats" style="--n:4"><div><span class="v">' + open.length + '</span><span class="k">open</span></div><div><span class="v"' + (open.some(function (f) { return fuGroup(f, today) === "late"; }) ? ' style="color:var(--red)"' : "") + ">" + open.filter(function (f) { return fuGroup(f, today) === "late"; }).length + '</span><span class="k">past its date</span></div><div><span class="v">' + open.filter(function (f) { return fuGroup(f, today) === "soon"; }).length + '</span><span class="k">due in the next 14 days</span></div><div><span class="v">' + done.filter(function (f) { return String(f.closedAt || "").slice(0, 7) === month; }).length + '</span><span class="k">done in ' + monthName + "</span></div></section>";
+    h += '<section class="sec tight"><span class="xs b">Owner</span><div class="pills">' + owners.map(function (o) { var n = o === "Everyone" ? open.length : open.filter(function (f) { return f.owner === o; }).length; return '<button type="button" class="pill' + (own === o ? " on" : "") + '" data-fo="' + esc(o) + '" aria-pressed="' + (own === o) + '">' + esc(o) + " · " + n + "</button>"; }).join("") + "</div></section>";
+    var mine = open.filter(function (f) { return own === "Everyone" || f.owner === own; });
+    if (!open.length) h += '<section class="card pad sec tight"><b class="h3">Nothing open</b><p class="txt">A follow-up is asked in the audit&#8217;s last step, with an owner and a date. It shows here until it is done.</p></section>';
+    else [["late", "Past its date", "r"], ["soon", "Due in the next 14 days", "a"], ["later", "Later", "m"], ["nodate", "No date set", "m"]].forEach(function (G) {
+      var items = mine.filter(function (f) { return fuGroup(f, today) === G[0]; }).sort(function (a, b) { return String(a.due || "9999").localeCompare(String(b.due || "9999")); });
+      if (!items.length && G[0] === "nodate") return;
+      h += '<section class="sec tight"><div class="hstack" style="gap:10px"><span class="dot ' + G[2] + '"></span><h2 class="h3">' + G[1] + '</h2><span class="sm">' + items.length + '</span></div><div class="card clip">'
+        + (items.length ? items.map(function (f) { return fuItem(f, today); }).join("") : '<div class="item"><span class="sm">Nothing ' + (own === "Everyone" ? "" : "for " + esc(own) + " ") + "here.</span></div>") + "</div></section>";
     });
-    var fixed = F.filter(function (f) { return f.status === "fixed"; }).sort(function (a, b) { return String(b.closedAt || "").localeCompare(String(a.closedAt || "")); });
-    var h = '<div class="sh">Open<span>' + open.length + "</span></div>";
-    h += open.length ? '<div class="card">' + open.map(function (f) { return fuItem(f, today); }).join("") + "</div>"
-      : '<div class="card"><div class="empty">' + ic("f:check-circle") + "Nothing open.<span>A follow-up is asked in the audit's last step, with an owner and a date.</span></div></div>";
-    if (fixed.length) h += '<details class="card fold"><summary class="row"><span class="sq">' + ic("f:check-circle") + '</span><div class="tx"><div class="nm" style="font-size:15px">Fixed</div><div class="sm">' + fixed.length + " · newest first</div></div>" + ic("caret-right", "go") + "</summary>" + fixed.map(function (f) { return fuItem(f, today); }).join("") + "</details>";
+    if (done.length) {
+      var shut = S.fdone !== true;
+      h += '<section class="card clip"><div class="grp-hd"><div style="flex:1;min-width:0"><b class="h3">Done</b><div class="sm">' + done.length + ' · newest first · who closed it and where</div></div><button type="button" class="fold' + (shut ? " shut" : "") + '" data-fdone aria-label="' + (shut ? "Open done" : "Fold done") + '">' + ic("caret-down") + "</button></div>"
+        + (shut ? "" : done.map(function (f) { return '<div class="item"><div class="sec tight" style="min-width:0"><b class="h4">' + esc(f.text) + '</b><p class="sm">' + esc(f.owner) + " · asked at " + esc(f.ship) + ", " + fmtD(f.createdAt, true) + "</p><p class=\"sm\">Fixed " + fmtD(f.closedAt, true) + " by " + esc(byName(f.closedBy)) + (f.closedOnVisit ? " at the next audit" : " from this list") + '</p></div><div class="acts"><span class="chip g">' + (f.closedOnVisit ? "Fixed at the next audit" : "Done by its owner") + "</span></div></div>"; }).join("")) + "</section>";
+    }
+    h += '<section class="sec"><div class="hstack"><span class="eyebrow">How a follow-up moves</span></div><div class="card how4">'
+      + '<div class="how"><span class="n">1</span><b class="h4">Asked in the audit</b><span class="sm">The last step: what, the owner (' + esc(AR.FOLLOW_OWNERS.join(", ")) + ") and a date.</span></div>"
+      + '<div class="how"><span class="n">2</span><b class="h4">Shows where it matters</b><span class="sm">This page, the ship&#8217;s briefing and the audit it came from.</span></div>'
+      + '<div class="how"><span class="n">3</span><b class="h4">Its date comes</b><span class="sm">Past the date it turns red here. A reminder email to the owner waits for its render to be signed off.</span></div>'
+      + '<div class="how"><span class="n">4</span><b class="h4">Closed once</b><span class="sm">Its owner marks it done here, or Dexter ticks Fixed at the next audit; still open there reads &#8220;2nd time&#8221;.</span></div></div></section>';
     $("main").innerHTML = h;
   }
   /* two taps: the first asks, the second closes (a follow-up closed by a stray thumb would never come back at the next visit) */
   function fixFollowup(b) {
     if (b.disabled) return;
-    var reset = function () { b.disabled = false; b.classList.remove("sure"); b.textContent = "Mark fixed"; };
+    var reset = function () { b.disabled = false; b.classList.remove("sure"); b.className = "btn pri s"; b.textContent = "Mark done"; };
     if (!b.classList.contains("sure")) {
-      b.classList.add("sure"); b.innerHTML = ic("check") + "Confirm";
+      b.classList.add("sure"); b.className = "btn green s sure"; b.innerHTML = "Confirm: done";
       setTimeout(function () { if (b.isConnected && !b.disabled && b.classList.contains("sure")) reset(); }, 4000);
       return;
     }
-    b.disabled = true; b.innerHTML = "Saving…";
+    b.disabled = true; b.innerHTML = "Saving";
     var at = S.cur;
     post("/api/audit/followup/close", { id: b.getAttribute("data-fix") }).then(function (r) {
-      if (r.ok || r.error === "already_closed") { toast(r.ok ? "Marked fixed." : "It was already closed."); reloadShips(); if (S.cur === at) followupsView(); return; }
+      if (r.ok || r.error === "already_closed") { toast(r.ok ? "Marked done." : "It was already closed."); reloadShips(); if (S.cur === at) followupsView(); return; }
       reset(); toast("Not saved: " + (r.error || "try again") + ".");
     }).catch(function () { reset(); toast("No signal. Nothing was saved; try again."); });
+  }
+
+  /* ---------------- One audit, as filed (canvas board "Report") ----------------
+     The record in the order the visit ran: the score, what the documents said, then the seven steps as answered.
+     Nothing is recomputed but the counts the page adds up from the filed steps. */
+  function ckl(kind, html) { return '<div class="ck"><span class="' + kind + '">' + ic(kind === "c" ? "b:check" : kind === "x" ? "b:x" : "b:exclamation-mark") + "</span><span>" + html + "</span></div>"; }
+  function shd(n, title, sub, chip) { return '<div class="shd"><span class="num">' + n + '</span><div class="shd-t"><b class="h3">' + title + '</b><div class="sm">' + sub + "</div></div>" + (chip || "") + "</div>"; }
+  function reportView(d, key) {
+    api("/api/audit/visit?id=" + encodeURIComponent(d.id)).then(function (v) {
+      if (S.view !== key) return;
+      var F = v.filed || {}, D = F.data, G = d.grade, fn = esc(first(d.crew)), sh = (S.ships || []).filter(function (x) { return x.ship === d.ship; })[0] || {};
+      var ctx = (D && D.ctx) || {}, machines = ctx.machines || v.machines || [], rep = (D && D.repeat) || {};
+      var lo = G.score <= 3, fromAvg = G.from !== "overall";
+      var avg3 = [G.inventory, G.technical, G.collaterals].filter(function (x) { return x != null; });
+      var why = fromAvg ? "Overall not given: the average of inventory, technical and collaterals, rounded down" + (avg3.length === 3 ? " (" + (avg3.reduce(function (a, b) { return a + b; }, 0) / 3).toFixed(1) + "&nbsp;&#8594;&nbsp;" + esc(G.score) + ")" : "") : "The Overall rating Dexter gave";
+      var at = String(G.at || ""), hhmm = at.length > 15 ? at.slice(11, 16) + " UTC" : "";
+      var links = '<div class="links line-t">' + (d.sc ? '<a class="arrow" href="https://cims.work/#crew/' + esc(encodeURIComponent(d.sc)) + '" target="_blank" rel="noopener">' + fn + "&#8217;s profile in the HR console" + ic("arrow-right") + "</a>" : "")
+        + (d.sc ? '<button type="button" class="arrow" data-go="b=' + esc(encodeURIComponent(d.ship)) + "|" + esc(encodeURIComponent(d.sc)) + '">' + esc(d.ship) + " briefing" + ic("arrow-right") + "</button>" : "") + "</div>";
+      var h = '<section class="split hero">' + head({ back: ["hist", "History"], eyebrow: "Audit" + (brandOf(sh) ? " · " + brandOf(sh) : ""), title: esc(d.ship), lead: esc(d.crew) + ". Filed " + fmtD(G.at, true) + (hhmm ? " at " + hhmm : "") + (G.by ? " by " + esc(byName(G.by)) : "") + ".", more: links })
+        + '<aside class="navy sec"><div class="hstack" style="gap:18px;flex-wrap:nowrap"><div class="ring big' + (lo ? " lo" : "") + '"><b class="h">' + esc(G.score) + '</b><span class="of">/5</span></div><div class="sec tight"><b class="h3">Score ' + esc(G.score) + ' of 5</b><span class="sm">' + why + "</span></div></div>"
+        + '<div class="fourr">' + RT.map(function (r) { var x = G[r[0]]; return '<div><b class="h"' + (x == null ? ' style="color:#9FB2C8"' : x <= 3 ? ' style="color:#F2A99D"' : "") + ">" + (x == null ? "–" : esc(x)) + "</b><span>" + r[1] + "</span></div>"; }).join("") + "</div>"
+        + (D && D.crew && D.crew.dispatch != null ? '<p class="xs line-w">Dispatch, for Rita: ' + esc(D.crew.dispatch) + " / 5 · TDG&#8217;s travel, never part of this score</p>" : "") + "</aside></section>";
+      if (!D) {
+        // a grade filed on the 15 Oct screen: the ratings and the sentence, no steps to show
+        h += '<section class="card pad sec tight"><b class="h3">Graded before the audit had steps</b><p class="txt">This audit was graded on the first screen of 15 Oct 2026: the four ratings above and Dexter&#8217;s note, nothing on the desk, the presses, the shelf or the crew.</p>' + (G.note ? '<p class="txt">&#8220;' + esc(G.note) + "&#8221;</p>" : "") + "</section>";
+        $("main").innerHTML = h; return;
+      }
+      var wsM = D.ws.missing || [], tlM = (D.hw.tools && D.hw.tools.missing) || [], again = wsM.concat(tlM).filter(function (k) { return (rep[k] || 1) > 1; });
+      var mf = machines.filter(function (m) { var a = (D.hw.machines || {})[m.serial] || {}; return a.down === "still" || a.p43 === "seen" || AR.MACHINE_CHECKS.some(function (c) { return (a.checks || {})[c.key] === "finding"; }); });
+      var gaps = (ctx.diff || []).filter(function (x) { return x.kind === "gap"; }), lines = D.inv.lines || {};
+      var offRows = gaps.filter(function (x) { var L = lines[x.part_no], s = L && L.shelf != null ? L.shelf : x.counted; return s !== x.obp; });
+      var fus = F.followups || [], fuLate = fus.filter(function (f) { return f.status === "open" && f.due && f.due < (v.today || S.today); });
+      h += '<section class="stats" style="--n:4"><div><span class="v">' + (wsM.length + tlM.length) + '</span><span class="k">missing on the desk and tools' + (again.length ? " · " + again.length + " again" : "") + "</span></div>"
+        + '<div><span class="v">' + mf.length + " of " + machines.length + '</span><span class="k">presses with a finding</span></div>'
+        + '<div><span class="v">' + one(offRows.length + (D.inv.added || []).length, "line") + '</span><span class="k">where OBP is off' + (v.count && v.count.total ? ", of " + v.count.total : "") + "</span></div>"
+        + '<div><span class="v">' + fus.length + '</span><span class="k">follow-ups asked' + (fuLate.length ? " · " + fuLate.length + " past " + (fuLate.length === 1 ? "its" : "their") + " date" : "") + "</span></div></section>";
+      // what the documents said, confirmed on board
+      var q = function (t, s) { return '<div class="q"><b>' + t + '</b><span class="sm">' + s + "</span></div>"; }, qs = [];
+      machines.forEach(function (m) {
+        var it = (m.p43 && m.p43.items) || [];
+        qs.push(q("Pattern 43 · " + esc(m.label), m.down ? "Reported down by the crew" : it.length ? esc(it.map(function (i) { return sentence(i.head); }).join("; ")) + ((D.hw.machines[m.serial] || {}).p43 === "seen" ? " · seen on board" : " · not seen on board") : "No mark found"));
+        if ((m.life || []).length) qs.push(q("Management list · " + esc(m.label), one(m.life.length, "part") + " past rated life · information, copy quality decides"));
+      });
+      qs.push(q("The crew&#8217;s blind count", (v.count && v.count.total ? v.count.total + " lines · " : "") + one(gaps.length, "line") + " differed from OBP"));
+      h += '<section class="card pad-m soft sec"><div class="hstack"><span class="eyebrow">Before the visit</span><b class="h3">What the documents said</b>' + (ctx.asOf ? '<span class="sm">OBP of ' + fmtD(ctx.asOf, true) + " · confirmed on board</span>" : "") + '</div><div class="qgrid">' + qs.join("") + "</div></section>";
+      // 1 · Workstation
+      var b1 = "";
+      AR.WORKSTATION.forEach(function (g) { var m = g.items.filter(function (i) { return wsM.indexOf(i.key) >= 0; }); b1 += m.length ? m.map(function (i) { return ckl("x", "<b>" + esc(i.label) + "</b>" + ((rep[i.key] || 1) > 1 ? ' <span class="chip r">' + esc(AR.ordinal(rep[i.key])) + " time</span>" : "") + ' <span class="sm">' + esc(g.grp) + "</span>"); }).join("") : ckl("c", esc(g.grp) + " · all present"); });
+      b1 += ckl(D.hw.labeled === false ? "x" : "c", D.hw.labeled === false ? "<b>Hardware not labeled</b>" : "Hardware labeled");
+      h += '<section class="card clip">' + shd(1, "Workstation", "DG3 folder, OneNote, browser bookmarks", wsM.length ? '<span class="chip r">' + wsM.length + " missing</span>" : '<span class="chip g">All present</span>') + '<div class="sbody">' + b1 + "</div></section>";
+      // 2 · Machines & tools
+      var b2 = '<div class="grid2">' + machines.map(function (m) {
+        var a = (D.hw.machines || {})[m.serial] || {}, bad = AR.MACHINE_CHECKS.filter(function (c) { return (a.checks || {})[c.key] === "finding"; }), good = AR.MACHINE_CHECKS.filter(function (c) { return (a.checks || {})[c.key] !== "finding"; });
+        var it = (m.p43 && m.p43.items) || [];
+        return '<div class="press"><div class="hstack" style="justify-content:space-between"><b>' + esc(m.label) + "</b>" + (a.down === "still" ? '<span class="chip r">Still down</span>' : bad.length ? '<span class="chip r">' + esc(bad.map(function (c) { return c.label; }).join(", ")) + "</span>" : '<span class="chip g">Pass</span>') + "</div>"
+          + (a.down === "still" ? ckl("x", "Still down at the visit") : (good.length ? ckl("c", esc(good.map(function (c) { return c.label; }).join(" · "))) : "") + bad.map(function (c) { return ckl("x", esc(c.label)); }).join(""))
+          + (a.note ? '<span class="sm">&#8220;' + esc(a.note) + "&#8221;</span>" : "")
+          + '<span class="sm">Pattern 43 mark: ' + (it.length ? (a.p43 === "seen" ? "seen on board" : "not seen on board") : "none to see") + ((m.life || []).length ? " · " + one(m.life.length, "part") + " past rated life (information)" : "") + "</span></div>";
+      }).join("") + "</div>";
+      b2 += tlM.length ? tlM.map(function (k) { return ckl("x", "<b>" + esc(labelOf(k)) + "</b>" + ((rep[k] || 1) > 1 ? ' <span class="chip r">' + esc(AR.ordinal(rep[k])) + " time</span>" : "")); }).join("") : ckl("c", "Every tool on inventory");
+      h += '<section class="card clip">' + shd(2, "Machines &amp; tools", one(machines.length, "press", "presses") + " · three checks each", mf.length || tlM.length ? '<span class="chip r">' + [mf.length ? one(mf.length, "finding") : "", tlM.length ? one(tlM.length, "tool") : ""].filter(Boolean).join(" · ") + "</span>" : '<span class="chip g">Pass</span>') + '<div class="sbody">' + b2 + "</div></section>";
+      // 3 · Inventory
+      var parts = {}; (v.parts || []).forEach(function (p) { parts[p.part_no] = p; });
+      var invRows = gaps.map(function (x) { var L = lines[x.part_no], s = L && L.shelf != null ? L.shelf : x.counted, df = s - x.obp; return '<tr><td class="full"><b>' + esc(x.description || x.part_no) + '</b><div class="xs">' + esc(x.part_no) + '</div></td><td class="n" data-l="Crew">' + esc(x.counted) + '</td><td class="n" data-l="OBP">' + esc(x.obp) + '</td><td class="n" data-l="Shelf">' + esc(s) + '</td><td data-l="Result">' + (df ? '<span class="chip a">OBP ' + Math.abs(df) + (df > 0 ? " low" : " high") + "</span>" : '<span class="chip g">OBP right</span>') + "</td></tr>"; })
+        .concat((D.inv.added || []).map(function (a) { var p = parts[a.part_no] || {}; var s = a.shelf != null ? a.shelf : (lines[a.part_no] || {}).shelf; return '<tr><td class="full"><b>' + esc(p.description || a.part_no) + '</b><div class="xs">' + esc(a.part_no) + '</div></td><td class="n" data-l="Crew">' + esc(p.counted == null ? "–" : p.counted) + '</td><td class="n" data-l="OBP">' + esc(p.obp == null ? "–" : p.obp) + '</td><td class="n" data-l="Shelf">' + esc(s == null ? "–" : s) + '</td><td data-l="Result"><span class="chip n">Added by Dexter</span></td></tr>'; }))
+        .concat((ctx.extras || []).map(function (x) { var nf = (D.inv.repairs || {})[x.id] === "not_found"; return '<tr><td class="full"><b>' + esc(x.text) + '</b><div class="xs">Not in OBP</div></td><td class="n" data-l="Crew">' + esc(x.counted == null ? "–" : x.counted) + '</td><td class="n" data-l="OBP">–</td><td class="n" data-l="Shelf">' + (nf ? "–" : "seen") + '</td><td data-l="Result">' + (nf ? '<span class="chip r">Not found</span>' : '<span class="chip m">On the shelf</span>') + "</td></tr>"; }));
+      h += '<section class="card clip">' + shd(3, "Inventory", "The crew&#8217;s blind count against OBP, then the shelf", D.inv.accurate ? '<span class="chip g">OBP matches the shelf</span>' : '<span class="chip a">OBP is off on ' + one(offRows.length + (D.inv.added || []).length, "line") + "</span>")
+        + (invRows.length ? '<table class="tbl cards"><thead><tr><th>Part</th><th class="n">Crew counted</th><th class="n">OBP</th><th class="n">Shelf</th><th>Result</th></tr></thead><tbody>' + invRows.join("") + "</tbody></table>" : "")
+        + '<div class="pad-m line-t soft"><p class="sm">' + (v.count && v.count.total ? one(Math.max(0, v.count.total - gaps.length), "other line") + ": the crew&#8217;s count and OBP agree." : "Every other line agrees.") + (D.inv.note ? " Dexter&#8217;s note: &#8220;" + esc(D.inv.note) + "&#8221;" : "") + "</p></div></section>";
+      // 4 · Ratings
+      var lows = ["inventory", "technical", "collaterals"].filter(function (k) { return G[k] != null && G[k] <= 3; }).length + (G.overall != null && G.overall <= 3 ? 1 : 0);
+      var rr = function (x, name, say) { return '<div class="rrow"><span class="r5' + (x == null ? " na" : x <= 3 ? " lo" : "") + '">' + (x == null ? "–" : esc(x)) + "</span><div><b>" + name + '</b><div class="sm">' + say + "</div></div></div>"; };
+      h += '<section class="card clip">' + shd(4, "Ratings", "A 3 or below carries Dexter&#8217;s sentence", lows ? '<span class="chip r">' + lows + " at 3 or below</span>" : '<span class="chip g">None below 4</span>') + '<div class="sbody">'
+        + ["inventory", "technical", "collaterals"].map(function (k) { var x = G[k], w = ((D.rt || {}).why || {})[k]; return rr(x, esc(AR.RATING_TEXT[k].label), x != null && x <= 3 ? (w ? "&#8220;" + esc(w) + "&#8221;" : "No sentence kept") : "No sentence needed"); }).join("")
+        + rr(G.overall, "Overall", G.overall == null ? "Not given: the score is the average, rounded down" : G.overall <= 3 && D.ov.why ? "&#8220;" + esc(D.ov.why) + "&#8221;" : "The score is this rating") + "</div></section>";
+      // 5 · Crew
+      var tr = (D.crew.training || []).map(function (k) { var t = AR.TRAINING.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; }); if (D.crew.trainingOther) tr.push(D.crew.trainingOther);
+      var pm = (D.crew.ppe && D.crew.ppe.missing) || [];
+      h += '<section class="card clip">' + shd(5, "Crew", "Training, uniform, the HON app, dispatch", tr.length || pm.length ? '<span class="chip a">' + [tr.length ? one(tr.length, "training") : "", pm.length ? pm.length + " PPE" : ""].filter(Boolean).join(" · ") + "</span>" : '<span class="chip g">Complete</span>') + '<div class="sbody">'
+        + (tr.length ? ckl("w", "<b>Training asked</b> " + '<span class="sm">' + esc(tr.join(", ")) + "</span>") : ckl("c", "No training needed"))
+        + (pm.length ? pm.map(function (k) { return ckl("x", "<b>" + esc(labelOf(k)) + "</b>"); }).join("") : ckl("c", "Uniform &amp; PPE complete"))
+        + ckl(D.crew.hon === "no" ? "x" : "c", D.crew.hon === "no" ? "<b>HON app not in use</b>" : "HON app in use")
+        + (D.crew.dispatch != null ? '<div class="q"><b>Dispatch · ' + esc(D.crew.dispatch) + ' / 5 · for Rita</b><span class="sm">It rates TDG&#8217;s travel and is in no score.</span></div>' : "") + "</div></section>";
+      // 6 · Overall
+      var said = [["Strengths", D.ov.strengths], ["To improve", D.ov.improve], ["Agreed with the crew", D.ov.agreed]].filter(function (x) { return x[1]; });
+      h += '<section class="card clip">' + shd(6, "Overall", "What Dexter and " + fn + " agreed", "") + '<div class="sbody">' + (said.length ? '<div class="grid3">' + said.map(function (x) { return q(x[0], esc(x[1])); }).join("") + "</div>" : "")
+        + '<p class="sm">Oasis / Icon class: ' + (D.ov.recommendBlock ? "recommended at this visit" : "not recommended at this visit") + "</p></div></section>";
+      // 7 · Follow-ups
+      h += '<section class="card clip">' + shd(7, "Follow-ups", "Asked at this visit", fuLate.length ? '<span class="chip r">' + one(fuLate.length, "past its date", "past their date") + "</span>" : fus.length ? '<span class="chip a">' + fus.filter(function (f) { return f.status === "open"; }).length + " open</span>" : '<span class="chip g">None asked</span>') + '<div class="sbody">'
+        + (fus.length ? fus.map(function (f, i) { var late = f.status === "open" && f.due && f.due < (v.today || S.today); return '<div class="fu' + (i ? " line-t" : "") + '">' + (f.status === "fixed" ? '<span class="chip g">Fixed ' + fmtD(f.closed_at) + "</span>" : late ? '<span class="chip r">Past ' + fmtD(f.due) + "</span>" : '<span class="chip a">' + (f.due ? "By " + fmtD(f.due) : "No date") + "</span>") + '<div class="fu-t"><b>' + esc(f.text) + '</b><div class="sm">' + esc(f.owner) + "</div></div>" + (f.status === "open" ? '<button type="button" class="arrow" data-go="fu">Open' + ic("arrow-right") + "</button>" : "<span></span>") + "</div>"; }).join("") : '<p class="sm">No follow-up asked at this visit.</p>') + "</div></section>";
+      // photos
+      var ph = v.photos || [];
+      if (ph.length) h += '<section class="card pad-m sec"><div class="sec-hd"><h2 class="h3">Photos</h2><span class="sm">' + ph.length + ' · tap to open full size</span></div><div class="photos">' + ph.map(function (p) { return '<a class="ph" href="/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '" target="_blank" rel="noopener" style="background-image:url(&quot;/api/audit/visit/photo?f=' + encodeURIComponent(p.id) + '&quot;)"><span>' + esc(({ workstation: "Desk", machines: "Machines", inventory: "Shelf", crew: "Crew" })[p.step] || p.step) + "</span></a>"; }).join("") + "</div></section>";
+      h += '<section class="navy goes"><div class="sec tight"><span class="eyebrow">Where this audit goes</span><h2 class="h3">Filed once, read where it counts</h2></div>'
+        + '<div class="sm"><b style="color:#fff">The crew&#8217;s profile</b><br>What people said · the internal crew file</div><div class="sm"><b style="color:#fff">The Score Card</b><br>Dexter&#8217;s audit factor reads this score</div><div class="sm"><b style="color:#fff">The next audit of ' + esc(d.ship) + "</b><br>Opens with what was missing and is still open</div></section>";
+      $("main").innerHTML = h;
+    }).catch(function (e) { if (S.view === key) fail(e); });
   }
 
   /* ---------------- router ---------------- */
@@ -1308,8 +1435,18 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (e.target.closest("[data-retry]")) { location.reload(); return; }
     var g = e.target.closest("[data-go]");
     if (g) { if (g.disabled) return; go(g.getAttribute("data-go")); return; }
-    var hf = e.target.closest("[data-hf]");
-    if (hf) { S.hf = hf.getAttribute("data-hf"); historyList(); return; }
+    var hx = e.target.closest("[data-hc],[data-hp],[data-hl],[data-hmore]");
+    if (hx) {
+      if (hx.hasAttribute("data-hc")) S.hc = hx.getAttribute("data-hc");
+      if (hx.hasAttribute("data-hp")) S.hp = hx.getAttribute("data-hp");
+      if (hx.hasAttribute("data-hmore")) S.hmore = !S.hmore;
+      if (hx.hasAttribute("data-hl")) { S.hl = hx.getAttribute("data-hl"); S.hmore = false; }
+      historyList();
+      if (hx.hasAttribute("data-hl")) { var ev = $("every"); if (ev && ev.scrollIntoView) ev.scrollIntoView({ block: "start", behavior: "smooth" }); }
+      return;
+    }
+    var fo2 = e.target.closest("[data-fo],[data-fdone]");
+    if (fo2) { if (fo2.hasAttribute("data-fo")) S.fo = fo2.getAttribute("data-fo"); else S.fdone = !S.fdone; followupsList(); return; }
     var fx = e.target.closest("[data-fix]");
     if (fx) { fixFollowup(fx); return; }
     var fo = e.target.closest("[data-fold]");
