@@ -5,7 +5,7 @@
 // PR A + B (this file today): the shell, the health proof, the ships list and the briefing. READ-ONLY: nothing here
 // sends an email or writes a crew-facing record. The request, the seafarer's upload page, the blind count and the
 // gate arrive in the next PR (C), the reading of the files through HON in PR G.
-import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso, aboardNow, isOpenRequest, SHIP_OPEN_SQL } from "./audit.js";
+import { AUDIT_HOST, isAuditHost, auditShellPath, contractLabel, normShip, iso, aboardOf, isOpenRequest, SHIP_OPEN_SQL } from "./audit.js";
 import { AUDIT_HTML, AUDIT_MANIFEST, AUDIT_SW } from "./audit_ui.js";
 import { installAuditRequest, isLive } from "./audit_request.js";
 import { feedbackPlain, intelFallback, plainKey, rewritePlain, mergeIntel, numbersKept, datesKept } from "./audit_plain.js";
@@ -29,7 +29,7 @@ export function personName(v) {
   return local.split(/[._-]+/).filter(Boolean).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ") || null;
 }
 export function aboardSomewhere(board, sc) {
-  for (const s of (board && board.sections) || []) for (const c of s.crew || []) if (aboardNow(c) && c.agency_id === sc) return true;
+  for (const s of (board && board.sections) || []) if (aboardOf(s).some((c) => c.agency_id === sc)) return true;
   return false;
 }
 // A POST from another site, or from another *.cims.work app carrying the shared cookie, is refused: the browser always
@@ -82,7 +82,7 @@ export function installAudit(deps) {
     const auditOf = (sc, on) => { const r = (bySc[sc] || []).find((x) => !on || iso(x.created_at) >= on); return r ? { id: r.id, status: r.status, at: iso(r.created_at), grade: r.grade != null ? Number(r.grade) : null, open: isOpenRequest(r) } : null; };
     const out = [];
     for (const s of (board && board.sections) || []) {
-      const aboard = (s.crew || []).filter((c) => aboardNow(c) && c.agency_id)
+      const aboard = aboardOf(s)
         .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile, audit: auditOf(c.agency_id, iso(c.signOn)) }));
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
@@ -109,7 +109,7 @@ export function installAudit(deps) {
     const today = TODAY(), lo = shiftDays(today, -RUSH_LOOKBACK_DAYS);
     const readRush = (from) => (rushOrders ? rushOrders.read(env, from, today) : Promise.resolve(null));
     const ns = ship ? normShip(ship) : null;
-    const [prof, reqs, board, rushRows, onShip, shipFiled, shipFus] = await Promise.all([
+    const [prof, reqs, board, rushRows, onShip, shipFiled, shipFus, shipForms] = await Promise.all([
       crewProfile(env, sc, session),
       env.DB.prepare("SELECT r.id, r.ship, r.status, r.created_at, r.sent_at, r.complete_at, r.due_at, r.auditor, r.test_mode, e.score AS grade, e.filed_at AS graded_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? ORDER BY r.created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
       session.open ? rotationSections(env).catch(() => null) : null,
@@ -118,6 +118,10 @@ export function installAudit(deps) {
       // the ship's own record (the briefing's "Audits of <ship>" and "Open follow-ups"): filed audits, never a TEST one
       ns ? env.DB.prepare("SELECT r.id, r.crew_name, e.score, e.filed_at FROM audit_request r JOIN audit_eval e ON e.request_id = r.id WHERE r.normalized_ship=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC LIMIT 5").bind(ns).all().catch(() => ({ results: [] })) : { results: [] },
       ns ? env.DB.prepare("SELECT id, owner, due, text, crew_name, created_at FROM audit_followup WHERE normalized_ship=? AND status='open' ORDER BY created_at LIMIT 20").bind(ns).all().catch(() => ({ results: [] })) : { results: [] },
+      // ...and the audits before the app on this hull (the Forms survey, audit_forms, src/audit_forms.js): read beside the
+      // filed ones, never scored (Miguel, 20 Oct 2026, the briefing read "The 61 Forms audits are not imported yet": "ensure
+      // this is wire correctly")
+      ns ? env.DB.prepare("SELECT id, crew_name, crew_raw, score, audit_date FROM audit_forms WHERE normalized_ship=? ORDER BY audit_date DESC LIMIT 5").bind(ns).all().catch(() => ({ results: [] })) : { results: [] },
     ]);
     // OPEN MODE: a seafarer the board has aboard, or one a LIVE request was made for (a cancelled or TEST row is no pass)
     const liveReq = (reqs.results || []).some((r) => r.status !== "cancelled" && !r.test_mode);
@@ -156,7 +160,9 @@ export function installAudit(deps) {
         before: cur.handover.before ? { name: personName(cur.handover.before.name), off: cur.handover.before.off || null } : null,
         after: cur.handover.after ? { name: personName(cur.handover.after.name), on: cur.handover.after.on || null, src: cur.handover.after.src || null, told: !!cur.handover.after.told, tdg: !!cur.handover.after.tdg } : null,
       } : null,
-      shipAudits: (shipFiled.results || []).map((r) => ({ id: r.id, crew: personName(r.crew_name), score: r.score != null ? Number(r.score) : null, at: iso(r.filed_at) })),
+      shipAudits: (shipFiled.results || []).map((r) => ({ id: r.id, crew: personName(r.crew_name), score: r.score != null ? Number(r.score) : null, at: iso(r.filed_at) }))
+        .concat((shipForms.results || []).map((r) => ({ id: r.id, source: "forms", crew: r.crew_name || r.crew_raw || null, score: r.score != null ? Number(r.score) : null, at: iso(r.audit_date) })))
+        .sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))),
       followups: (shipFus.results || []).map((f) => ({ id: f.id, owner: f.owner, due: f.due || null, text: f.text, crew: personName(f.crew_name), at: iso(f.created_at) })),
       slots: (P.people && P.people.slots) || [],
       // the crew record's own To-check rows are HR's housekeeping, not the auditor's (Miguel, 16 Oct 2026: "i dont think this

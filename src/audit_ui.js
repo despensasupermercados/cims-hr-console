@@ -438,7 +438,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var lastA = sa[0];
       h += '<section class="grid3">'
         + '<div class="card feat rowm"><span class="fi' + (r && r.his && r.his.count ? " r" : "") + '">' + ic("shopping-cart") + '</span><span class="xs">Rush orders this contract</span><b class="h3">' + rushT[0] + '</b><p class="sm">' + rushT[1] + "</p></div>"
-        + '<div class="card feat rowm"><span class="fi n">' + ic("list") + '</span><span class="xs">Audits of ' + esc(ship) + '</span><b class="h3">' + (lastA ? (sa.length === 1 ? "1 filed" : sa.length + " filed") : "None filed yet") + '</b><p class="sm">' + (lastA ? "Last: " + esc(lastA.crew || "") + ", " + fmtD(lastA.at, true) + (lastA.score != null ? " · score " + esc(lastA.score) + "/5" : "") : "The 61 Forms audits are not imported yet.") + "</p></div>"
+        + '<div class="card feat rowm"><span class="fi n">' + ic("list") + '</span><span class="xs">Audits of ' + esc(ship) + '</span><b class="h3">' + (lastA ? (sa.length === 1 ? "1 filed" : sa.length + " filed") : "None filed yet") + '</b><p class="sm">' + (lastA ? "Last: " + (lastA.crew ? esc(lastA.crew) + ", " : "") + fmtD(lastA.at, true) + (lastA.source === "forms" ? " · Forms survey" : "") + (lastA.score != null ? " · score " + esc(lastA.score) + "/5" : "") : "No audit of " + esc(ship) + " on record.") + "</p></div>"
         + '<div class="card feat rowm"><span class="fi a">' + ic("flag") + '</span><span class="xs">Open follow-ups</span><b class="h3">' + (fu.length ? fu.length + " open" : "None") + '</b><p class="sm">' + (fu.length ? esc(fu[0].text) + (fu[0].owner ? " · " + esc(fu[0].owner) : "") + (fu[0].due ? " · due " + fmtD(fu[0].due) : "") : "Nothing carried over from an earlier audit of " + esc(ship) + ".") + "</p></div>"
         + "</section>";
       h += rushOrders(r, first(b.crew.name));
@@ -550,10 +550,11 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       h += '<div class="card pad sec"><div class="hstack"><span class="fi">' + ic("printer") + '</span><div style="min-width:0"><b class="h3">' + esc(m.label) + '</b><div class="sm">' + esc([m.model, m.serial].filter(Boolean).join(" · ")) + "</div></div></div>";
       if (m.down) h += '<div class="finding"><div class="hstack"><span class="chip a">Reported down</span><b class="h4">&#8220;' + esc(m.down) + '&#8221;</b></div><p class="sm">Verify on board: running again, or still down.</p></div>';
       else {
-        h += items.length ? items.map(function (i) { return '<div class="finding"><div class="hstack"><span class="chip a">Pattern 43</span><b class="h4">' + esc(sentence(i.head)) + "</b></div>" + (i.where || i.detail ? '<p class="txt">' + esc(i.where || i.detail) + "</p>" : "") + (i.check ? '<p class="sm">Observation · ' + esc(i.check) + "</p>" : "") + "</div>"; }).join("")
+        h += items.length ? items.map(function (i) { return '<div class="finding"><div class="hstack"><span class="chip a">Pattern 43</span><b class="h4">' + esc(sentence(i.head)) + "</b></div>" + p43More(i) + "</div>"; }).join("")
           : '<div class="finding ok"><div class="hstack"><span class="chip g">Pattern 43</span><b class="h4">' + (m.p43 ? "No mark found" : "Not read") + "</b></div></div>";
         h += life.length ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">' + life.length + (life.length === 1 ? " part" : " parts") + ' past its rated life</b></div><p class="txt">' + life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%"; }).join(" · ") + "</p></div>"
-          : '<div class="finding ok"><div class="hstack"><span class="chip g">Management list</span><b class="h4">No part past its rated life</b></div></div>';
+          : (m.lifeRead === false ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">Part life not read</b></div><p class="sm">The file on record has no parts-life page (Developing unit count, Special parts counter: pages 5 and 7 to 15 of the Machine Management List). Ask for the whole list.</p></div>'
+          : '<div class="finding ok"><div class="hstack"><span class="chip g">Management list</span><b class="h4">' + (m.lifeRead ? "No part past its rated life" : "Not read") + "</b></div></div>");
         if (items.length || life.length) h += '<p class="txt"><b>Recommendation:</b> have this machine looked at. Parts are changed on copy quality, not on a count.</p>';
       }
       h += "</div>";
@@ -789,7 +790,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   STEP.before = function (v) {
     var b = v.before || [];
     var h = b.length ? b.map(function (x) { return '<div class="card pad-m sec tight"><div class="hstack"><span class="chip ' + (x.tone === "a" ? "a" : "m") + '">' + (x.step === "inventory" ? "Count" : "Machines") + '</span><b class="h4">' + esc(x.t) + '</b></div><p class="sm">' + esc(x.s) + "</p></div>"; }).join("")
-      : '<div class="card pad-m sec tight"><div class="hstack"><span class="chip g">The documents</span><b class="h4">Nothing found</b></div><p class="sm">Pattern 43 clean, no part past its rated life, the count agrees with OBP.</p></div>';
+      : '<div class="card pad-m sec tight"><div class="hstack"><span class="chip g">The documents</span><b class="h4">Nothing found</b></div><p class="sm">Pattern 43 clean, the part life read, the count agrees with OBP.</p></div>';
     return h + '<p class="sm">Every step saves on this phone as you tap. No signal: it is kept here and sent when the server answers.</p><button type="button" class="ul" data-go="q=' + esc(v.id) + '">Open what the documents said</button>';
   };
   STEP.workstation = function (v, d) {
@@ -826,7 +827,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         }
         if (!m.down) h += (m.life || []).length
           ? '<div class="info line-t"><span class="xs">Management list · ' + m.life.length + (m.life.length === 1 ? " part" : " parts") + ' past rated life · information</span><span class="sm">' + m.life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " (" + esc(x.cover) + ")" : " (not on the OBP list)"); }).join(" · ") + ". Copy quality decides, never the counter.</span></div>"
-          : '<div class="info line-t"><span class="xs">Management list</span><span class="sm">No part past its rated life. Parts are changed on copy quality, not on a count.</span></div>';
+          : (m.lifeRead === false ? '<div class="info line-t"><span class="xs">Management list</span><span class="sm">Part life not read: the file on record has no parts-life page. Read the counters on the machine if you can.</span></div>'
+          : '<div class="info line-t"><span class="xs">Management list</span><span class="sm">' + (m.lifeRead ? "No part past its rated life. Parts are changed on copy quality, not on a count." : "Not read.") + "</span></div>");
       }
       if (finding || stillDown) h += '<div class="pad-m line-t sec tight">' + lbl("What you found" + (finding ? " · required" : ""), box("m:" + m.serial, a.note, "One sentence, what you saw on " + m.label)) + whyMsg(probs, "note:" + m.serial) + "</div>";
       h += "</div>";
@@ -968,6 +970,18 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function labelOf(k) { var all = []; AR.WORKSTATION.forEach(function (g) { all = all.concat(g.items); }); all = all.concat(AR.TOOLS, AR.PPE); var x = all.filter(function (i) { return i.key === k; })[0]; return x ? x.label : k; }
   function stepNo(key) { for (var i = 0; i < AR.STEPS.length; i++) if (AR.STEPS[i].key === key) return i + 1; return 7; }
   function sentence(t) { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); }
+  /* A Pattern 43 mark, said in full (Miguel, 20 Oct 2026: "i would like the ai to elaborate a bit more on the assessment").
+     Every line is built from what HON measured and the DG3 tech library's rule it carries; nothing is guessed: where it
+     shows (each page of the bundle), why that isolates one colour, what it points to and how to tell which on board. */
+  function p43Lines(i) {
+    var out = [], w = String(i.where || "").split(" · ").filter(Boolean), pg = i.pages || [], ink = String(i.ink || "").toLowerCase();
+    if (w.length) out.push(["Where", w.map(function (x, k) { return sentence(x) + (pg.length === w.length ? " (page " + pg[k] + ")" : ""); }).join(" · ") + (pg.length && pg.length !== w.length ? " · pages " + pg.join(", ") : "")]);
+    if (ink && ink !== "black" && w.length > 1 && /half tone|full tone/i.test(w[0])) out.push(["What it means", "The same mark on the " + ink + " page and on the mixes that carry " + ink + ": one colour, " + ink + ". The transfer belt or the scanner would mark every colour."]);
+    if (i.part) out.push(["Points to", sentence(i.part) + (i.src ? " · " + i.src : "")]);
+    if (i.check) out.push(["To tell which on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and follow the line along its length: " : "") + i.check + "."]);
+    return out;
+  }
+  function p43More(i) { var L = p43Lines(i); if (!L.length) return i.detail ? '<p class="txt">' + esc(i.detail) + "</p>" : ""; return L.map(function (l) { return '<p class="sm"><b>' + esc(l[0]) + "</b> · " + esc(l[1]) + "</p>"; }).join(""); }
 
   /* the side of the stepper on a wide screen: what the documents said, the seafarer, the ship's last audit */
   function visitSide(v) {

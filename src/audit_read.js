@@ -27,9 +27,15 @@ export function mmlReadState(res) {
       : { read_state: "unreadable", say: "Could not read this file (" + (res.error || "unreadable") + "). Scan the Machine Management List again as one PDF." };
   }
   if (res.kind === "machine-list") {
+    // A machine list whose read carries NO life row cannot say "no part past its rated life" (Miguel, 20 Oct 2026, Kevin
+    // Jugao's Pursuit list: "u didnt read the files correctly"). The life % sits on two sections of the 52-page report,
+    // "Developing unit count" (p5) and "Special parts counter" (p7–15); a file without them — part of the list, or a read
+    // that missed them — answers nothing about part life. The crew can fix it: send the whole list.
+    const rows = res.read && Array.isArray(res.read.lifeItems) ? res.read.lifeItems.length : null;
+    if (rows === 0) return { read_state: "wrong_doc", say: "No parts-life page was found in this file (Developing unit count and Special parts counter, pages 5 and 7 to 15 of the Machine Management List). Upload the whole list, every page, as one PDF.", summary: { kind: res.kind, lifeRows: 0, lifeOver: [], version: res.version || null } };
     const n = (res.lifeOver || []).length;
     return { read_state: "ok", say: "Read. " + (n ? n + " part" + (n === 1 ? "" : "s") + " past rated life, for the team." : "No part past its rated life."),
-      summary: { kind: res.kind, lifeOver: res.lifeOver || [], recommendation: res.recommendation || null, version: res.version || null } };
+      summary: { kind: res.kind, lifeRows: rows, lifeOver: res.lifeOver || [], recommendation: res.recommendation || null, version: res.version || null } };
   }
   if (res.kind === "settings-list") return { read_state: "wrong_doc", say: "This is the USER Management List (the settings). Print the MACHINE Management List, the long report with the life %, and upload that.", summary: { kind: res.kind } };
   return { read_state: "wrong_doc", say: "This file does not carry the part life. Print the MACHINE Management List, the long report with the life %, and upload that.", summary: { kind: res.kind || "unknown" } };

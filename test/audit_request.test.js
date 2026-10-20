@@ -474,3 +474,18 @@ test("one per ship in the database: two requests waiting on one ship cannot both
   ins.run("d", "SC-3", "complete");
   db.prepare("INSERT INTO audit_request (id, ship, normalized_ship, agency_id, auditor, status, created_at) VALUES ('e', 'Apex', 'apex', 'SC-2', 'dexter', 'sent', '2026-10-20')").run();
 });
+
+// Miguel, 20 Oct 2026, Kevin Jugao's Pursuit list read "No part past its rated life": "u didnt read the files correctly".
+// The file he re-sent is pages 25–50 of the 52-page Machine Management List: the life % (pages 5 and 7–15) is not in it.
+// A machine list whose read carries no life row says so and asks for the whole list; it never reads as a clean machine.
+test("a machine list with no life row is not 'no part past its rated life'", async () => {
+  const { mmlReadState } = await import("../src/audit_read.js");
+  const none = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [], read: { ok: true, lifeItems: [] } });
+  assert.equal(none.read_state, "wrong_doc");
+  assert.match(none.say, /No parts-life page was found/);
+  assert.equal(none.summary.lifeRows, 0);
+  const clean = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 40 }] } });
+  assert.equal(clean.read_state, "ok"); assert.equal(clean.say, "Read. No part past its rated life."); assert.equal(clean.summary.lifeRows, 1);
+  const over = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
+  assert.equal(over.say, "Read. 1 part past rated life, for the team.");
+});

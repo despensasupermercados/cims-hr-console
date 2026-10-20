@@ -14,7 +14,7 @@
 // TEST MODE until Miguel signs off the rendered emails (CIMS email standard §5): with AUDIT_LIVE unset every email goes
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
-import { aboardNow, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
+import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
 import { p43ReadState, mmlReadState, coverFor } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
@@ -255,8 +255,11 @@ export function installAuditRequest(deps) {
     ]);
     const read = machinesRead(s, obp.lines, obp.intransit);
     const machines = read.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down,
-      p43: m.p43 ? { state: m.p43.state, items: ((m.p43.legend && m.p43.legend.items) || []).map((i) => ({ head: i.head, detail: i.detail || null, where: i.where || null, part: i.part || null, check: i.check && i.check.say ? i.check.say : null })) } : null,
-      life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })) }));
+      p43: m.p43 ? { state: m.p43.state, items: ((m.p43.legend && m.p43.legend.items) || []).map((i) => ({ head: i.head, detail: i.detail || null, where: i.where || null, part: i.part || null, check: i.check && i.check.say ? i.check.say : null, pointsTo: i.pointsTo || null, pages: Array.isArray(i.pages) ? i.pages : [], ink: i.ink || null, mark: i.mark || null, src: (i.check && i.check.src) || null })) } : null,
+      life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })),
+      // "No part past its rated life" only from a read that carried life rows; a read filed before the count was kept
+      // (lifeRows absent) or one with none is "part life not read", never a clean machine
+      lifeRead: m.mml ? m.mml.lifeRows > 0 : null }));
     const diff = countDiff(obp.lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const extras = s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted }));
     const parts = blindLines(obp.lines).map((l) => { const o = obp.lines.find((x) => String(x.part_number || x.part_no || "").trim() === l.part_no); return { part_no: l.part_no, description: l.description, obp: o && Number.isFinite(Number(o.on_hand)) ? Number(o.on_hand) : null, counted: s.counted[l.part_no] == null ? null : s.counted[l.part_no] }; });
@@ -302,7 +305,7 @@ export function installAuditRequest(deps) {
     if (problems.length || e.problems.length) return json({ ok: false, error: "invalid", problems, fields: e.problems }, 400);
     d.repeat = repeatCounts(c.prevData, d);
     // what the documents said, kept with the visit: the filed record never depends on a later read
-    d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life })) };
+    d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life, lifeRead: m.lifeRead })) };
     const at = now(), vid = "av_" + crypto.randomUUID();
     const opened = d.openedAt && d.openedAt >= String(req.complete_at || "") && d.openedAt <= at ? d.openedAt : at;
     const by = session.open ? session.email + " (open site, no sign-in)" : session.email;
@@ -422,7 +425,7 @@ export function installAuditRequest(deps) {
     if (!rotationSections) return true;
     const board = await rotationSections(env).catch(() => null);
     const sec = ((board && board.sections) || []).find((x) => normShip(x.ship) === normShip(ship));
-    return !!(sec && (sec.crew || []).some((c) => aboardNow(c) && c.agency_id === sc));
+    return !!(sec && aboardOf(sec).some((c) => c.agency_id === sc));
   }
 
   async function crewState(env, req) {

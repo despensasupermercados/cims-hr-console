@@ -500,3 +500,10 @@ test("the page: History and Follow-ups are routes, the doors are on the home, a 
     assert.ok(src.includes(s), s);
   return import("../src/audit_ui.js").then((m) => { new Function(m.AUDIT_HTML.split("<script>").slice(-1)[0].split("</script>")[0]); });
 });
+
+test("before the visit: a management list read with no life row is 'part life not read', never clean", () => {
+  const b = beforeVisit({ machines: [{ serial: "AC58011020823", label: "PROD 1", lifeRead: false, life: [] }] });
+  assert.equal(b.length, 1);
+  assert.match(b[0].t, /part life not read/);
+  assert.deepEqual(beforeVisit({ machines: [{ serial: "S", label: "P", lifeRead: true, life: [] }] }), []);
+});
