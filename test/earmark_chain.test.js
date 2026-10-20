@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createProjection, defaultProjectionDates, SHIP_EARMARKS_SQL } from "../src/projection.js";
 import { saveReliefAssignment, addMonthsISO } from "../src/relief_api.js";
+import { legsFromRegistry } from "../src/ship_leg_source.js";
 
 let DatabaseSync = null;
 try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted below */ }
@@ -34,6 +35,40 @@ test("dates: with an earmark still to come, the next one starts on ITS sign-off 
   // Azamara: five months after the last earmark
   const az = defaultProjectionDates({ ship: "Quest", legs: [], today: TODAY, brand: "Azamara", addMonths: addMonthsISO, chain: [{ on: "2026-12-01", off: "2027-05-01", name: "Q" }] });
   assert.deepEqual([az.signOn, az.signOff], ["2027-05-01", "2027-10-01"]);
+});
+
+// NIGHT WATCH, 20 Oct 2026 — Pursuit as production held it (registry_snapshot of the 16 Oct file, contract_edit,
+// contract_visit, crew_trainer). Kevin Jugao aboard since 2 May, Rita typed 31 Oct; A.J. Baleña embarked 16 Oct as his
+// relief; Jonathan Alonzo (a trainer) embarked 16 Oct to teach, Rita typed 24 Oct, the trip marked a visit. The next
+// earmark's day was the EARLIEST current sign-off on the hull — Jonathan's 24 Oct: the bench was measured on the
+// trainer's last day and the one-tap / drag / TDG-earmark card started then. Without the visit it was Jugao's 31 Oct, a
+// seat Baleña already holds (a second relief for the same printer). The next earmark follows the printer still to be
+// relieved: never a training visit (§10i), never a contract a file row already relieves (its relief's own leg dates it).
+test("dates: the next earmark never follows a training visit or a contract a file row already relieves (Pursuit, 20 Oct 2026)", () => {
+  const today = "2026-10-20", run = "2026-10-16T13:36:44.757Z";
+  const rows = [
+    { sc: "SC-0039935", status: "On board", raw_status: "On board", vessel: "MV AZAMARA PURSUIT", embarked_at: "2026-05-02", debarked_at: null, run_at: run, first_name: "Kevin Leif", last_name: "Jugao", crew_name: "Kevin Leif Jugao" },
+    { sc: "SC-0046383", status: "On board", raw_status: "On board", vessel: "MV AZAMARA PURSUIT", embarked_at: "2026-10-16", debarked_at: null, run_at: run, first_name: "A.J. Lorenzo", last_name: "Baleña", crew_name: "A.J. Lorenzo Baleña" },
+    { sc: "SC-0041465", status: "On board", raw_status: "On board", vessel: "MV AZAMARA PURSUIT", embarked_at: "2026-10-16", debarked_at: null, run_at: run, first_name: "Jonathan", last_name: "Alonzo", crew_name: "Jonathan Alonzo" },
+  ];
+  const edits = [
+    { sc: "SC-0039935", seq: null, on_key: "2026-05-02", sign_off: "2026-10-31", updated_at: "2026-10-17T10:00:00Z" },
+    { sc: "SC-0041465", seq: null, on_key: "2026-10-16", sign_off: "2026-10-24", updated_at: "2026-10-16T13:36:45.062Z" },
+  ];
+  const legs = legsFromRegistry({ rows, edits, counter: [], open: [], vessels: [{ name: "Pursuit", brand: "Azamara" }], today,
+    visits: [{ sc: "SC-0041465", on_key: "2026-10-16", kind: "visit" }], trainers: [{ sc: "SC-0041465" }] });
+  const by = Object.fromEntries(legs.map((l) => [l.sc, l]));
+  // the schedule as the board holds it: three current legs, one of them a visit, Jugao relieved by Baleña (a file row)
+  assert.deepEqual([by["SC-0039935"].off, by["SC-0046383"].off, by["SC-0041465"].off], ["2026-10-31", "2027-03-16", "2026-10-24"]);
+  assert.equal(by["SC-0041465"].visit, true);
+  assert.equal(by["SC-0039935"].reliever.sc, "SC-0046383");
+  const d = defaultProjectionDates({ ship: "Pursuit", legs, today, brand: "Azamara", addMonths: addMonthsISO, chain: [] });
+  assert.deepEqual([d.signOn, d.signOff, d.follows], ["2027-03-16", "2027-08-16", true]);
+  // the rest holds: one printer, no relief — his own sign-off; a relief still a CARD — the chain dates it, as before
+  const one = defaultProjectionDates({ ship: "Pursuit", legs: legs.filter((l) => l.sc === "SC-0039935").map((l) => ({ ...l, reliever: null })), today, brand: "Azamara", addMonths: addMonthsISO, chain: [] });
+  assert.equal(one.signOn, "2026-10-31");
+  const viaCard = defaultProjectionDates({ ship: "Pursuit", legs: [{ ...by["SC-0039935"], reliever: { sc: "X", cardId: "as_x", on: "2026-10-31" } }], today, brand: "Azamara", addMonths: addMonthsISO, chain: [{ on: "2026-10-31", off: "2027-03-31", name: "X" }] });
+  assert.deepEqual([viaCard.signOn, viaCard.after], ["2027-03-31", "X"]);
 });
 
 const SCHEMA = `
