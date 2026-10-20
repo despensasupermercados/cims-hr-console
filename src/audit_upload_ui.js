@@ -1,135 +1,93 @@
-// PRINTSHOP AUDIT — the seafarer's upload page, v2 (14 Oct 2026; Miguel: "the idea behind is ok, but the UI and UX is
-// horrible .. design it better"). Web or phone, no login: the link in his email is the key.
+// PRINTSHOP OPS AUDIT — the seafarer's upload page, v3 (20 Oct 2026, the approved canvas 45Hsjnr7Vr6f1BPussctg3, board
+// "Crew"; Miguel: "1. yes"). Web or phone, no login: the link in the email is the key.
 //
-// One idea per screen region, read without reading:
-//   - the header says the ship, who it is for, the deadline, and two progress bars (machines, count);
-//   - each machine is two TILES (Pattern 43, Machine Management List): empty, sending %, reading, read, send again —
-//     the tile's colour and icon carry the state, a short sentence carries the fix only when something is wrong;
-//   - "Machine won't print?" is a quiet link that opens a reason box (the reason is required);
-//   - the count is a filtered list (To count first) with big - / + steppers; it never shows OBP's on-hand;
-//   - a bar fixed to the bottom always says what is left, or that everything is in.
-// Icons are Phosphor's own glyphs (src/audit_icons.js), inlined so they survive the ship's connection.
+// One page, three things to send, in the order the crew does them:
+//   - Pattern 43 and the Machine Management List, one row per press, each row its own file input: empty, sending %,
+//     reading, read, send again (the fix in one sentence only when something is wrong);
+//   - the shelf count: a filtered list (To count first, a search), one box per line; it never shows OBP's on-hand;
+//   - "Machine won't print?": the reason is required, and it counts as explained;
+//   - then Send, once everything is in: the request never closes on the last keystroke.
+// The design system is the console's audit app's (src/audit_ui_css.js): one sheet, the same names.
 // String.raw keeps the client script's backslashes; no backtick or dollar-brace inside (scripts/verify_client_scripts.mjs).
 import { ICONS } from "./audit_icons.js";
 import { AUDIT_NAME, markSvg } from "./audit_brand.js";
+import { AUDIT_CSS } from "./audit_ui_css.js";
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const HEAD = (title) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>${esc(title)}</title><meta name="robots" content="noindex"><meta name="theme-color" content="#142D48"><link rel="icon" href="/audit/favicon.ico"><link rel="apple-touch-icon" href="/audit/icon-180.png">
+<title>${esc(title)}</title><meta name="robots" content="noindex"><meta name="theme-color" content="#FFFFFF"><link rel="icon" href="/audit/favicon.ico"><link rel="apple-touch-icon" href="/audit/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">`;
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">`;
 
-const CSS = String.raw`<style>
-:root{--nfg:#1B3A5C;--fill:#2F7A22;--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--green-d:#2F7A22;--greenbg:#EEF7EA;--red:#B4382A;--redbg:#FCEDEA;--amber:#9A6412;--amberbg:#FBF3E4;
---ink:#14243A;--ink2:#46566B;--mut:#5B6A7D;--line:#E6EBF1;--line2:#D3DCE6;--bg:#F2F5F9;--card:#FFFFFF;--fh:'Outfit',Helvetica,Arial,sans-serif;--ff:'DM Sans',Helvetica,Arial,sans-serif;--fm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--r:16px}
-@media (prefers-color-scheme:dark){:root{--nfg:#9CC0E8;--navy:#2B5A8C;--ink:#E9EEF5;--ink2:#B6C2D2;--mut:#8C9AAE;--line:#24344A;--line2:#2F4259;--bg:#0D1828;--card:#14233A;--greenbg:#16301F;--redbg:#3A1C18;--amberbg:#352812;--green-d:#7CCB66;--red:#F08A7C;--amber:#E2AE5A}}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ff);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased}
-.ic{width:1.15em;height:1.15em;flex:none;vertical-align:-.18em}
-button{font:inherit;color:inherit}
-.top{background:var(--deep);color:#fff;padding:calc(16px + env(safe-area-inset-top)) 16px 18px}
-.top .in{max-width:1048px;margin:0 auto}
-.brand{display:flex;justify-content:space-between;align-items:center;font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:4px}
-.bm{display:inline-flex;align-items:center;gap:10px}.bm>svg{display:block;flex:none;border-radius:6px;box-shadow:0 0 0 1px rgba(255,255,255,.14)}.bm>span{opacity:.9}
-.due{display:inline-flex;align-items:center;gap:6px;font-family:var(--ff);font-size:12.5px;letter-spacing:0;font-weight:600;background:rgba(255,255,255,.1);padding:6px 11px;border-radius:999px}
-.due.late{background:#B4382A}
-.top h1{font-family:var(--fh);font-weight:600;font-size:30px;letter-spacing:-.4px;margin:18px 0 2px;line-height:1.1}
-.top .who{color:#B9C6D6;font-size:14px}
-.bars{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
-.bar .lb{display:flex;justify-content:space-between;font-size:12.5px;color:#B9C6D6;margin-bottom:6px}.bar .lb b{color:#fff;font-weight:600}
-.track{height:6px;border-radius:99px;background:rgba(255,255,255,.14);overflow:hidden}.track i{display:block;height:100%;background:var(--green);border-radius:99px;transition:width .5s cubic-bezier(.16,1,.3,1)}
-main{max-width:1080px;margin:0 auto;padding:22px 16px 120px;display:grid;gap:28px}
-@media (min-width:900px){main{grid-template-columns:1.05fr 1fr;align-items:start;padding-top:28px}}
-.sec h2{font-family:var(--fh);font-weight:600;font-size:20px;margin:0;display:flex;align-items:center;gap:10px}
-.sec h2 .n{width:26px;height:26px;border-radius:50%;background:var(--navy);color:#fff;font-size:13px;display:grid;place-items:center;flex:none}
-.sec .sub{color:var(--mut);font-size:13.5px;margin:4px 0 14px 36px}
-.mach{background:var(--card);border-radius:var(--r);padding:16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line)}
-.mh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:12px}
-.mh b{font-family:var(--fh);font-weight:600;font-size:17px}.mh .sn{font-family:var(--fm);font-size:12px;color:var(--mut)}
-.tiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.tile{position:relative;overflow:hidden;min-height:118px;border-radius:14px;border:1.5px dashed var(--line2);background:var(--bg);padding:12px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;text-align:left;transition:transform .12s,border-color .2s,background .2s}
-.tile:active{transform:scale(.985)}
-.tile input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
-.tile .t{font-family:var(--fh);font-weight:600;font-size:14.5px;line-height:1.2}.tile .s{font-size:12px;color:var(--mut);margin-top:2px;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.tile .s.fn{display:block;white-space:nowrap;text-overflow:ellipsis}
-.tile .st{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--nfg)}
-.tile .st .ic{width:18px;height:18px}
-.tile.ok{border:1.5px solid transparent;background:var(--greenbg)}.tile.ok .st{color:var(--green-d)}
-.tile.bad{border:1.5px solid var(--red);background:var(--redbg)}.tile.bad .st{color:var(--red)}
-.tile.busy{border:1.5px solid var(--line2);cursor:default}
-.tile.busy:after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.55) 50%,transparent 70%);background-size:220% 100%;animation:sh 1.3s infinite linear}
-@keyframes sh{from{background-position:120% 0}to{background-position:-120% 0}}
-.tile .pg{position:absolute;left:0;bottom:0;height:4px;background:var(--navy);transition:width .2s}
-.fix{display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--redbg);color:var(--red);font-size:13.5px;font-weight:500}
-.fix .ic{width:18px;height:18px;margin-top:1px}
-.dn{margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:10px}
-.lnk{background:none;border:0;padding:0;min-height:44px;color:var(--mut);font-size:13px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
-.down{margin-top:2px;border-radius:12px;background:var(--amberbg);padding:12px}
-.down .row{display:flex;align-items:center;gap:8px;color:var(--amber);font-weight:600;font-size:14px}
-.down textarea{width:100%;margin-top:10px;border:1px solid var(--line2);border-radius:10px;padding:10px 12px;font:inherit;min-height:64px;background:var(--card);color:var(--ink);resize:vertical}
-.down .act{display:flex;gap:8px;margin-top:8px}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 18px;border-radius:12px;border:0;background:var(--navy);color:#fff;font-family:var(--fh);font-weight:600;font-size:15px;cursor:pointer;transition:transform .12s}
-.btn:active{transform:scale(.98)}.btn.ghost{background:transparent;color:var(--ink2);box-shadow:inset 0 0 0 1px var(--line2)}
-.err{color:var(--red);font-size:12.5px;font-weight:600;margin-top:6px}
-.filters{display:flex;gap:8px;margin:0 0 12px 36px;flex-wrap:wrap}
-.chip{min-height:40px;padding:0 14px;border-radius:999px;border:0;background:var(--card);box-shadow:inset 0 0 0 1px var(--line2);color:var(--ink2);font-size:13.5px;font-weight:600;cursor:pointer}
-.chip.on{background:var(--navy);color:#fff;box-shadow:none}
-.list{background:var(--card);border-radius:var(--r);box-shadow:0 1px 2px rgba(20,36,58,.05),0 0 0 1px var(--line);overflow:hidden}
-.cat{padding:14px 16px 6px;font-size:12px;font-weight:600;color:var(--mut)}
-.ln{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:10px 12px 10px 16px;border-top:1px solid var(--line)}
-.cat+.ln{border-top:0}
-.ln .nm{font-weight:600;font-size:14.5px;line-height:1.25}.ln .pn{font-family:var(--fm);font-size:11.5px;color:var(--mut);margin-top:2px}
-.ln.done .nm:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:8px;vertical-align:2px}
-.step{display:flex;align-items:center;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line2);overflow:hidden}
-.step button{width:44px;height:44px;border:0;background:transparent;display:grid;place-items:center;color:var(--ink2);cursor:pointer}
-.step button:active{background:var(--bg)}
-.step input{width:52px;height:44px;border:0;border-left:1px solid var(--line);border-right:1px solid var(--line);text-align:center;font-family:var(--fh);font-weight:600;font-size:18px;color:var(--ink);background:transparent;-moz-appearance:textfield}
-.ln.done .step{box-shadow:inset 0 0 0 1.5px var(--green)}
-.empty{padding:22px 16px;text-align:center;color:var(--mut);font-size:14px}
-.add{display:grid;grid-template-columns:1fr 80px auto;gap:8px;padding:12px;border-top:1px solid var(--line)}
-.add input{min-height:44px;border:1px solid var(--line2);border-radius:10px;padding:0 12px;font:inherit;background:var(--card);color:var(--ink);min-width:0}
-.xt{display:flex;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--line);font-size:14px}
-.dock{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--card);box-shadow:0 -1px 0 var(--line),0 -8px 24px rgba(20,36,58,.06);z-index:5}
-.dock .in{max-width:1048px;margin:0 auto;display:flex;align-items:center;gap:12px}
-.dock .msg{flex:1;min-width:0;font-size:14px}.dock .msg b{font-family:var(--fh);font-size:16px;display:block}
-.dock .msg span{color:var(--mut);font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.dock.done{background:var(--fill);color:#fff}.dock.done .msg span{color:#E3F2DD}
-.dock .ic.big{width:28px;height:28px}
-.dock .btn{flex:none;white-space:nowrap}.dock .btn:disabled{opacity:.55}
-@media (max-width:480px){.dock.ready .in{flex-direction:column;align-items:stretch;gap:10px}.dock.ready .btn{width:100%}.dock.ready .msg span{-webkit-line-clamp:3}}
-.test{max-width:1080px;margin:14px auto 0;padding:0 16px}.test div{background:var(--amberbg);color:var(--amber);font-weight:600;font-size:13px;padding:10px 14px;border-radius:12px}
-.toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,8px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:13.5px;opacity:0;transition:.2s;pointer-events:none;z-index:9;max-width:90vw}.toast.on{opacity:1;transform:translate(-50%,0)}
-.sk{height:118px;border-radius:14px;background:var(--line);opacity:.6}
-@media (max-width:360px){.tiles{grid-template-columns:1fr}.tile{min-height:92px}.filters,.sec .sub{margin-left:0}.ln{grid-template-columns:1fr;gap:8px}.ln .step{justify-self:end}.add{grid-template-columns:1fr 64px auto}}
-@media (prefers-reduced-motion:reduce){.tile.busy:after{animation:none}.track i,.tile{transition:none}}
-</style>`;
+const PAGE_CSS = String.raw`
+.crew-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;align-items:start}
+.main-col{gap:16px}
+.side-col{position:sticky;top:88px}
+.task{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;padding:20px 22px;align-items:start}
+.up{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:12px 14px;border-radius:12px;border:1.5px dashed var(--line2);background:var(--bg);cursor:pointer}
+.up input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0;width:100%}
+.up.ok{border:1.5px solid transparent;background:var(--greenbg)}
+.up.bad{border:1.5px solid var(--redm);background:var(--redbg)}
+.up.dn{border:1.5px solid transparent;background:var(--amberbg);cursor:default}
+.up.busy{border-style:solid;cursor:default}
+.up .fn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.up .prog{grid-column:1 / -1}
+.fixl{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;font-weight:600;color:var(--red)}.fixl .ic{width:16px;height:16px;margin-top:2px}
+.cat{padding:12px 24px 6px;font-size:12.5px;font-weight:600;color:var(--mut);background:var(--soft)}
+.cline{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:14px;align-items:center;padding:12px 24px}
+.cline .qty.on{border-color:var(--green);background:var(--greenbg)}
+.fld2{display:flex;align-items:center;gap:10px;height:48px;border:1px solid var(--line2);border-radius:12px;background:var(--card);padding:0 12px;color:var(--mut)}
+.fld2 input{border:0;outline:0;flex:1;min-width:0;font:inherit;font-size:16px;color:var(--ink);background:transparent}
+.fld2:focus-within{box-shadow:0 0 0 2px var(--green)}
+.addx{display:grid;grid-template-columns:minmax(0,1fr) 88px auto;gap:8px;padding:12px 24px}
+.downs{gap:14px}
+.acc{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.acc-i{border-top:1px solid var(--lines)}.acc-i:first-child{border-top:0}
+.acc-q{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:52px;padding:12px 18px;border:0;background:none;text-align:left;font-weight:600;font-size:14.5px;color:var(--ink);cursor:pointer}
+.acc-pm{width:26px;height:26px;border-radius:8px;background:var(--quiet);display:flex;align-items:center;justify-content:center;flex:none;color:var(--nfg)}.acc-pm .ic{width:14px;height:14px}
+.acc-a{padding:0 18px 16px;font-size:14px;line-height:1.55;color:var(--txt);margin:0}
+.duec{background:var(--quiet);color:var(--nfg)}.duec.late{background:var(--redbg);color:var(--red)}.duec.done{background:var(--greenbg);color:var(--greend)}
+.donecard{display:flex;gap:16px;align-items:center}
+@media (max-width:900px){.crew-grid{grid-template-columns:minmax(0,1fr)}.side-col{position:static}}
+@media (max-width:760px){
+.task{padding:18px;gap:14px;grid-template-columns:minmax(0,1fr)}
+.task>.fi{display:none}
+.appbar .brand b{font-size:16px}
+.cline{padding:12px 18px;grid-template-columns:minmax(0,1fr) 76px}
+.cat{padding:12px 18px 6px}
+.addx{padding:12px 18px;grid-template-columns:minmax(0,1fr) 76px}
+.addx .btn{grid-column:1 / -1}
+.list-foot .btn{flex:1 1 100%}
+}
+`;
 
 export function auditUploadHtml({ token, ship, crew }) {
-  return HEAD(AUDIT_NAME + " · " + ship) + CSS + `</head><body>
-<header class="top"><div class="in"><div class="brand"><span class="bm">${markSvg(24)}<span>CIMS</span></span><span class="due" id="due"></span></div>
-<h1>${esc(ship)}</h1><div class="who" id="who">${esc(crew || "")}</div>
-<div class="bars"><div class="bar"><div class="lb"><span>Machines</span><b id="mp"></b></div><div class="track"><i id="mt" style="width:0"></i></div></div>
-<div class="bar"><div class="lb"><span>Count</span><b id="cp"></b></div><div class="track"><i id="ct" style="width:0"></i></div></div></div></div></header>
+  return HEAD(AUDIT_NAME + " · " + ship) + "<style>" + AUDIT_CSS + PAGE_CSS + `</style></head><body>
+<header class="appbar"><div class="appbar-in"><span class="brand">${markSvg(36)}<b>${esc(AUDIT_NAME)}</b></span><span class="chip duec" id="due"></span></div></header>
 <div id="testslot"></div>
-<main id="main"><section class="sec"><div class="sk"></div></section></main>
-<div class="dock" id="dock" hidden></div><div class="toast" id="toast"></div>
+<main class="wrap"><section class="crew-grid"><div class="sec main-col" id="main"><div class="sec"><span class="eyebrow">Before the audit</span><h1 class="h1">${esc(ship)}</h1><p class="lead">${esc(crew || "")}</p></div><div class="card clip"><div class="sk"></div><div class="sk"></div></div></div><aside class="sec side-col" id="side"></aside></section></main>
+<div id="dockslot"></div><div class="toast" id="toast"></div>
 <script>window.__T=${JSON.stringify(String(token))};window.__IC=${JSON.stringify(ICONS)};</script>
 <script>` + SCRIPT + `</script></body></html>`;
 }
 
 export function auditClosedHtml(why) {
   const msg = why === "cancelled" ? "This request was cancelled. Nothing more is needed." : why === "expired" ? "This link has expired. Ask Dexter or Onboard Support for a new one." : "This link is not valid. Use the newest email you received.";
-  return HEAD(AUDIT_NAME) + CSS + `</head><body><header class="top"><div class="in"><div class="brand"><span class="bm">${markSvg(24)}<span>CIMS</span></span></div><h1>Link closed</h1><div class="who">${esc(msg)}</div></div></header></body></html>`;
+  return HEAD(AUDIT_NAME) + "<style>" + AUDIT_CSS + PAGE_CSS + `</style></head><body><header class="appbar"><div class="appbar-in"><span class="brand">${markSvg(36)}<b>${esc(AUDIT_NAME)}</b></span></div></header>
+<main class="wrap"><section class="card pad sec tight" style="max-width:640px"><span class="eyebrow">Link closed</span><h1 class="h2">Nothing to send here</h1><p class="lead">${esc(msg)}</p></section></main></body></html>`;
 }
 
 const SCRIPT = String.raw`
 (function () {
   "use strict";
-  var T = window.__T, IC = window.__IC || {}, S = null, busy = {}, pend = {}, openDown = {}, timer = null, filter = "todo", picked = false;
+  var T = window.__T, IC = window.__IC || {}, S = null, busy = {}, pend = {}, openDown = {}, timer = null, filter = "todo", picked = false, find = "", addOpen = false, faq = 0;
   var $ = function (id) { return document.getElementById(id); };
   function ic(n, cls) { return (IC[n] || "").replace("<svg ", '<svg class="ic' + (cls ? " " + cls : "") + '" '); }
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   var MON = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  function left(v) { var h = (Date.parse(v) - Date.now()) / 36e5; if (isNaN(h)) return ""; if (h <= 0) return "Overdue"; return h < 1 ? Math.round(h * 60) + " min left" : Math.floor(h) + " h left"; }
+  function first(n) { return String(n || "").split(" ")[0]; }
+  function when(v) { var d = new Date(v); if (isNaN(d)) return ""; return MON[d.getUTCMonth()] + " " + d.getUTCDate() + ", " + ("0" + d.getUTCHours()).slice(-2) + ":" + ("0" + d.getUTCMinutes()).slice(-2) + " UTC"; }
+  function left(v) { var h = (Date.parse(v) - Date.now()) / 36e5; if (isNaN(h)) return ""; if (h <= 0) return "Past the deadline"; return h < 1 ? Math.round(h * 60) + " min left" : h < 48 ? Math.floor(h) + " h left" : "Due " + when(v).split(",")[0]; }
   function toast(t) { var e = $("toast"); e.textContent = t; e.className = "toast on"; clearTimeout(e._t); e._t = setTimeout(function () { e.className = "toast"; }, 2800); }
   function q(p) { return p + (p.indexOf("?") < 0 ? "?" : "&") + "t=" + encodeURIComponent(T); }
   function api(p, body, keep) {
@@ -137,80 +95,124 @@ const SCRIPT = String.raw`
       .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.say) j.say = j.error || ("HTTP " + r.status); return j; }); })
       .catch(function () { return { ok: false, say: "No connection. Your numbers on this page are kept; try again." }; });
   }
-  function typing() { var a = document.activeElement; return !!(a && a.getAttribute && (a.getAttribute("data-part") || a.getAttribute("data-reason") || a.id === "xt" || a.id === "xn")); }
-  function load(soft) { return api("/api/audit/u/state").then(function (j) { if (j && j.machines) { S = j; if (soft && typing() && S.status === "sent") { head(); dock(); } else draw(); } else { $("main").innerHTML = '<section class="sec"><div class="empty">' + esc(j.say || j.error || "Could not load.") + "</div></section>"; } }); }
+  function typing() { var a = document.activeElement; return !!(a && a.getAttribute && (a.getAttribute("data-part") || a.getAttribute("data-reason") || a.id === "xt" || a.id === "xn" || a.id === "find")); }
+  function load(soft) { return api("/api/audit/u/state").then(function (j) { if (j && j.machines) { S = j; if (soft && typing() && S.status === "sent") { head(); dock(); progress(); } else draw(); } else { $("main").innerHTML = '<div class="card pad"><p class="txt">' + esc(j.say || j.error || "Could not load.") + "</p></div>"; } }); }
 
   function mDone(m) { return !!m.down || !!(m.p43 && m.p43.read_state === "ok" && m.mgmt && m.mgmt.read_state === "ok"); }
   function counted(l) { var v = S.counted[l.part_no]; return v !== undefined && v !== null && v !== ""; }
+  function kindDone(kind) { return S.machines.every(function (m) { return m.down || (m[kind] && m[kind].read_state === "ok"); }); }
+  function doneN() { return (kindDone("p43") ? 1 : 0) + (kindDone("mgmt") ? 1 : 0) + (S.lines.length && S.lines.every(counted) ? 1 : 0); }
   function head() {
-    $("who").textContent = S.crew + " · for " + S.auditor + "'s visit";
-    var d = $("due"); var lf = left(S.dueAt); d.innerHTML = (S.status !== "sent" ? ic("f:check-circle") + "<span>Done</span>" : ic("clock") + "<span>" + esc(lf) + "</span>"); d.className = "due" + (lf === "Overdue" && S.status === "sent" ? " late" : "");
-    var md = S.machines.filter(mDone).length, cd = S.lines.filter(counted).length;
-    $("mp").textContent = md + " of " + S.machines.length; $("mt").style.width = (S.machines.length ? md / S.machines.length * 100 : 0) + "%";
-    $("cp").textContent = cd + " of " + S.lines.length; $("ct").style.width = (S.lines.length ? cd / S.lines.length * 100 : 0) + "%";
+    var d = $("due"), lf = left(S.dueAt);
+    if (S.status !== "sent") { d.className = "chip duec done"; d.innerHTML = ic("f:check-circle") + "Everything is in"; }
+    else { d.className = "chip duec" + (lf === "Past the deadline" ? " late" : ""); d.innerHTML = ic("clock") + esc(lf); }
+  }
+  function progress() { var p = $("prog"); if (!p) return; var n = doneN(); p.innerHTML = '<div class="sec-hd"><b class="h4">' + n + ' of 3 done</b><span class="xs">Saved as you go</span></div><div class="prog"><i style="width:' + Math.round(n * 100 / 3) + '%"></i></div>'; var c = $("countchip"); if (c) { var k = S.lines.filter(counted).length; c.textContent = k + " of " + S.lines.length; c.className = "chip " + (k === S.lines.length ? "g" : "m"); } }
+  function sendBtn() {
+    if (S.status !== "sent") return "";
+    var miss = S.gate.missing || [];
+    return S.gate.open ? '<button type="button" class="btn green" id="submit">Send to ' + esc(first(S.auditor)) + "</button>"
+      : '<button type="button" class="btn off" disabled>Send to ' + esc(first(S.auditor)) + " · " + miss.length + (miss.length === 1 ? " thing" : " things") + " left</button>";
   }
   function dock() {
-    var el = $("dock"); el.hidden = false;
-    if (S.status !== "sent") { el.className = "dock done"; el.innerHTML = '<div class="in">' + ic("f:check-circle", "big") + '<div class="msg"><b>Everything is in.</b><span>' + esc(S.auditor) + " has been told. Thank you.</span></div></div>"; return; }
-    // everything is in: the crew checks the numbers and sends — the request no longer closes on the last keystroke
-    if (S.gate.open) { el.className = "dock ready"; el.innerHTML = '<div class="in"><div class="msg"><b>All in. Check your numbers.</b><span>Then send it. You cannot change it after.</span></div><button class="btn" id="submit">Send to ' + esc(String(S.auditor || "").split(" ")[0]) + "</button></div>"; return; }
-    var miss = S.gate.missing || [];
-    el.className = "dock"; el.innerHTML = '<div class="in"><div class="msg"><b>' + miss.length + (miss.length === 1 ? " thing" : " things") + ' left</b><span>' + esc(miss.join(" · ")) + "</span></div></div>";
+    $("dockslot").innerHTML = S.status === "sent" ? '<div class="dock">' + sendBtn() + (S.gate.open ? '<div class="note">Check your numbers first. You cannot change them after.</div>' : "") + "</div>" : "";
+    var sc = $("sendcard"); if (sc) sc.innerHTML = '<div class="sec-hd"><b class="h4">' + (S.gate.open ? "All in. Check your numbers, then send." : "All in? Check your numbers, then send.") + '</b><span class="xs">You cannot change it after</span></div>'
+      + (S.gate.open ? "" : '<p class="sm">Still to do: ' + esc((S.gate.missing || []).join(" · ")) + "</p>") + '<div class="cta">' + sendBtn() + "</div>";
   }
 
-  function tile(m, kind, title, sub) {
-    var s = m[kind], k = m.serial + "|" + kind, b = busy[k];
-    var cls = "tile", st, extra = "";
-    if (b) { cls += " busy"; st = (b.pct != null ? ic("cloud-arrow-up") + "Sending " + b.pct + "%" : ic("hourglass-medium") + esc(b.text)); if (b.pct != null) extra = '<i class="pg" style="width:' + b.pct + '%"></i>'; }
-    else if (!s) { st = ic("cloud-arrow-up") + "Add file"; }
-    else if (s.read_state === "ok") { cls += " ok"; st = ic("f:check-circle") + "Read"; }
-    else if (s.read_state === "pending") { cls += " busy"; st = ic("hourglass-medium") + "Reading…"; }
-    else if (s.read_state === "failed") { cls += " busy"; st = ic("hourglass-medium") + "Trying again"; }
-    else { cls += " bad"; st = ic("f:warning-circle") + "Send again"; }
-    var input = (S.status === "sent" && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + esc(title) + ' for ' + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
-    return '<label class="' + cls + '">' + input + '<div><div class="t">' + title + '</div>' + (s && s.filename && !b ? '<div class="s fn" title="' + esc(s.filename) + '">' + esc(s.filename) + "</div>" : '<div class="s">' + sub + "</div>") + '</div><div class="st">' + st + "</div>" + extra + "</label>";
+  /* one press, one document: the row is its own file input */
+  function upRow(m, kind) {
+    var s = m[kind], k = m.serial + "|" + kind, b = busy[k], label = esc(m.label) + (m.model ? " · " + esc(m.model) : "");
+    var cls = "up", chip, sub, bar = "";
+    if (m.down) { cls += " dn"; chip = '<span class="chip a">Reported down</span>'; sub = "Explained: " + esc(m.down); }
+    else if (b) { cls += " busy"; chip = '<span class="chip n">' + (b.pct != null ? "Sending " + b.pct + "%" : esc(b.text)) + "</span>"; sub = b.pct != null ? "Keep this page open" : "HON is reading it"; if (b.pct != null) bar = '<div class="prog"><i style="width:' + b.pct + '%;background:var(--navy)"></i></div>'; }
+    else if (!s) { chip = '<span class="chip m">' + ic("cloud-arrow-up") + "Choose file</span>"; sub = kind === "p43" ? "12 pages, one PDF" : "Print it from the machine, then scan it"; }
+    else if (s.read_state === "ok") { cls += " ok"; chip = '<span class="chip g">' + ic("b:check") + "Received</span>"; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
+    else if (s.read_state === "pending") { cls += " busy"; chip = '<span class="chip n">Reading</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
+    else if (s.read_state === "failed") { cls += " busy"; chip = '<span class="chip n">Trying again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
+    else { cls += " bad"; chip = '<span class="chip r">Send again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
+    var input = (S.status === "sent" && !m.down && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + (kind === "p43" ? "Pattern 43" : "Machine Management List") + " for " + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
+    var fix = s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !b && s.say ? '<div class="fixl">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>" : "";
+    return '<label class="' + cls + '">' + input + '<div style="min-width:0"><b>' + label + '</b><div class="xs">' + sub + "</div></div>" + chip + bar + "</label>" + fix;
   }
-  function machine(m) {
-    var h = '<div class="mach"><div class="mh"><b>' + esc(m.label) + '</b><span class="sn">' + esc(m.serial) + "</span></div>";
-    if (m.down) {
-      h += '<div class="down"><div class="row">' + ic("wrench") + "Reported down</div><div style=\"margin-top:6px;font-size:14px\">" + esc(m.down) + "</div>";
-      if (S.status === "sent") h += '<div class="act"><button class="btn ghost" data-undown="' + esc(m.serial) + '">It prints again</button></div>';
-      return h + "</div></div>";
-    }
-    h += '<div class="tiles">' + tile(m, "p43", "Pattern 43", "12 pages, one PDF") + tile(m, "mgmt", "Machine Management List", "the long report with life\u00a0%") + "</div>";
-    [m.p43, m.mgmt].forEach(function (s) { if (s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !busy[m.serial + "|" + (s === m.p43 ? "p43" : "mgmt")]) h += '<div class="fix">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>"; });
-    if (S.status === "sent") {
-      if (openDown[m.serial]) h += '<div class="down" style="margin-top:12px"><div class="row">' + ic("wrench") + 'Why won\'t it print?</div><textarea data-reason="' + esc(m.serial) + '" placeholder="Error code, what you tried, engineer called">' + esc(pend["r" + m.serial] || "") + '</textarea><div class="err" id="err' + esc(m.serial) + '"></div><div class="act"><button class="btn" data-savedown="' + esc(m.serial) + '">Report down</button><button class="btn ghost" data-canceldown="' + esc(m.serial) + '">Cancel</button></div></div>';
-      else h += '<div class="dn"><span></span><button class="lnk" data-opendown="' + esc(m.serial) + '">Machine won\'t print?</button></div>';
-    }
-    return h + "</div>";
+  function docTask(kind, icn, cls, title, sub) {
+    var live = S.machines.filter(function (m) { return !m.down; }), ok = live.filter(function (m) { return m[kind] && m[kind].read_state === "ok"; }).length;
+    var bad = live.some(function (m) { var s = m[kind]; return s && (s.read_state === "wrong_doc" || s.read_state === "unreadable"); });
+    var chip = !live.length ? '<span class="chip a">Every press down</span>' : ok === live.length ? '<span class="chip g">' + ic("b:check") + "Received</span>" : bad ? '<span class="chip r">Send again</span>' : '<span class="chip m">' + ok + " of " + live.length + "</span>";
+    return '<div class="card task"><span class="fi' + (cls ? " " + cls : "") + '">' + ic(icn) + '</span><div class="sec tight" style="min-width:0"><div class="hstack" style="justify-content:space-between"><b class="h3">' + title + "</b>" + chip + '</div><p class="sm">' + sub + "</p>"
+      + S.machines.map(function (m) { return upRow(m, kind); }).join("") + "</div></div>";
+  }
+  /* the rows alone: a search redraws them under the box, never the box (a redrawn box closes the phone's keyboard) */
+  function rowsHtml(rows, f, dis) {
+    var h = "", cat = null;
+    if (!rows.length) h += '<div class="pad-m line-t"><p class="sm">' + (f ? "No line matches." : filter === "todo" ? "Every line is counted." : "Nothing here yet.") + "</p></div>";
+    rows.forEach(function (l) {
+      if ((l.category || "Other") !== cat) { cat = l.category || "Other"; h += '<div class="cat line-t">' + esc(cat) + "</div>"; }
+      var v = S.counted[l.part_no], has = v !== undefined && v !== null && v !== "";
+      h += '<div class="cline line-t"><div style="min-width:0"><b>' + esc(l.description || l.part_no) + '</b><div class="xs">' + esc(l.part_no) + '</div></div><label class="qty' + (has ? " on" : "") + '"><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5" aria-label="Count for ' + esc(l.description || l.part_no) + '" data-part="' + esc(l.part_no) + '" value="' + (has ? esc(v) : "") + '" placeholder="–"' + dis + "></label></div>";
+    });
+    if (filter !== "done" && !f && S.extras.length) { h += '<div class="cat line-t">Not on the list</div>'; S.extras.forEach(function (x) { h += '<div class="cline line-t"><div style="min-width:0"><b>' + esc(x.text) + '</b><div class="xs">Found on the shelf</div></div><b class="h4" style="text-align:center">' + esc(x.counted == null ? "–" : x.counted) + "</b></div>"; }); }
+    return h;
+  }
+  function rowsFor() {
+    var all = S.lines, rows = filter === "todo" ? all.filter(function (l) { return !counted(l); }) : filter === "done" ? all.filter(counted) : all, f = find.toLowerCase().trim();
+    if (f) rows = rows.filter(function (l) { return ((l.description || "") + " " + l.part_no).toLowerCase().indexOf(f) >= 0; });
+    return rowsHtml(rows, f, S.status !== "sent" ? " disabled" : "");
   }
   function countList() {
     var all = S.lines, todo = all.filter(function (l) { return !counted(l); }), done = all.length - todo.length;
     if (filter === "todo" && !todo.length && !picked) filter = "all"; // nothing left to count: show the count, not an empty list
-    var rows = filter === "todo" ? todo : filter === "done" ? all.filter(counted) : all;
-    var h = '<div class="filters"><button class="chip' + (filter === "todo" ? " on" : "") + '" data-f="todo">To count ' + todo.length + '</button><button class="chip' + (filter === "done" ? " on" : "") + '" data-f="done">Counted ' + done + '</button><button class="chip' + (filter === "all" ? " on" : "") + '" data-f="all">All ' + all.length + "</button></div>";
-    h += '<div class="list">';
-    if (!rows.length) h += '<div class="empty">' + (filter === "todo" ? "Every line is counted." : "Nothing here yet.") + "</div>";
-    var cat = null;
-    rows.forEach(function (l) {
-      if ((l.category || "Other") !== cat) { cat = l.category || "Other"; h += '<div class="cat">' + esc(cat) + "</div>"; }
-      var v = S.counted[l.part_no]; var has = v !== undefined && v !== null && v !== "";
-      var dis = S.status !== "sent" ? " disabled" : "";
-      h += '<div class="ln' + (has ? " done" : "") + '"><div><div class="nm">' + esc(l.description || l.part_no) + '</div><div class="pn">' + esc(l.part_no) + '</div></div><div class="step"><button data-dec="' + esc(l.part_no) + '" aria-label="One less"' + dis + ">" + ic("minus") + '</button><input inputmode="numeric" pattern="[0-9]*" maxlength="5" aria-label="Count for ' + esc(l.description || l.part_no) + '" data-part="' + esc(l.part_no) + '" value="' + (has ? esc(v) : "") + '"' + dis + '><button data-inc="' + esc(l.part_no) + '" aria-label="One more"' + dis + ">" + ic("plus") + "</button></div></div>";
-    });
-    if (filter !== "done") {
-      if (S.extras.length) { h += '<div class="cat">Not on the list</div>'; S.extras.forEach(function (x) { h += '<div class="xt"><span>' + esc(x.text) + "</span><b>" + esc(x.counted == null ? "" : x.counted) + "</b></div>"; }); }
-      if (S.status === "sent") h += '<div class="add"><input id="xt" placeholder="Other item"><input id="xn" inputmode="numeric" placeholder="Qty"><button class="btn ghost" id="xadd">' + ic("plus") + "</button></div>";
+    var rows = filter === "todo" ? todo : filter === "done" ? all.filter(counted) : all, f = find.toLowerCase().trim();
+    if (f) rows = rows.filter(function (l) { return ((l.description || "") + " " + l.part_no).toLowerCase().indexOf(f) >= 0; });
+    var dis = S.status !== "sent" ? " disabled" : "";
+    var h = '<div class="card clip"><div class="pad-m sec tight"><div class="sec-hd"><b class="h3">The list · ' + all.length + ' lines from OBP</b><span class="xs">' + (todo.length ? todo.length + " to count" : "All counted") + "</span></div>"
+      + '<label class="fld2">' + ic("magnifying-glass") + '<input id="find" type="search" aria-label="Find a part" placeholder="Find a part or number" value="' + esc(find) + '" autocomplete="off"></label>'
+      + '<div class="pills"><button type="button" class="pill' + (filter === "todo" ? " on" : "") + '" data-f="todo">To count · ' + todo.length + '</button><button type="button" class="pill' + (filter === "all" ? " on" : "") + '" data-f="all">All · ' + all.length + '</button><button type="button" class="pill' + (filter === "done" ? " on" : "") + '" data-f="done">Counted · ' + done + "</button></div></div>";
+    h += '<div id="crows">' + rowsHtml(rows, f, dis) + "</div>";
+    if (S.status === "sent") {
+      if (addOpen) h += '<div class="addx line-t"><label class="fld2"><input id="xt" placeholder="What it is" aria-label="What it is"></label><label class="qty"><input id="xn" type="text" inputmode="numeric" placeholder="Qty" aria-label="How many"></label><button type="button" class="btn pri s" id="xadd">Add</button></div>';
+      h += '<div class="pad-m line-t hstack list-foot" style="justify-content:space-between"><button type="button" class="ul" id="xopen">' + (addOpen ? "Close" : "Found something not on the list?") + "</button>" + (todo.length ? '<button type="button" class="btn pri s" id="nextc">Next to count' + ic("arrow-right") + "</button>" : "") + "</div>";
     }
     return h + "</div>";
   }
+  function downs() {
+    if (S.status !== "sent" && !S.machines.some(function (m) { return m.down; })) return "";
+    var h = '<div class="card pad-m sec downs"><div class="hstack" style="flex-wrap:nowrap;align-items:flex-start"><span class="fi r s">' + ic("wrench") + '</span><div style="flex:1 1 200px;min-width:0"><b class="h4">Machine won&#8217;t print?</b><div class="sm">Say why. That counts as explained, and ' + esc(first(S.auditor)) + " checks it on board.</div></div></div>";
+    S.machines.forEach(function (m) {
+      if (m.down) { h += '<div class="hstack" style="justify-content:space-between"><span class="sm"><b>' + esc(m.label) + "</b> reported down: &#8220;" + esc(m.down) + "&#8221;</span>" + (S.status === "sent" ? '<button type="button" class="btn ghost s" data-undown="' + esc(m.serial) + '">It prints again</button>' : "") + "</div>"; return; }
+      if (S.status !== "sent") return;
+      if (openDown[m.serial]) h += '<div class="sec tight"><label class="lbl"><span class="xs b">Why won&#8217;t ' + esc(m.label) + ' print?</span><textarea class="ta" data-reason="' + esc(m.serial) + '" placeholder="Error code, what you tried, engineer called">' + esc(pend["r" + m.serial] || "") + '</textarea></label><div class="why" id="err' + esc(m.serial) + '"></div><div class="cta"><button type="button" class="btn pri s" data-savedown="' + esc(m.serial) + '">Report it down</button><button type="button" class="btn ghost s" data-canceldown="' + esc(m.serial) + '">Cancel</button></div></div>';
+      else h += '<div class="hstack" style="justify-content:space-between"><span class="sm">' + esc(m.label) + (m.model ? " · " + esc(m.model) : "") + '</span><button type="button" class="btn ghost s" data-opendown="' + esc(m.serial) + '">Report it down</button></div>';
+    });
+    return h + "</div>";
+  }
+  function side() {
+    var FAQ = [["Which management list?", "The MACHINE Management List, 52 pages, printed from the press. Not the User Management List, 5 pages: it carries no part life."],
+      ["The file is big. Will it go?", "Send it anyway, up to 24 MB. Each file saves on its own; if the connection drops, choose it again from here."],
+      ["Why can&#8217;t I see OBP&#8217;s number?", "So the count is what is on the shelf today. Type the total for every line; 0 counts, blank does not."],
+      ["A machine is down", "Tap &#8220;Report it down&#8221; and say why. That counts as explained, and " + esc(first(S.auditor)) + " checks it on board."]];
+    return '<div class="navy sec hide-m"><span class="eyebrow">Due ' + esc(when(S.dueAt)) + '</span><b class="h3">' + esc(S.auditor) + " audits " + esc(S.ship) + '&#8217;s print shop</b><p class="sm">Each file is read the moment it lands. This page saves as you go.</p></div>'
+      + '<div class="acc">' + FAQ.map(function (x, i) { var o = faq === i; return '<div class="acc-i' + (o ? " open" : "") + '"><button type="button" class="acc-q" data-faq="' + i + '" aria-expanded="' + o + '"><span>' + x[0] + '</span><span class="acc-pm">' + ic(o ? "b:minus" : "b:plus") + "</span></button>" + (o ? '<p class="acc-a">' + x[1] + "</p>" : "") + "</div>"; }).join("") + "</div>"
+      + '<div class="help"><span class="fi a s">' + ic("chat-circle") + '</span><div class="t"><b class="h4">Stuck?</b><span class="sm">Reply to the email you got. It reaches the CIMS team.</span></div></div>';
+  }
   function draw() {
     head();
-    $("testslot").innerHTML = S.test ? '<div class="test"><div>Test mode. This page is real; the request went to the auditor only.</div></div>' : "";
-    var h = '<section class="sec"><h2><span class="n">1</span>Machines</h2><div class="sub">Two files each. Read the moment they land.</div>' + S.machines.map(machine).join("") + "</section>";
-    h += '<section class="sec"><h2><span class="n">2</span>Count</h2><div class="sub">Count the shelf, type the total. 0 counts.</div>' + countList() + "</section>";
-    $("main").innerHTML = h; dock();
+    $("testslot").innerHTML = S.test ? '<div class="offl"><div>' + ic("f:warning-circle") + "Test mode. This page is real; the request went to the auditor only.</div></div>" : "";
+    var fn = esc(first(S.crew)), af = esc(first(S.auditor));
+    var h = '<div class="sec"><span class="eyebrow">Before ' + af + "&#8217;s visit</span>";
+    if (S.status !== "sent") {
+      h += '<h1 class="h1">Everything is in, ' + fn + '</h1><p class="lead">' + esc(S.auditor) + " has been told. Thank you. Nothing more is needed from this page.</p></div>"
+        + '<div class="card pad-m donecard"><span class="fi">' + ic("b:check") + '</span><div><b class="h4">Sent</b><div class="sm">' + S.machines.length + (S.machines.length === 1 ? " press" : " presses") + " · " + S.lines.filter(counted).length + " of " + S.lines.length + " lines counted</div></div></div>";
+      $("main").innerHTML = h + countList(); $("side").innerHTML = side(); dock(); return;
+    }
+    h += '<h1 class="h1">Hi ' + fn + ", three things for " + af + '</h1><p class="lead">Send them by ' + esc(when(S.dueAt)) + ". " + af + " reads them before coming aboard, and only you see this page.</p></div>";
+    h += '<div class="card pad-m sec tight" id="prog"></div>';
+    h += docTask("p43", "file-text", "", "Pattern 43", "One 12-page scan per press");
+    h += docTask("mgmt", "list", "n", "Machine Management List", "The Machine list, 52 pages: print it from the press, then scan it");
+    var k = S.lines.filter(counted).length;
+    h += '<div class="card task"><span class="fi a">' + ic("package") + '</span><div class="sec tight" style="min-width:0"><div class="hstack" style="justify-content:space-between"><b class="h3">Count the shelf</b><span class="chip ' + (k === S.lines.length ? "g" : "m") + '" id="countchip">' + k + " of " + S.lines.length + '</span></div><p class="sm">Every OBP line. Type the total on the shelf; 0 counts.</p></div></div>';
+    h += countList() + downs() + '<div class="card pad-m sec tight hide-m" id="sendcard"></div>';
+    $("main").innerHTML = h; $("side").innerHTML = side(); progress(); dock();
   }
 
   function send(file, serial, kind) {
@@ -221,12 +223,12 @@ const SCRIPT = String.raw`
     x.open("POST", q("/api/audit/u/upload?serial=" + encodeURIComponent(serial) + "&kind=" + kind));
     x.setRequestHeader("Content-Type", file.type || "application/pdf");
     x.setRequestHeader("X-File-Name", encodeURIComponent(file.name || "file")); // a header is Latin-1 only: "Dexter’s scan.pdf" threw
-    x.upload.onprogress = function (e) { if (e.lengthComputable) { busy[k] = { pct: Math.round(e.loaded / e.total * 100) }; var t = document.querySelector('[data-serial="' + serial + '"][data-kind="' + kind + '"]'); draw(); } };
+    x.upload.onprogress = function (e) { if (e.lengthComputable) { busy[k] = { pct: Math.round(e.loaded / e.total * 100) }; draw(); } };
     x.onerror = function () { delete busy[k]; draw(); toast("No connection. Choose the file again."); };
     x.onload = function () {
       var j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
       if (!j.ok) { delete busy[k]; draw(); toast(j.say || j.error || "Not sent"); return; }
-      busy[k] = { text: kind === "mgmt" ? "Reading…" : "Measuring…" }; draw();
+      busy[k] = { text: kind === "mgmt" ? "Reading" : "Measuring" }; draw();
       api("/api/audit/u/read?id=" + encodeURIComponent(j.id), {}).then(function () { delete busy[k]; load(); });
     };
     x.send(file);
@@ -247,8 +249,8 @@ const SCRIPT = String.raw`
   function setCount(part, v) {
     S.counted[part] = v === "" ? null : Number(v);
     pend["c:" + part] = v;
-    var inp = document.querySelector('input[data-part="' + part + '"]'); if (inp) { inp.value = v; var row = inp.closest(".ln"); if (row) row.className = "ln" + (v === "" ? "" : " done"); }
-    head(); clearTimeout(timer); timer = setTimeout(flush, 800);
+    var inp = document.querySelector('input[data-part="' + part + '"]'); if (inp) { if (inp.value !== v) inp.value = v; var b = inp.closest(".qty"); if (b) b.className = "qty" + (v === "" ? "" : " on"); }
+    head(); progress(); clearTimeout(timer); timer = setTimeout(flush, 800);
   }
 
   document.addEventListener("change", function (e) { var t = e.target; if (t.type === "file" && t.files && t.files[0]) send(t.files[0], t.getAttribute("data-serial"), t.getAttribute("data-kind")); });
@@ -256,15 +258,14 @@ const SCRIPT = String.raw`
     var t = e.target;
     if (t.getAttribute && t.getAttribute("data-part")) { t.value = t.value.replace(/[^0-9]/g, "").slice(0, 5); setCount(t.getAttribute("data-part"), t.value); }
     if (t.getAttribute && t.getAttribute("data-reason")) pend["r" + t.getAttribute("data-reason")] = t.value;
+    if (t.id === "find") { find = t.value; var cr = $("crows"); if (cr) cr.innerHTML = rowsFor(); }
   });
   document.addEventListener("click", function (e) {
     var t = e.target.closest("button"); if (!t) return;
     if (t.hasAttribute("data-f")) { flush(); filter = t.getAttribute("data-f"); picked = true; draw(); return; }
-    if (t.hasAttribute("data-inc") || t.hasAttribute("data-dec")) {
-      var p = t.getAttribute("data-inc") || t.getAttribute("data-dec"), cur = S.counted[p]; cur = cur == null || cur === "" ? 0 : Number(cur);
-      var n = t.hasAttribute("data-inc") ? Math.min(99999, cur + 1) : Math.max(0, cur - 1);
-      setCount(p, String(n)); return;
-    }
+    if (t.hasAttribute("data-faq")) { var i = Number(t.getAttribute("data-faq")); faq = faq === i ? -1 : i; $("side").innerHTML = side(); return; }
+    if (t.id === "xopen") { addOpen = !addOpen; draw(); var xt = $("xt"); if (xt) xt.focus(); return; }
+    if (t.id === "nextc") { var all = document.querySelectorAll("input[data-part]"), n = null; for (var j = 0; j < all.length && !n; j++) if (!all[j].value) n = all[j]; if (n) { n.scrollIntoView({ block: "center", behavior: "smooth" }); n.focus(); } return; }
     if (t.hasAttribute("data-opendown")) { openDown[t.getAttribute("data-opendown")] = 1; draw(); var ta = document.querySelector('[data-reason="' + t.getAttribute("data-opendown") + '"]'); if (ta) ta.focus(); return; }
     if (t.hasAttribute("data-canceldown")) { delete openDown[t.getAttribute("data-canceldown")]; draw(); return; }
     if (t.hasAttribute("data-savedown")) {
@@ -281,7 +282,7 @@ const SCRIPT = String.raw`
     }
     if (t.id === "xadd") {
       var tx = $("xt").value.trim(); if (!tx) { toast("Write the item"); return; }
-      api("/api/audit/u/count", { extras: [{ text: tx, counted: $("xn").value }] }).then(function (j) { if (j.ok) load(); else toast(j.say || "Not saved"); });
+      api("/api/audit/u/count", { extras: [{ text: tx, counted: $("xn").value }] }).then(function (j) { if (j.ok) { addOpen = false; load(); } else toast(j.say || "Not saved"); });
     }
   });
   document.addEventListener("visibilitychange", function () { if (document.visibilityState === "hidden") flush(true); });

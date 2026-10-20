@@ -121,7 +121,10 @@ export function installAuditRequest(deps) {
       to: live ? addr.to : [session.email], cc: live && !session.open ? addr.cc : [], shown: addr.shown, noPersonal: !!addr.noPersonal, blocked: addr.ok ? null : addr.reason,
       machines: H && H.ok ? H.presses : null, lines: H && H.ok && H.obp ? blindLines(H.obp.lines).length : null, obpAsOf: H && H.obp ? H.obp.asOf : null,
       hon: !!(H && H.ok), honError: H && !H.ok ? H.error : (H ? null : "HON did not answer"),
-      dueAt: plusHours(now(), REQUEST_HOURS), open: open || null,
+      dueAt: plusHours(now(), REQUEST_HOURS), remindAt: REMIND_HOURS, open: open || null,
+      // who is copied and who replies, by name (the addresses stay off the open site): the first of AUDIT_REQUEST_CC
+      // takes the replies when live, the auditor in test mode (sendRequest)
+      copyNames: live ? csv(env.AUDIT_REQUEST_CC).map(nameOf) : [], replyTo: nameOf(live ? (csv(env.AUDIT_REQUEST_CC)[0] || session.email) : session.email),
       // one person at a time per ship: another seafarer's request still open on this ship (Miguel, 20 Oct 2026)
       shipOpen: onShip && onShip.agency_id !== sc ? { id: onShip.id, crew: onShip.crew_name, sc: onShip.agency_id } : null,
     });
@@ -632,6 +635,22 @@ export function installAuditRequest(deps) {
   // History (19 Oct 2026; docs/AUDIT_DESIGN.md "History" and W1's rail: History · Open follow-ups): every filed audit by
   // ship, crew and date, and every follow-up with its state. It reads only what a filing wrote (the grade, the visit, its
   // steps, its photos) and decides nothing; a TEST request is a rehearsal and is never listed. One wave (§12).
+  // One filed visit in numbers: the presses' checks, the shelf against OBP, the crew's needs. A line's shelf is Dexter's
+  // number where he typed one, else the crew's count (the page's own rule, obpMatches).
+  function foundOf(d) {
+    const ms = Object.values((d.hw && d.hw.machines) || {});
+    const n = (f) => ms.filter(f).length;
+    const lines = (d.inv && d.inv.lines) || {}, diff = ((d.ctx && d.ctx.diff) || []).filter((x) => x.kind === "gap");
+    let above = 0, below = 0;
+    for (const x of diff) { const L = lines[x.part_no], shelf = L && L.shelf != null ? L.shelf : x.counted; if (shelf > x.obp) above++; else if (shelf < x.obp) below++; }
+    const crew = d.crew || {}, ov = d.ov || {};
+    return {
+      machines: { presses: ms.length, test: n((m) => (m.checks || {}).test === "finding"), scan: n((m) => (m.checks || {}).scan === "finding"), collab: n((m) => (m.checks || {}).collab === "finding"), p43: n((m) => m.p43 === "seen"), down: n((m) => m.down === "still") },
+      inv: { accurate: d.inv && typeof d.inv.accurate === "boolean" ? d.inv.accurate : null, above, below, added: ((d.inv && d.inv.added) || []).length, notInObp: ((d.ctx && d.ctx.extras) || []).length, notFound: Object.values((d.inv && d.inv.repairs) || {}).filter((v) => v === "not_found").length },
+      crew: { training: (crew.training || []).slice(), trainingOther: crew.trainingOther || "", ppe: ((crew.ppe && crew.ppe.missing) || []).length, hon: crew.hon || null, block: !!ov.recommendBlock },
+      why: { inventory: ((d.rt || {}).why || {}).inventory || "", technical: ((d.rt || {}).why || {}).technical || "", collaterals: ((d.rt || {}).why || {}).collaterals || "", overall: ov.why || "" },
+    };
+  }
   async function history(env) {
     await ensureAudit(env);
     const NOT_TEST = "COALESCE(r.test_mode, 0) = 0";
@@ -654,6 +673,8 @@ export function installAuditRequest(deps) {
         steps: !!d,
         missing: d ? { ws: (d.ws && d.ws.missing) || [], tools: (hw.tools && hw.tools.missing) || [], ppe: (crew.ppe && crew.ppe.missing) || [] } : null,
         repeat: (d && d.repeat) || {},
+        // what the visit found, for the History page to add up (every number read from the filed steps, nothing guessed)
+        found: d ? foundOf(d) : null,
         photos: photos.get(e.request_id) || 0,
         followups: { open: st.filter((x) => x === "open").length, fixed: st.filter((x) => x === "fixed").length },
       };

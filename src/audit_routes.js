@@ -72,17 +72,23 @@ export function installAudit(deps) {
       // the home's two doors (History · Follow-ups): how many audits are filed and how many follow-ups are open, TEST never
       env.DB.prepare("SELECT (SELECT COUNT(*) FROM audit_eval e JOIN audit_request r ON r.id = e.request_id WHERE COALESCE(r.test_mode, 0) = 0) AS filed, (SELECT COUNT(*) FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE f.status = 'open' AND COALESCE(r.test_mode, 0) = 0) AS open_fu").first().catch(() => null),
     ]);
-    const lastBy = {};
-    for (const r of reqs.results || []) { const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r; }
+    const lastBy = {}, bySc = {};
+    for (const r of reqs.results || []) {
+      const k = normShip(r.ship); if (!lastBy[k]) lastBy[k] = r;
+      if (!r.test_mode) (bySc[r.agency_id] = bySc[r.agency_id] || []).push(r);
+    }
+    // THIS contract's audit (an audit belongs to the contract it was asked in, Miguel 16 Oct 2026): the newest live request
+    // for the seafarer made on or after the contract's sign-on. The landing sorts by it: not audited first.
+    const auditOf = (sc, on) => { const r = (bySc[sc] || []).find((x) => !on || iso(x.created_at) >= on); return r ? { id: r.id, status: r.status, at: iso(r.created_at), grade: r.grade != null ? Number(r.grade) : null, open: isOpenRequest(r) } : null; };
     const out = [];
     for (const s of (board && board.sections) || []) {
       const aboard = (s.crew || []).filter((c) => aboardNow(c) && c.agency_id)
-        .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile }));
+        .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile, audit: auditOf(c.agency_id, iso(c.signOn)) }));
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
       // `open`: the request still open on this ship (one person at a time, isOpenRequest), the page's "Open requests"
-      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
+      out.push({ ship: s.ship, brand: s.brand || null, aboard: uniq, open: !!(last && isOpenRequest(last)), last: last ? { id: last.id, at: iso(last.created_at), sent: iso(last.sent_at), in: iso(last.complete_at), status: last.status, crew: last.crew_name, sc: last.agency_id, due: last.due_at || null, overdue: !!last.overdue_at, test: !!last.test_mode, grade: last.grade != null ? Number(last.grade) : null } : null });
     }
     out.sort((a, b) => (b.aboard.length > 0) - (a.aboard.length > 0) || String(a.last ? a.last.at : "").localeCompare(String(b.last ? b.last.at : "")) || a.ship.localeCompare(b.ship));
     return json({ today: TODAY(), auditor: session.email, ships: out, counts: cnt ? { filed: Number(cnt.filed) || 0, openFollowups: Number(cnt.open_fu) || 0 } : null });
@@ -102,12 +108,16 @@ export function installAudit(deps) {
     // lower bound wide enough for any contract and cut to the contract below. A failed read says nothing.
     const today = TODAY(), lo = shiftDays(today, -RUSH_LOOKBACK_DAYS);
     const readRush = (from) => (rushOrders ? rushOrders.read(env, from, today) : Promise.resolve(null));
-    const [prof, reqs, board, rushRows, onShip] = await Promise.all([
+    const ns = ship ? normShip(ship) : null;
+    const [prof, reqs, board, rushRows, onShip, shipFiled, shipFus] = await Promise.all([
       crewProfile(env, sc, session),
       env.DB.prepare("SELECT r.id, r.ship, r.status, r.created_at, r.sent_at, r.complete_at, r.due_at, r.auditor, r.test_mode, e.score AS grade, e.filed_at AS graded_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? ORDER BY r.created_at DESC LIMIT 10").bind(sc).all().catch(() => ({ results: [] })),
       session.open ? rotationSections(env).catch(() => null) : null,
       readRush(lo),
-      ship ? env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null) : null,
+      ship ? env.DB.prepare(SHIP_OPEN_SQL).bind(ns).first().catch(() => null) : null,
+      // the ship's own record (the briefing's "Audits of <ship>" and "Open follow-ups"): filed audits, never a TEST one
+      ns ? env.DB.prepare("SELECT r.id, r.crew_name, e.score, e.filed_at FROM audit_request r JOIN audit_eval e ON e.request_id = r.id WHERE r.normalized_ship=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC LIMIT 5").bind(ns).all().catch(() => ({ results: [] })) : { results: [] },
+      ns ? env.DB.prepare("SELECT id, owner, due, text, crew_name, created_at FROM audit_followup WHERE normalized_ship=? AND status='open' ORDER BY created_at LIMIT 20").bind(ns).all().catch(() => ({ results: [] })) : { results: [] },
     ]);
     // OPEN MODE: a seafarer the board has aboard, or one a LIVE request was made for (a cancelled or TEST row is no pass)
     const liveReq = (reqs.results || []).some((r) => r.status !== "cancelled" && !r.test_mode);
@@ -141,6 +151,13 @@ export function installAudit(deps) {
         label: contractLabel(completed, !!cur), source: count && count.asOf ? "TDG count as of " + count.asOf + (count.added ? " + " + count.added + " finished since" : "") : null,
         current: cur ? { ship: cur.ship, on: cur.on, off: cur.off, offSource: cur.offSource || null, day: cur.days, of: cur.plannedDays, held: !!cur.held } : null,
       },
+      // who handed the seat over and who takes it next (the profile's handovers: ONE rule, reliever.js)
+      relay: cur && cur.handover ? {
+        before: cur.handover.before ? { name: personName(cur.handover.before.name), off: cur.handover.before.off || null } : null,
+        after: cur.handover.after ? { name: personName(cur.handover.after.name), on: cur.handover.after.on || null, src: cur.handover.after.src || null, told: !!cur.handover.after.told, tdg: !!cur.handover.after.tdg } : null,
+      } : null,
+      shipAudits: (shipFiled.results || []).map((r) => ({ id: r.id, crew: personName(r.crew_name), score: r.score != null ? Number(r.score) : null, at: iso(r.filed_at) })),
+      followups: (shipFus.results || []).map((f) => ({ id: f.id, owner: f.owner, due: f.due || null, text: f.text, crew: personName(f.crew_name), at: iso(f.created_at) })),
       slots: (P.people && P.people.slots) || [],
       // the crew record's own To-check rows are HR's housekeeping, not the auditor's (Miguel, 16 Oct 2026: "i dont think this
       // is relevant or provide any value"): they stay on the console's crew profile and are not sent here

@@ -1617,6 +1617,27 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   home-screen icon and the maskable one are full squares (iOS paints a transparent corner black). The shell, the crew's page,
   the closed-link page, the manifest and the audit sign-in carry the name and the mark; the profile's feed reads "Printshop
   Ops Audit". **The emails keep "Printshop audit"** until Miguel signs off a render with the new name (CIMS email standard).
+- **THE REDESIGN, the approved canvas** (Miguel, 20 Oct 2026, "1. yes": artifact 45Hsjnr7Vr6f1BPussctg3, every board built).
+  ONE stylesheet for the app and the crew's page (`src/audit_ui_css.js`, CSS variables with a dark-mode block; the canvas's
+  names mean one thing everywhere: `.card`, `.chip`, `.btn`, `.navy`, `.stats`, `.tap`...). The shell is a white app bar (the
+  mark and the name, who is signed in, History and Follow-ups with the open count); every screen draws its own head; the main
+  action sits in the page on a computer and in a bar at the bottom on a phone (`dock`). **Landing**: pick the customer (the
+  one with a contract ending soonest opens first), its ships in four groups (ends within 30 days not audited · not audited
+  this contract · audited this contract · nobody aboard), the open request on top; the head and the search are drawn once,
+  the list into `#lres` (a redrawn box closes the phone's keyboard). **Briefing**: two aboard = pick whose contract; the
+  request's steps or "X waits for Y's audit" (one per ship); the contract in four numbers and its relay (`brief.relay`, the
+  profile's `handovers`); what others said; rush orders, the ship's filed audits (`shipAudits`) and open follow-ups;
+  "Open the profile" = `cims.work/#crew/SC-…` (the console opens the Crew tab, then the profile). **Ask**: what the crew
+  sends, the email (copy and reply-to by name, `copyNames` / `replyTo` — never an address on the open site) and every
+  condition ticked. **Request**: waiting / past the deadline / documents in, what came in per document, then Before the
+  visit press by press and line by line. **The audit**: a step rail, a step 0 "Before you start", the side panel with what
+  the documents said; the rules and one-way rows unchanged (a Pattern 43 mark is an observation: open circle until Seen,
+  amber; the press reads Problem). **History** adds up the filed steps (`/api/audit/history` `found`: presses, shelf, crew,
+  read from `audit_visit_data`), Rita's dispatch on its own line, every audit a row. **One audit** = the filed record step by
+  step. **Follow-ups** by date with owner filters, Mark done in two taps, done in a native fold. **The crew's page**: three
+  things (a row per press for each file, the blind count with a search, Machine won't print? with its reason), Send once
+  everything is in; OBP's number never shown. Renders: scratchpad harness `aud/run.mjs` on live read-only data. Pinned by
+  `test/audit_page_boot.test.js` (rewritten to the new markup, same intent), `test/audit_brand.test.js`.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

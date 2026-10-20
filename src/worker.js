@@ -5559,7 +5559,7 @@ function prefetchTabs(delay){clearTimeout(window._pfT);window._pfT=setTimeout(fu
 // I want it when I refresh to stay where it is .. and go all the way up of the tab I am on"). The open tab
 // rides in the URL hash (replaceState: no extra Back entries); a reload opens that tab at its top.
 var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','billing','travel','fleet','reports','data','settings','ask'];
-function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
+function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}if(h.indexOf('crew/')===0)return 'crew';return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
   VIEW_GEN++;
   var _vw=document.getElementById('view');if(_vw)_vw.classList.remove('wide','full');
@@ -10123,7 +10123,11 @@ function mClose(){$('#modalRoot').innerHTML='';}
 // started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
 function tgFlip(id){var c=document.getElementById(id);if(!c)return;if(typeof _TOUCHED==='object')_TOUCHED[id]=1;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
 try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
+// A LINK TO ONE SEAFARER (20 Oct 2026, the audit briefing's "Open the profile"): cims.work/#crew/SC-0039935 opens the Crew
+// tab (tabFromHash), then that profile; the list's render gives up when the profile is drawn after it (VIEW_GEN).
+var _crewLink=/^#crew\\/(SC-[A-Za-z0-9-]+)$/.exec(String(location.hash||''));
 show(tabFromHash());
 prefetchTabs(1200);
+if(_crewLink)openCrew(_crewLink[1]);
 </script>
 <div id=modalRoot></div></body></html>`;
