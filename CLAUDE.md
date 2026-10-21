@@ -974,7 +974,9 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   sign-off** (no cross-over in `legsFromRegistry`, never the cross-over's reliever, not picked by `seatContexts`, not the
   profile's before/after); **not a completed contract** (its debark never adds to TDG's count: `completedSince`, the
   `CC_*_SQL` join reads the mark and the tag); **off the bench and the seats** (a "Training visit · trainer" line under the
-  ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard). Time at sea still counts its days. The
+  ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard); **off the crew's statement** (Miguel, 21 Oct
+  2026: "left off the crew's statement, is a training visit"; `statementContracts` skips the leg, so its row and its days are
+  not printed — the PDF, its email and the internal crew file's statement pages). The profile's time at sea still counts its days. The
   mark belongs to the trip that embarked that day: a later file that moves the embark makes it a new trip. (The same
   morning this was Jonathan's id alone, PR #284, then a per-trip tick, PR #285.) Checked on the 17 Oct 2026 production
   data before merging: Score Card inputs, statements and schedule legs identical for all 108 crew. Pinned by

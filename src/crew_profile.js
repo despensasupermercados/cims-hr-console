@@ -334,7 +334,9 @@ function normStatusWord(s) {
 // passed, a projected one stays "projected".
 export function statementContracts(legs, sc, today) {
   const t = iso(today) || new Date().toISOString().slice(0, 10);
-  const rows = (Array.isArray(legs) ? legs : []).filter((l) => l && l.sc === sc && l.ours !== false && iso(l.on))
+  // A training visit is not a contract: it is left off the crew's statement (Miguel, 21 Oct 2026: "left off the crew's
+  // statement, is a training visit"; visits.js marks the leg). Neither its row nor its days are printed.
+  const rows = (Array.isArray(legs) ? legs : []).filter((l) => l && l.sc === sc && l.ours !== false && !l.visit && iso(l.on))
     .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
   let seaDays = 0;
   const contracts = rows.map((l, i) => {
