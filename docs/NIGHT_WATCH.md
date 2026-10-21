@@ -123,9 +123,20 @@ Method:
 
 6. **Merge only through the gate.** Wait for CI `test` on the PR head, then run `node scripts/night_merge_gate.mjs origin/main <branch>`. `MERGE_OK` and no earlier merge tonight: mark the PR ready and squash-merge it, then prove it live. `DRAFT_ONLY`: leave it a draft and paste the gate's reasons into the PR body.
 
-## The digest (every run, at most 8 lines)
+## What Miguel reads: quiet unless needed
 
-End the session with this digest; it is the run's notification.
+Miguel, 21 Oct 2026, after the first full digest landed in the conversation ("why u gove me this??"): **"yes"** to "stay
+silent on nights with nothing for you". The reply in the conversation is for Miguel, in plain words:
+
+- **Nothing for Miguel** (tests green, deploy = main, jobs ok, no PR, no question): ONE line, e.g. "Night watch 22 Oct: all clear."
+- **Something for Miguel** (a PR opened or merged, red tests, a deploy behind main, a failed job, a money / data flag, a decision
+  only Miguel can make): at most two plain lines, what happened and what, if anything, Miguel must do.
+- Notes that need nothing from Miguel (a slow route under the threshold, a candidate ruled out) go in the PR body or the Brain
+  log, never in the reply.
+
+## The digest (the record: the Brain log and the PR body, never the reply)
+
+The digest below is the run's full record. It goes into the Brain log when one is filed, never into the conversation.
 
 ```
 Night watch <date> · <area>
@@ -135,6 +146,6 @@ PRs: <Night watch: … #N — merged + live / draft (gate: reason)> or none
 Flags for Miguel: <money / data / decisions only>
 ```
 
-If the night found and opened nothing, the digest says so in two lines.
+If the night found and opened nothing, the reply is the one line above and the Brain gets nothing.
 
 When a PR was opened or a money/data flag raised, also file one Brain log (`brain_correct`, domain CIMS, subject "CIMS HR Console", **kind "log"**) with the same lines. A clean night writes nothing to the Brain.

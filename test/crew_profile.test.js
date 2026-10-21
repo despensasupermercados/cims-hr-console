@@ -168,6 +168,18 @@ test("the statement PDF reads the same schedule: actual once TDG/Rita gave it, p
   assert.deepEqual(statementContracts(cur, SC, "2026-10-12"), { contracts: [{ seq: 1, ship: "Allure", on: "2026-07-01", act: null, proj: "2027-02-01" }], seaDays: 103 });
 });
 
+test("the statement leaves a training visit off: Jonathan Alonzo's Rhapsody contract stays, his Pursuit visit is neither a row nor sea days", () => {
+  const legs = [
+    { ship: "Rhapsody", sc: SC, ours: true, on: "2025-12-06", off: "2026-08-01", is_current: false, source: "counter" },
+    { ship: "Pursuit", sc: SC, ours: true, on: "2026-10-16", off: "2026-10-24", is_current: true, source: "registry", offSource: "rita", visit: true },
+  ];
+  assert.deepEqual(statementContracts(legs, SC, "2026-10-21"), { contracts: [
+    { seq: 1, ship: "Rhapsody", on: "2025-12-06", act: "2026-08-01", proj: null }], seaDays: 238 });
+  // Ohji Miranda: his only trip is the Onward visit, so the statement has no contract
+  const ohji = [{ ship: "Onward", sc: SC, ours: true, on: "2026-09-07", off: "2026-09-12", is_current: false, source: "registry", offSource: "tdg", visit: true }];
+  assert.deepEqual(statementContracts(ohji, SC, "2026-10-21"), { contracts: [], seaDays: 0 });
+});
+
 test("helpers: calendar months clamp, dates read 'Sep 5, 2026', who from an email, plain intel stays whole", () => {
   assert.equal(plusMonths("2026-01-31", 1), "2026-02-28");
   assert.equal(plusMonths("2026-05-02", 7), "2026-12-02");
