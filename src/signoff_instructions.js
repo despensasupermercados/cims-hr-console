@@ -17,6 +17,7 @@
 // ============================================================================
 import { memoDdl } from "./ensure_memo.js";
 import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
+import { relieverEmail, TEMPLATE_ID as RELIEVER_TEMPLATE } from "./emails/hr.signoff.reliever.v1.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
 // ACK_HTML in signoff_ack.js. /instr is a PUBLIC seafarer page and its inline <script> was
@@ -130,7 +131,7 @@ export function installInstr(deps) {
     var name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
     // The pass prints the name as the crew would say it (first word of the first name + the last name) and TDG's position.
     var passName = [firstWord(c.first_name), c.last_name].filter(Boolean).join(" ").trim();
-    return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, pass_name: passName || name, position: c.rank_override || c.rank_observed || null, first_name: firstWord(c.first_name) || null, email: c.email || null, vessel: vessel, port: port, sign_on_date: (ovr && ovr.on) || null, sign_off_date: sign_off };
+    return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, pass_name: passName || name, position: c.rank_override || c.rank_observed || null, first_name: firstWord(c.first_name) || null, email: c.email || null, phone: c.phone || null, vessel: vessel, port: port, sign_on_date: (ovr && ovr.on) || null, sign_off_date: sign_off };
   }
 
   // POST /api/instructions/request  (session-gated) — issue the instructions email
@@ -160,6 +161,7 @@ export function installInstr(deps) {
     if (b.send && r.email) {
       try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
       catch (e) { await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq); }
+      if (emailed) await sendRelieverPass(env, r, ctx);
     }
     await logActivity(env, session && session.email, "instr_request", r.sc + " #" + r.seq);
     return json({ ok: true, link: link, crew_name: r.crew_name, emailed: emailed, hasEmail: !!r.email });
@@ -248,6 +250,38 @@ export function installInstr(deps) {
     if (!out.ok) throw new Error("mailer_" + (out.error || out.status || "failed"));
   }
 
+  // THE RELIEVER'S HANDOVER PASS (hr.signoff.reliever.v1; Miguel, 19 Oct 2026: "add .. the name .. phone and email of the
+  // incoming crew .. so they can be in contact"; render approved 23 Oct 2026, "all approved"). It goes with the instructions
+  // email, the same day, to the INCOMING printer: the outgoing one's name, mobile and email. Only when TDG has the reliever
+  // (rel.tdg, signoff_context.relieverInTdg) and the reliever has an email — a plan only the console holds must reach nobody
+  // (§10d). Once per seat and reliever (activity_log reliever_pass_sent, keyed sc · sign-off · reliever), whatever the
+  // instructions do on a resend. CC onboardsupport, reply-to Rita, like the instructions. Never blocks the instructions email:
+  // a failure is logged (reliever_pass_failed) and said in the result.
+  async function sendRelieverPass(env, r, ctx) {
+    try {
+      var rel0 = ctx && ctx.reliever;
+      if (!rel0 || !rel0.sc || !rel0.tdg) return { sent: false, why: !rel0 ? "no_reliever" : "not_in_tdg" };
+      var rel = await relieverName(env, rel0);
+      if (!rel || !rel.email) return { sent: false, why: "no_reliever_email" };
+      var off = (ctx && ctx.off) || r.sign_off_date || null;
+      var key = r.sc + "|" + String(off || "").slice(0, 10) + "|" + rel.sc;
+      var seen = await env.DB.prepare("SELECT 1 x FROM activity_log WHERE action='reliever_pass_sent' AND detail=? LIMIT 1").bind(key).first().catch(function () { return null; });
+      if (seen) return { sent: false, why: "already_sent" };
+      var mail = relieverEmail({
+        firstName: rel.first, ship: (ctx && ctx.ship) || r.vessel, brand: (ctx && ctx.brand) || null, port: (ctx && ctx.port) || r.port,
+        outgoing: { name: r.pass_name || r.crew_name, first: r.first_name || firstWord(r.crew_name), position: r.position || null, signOff: off, phone: r.phone, email: r.email },
+        relieverOn: rel.on, today: new Date().toISOString().slice(0, 10),
+      });
+      var out = await sendViaMailer(env, {
+        to: [rel.email], cc: [env.INSTR_CC || INSTR_CC], replyTo: INSTR_REPLY_TO, subject: mail.subject, html: mail.html, text: mail.text,
+        templateId: RELIEVER_TEMPLATE, critical: true, idempotencyKey: RELIEVER_TEMPLATE + ":" + key,
+      });
+      if (!out || !out.ok) { await logActivity(env, null, "reliever_pass_failed", key); return { sent: false, why: "not_sent" }; }
+      await logActivity(env, null, "reliever_pass_sent", key);
+      return { sent: true, to: rel.email };
+    } catch (e) { await logActivity(env, null, "reliever_pass_failed", (r && r.sc) || ""); return { sent: false, why: "error" }; }
+  }
+
   async function sendInstrConfirmation(env, o) {
     if (!env.MAILER) throw new Error("no_mailer");
     var to = env.INSTR_NOTIFY || "onboardsupport@dg3.com";
@@ -314,7 +348,8 @@ export function installInstr(deps) {
     var insId = "ins_" + crypto.randomUUID();
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
     var link = origin + "/instr?t=" + token;
-    try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
+    try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); } catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+    try { var rp = await sendRelieverPass(env, r, ctx); return { emailed: true, crew_name: r.crew_name, to: r.email, reliever: rp }; }
     catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
   }
   instrHandle.sendInstructionsFor = sendInstructionsFor;

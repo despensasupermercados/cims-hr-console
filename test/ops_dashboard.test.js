@@ -193,9 +193,13 @@ test("the route and the page: one wave, the board's own reads, and the page read
   assert.match(body, /await Promise\.all\(\[\s*rotationSections\(env\),\s*apiDashboard\(env\),/, "one concurrent wave over the board (§12)");
   assert.doesNotMatch(body, /\n\s+await env\.DB/, "no sequential D1 round trip");
   assert.match(SRC, /d=await cachedJson\('\/api\/ops',opsRefresh\)/); // 16 Oct 2026: a revalidation repaints under the same week page and filter
-  // The Joy email is held for Miguel's sign-off on the rendered email (CIMS email standard): no send from this page yet.
+  // The Joy email, wired 23 Oct 2026 (Miguel: "all approved"): the page's ONE send is "Email Joy" through /api/ops/tdg-fixes,
+  // a dry run first and a confirm before anything goes; nothing else on the dashboard writes.
   const page = SRC.slice(SRC.indexOf("var OPS=null,OPS_F='all';"), SRC.indexOf("async function renderDashboard(){"));
-  assert.doesNotMatch(page, /fetch\(|sendViaMailer|\/api\/ops\/tdg/, "the dashboard sends nothing");
+  assert.deepEqual([...new Set((page.match(/fetch\('[^']+'/g) || []))], ["fetch('/api/ops/tdg-fixes'"]);
+  const fx = page.slice(page.indexOf("function opsTdgFix("), page.indexOf("function OPS_addDays("));
+  assert.ok(fx.indexOf("post({})") < fx.indexOf("confirm(") && fx.indexOf("confirm(") < fx.indexOf("post({send:true"), "dry run, confirm, then send");
+  assert.doesNotMatch(page, /sendViaMailer/);
 });
 
 // Miguel, 14 Oct 2026: "You're not utilizing the space ... you have enough space for you to not double-line". On a wide

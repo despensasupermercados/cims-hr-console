@@ -80,10 +80,10 @@ export function buildOps(input) {
       // both are TDG's to correct, listed once in the TDG card and never as a crew change.
       if (s.heldByFile) {
         const other = seats.find((o) => o !== s && o.signOn);
-        fixes.push({ code, ship: sec.ship, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "held", off: s.signOff || null, by: other ? sn(other.name, other.agency_id) : null, byOn: other ? other.signOn : null });
+        fixes.push({ code, ship: sec.ship, brand: sec.brand, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "held", off: s.signOff || null, by: other ? sn(other.name, other.agency_id) : null, byName: other ? other.name : null, byOn: other ? other.signOn : null });
         continue;
       }
-      if (!s.signOn) fixes.push({ code, ship: sec.ship, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "undated" });
+      if (!s.signOn) fixes.push({ code, ship: sec.ship, brand: sec.brand, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "undated" });
       if (s.signOff) ends.push(s.signOff);
       // documents of the crew at sea, read against this contract (Schengen optional)
       const cr = crewBy[s.agency_id];

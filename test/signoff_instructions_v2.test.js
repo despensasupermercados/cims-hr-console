@@ -173,7 +173,7 @@ test("the T-14 send: v2 template, CC onboardsupport@dg3.com, reply to Rita, reli
   const ctx = seatContexts(SECTIONS)["SC-K"];
   const r = await h.sendInstructionsFor(env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
   assert.equal(r.emailed, true);
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2, "the instructions, then the reliever's handover pass (TDG has A.J.)");
   const e = sent[0];
   assert.deepEqual(e.to, ["kevin@example.com"]);
   assert.deepEqual(e.cc, ["onboardsupport@dg3.com"]);
@@ -204,8 +204,9 @@ test("the manual send from the crew page reads the same board context", async (t
   const b = await res.json();
   assert.equal(b.ok, true);
   assert.equal(b.emailed, true);
-  assert.equal(sent.length, 1);
+  assert.equal(sent.length, 2);
   assert.deepEqual(sent[0].cc, ["onboardsupport@dg3.com"]);
+  assert.equal(sent[1].templateId, "hr.signoff.reliever.v1");
   const t = text(sent[0].html);
   assert.match(t, /To HOME via Hong Kong/);
   assert.match(t, /Sign-off 31 Oct 2026/);
@@ -484,4 +485,34 @@ test("the page the button opens says Digital Handover Notes, never HON", () => {
   const words = INSTR_HTML.replace(/<script>[^]*?<\/script>/g, "").replace(/<style>[^]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/hon\.cims\.work/g, "");
   assert.doesNotMatch(words, /\bHON\b/);
   assert.match(words, /Opening your Digital Handover Notes/);
+});
+
+// THE RELIEVER'S HANDOVER PASS, wired 23 Oct 2026 (Miguel: "all approved"): it goes with the instructions, to the incoming
+// printer, only when TDG has them and they have an email; once per seat and reliever; never blocks the instructions.
+test("the reliever's pass: to A.J., the outgoing printer's contact, CC onboardsupport, reply to Rita, once", async (tc) => {
+  tc.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
+  const { h, sent, env } = senderHarness();
+  const ctx = seatContexts(SECTIONS)["SC-K"];
+  const r = await h.sendInstructionsFor(env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
+  assert.deepEqual(r.reliever, { sent: true, to: "aj.balena@example.com" });
+  const e = sent[1];
+  assert.equal(e.templateId, "hr.signoff.reliever.v1");
+  assert.deepEqual(e.to, ["aj.balena@example.com"]); assert.deepEqual(e.cc, ["onboardsupport@dg3.com"]); assert.equal(e.replyTo, "Rita.Berenyi@dg3.com");
+  assert.equal(e.critical, true); assert.match(e.idempotencyKey, /^hr\.signoff\.reliever\.v1:SC-K\|2026-10-31\|SC-A$/);
+  const t = text(e.html);
+  assert.match(t, /Over to you, A\.J\./); assert.match(t, /Kevin Jugao/); assert.match(t, /kevin@example\.com/);
+  assert.equal(e.subject, "You take over from Kevin on Azamara Pursuit");
+});
+
+test("the reliever's pass is not sent when TDG does not have the reliever, nor twice for the same seat", async (tc) => {
+  tc.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
+  const ctx = seatContexts(SECTIONS)["SC-K"];
+  let H = senderHarness({ ctx: { ...ctx, reliever: { ...ctx.reliever, tdg: false } } });
+  let r = await H.h.sendInstructionsFor(H.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port });
+  assert.equal(r.emailed, true); assert.equal(H.sent.length, 1, "the instructions only"); assert.equal(r.reliever.why, "not_in_tdg");
+  H = senderHarness();
+  const prep = H.env.DB.prepare;
+  H.env.DB.prepare = (sql) => { const st = prep(sql); if (/reliever_pass_sent/.test(sql)) st.first = async () => ({ x: 1 }); return st; };
+  r = await H.h.sendInstructionsFor(H.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
+  assert.equal(H.sent.length, 1); assert.equal(r.reliever.why, "already_sent");
 });
