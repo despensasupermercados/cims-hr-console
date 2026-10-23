@@ -62,7 +62,7 @@ export const SURVEY_HOUR = "07";
 export const SURVEY_CC = ["Rita.Berenyi@dg3.com", "Miguel.Sanmartin@dg3.com"];
 export const SURVEY_REPLY_TO = "Rita.Berenyi@dg3.com";
 export const SURVEY_ANSWERS_CC = "onboardsupport@dg3.com";
-export const NEEDS_CALL_LOW = 3;         // three or more answers at 1–2
+export const NEEDS_CALL_LOW = 3;         // the watchlist: three or more answers at 1–2
 export const NEEDS_CALL_RETURN = 2;      // or "Would return" at 1–2 (Miguel, 23 Oct 2026, the HR view: "said they would not return")
 // The HR view (Miguel, 23 Oct 2026). Under SURVEY_MIN_READ answers the averages are a floor check, not a measure, and the page
 // says so; a cell of the theme table with fewer than SURVEY_MIN_CELL answers stays grey; a quarter shows on the trend only
@@ -193,10 +193,10 @@ const quarterOf = (d) => d.slice(0, 4) + "-Q" + (Math.floor((+d.slice(5, 7) - 1)
 const PERIOD_WORDS = { "30D": "in the last 30 days", QTD: "this quarter", YTD: "this year", All: "on file" };
 // The answer in its first line (the CIMS report layout): ONE definition, read by the page and the leadership PDF.
 export function surveyHeadline(r) {
-  const n = r.n, calls = (r.needsCall || []).length, words = PERIOD_WORDS[r.p] || "on file";
+  const n = r.n, calls = (r.watch || []).length, words = PERIOD_WORDS[r.p] || "on file";
   if (!n) return { lead: "No answers " + words + ".", rest: "", sub: r.enabled ? "The invitations go 3 days after each sign-off; the first answers land here." : "The daily invitation is off." };
   const o = r.overall;
-  let lead = calls ? calls + (calls === 1 ? " seafarer needs" : " seafarers need") + " a call." :
+  let lead = calls ? calls + (calls === 1 ? " seafarer is" : " seafarers are") + " on the watchlist." :
     o == null ? n + " answer" + (n === 1 ? "" : "s") + " " + words + "." :
     o >= 4.5 ? "Crew say they are happy." : o >= 4 ? "Crew are mostly satisfied." : o >= 3 ? "Crew are lukewarm." : "Crew are unhappy.";
   const worst = (r.statements || [])[0];
@@ -225,7 +225,6 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
   const calls = answered.filter((r) => callWhy(r).length).map((r) => ({ why: callWhy(r), ret: r.answers[RETURN] ?? null,
     id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, at: iso(r.submitted_at), fix: r.fix_text || null,
     low: lowKeys(r.answers).map((k) => ({ key: k, short: QUESTIONS.find((x) => x.key === k).short, v: r.answers[k] })),
-    called_at: r.called_at || null, called_by: r.called_by || null, call_note: r.call_note || null,
   }));
   const fixes = answered.filter((r) => !isNothing(r.fix_text)).map((r) => ({ id: r.id, text: r.fix_text, name: r.crew_name, ship: r.ship, at: iso(r.submitted_at) }))
     .sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -242,18 +241,9 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
   const list = answered.slice().sort((a, b) => (a.submitted_at < b.submitted_at ? 1 : -1)).map((r) => ({
     id: r.id, at: iso(r.submitted_at), name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, line: r.brand || null, source: r.source,
     overall: r.answers[OVERALL] ?? null, ret: r.answers[RETURN] ?? null, low: lowKeys(r.answers).length, words: !isNothing(r.fix_text),
-    answers: r.answers, fix: r.fix_text || null, called_at: r.called_at || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r), same: allSame(r.answers),
+    answers: r.answers, fix: r.fix_text || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r), same: allSame(r.answers),
   }));
   const waiting = asked.filter((r) => !r.submitted_at).map((r) => ({ id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, invited_at: iso(r.invited_at), reminded_at: iso(r.reminded_at), opened: !!r.opened_at, expires_at: iso(r.expires_at) }));
-  // Nobody to call: name the answer that is furthest from perfect (the lowest average, never a quick one), so a 3 is not lost.
-  let closest = null;
-  if (!calls.length) {
-    const avgOf = (r) => avg(KEYS.map((k) => r.answers[k]).filter(Number.isInteger));
-    const c = scored.filter((r) => avgOf(r) < 5).sort((a, b) => avgOf(a) - avgOf(b) || (a.submitted_at < b.submitted_at ? 1 : -1))[0];
-    if (c) closest = { id: c.id, name: c.crew_name, agency_id: c.agency_id || null, ship: c.ship, at: iso(c.submitted_at), ret: c.answers[RETURN] ?? null,
-      low: KEYS.filter((k) => Number.isInteger(c.answers[k]) && c.answers[k] <= 3).map((k) => ({ key: k, short: QUESTIONS.find((x) => x.key === k).short, v: c.answers[k] })),
-      fours: KEYS.filter((k) => c.answers[k] === 4).length };
-  }
   // The theme table: every line (the line chip does not narrow it), the period's scored answers, the number behind each cell.
   const inPeriod = (Array.isArray(rows) ? rows : []).filter((r) => r && r.submitted_at && r.answers && iso(r.submitted_at) >= from && !quickAnswer(r));
   const cell = (rs, keys) => { const xs = []; let n = 0; for (const r of rs) { const v = keys.map((k) => r.answers[k]).filter(Number.isInteger); if (v.length) { n++; xs.push(...v); } } return { n, avg: round2(avg(xs)) }; };
@@ -273,8 +263,7 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
     overall: round2(avg(ov)), fives: ov.filter((v) => v === 5).length,
     wouldReturn: rt.length ? { yes: rt.filter((v) => v >= 4).length, of: rt.length } : null,
     rate: asked.length ? { answered: loop.answered, of: asked.length } : null,
-    needsCall: calls.filter((c) => !c.called_at), called: calls.filter((c) => c.called_at),
-    statements, fixes, fixGroups: fixGroups(fixes), byLine, loop, list, waiting, closest, themes, quarters,
+    watch: calls, statements, fixes, fixGroups: fixGroups(fixes), byLine, loop, list, waiting, themes, quarters,
     minRead: SURVEY_MIN_READ, minCell: SURVEY_MIN_CELL, minQuarter: SURVEY_MIN_QUARTER,
     questions: QUESTIONS.map((x) => ({ key: x.key, short: x.short, text: statementFor(x, null) })),
   };

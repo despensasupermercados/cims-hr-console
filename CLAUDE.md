@@ -1076,8 +1076,8 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   invitation leaves no row (tried next morning); a failed copy is logged, the answers are kept.
 - **The page**: `GET/POST /hub/survey/<token>` (hub.cims.work, no login, the link is the key — `newHubToken`, open
   `SURVEY_LINK_DAYS` = 30), answers taken ONCE (`checkAnswers`: every statement a whole 1–5), the address shown masked.
-- **Reports › Crew survey** (`GET /api/survey/report`, `surveyReport`): answers, overall, would sail again, answer rate, **need a
-  call** (3+ answers at 1–2; Rita logs the call, `POST /api/survey/call`), where it hurts (lowest first), the fixes, by line, the
+- **Reports › Crew survey** (`GET /api/survey/report`, `surveyReport`): answers, overall, would sail again, answer rate, **the
+  watchlist** (3+ answers at 1–2; nothing is logged here — see THE PAGE IS ONE APP below), where it hurts (lowest first), the fixes, by line, the
   loop (signed off → asked → opened → answered, and who has no email), every answer (Forms rows tagged). Period + line chips.
 - **23 Oct 2026, Miguel's "2. yes to all. 3. yes do it. 4. ok."** Pinned by `test/crew_survey.test.js`.
   - **Who is NOT asked** (`surveySkip`, read the morning the invitation would go): TDG's word or Rita's manual status Not for
@@ -1091,20 +1091,26 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   - **Quick answers**: the page sends the seconds from Start to Send (`answer_secs`, migrations/0041, `SURVEY_ALTERS` through
     `addColumn`); the same answer to every statement in under `QUICK_SECS` = 60 is listed and tagged Quick but left out of
     every average (`quickAnswer`). Forms answers have no timing, so never quick.
-- **THE HR VIEW** (Miguel, 23 Oct 2026, of the mock-up `docs/mockups/crew_survey_report_hrvp_20261023/`: "1. no. 2. yes. 3. not ..
-  4. pdf"). The page answers in its first line (`surveyHeadline`, ONE definition, the page and the PDF read it): under
-  `SURVEY_MIN_READ` = 20 answers it says "We are hearing from too few to be sure" and that the scores are a floor check. Five tiles
-  (answers by line, would sail again, overall, **same answer to every statement** — `allSame`, the ceiling: 4 of the first 7 —,
-  answer rate vs a 60% target); **People to call** = 3+ statements at 1–2 OR "Would return" at 1–2 (`NEEDS_CALL_RETURN`), and
-  with nobody to call the answer furthest from perfect is named (`closest`); **Where it hurts** = the four themes + Would return
-  × the four lines, every line whatever the chip, the n under each cell, under `SURVEY_MIN_CELL` = 3 grey; **What they asked us
-  to fix** grouped by keyword, no model (`FIX_THEMES`, owners Miguel approved: Travel & joining → Rita / TDG, Pay & benefits →
-  Miguel, Training → Ray / Rolando; none → Other, no owner), the clause that names the theme (`fixClause`), a theme named by
-  `FIX_HOT` = 3 leads in red; every statement below 5; **By quarter** only with `SURVEY_MIN_QUARTER` = 10 answers. **No
-  retention block** ("Who came back": "once they are done .. is mostly coz they cost me money and I dont want them back") and
-  **no "left after 3+ contracts" call rule** ("not coz of the same thing"). **The leadership PDF** (`GET /api/survey/report.pdf`,
-  `src/crew_survey_pdf.js`, one page, internal, a download only, never emailed). The Reports frame stacks on a phone (its rail
-  squeezed the body to 46px on main).
+- **THE HR VIEW** (Miguel, 23 Oct 2026: "1. no. 2. yes. 3. not .. 4. pdf"), the rules that stay: under `SURVEY_MIN_READ` = 20
+  answers the scores are a floor check (`surveyHeadline`, read by the PDF); **same answer to every statement** (`allSame`, the
+  ceiling); **the watchlist** = 3+ statements at 1–2 OR "Would return" at 1–2 (`NEEDS_CALL_RETURN`), `watch` on the report — every
+  such answer of the period, nothing ticks it off; **What they asked us to fix** grouped by keyword, no model (`FIX_THEMES`, owners
+  Miguel approved: Travel & joining → Rita / TDG, Pay & benefits → Miguel, Training → Ray / Rolando; none → Other, no owner), the
+  clause that names the theme (`fixClause`), `FIX_HOT` = 3 in red; a line under `SURVEY_MIN_CELL` = 3 answers shows a dash. **No
+  retention block** ("once they are done .. is mostly coz they cost me money and I dont want them back") and **no "left after 3+
+  contracts" rule**. **The leadership PDF** (`GET /api/survey/report.pdf`, `src/crew_survey_pdf.js`, one page, internal, a
+  download only, never emailed). The Reports frame stacks on a phone.
+- **THE PAGE IS ONE APP, NOT ITS OWN** (Miguel, 23 Oct 2026, the same afternoon, on the HR view's page: "is messy the report now ..
+  u have to think about unit .. logging a call is somewhere else in the app. so is a no go .. the way is displaying all the shit is
+  just horrible"). `srvDraw` is drawn with the **Shipboard Feedback report's own parts** — `rpthead` + `pchip` (period, line, PDF),
+  `liveband`, `kgrid`/`ktile` (Answers · Overall · Would sail again · Same answer to all · Answer rate · Watchlist), `rgrid2` of `rblk`
+  (By cruise line table | Lowest statements `frow` bars), the red-ruled **Watchlist** block (green "Clear" when empty, as the
+  Shipboard Feedback watchlist), `rgrid2` (What they asked us to fix table | Are we hearing from everyone? `frow` bars + waiting, no
+  email, Not asked on purpose with Send anyway), **Latest answers** (10, "Show all N", a row opens every statement), the one-line
+  footer. Gone: the big headline, the band, the heat map, the call cards, By quarter, the three-column grid. **No call is logged on
+  the report**: `POST /api/survey/call` and `srvLogCall` are removed; a follow-up is a note on the seafarer's profile (the name links
+  there). The `called_*` columns stay in D1, unread (no schema change). A new report on Reports uses these parts, never its own.
+  Pinned by `test/crew_survey.test.js` (the page run in node:vm).
 - **The switch**: Keyman › Automation "Crew survey" (`/api/survey/auto`, `crew_survey_auto_enabled` + `_since`), OFF until Miguel
   switches it on. `GET /api/survey/preview?id=&what=page|invite|reminder|answers` shows a crew's real data, makes no link, sends nothing.
 - **Never money, never the cruise line**: `crew_survey` (migrations/0040) is read by nothing on the Score Card / bonus path, and

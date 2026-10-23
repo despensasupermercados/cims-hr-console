@@ -1,7 +1,7 @@
 // THE CREW SURVEY'S SENDS AND ROUTES (Miguel, 22–23 Oct 2026; rules in src/crew_survey.js). Public: GET/POST
 // /hub/survey/<token> — the seafarer's page, no login, the link is the key (served on hub.cims.work like the Crew Hub).
-// Signed in: GET /api/survey/report (Reports › Crew survey), POST /api/survey/call (Rita logs the call to a seafarer who
-// needs one), GET/POST /api/survey/auto (the Automation switch), GET /api/survey/preview (the page or an email filled with a
+// Signed in: GET /api/survey/report (Reports › Crew survey; a call to a seafarer is a note on his profile, never logged
+// here — Miguel, 23 Oct 2026), GET/POST /api/survey/auto (the Automation switch), GET /api/survey/preview (the page or an email filled with a
 // crew's real data; it makes no link and sends nothing). The daily run invites 3 days after the sign-off (07:00 Miami,
 // like the welcome email) and reminds once after 5 days. The reads are injected by the Worker, so this module never imports
 // it. FEEDBACK ONLY (§1). Pinned by test/crew_survey.test.js on real SQLite.
@@ -230,17 +230,6 @@ export function installSurvey(deps) {
       if (!leg) return json({ error: "no_ended_contract" }, 404);
       const r = await invite(env, leg, { by: who || "console" });
       return json(r, r.ok ? 200 : (r.error === "already_invited" ? 409 : 400));
-    }
-    if (p === "/api/survey/call" && request.method === "POST") {
-      await ensure(env);
-      const b = await request.json().catch(() => ({}));
-      const id = String(b.id || ""), note = typeof b.note === "string" ? b.note.trim().slice(0, 1000) : "";
-      if (!id) return json({ error: "bad_request" }, 400);
-      const now = new Date().toISOString();
-      const r = await env.DB.prepare("UPDATE crew_survey SET called_at=?, called_by=?, call_note=? WHERE id=? AND submitted_at IS NOT NULL").bind(now, who, note || null, id).run();
-      if (!r || !r.meta || !r.meta.changes) return json({ error: "not_found" }, 404);
-      await log(env, who, "crew_survey_call", id + (note ? " · " + note : "")).run();
-      return json({ ok: true, called_at: now, called_by: who });
     }
     if (p === "/api/survey/auto") {
       await ensure(env);
