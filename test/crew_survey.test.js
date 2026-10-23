@@ -121,7 +121,13 @@ test("the emails: canonical letterhead, no rgba or gradient, bgcolor paired, the
   assert.ok(rem.html.includes("A REMINDER"));
   assert.ok(ans.html.includes("17 of 19 at 5"));
   assert.ok(ans.html.includes("(DCM)"), "the brand's own supervisor title");
-  assert.ok(ans.html.includes("Rita answers this one herself, within a week."));
+  // Nothing promised, nothing left pending (Miguel, 23 Oct 2026: "make them generic all of them .. I don't want anything
+  // standing or pending"): no reply, no deadline, in any email or on the page the seafarer reads.
+  assert.ok(ans.html.includes("The whole CIMS team sees it."));
+  const page = surveyPage({ first: "Ray", ship: "X", brand: "Royal" }) + SURVEY_CLIENT_JS;
+  for (const [name, txt] of [["invite", inv.html + inv.text], ["reminder", rem.html + rem.text], ["answers", ans.html + ans.text], ["page", page]]) {
+    assert.ok(!/writes back|within a week|will reply|answers this one|gets back to you/i.test(txt), name + " promises a reply");
+  }
   assert.ok(ans.html.includes("never part of your bonus"));
 });
 

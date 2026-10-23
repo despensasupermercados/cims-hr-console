@@ -1068,7 +1068,9 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
 - **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own
   address (Rita's override first; TDG's "-" is none → listed on the report's loop, never guessed), **CC Rita + Miguel**, reply-to
   Rita, 07:00 Miami; **one reminder** after `SURVEY_REMIND_DAYS` = 5 (the same email, "Still a minute"). On Send, his copy goes
-  To him, **CC onboardsupport@dg3.com**; Rita answers "the one thing to fix first" within a week (the email says so). A failed
+  To him, **CC onboardsupport@dg3.com**. **Nothing is promised back** (Miguel, 23 Oct 2026: "make them generic all of them .. I
+  don't want anything standing or pending"): no email or page tells the seafarer that Rita replies or by when — "we read every
+  one", "the whole CIMS team sees it"; pinned by `test/crew_survey.test.js`. A failed
   invitation leaves no row (tried next morning); a failed copy is logged, the answers are kept.
 - **The page**: `GET/POST /hub/survey/<token>` (hub.cims.work, no login, the link is the key — `newHubToken`, open
   `SURVEY_LINK_DAYS` = 30), answers taken ONCE (`checkAnswers`: every statement a whole 1–5), the address shown masked.

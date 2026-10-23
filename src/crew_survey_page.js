@@ -85,7 +85,7 @@ function render(){
   if (step === 0) {
     h = '<div class="card hero"><div class="eyebrow">Contract complete</div>'
       + '<h1>How was ' + esc(M.shipShort) + ', ' + esc(M.first) + '?<br><em>Tell us straight.</em></h1>'
-      + '<p>You know what worked and what got in the way better than anyone. Three minutes, and Rita reads every answer herself.</p>'
+      + '<p>You know what worked and what got in the way better than anyone. Three minutes, and every answer is read by the CIMS team.</p>'
       + '<div class="strip"><div class="ln">Your contract</div><div class="ship">' + esc(M.ship) + '</div>'
       + '<div class="row"><div>Signed on<b>' + esc(M.on) + '</b></div><div>Signed off<b>' + esc(M.off) + '</b></div><div>Aboard<b>' + esc(M.aboard) + '</b></div></div></div>'
       + '<div class="facts"><span><b>3</b> minutes</span><span><b>19</b> quick taps</span><span><b>1</b> line in your words</span></div>'
@@ -114,7 +114,7 @@ function render(){
   } else {
     h = '<div class="card done"><div class="tick"><svg viewBox="0 0 48 48"><path d="M13 25 l8 8 l15 -17"/></svg></div>'
       + '<h1>Thank you, ' + esc(M.first) + '.</h1>'
-      + '<p>Your answers are with the CIMS team. Rita reads every one, and when you name something to fix, she writes back.</p>'
+      + '<p>Your answers are with the CIMS team. We read every one, and what you tell us shapes how we support the next contract.</p>'
       + (M.email ? '<div class="copy">A copy of your answers is on its way to <b>' + esc(M.email) + '</b>, with Onboard Support in copy, so you can reply to it any time.</div>' : '')
       + '<div class="sign"><b>Rita Berenyi</b>Manager, People &amp; Culture · enjoy your time home</div></div>';
   }
@@ -146,7 +146,7 @@ export function surveyPage(m) {
 // Answers already sent: the thank-you, never the form again.
 export function surveyThanksPage(m) {
   return shell("Thank you · CIMS", m && m.brand, `<div class="card done"><div class="tick"><svg viewBox="0 0 48 48"><path d="M13 25 l8 8 l15 -17"/></svg></div>
-<h1>Thank you, ${esc((m && m.first) || "there")}.</h1><p>Your answers reached the CIMS team${m && m.when ? " on " + esc(m.when) : ""}. Rita reads every one. Something to add? Reply to the copy in your inbox.</p></div>`);
+<h1>Thank you, ${esc((m && m.first) || "there")}.</h1><p>Your answers reached the CIMS team${m && m.when ? " on " + esc(m.when) : ""}. We read every one. Something to add? Reply to the copy in your inbox.</p></div>`);
 }
 export function surveyGonePage() {
   return shell("Link closed · CIMS", null, `<div class="card done"><h1>This link has closed.</h1><p>Survey links stay open for 30 days. If you still want to tell us something, reply to Rita's email: she reads every one.</p></div>`);

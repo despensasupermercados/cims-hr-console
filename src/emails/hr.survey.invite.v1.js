@@ -19,10 +19,10 @@ export function surveyInviteEmail(d) {
     ? `Still a minute, ${first}?<br><span style="color:${C.grey};">How did ${shipShort} go?</span>`
     : `Welcome home, ${first}.<br><span style="color:${C.grey};">How did ${shipShort} go?</span>`;
   const lead = d.reminder
-    ? `Your survey is still open until ${esc(d.expires)}. Three minutes, and Rita reads every answer herself. If something got in your way on ${shipShort}, this is where we hear it.`
-    : `You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and Rita reads every answer herself.`;
+    ? `Your survey is still open until ${esc(d.expires)}. Three minutes, and every answer is read by the CIMS team. If something got in your way on ${shipShort}, this is where we hear it.`
+    : `You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and every answer is read by the CIMS team.`;
   const subject = d.reminder ? `Still a minute, ${d.first || "there"}? Your survey on ${d.shipShort || d.ship || "your contract"}` : `Welcome home, ${d.first || "there"}. How did ${d.shipShort || d.ship || "your contract"} go?`;
-  const pre = d.reminder ? "Your end-of-contract survey is still open. Three minutes." : "Three minutes, 19 taps, one line in your words. Rita reads every answer.";
+  const pre = d.reminder ? "Your end-of-contract survey is still open. Three minutes." : "Three minutes, 19 taps, one line in your words. Every answer is read.";
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(subject)}</title>
 <style>@media (max-width:480px){.hl{font-size:30px !important}.px{padding-left:20px !important;padding-right:20px !important}}</style></head>
 <body style="margin:0;padding:0;background:#EEF0EC;">
@@ -61,7 +61,7 @@ ${mastRows()}
 <tr><td class="px" style="padding:28px 32px 0;">
  <div style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.gink};border-bottom:1px solid ${C.border};padding-bottom:8px;">WHAT HAPPENS TO YOUR ANSWERS</div>
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:6px;">
-  ${row("Rita reads every one.", "When you name something to fix, she writes back.")}
+  ${row("We read every one.", "What you tell us shapes how we support the next contract.")}
   ${row("They stay with CIMS.", "Never sent to the cruise line, and they never touch your bonus.")}
   ${row("You get a copy.", "The moment you send, your answers land in this inbox.", true)}
  </table></td></tr>
@@ -75,14 +75,14 @@ ${mastRows()}
   const text = [
     d.reminder ? `Still a minute, ${d.first || "there"}? How did ${d.shipShort || d.ship || "your contract"} go?` : `Welcome home, ${d.first || "there"}. How did ${d.shipShort || d.ship || "your contract"} go?`,
     "",
-    d.reminder ? `Your survey is still open until ${d.expires}. Three minutes, and Rita reads every answer herself.` : "You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and Rita reads every answer herself.",
+    d.reminder ? `Your survey is still open until ${d.expires}. Three minutes, and every answer is read by the CIMS team.` : "You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and every answer is read by the CIMS team.",
     "",
     `${d.ship || ""}: signed on ${d.on}, signed off ${d.off}, aboard ${d.aboard}.`,
     "",
     "Start the survey (your own link, no login, open until " + d.expires + "):",
     d.link,
     "",
-    "Rita reads every one. Your answers stay with CIMS: never sent to the cruise line, never part of your bonus. You get a copy the moment you send.",
+    "We read every one. Your answers stay with CIMS: never sent to the cruise line, never part of your bonus. You get a copy the moment you send.",
     "",
     "Rita Berenyi, Manager, People & Culture, Rita.Berenyi@dg3.com",
   ].join("\n");

@@ -2,9 +2,9 @@
 // all now 4 customers .. triggered once the seafarer sign off .. u will use the seafarer email for that .. and cc rita and
 // myself .. when the seafarer answer the survey .. the reply will be for his personal email and cc onboardsupport@DG3.com ..
 // the reporting .. under the hr console under reports tab .. we will call it . crew survey"; mock-ups approved 23 Oct 2026
-// with "1. yes. 2. yes or ok, 3. call it shipboard manager": one reminder after 5 days, Rita answers "the one thing to fix
-// first" within a week, NCL's supervisor reads "shipboard manager"). Pure: the questions, who is due, the reminder, the
-// answer check, the report and the Forms history reader. FEEDBACK ONLY: nothing here feeds the Score Card, bonus_outcome or
+// with "1. yes. 2. yes or ok, 3. call it shipboard manager": one reminder after 5 days, NCL's supervisor reads "shipboard
+// manager"; the same day "make them generic all of them .. I don't want anything standing or pending": no reply to the seafarer
+// is promised anywhere). Pure: the questions, who is due, the reminder, the answer check, the report and the Forms history reader. FEEDBACK ONLY: nothing here feeds the Score Card, bonus_outcome or
 // a payout (§1), and nothing is sent to the cruise line. Pinned by test/crew_survey.test.js.
 
 // Rita's 19 statements, word for word (Microsoft Forms "Seafarer End-of-Contract / Exit Survey", 18 Dec 2025), keyed in HER
