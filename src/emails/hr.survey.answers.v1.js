@@ -1,6 +1,6 @@
 // THE CREW SURVEY: HIS COPY OF THE ANSWERS (Miguel, 22 Oct 2026: "the reply will be for his personal email and cc
-// onboardsupport@DG3.com"; the render approved 23 Oct 2026, with "2. yes" to Rita answering the one thing to fix within a
-// week). Pure: (data) => { subject, html, text }. Sent the moment he presses Send. Every answer is his own number in its
+// onboardsupport@DG3.com"; the render approved 23 Oct 2026; on 23 Oct he took back the "Rita answers within a week"
+// line: "make them generic all of them .. I don't want anything standing or pending" — no reply is promised). Pure: (data) => { subject, html, text }. Sent the moment he presses Send. Every answer is his own number in its
 // statement's words; the colours read 4–5 green, 3 amber, 1–2 red. Canonical letterhead. Pinned by test/crew_survey.test.js.
 import { mastRows } from "../cims-mast.js";
 import { QUESTIONS, SECTIONS, FIX_QUESTION, statementFor, isNothing } from "../crew_survey.js";
@@ -30,7 +30,7 @@ export function surveyAnswersEmail(d) {
   <div style="font-family:${FB};font-size:11px;font-weight:700;letter-spacing:1.4px;color:${C.grey};">THE ONE THING TO FIX FIRST</div>
   ${said ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr><td width="3" bgcolor="${C.green}" style="background:${C.green};width:3px;">&nbsp;</td>
    <td style="padding:2px 0 2px 12px;font-family:${FH};font-size:20px;font-weight:600;line-height:1.35;color:${C.navy};">&ldquo;${esc(d.fix)}&rdquo;</td></tr></table>
-  <div style="font-family:${FB};font-size:13.5px;line-height:1.55;color:${C.slate};margin-top:12px;">Rita answers this one herself, within a week.</div>`
+  <div style="font-family:${FB};font-size:13.5px;line-height:1.55;color:${C.slate};margin-top:12px;">Thank you for telling us. The whole CIMS team sees it.</div>`
     : `<div style="font-family:${FB};font-size:14.5px;line-height:1.55;color:${C.body};margin-top:10px;">${d.fix ? "&ldquo;" + esc(d.fix) + "&rdquo; Thank you, that is good to hear." : "You left this one blank. If something comes to mind, reply to this email."}</div>`}
  </td></tr></table></td></tr>`;
   const subject = `Your answers, ${d.first || "there"}. Thank you.`;

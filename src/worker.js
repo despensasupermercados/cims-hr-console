@@ -8290,7 +8290,7 @@ function srvDraw(){
     h+='<div class="rblk span2"><h3>Where it hurts</h3><div class=csub style="margin-bottom:8px">Every statement, the lowest average first.</div><div class=svbars>'
      +d.statements.map(function(s){var col=s.avg>=4.5?'#5FB946':(s.avg>=4?'#8FBF6A':(s.avg>=3?'#E0A23B':'#C2412F'));
        return '<div class=svbar title="'+escHtml((Q[s.key]||{}).text||'')+'"><span>'+escHtml(s.short)+'</span><span class=svtr><i style="width:'+Math.round(s.avg/5*100)+'%;background:'+col+'"></i></span><span class=svbv>'+s.avg.toFixed(1)+'</span><span class=svbl>'+(s.low?s.low+' low':'')+'</span></div>';}).join('')+'</div></div>';
-    h+='<div class=rblk><h3>The one thing to fix first</h3><div class=csub style="margin-bottom:4px">In their words, newest first. Rita answers each within a week.</div>'
+    h+='<div class=rblk><h3>The one thing to fix first</h3><div class=csub style="margin-bottom:4px">In their words, newest first.</div>'
      +(d.fixes.length?d.fixes.slice(0,12).map(function(f){return '<div class=svfx><div class=svfq>&ldquo;'+escHtml(f.text)+'&rdquo;</div><div class=svfw>'+srvWho(f.name,null)+' &middot; '+escHtml(f.ship||'')+' &middot; '+srvDay(f.at)+'</div></div>';}).join('')
        +(d.fixes.length>12?'<div class=svnote>'+(d.fixes.length-12)+' more under Every answer.</div>':''):'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
     h+='</div>';
