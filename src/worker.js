@@ -46,6 +46,7 @@ import { loadCrewRecord, buildEarmarkNotice, earmarkSubject, renderEarmarkEmail,
 import { fetchShipTurnarounds, fetchBoardPortDays } from "./port_days.js";
 import { batchingDb } from "./d1batch.js";
 import { buildOps } from "./ops_dashboard.js";
+import { tdgFixesSend } from "./tdg_fixes_send.js";
 import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
@@ -82,7 +83,7 @@ import { installWelcome, WELCOME_DDL } from "./welcome_send.js";
 import { installSurvey, SURVEY_DDL, SURVEY_ALTERS } from "./crew_survey_send.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
-const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
+const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, ackContext: instrSeatContext, sendViaMailer, boardLegs });
 // markDeployed: the card STAYS on the ship once sent (Miguel, 5 Oct 2026) — stamped, not removed.
 // Telling Joy changes no date, so it leaves updated_at alone (8 Oct 2026): the sign-off ladder reads a reliever card's
 // updated_at as "Rita's newer action", and the stamp flipped an outgoing crew's typed sign-off to the card's sign-on.
@@ -308,6 +309,7 @@ export default {
         if (p === "/api/me")        return json({ email: session.email });
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/ops")       return apiOps(env);
+        if (p === "/api/ops/tdg-fixes" && request.method === "POST") return apiTdgFixes(request, env, session);
         if (p === "/api/crew")      return apiCrew(env, url);
         if (p === "/api/crew/get")  return apiCrewOne(env, url, session);
         if (p === "/api/crew/save" && request.method === "POST") return apiCrewSave(request, env, session);
@@ -1955,7 +1957,7 @@ async function apiSga(env) {
 // board (rotationSections, the ONE schedule and every verdict on it), the workforce + travel figures (apiDashboard),
 // the score queue, the crew's dates (documents, birthdays) and the sign-off kit sends. buildOps (src/ops_dashboard.js,
 // pure) only sorts what the board already says into the questions Rita acts on; it decides no date and no status.
-async function apiOps(env) {
+async function apiOps(env, asData) {
   const none = () => ({ results: [] });
   const [rot, dashRes, queueRes, crewRes, instrRes, linkRes] = await Promise.all([
     rotationSections(env),
@@ -1971,11 +1973,23 @@ async function apiOps(env) {
   const dash = await dashRes.json();
   const queue = queueRes && queueRes.ok ? await queueRes.json() : {};
   const crew = ((crewRes && crewRes.results) || []).map((c) => ({ sc: c.sc, first: c.first, last: c.last, dob: c.dob, vessel: c.vessel, docs: { med: c.med, sirb: c.sirb, pp: c.pp, usv: c.usv, sch: c.sch } }));
-  return json(buildOps({
+  const out = buildOps({
     today: TODAY(), sections: rot.sections || [], pool: rot.pool || [], sources: rot.sources || {}, issues: rot.issues || [],
     dash, queue, crew, kit: { instr: (instrRes && instrRes.results) || [], link: (linkRes && linkRes.results) || [] },
-  }));
+  });
+  return asData ? out : json(out);
 }
+const opsData = (env) => apiOps(env, true);
+// "Email Joy · To correct in TDG" (tdg_fixes_send.js): the rows the dashboard shows, read again at the click.
+async function apiTdgFixes(request, env, session) {
+  const body = await request.json().catch(() => ({}));
+  const r = await tdgFixesSend(env, body, session, {
+    ops: opsData, recipient: deployRecipient, cc: deployCc, send: sendViaMailer, log: logActivity, now: () => new Date().toISOString(),
+    lastSend: (env) => env.DB.prepare("SELECT detail, at FROM activity_log WHERE action='tdg_fixes_email' ORDER BY at DESC LIMIT 1").first(),
+  });
+  return json(r, r.ok ? 200 : r.error === "already_sent" ? 409 : r.error === "nothing_to_correct" ? 400 : 502);
+}
+
 async function apiDashboard(env) {
   const today = TODAY(), in90 = plus(90);
   // PERF (2026-07): this route used to issue ~15 D1 queries ONE AFTER ANOTHER — each a full
@@ -8672,8 +8686,27 @@ function opsTdg(t){
     var txt=f.kind==='held'?' still On board &middot; relieved'+(f.by?' by '+escHtml(f.by):'')+(f.byOn?' '+opsD(f.byOn):''):' On board, no embark date';
     return '<div style="display:flex;gap:8px;align-items:baseline">'+opsCode(f.code,f.ship)+'<span><b>'+escHtml(f.surname)+'</b>'+txt+'</span></div>';}).join('')+'</div>';
   else h+='<p class=oc-sub>Nothing: the file agrees with the board.</p>';
+  if(t.fixes.length)h+='<button type=button class=oc-link data-tdgfix=1 style="align-self:flex-start">Email Joy &middot; '+(t.fixes.length===1?'this one':'all '+t.fixes.length)+' &rarr;</button>';
   h+='<p class=oc-sub style="font-size:11.5px">Earmarks TDG agrees with: '+t.earmarks.agree+' of '+t.earmarks.total+' &middot; &quot;TDG says otherwise&quot; rows: '+t.issues+'</p></div></section>';
   return h;
+}
+/* "Email Joy" (tdg_fixes_send.js, Miguel 23 Oct 2026: "all approved"): a dry run names the recipient and the rows, one
+   confirm sends; the same rows sent in the last 7 days ask once more; the button is busy while it sends. */
+function opsTdgFix(b){
+  if(b._busy)return;b._busy=true;var t0=b.innerHTML;b.innerHTML='Checking&hellip;';
+  var post=function(body){return fetch('/api/ops/tdg-fixes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();});};
+  var done=function(msg){b._busy=false;b.innerHTML=t0;if(msg)alert(msg);};
+  post({}).then(function(d){
+    if(!d||!d.ok)return done('Could not prepare the email: '+((d&&(d.detail||d.error))||'no answer'));
+    if(!d.recipient)return done('No recipient configured: set DEPLOY_TO on the Worker. Nothing was sent.');
+    var q='Email Joy the '+d.count+(d.count===1?' row':' rows')+' to correct in TDG?\\n\\nTo: '+d.recipient+(d.cc&&d.cc.length?'\\nCc: '+d.cc.join(', '):'')+'\\nSubject: '+d.subject+(d.sameAsLast?'\\n\\nThe same rows were emailed '+opsD(String(d.lastSent).slice(0,10))+'. Send them again?':'');
+    if(!confirm(q))return done();
+    b.innerHTML='Sending&hellip;';
+    return post({send:true,resend:!!d.sameAsLast}).then(function(r){
+      if(r&&r.ok){done();b.outerHTML='<span class=oc-sub style="color:#2E7D32">Sent to '+escHtml(r.recipient)+' &middot; '+r.count+(r.count===1?' row':' rows')+'</span>';return;}
+      done('Not sent: '+((r&&(r.detail||r.error))||'no answer'));
+    });
+  }).catch(function(){done('Not sent: no connection.');});
 }
 function OPS_addDays(iso,n){var d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
 function opsDocs(da){
@@ -8745,6 +8778,7 @@ function opsBind(){
   v.querySelectorAll('[data-f]').forEach(function(b){b.onclick=function(){OPS_F=b.getAttribute('data-f');v.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',String(x===b));});var tb=document.getElementById('oc-rows');if(tb&&OPS)tb.innerHTML=opsRows(OPS.changes.rows);opsBindRows();};});
   v.querySelectorAll('[data-gantt]').forEach(function(b){b.onclick=function(){Promise.resolve(show('rotation')).then(function(){setTimeout(function(){try{fleetGantt();}catch(_){}},150);});};});
   v.querySelectorAll('[data-crew]').forEach(function(b){b.onclick=function(){openCrew(b.getAttribute('data-crew'));};});
+  v.querySelectorAll('[data-tdgfix]').forEach(function(b){b.onclick=function(){opsTdgFix(b);};});
   opsBindWeek();opsBindRows();
 }
 function opsBindWeek(){

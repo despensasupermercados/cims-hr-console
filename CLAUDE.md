@@ -693,11 +693,16 @@ held / undated seats TDG must correct); Documents aboard; the crew and travel. R
 no embark date is TDG's to correct, never a crew change; an overdue seat is past whatever its earmark says. **Ship codes
 are the cruise lines' own** (`src/ship_codes.js`, from cims-timecard `ship_contact`: QN Quantum / QS Quest, ID
 Independence / IN Infinity, AX Apex / AT Ascent — "the first two letters" collides on six pairs); Miguel: "use the 2
-letters .. rita knows who they are". The "Email Joy · all four" send he approved: its template is RENDERED, NOT wired
-(`hr.keyman.tdg_fixes.v1`, 23 Oct 2026, proofs `docs/mockups/emails_20261023/`): one email to Joy with every row of "To
-correct in TDG" (`tdg.fixes`: held — TDG still has them On board after the reliever signed on; undated — On board, no
-embark date), each card saying what the file shows and what to enter, never a date the console inferred. Pinned by
-`test/ops_dashboard.test.js`, `test/renders_20261023.test.js`.
+letters .. rita knows who they are". **"Email Joy" is WIRED** (render approved 23 Oct 2026: "all approved";
+`hr.keyman.tdg_fixes.v1`, proofs `docs/mockups/emails_20261023/`): the TDG card's "Email Joy · all N" button
+(`opsTdgFix`) runs `POST /api/ops/tdg-fixes` (`src/tdg_fixes_send.js`) — a dry run first that names the recipient, the copy
+and the subject, one confirm, then ONE email to Joy with every row of "To correct in TDG" read again at the click
+(`opsData` = `apiOps(env, true)`; held — TDG still has them On board after the reliever signed on; undated — On board, no
+embark date), each card saying what the file shows and what to enter, never a date the console inferred. Recipient and copy
+are Deploy's (`DEPLOY_TO`, else `TG_NOTIFY`; `DEPLOY_CC`, Rita) — unset = refused, never a guess; reply-to the sender, signed
+with their first name; the same rows within `RESEND_DAYS` = 7 ask once more (`already_sent`), a changed set is a new email;
+every send is on `activity_log` (`tdg_fixes_email`, the rows' key). Pinned by `test/ops_dashboard.test.js`,
+`test/tdg_fixes_send.test.js`, `test/renders_20261023.test.js`.
 
 ## 10j. THE TRAVEL TAB — Miguel, 15 Oct 2026 ("review the code .. connect the dots .. fix bugs")
 His decisions, same day: (1) **TDG's Statement of General Account (SGA) is the audited number, Rita's travel workbook the
@@ -987,22 +992,31 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   file put aboard, Rita's card the file confirms or earmarks for that hull — the dashboard's `tdgHas` reads the same; a
   card only the console holds, or "told Joy", is not): a plan only the console holds must reach nobody (§10d). A Philippine
   mobile reads "+63 917 555 0142" with tel: and WhatsApp links (`phoneOf`), anything else as written; TDG's "-" prints
-  nothing. Every active crew had a phone and an email on file on 19 Oct 2026. The reliever is NOT sent the outgoing crew's
-  contact yet: its email is RENDERED, NOT wired (`hr.signoff.reliever.v1`, 23 Oct 2026, proofs
-  `docs/mockups/emails_20261023/`) — a HANDOVER PASS with the outgoing printer's name, mobile (WhatsApp) and email, "together"
-  only on an overlap, the same IN TDG rule, three steps (say hello, read the Digital Handover Notes, sign your own count).
+  nothing. Every active crew had a phone and an email on file on 19 Oct 2026. **The reliever's handover pass is WIRED**
+  (render approved 23 Oct 2026, "all approved"; `hr.signoff.reliever.v1`, proofs `docs/mockups/emails_20261023/`): it goes
+  with the instructions email, the same send (the daily T-14 run and the crew page's button, `sendRelieverPass` in
+  `signoff_instructions.js`), TO the incoming printer — the outgoing one's name, mobile (WhatsApp) and email, "together"
+  only on an overlap, three steps (say hello, read the Digital Handover Notes, sign your own count); CC onboardsupport,
+  reply-to Rita. Only when TDG has the reliever (`rel.tdg`) and the reliever has an email; once per seat and reliever
+  (`activity_log` `reliever_pass_sent`, key sc · sign-off · reliever); a failure is logged (`reliever_pass_failed`) and never
+  blocks the instructions.
   **The T-7 sign-off link email** (`signoff_ack.js` ACK_REQUEST_EMAIL, July's design: the retired navy bar, Arial only, an ISO
-  date, and a page with a tick box AND a button) was rendered as it stands on 23 Oct 2026 for Miguel; its switch stays off. **The pass-style rebuild is a MOCK-UP** (`hr.signoff.link.v2`, `linkEmail`, NOT wired; proofs
-  `docs/mockups/signoff_link_20261023/`, Miguel asked "yes or no .. give me the mocks up"): "One week to go, <first name>.",
-  the same pass (FROM code TO HOME, signed on · sign-off, time aboard), the four lines the crew confirms (`CONFIRMS`, one list
-  for the email and the page), ONE button that opens the confirmation page — the click confirms nothing (a mail scanner
-  opens every link); the page has the same pass and one button, no tick box. Pinned by `test/renders_20261023.test.js`.
+  date, and a page with a tick box AND a button) is RETIRED. **The 7-day email is the pass** (render approved 23 Oct 2026,
+  "all approved"; `hr.signoff.link.v2`, `linkEmail`, proofs `docs/mockups/signoff_link_20261023/`): "One week to go, <first
+  name>.", the same pass (FROM code TO HOME, signed on · sign-off, time aboard), the four lines the crew confirms (`CONFIRMS`,
+  one list for the email and the page), ONE button that opens the confirmation page — the click confirms nothing (a mail
+  scanner opens every link); reply-to Rita. The pass is kept on the row (`ack_request.pass_json`, the ALTER in the module's
+  guard; filled from the board's seat, `ackContext` = `instrSeatContext`), so the page shows what the email showed.
+  **The page (`ACK_HTML`) is the same pass**, the four lines from `/api/ack/form` and ONE button — no tick box; the tap is the
+  confirmation (recorded once with its time; the team's notice unchanged). A row filed before the pass was kept reads its
+  old fields. Its switch stays OFF until Miguel turns it on. Pinned by `test/signoff_link_v2.test.js`,
+  `test/renders_20261023.test.js`.
 - The HON bonus box (Ship handover factor, reczJqxZnOuzkv74X) shows only for sign-offs on or after 1 Nov 2026.
 - **One switch per email** (the rail's Automation: Instructions · Sign-off link · GSM review; `/api/autosend` with `kind`).
   Switching a kind ON stamps the day (`auto_send_instr_since` / `auto_send_link_since`): a seat already inside the
   window is never auto-emailed, only listed in the digest ("inside the window at switch-on — send by hand"). The old
-  one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was NOT reviewed in this round: its
-  switch stays off until Miguel signs off its rendered email.
+  one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was approved in the pass style on 23 Oct
+  2026; its switch stays off until Miguel turns it on.
 - **A TRAINING VISIT IS A TRIP, NOT A CONTRACT; THE TRAINERS ARE TAGGED** (Miguel, 17 Oct 2026: Jonathan "sometimes he goes
   to the ship to teach as crew and then home [to] support .. same as Ohji"; then "perhaps you can tag the 3 guys as trainers"
   — of the options, "Trainer tag"). Jonathan Placer Alonzo sailed a full contract (Rhapsody, Dec 2025 – Sep 2026) and is now

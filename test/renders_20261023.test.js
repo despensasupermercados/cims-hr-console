@@ -46,10 +46,14 @@ test("the reliever's pass: the outgoing printer's contact, 'together' only on an
   for (const h of [a.html, b.html]) { assert.doesNotMatch(h, /rgba\(|gradient/); assert.match(h, /CRUISE INDUSTRY MANAGED SERVICES/); }
 });
 
-test("not wired: nothing outside src/emails imports either until Miguel signs off the render", () => {
+// WIRED 23 Oct 2026 (Miguel: "all approved"): Joy's email through the dashboard's button (tdg_fixes_send.js), the reliever's
+// pass with the instructions email (signoff_instructions.js), and nowhere else.
+test("wired: each email has one sender", () => {
   const dir = new URL("../src/", import.meta.url);
-  const users = readdirSync(dir).filter((f) => f.endsWith(".js")).filter((f) => /hr\.keyman\.tdg_fixes\.v1|hr\.signoff\.reliever\.v1/.test(readFileSync(new URL(f, dir), "utf8")));
-  assert.deepEqual(users, []);
+  const users = (rx) => readdirSync(dir).filter((f) => f.endsWith(".js")).filter((f) => rx.test(readFileSync(new URL(f, dir), "utf8")));
+  assert.deepEqual(users(/hr\.keyman\.tdg_fixes\.v1/), ["tdg_fixes_send.js"]);
+  assert.deepEqual(users(/hr\.signoff\.reliever\.v1/), ["signoff_instructions.js"]);
+  assert.deepEqual(users(/hr\.signoff\.link\.v2/), ["signoff_ack.js"]);
 });
 
 // The 7-day sign-off link email in the pass style (Miguel, 23 Oct 2026: "give me the mocks up .. yes or no on rebuilding the
@@ -68,8 +72,4 @@ test("the 7-day email in the pass style: one week to go, the dates, the four lin
   assert.doesNotMatch(t.replace(/hon\.cims\.work/g, ""), /\bHON\b/);
   assert.doesNotMatch(m.html, /rgba\(|gradient|type="checkbox"/); assert.match(m.html, /CRUISE INDUSTRY MANAGED SERVICES/);
   assert.doesNotMatch(t, /\b(his|her|he|she)\b/i);
-});
-test("not wired: nothing outside src/emails imports the 7-day pass email until Miguel says yes", () => {
-  const dir = new URL("../src/", import.meta.url);
-  assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".js")).filter((f) => /hr\.signoff\.link\.v2/.test(readFileSync(new URL(f, dir), "utf8"))), []);
 });
