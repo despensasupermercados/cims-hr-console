@@ -10,7 +10,7 @@ import { applyOverride } from "../src/override.js";
 import { auditRequestEmail } from "../src/emails/hr.audit.request.v1.js";
 import { docsInEmail } from "../src/emails/hr.audit.docsin.v1.js";
 import { overdueEmail } from "../src/emails/hr.audit.overdue.v1.js";
-import { p43ReadState, mmlReadState, coverFor } from "../src/audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess } from "../src/audit_read.js";
 
 function d1() {
   const db = new DatabaseSync(":memory:");
@@ -504,4 +504,39 @@ test("the request page never repeats an old read's 'No part past its rated life'
   ins("u_new", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeRows: 45, lifeOver: [], version: 4 } });
   const m2 = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
   assert.equal(m2.mgmt.say, "Read. No part past its rated life.", "a read that carried life rows keeps its own words");
+});
+
+// R1 (Miguel, 23 Oct 2026: "is not that Rolando needs to approve .. is that you the AI tell the crew the assessment of it"):
+// the crew's own page says what the Pattern 43 scan shows the moment it is read. Built from HON's measurement and the DG3
+// tech library rule it carries (Kevin Jugao's Pursuit read, 16 Oct 2026, as stored); never "replace", never OBP's numbers.
+const PURSUIT_MARK = { head: "LINES ALONG THE FEED IN CYAN", line: "1 line · cyan half tone · green · blue · gray", ink: "cyan", mark: "lines along the feed", detail: "1 line",
+  where: "cyan half tone · green · blue · gray", pages: [7, 10, 11, 12], part: "CYAN DRUM OR CHARGING POLE", rule: 4,
+  check: { say: "an even line reads as the drum, an uneven one with darker sections as the charging pole; this scan does not settle which", src: "DG3 tech library", href: null } };
+test("R1: the crew is told what the Pattern 43 scan shows, in full, from HON's measurement", () => {
+  const a = p43Assess({ state: "findings", legend: { items: [PURSUIT_MARK] } }, "Dexter");
+  assert.equal(a.head, "1 mark on this press.");
+  assert.equal(a.items[0].title, "Lines along the feed in cyan · 1 line");
+  assert.deepEqual(a.items[0].lines.map((l) => l[0]), ["Where", "What it means", "Points to", "Check on board"]);
+  assert.equal(a.items[0].lines[0][1], "Cyan half tone (page 7) · Green (page 10) · Blue (page 11) · Gray (page 12)");
+  assert.match(a.items[0].lines[1][1], /comes from the cyan unit alone/);
+  assert.equal(a.items[0].lines[2][1], "The cyan drum or charging pole (DG3 tech library).");
+  assert.match(a.items[0].lines[3][1], /^Print page 7 of Pattern 43 again and follow the line along its length: an even line reads as the drum/);
+  assert.match(a.after, /Keep printing\. Parts are changed on copy quality/); assert.match(a.after, /Dexter sees the same reading/);
+  assert.doesNotMatch(JSON.stringify(a), /\breplace\b/i, "copy quality decides: never 'replace'");
+  assert.equal(p43Assess({ state: "clean", legend: { items: [] } }).head, "No marks on any page. Nothing to do for this press.");
+  assert.equal(p43Assess({ state: "unreadable" }), null); assert.equal(p43Assess(null), null);
+});
+
+test("R1: the crew's state carries the assessment on a read Pattern 43 only, and the page draws it", async () => {
+  const t = setup({ reads: { p43: { ok: true, version: 5, state: "findings", legend: { state: "findings", items: [PURSUIT_MARK] } } } });
+  const { token } = await makeRequest(t);
+  const u = await (await upload(t, token, "S1", "p43")).json();
+  let st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
+  assert.equal(st.machines[0].p43.assess, undefined, "nothing said before the read");
+  await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null);
+  st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
+  const a = st.machines[0].p43.assess;
+  assert.equal(a.state, "findings"); assert.equal(a.items[0].title, "Lines along the feed in cyan · 1 line"); assert.match(a.after, /Dexter sees the same reading/);
+  const pg = await (await t.call("GET", "/audit/u/" + token, undefined, null)).text();
+  assert.match(pg, /function assess\(s\)/); assert.match(pg, /\.asx\{/);
 });

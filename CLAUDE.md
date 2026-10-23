@@ -1772,8 +1772,17 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   falls due that day and, under it, what is still open past its date (`followupBatches`; an owner with only late items hears
   nothing that day); the owner's address from `OWNER_EMAIL` (the five names the audit offers), anything else logged
   `no_recipient`, never guessed; link `audit.cims.work/#fu`. Pinned by `test/audit_visit.test.js`,
-  `test/audit_filed_email.test.js`, `test/audit_followup_email.test.js`. Still to build: Rolando's
-  Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
+  `test/audit_filed_email.test.js`, `test/audit_followup_email.test.js`. Still to build: the import of the 61 (I1), the
+  web rail (W1).
+- **THE CREW IS TOLD WHAT THE PATTERN 43 SCAN SHOWS** (R1; Miguel, 23 Oct 2026: "is not that Rolando needs to approve .. is
+  that you the AI tell the crew the assessment of it"). R1 was never a sign-off by Rolando. The crew's page used to say
+  "Received" while only the team saw the marks; now each read Pattern 43 row carries `assess` (`audit_read.p43Assess`, pure,
+  attached in `crewState`) and the page draws it under the press: clean → "No marks on any page. Nothing to do for this
+  press."; marks → per mark Where (each page), What it means (one colour isolates the unit), Points to (the part and the DG3
+  tech library), Check on board (print page N again, how to tell which), then "Keep printing. Parts are changed on copy
+  quality, not on a mark …" and that the auditor sees the same reading. Built in code from HON's measurement, the same lines
+  Dexter's app shows (`p43Lines`) — no model writes it, nothing is guessed, never "replace". Pinned by
+  `test/audit_request.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`
