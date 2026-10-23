@@ -553,3 +553,89 @@ test("the wire: a filed audit reaches the Score Card's Dexter's audit slider", a
   assert.equal((await card("SC-1", "Oasis", on, off)).sliders.sComm, 10, "a TEST request never reaches the Score Card");
   assert.ok(today >= on);
 });
+
+// THE EMAILS A FILED AUDIT SENDS (Miguel signed off the renders, 23 Oct 2026: "You need to merge them and have these emails
+// ready to go"). The filed email to Miguel with Rita, Ray and Rolando in copy; the dispatch note to Rita alone, only when the
+// crew rated the dispatch; never to the crew; one that did not go is retried by the sweep, and never twice once sent.
+test("filing sends the filed email (Miguel; Rita, Ray, Rolando) and the dispatch note (Rita), once, never to the crew", async () => {
+  const t = setup();
+  const id = await completeRequest(t);
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  const d = cleanVisit(v); d.crew.dispatch = 2; d.crew.dispatchNote = "No hotel booking.";
+  d.ov.followup = { owner: "Rolando", due: "2099-11-15", text: "MFD refresher" };
+  const before = t.sent.length;
+  const ok = await (await t.call("POST", "/api/audit/request/grade", { id, visit: d })).json();
+  assert.equal(ok.ok, true);
+  assert.deepEqual([ok.mailed.filed.ok, ok.mailed.dispatch.ok], [true, true]);
+  const mails = t.sent.slice(before);
+  const filed = mails.find((m) => m.templateId === "hr.audit.filed.v1"), disp = mails.find((m) => m.templateId === "hr.audit.dispatch.v1");
+  assert.deepEqual([filed.to, filed.cc], [["Miguel.Sanmartin@dg3.com"], ["Rita.Berenyi@dg3.com", "Ray.Guerra@dg3.com", "Rolando.Abellan@dg3.com"]]);
+  assert.match(filed.subject, /^Printshop audit · Oasis · John Gorre · 4\/5 · follow-up for Rolando$/);
+  assert.match(filed.text, /Open the audit: https:\/\/audit\.cims\.work\/#q=/);
+  assert.doesNotMatch(filed.html + filed.text, /No hotel booking/, "the dispatch words go to Rita alone");
+  assert.deepEqual(disp.to, ["Rita.Berenyi@dg3.com"]); assert.equal(disp.cc, undefined);
+  assert.match(disp.html, /No hotel booking\./);
+  for (const m of mails) assert.ok(![].concat(m.to, m.cc || []).includes("john@gmail.com"), "never to the crew");
+  const log = t.db.prepare("SELECT kind, ok FROM audit_send_log WHERE request_id=? AND kind IN ('filed','dispatch') ORDER BY kind").all(id).map((r) => [r.kind, r.ok]);
+  assert.deepEqual(log, [["dispatch", 1], ["filed", 1]]);
+  const again = await t.R._internal.sendFiledMails(t.env, id);
+  assert.deepEqual(again, {}, "sent once: a second call sends nothing");
+});
+
+test("no dispatch rating, no dispatch note; a failed filed email is retried by the sweep and only one that was tried", async () => {
+  const t = setup();
+  let fail = true;
+  const sentOk = [];
+  const env = t.env;
+  const R = installAuditRequest({ json, htmlResponse: (b) => new Response(b), ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => BOARD,
+    sendViaMailer: async (e, m) => { const msg = m || e; if (fail && /^hr\.audit\.filed/.test(msg.templateId)) return { ok: false, error: "mailer down" }; sentOk.push(msg); return { ok: true }; } });
+  const id = await completeRequest(t);
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  const d = cleanVisit(v); d.crew.dispatch = null;
+  // filed through this harness's mailer (down for the filed email)
+  const call = async (body) => R.handle("/api/audit/request/grade", new Request("https://audit.cims.work/api/audit/request/grade", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), env, new URL("https://audit.cims.work/api/audit/request/grade"), { email: "dexter.lawrence@dg3.com" });
+  const ok = await (await call({ id, visit: d })).json();
+  assert.equal(ok.ok, true, "an email that did not go never undoes the filing");
+  assert.deepEqual(ok.mailed, { filed: { ok: false, error: "mailer down" } }, "no rating: no dispatch note");
+  assert.equal(t.db.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind='filed'").get(id).ok, 0);
+  // the sweep retries it once the failed attempt is 10 minutes old
+  t.db.prepare("UPDATE audit_send_log SET sent_at=? WHERE request_id=? AND kind='filed'").run(new Date(Date.now() - 20 * 60000).toISOString(), id);
+  fail = false;
+  const out = await R.sweep(env);
+  assert.equal(out.filedMail, 1);
+  assert.ok(sentOk.some((m) => m.templateId === "hr.audit.filed.v1"));
+  assert.equal(t.db.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind='filed'").get(id).ok, 1);
+  assert.equal((await R.sweep(env)).filedMail, 0, "never twice");
+});
+
+test("a follow-up's owner hears on its date: one email per owner per day from 07:00 Miami, late ones under it, nobody guessed", async () => {
+  const { followupBatches, ownerEmail, localDayHour } = await import("../src/audit_request.js");
+  assert.equal(ownerEmail("Ray"), "Ray.Guerra@dg3.com"); assert.equal(ownerEmail("rolando abellan"), "Rolando.Abellan@dg3.com");
+  assert.equal(ownerEmail("The captain"), null); assert.equal(ownerEmail("x@gmail.com"), null);
+  assert.deepEqual(localDayHour(new Date("2026-11-02T11:30:00Z")), { day: "2026-11-02", hour: 6 }, "EST after the clocks change");
+  assert.deepEqual(localDayHour(new Date("2026-10-23T02:00:00Z")), { day: "2026-10-22", hour: 22 }, "Miami's day, not UTC's");
+  const F = (o) => ({ status: "open", ship: "Oasis", text: "x", ...o });
+  const b = followupBatches([F({ owner: "Ray", due: "2026-10-23" }), F({ owner: "Ray", due: "2026-10-20" }), F({ owner: "Rita", due: "2026-10-19" }), F({ owner: "Ray", due: "2026-10-30" }), F({ owner: "Ray", due: "2026-10-23", status: "fixed" })], "2026-10-23");
+  assert.deepEqual(b.map((x) => [x.email, x.due.length, x.late.length]), [["Ray.Guerra@dg3.com", 1, 1]], "Rita has only a late one: no email today");
+
+  const t = setup();
+  const id = await completeRequest(t);
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  const d = cleanVisit(v); d.ov.followup = { owner: "Ray", due: "2099-11-15", text: "Resend the SOPs folder" };
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id, visit: d })).json()).ok, true);
+  t.db.prepare("UPDATE audit_followup SET due='2026-11-02'").run();
+  const before = t.sent.length;
+  assert.equal(await t.R._internal.sendFollowups(t.env, new Date("2026-11-02T11:30:00Z")), 0, "06:30 Miami: nothing yet");
+  const at = new Date("2026-11-02T12:05:00Z"); // 07:05 Miami
+  const n = await t.R._internal.sendFollowups(t.env, at);
+  assert.equal(n, 1);
+  const m = t.sent.slice(before).find((x) => x.templateId === "hr.audit.followup.v1");
+  assert.deepEqual(m.to, ["Ray.Guerra@dg3.com"]);
+  assert.match(m.subject, /^Due today · Oasis · Resend the SOPs folder$/);
+  assert.match(m.text, /Open the follow-ups: https:\/\/audit\.cims\.work\/#fu/);
+  assert.equal(await t.R._internal.sendFollowups(t.env, at), 0, "once a day");
+  t.db.prepare("UPDATE audit_followup SET owner='The captain'").run();
+  t.db.prepare("DELETE FROM audit_send_log WHERE kind LIKE 'followup:%'").run();
+  assert.equal(await t.R._internal.sendFollowups(t.env, at), 0, "no address: logged, never guessed");
+  assert.equal(t.db.prepare("SELECT note FROM audit_send_log WHERE kind LIKE 'followup:%'").get().note, "no_recipient: The captain");
+});

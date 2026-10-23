@@ -76,8 +76,8 @@ test("a visit's two dates read like a visit", () => {
   assert.equal(visitWhen(null, "2026-10-14T17:00:00Z"), "Oct 14, 2026");
 });
 
-test("not wired to send until Miguel signs off the render (CIMS email standard §5): nothing outside src/emails imports them", () => {
+test("wired (Miguel signed off the renders, 23 Oct 2026): only the audit's request module sends them, to the design's people", () => {
   const dir = new URL("../src/", import.meta.url);
   const users = readdirSync(dir).filter((f) => f.endsWith(".js")).filter((f) => /hr\.audit\.(filed|dispatch)\.v1/.test(readFileSync(new URL(f, dir), "utf8")));
-  assert.deepEqual(users, [], "wiring the send is a deliberate change of this test, after the sign-off");
+  assert.deepEqual(users, ["audit_request.js"]);
 });

@@ -19,6 +19,9 @@ import { p43ReadState, mmlReadState, coverFor } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
+import { filedEmail, TEMPLATE_ID as FILED_ID } from "./emails/hr.audit.filed.v1.js";
+import { dispatchEmail, TEMPLATE_ID as DISPATCH_ID } from "./emails/hr.audit.dispatch.v1.js";
+import { followupEmail, TEMPLATE_ID as FOLLOWUP_ID } from "./emails/hr.audit.followup.v1.js";
 import { auditUploadHtml, auditClosedHtml } from "./audit_upload_ui.js";
 import { normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, PHOTO_STEPS, VISIT_VERSION } from "./audit_steps.js";
 import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
@@ -36,6 +39,41 @@ const J = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (e) { return d
 async function sha256hex(s) { const b = await crypto.subtle.digest("SHA-256", typeof s === "string" ? new TextEncoder().encode(s) : s); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join(""); }
 function newToken() { const b = new Uint8Array(18); crypto.getRandomValues(b); return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
 export const isLive = (env) => String(env.AUDIT_LIVE || "").toLowerCase() === "true";
+
+// THE THREE EMAILS A FILED AUDIT SENDS (Miguel signed off the renders, 23 Oct 2026: "You need to merge them and have these
+// emails ready to go"; renders in docs/mockups/audit_filed_20261019/ and audit_followup_20261020/). A TEST request never
+// reaches here (it cannot be filed); the addresses are the design's ("Filed": Miguel, Rita, Ray and Rolando in copy;
+// "Dispatch": Rita alone; a follow-up: its owner alone). Never to the crew.
+export const AUDIT_ORIGIN = "https://audit.cims.work";
+export const FILED_TO = ["Miguel.Sanmartin@dg3.com"];
+export const FILED_CC = ["Rita.Berenyi@dg3.com", "Ray.Guerra@dg3.com", "Rolando.Abellan@dg3.com"];
+export const DISPATCH_TO = ["Rita.Berenyi@dg3.com"];
+// the follow-up's owner is one of the names the audit's last step offers (FOLLOW_OWNERS); anything else has no address
+export const OWNER_EMAIL = { rolando: "Rolando.Abellan@dg3.com", ray: "Ray.Guerra@dg3.com", rita: "Rita.Berenyi@dg3.com", dexter: "Dexter.Lawrence@dg3.com", miguel: "Miguel.Sanmartin@dg3.com" };
+export function ownerEmail(owner) {
+  const t = String(owner || "").trim();
+  if (/^[^@\s]+@dg3\.com$/i.test(t)) return t;
+  return OWNER_EMAIL[t.split(/\s+/)[0].toLowerCase()] || null;
+}
+export const FILED_RETRY_DAYS = 3;        // a filed / dispatch email that did not go is tried again this long
+export const FOLLOWUP_TZ = "America/New_York", FOLLOWUP_HOUR = 7; // a follow-up's owner hears on its date, from 07:00 Miami
+// The day and hour in Miami: the follow-up's date is a calendar day there, never UTC's.
+export function localDayHour(d = new Date(), tz = FOLLOWUP_TZ) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
+  return { day: p.year + "-" + p.month + "-" + p.day, hour: Number(p.hour) };
+}
+// One email per owner per day: the follow-ups due that day, and under them what is still open past its date. An owner
+// with nothing due today hears nothing (a late one rides on the next day something falls due, and stays on the page).
+export function followupBatches(rows, day) {
+  const by = new Map();
+  for (const f of rows) {
+    if (f.status !== "open" || !f.due || f.due > day) continue;
+    const k = ownerEmail(f.owner) || "?" + String(f.owner || "").trim();
+    if (!by.has(k)) by.set(k, { email: k[0] === "?" ? null : k, owner: String(f.owner || "").trim(), due: [], late: [] });
+    (f.due === day ? by.get(k).due : by.get(k).late).push(f);
+  }
+  return [...by.values()].filter((b) => b.due.length);
+}
 
 export function installAuditRequest(deps) {
   const { json, htmlResponse, ensureAudit, sendViaMailer, logActivity, applyOverride, rotationSections } = deps;
@@ -309,6 +347,8 @@ export function installAuditRequest(deps) {
     d.repeat = repeatCounts(c.prevData, d);
     // what the documents said, kept with the visit: the filed record never depends on a later read
     d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life, lifeRead: m.lifeRead })) };
+    // what this visit did with the follow-ups left open on the ship, kept with it: the filed email says it as filed
+    d.fuSeen = c.followups.map((o) => ({ id: o.id, text: o.text, owner: o.owner, state: (d.close[o.id] || "open") === "fixed" ? "fixed" : "open", times: (o.carried || 0) + 1 }));
     const at = now(), vid = "av_" + crypto.randomUUID();
     const opened = d.openedAt && d.openedAt >= String(req.complete_at || "") && d.openedAt <= at ? d.openedAt : at;
     const by = session.open ? session.email + " (open site, no sign-in)" : session.email;
@@ -331,7 +371,80 @@ export function installAuditRequest(deps) {
       throw err;
     }
     await logActivity(env, session.email, "audit_file", req.id + " " + e.score.score + (session.open ? " (open site)" : ""));
-    return json({ ok: true, score: e.score.score, from: e.score.from, visit: vid });
+    // the filed email (Miguel; Rita, Ray, Rolando in copy) and the dispatch note (Rita) go now; one that did not go is
+    // tried again by the hourly sweep, and an email never undoes or blocks the filing
+    let mailed = null;
+    try { mailed = await sendFiledMails(env, req.id); } catch (err) { console.error("audit_filed_mail", req.id, (err && err.message) || err); }
+    return json({ ok: true, score: e.score.score, from: e.score.from, visit: vid, mailed });
+  }
+
+  // One email, sent and logged: a failed send is a row with ok = 0 (the sweep's retry replaces it), a sent one is never
+  // overwritten (the docs-in rule).
+  async function sendLogged(env, key, kind, msg) {
+    let r;
+    try { r = await sendViaMailer(env, msg); } catch (err) { r = { ok: false, error: (err && err.message) || String(err) }; }
+    const ok = !!r && r.ok !== false;
+    await env.DB.prepare("INSERT INTO audit_send_log (request_id, kind, sent_at, to_json, ok, note) VALUES (?,?,?,?,?,?) ON CONFLICT(request_id, kind) DO UPDATE SET sent_at=excluded.sent_at, to_json=excluded.to_json, ok=excluded.ok, note=excluded.note WHERE audit_send_log.ok = 0")
+      .bind(key, kind, now(), JSON.stringify({ to: msg.to, cc: msg.cc || [] }), ok ? 1 : 0, ok ? null : String((r && r.error) || "not sent").slice(0, 200)).run().catch(() => null);
+    if (!ok) await logActivity(env, null, "audit_" + kind.split(":")[0] + "_mail_failed", key + " " + String((r && r.error) || "").slice(0, 120));
+    return ok ? { ok: true, to: msg.to } : { ok: false, error: (r && r.error) || "not sent" };
+  }
+
+  // The filed email and the dispatch note of one filed audit, built ONLY from what the filing stored (the grade, the
+  // steps, what the documents said, the follow-ups). `only` = one kind, for the sweep's retry.
+  async function sendFiledMails(env, rid, only) {
+    const [req, ev, vis, vd, fus, files, logs] = await Promise.all([
+      env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(rid).first(),
+      env.DB.prepare("SELECT score, score_from FROM audit_eval WHERE request_id=?").bind(rid).first(),
+      env.DB.prepare("SELECT auditor, opened_at, filed_at FROM audit_visit WHERE request_id=?").bind(rid).first(),
+      env.DB.prepare("SELECT data_json FROM audit_visit_data WHERE request_id=?").bind(rid).first(),
+      env.DB.prepare("SELECT owner, due, text, status FROM audit_followup WHERE request_id=? ORDER BY created_at").bind(rid).all(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM audit_file WHERE request_id=?").bind(rid).first().catch(() => null),
+      env.DB.prepare("SELECT kind, ok FROM audit_send_log WHERE request_id=?").bind(rid).all(),
+    ]);
+    // a grade filed on the 15 Oct screen has no steps to tell; a TEST request is never filed
+    if (!req || !ev || !vis || !vd || req.test_mode) return { skipped: true };
+    const d = J(vd.data_json, {}), sent = new Set(((logs && logs.results) || []).filter((x) => x.ok).map((x) => x.kind));
+    const common = { ship: req.ship, crew: req.crew_name, auditor: nameOf(vis.auditor), openedAt: vis.opened_at, filedAt: vis.filed_at, link: AUDIT_ORIGIN + "/#q=" + req.id };
+    const out = {};
+    if (!sent.has("filed") && (!only || only === "filed")) {
+      const mail = filedEmail({ ...common, id: req.id, contract: req.contract_label || null, grade: { score: ev.score, from: ev.score_from }, data: d,
+        followups: (fus && fus.results) || [], carried: d.fuSeen || [], photos: (files && files.n) || 0 });
+      out.filed = await sendLogged(env, req.id, "filed", { templateId: FILED_ID, to: FILED_TO, cc: FILED_CC, subject: mail.subject, html: mail.html, text: mail.text, critical: true });
+    }
+    const rating = d.crew && Number(d.crew.dispatch);
+    if (rating >= 1 && rating <= 5 && !sent.has("dispatch") && (!only || only === "dispatch")) {
+      // the sign-on is TDG's embark on THIS ship (the kept file's row); another ship's embark is not this contract's
+      const reg = await env.DB.prepare("SELECT vessel, embarked_at FROM registry_snapshot WHERE agency_id=?").bind(req.agency_id).first().catch(() => null);
+      const signOn = reg && reg.embarked_at && normShip(reg.vessel) === normShip(req.ship) ? reg.embarked_at : null;
+      const mail = dispatchEmail({ ...common, rating, note: (d.crew.dispatchNote || "").trim() || null, signOn });
+      out.dispatch = await sendLogged(env, req.id, "dispatch", { templateId: DISPATCH_ID, to: DISPATCH_TO, subject: mail.subject, html: mail.html, text: mail.text, critical: true });
+    }
+    return out;
+  }
+
+  // A follow-up's owner hears on its date (hr.audit.followup.v1): one email per owner per day, from 07:00 Miami; one that
+  // did not go is tried again the next hour. An owner with no address is logged once that day, never guessed.
+  async function sendFollowups(env, at = new Date()) {
+    const lh = localDayHour(at);
+    if (lh.hour < FOLLOWUP_HOUR) return 0;
+    const rows = (await env.DB.prepare("SELECT f.id, f.ship, f.owner, f.due, f.text, f.status, f.carried, f.crew_name, f.created_by, f.created_at FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE f.status = 'open' AND f.due IS NOT NULL AND f.due <= ? AND COALESCE(r.test_mode, 0) = 0 ORDER BY f.due, f.created_at").bind(lh.day).all().catch(() => ({ results: [] }))).results || [];
+    let n = 0;
+    for (const b of followupBatches(rows, lh.day)) {
+      const key = "fu:" + (b.email || b.owner).toLowerCase(), kind = "followup:" + lh.day;
+      const done = await env.DB.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind=?").bind(key, kind).first().catch(() => null);
+      if (done && done.ok) continue;
+      if (!b.email) {
+        await env.DB.prepare("INSERT OR IGNORE INTO audit_send_log (request_id, kind, sent_at, to_json, ok, note) VALUES (?,?,?,?,1,?)").bind(key, kind, now(), "{}", "no_recipient: " + b.owner).run().catch(() => null);
+        await logActivity(env, null, "audit_followup_no_recipient", b.owner + " · " + b.due.length + " due " + lh.day);
+        continue;
+      }
+      const item = (f) => ({ ship: f.ship, text: f.text, askedBy: nameOf(f.created_by), askedAt: f.created_at, due: f.due, crew: f.crew_name, carried: f.carried || 0 });
+      const mail = followupEmail({ owner: b.owner, due: b.due.map(item), late: b.late.map(item), link: AUDIT_ORIGIN + "/#fu" });
+      const r = await sendLogged(env, key, kind, { templateId: FOLLOWUP_ID, to: [b.email], subject: mail.subject, html: mail.html, text: mail.text, critical: false });
+      if (r.ok) n++;
+    }
+    return n;
   }
 
   // Evidence photos (B1, B2, B3, B5). Shrunk on the phone; keyed by the phone's own key so a retry after a dropped
@@ -633,6 +746,14 @@ export function installAuditRequest(deps) {
       if (!req.test_mode && !csv(env.AUDIT_TO).length) break;
       try { const r = await sendDocsIn(env, req, await stateOf(env, req)); if (r && r.ok !== false) out.docsin++; } catch (e) { console.error("audit_sweep_docsin", req.id, (e && e.message) || e); }
     }
+    // a filed email or dispatch note that did not go is sent again for FILED_RETRY_DAYS after the filing. Only one that was
+    // tried: an audit filed before these were wired has no row and is never emailed late.
+    out.filedMail = 0;
+    const failed = (await env.DB.prepare("SELECT l.request_id, l.kind FROM audit_send_log l JOIN audit_visit v ON v.request_id = l.request_id WHERE l.kind IN ('filed','dispatch') AND l.ok = 0 AND v.filed_at > ? AND l.sent_at < ?").bind(new Date(Date.now() - FILED_RETRY_DAYS * 864e5).toISOString(), new Date(Date.now() - 10 * 60000).toISOString()).all().catch(() => ({ results: [] }))).results || [];
+    for (const f of failed) {
+      try { const r = await sendFiledMails(env, f.request_id, f.kind); if (r[f.kind] && r[f.kind].ok) out.filedMail++; } catch (e) { console.error("audit_sweep_filed", f.request_id, (e && e.message) || e); }
+    }
+    try { out.followups = await sendFollowups(env); } catch (e) { console.error("audit_sweep_followups", (e && e.message) || e); }
     return out;
   }
 
@@ -773,5 +894,5 @@ export function installAuditRequest(deps) {
     return null;
   }
 
-  return { handle, sweep, _internal: { crewState, stateOf, maybeComplete, readUpload, sendDocsIn, byToken, closedWhy, visitCtx } };
+  return { handle, sweep, _internal: { crewState, stateOf, maybeComplete, readUpload, sendDocsIn, byToken, closedWhy, visitCtx, sendFiledMails, sendFollowups } };
 }
