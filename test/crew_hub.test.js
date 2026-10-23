@@ -248,7 +248,8 @@ test("ordering: three tabs; an NCL crew opens on Norwegian's MXP steps, Azamara 
   assert.equal(checked(page("Royal")), "t1");
   const h = page("NCL");
   assert.match(h, /<label for="t3">Norwegian<\/label>/);
-  assert.match(h, /raised in MXP, NCL's own system/);
+  assert.match(h, /linen keeper raises the Getaway order in MXP, NCL's own system/);
+  assert.match(h, /You keep OBP up to date every day/);
   assert.match(h, /an order closes two days before the storing date/);
   assert.match(h, /#t3:checked~\.p3\{display:block\}|#t3:checked~\.p3\{/);
 });

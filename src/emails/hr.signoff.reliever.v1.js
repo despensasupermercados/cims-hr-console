@@ -33,11 +33,14 @@ export function relieverEmail(d) {
   const ph = phoneOf(o.phone), em = emailOf(o.email);
 
   const subject = "You take over from " + (o.first || firstWord(o.name)) + " on " + ship;
-  const head = `You take over from ${of}, ${name}` + (/\.$/.test(name) ? "" : ".");
-  const head2 = off ? `${esc(ship)} · sign-off ${shortDate(off)}${port ? ", " + esc(port) : ""}.` : esc(ship) + ".";
+  // Phone first (Miguel, 23 Oct 2026, on the render: "the mobile version needs work"): a two-line headline at 375px, the
+  // pass in rows that never sit three abreast (two dates side by side, the overlap a line of its own), the ship and the
+  // IN TDG chip in the pass's band so the name has its line, WhatsApp a row of its own.
+  const head = `Over to you, ${name}` + (/\.$/.test(name) ? "" : ".");
+  const head2 = off ? `${of} signs off ${shortDate(off)}.` : `${of} hands over the seat.`;
   const lead = overlap
-    ? `You are aboard together from ${longDate(overlap.from).replace(/ \d{4}$/, "")}. Use those days: ${of} walks you through the ship and the Digital Handover Notes.`
-    : `You may or may not meet ${of} aboard, so a short message before the sign-off helps. Introduce yourself, and ask what cannot wait for the notes.`;
+    ? `You take over ${of}'s seat on ${esc(ship)}${port ? ", signing off in " + esc(port) : ""}. You are aboard together from ${longDate(overlap.from).replace(/ \d{4}$/, "")}: ${of} walks you through the ship and the Digital Handover Notes.`
+    : `You take over ${of}'s seat on ${esc(ship)}${port ? ", signing off in " + esc(port) : ""}. You may or may not meet aboard, so a short message before the sign-off helps.`;
 
   const lab = (t, al) => `<div style="font-family:${FB};font-size:10px;font-weight:700;letter-spacing:1.6px;color:${C.slate};text-transform:uppercase;line-height:14px;${al === "right" ? "margin-right:-1.6px;" : ""}">${t}</div>`;
   const lnk = (href, t) => `<a href="${esc(href)}" style="color:${C.navy};font-weight:700;text-decoration:none;">${t}</a>`;
@@ -46,30 +49,26 @@ export function relieverEmail(d) {
  <td width="14" height="28" bgcolor="${C.cloud}" style="background:${C.cloud};font-size:0;line-height:0;border-radius:0 14px 14px 0;">&nbsp;</td>
  <td style="padding:0 10px;">${hair(true)}</td>
  <td width="14" height="28" bgcolor="${C.cloud}" style="background:${C.cloud};font-size:0;line-height:0;border-radius:14px 0 0 14px;">&nbsp;</td></tr></table></td></tr>`;
-  const cell = (k, v, w, al) => `<td width="${w}" valign="top" align="${al}" style="text-align:${al};padding:0;">${lab(k, al)}<div style="font-family:${FH};font-size:16px;font-weight:600;color:${C.navy};line-height:22px;padding-top:4px;">${v}</div></td>`;
-  const crow = (k, v) => `<tr><td width="60" valign="top" style="font-family:${FB};font-size:13px;line-height:26px;color:${C.slate};">${k}</td><td valign="top" style="font-family:${FB};font-size:15px;line-height:26px;color:${C.body};word-break:break-word;">${v}</td></tr>`;
-  const contact = (ph ? crow("Mobile", lnk("tel:" + ph.tel, esc(ph.shown)) + (ph.wa ? ` <span style="color:${C.grey};">&middot;</span> ` + lnk(ph.wa, "WhatsApp") : "")) : "")
+  const cell = (k, v, w, al) => `<td width="${w}" valign="top" align="${al}" style="text-align:${al};padding:0;">${lab(k, al)}<div style="font-family:${FH};font-size:18px;font-weight:600;color:${C.navy};line-height:24px;padding-top:4px;white-space:nowrap;">${v}</div></td>`;
+  const crow = (k, v) => `<tr><td width="76" valign="top" style="font-family:${FB};font-size:13px;line-height:26px;color:${C.slate};">${k}</td><td valign="top" style="font-family:${FB};font-size:15px;line-height:26px;color:${C.body};word-break:break-word;">${v}</td></tr>`;
+  const contact = (ph ? crow("Mobile", lnk("tel:" + ph.tel, esc(ph.shown))) + (ph.wa ? crow("WhatsApp", lnk(ph.wa, "Message " + of)) : "") : "")
     + (em ? crow("Email", lnk("mailto:" + em, esc(em).replace("@", "<wbr>@"))) : "");
-  const together = overlap ? `${shortDate(overlap.from)}&ndash;${shortDate(off)}` : "May not meet";
 
   const pass = `<tr><td class="px" style="padding:22px 32px 0 32px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.cloud}" style="background:${C.cloud};border-radius:20px;"><tr><td style="padding:14px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.cloud}" style="background:${C.cloud};border-radius:20px;"><tr><td class="pc" style="padding:14px;">
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border-radius:16px;">
   <tr><td bgcolor="${C.deep}" style="background:${C.deep};border-radius:16px 16px 0 0;padding:13px 22px;">
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td style="font-family:${FB};font-size:11px;font-weight:700;letter-spacing:2px;line-height:16px;color:${C.sub};">HANDOVER PASS</td>
-    <td align="right" style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1px;line-height:16px;color:${C.green};white-space:nowrap;padding-left:14px;">${esc(ship).toUpperCase()}</td></tr></table></td></tr>
-  <tr><td style="padding:18px 22px 0 22px;">
-   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-    <td valign="top">${lab("You take over from")}<div style="font-family:${FH};font-size:22px;font-weight:600;color:${C.navy};line-height:28px;padding-top:4px;">${esc(o.name || "")}</div>${o.position ? `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:2px;">${esc(o.position)}</div>` : ""}</td>
-    <td valign="top" align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:5px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;color:${C.gink};white-space:nowrap;">IN TDG</td></tr></table></td>
-   </tr></table>
+    <td align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:4px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;line-height:14px;color:${C.gink};white-space:nowrap;">IN TDG</td></tr></table></td></tr></table></td></tr>
+  <tr><td class="pp" style="padding:18px 22px 0 22px;">
+   ${lab("You take over from")}<div style="font-family:${FH};font-size:22px;font-weight:600;color:${C.navy};line-height:28px;padding-top:4px;">${esc(o.name || "")}</div>${o.position ? `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:2px;">${esc(o.position)}${" · " + esc(ship)}</div>` : `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:2px;">${esc(ship)}</div>`}
    ${contact ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;">${contact}</table>` : `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:10px;">No mobile or email on file. Rita can put you in touch.</div>`}
   </td></tr>
   ${tear}
-  <tr><td style="padding:16px 22px 20px 22px;">
-   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cell("You sign on", on ? shortDate(on) + " " + on.slice(0, 4) : "To be confirmed", "34%", "left")}${cell("Sign-off", off ? shortDate(off) + " " + off.slice(0, 4) : "To be confirmed", "33%", "center")}${cell("Together", together, "33%", "right")}</tr></table>
-   ${overlap ? `<div style="font-family:${FB};font-size:13px;color:${C.gink};padding-top:10px;">${mdWords(overlap.from, off)} aboard together.</div>` : ""}
+  <tr><td class="pp" style="padding:16px 22px 20px 22px;">
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>${cell("You sign on", on ? shortDate(on) : "To confirm", "50%", "left")}${cell(of + " signs off", off ? shortDate(off) : "To confirm", "50%", "right")}</tr></table>
+   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding-top:14px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${overlap ? C.gtint : C.cloud}" style="background:${overlap ? C.gtint : C.cloud};border-radius:10px;padding:9px 12px;font-family:${FB};font-size:13px;line-height:18px;color:${overlap ? C.gink : C.slate};font-weight:700;">${overlap ? `Together aboard ${shortDate(overlap.from)}&ndash;${shortDate(off)} &middot; ${mdWords(overlap.from, off)}` : "You may not meet aboard"}</td></tr></table></td></tr></table>
   </td></tr>
  </table></td></tr></table></td></tr>`;
 
@@ -82,7 +81,7 @@ export function relieverEmail(d) {
     `<b>Count and sign your own count when you join.</b> ${of} signs one count, you sign yours; a signed count is never rewritten.`,
   ];
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>${esc(subject)}</title>
-<style>a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}@media only screen and (max-width:620px){.c{width:100%!important}.px{padding-left:16px!important;padding-right:16px!important}.hl{font-size:28px!important}.fr{padding:0!important}}</style></head>
+<style>a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}@media only screen and (max-width:620px){.c{width:100%!important}.px{padding-left:16px!important;padding-right:16px!important}.hl{font-size:28px!important}.fr{padding:0!important}.pp{padding-left:16px!important;padding-right:16px!important}.pc{padding:8px!important}}</style></head>
 <body style="margin:0;padding:0;background:${C.page};">
 <div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${C.page};">${esc(subject)}. ${overlap ? "You are aboard together from " + shortDate(overlap.from) + "." : "Here is how to reach " + (o.first || firstWord(o.name)) + "."}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="background:${C.page};"><tr><td class="fr" align="center" style="padding:24px 12px;">
