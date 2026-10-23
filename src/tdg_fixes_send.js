@@ -13,7 +13,7 @@ export const fixesKey = (fixes) => (fixes || []).map((f) => f.kind + ":" + f.sc 
 const firstOf = (email) => { const w = String(email || "").split("@")[0].split(/[._]/)[0]; return w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : "Rita"; };
 
 // deps: { ops(env) -> buildOps output, recipient(env), cc(env), send(env, envelope), log(env, email, action, detail),
-//         lastSend(env) -> { detail, at } | null, now() -> ISO }
+//         recentSends(env, sinceIso) -> [{ detail, at }] (or the older lastSend(env) -> { detail, at } | null), now() -> ISO }
 export async function tdgFixesSend(env, body, session, deps) {
   const ops = await deps.ops(env);
   const fixes = (ops && ops.tdg && ops.tdg.fixes) || [];
@@ -22,9 +22,13 @@ export async function tdgFixesSend(env, body, session, deps) {
   const to = deps.recipient(env);
   const cc = (deps.cc(env) || []).filter((a) => to && a.toLowerCase() !== String(to).toLowerCase());
   const key = fixesKey(fixes);
-  const last = await deps.lastSend(env).catch(() => null);
-  let prev = null; try { prev = last && last.detail ? JSON.parse(last.detail) : null; } catch { prev = null; }
-  const sameAsLast = !!(prev && prev.key === key && last.at && (Date.parse(deps.now()) - Date.parse(last.at)) < RESEND_DAYS * 864e5);
+  // every send of the last RESEND_DAYS, not only the latest: A, then A+B, then A again is still "the same rows this week"
+  const since = new Date(Date.parse(deps.now()) - RESEND_DAYS * 864e5).toISOString();
+  const recent = ((deps.recentSends ? await deps.recentSends(env, since).catch(() => []) : [await deps.lastSend(env).catch(() => null)]) || []).filter(Boolean);
+  const keyOf = (row) => { try { return row && row.detail ? JSON.parse(row.detail).key : null; } catch { return null; } };
+  const inWindow = (row) => row.at && (Date.parse(deps.now()) - Date.parse(row.at)) < RESEND_DAYS * 864e5;
+  const last = recent.slice().sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))[0] || null;
+  const sameAsLast = recent.some((row) => inWindow(row) && keyOf(row) === key);
   const mail = tdgFixesEmail({ fixes, asOf, today, from: firstOf(session && session.email) });
   const out = { recipient: to, cc, count: fixes.length, subject: mail.subject, asOf, lastSent: last ? last.at : null, sameAsLast };
   if (!body || !body.send) return { ok: true, dryRun: true, ...out };

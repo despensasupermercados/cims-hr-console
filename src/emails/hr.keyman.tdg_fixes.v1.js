@@ -31,7 +31,7 @@ export function tdgFixesEmail({ fixes = [], asOf, today, from = "Rita", test = f
       + blk(`padding-top:10px;font-family:${FH};font-size:22px;font-weight:600;color:${T.navy};line-height:1.2;`, `<span class="nm">${esc(f.name || f.surname)}</span>`);
     const id = blk(`padding-top:4px;font-family:${FB};font-size:13px;color:${T.slate};`, esc(ship) + (f.code ? " · " + esc(f.code) : ""));
     const said = f.kind === "held"
-      ? "TDG: On board, no debark date. " + (f.byName ? esc(f.byName) + " signed on" + (f.byOn ? " " + esc(short(f.byOn)) : "") + " as the reliever." : "The reliever has signed on.")
+      ? "TDG: On board, no debark date. " + (f.byName ? esc(f.byName) + " signed on" + (f.byOn ? " " + esc(short(f.byOn)) : "") + " as the reliever." : "The sign-off the board has" + (f.off ? ", " + esc(short(f.off)) + "," : "") + " has passed.")
       : "TDG: On board, no embark date. The board cannot date the contract.";
     const ask = f.kind === "held" ? "Please enter " + esc(first(f.name)) + "'s debark date." : "Please enter " + esc(first(f.name)) + "'s embark date.";
     return card(top + id + blk(`padding-top:12px;font-family:${FB};font-size:14px;color:${T.body};line-height:1.5;`, said + "<br><b style=\"color:" + T.navy + ";\">" + ask + "</b>"), tone);
@@ -45,7 +45,7 @@ export function tdgFixesEmail({ fixes = [], asOf, today, from = "Rita", test = f
   const footer = "CIMS HR console · from the Keyman board's “To correct in TDG” list" + (today ? " on " + esc(fmtDate(today)) : "") + " · the console never changes TDG; your next file does.";
   const html = frame({ preheader: head + " " + head2, eyebrow: "To correct in TDG", date: asOf ? "File of " + short(asOf) : "", head, head2, lead, rows, footer });
   const line = (f) => "- " + (f.name || f.surname) + " · " + (shipFullName(f.ship, f.brand) || f.ship) + ": " + (f.kind === "held"
-    ? "still On board in TDG; " + (f.byName ? f.byName + " signed on" + (f.byOn ? " " + fmtDate(f.byOn) : "") + " as the reliever" : "the reliever has signed on") + ". Please enter the debark date."
+    ? "still On board in TDG; " + (f.byName ? f.byName + " signed on" + (f.byOn ? " " + fmtDate(f.byOn) : "") + " as the reliever" : "the sign-off the board has" + (f.off ? " (" + fmtDate(f.off) + ")" : "") + " has passed") + ". Please enter the debark date."
     : "On board with no embark date. Please enter " + first(f.name) + "'s embark date.");
   const text = [head + " " + head2, "Joy, on these rows TDG's AdvancedQuery" + (asOf ? " of " + fmtDate(asOf) : "") + " still says what the ships have moved past.", fixes.map(line).join("\n"), "Questions on any of them, reply to this email. " + from + "."].join("\n\n");
   return { subject, html, text };

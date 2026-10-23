@@ -55,7 +55,7 @@ const SECTIONS = [
   { ship: "Star", brand: "Royal", crew: [seat({ agency_id: "H", name: "Maria Murillo", signOn: "2026-03-08", signOff: "2026-11-29", offSource: "rita" })],
     projections: [card({ agency_id: "I", name: "New Person", signOn: "2026-11-29", signOff: "2027-06-29", registry: null })] },
   // held by the file: the old crew still On board per TDG next to the reliever already aboard
-  { ship: "Apex", brand: "Celebrity", crew: [seat({ agency_id: "J", name: "Dan Andrew Belhida", signOn: "2026-03-14", signOff: "2026-10-07", offSource: "tdg", heldByFile: true }),
+  { ship: "Apex", brand: "Celebrity", crew: [seat({ agency_id: "J", name: "Dan Andrew Belhida", signOn: "2026-03-14", signOff: "2026-10-07", offSource: "tdg", heldByFile: true, reliever: { sc: "K", name: "Michael Angelo Resposo", on: "2026-10-07" } }),
     seat({ agency_id: "K", name: "Michael Angelo Resposo", signOn: "2026-10-07", signOff: "2027-05-07", offSource: "projected" })], projections: [] },
   // aboard per TDG with no embark date
   { ship: "Radiance", brand: "Royal", crew: [seat({ agency_id: "L", name: "Andrea Calayag", signOn: null, signOff: null })], projections: [] },
