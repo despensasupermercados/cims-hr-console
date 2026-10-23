@@ -992,7 +992,11 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   `docs/mockups/emails_20261023/`) — a HANDOVER PASS with the outgoing printer's name, mobile (WhatsApp) and email, "together"
   only on an overlap, the same IN TDG rule, three steps (say hello, read the Digital Handover Notes, sign your own count).
   **The T-7 sign-off link email** (`signoff_ack.js` ACK_REQUEST_EMAIL, July's design: the retired navy bar, Arial only, an ISO
-  date, and a page with a tick box AND a button) was rendered as it stands on 23 Oct 2026 for Miguel; its switch stays off.
+  date, and a page with a tick box AND a button) was rendered as it stands on 23 Oct 2026 for Miguel; its switch stays off. **The pass-style rebuild is a MOCK-UP** (`hr.signoff.link.v2`, `linkEmail`, NOT wired; proofs
+  `docs/mockups/signoff_link_20261023/`, Miguel asked "yes or no .. give me the mocks up"): "One week to go, <first name>.",
+  the same pass (FROM code TO HOME, signed on · sign-off, time aboard), the four lines the crew confirms (`CONFIRMS`, one list
+  for the email and the page), ONE button that opens the confirmation page — the click confirms nothing (a mail scanner
+  opens every link); the page has the same pass and one button, no tick box. Pinned by `test/renders_20261023.test.js`.
 - The HON bonus box (Ship handover factor, reczJqxZnOuzkv74X) shows only for sign-offs on or after 1 Nov 2026.
 - **One switch per email** (the rail's Automation: Instructions · Sign-off link · GSM review; `/api/autosend` with `kind`).
   Switching a kind ON stamps the day (`auto_send_instr_since` / `auto_send_link_since`): a seat already inside the
