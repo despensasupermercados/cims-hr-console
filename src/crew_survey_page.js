@@ -75,7 +75,7 @@ ${body}
 // The browser side. Plain ES5, no template literals and no backslashes: it rides inside a JS module as a string.
 const CLIENT = `
 var M = JSON.parse(document.getElementById('m').textContent);
-var LBL = M.scale, step = 0, ans = {}, fix = '', busy = false, err = '';
+var LBL = M.scale, step = 0, ans = {}, fix = '', busy = false, err = '', t0 = null;
 function $(s){ return document.querySelector(s); }
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
 function total(){ return M.keys.length; }
@@ -88,7 +88,7 @@ function render(){
       + '<p>You know what worked and what got in the way better than anyone. Three minutes, and every answer is read by the CIMS team.</p>'
       + '<div class="strip"><div class="ln">Your contract</div><div class="ship">' + esc(M.ship) + '</div>'
       + '<div class="row"><div>Signed on<b>' + esc(M.on) + '</b></div><div>Signed off<b>' + esc(M.off) + '</b></div><div>Aboard<b>' + esc(M.aboard) + '</b></div></div></div>'
-      + '<div class="facts"><span><b>3</b> minutes</span><span><b>19</b> quick taps</span><span><b>1</b> line in your words</span></div>'
+      + '<div class="facts"><span><b>3</b> minutes</span><span><b>' + M.keys.length + '</b> quick taps</span><span><b>1</b> line in your words</span></div>'
       + '<button class="go" onclick="go(1)">Start</button>'
       + '<div class="fine">Your answers go to the CIMS team, never to the cruise line, and they never touch your bonus.</div></div>';
   } else if (step <= M.sections.length) {
@@ -121,12 +121,12 @@ function render(){
   $('#app').innerHTML = h;
 }
 function pick(k, x){ ans[k] = x; err = ''; var t = document.getElementById('fix'); if (t) fix = t.value; render(); }
-function go(s){ var t = document.getElementById('fix'); if (t) fix = t.value; step = s; err = ''; render(); window.scrollTo(0, 0); }
+function go(s){ var t = document.getElementById('fix'); if (t) fix = t.value; if (s === 1 && !t0) t0 = Date.now(); step = s; err = ''; render(); window.scrollTo(0, 0); }
 function send(){
   if (busy) return; var t = document.getElementById('fix'); if (t) fix = t.value;
   if (document.body.getAttribute('data-preview')) { step = M.sections.length + 1; render(); window.scrollTo(0, 0); return; }
   busy = true; err = ''; render();
-  fetch(location.pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: ans, fix: fix }) })
+  fetch(location.pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answers: ans, fix: fix, secs: t0 ? Math.round((Date.now() - t0) / 1000) : null }) })
     .then(function(r){ return r.json().catch(function(){ return { ok: false, error: 'HTTP ' + r.status }; }); })
     .then(function(d){ busy = false; if (d && d.ok) { step = M.sections.length + 1; render(); window.scrollTo(0, 0); } else { err = d && d.error === 'already_sent' ? 'These answers were already sent. Thank you.' : d && d.error === 'closed' ? 'This link has closed.' : 'Could not send. Check your signal and try again.'; render(); } })
     .catch(function(){ busy = false; err = 'Could not send. Check your signal and try again.'; render(); });

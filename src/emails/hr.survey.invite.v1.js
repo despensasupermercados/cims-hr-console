@@ -3,6 +3,7 @@
 // and Miguel, reply-to Rita (src/crew_survey_send.js). The reminder is the same email with its own headline. Canonical
 // letterhead (cims-mast.js), tables and solid colours only (CIMS email standard §2). Pinned by test/crew_survey.test.js.
 import { mastRows } from "../cims-mast.js";
+import { QUESTIONS } from "../crew_survey.js";
 
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB", body: "#374151", grey: "#9CA3AF", line: "#F0F1F3", pass: "#C9D4E0", lime: "#8FD27A" };
 const FB = "'DM Sans',Helvetica,Arial,sans-serif", FH = "'Outfit',Helvetica,Arial,sans-serif";
@@ -22,7 +23,7 @@ export function surveyInviteEmail(d) {
     ? `Your survey is still open until ${esc(d.expires)}. Three minutes, and every answer is read by the CIMS team. If something got in your way on ${shipShort}, this is where we hear it.`
     : `You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and every answer is read by the CIMS team.`;
   const subject = d.reminder ? `Still a minute, ${d.first || "there"}? Your survey on ${d.shipShort || d.ship || "your contract"}` : `Welcome home, ${d.first || "there"}. How did ${d.shipShort || d.ship || "your contract"} go?`;
-  const pre = d.reminder ? "Your end-of-contract survey is still open. Three minutes." : "Three minutes, 19 taps, one line in your words. Every answer is read.";
+  const pre = d.reminder ? "Your end-of-contract survey is still open. Three minutes." : "Three minutes, " + QUESTIONS.length + " taps, one line in your words. Every answer is read.";
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(subject)}</title>
 <style>@media (max-width:480px){.hl{font-size:30px !important}.px{padding-left:20px !important;padding-right:20px !important}}</style></head>
 <body style="margin:0;padding:0;background:#EEF0EC;">
@@ -52,7 +53,7 @@ ${mastRows()}
    ${fact("SIGNED ON", esc(d.on), "34%")}${fact("SIGNED OFF", esc(d.off), "33%")}${fact("ABOARD", esc(d.aboard), "33%", "right")}</tr></table></td></tr>
   <tr><td style="padding:18px 20px 0;"><div style="border-top:2px dashed ${C.border};font-size:0;line-height:0;">&nbsp;</div></td></tr>
   <tr><td style="padding:16px 20px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-   <tr><td style="font-family:${FB};font-size:14px;line-height:1.55;color:${C.body};padding-bottom:6px;"><b style="color:${C.navy};">19 taps.</b> The job, the print shop, support, how you were treated, and overall.</td></tr>
+   <tr><td style="font-family:${FB};font-size:14px;line-height:1.55;color:${C.body};padding-bottom:6px;"><b style="color:${C.navy};">${QUESTIONS.length} taps.</b> The job, the print shop, support, how you were treated, and overall.</td></tr>
    <tr><td style="font-family:${FB};font-size:14px;line-height:1.55;color:${C.body};"><b style="color:${C.navy};">One line in your words.</b> The one thing we should fix first.</td></tr></table></td></tr>
   <tr><td style="padding:20px 20px 8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
    <td align="center" bgcolor="${C.green}" style="background:${C.green};border-radius:12px;"><a href="${esc(d.link)}" target="_blank" style="display:block;padding:16px 10px;font-family:${FB};font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none;">Start the survey</a></td></tr></table></td></tr>

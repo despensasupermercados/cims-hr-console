@@ -29,12 +29,17 @@ export const QUESTIONS = [
   ["q17", "I had opportunities to learn, improve, or grow in my role.", "Room to grow"],
   ["q18", "Overall, I am satisfied with my contract experience.", "Overall satisfaction"],
   ["q19", "I would consider returning for another contract.", "Would return"],
+  // Added 23 Oct 2026 (Miguel: "3. yes do it"): travel is the largest cost line and the Forms' one written fix was "hotel
+  // accommodations before embarking"; no statement measured it. Keyed after Rita's 19 so her history stays comparable.
+  ["q20", "My travel, hotel and joining arrangements were well organized.", "Travel & joining"],
 ].map(([key, text, short]) => ({ key, text, short }));
 export const FIX_QUESTION = "What is the one thing we should fix first to improve the seafarer experience?";
 export const KEYS = QUESTIONS.map((q) => q.key);
 export const OVERALL = "q18", RETURN = "q19";
+// The statements the Microsoft Forms survey asked (Rita's 19); q20 came with the console, so a Forms answer never has it.
+export const FORMS_KEYS = KEYS.filter((k) => k !== "q20");
 export const SECTIONS = [
-  { title: "The job", intro: "Before you boarded and your first weeks.", keys: ["q01", "q02", "q03", "q04"] },
+  { title: "The job", intro: "Before you boarded and your first weeks.", keys: ["q01", "q02", "q03", "q04", "q20"] },
   { title: "The print shop", intro: "How the work itself ran.", keys: ["q05", "q06", "q10", "q11"] },
   { title: "Support", intro: "The people behind you, aboard and ashore.", keys: ["q07", "q08", "q09", "q16", "q17"] },
   { title: "You", intro: "How you were treated, and how you were paid.", keys: ["q12", "q15", "q13", "q14"] },
@@ -56,6 +61,23 @@ export const SURVEY_CC = ["Rita.Berenyi@dg3.com", "Miguel.Sanmartin@dg3.com"];
 export const SURVEY_REPLY_TO = "Rita.Berenyi@dg3.com";
 export const SURVEY_ANSWERS_CC = "onboardsupport@dg3.com";
 export const NEEDS_CALL_LOW = 3;         // three or more answers at 1–2
+// An answer is "quick" when every statement got the same number in under a minute (Miguel, 23 Oct 2026: "4. ok"): it stays
+// listed and counted, but leaves the averages, so a tap-through on 5 does not lift the score. Forms answers have no timing.
+export const QUICK_SECS = 60;
+// Who is NOT asked (Miguel, 23 Oct 2026, "yes to all"): a contract ended for Performance, or a seafarer TDG (or Rita's manual
+// status) has as Not for Rehire, gets no "Welcome home" email; a Medical or Compassionate ending is not asked either, the tone
+// would be wrong. Each is listed on the report with its reason and a Send anyway button, nothing waits for anyone.
+export const SKIP_REASONS = { not_for_rehire: "Not for Rehire", performance: "Ended for performance", medical: "Medical sign-off", compassionate: "Compassionate sign-off" };
+export function surveySkip({ status, rawStatus, endReason } = {}) {
+  if (/not\s*for\s*re-?hire/i.test(String(rawStatus || "")) || /not\s*for\s*re-?hire/i.test(String(status || ""))) return "not_for_rehire";
+  const r = String(endReason || "").trim().toLowerCase();
+  if (r === "performance") return "performance";
+  if (r === "medical") return "medical";
+  if (r === "compassionate") return "compassionate";
+  return null;
+}
+export const quickAnswer = (r) => !!(r && r.source !== "forms" && Number.isInteger(r.answer_secs) && r.answer_secs < QUICK_SECS && r.answers
+  && new Set(KEYS.map((k) => r.answers[k]).filter((v) => v != null)).size === 1);
 export const FIX_MAX = 2000;
 
 export const SURVEY_DDL = [
@@ -63,6 +85,8 @@ export const SURVEY_DDL = [
   "CREATE UNIQUE INDEX IF NOT EXISTS ux_crew_survey_contract ON crew_survey (agency_id, on_key) WHERE source = 'console'",
   "CREATE INDEX IF NOT EXISTS idx_crew_survey_submitted ON crew_survey (submitted_at)",
 ];
+// Columns added after the table (migrations/0041): how long the answer took, Start to Send, in seconds (QUICK_SECS).
+export const SURVEY_ALTERS = ["ALTER TABLE crew_survey ADD COLUMN answer_secs INTEGER"];
 
 const iso = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
 export const addDays = (d, n) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -108,7 +132,9 @@ export function checkAnswers(body) {
   if (missing.length) return { ok: false, error: "incomplete", missing };
   const f = body.fix == null ? "" : body.fix;
   if (typeof f !== "string") return { ok: false, error: "bad_fix" };
-  return { ok: true, answers: out, fix: f.replace(/\r/g, "").trim().slice(0, FIX_MAX) || null };
+  // How long he took, from Start to Send, as the page measured it: a whole number of seconds, else not recorded.
+  const secs = Number.isInteger(body.secs) && body.secs >= 0 && body.secs <= 86400 ? body.secs : null;
+  return { ok: true, answers: out, fix: f.replace(/\r/g, "").trim().slice(0, FIX_MAX) || null, secs };
 }
 
 export const lowKeys = (ans) => KEYS.filter((k) => ans && Number.isInteger(ans[k]) && ans[k] <= 2);
@@ -136,11 +162,12 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
   const all = (Array.isArray(rows) ? rows : []).filter((r) => r && inLine(r.brand));
   const answered = all.filter((r) => r.submitted_at && r.answers && iso(r.submitted_at) >= from);
   const asked = all.filter((r) => r.source === "console" && r.invited_at && iso(r.invited_at) >= from);
-  const q = (k) => answered.map((r) => r.answers[k]).filter((v) => Number.isInteger(v));
+  const scored = answered.filter((r) => !quickAnswer(r)); // a quick tap-through is listed, never averaged
+  const q = (k) => scored.map((r) => r.answers[k]).filter((v) => Number.isInteger(v));
   const statements = QUESTIONS.map((x) => ({ key: x.key, short: x.short, avg: round2(avg(q(x.key))), low: q(x.key).filter((v) => v <= 2).length, n: q(x.key).length }))
     .filter((s) => s.n).sort((a, b) => a.avg - b.avg || b.low - a.low || a.key.localeCompare(b.key));
   const ov = q(OVERALL), rt = q(RETURN);
-  const byLine = LINES.map((b) => { const xs = answered.filter((r) => r.brand === b).map((r) => r.answers[OVERALL]).filter(Number.isInteger); return { line: b, n: xs.length, avg: round2(avg(xs)) }; });
+  const byLine = LINES.map((b) => { const xs = scored.filter((r) => r.brand === b).map((r) => r.answers[OVERALL]).filter(Number.isInteger); return { line: b, n: xs.length, avg: round2(avg(xs)) }; });
   const calls = answered.filter((r) => lowKeys(r.answers).length >= NEEDS_CALL_LOW).map((r) => ({
     id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, at: iso(r.submitted_at), fix: r.fix_text || null,
     low: lowKeys(r.answers).map((k) => ({ key: k, short: QUESTIONS.find((x) => x.key === k).short, v: r.answers[k] })),
@@ -154,16 +181,18 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
     invited: asked.length,
     opened: asked.filter((r) => r.opened_at).length,
     answered: asked.filter((r) => r.submitted_at).length,
-    noEmail: endedIn.filter((l) => l.noEmail).map((l) => ({ sc: l.sc, name: l.name || null, ship: l.ship, off: iso(l.off) })),
+    noEmail: endedIn.filter((l) => l.noEmail && !l.skip).map((l) => ({ sc: l.sc, name: l.name || null, ship: l.ship, off: iso(l.off) })),
+    // not asked on purpose (surveySkip): each with its reason and the contract, for Send anyway
+    skipped: endedIn.filter((l) => l.skip).map((l) => ({ sc: l.sc, on: iso(l.on), name: l.name || null, ship: l.ship, off: iso(l.off), why: l.skip, label: SKIP_REASONS[l.skip] || l.skip, asked: !!l.asked })),
   };
   const list = answered.slice().sort((a, b) => (a.submitted_at < b.submitted_at ? 1 : -1)).map((r) => ({
     id: r.id, at: iso(r.submitted_at), name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, line: r.brand || null, source: r.source,
     overall: r.answers[OVERALL] ?? null, ret: r.answers[RETURN] ?? null, low: lowKeys(r.answers).length, words: !isNothing(r.fix_text),
-    answers: r.answers, fix: r.fix_text || null, called_at: r.called_at || null,
+    answers: r.answers, fix: r.fix_text || null, called_at: r.called_at || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r),
   }));
   const waiting = asked.filter((r) => !r.submitted_at).map((r) => ({ id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, invited_at: iso(r.invited_at), reminded_at: iso(r.reminded_at), opened: !!r.opened_at, expires_at: iso(r.expires_at) }));
   return {
-    p, line, from, n: answered.length,
+    p, line, from, n: answered.length, quick: answered.length - scored.length,
     byLineCount: Object.fromEntries(LINES.map((b) => [b, answered.filter((r) => r.brand === b).length])),
     overall: round2(avg(ov)), fives: ov.filter((v) => v === 5).length,
     wouldReturn: rt.length ? { yes: rt.filter((v) => v >= 4).length, of: rt.length } : null,
@@ -198,13 +227,13 @@ export function readFormsSurvey(sheet, { place = () => ({ sc: null, why: "not pl
   const rows = Array.isArray(sheet) ? sheet : [];
   const c = formsSurveyColumns(rows[0]);
   const out = [], skipped = [];
-  if (Object.keys(c.keys).length !== KEYS.length || c.id < 0) return { rows: out, skipped, error: "not_the_exit_survey", found: Object.keys(c.keys).length };
+  if (Object.keys(c.keys).length < FORMS_KEYS.length || c.id < 0) return { rows: out, skipped, error: "not_the_exit_survey", found: Object.keys(c.keys).length };
   for (const r of rows.slice(1)) {
     if (!r || r.every((x) => x == null || String(x).trim() === "")) continue;
     const no = Number(r[c.id]);
     const ans = {};
     for (const [col, k] of Object.entries(c.keys)) { const v = Number(r[col]); if (Number.isInteger(v) && v >= 1 && v <= 5) ans[k] = v; }
-    if (Object.keys(ans).length !== KEYS.length) { skipped.push({ form: no, why: "not every statement answered" }); continue; }
+    if (Object.keys(ans).length !== Object.keys(c.keys).length) { skipped.push({ form: no, why: "not every statement answered" }); continue; }
     const day = formsDay(r[c.done]);
     if (!day) { skipped.push({ form: no, why: "no completion date" }); continue; }
     const typed = String(r[c.name] == null ? "" : r[c.name]).trim();

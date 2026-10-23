@@ -79,7 +79,7 @@ import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 import { installHub, HUB_DDL } from "./crew_hub_routes.js";
 import { hubHomePage, HUB_HOST } from "./crew_hub.js";
 import { installWelcome, WELCOME_DDL } from "./welcome_send.js";
-import { installSurvey, SURVEY_DDL } from "./crew_survey_send.js";
+import { installSurvey, SURVEY_DDL, SURVEY_ALTERS } from "./crew_survey_send.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -117,7 +117,7 @@ const _welcome = installWelcome({ ensure: ensureWelcome, boardLegs: (env) => boa
   sendMail: sendViaMailer, json, today: () => TODAY(), origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
 // The end-of-contract crew survey (Miguel, 22–23 Oct 2026, src/crew_survey_send.js): /hub/survey/<token> public, the
 // Reports › Crew survey page and the Automation switch signed in; the daily run is OFF until switched on. Feedback only (§1).
-const ensureSurvey = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); for (const q of SURVEY_DDL) await env.DB.prepare(q).run(); }, SURVEY_DDL.join("\n"));
+const ensureSurvey = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); for (const q of SURVEY_DDL) await env.DB.prepare(q).run(); for (const q of SURVEY_ALTERS) await addColumn(env, q); }, SURVEY_DDL.concat(SURVEY_ALTERS).join("\n"));
 const _survey = installSurvey({ ensure: ensureSurvey, boardLegs: (env) => boardLegs(env), sendMail: sendViaMailer, json, today: () => TODAY(),
   origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
@@ -2227,7 +2227,7 @@ async function apiCrewOne(env, url, session) {
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
   const today = TODAY();
   const none = () => ({ results: [] });
-  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes, trainerRow, auditRes, auditOpenRes, auditFuRes] = await Promise.all([
+  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes, trainerRow, auditRes, auditOpenRes, auditFuRes, surveyRes] = await Promise.all([
     env.DB.prepare("SELECT crew.*, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE crew.agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
@@ -2263,6 +2263,8 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT e.request_id, e.ship, e.r_inventory, e.r_technical, e.r_collaterals, e.r_overall, e.score, e.score_from, e.note, e.filed_at, d.data_json FROM audit_eval e LEFT JOIN audit_visit_data d ON d.request_id = e.request_id LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT r.id, r.ship, r.status, r.sent_at, r.created_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND r.test_mode = 0 AND r.status IN ('sent','complete') AND e.request_id IS NULL ORDER BY r.created_at DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT request_id, owner, due, text, status, closed_at FROM audit_followup WHERE agency_id=? ORDER BY created_at").bind(id).all().catch(none),
+    // his own end-of-contract survey answers (23 Oct 2026); a database without the table, or the column, reads empty
+    env.DB.prepare("SELECT * FROM crew_survey WHERE agency_id=? AND submitted_at IS NOT NULL ORDER BY submitted_at DESC").bind(id).all().catch(none),
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
@@ -2280,7 +2282,7 @@ async function apiCrewOne(env, url, session) {
     edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
     sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
     statusRows: statusRes.results, travel: travelRowsFor(travelRes.results, { agency_id: id }, namesRes.results), activity: actRes.results, instr: instrRes.results, links: linkRes.results,
-    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, audits: auditRes.results, auditOpen: auditOpenRes.results, auditFollowups: auditFuRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
+    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, audits: auditRes.results, auditOpen: auditOpenRes.results, auditFollowups: auditFuRes.results, surveys: surveyRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
   // `tdg` = the crew row as the last import wrote it, `override` = what a person typed over it: the Edit crew window
   // shows TDG's value under every field someone changed, with Reset to TDG (12 Oct 2026).
@@ -8267,7 +8269,7 @@ function srvDraw(){
   var ret=d.wouldReturn?Math.round(d.wouldReturn.yes/d.wouldReturn.of*100)+'<small>%</small>':'&mdash;';
   h+='<div class=svk>'
    +'<div class=k><div class=l>Answers</div><div class=v>'+d.n+'</div><div class=s>'+(d.line==='all'?['Royal','Celebrity','Azamara','NCL'].filter(function(l){return d.byLineCount[l];}).map(function(l){return d.byLineCount[l]+' '+(l==='NCL'?'Norwegian':l);}).join(' · ')||'none yet':(SRV_LN[d.line]||d.line))+'</div></div>'
-   +'<div class=k><div class=l>Overall</div><div class=v>'+(d.overall==null?'&mdash;':d.overall.toFixed(2)+'<small>/5</small>')+'</div><div class=s>'+d.fives+' gave 5</div></div>'
+   +'<div class=k><div class=l>Overall</div><div class=v>'+(d.overall==null?'&mdash;':d.overall.toFixed(2)+'<small>/5</small>')+'</div><div class=s>'+d.fives+' gave 5'+(d.quick?' &middot; '+d.quick+' quick left out':'')+'</div></div>'
    +'<div class=k><div class=l>Would sail with us again</div><div class=v>'+ret+'</div><div class=s>'+(d.wouldReturn?d.wouldReturn.yes+' of '+d.wouldReturn.of+' at 4 or 5':'no answers yet')+'</div></div>'
    +'<div class=k><div class=l>Answer rate</div><div class=v>'+rate+'</div><div class=s>'+(d.rate?d.rate.answered+' of '+d.rate.of+' asked':'starts when the switch is on')+'</div></div>'
    +'<div class=k style="--c:'+(d.needsCall.length?'#96281B':'#5FB946')+'"><div class=l>Need a call</div><div class=v>'+d.needsCall.length+'</div><div class=s>3 or more answers at 1&ndash;2</div></div>'
@@ -8298,6 +8300,7 @@ function srvDraw(){
     h+='<div class=rblk><h3>By cruise line</h3><div class=svlines>'+d.byLine.map(function(b){return '<div class="svlc'+(b.n?'':' none')+'"><div class=n>'+(SRV_LN[b.line]||b.line)+'</div><div class=v>'+(b.avg==null?'&mdash;':b.avg.toFixed(2))+'</div><div class=s>'+(b.n?b.n+' answer'+(b.n===1?'':'s')+' &middot; overall':'no answers yet')+'</div></div>';}).join('')+'</div></div>';
     var L=d.loop;
     h+='<div class=rblk><h3>The loop</h3><div class=svpipe><div><b>'+L.signedOff+'</b><span>signed off</span></div><div><b>'+L.invited+'</b><span>asked</span></div><div><b>'+L.opened+'</b><span>opened</span></div><div><b>'+L.answered+'</b><span>answered</span></div></div>'
+     +((L.skipped||[]).length?'<div class=svnote><b>Not asked, on purpose:</b>'+L.skipped.map(function(x){return '<div style="display:flex;gap:8px;align-items:center;margin-top:6px">'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join('')+'<div style="margin-top:6px">Checked the morning the invitation would go: a reason recorded later does not recall one already sent.</div></div>':'')
      +(L.noEmail.length?'<div class=svnote style="color:#96281B">No email on file, so never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+', off '+srvDay(x.off)+')';}).join(', ')+'. Add the address in Edit crew.</div>':'')
      +'<div class=svnote>Signed off = contracts the Keyman board shows ended (TDG&rsquo;s debark, Rita&rsquo;s date or a reliever) in the period. Asked, opened and answered count the console&rsquo;s invitations only.</div></div>';
     h+='<div class=rblk><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3>'
@@ -8313,10 +8316,10 @@ function srvDraw(){
   if(d.list.length){
     h+='<div class=rblk style="margin-top:12px"><h3>Every answer &middot; '+d.list.length+'</h3><div class=svx><table class=svt><thead><tr><th>Date</th><th>Seafarer</th><th>Ship</th><th class=c>Overall</th><th class=c>Again</th><th class=c>Low</th><th>In their words</th></tr></thead><tbody>'
      +d.list.map(function(x){var open=!!SRV_OPEN[x.id];
-       var row='<tr class="row'+(x.low>=3?' hot':'')+'" data-svrow="'+escHtml(x.id)+'"><td style="white-space:nowrap">'+srvDay(x.at)+'</td><td>'+srvWho(x.name,x.agency_id)+(x.source==='forms'?'<span class=svtag>Forms</span>':'')+'</td><td>'+escHtml(x.ship||'')+'</td><td class=c>'+srvPill(x.overall)+'</td><td class=c>'+srvPill(x.ret)+'</td><td class=c>'+(x.low?'<b style="color:#96281B">'+x.low+'</b>':'<span class=mu>0</span>')+'</td><td>'+(x.words?escHtml(x.fix):'<span class=mu>'+(x.fix?escHtml(x.fix):'&mdash;')+'</span>')+'</td></tr>';
+       var row='<tr class="row'+(x.low>=3?' hot':'')+'" data-svrow="'+escHtml(x.id)+'"><td style="white-space:nowrap">'+srvDay(x.at)+'</td><td>'+srvWho(x.name,x.agency_id)+(x.source==='forms'?'<span class=svtag>Forms</span>':'')+(x.quick?'<span class=svtag title="The same answer to every statement in '+(x.secs||0)+' seconds">Quick</span>':'')+'</td><td>'+escHtml(x.ship||'')+'</td><td class=c>'+srvPill(x.overall)+'</td><td class=c>'+srvPill(x.ret)+'</td><td class=c>'+(x.low?'<b style="color:#96281B">'+x.low+'</b>':'<span class=mu>0</span>')+'</td><td>'+(x.words?escHtml(x.fix):'<span class=mu>'+(x.fix?escHtml(x.fix):'&mdash;')+'</span>')+'</td></tr>';
        if(open)row+='<tr><td></td><td colspan=6><div class=svdet>'+(d.questions||[]).map(function(q){return '<div>'+srvPill(x.answers[q.key])+'<span>'+escHtml(q.text)+'</span></div>';}).join('')+'</div></td></tr>';
        return row;}).join('')
-     +'</tbody></table></div><div class=svnote>Tap a row for the 19 answers. A row in red has 3 or more answers at 1&ndash;2.</div></div>';
+     +'</tbody></table></div><div class=svnote>Tap a row for every answer. &ldquo;Quick&rdquo; = the same answer to every statement in under a minute: listed, left out of the averages. A row in red has 3 or more answers at 1&ndash;2.</div></div>';
   }
   $('#rptbody').innerHTML=h;
   var b=document.getElementById('rptbody');
@@ -8324,6 +8327,13 @@ function srvDraw(){
   b.querySelectorAll('[data-crew]').forEach(function(el){el.onclick=function(ev){ev.preventDefault();ev.stopPropagation();openCrew(el.getAttribute('data-crew'));};});
   b.querySelectorAll('[data-svrow]').forEach(function(el){el.onclick=function(){var id=el.getAttribute('data-svrow');SRV_OPEN[id]=!SRV_OPEN[id];srvDraw();};});
   b.querySelectorAll('[data-svcall]').forEach(function(el){el.onclick=function(){srvLogCall(el.getAttribute('data-svcall'),el.getAttribute('data-svname'),el);};});
+  b.querySelectorAll('[data-svsend]').forEach(function(el){el.onclick=function(){srvSendAnyway(el.getAttribute('data-svsend'),el.getAttribute('data-svon'),el.getAttribute('data-svname'),el);};});
+}
+async function srvSendAnyway(sc,on,name,btn){
+  if(!confirm('Send the end-of-contract survey to '+(name||sc)+' anyway? It goes to his own email, CC Rita and Miguel.'))return;
+  if(btn)btn.disabled=true;
+  try{var r=await fetch('/api/survey/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:sc,on:on})});var j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error==='no_email'?'no email on file':(j.error||('HTTP '+r.status)));apiDirty&&apiDirty();rptCrewSurvey();}
+  catch(e){alert('Not sent: '+e.message);if(btn)btn.disabled=false;}
 }
 async function srvLogCall(id,name,btn){
   var note=prompt('Log the call to '+(name||'this seafarer')+'. What was said? (optional)','');
@@ -9306,8 +9316,8 @@ var PF_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontim
 function pfPeople(PE,sc){
   var sl=(PE.slots||[]).map(function(s){var lab=String(s.label).split(' · ')[0];return '<div class="pf2slot '+s.state+'"><b>'+escHtml(lab)+'</b><span>'+(s.state==='answered'?('Answered '+fmtDateS(s.at)):(s.state==='pending'?('Asked '+fmtDateS(s.at)):(s.state==='na'?'Not assessed':'Never asked')))+'</span></div>';}).join('');
   var fd=(PE.feed||[]).map(function(f){
-    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='audit'?'Audit':(f.kind==='comment'?'Comment':'Note'))));
-    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'||f.kind==='audit'?'feedback':'typed');
+    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='audit'?'Audit':(f.kind==='survey'?'Crew survey':(f.kind==='comment'?'Comment':'Note')))));
+    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'||f.kind==='audit'||f.kind==='survey'?'feedback':'typed');
     var body='';
     if(f.kind==='intel'){var ps=f.parts||[];var head=pfIntelHead(f);var rest=ps.filter(function(p){return p.label!=='Summary';});
       body='<div>'+escHtml(head)+'</div>'+(rest.length?'<details class=pf2more><summary>Full report</summary>'+rest.map(function(p){return '<div style="margin-top:6px">'+(p.label?'<b>'+escHtml(p.label)+':</b> ':'')+escHtml(p.text)+'</div>';}).join('')+'</details>':'')
@@ -9315,6 +9325,7 @@ function pfPeople(PE,sc){
     else if(f.kind==='feedback'){var a=f.answers||{};body='<div class=pf2tk>'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((PF_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div style="margin-top:4px">“'+escHtml(a.note)+'”</div>':'')+(f.superseded?'<div class=pf2mut>Earlier answer · kept, not used</div>':'');}
     else if(f.kind==='review')body='<div><b>'+(f.rating!=null?f.rating+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'</div>'+(f.text?'<div>“'+escHtml(f.text)+'”</div>':'');
     else if(f.kind==='audit')body=pfAudit(f);
+    else if(f.kind==='survey')body=pfSurvey(f);
     else body='<div style="font-size:14px">“'+escHtml(f.text)+'”</div>';
     return '<div class=pf2fd><div><b>'+fmtDateS(String(f.at||'').slice(0,10))+'</b>'+pfSrc(src,kind+(f.who&&f.kind!=='intel'?(' · '+String(f.who).split(' · ')[0]):''))+'</div><div>'+body+'</div></div>';
   }).join('');
@@ -9323,6 +9334,13 @@ function pfPeople(PE,sc){
 }
 // Dexter's printshop audit on the profile (19 Oct 2026, P1): the score and how it was reached, the four ratings, the three
 // boxes, the follow-up with its state, and the way back to the whole audit on the audit app. Never the crew's to read.
+// His own end-of-contract survey (23 Oct 2026): what he said about the contract. Feedback only, never scored (\u00a71).
+function pfSurvey(f){
+  var pill=function(v){return v==null?'-':'<b style="color:'+(v>=4?'#3E7F2E':(v===3?'#B7791F':'#96281B'))+'">'+v+'/5</b>';};
+  return '<div>Overall '+pill(f.overall)+' &middot; Would return '+pill(f.ret)+' &middot; '+f.fives+' of '+f.of+' at 5'+(f.ship?' &middot; '+escHtml(niceShip(f.ship)):'')+(f.source==='forms'?' <span class=pf2mut>&middot; Forms survey</span>':'')+(f.quick?' <span class=pf2mut>&middot; quick (same answer to everything)</span>':'')+'</div>'
+    +((f.low||[]).length?'<div class=pf2tk style="margin-top:4px">'+f.low.map(function(x){return '<span class=pf2tick style="color:#96281B">'+escHtml(x.short+' \u00b7 '+x.v)+'</span>';}).join('')+'</div>':'')
+    +(f.fix?'<div style="margin-top:4px">Fix first: &ldquo;'+escHtml(f.fix)+'&rdquo;</div>':'');
+}
 function pfAudit(f){
   var R=f.ratings||{},rt=function(l,v){return v==null?'':'<span class="pf2tick'+(v<=3?' lo':' on')+'">'+l+' · '+escHtml(v)+'</span>';};
   var h='<div><b>'+(f.score!=null?escHtml(f.score)+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'<span class=pf2mut> · '+(f.from==='overall'?'the Overall rating':'average of the three, rounded down')+'</span></div>'
@@ -9665,7 +9683,7 @@ async function ntLoad(){
   var items=[];
   (rs[1].notes||[]).forEach(function(n){items.push({kind:'note',at:n.ts,id:n.id,text:n.text,who:n.created_by?ntWho(n.created_by):null,archived:n.archived_at,archivedBy:n.archived_by});});
   (rs[2].intel||[]).forEach(function(x){items.push({kind:'intel',at:x.ts,id:x.id,text:x.summary,who:x.reporter,confidence:x.confidence,contractNo:x.contract_no,edited:x.edited_at});});
-  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});else if(f.kind==='audit')items.push({kind:'audit',at:f.at,who:'Dexter',audit:f});});
+  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});else if(f.kind==='audit')items.push({kind:'audit',at:f.at,who:'Dexter',audit:f});else if(f.kind==='survey')items.push({kind:'survey',at:f.at,who:'His survey',survey:f});});
   // a note written before authors were recorded: the activity row of the same second names them (as on the profile)
   var feedNotes=((P.people&&P.people.feed)||[]).filter(function(f){return f.kind==='note'&&f.who;});
   items.forEach(function(it){if(it.kind==='note'&&!it.who){var m=feedNotes.filter(function(f){return f.at===it.at;})[0];if(m)it.who=m.who;}});
@@ -9678,10 +9696,10 @@ function ntGroup(day){var K=NOTES_STATE.contracts||[],today=new Date().toISOStri
 function ntDraw(){
   var S=NOTES_STATE,w=document.getElementById('crewmodal');if(!S||!w)return;
   var _dr=document.getElementById('newNote');if(_dr)S.draft=_dr.value; // the draft survives a chip or an archive (13 Oct 2026)
-  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'||it.kind==='audit'?'feedback':it.kind]++;});
+  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'||it.kind==='audit'||it.kind==='survey'?'feedback':it.kind]++;});
   var chip=function(k,l){return '<button class="ntchip'+(S.filter===k?' sel':'')+'" onclick="NOTES_STATE.filter=\\''+k+'\\';ntDraw()">'+l+' · '+cnt[k]+'</button>';};
   var cur=(S.contracts||[]).filter(function(k){return k.current;})[0]||(S.contracts||[])[0]||null;
-  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&(it.kind==='review'||it.kind==='audit'));});
+  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&(it.kind==='review'||it.kind==='audit'||it.kind==='survey'));});
   var body='',lastKey=null;
   shown.forEach(function(it){
     var day=String(it.at||'').slice(0,10),k=ntGroup(day),key=k?(k.ship+k.on):'none';
@@ -9700,7 +9718,7 @@ var NT_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontim
 function ntItem(it){
   var when=fmtDateS(String(it.at||'').slice(0,10))+(it.kind==='note'&&it.at&&String(it.at).length>10?' · '+new Date(it.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'');
   var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6'],audit:['#F1ECFA','#5A3FA6']}[it.kind];
-  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop Ops Audit'}[it.kind];
+  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop Ops Audit',survey:'Crew survey'}[it.kind];
   var body='',acts='';
   if(it.kind==='note'){body='<div class=nttext>'+escHtml(it.text)+'</div>';
     acts=it.archived?('<div class=ntacts><span>Archived '+fmtDateS(String(it.archived).slice(0,10))+(it.archivedBy?' by '+escHtml(ntWho(it.archivedBy)):'')+'</span><a href="#" onclick="ntArchive('+it.id+',true);return false">Restore</a></div>'):('<div class=ntacts><a href="#" onclick="ntArchive('+it.id+',false);return false">Archive</a></div>');}
@@ -9708,6 +9726,7 @@ function ntItem(it){
     acts='<div class=ntacts><span>'+escHtml([it.confidence?it.confidence+' match':'',it.contractNo!=null?'contract '+it.contractNo:'','never scored',it.edited?'edited':''].filter(Boolean).join(' · '))+'</span><a href="#" onclick="intelEdit(NOTES_STATE.id,\\''+escHtml(it.id)+'\\');return false">Edit summary</a></div>';}
   else if(it.kind==='feedback'){var a=it.answers||{};body='<div class=pf2tk style="margin-top:6px">'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((NT_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div class=nttext>“'+escHtml(a.note)+'”</div>':'')+(it.superseded?'<div class=echint>Earlier answer · kept, not used</div>':'');}
   else if(it.kind==='audit')body='<div class=nttext>'+pfAudit(it.audit)+'</div>';
+  else if(it.kind==='survey')body='<div class=nttext>'+pfSurvey(it.survey)+'</div>';
   else body='<div class=nttext><b>'+(it.rating!=null?it.rating+'/5':'')+'</b>'+(it.ship?' · '+escHtml(niceShip(it.ship)):'')+(it.text?' — “'+escHtml(it.text)+'”':'')+'</div>';
   return '<div class="ntitem'+(it.archived?' ntarch':'')+'"><div style="flex:1;min-width:0">'
     +'<div class=nthead><b>'+escHtml(it.who||'Author not recorded')+'</b><span class=pfsrc><i style="background:'+col[1]+'"></i>'+tag+'</span><span class=ntwhen>'+when+'</span></div>'+body+acts+'</div></div>';

@@ -1077,6 +1077,18 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
 - **Reports › Crew survey** (`GET /api/survey/report`, `surveyReport`): answers, overall, would sail again, answer rate, **need a
   call** (3+ answers at 1–2; Rita logs the call, `POST /api/survey/call`), where it hurts (lowest first), the fixes, by line, the
   loop (signed off → asked → opened → answered, and who has no email), every answer (Forms rows tagged). Period + line chips.
+- **23 Oct 2026, Miguel's "2. yes to all. 3. yes do it. 4. ok."** Pinned by `test/crew_survey.test.js`.
+  - **Who is NOT asked** (`surveySkip`, read the morning the invitation would go): TDG's word or Rita's manual status Not for
+    Rehire, or the contract's recorded end reason (`contract_end`) Performance, Medical or Compassionate. Each is listed on the
+    report under "Not asked, on purpose" with its reason and **Send anyway** (`POST /api/survey/send` {sc, on}, the same
+    `invite`). A reason recorded after the invitation went cannot recall it (said on the report).
+  - **His answers are on his profile** ("What people said", kind `survey`; the Notes window under Feedback) and in the
+    internal crew file (`feedbackFile`, "Crew survey (his own answers)"), never the statement or anything the crew reads.
+  - **q20 "My travel, hotel and joining arrangements were well organized."** (Travel & joining, on the first screen). Rita's
+    19 stay as q01–q19 so the history compares; `FORMS_KEYS` = the 19 the Forms survey asked; a Forms answer never has q20.
+  - **Quick answers**: the page sends the seconds from Start to Send (`answer_secs`, migrations/0041, `SURVEY_ALTERS` through
+    `addColumn`); the same answer to every statement in under `QUICK_SECS` = 60 is listed and tagged Quick but left out of
+    every average (`quickAnswer`). Forms answers have no timing, so never quick.
 - **The switch**: Keyman › Automation "Crew survey" (`/api/survey/auto`, `crew_survey_auto_enabled` + `_since`), OFF until Miguel
   switches it on. `GET /api/survey/preview?id=&what=page|invite|reminder|answers` shows a crew's real data, makes no link, sends nothing.
 - **Never money, never the cruise line**: `crew_survey` (migrations/0040) is read by nothing on the Score Card / bonus path, and
