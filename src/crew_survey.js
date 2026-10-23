@@ -53,6 +53,8 @@ export const SUPERVISOR = { Royal: "GSM", Celebrity: "DCM", Azamara: "BOM", NCL:
 export const statementFor = (q, brand) => q.text.replace("{M}", SUPERVISOR[brand] ? " (" + SUPERVISOR[brand] + ")" : "");
 
 export const SURVEY_CATCHUP_DAYS = 14;   // TDG's file can confirm a debark a week or more after the day
+export const SURVEY_DELAY_DAYS = 3;      // Miguel, 23 Oct 2026 ("ok go ahead"): 3 days after the sign-off, so Rita can record
+                                         // why a contract ended (Performance / Medical / Compassionate are not asked) first
 export const SURVEY_REMIND_DAYS = 5;     // Miguel, 23 Oct 2026: "1. yes" — one reminder
 export const SURVEY_LINK_DAYS = 30;
 export const SURVEY_TZ = "America/New_York";
@@ -94,8 +96,8 @@ export const emailOk = (e) => /^[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+$/.test(String(e |
 export const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
 
 // The contracts the daily run asks: ENDED on the board (TDG's debark, Rita's typed date or a reliever's card — a projected
-// sign-off that passed is overdue, still aboard, never asked), never a training visit, ended BEFORE today (the morning
-// after), within the catch-up window, and never before the day the switch went on. One per contract (sc + sign-on).
+// sign-off that passed is overdue, still aboard, never asked), never a training visit, ended SURVEY_DELAY_DAYS or more
+// before today, within the catch-up window, and never before the day the switch went on. One per contract (sc + sign-on).
 export function surveyDue(legs, today, since) {
   const lo = [addDays(today, -SURVEY_CATCHUP_DAYS), iso(since) || "0000-00-00"].sort().pop();
   const seen = new Set(), out = [];
@@ -103,7 +105,7 @@ export function surveyDue(legs, today, since) {
     if (!l || !l.sc || l.is_current || l.ours === false || l.visit || !iso(l.on) || !iso(l.off)) continue;
     if (!["tdg", "rita", "card"].includes(l.offSource)) continue;
     const off = iso(l.off);
-    if (off >= today || off < lo) continue;
+    if (off > addDays(today, -SURVEY_DELAY_DAYS) || off < lo) continue;
     const k = l.sc + "|" + iso(l.on);
     if (seen.has(k)) continue;
     seen.add(k);

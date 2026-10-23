@@ -18,11 +18,11 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted be
 const TODAY = "2026-10-23";
 const ALL5 = Object.fromEntries(KEYS.map((k) => [k, 5]));
 const LEGS = [
-  { sc: "SC-1", name: "Raymond Quiming", ship: "Infinity", brand: "Celebrity", on: "2026-03-01", off: "2026-10-22", is_current: false, ours: true, offSource: "tdg", disembark: "Fort Lauderdale" },
+  { sc: "SC-1", name: "Raymond Quiming", ship: "Infinity", brand: "Celebrity", on: "2026-03-01", off: "2026-10-19", is_current: false, ours: true, offSource: "tdg", disembark: "Fort Lauderdale" },
   { sc: "SC-2", name: "Projected Only", ship: "Allure of the Seas", brand: "Royal", on: "2026-03-01", off: "2026-10-01", is_current: true, ours: true, offSource: "projected" },
   { sc: "SC-3", name: "Trainer Visit", ship: "Pursuit", brand: "Azamara", on: "2026-10-16", off: "2026-10-22", is_current: false, ours: true, offSource: "rita", visit: true },
   { sc: "SC-4", name: "Long Ago", ship: "Quest", brand: "Azamara", on: "2026-02-01", off: "2026-09-01", is_current: false, ours: true, offSource: "tdg" },
-  { sc: "SC-5", name: "No Mail", ship: "Getaway", brand: "NCL", on: "2026-04-01", off: "2026-10-20", is_current: false, ours: true, offSource: "card" },
+  { sc: "SC-5", name: "No Mail", ship: "Getaway", brand: "NCL", on: "2026-04-01", off: "2026-10-18", is_current: false, ours: true, offSource: "card" },
   { sc: "SC-6", name: "Signs Off Today", ship: "Wonder of the Seas", brand: "Royal", on: "2026-03-23", off: TODAY, is_current: false, ours: true, offSource: "tdg" },
 ];
 
@@ -76,7 +76,9 @@ test("the supervisor statement names the line's own title (NCL: shipboard manage
 test("due: ended by TDG, Rita or a card, before today, inside the catch-up, never a projection or a visit, never before the switch", () => {
   const due = (since) => surveyDue(LEGS, TODAY, since).map((l) => l.sc).sort();
   assert.deepEqual(due(null), ["SC-1", "SC-5"], "SC-2 projected (held, still aboard), SC-3 a visit, SC-4 older than 14 days, SC-6 signs off today");
-  assert.deepEqual(due("2026-10-21"), ["SC-1"], "a contract that ended before the switch went on is never asked");
+  assert.deepEqual(due("2026-10-19"), ["SC-1"], "a contract that ended before the switch went on is never asked");
+  const at = (off) => surveyDue([{ ...LEGS[0], off }], TODAY, null).length;
+  assert.deepEqual([at("2026-10-22"), at("2026-10-21"), at("2026-10-20")], [0, 0, 1], "asked 3 days after the sign-off, never the morning after");
   assert.equal(surveyDue([...LEGS, { ...LEGS[0] }], TODAY, null).length, 2, "one per contract");
   assert.equal(endedLegs(LEGS).length, 4, "the loop counts ended contracts (not the projection, not the visit)");
 });
@@ -193,7 +195,7 @@ test("the daily run: 07:00 Miami, only when switched on, never a contract ended 
   const on = await call(s, env, "POST", "/api/survey/auto", { enabled: true });
   assert.deepEqual(await on.json(), { ok: true, enabled: true, since: TODAY });
   assert.equal((await s.run(env, OFF_GATE)).skipped, "not_gate_hour");
-  assert.equal((await s.run(env, GATE)).invited.length, 0, "SC-1 ended yesterday, before the switch went on");
+  assert.equal((await s.run(env, GATE)).invited.length, 0, "SC-1 ended 4 days ago, before the switch went on");
   d.prepare("UPDATE app_setting SET v='2026-10-15' WHERE k='crew_survey_auto_since'").run();
   const rep = await s.run(env, GATE);
   assert.deepEqual(rep.invited.map((x) => x.sc), ["SC-1"]);
