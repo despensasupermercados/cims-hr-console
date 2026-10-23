@@ -1772,8 +1772,14 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   falls due that day and, under it, what is still open past its date (`followupBatches`; an owner with only late items hears
   nothing that day); the owner's address from `OWNER_EMAIL` (the five names the audit offers), anything else logged
   `no_recipient`, never guessed; link `audit.cims.work/#fu`. Pinned by `test/audit_visit.test.js`,
-  `test/audit_filed_email.test.js`, `test/audit_followup_email.test.js`. Still to build: the import of the 61 (I1), the
-  web rail (W1).
+  `test/audit_filed_email.test.js`, `test/audit_followup_email.test.js`. Still to build: the import of the 61 (I1).
+- **THE WEB RAIL** (W1; Miguel, 23 Oct 2026: "yeah I like that. do it"): on a computer (wider than 1100px) the audit app keeps
+  a left column like the console's — Ships (crewed hulls), History (filed count), Follow-ups (open count, red), then In
+  progress: one row per open request (ship · first name, "Documents in" / "Waiting on X · N h left" / "Past the
+  deadline"), the current page marked. Drawn by `wrail()` from the ships list the page already holds (no request of its
+  own), redrawn by `chrome()` on every view. The app bar's two icon buttons hide where the rail shows; a phone keeps them
+  and never sees the rail; the audit itself (`#a=`, `body.instep`) hides it for its own step rail. Pinned by
+  `test/audit_page_boot.test.js`; proofs under `docs/mockups/audit_w1_20261023/`.
 - **THE CREW IS TOLD WHAT THE PATTERN 43 SCAN SHOWS** (R1; Miguel, 23 Oct 2026: "is not that Rolando needs to approve .. is
   that you the AI tell the crew the assessment of it"). R1 was never a sign-off by Rolando. The crew's page used to say
   "Received" while only the team saw the marks; now each read Pattern 43 row carries `assess` (`audit_read.p43Assess`, pure,
