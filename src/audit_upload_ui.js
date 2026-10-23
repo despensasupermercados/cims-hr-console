@@ -245,17 +245,27 @@ const SCRIPT = String.raw`
     };
     x.send(file);
   }
+  // One save at a time, and every caller learns whether the numbers landed (true / false): Send waits for the save
+  // already on its way and goes only once nothing is left unsaved (23 Oct 2026 review: the 800 ms auto-save had already
+  // taken the numbers, so Send found nothing queued and filed the request ahead of the crew's last count). The keepalive
+  // save on leaving the page goes at once, never behind the queue.
+  var saving = Promise.resolve(true);
   function flush(keep) {
+    if (keep) return saveOnce(true);
+    saving = saving.then(function () { return saveOnce(false); }, function () { return saveOnce(false); });
+    return saving;
+  }
+  function saveOnce(keep) {
     var counts = {}, any = false;
     Object.keys(pend).forEach(function (k) { if (k.indexOf("c:") === 0) { counts[k.slice(2)] = pend[k]; delete pend[k]; any = true; } });
-    if (!any) return Promise.resolve();
+    if (!any) return Promise.resolve(true);
     return api("/api/audit/u/count", { counts: counts }, keep).then(function (j) {
       if (j && j.ok === false) {
         // not saved: the numbers go back in the queue (a newer keystroke wins) and are tried again
         Object.keys(counts).forEach(function (p) { if (!("c:" + p in pend)) pend["c:" + p] = counts[p]; });
-        toast(j.say || "Not saved"); clearTimeout(timer); timer = setTimeout(flush, 5000); return;
+        toast(j.say || "Not saved"); clearTimeout(timer); timer = setTimeout(flush, 5000); return false;
       }
-      return load(true);
+      return load(true).then(function () { return true; }, function () { return true; });
     });
   }
   function setCount(part, v) {
@@ -289,7 +299,10 @@ const SCRIPT = String.raw`
     if (t.hasAttribute("data-undown")) { api("/api/audit/u/down", { serial: t.getAttribute("data-undown"), down: false }).then(load); return; }
     if (t.id === "submit") {
       t.disabled = true;
-      flush().then(function () { return api("/api/audit/u/submit", {}); }).then(function (j) { if (j && j.ok) load(); else { t.disabled = false; toast((j && j.say) || "Not sent"); load(); } });
+      flush().then(function (saved) {
+        if (!saved) { t.disabled = false; return; } // the save said why (its toast); nothing is sent with a number missing
+        return api("/api/audit/u/submit", {}).then(function (j) { if (j && j.ok) load(); else { t.disabled = false; toast((j && j.say) || "Not sent"); load(); } });
+      });
       return;
     }
     if (t.id === "xadd") {

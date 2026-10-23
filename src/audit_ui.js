@@ -871,9 +871,14 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function diffCls(diff) { return diff > 0 ? " p" : !diff ? " z" : ""; }
   function diffTxt(diff) { return isNaN(diff) ? "–" : !diff ? "0" : (diff > 0 ? "+" : "−") + Math.abs(diff); }
   /* the answer to "Does the OBP match the shelf?" is read from the lines (AR.obpMatches), never a second control */
-  function obpVerdict(v, d) {
-    var off = v.count.diff.filter(function (x) { return x.kind === "gap" && !AR.obpMatches({ inv: { lines: d.inv.lines, added: [] } }, { diff: [x] }); }).length
+  // ONE count of the lines where OBP is off, for the Inventory step and Review (23 Oct 2026 review: Review counted every
+  // line Dexter added as off, even one whose shelf equals OBP)
+  function offLines(v, d) {
+    return v.count.diff.filter(function (x) { return x.kind === "gap" && !AR.obpMatches({ inv: { lines: d.inv.lines, added: [] } }, { diff: [x] }); }).length
       + d.inv.added.filter(function (a) { return !AR.obpMatches({ inv: { lines: {}, added: [a] } }, { diff: [], obp: ctxOf(v).obp }); }).length;
+  }
+  function obpVerdict(v, d) {
+    var off = offLines(v, d);
     var tot = v.count.total || 0;
     return '<div class="card pad-m measure" id="obpv"><span class="fi' + (off ? " a" : "") + '">' + ic("package") + '</span><div><b class="h3">' + (off ? "OBP is off on " + off + (off === 1 ? " line" : " lines") : "OBP matches the shelf") + '</b><div class="sm">' + esc(first(v.crew)) + "&#8217;s count, with the shelf you type where it differs" + (tot ? ": " + Math.max(0, tot - off) + " of " + tot + " lines match" : "") + "</div></div></div>";
   }
@@ -958,7 +963,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (probs.length) h += '<div class="alert">' + ic("warning-circle") + "<div><b>" + probs.length + (probs.length === 1 ? " answer missing" : " answers missing") + '</b><div class="sm">' + esc(probs[0].say) + '</div><button type="button" class="ul" style="color:inherit" data-step="' + stepNo(probs[0].step) + '">Go to ' + esc(AR.STEPS[stepNo(probs[0].step) - 1].title) + "</button></div></div>";
     var ws = d.ws.missing, tools = d.hw.tools.missing;
     var finds = v.machines.filter(function (m) { return machState(d, m) !== "ok"; });
-    var off = v.count.diff.filter(function (x) { return x.kind === "gap" && !AR.obpMatches({ inv: { lines: d.inv.lines, added: [] } }, { diff: [x] }); }).length + d.inv.added.length;
+    var off = offLines(v, d);
     var nf = Object.keys(d.inv.repairs || {}).filter(function (k) { return d.inv.repairs[k] === "not_found"; }).length;
     var tr = (d.crew.training || []).map(function (k) { var t = AR.TRAINING.filter(function (x) { return x.key === k; })[0]; return t ? t.label : k; }); if (d.crew.trainingOther) tr.push(d.crew.trainingOther);
     var pm = (d.crew.ppe.missing || []).map(labelOf), fu = d.ov.followup;
@@ -1201,7 +1206,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function loadHist() {
     return api("/api/audit/history").then(function (r) {
       S.hist = r;
-      S.counts = { filed: r.audits.length, openFollowups: r.followups.filter(function (f) { return f.status === "open"; }).length };
+      // the rail's History number counts the audits filed in the app, as /api/audit/ships does: never the Forms survey's rows
+      S.counts = { filed: r.audits.filter(function (a) { return a.source !== "forms"; }).length, openFollowups: r.followups.filter(function (f) { return f.status === "open"; }).length };
       return r;
     });
   }
@@ -1428,10 +1434,12 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var mf = machines.filter(function (m) { var a = (D.hw.machines || {})[m.serial] || {}; return a.down === "still" || a.p43 === "seen" || AR.MACHINE_CHECKS.some(function (c) { return (a.checks || {})[c.key] === "finding"; }); });
       var gaps = (ctx.diff || []).filter(function (x) { return x.kind === "gap"; }), lines = D.inv.lines || {};
       var offRows = gaps.filter(function (x) { var L = lines[x.part_no], s = L && L.shelf != null ? L.shelf : x.counted; return s !== x.obp; });
+      // an added line is off only when its shelf differs from OBP as filed (ctx.obp); a filing from before that was kept counts it off
+      var addOff = (D.inv.added || []).filter(function (a) { var o = ctx.obp ? ctx.obp[a.part_no] : undefined; return o === undefined || o === null || a.shelf !== o; }).length;
       var fus = F.followups || [], fuLate = fus.filter(function (f) { return f.status === "open" && f.due && f.due < (v.today || S.today); });
       h += '<section class="stats" style="--n:4"><div><span class="v">' + (wsM.length + tlM.length) + '</span><span class="k">missing on the desk and tools' + (again.length ? " · " + again.length + " again" : "") + "</span></div>"
         + '<div><span class="v">' + mf.length + " of " + machines.length + '</span><span class="k">presses with a finding</span></div>'
-        + '<div><span class="v">' + one(offRows.length + (D.inv.added || []).length, "line") + '</span><span class="k">where OBP is off' + (v.count && v.count.total ? ", of " + v.count.total : "") + "</span></div>"
+        + '<div><span class="v">' + one(offRows.length + addOff, "line") + '</span><span class="k">where OBP is off' + (v.count && v.count.total ? ", of " + v.count.total : "") + "</span></div>"
         + '<div><span class="v">' + fus.length + '</span><span class="k">follow-ups asked' + (fuLate.length ? " · " + fuLate.length + " past " + (fuLate.length === 1 ? "its" : "their") + " date" : "") + "</span></div></section>";
       // what the documents said, confirmed on board
       var q = function (title, s) { return '<div class="q"><b>' + title + '</b><span class="sm">' + s + "</span></div>"; }, qs = [];
@@ -1463,7 +1471,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var invRows = gaps.map(function (x) { var L = lines[x.part_no], s = L && L.shelf != null ? L.shelf : x.counted, df = s - x.obp; return '<tr><td class="full"><b>' + esc(x.description || x.part_no) + '</b><div class="xs">' + esc(x.part_no) + '</div></td><td class="n" data-l="Crew">' + esc(x.counted) + '</td><td class="n" data-l="OBP">' + esc(x.obp) + '</td><td class="n" data-l="Shelf">' + esc(s) + '</td><td data-l="Result">' + (df ? '<span class="chip a">OBP ' + Math.abs(df) + (df > 0 ? " low" : " high") + "</span>" : '<span class="chip g">OBP right</span>') + "</td></tr>"; })
         .concat((D.inv.added || []).map(function (a) { var p = parts[a.part_no] || {}; var s = a.shelf != null ? a.shelf : (lines[a.part_no] || {}).shelf; return '<tr><td class="full"><b>' + esc(p.description || a.part_no) + '</b><div class="xs">' + esc(a.part_no) + '</div></td><td class="n" data-l="Crew">' + esc(p.counted == null ? "–" : p.counted) + '</td><td class="n" data-l="OBP">' + esc(p.obp == null ? "–" : p.obp) + '</td><td class="n" data-l="Shelf">' + esc(s == null ? "–" : s) + '</td><td data-l="Result"><span class="chip n">Added by Dexter</span></td></tr>'; }))
         .concat((ctx.extras || []).map(function (x) { var nf = (D.inv.repairs || {})[x.id] === "not_found"; return '<tr><td class="full"><b>' + esc(x.text) + '</b><div class="xs">Not in OBP</div></td><td class="n" data-l="Crew">' + esc(x.counted == null ? "–" : x.counted) + '</td><td class="n" data-l="OBP">–</td><td class="n" data-l="Shelf">' + (nf ? "–" : "seen") + '</td><td data-l="Result">' + (nf ? '<span class="chip r">Not found</span>' : '<span class="chip m">On the shelf</span>') + "</td></tr>"; }));
-      h += '<section class="card clip">' + shd(3, "Inventory", "The crew&#8217;s blind count against OBP, then the shelf", D.inv.accurate ? '<span class="chip g">OBP matches the shelf</span>' : '<span class="chip a">OBP is off on ' + one(offRows.length + (D.inv.added || []).length, "line") + "</span>")
+      h += '<section class="card clip">' + shd(3, "Inventory", "The crew&#8217;s blind count against OBP, then the shelf", D.inv.accurate ? '<span class="chip g">OBP matches the shelf</span>' : '<span class="chip a">OBP is off on ' + one(offRows.length + addOff, "line") + "</span>")
         + (invRows.length ? '<table class="tbl cards"><thead><tr><th>Part</th><th class="n">Crew counted</th><th class="n">OBP</th><th class="n">Shelf</th><th>Result</th></tr></thead><tbody>' + invRows.join("") + "</tbody></table>" : "")
         + '<div class="pad-m line-t soft"><p class="sm">' + (v.count && v.count.total ? one(Math.max(0, v.count.total - gaps.length), "other line") + ": the crew&#8217;s count and OBP agree." : "Every other line agrees.") + (D.inv.note ? " Dexter&#8217;s note: &#8220;" + esc(D.inv.note) + "&#8221;" : "") + "</p></div></section>";
       // 4 · Ratings

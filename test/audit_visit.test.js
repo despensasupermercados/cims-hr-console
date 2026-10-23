@@ -639,3 +639,42 @@ test("a follow-up's owner hears on its date: one email per owner per day from 07
   assert.equal(await t.R._internal.sendFollowups(t.env, at), 0, "no address: logged, never guessed");
   assert.equal(t.db.prepare("SELECT note FROM audit_send_log WHERE kind LIKE 'followup:%'").get().note, "no_recipient: The captain");
 });
+
+/* ------------------------------------------- the 23 Oct 2026 review ------------------------------------------- */
+test("review: 'OBP matches the shelf' is measured by the server, never taken from the open page", async () => {
+  const t = setup();
+  const id = await completeRequest(t);
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id);
+  const d = cleanVisit(v);
+  d.inv.accurate = true; // what a stranger's POST may say: Toner C is 0 on the shelf against OBP's 5, and nobody typed otherwise
+  const ok = await (await t.call("POST", "/api/audit/request/grade", { id, visit: d })).json();
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  const data = JSON.parse(t.db.prepare("SELECT data_json FROM audit_visit_data WHERE request_id=?").get(id).data_json);
+  assert.equal(data.inv.accurate, false, "two lines are off: the filing says so whatever the page sent");
+});
+
+test("review: a line Dexter adds keeps OBP's number as filed, and History counts it above or below OBP", async () => {
+  const t = setup();
+  const id = await completeRequest(t);
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id);
+  const d = cleanVisit(v);
+  d.inv.lines.B2 = { shelf: 5, checked: true }; d.inv.lines.C3 = { shelf: 4, checked: true }; // both crew lines right on the shelf
+  d.inv.added = [{ part_no: "A1", shelf: 3 }];                                                    // Drum K: 3 on the shelf, OBP says 2
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id, visit: d })).json()).ok, true);
+  const data = JSON.parse(t.db.prepare("SELECT data_json FROM audit_visit_data WHERE request_id=?").get(id).data_json);
+  assert.deepEqual(data.ctx.obp, { A1: 2 });
+  assert.equal(data.inv.accurate, false);
+  const found = (await (await t.call("GET", "/api/audit/history")).json()).audits[0].found.inv;
+  assert.deepEqual([found.above, found.below, found.added], [1, 0, 1], "the added Drum K is the one line above OBP");
+});
+
+test("review: a machine list read before lifeRows was kept, listing a part past its life, was read — never 'part life not read'", async () => {
+  const t = setup();
+  const id = await completeRequest(t); // the fake HON read carries lifeOver (Drum K 140%) and no lifeItems: lifeRows null
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  assert.equal(v.machines[0].life.length, 1);
+  assert.equal(v.machines[0].lifeRead, true);
+  assert.equal(beforeVisit({ machines: v.machines }).some((b) => /part life not read/.test(b.t)), false);
+});

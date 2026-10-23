@@ -23,7 +23,7 @@ import { filedEmail, TEMPLATE_ID as FILED_ID } from "./emails/hr.audit.filed.v1.
 import { dispatchEmail, TEMPLATE_ID as DISPATCH_ID } from "./emails/hr.audit.dispatch.v1.js";
 import { followupEmail, TEMPLATE_ID as FOLLOWUP_ID } from "./emails/hr.audit.followup.v1.js";
 import { auditUploadHtml, auditClosedHtml } from "./audit_upload_ui.js";
-import { normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, PHOTO_STEPS, VISIT_VERSION } from "./audit_steps.js";
+import { normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, obpMatches, PHOTO_STEPS, VISIT_VERSION } from "./audit_steps.js";
 import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
 
 export const LINK_DAYS = 14;
@@ -117,12 +117,15 @@ export function installAuditRequest(deps) {
     const lastAt = [...(cnt.results || []), ...(extra.results || []), ...(down.results || []), ...ups].map((x) => String((x && (x.read_at || x.at)) || "")).sort().pop() || null;
     return { machines, lines, obpLines, counted, extras: extra.results || [], down: down.results || [], uploads: ups, gate, lastAt };
   }
+  // A machine list's life pages were read when the read kept life rows, or listed a part past its rated life (a read filed
+  // before lifeRows was kept still carries lifeOver: it read the pages; 23 Oct 2026 review).
+  const lifeWasRead = (s) => !!s && (s.lifeRows > 0 || (Array.isArray(s.lifeOver) && s.lifeOver.length > 0));
   // The newest live file per machine and kind, with what the crew is told about it.
   function slot(ups, serial, kind) {
     const u = ups.filter((x) => x.serial === serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
     // A machine list read with no life row never says "No part past its rated life" (Miguel, 20 Oct 2026: "u didnt read the
     // files correctly"): a read filed before lifeRows was kept, or one with none, says what is true. Nothing stored changes.
-    const s = u && u.read && u.read.summary, noLife = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && !(s.lifeRows > 0));
+    const s = u && u.read && u.read.summary, noLife = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && !lifeWasRead(s));
     return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
   }
   // What the reads found per machine — ONE definition for the documents-in email and the audit's Machines step.
@@ -300,7 +303,7 @@ export function installAuditRequest(deps) {
       life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })),
       // "No part past its rated life" only from a read that carried life rows; a read filed before the count was kept
       // (lifeRows absent) or one with none is "part life not read", never a clean machine
-      lifeRead: m.mml ? m.mml.lifeRows > 0 : null }));
+      lifeRead: m.mml ? lifeWasRead(m.mml) : null }));
     const diff = countDiff(obp.lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const extras = s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted }));
     const parts = blindLines(obp.lines).map((l) => { const o = obp.lines.find((x) => String(x.part_number || x.part_no || "").trim() === l.part_no); return { part_no: l.part_no, description: l.description, obp: o && Number.isFinite(Number(o.on_hand)) ? Number(o.on_hand) : null, counted: s.counted[l.part_no] == null ? null : s.counted[l.part_no] }; });
@@ -340,13 +343,18 @@ export function installAuditRequest(deps) {
     const c = await visitCtx(env, req);
     const ctx = { machines: c.machines, diff: c.diff, extras: c.extras, parts: c.parts.map((p) => p.part_no), followups: c.followups };
     const d = normalizeVisit(raw, ctx);
+    // "Does OBP match the shelf" is measured from the lines, never taken from the page (the site is open, no sign-in): the
+    // same rule the page shows (obpMatches), on OBP's numbers as the documents-in email compared them (23 Oct 2026 review)
+    const obpOf = {}; for (const p of c.parts) obpOf[p.part_no] = p.obp;
+    d.inv.accurate = obpMatches(d, { ...ctx, obp: obpOf });
     const today = now().slice(0, 10);
     const problems = visitProblems(d, ctx, today);
     const e = evalOf(d);
     if (problems.length || e.problems.length) return json({ ok: false, error: "invalid", problems, fields: e.problems }, 400);
     d.repeat = repeatCounts(c.prevData, d);
     // what the documents said, kept with the visit: the filed record never depends on a later read
-    d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life, lifeRead: m.lifeRead })) };
+    // OBP's number for each line Dexter added is kept too: History and the filed record read the shelf against it as filed
+    d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, obp: Object.fromEntries(d.inv.added.map((a) => [a.part_no, obpOf[a.part_no] == null ? null : obpOf[a.part_no]])), machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life, lifeRead: m.lifeRead })) };
     // what this visit did with the follow-ups left open on the ship, kept with it: the filed email says it as filed
     d.fuSeen = c.followups.map((o) => ({ id: o.id, text: o.text, owner: o.owner, state: (d.close[o.id] || "open") === "fixed" ? "fixed" : "open", times: (o.carried || 0) + 1 }));
     const at = now(), vid = "av_" + crypto.randomUUID();
@@ -780,6 +788,9 @@ export function installAuditRequest(deps) {
     const lines = (d.inv && d.inv.lines) || {}, diff = ((d.ctx && d.ctx.diff) || []).filter((x) => x.kind === "gap");
     let above = 0, below = 0;
     for (const x of diff) { const L = lines[x.part_no], shelf = L && L.shelf != null ? L.shelf : x.counted; if (shelf > x.obp) above++; else if (shelf < x.obp) below++; }
+    // a line Dexter added is read against OBP's number as filed (d.ctx.obp, kept since 23 Oct 2026); an older filing has none
+    const addedObp = (d.ctx && d.ctx.obp) || {};
+    for (const a of (d.inv && d.inv.added) || []) { const o = addedObp[a.part_no]; if (o == null || a.shelf == null) continue; if (a.shelf > o) above++; else if (a.shelf < o) below++; }
     const crew = d.crew || {}, ov = d.ov || {};
     return {
       machines: { presses: ms.length, test: n((m) => (m.checks || {}).test === "finding"), scan: n((m) => (m.checks || {}).scan === "finding"), collab: n((m) => (m.checks || {}).collab === "finding"), p43: n((m) => m.p43 === "seen"), down: n((m) => m.down === "still") },

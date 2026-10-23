@@ -24,7 +24,7 @@ const HANG = Symbol("hang"), DOWN = Symbol("down");
 // 15-second ceiling is tested without waiting 15 seconds.
 function boot(hash, api, opt = {}) {
   const els = new Map(), $ = (id) => { if (!els.has(id)) els.set(id, fakeEl(id)); return els.get(id); };
-  const store = new Map(Object.entries(opt.store || {})), errors = [], calls = [];
+  const store = new Map(Object.entries(opt.store || {})), errors = [], calls = [], wl = {};
   const json = (o, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(o) });
   const timers = new Map(); let tid = 0;
   const st = opt.clock ? (fn, ms) => { timers.set(++tid, { fn, ms: ms || 0 }); return tid; } : setTimeout;
@@ -42,13 +42,15 @@ function boot(hash, api, opt = {}) {
       if (api[p] === DOWN) return Promise.reject(new TypeError("Failed to fetch"));
       return p in api ? json(api[p], (api[p] && api[p].__status) || 200) : json({ error: "not found" }, 404);
     },
-    addEventListener() {}, scrollTo() {},
+    addEventListener: (k, f) => { wl[k] = f; }, scrollTo() {},
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   const scripts = AUDIT_HTML.split("<script>").slice(1).map((s) => s.split("</script>")[0]);
   for (const s of scripts) { try { vm.runInContext(s, ctx); } catch (e) { errors.push(e.message); } }
-  return { $, errors, store, calls, fire, timers };
+  // nav(h): the address changes the way a tap does (hashchange), so a test can move from one view to the next
+  const nav = (h) => { ctx.location.hash = h; if (wl.hashchange) wl.hashchange(); };
+  return { $, errors, store, calls, fire, timers, nav };
 }
 const SHIPS = { today: "2026-10-19", counts: { filed: 0, openFollowups: 0 }, ships: [
   { ship: "Oasis", brand: "Royal", aboard: [{ sc: "SC-1", name: "John Gorre", contract: "3 completed · on contract 4", signOn: "2026-06-02", signOff: "2027-01-03" }], last: null },
@@ -336,4 +338,26 @@ test("W1: the web rail lists Ships, History, Follow-ups and each request in prog
   const H = boot("hist", { "/api/me": { email: "Dexter.Lawrence@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/history": { audits: [], followups: [] } });
   await settle();
   assert.match(H.$("wrail").innerHTML, /class="wr-i on" data-go="hist"/);
+});
+
+// 23 Oct 2026 review. Review counted every line Dexter added as "OBP is off", even one whose shelf equals OBP, while the
+// Inventory step (and the filing) read it as matching; and the rail's History number jumped by the 52 Forms rows once
+// History had loaded (the ships route counts the app's filed audits only).
+test("review: Review reads an added line the way Inventory does — a shelf equal to OBP is not off", async () => {
+  const V = Object.assign({}, VISIT2, { parts: VISIT2.parts.concat([{ part_no: "B1", description: "Waste box", obp: 4, counted: 4 }]) });
+  const d = startVisit({ machines: V.machines, diff: V.count.diff, extras: V.count.extras });
+  d.inv.lines.ACF0033 = { shelf: 2, checked: true }; d.inv.added = [{ part_no: "B1", shelf: 4 }];
+  const P = boot("#a=ar_9|7", Object.assign({}, API2, { "/api/audit/visit": V }), { store: { "aud:d:ar_9": JSON.stringify(d) } });
+  await settle();
+  const main = P.$("main").innerHTML;
+  assert.match(main, /Inventory[\s\S]{0,400}OBP matches the shelf/);
+  assert.doesNotMatch(main, /OBP is off on/);
+});
+test("review: the rail's History number is the app's filed audits, never the Forms survey's rows", async () => {
+  // the way a phone goes: the ships first (2 filed), then History (52 Forms rows beside them), then Follow-ups — no new ships read
+  const P = boot("", { "/api/me": { email: "d@dg3.com" }, "/api/audit/ships": { ...SHIPS, counts: { filed: 2, openFollowups: 0 } }, "/api/audit/history": { ...HIST, audits: [FORM, { ...FORM, id: "forms-60" }].concat(HIST.audits) } });
+  await settle();
+  P.nav("hist"); await settle();
+  P.nav("fu"); await settle();
+  assert.match(P.$("wrail").innerHTML, /History<\/span><span class="wr-n">2</);
 });

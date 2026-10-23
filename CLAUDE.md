@@ -1064,7 +1064,12 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   "up to" — the payout is the step times the Score Card score, at 80 or more (his draft said "finish without a reset and you
   earn $500", which the engine does not do). The bonus wording is Miguel's approved text; changing it is his call.
 - **Payroll dates are data** (`PAYROLL` in `src/payroll.js`, twelve [month, paid on] pairs per year, from payroll's own PDF):
-  2027 is one more list, never derived; with no next date published the page says so, never a guess.
+  2027 is one more list, never derived; with no next date published the page says so, never a guess (a year with no list
+  names THAT year).
+- **The Hub never misleads a seafarer aboard** (23 Oct 2026 review): a failed board read is "We could not load your page
+  right now" (503), never "Between contracts" (the preview and the audit say the same); the contract is never Rita's card a
+  TDG file dated after its sign-on contradicts (`currentLeg`); the sign-off day reads "sign-off today" and after it "past the
+  planned sign-off", never "-17 days to go".
 - **The Expense Report v3** is served at `/hub/expense.xlsx` (`src/hub_assets.js`, byte for byte
   `docs/mockups/welcome_20261019/expense_report_v3.xlsx`): Legend, Star, Symphony, Xcel on the ship list (now dropdowns, warning
   only), Mary Joy named, every line blank until used (v2's line 11 had no formula but was summed), and the rate's direction
@@ -1077,10 +1082,11 @@ download link. An earlier "keep the six" answer is superseded — never attach f
 - **The send** (`src/welcome_send.js`): To = the ship's mailbox (cims-timecard `ship_contact`, `audit.shipMailbox`, read only)
   AND the personal address (Rita's override first), never the same address twice; CC + reply-to Rita (`WELCOME_CC`); no
   ship mailbox = the personal address alone, neither = `no_recipient`, never sent. **Once per contract** (`welcome_send`,
-  keyed sc + the sign-on), a resend is a deliberate second click. The profile's **Send welcome email** runs a dry run that
+  keyed sc + the sign-on; a row within `ABSORB_DAYS` of the sign-on is the same contract — Rita's card 9 Nov, the file 8 Nov
+  is one welcome, 23 Oct 2026 review), a resend is a deliberate second click. The profile's **Send welcome email** runs a dry run that
   names the recipients, then one confirm. The **daily run** (`_welcome.run` in `scheduled`, **07:00 Miami time** — `WELCOME_TZ` America/New_York,
   `WELCOME_HOUR`; Miguel, 19 Oct 2026: "the same day that the crew sign on .. 7am miami time") welcomes contracts that signed on today, catching up `WELCOME_CATCHUP_DAYS` = 2 for a missed run; never a training
-  visit; a mail that did not go is not recorded, so the next morning retries; failures land in the activity log
+  visit (a trainer's trip only Rita's card holds is one too, `markCardVisits`, unless she marked it a full contract); a mail that did not go is not recorded, so the next morning retries; failures land in the activity log
   (`welcome_send_failed`). **Its switch is the Automation rail's "Welcome email"** (Keyman tab, left rail, under the filters; renamed 19 Oct 2026 — Miguel: "instruction of what ?? welcome should be Welcome email" — the rail reads, in the order they send: Welcome email · Sign-off instructions · Sign-off link · GSM review) (`/api/hub/welcome/auto`, `welcome_auto_enabled`
   + `welcome_auto_since`): OFF until switched on, and switching on never emails a contract that started before that day. The
   missing training / day-7 / day-15 / SOP / booking links block nothing: no link = no button ("Rita sends you a time").
@@ -1108,7 +1114,7 @@ on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
 - **The crew's words**: the sign-off instructions say "Norwegian Getaway" and "your shipboard manager" (`managerOf(NCL)` is
   null — no title on record; never Royal's GSM). Royal, Celebrity and Azamara read exactly as before.
 - **Before service**: the hull has its section with nobody on it (anchored by VESSEL_REF `from`), drawn "First printer · in
-  service Nov 16, 2026 · drag a seafarer here"; it is no "empty hull" row until that day (`boardIssues` `notYet`). Rita places
+  service Nov 16, 2026 · drag a seafarer here"; it is no "empty hull" row until that day (`boardIssues` `notYet`), nor a red coverage tile on the dashboard (`buildOps`). Rita places
   Joe Art by tapping the slot ("First printer · … · PICK OR DRAG A SEAFARER": `firstPrinter` opens a side sheet over
   `/api/relief/crew`, a pick goes through `/api/rotation/project`, the drag's route; Miguel, 23 Oct 2026: "I cannot add a
   printer under ncl" — with the Norwegian filter on, nobody was on screen to drag, and the relief panel needs a printer to
@@ -1539,6 +1545,9 @@ sequence of writes is the point), and the suites named below.
   (`review.km_mismatch`), never overwritten (§6). A cruise-line id shared by two roster rows resolves nobody (`buildBridge`). The
   count import holds a loaded count whose id the file still lists but the roster could not place this time. A re-drop compares
   the rows READ on both sides (`rows_seen`), not the rows with an agency id.
+- **A mailer reply without a boolean `ok` is a mail that did not go** (23 Oct 2026 review): `sendViaMailer` answers
+  `{ ok: false, error: "bad mailer response (HTTP n)" }` for anything else, and every sender reads `ok === true` as sent —
+  a survey invitation that did not go leaves no row (tried next morning).
 - **The Worker's plumbing** (PR #276): `decodeEmailBody` ends the text/plain part at ITS MIME boundary (a "-- " signature cut every
   forwarded report to its first paragraph), decodes quoted-printable only when declared and as UTF-8; the sign-off dispatchers are
   installed once (`_autoAck` / `_autoInstr`); every module guard runs once per database (`src/ensure_memo.js memoDdl`;
@@ -1733,7 +1742,11 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   last-visit follow-up "Fixed"). **What the app can measure is never asked**: "Does the OBP match the shelf?" is the lines
   themselves (`obpMatches`: every gap line's shelf — typed, else the crew's count — equals OBP, every added line's shelf
   equals its OBP; timing lines never count), shown as "OBP matches the shelf" / "OBP is off on N lines" and filed as
-  `inv.accurate`. `fillVisit` (in `makeRules`, so page and server agree) writes the normal answers onto a new draft AND a
+  `inv.accurate` — the server measures it again at filing (`fileVisit`, `obpMatches` on OBP's numbers; the open page's value
+  is never kept) and keeps OBP's number for each line Dexter added (`d.ctx.obp`, read by History's above / below and the
+  filed record; Review and Inventory count "OBP is off on N" one way, `offLines`; 23 Oct 2026 review). The crew's Send waits
+  for the count already on its way and goes only once every number saved (`audit_upload_ui.js` `flush`, serialized,
+  true / false). `fillVisit` (in `makeRules`, so page and server agree) writes the normal answers onto a new draft AND a
   draft kept on the phone from before, never over an answer given (`inv.accurate` alone is re-measured on every tap); `visitProblems` / `normalizeVisit` are unchanged, so a
   raw body without the answers is still refused, and `VISIT_VERSION` is not bumped (Dexter's drafts survive). Stated to
   Miguel: an untapped Pattern 43 mark files "not seen", an untapped reported-down press files "running again", HON "N/A"
