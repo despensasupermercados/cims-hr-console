@@ -1865,7 +1865,7 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   wrong.. look at the hr console", Grandeur read "Nobody aboard"): `aboardOf(sec)` in `src/audit.js` — TDG's On board seat,
   TDG's Earmarked word for the hull a contract still runs on (`earmarkedHere`, Purnama on Xcel), and Rita's card past its
   sign-on drawn "awaiting the TDG file" (Corpin on Grandeur, a projection with `awaiting`); the landing, the open-mode pass
-  and the request guard all read it. (2) **The briefing's "Audits of <ship>" reads the Forms survey too** (`audit_forms` by
+  and the request guard all read it. **A seat TDG holds past the sign-off is not aboard for the audit** (Miguel, 23 Oct 2026, Marto on Quantum, relieved by Cedilla on 22 Oct: "if the crew is not onbaord.. no need to display here"): `aboardNow` skips `heldByFile` (the reliever's embark, Rita's typed date or a reliever card passed while TDG still lists them), so the landing, the request guard and the open-mode pass leave them out; a PROJECTED sign-off that passed with nobody relieving is still aboard; an open request on them still holds the ship. Pinned by `test/audit_routes.test.js`. (2) **The briefing's "Audits of <ship>" reads the Forms survey too** (`audit_forms` by
   hull, newest first, marked "Forms survey"); it said "The 61 Forms audits are not imported yet". (3) **No clean part life
   without life rows** ("u didnt read the files correctly"): Kevin Jugao's Pursuit list read "No part past its rated life",
   and the copy Miguel re-sent is pages 25–50 of the 52-page Machine Management List — the life % (p5, p7–15) is not in it.

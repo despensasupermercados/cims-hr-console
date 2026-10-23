@@ -151,7 +151,11 @@ export const OPEN_REQ_SQL = "(r.status IN ('draft','sent') OR (r.status = 'compl
 export const SHIP_OPEN_SQL = "SELECT r.id, r.agency_id, r.crew_name, r.status FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.normalized_ship = ? AND " + OPEN_REQ_SQL + " ORDER BY r.created_at DESC LIMIT 1";
 export const isOpenRequest = (r) => !!r && (r.status === "draft" || r.status === "sent" || (r.status === "complete" && r.grade == null && !r.test_mode));
 
-export const aboardNow = (c) => !!(c && (c.current || c.earmarkedHere) && (c.aboard || !c.signOn));
+// A seat TDG holds past a sign-off that is not TDG's final word (`heldByFile`: the reliever's embark, Rita's typed date or a
+// reliever card has passed) is NOT aboard for the audit (Miguel, 23 Oct 2026, Marto on Quantum, relieved by Cedilla on 22 Oct:
+// "if the crew is not onbaord.. no need to display here"): the board keeps the seat until TDG signs them off, the audit does
+// not ask a seafarer who has left. A PROJECTED sign-off that passed (overdue, nobody relieving) is still aboard.
+export const aboardNow = (c) => !!(c && (c.current || c.earmarkedHere) && !c.heldByFile && (c.aboard || !c.signOn));
 // WHO IS ABOARD A SHIP, AS THE KEYMAN BOARD DRAWS IT (Miguel, 20 Oct 2026, on Grandeur reading "Nobody aboard": "this is
 // wrong.. look at the hr console"). Three kinds of seat, read off the board's section, never decided here:
 // TDG's On board seat; TDG's "Earmarked" word for the hull a contract is still RUNNING on (Purnama, Xcel — the board seats
