@@ -2,7 +2,7 @@
 // /hub/survey/<token> — the seafarer's page, no login, the link is the key (served on hub.cims.work like the Crew Hub).
 // Signed in: GET /api/survey/report (Reports › Crew survey), POST /api/survey/call (Rita logs the call to a seafarer who
 // needs one), GET/POST /api/survey/auto (the Automation switch), GET /api/survey/preview (the page or an email filled with a
-// crew's real data; it makes no link and sends nothing). The daily run invites the morning after the sign-off (07:00 Miami,
+// crew's real data; it makes no link and sends nothing). The daily run invites 3 days after the sign-off (07:00 Miami,
 // like the welcome email) and reminds once after 5 days. The reads are injected by the Worker, so this module never imports
 // it. FEEDBACK ONLY (§1). Pinned by test/crew_survey.test.js on real SQLite.
 import { SURVEY_DDL, SURVEY_ALTERS, surveySkip, SURVEY_CC, SURVEY_REPLY_TO, SURVEY_ANSWERS_CC, SURVEY_LINK_DAYS, SURVEY_TZ, SURVEY_HOUR, KEYS,

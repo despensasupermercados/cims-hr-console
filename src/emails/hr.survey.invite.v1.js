@@ -1,5 +1,5 @@
 // THE CREW SURVEY INVITATION (Miguel, 22 Oct 2026; the render approved 23 Oct 2026, with "1. yes" to one reminder after 5
-// days). Pure: (data) => { subject, html, text }. Sent the morning after the sign-off to the seafarer's own address, CC Rita
+// days). Pure: (data) => { subject, html, text }. Sent 3 days after the sign-off to the seafarer's own address, CC Rita
 // and Miguel, reply-to Rita (src/crew_survey_send.js). The reminder is the same email with its own headline. Canonical
 // letterhead (cims-mast.js), tables and solid colours only (CIMS email standard §2). Pinned by test/crew_survey.test.js.
 import { mastRows } from "../cims-mast.js";
