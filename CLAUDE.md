@@ -693,8 +693,11 @@ held / undated seats TDG must correct); Documents aboard; the crew and travel. R
 no embark date is TDG's to correct, never a crew change; an overdue seat is past whatever its earmark says. **Ship codes
 are the cruise lines' own** (`src/ship_codes.js`, from cims-timecard `ship_contact`: QN Quantum / QS Quest, ID
 Independence / IN Infinity, AX Apex / AT Ascent — "the first two letters" collides on six pairs); Miguel: "use the 2
-letters .. rita knows who they are". The "Email Joy · all four" send he approved is NOT built yet: an email template
-ships only after he signs off the rendered email (CIMS email standard). Pinned by `test/ops_dashboard.test.js`.
+letters .. rita knows who they are". The "Email Joy · all four" send he approved: its template is RENDERED, NOT wired
+(`hr.keyman.tdg_fixes.v1`, 23 Oct 2026, proofs `docs/mockups/emails_20261023/`): one email to Joy with every row of "To
+correct in TDG" (`tdg.fixes`: held — TDG still has them On board after the reliever signed on; undated — On board, no
+embark date), each card saying what the file shows and what to enter, never a date the console inferred. Pinned by
+`test/ops_dashboard.test.js`, `test/renders_20261023.test.js`.
 
 ## 10j. THE TRAVEL TAB — Miguel, 15 Oct 2026 ("review the code .. connect the dots .. fix bugs")
 His decisions, same day: (1) **TDG's Statement of General Account (SGA) is the audited number, Rita's travel workbook the
@@ -985,7 +988,11 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   card only the console holds, or "told Joy", is not): a plan only the console holds must reach nobody (§10d). A Philippine
   mobile reads "+63 917 555 0142" with tel: and WhatsApp links (`phoneOf`), anything else as written; TDG's "-" prints
   nothing. Every active crew had a phone and an email on file on 19 Oct 2026. The reliever is NOT sent the outgoing crew's
-  contact (a new email; its render is Miguel's to sign off first).
+  contact yet: its email is RENDERED, NOT wired (`hr.signoff.reliever.v1`, 23 Oct 2026, proofs
+  `docs/mockups/emails_20261023/`) — a HANDOVER PASS with the outgoing printer's name, mobile (WhatsApp) and email, "together"
+  only on an overlap, the same IN TDG rule, three steps (say hello, read the Digital Handover Notes, sign your own count).
+  **The T-7 sign-off link email** (`signoff_ack.js` ACK_REQUEST_EMAIL, July's design: the retired navy bar, Arial only, an ISO
+  date, and a page with a tick box AND a button) was rendered as it stands on 23 Oct 2026 for Miguel; its switch stays off.
 - The HON bonus box (Ship handover factor, reczJqxZnOuzkv74X) shows only for sign-offs on or after 1 Nov 2026.
 - **One switch per email** (the rail's Automation: Instructions · Sign-off link · GSM review; `/api/autosend` with `kind`).
   Switching a kind ON stamps the day (`auto_send_instr_since` / `auto_send_link_since`): a seat already inside the
@@ -1089,9 +1096,15 @@ on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
   printer under ncl" — with the Norwegian filter on, nobody was on screen to drag, and the relief panel needs a printer to
   follow) or by dragging his card onto it. The earmark starts today; Rita sets his 9 Nov sign-on on the card. The Keyman rail groups it under
   "Norwegian"; the audit landing has a "Norwegian" tile saying "In service Nov 16".
-- **Open, Miguel's to answer**: the pilot term is 45 + 45 days (rec98ZTCYo7X2PkPO) but a projection is 7 months (Rita types the
-  date); the earmark bench lists everyone for an NCL hull (no NCL brand rule); NCL's ship code (the pass reads "GE");
-  NCL's ordering steps on the Crew Hub (it shows Royal & Celebrity's); NCL's shipboard manager title.
+- **Miguel's answers of 23 Oct 2026**: Joe Art's sign-on is 9 Nov (Rita corrected the card); the ship code is **GE**; the
+  manager stays "your shipboard manager" for now; the bench lists everyone for an NCL hull ("that is for everybody"). **The
+  Crew Hub's ordering section has a third tab, Norwegian** ("we need to bring them now because the crew has them"), opened
+  first for an NCL crew (`NCL` in `crew_hub.js`): the Getaway order raised in MXP every two weeks from DG3's template, the
+  order closing two days before NCL's storing date, shoreside approval, Apollo (NCL's Miami warehouse) to the port, the
+  delivery checked the day it comes aboard — from the Brain (recD2YcbbX9kaEHn0, rec2sYS0HGZgAGZkv, rec1chZ7sqWRJ2g5e). Still
+  open on NCL's side: whether the printer or the linen keeper raises the MXP requisition (the step does not say who), and
+  whether "Update OBP every day" applies on an NCL hull. Pinned by `test/crew_hub.test.js`. Open: the pilot term (45 + 45
+  days, rec98ZTCYo7X2PkPO) against the 7-month projection (Joe Art's card reads 23 May 2027).
 
 ## 10m. THE END-OF-CONTRACT CREW SURVEY — Miguel, 22–23 Oct 2026 (feedback, NEVER money)
 "build one that function for .. all now 4 customers .. triggered once the seafarer sign off .. u will use the seafarer email ..

@@ -95,6 +95,13 @@ export function hubPage(m) {
     "You create the orders for Konica C4070 parts. MFD toners and parts are sent as the ship needs them.", "Tell shoreside management about any request, change or approval.",
     "DG3 approves your order, gets the PO and processes it. It goes to the Blue Water Shipping warehouse, then onboard.",
     "Inspect and accept the whole delivery on OBP within 24 hours. Report any shortage with backup data, per the SOP."];
+  // Norwegian (the Getaway pilot, in service 16 Nov 2026). NCL orders through its own MXP system from a template DG3 built
+  // for the ship; the steps are what the Brain holds on it (recD2YcbbX9kaEHn0, rec2sYS0HGZgAGZkv, rec2S1tG9DnBiOmtt,
+  // rec1chZ7sqWRJ2g5e). Miguel, 23 Oct 2026: "we need to bring them now because the crew has them".
+  const NCL = ["Every two weeks the Getaway order is raised in MXP, NCL's own system, from the template DG3 built for the ship. Have your counts and what you need ready for it.",
+    "Watch NCL's storing dates: an order closes two days before the storing date.", "Tell shoreside management about any request, change or approval.",
+    "DG3 shoreside approves the order. Apollo, NCL's warehouse in Miami, receives it and trucks it to the port for the storing date.",
+    "Check the delivery against the order the day it comes aboard. Report any shortage to shoreside within 24 hours, with backup data."];
   const DAILY = ["Update OBP every day with any change in toner, paper and parts.", "Keep your printer logs up to date. They are your backup data.",
     "Check your usage once a week, so you never need an emergency order.", "Can't avoid an emergency order? Raise it early, with the documents."];
   
@@ -201,8 +208,8 @@ export function hubPage(m) {
   .tm b{display:block;color:var(--navy);font-size:14.5px;line-height:1.25}.tm span span{font-size:13px;color:var(--slate)}.tm .em{margin-left:auto;font-size:13px;font-weight:700;color:var(--navy);white-space:nowrap}
   .tabs{display:inline-flex;background:var(--cloud);border-radius:12px;padding:4px;gap:4px;margin-bottom:18px}
   .tabs label{font:700 14px/1 var(--fb);color:var(--slate);padding:11px 16px;border-radius:9px;cursor:pointer}
-  #t1:checked~.tabs label[for=t1],#t2:checked~.tabs label[for=t2]{background:#fff;color:var(--navy);box-shadow:0 1px 2px rgba(20,45,72,.12)}
-  .tp{display:none}#t1:checked~.p1,#t2:checked~.p2{display:block}input.tr{position:absolute;opacity:0;pointer-events:none}
+  #t1:checked~.tabs label[for=t1],#t2:checked~.tabs label[for=t2],#t3:checked~.tabs label[for=t3]{background:#fff;color:var(--navy);box-shadow:0 1px 2px rgba(20,45,72,.12)}
+  .tp{display:none}#t1:checked~.p1,#t2:checked~.p2,#t3:checked~.p3{display:block}input.tr{position:absolute;opacity:0;pointer-events:none}
   .steps li{display:flex;gap:14px;align-items:flex-start;padding:10px 0;font-size:14.5px;line-height:1.5;position:relative}
   .steps li:not(:last-child):before{content:"";position:absolute;left:13px;top:38px;bottom:-6px;width:2px;background:var(--border)}
   .sn{font:700 13px/1 var(--fh);color:var(--navy);background:var(--ntint);border-radius:999px;width:28px;height:28px;display:grid;place-items:center;flex:none}
@@ -369,10 +376,11 @@ export function hubPage(m) {
     </section>
   
     <section id="ordering">${head("ordering", "Inventory and supply chain", "Placing your orders", "Check the inventory team's ordering schedule first, so your order catches a container with time for review, approval and delivery.")}
-     <input class="tr" type="radio" name="t" id="t1"${CREW.brand !== "azamara" ? " checked" : ""}><input class="tr" type="radio" name="t" id="t2"${CREW.brand === "azamara" ? " checked" : ""}>
-     <div class="tabs"><label for="t1">Royal &amp; Celebrity</label><label for="t2">Azamara</label></div>
+     <input class="tr" type="radio" name="t" id="t1"${CREW.brand !== "azamara" && CREW.brand !== "ncl" ? " checked" : ""}><input class="tr" type="radio" name="t" id="t2"${CREW.brand === "azamara" ? " checked" : ""}><input class="tr" type="radio" name="t" id="t3"${CREW.brand === "ncl" ? " checked" : ""}>
+     <div class="tabs"><label for="t1">Royal &amp; Celebrity</label><label for="t2">Azamara</label><label for="t3">Norwegian</label></div>
      <ol class="steps tp p1">${ROYAL.map((t, i) => step(i + 1, t)).join("")}</ol>
      <ol class="steps tp p2">${AZ.map((t, i) => step(i + 1, t)).join("")}</ol>
+     <ol class="steps tp p3">${NCL.map((t, i) => step(i + 1, t)).join("")}</ol>
      <div class="daily"><h3>Every day, every ship</h3><ul>${DAILY.map((t) => `<li>${ic("check")}<span>${t}</span></li>`).join("")}</ul></div>
     </section>
   
