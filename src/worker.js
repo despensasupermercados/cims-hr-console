@@ -8177,6 +8177,8 @@ function rpset(p){RPT_P=p;rptSbm();}
 // right. Each report is a menu entry; future modules (Bonus & Money, Manpower,
 // Travel Spend) slot in as new entries + one render function each.
 function renderReports(){
+  // Reports uses the page's width (Miguel, 23 Oct 2026, the Crew survey: "can use more the width of the page").
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide','full');
   $('#view').innerHTML='<style>'
    +'.dswrap{display:grid;grid-template-columns:238px 1fr;gap:0;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(20,45,72,.06)}'
    +'.dsside{background:var(--navy);padding:22px 14px;display:flex;flex-direction:column;min-height:540px}'
@@ -8243,12 +8245,14 @@ function srvDraw(){
    +'.svbar{display:grid;grid-template-columns:minmax(110px,190px) minmax(56px,1fr) 34px 46px;gap:10px;align-items:center;padding:5px 0;font-size:13px}'
    +'.svtr{height:8px;background:#EEF1F5;border-radius:99px;overflow:hidden}.svtr i{display:block;height:100%;border-radius:99px}.svbv{font-weight:700;text-align:right;color:var(--navy)}.svbl{font-size:11.5px;color:#BC3B2C;font-weight:700}'
    +'.svfx{padding:10px 0;border-bottom:1px solid #F0F2F5}.svfx:last-child{border:0}.svfq{font-family:Outfit;font-size:15px;font-weight:600;color:var(--navy);line-height:1.4}.svfw{font-size:12px;color:var(--mut);margin-top:4px}'
-   +'.svlines{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.svlc{background:#F7F9FB;border-radius:12px;padding:12px 14px}.svlc.none{opacity:.55}.svlc .n{font-size:12px;font-weight:700;color:var(--mut)}.svlc .v{font-family:Outfit;font-size:24px;font-weight:700;color:var(--navy)}.svlc .s{font-size:11.5px;color:var(--mut)}'
+   +'.svlines{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.svlc{background:#F7F9FB;border-radius:12px;padding:12px 14px}.svlc.none{opacity:.55}.svlc .n{font-size:12px;font-weight:700;color:var(--mut)}.svlc .v{font-family:Outfit;font-size:24px;font-weight:700;color:var(--navy)}.svlc .s{font-size:11.5px;color:var(--mut)}'
    +'.svpipe{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.svpipe div{min-width:0;background:#F7F9FB;border-radius:12px;padding:12px 14px}.svpipe b{display:block;font-family:Outfit;font-size:22px;color:var(--navy)}.svpipe span{font-size:12px;color:var(--mut)}'
    +'.svp{display:inline-block;min-width:26px;text-align:center;font-weight:700;border-radius:99px;padding:2px 8px;font-size:12.5px}.svp.g{background:#EAF5E4;color:#3E7F2E}.svp.a{background:#F6EEE1;color:#B7791F}.svp.r{background:#F4E5E3;color:#96281B}'
    +'.svt{width:100%;border-collapse:collapse;font-size:13px}.svt th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:8px;border-bottom:1px solid var(--line)}.svt td{padding:9px 8px;border-bottom:1px solid #F0F2F5;vertical-align:top}.svt td.c{text-align:center}.svt tr.hot td{background:#FDF6F4}.svt tr.row{cursor:pointer}.svt tr.row:hover td{background:#F7F9FB}'
    +'.svtag{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 7px;margin-left:6px}'
    +'.svx{overflow-x:auto;-webkit-overflow-scrolling:touch}.svx .svt{min-width:640px}@media (max-width:560px){.svpipe{grid-template-columns:repeat(2,minmax(0,1fr))}}.svdet{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:4px 18px;padding:4px 0 8px}.svdet div{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.4}.svdet div span:last-child{color:var(--ink)}'
+   +'.svg3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}.svg3>.span2{grid-column:span 2}.svbars{columns:2;column-gap:32px}.svbars>.svbar{break-inside:avoid}'
+   +'@media(max-width:1180px){.svg3{grid-template-columns:minmax(0,1fr)}.svg3>.span2{grid-column:auto}}@media(max-width:760px){.svbars{columns:1}}'
    +'.svnote{font-size:12px;color:var(--mut);margin-top:10px;line-height:1.5}.mu{color:var(--mut)}.svlink{color:var(--navy);font-weight:700;text-decoration:none}.svlink:hover{text-decoration:underline}'
    +'</style>';
   h+='<div class=rpthead><h2>Crew survey</h2>'
@@ -8282,23 +8286,26 @@ function srvDraw(){
   if(!d.n){
     h+='<div class=rblk style="margin-top:12px"><div class=csub style="padding:8px 2px">No answers in this period. '+(SRV_P!=='All'||SRV_L!=='all'?'Widen the range or pick All lines.':'The first answers arrive once the switch is on.')+'</div></div>';
   }else{
-    h+='<div class=rgrid2>';
-    h+='<div class=rblk><h3>Where it hurts</h3><div class=csub style="margin-bottom:8px">Every statement, the lowest average first.</div>'
+    h+='<div class=svg3>';
+    h+='<div class="rblk span2"><h3>Where it hurts</h3><div class=csub style="margin-bottom:8px">Every statement, the lowest average first.</div><div class=svbars>'
      +d.statements.map(function(s){var col=s.avg>=4.5?'#5FB946':(s.avg>=4?'#8FBF6A':(s.avg>=3?'#E0A23B':'#C2412F'));
-       return '<div class=svbar title="'+escHtml((Q[s.key]||{}).text||'')+'"><span>'+escHtml(s.short)+'</span><span class=svtr><i style="width:'+Math.round(s.avg/5*100)+'%;background:'+col+'"></i></span><span class=svbv>'+s.avg.toFixed(1)+'</span><span class=svbl>'+(s.low?s.low+' low':'')+'</span></div>';}).join('')+'</div>';
+       return '<div class=svbar title="'+escHtml((Q[s.key]||{}).text||'')+'"><span>'+escHtml(s.short)+'</span><span class=svtr><i style="width:'+Math.round(s.avg/5*100)+'%;background:'+col+'"></i></span><span class=svbv>'+s.avg.toFixed(1)+'</span><span class=svbl>'+(s.low?s.low+' low':'')+'</span></div>';}).join('')+'</div></div>';
     h+='<div class=rblk><h3>The one thing to fix first</h3><div class=csub style="margin-bottom:4px">In their words, newest first. Rita answers each within a week.</div>'
      +(d.fixes.length?d.fixes.slice(0,12).map(function(f){return '<div class=svfx><div class=svfq>&ldquo;'+escHtml(f.text)+'&rdquo;</div><div class=svfw>'+srvWho(f.name,null)+' &middot; '+escHtml(f.ship||'')+' &middot; '+srvDay(f.at)+'</div></div>';}).join('')
        +(d.fixes.length>12?'<div class=svnote>'+(d.fixes.length-12)+' more under Every answer.</div>':''):'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
     h+='</div>';
-    h+='<div class=rgrid2>';
+    h+='<div class=svg3>';
     h+='<div class=rblk><h3>By cruise line</h3><div class=svlines>'+d.byLine.map(function(b){return '<div class="svlc'+(b.n?'':' none')+'"><div class=n>'+(SRV_LN[b.line]||b.line)+'</div><div class=v>'+(b.avg==null?'&mdash;':b.avg.toFixed(2))+'</div><div class=s>'+(b.n?b.n+' answer'+(b.n===1?'':'s')+' &middot; overall':'no answers yet')+'</div></div>';}).join('')+'</div></div>';
     var L=d.loop;
     h+='<div class=rblk><h3>The loop</h3><div class=svpipe><div><b>'+L.signedOff+'</b><span>signed off</span></div><div><b>'+L.invited+'</b><span>asked</span></div><div><b>'+L.opened+'</b><span>opened</span></div><div><b>'+L.answered+'</b><span>answered</span></div></div>'
      +(L.noEmail.length?'<div class=svnote style="color:#96281B">No email on file, so never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+', off '+srvDay(x.off)+')';}).join(', ')+'. Add the address in Edit crew.</div>':'')
      +'<div class=svnote>Signed off = contracts the Keyman board shows ended (TDG&rsquo;s debark, Rita&rsquo;s date or a reliever) in the period. Asked, opened and answered count the console&rsquo;s invitations only.</div></div>';
+    h+='<div class=rblk><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3>'
+     +(d.waiting.length?d.waiting.map(function(w){return '<div class=svfx><div style="font-weight:700;color:var(--navy)">'+srvWho(w.name,w.agency_id)+' <span class=mu style="font-weight:400">&middot; '+escHtml(w.ship||'')+'</span></div><div class=svfw>Asked '+srvDay(w.invited_at)+' &middot; '+(w.reminded_at?'reminded '+srvDay(w.reminded_at):'no reminder yet')+' &middot; '+(w.opened?'opened':'not opened')+' &middot; open to '+srvDay(w.expires_at)+'</div></div>';}).join('')
+       :'<div class=csub>Nobody is waiting. Every seafarer asked in this period has answered.</div>')+'</div>';
     h+='</div>';
   }
-  if(d.waiting.length){
+  if(!d.n&&d.waiting.length){
     h+='<div class=rblk style="margin-top:12px"><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3><div class=svx><table class=svt><thead><tr><th>Seafarer</th><th>Ship</th><th>Asked</th><th>Reminder</th><th>Opened</th><th>Link open to</th></tr></thead><tbody>'
      +d.waiting.map(function(w){return '<tr><td>'+srvWho(w.name,w.agency_id)+'</td><td>'+escHtml(w.ship||'')+'</td><td>'+srvDay(w.invited_at)+'</td><td>'+(w.reminded_at?srvDay(w.reminded_at):'<span class=mu>not yet</span>')+'</td><td>'+(w.opened?'Yes':'<span class=mu>No</span>')+'</td><td>'+srvDay(w.expires_at)+'</td></tr>';}).join('')
      +'</tbody></table></div></div>';
