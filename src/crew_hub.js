@@ -275,7 +275,7 @@ export function hubPage(m) {
    <div class="card">
     <span class="lab">Your contract</span>${hasK ? `
     <div class="mid">${CREW.ship}</div>
-    <div class="muted" style="margin-top:4px">Day ${cDay} of ${cDays} &middot; ${cDays - cDay} days to go</div>
+    <div class="muted" style="margin-top:4px">${/* the sign-off day and after it (TDG still has them aboard, §10d held / overdue): said, never "-17 days to go" (23 Oct 2026 review) */ ""}${TODAY > off ? `Day ${cDay} &middot; past the planned sign-off` : TODAY === off ? `Day ${cDays} of ${cDays} &middot; sign-off today` : `Day ${cDay} of ${cDays} &middot; ${days(TODAY, off) === 1 ? "1 day" : days(TODAY, off) + " days"} to go`}</div>
     <div style="margin-top:auto;padding-top:14px"><div class="track" style="margin-top:0"><i style="width:${cPct}%"></i></div>
     <div class="ends"><span>On <b>${dmy(CREW.on)}</b></span><span>Off <b>${CREW.offProjected ? "~" : ""}${dmy(CREW.off)}</b></span></div>
     <div class="muted" style="padding-top:6px;font-size:12.5px">${offNote}</div></div>` : `
@@ -308,7 +308,7 @@ export function hubPage(m) {
     <section id="payday">${head("payday", "Payroll calendar " + year, "When you get paid", "Each month's pay lands on the date below.")}
      <ol class="pay">${tiles}</ol>
      <div class="note">${ic("help")}<span>Filipino nationals: the amount can vary with mandatory social cost and allotment. Pay starts the month after you join the ship.</span></div>
-     ${PAYROLL[+year + 1] ? "" : `<div class="note">${ic("cal")}<span>The ${+year + 1} dates appear here as soon as payroll publishes them.</span></div>`}
+     ${/* a year payroll has not published yet names THAT year, not the one after (23 Oct 2026 review) */ ""}${!rows.length ? `<div class="note">${ic("cal")}<span>The ${year} dates appear here as soon as payroll publishes them.</span></div>` : PAYROLL[+year + 1] ? "" : `<div class="note">${ic("cal")}<span>The ${+year + 1} dates appear here as soon as payroll publishes them.</span></div>`}
     </section>
   
     <section id="pay">${head("pay", "Compensation package", "Your pay and benefits", "Every guest sees your work. This is what DG3 gives you in return.")}

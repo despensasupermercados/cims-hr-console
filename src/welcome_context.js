@@ -6,6 +6,15 @@ import { nextPayday } from "./payroll.js";
 import { shipCode, shipWord } from "./ship_codes.js";
 import { mdParts, mdShort } from "./span_md.js";
 import { RELIEF_WINDOW_DAYS } from "./signoff_context.js";
+import { isVisit, visitMap, trainerSet } from "./visits.js";
+
+// A trainer's trip that only Rita's card holds (no TDG file has it yet) is a training visit like a file trip (visits.js:
+// the trainer tag, unless Rita marked the trip a full contract) — never welcomed, never "your contract" on the Hub.
+// The file path marks its own legs (legsFromRegistry); this marks the card legs, for the Hub and the welcome only.
+export function markCardVisits(legs, visitRows, trainerRows) {
+  const vm = visitMap(visitRows || []), ts = trainerSet(trainerRows || []);
+  return (Array.isArray(legs) ? legs : []).map((l) => (l && l.source === "assignment" && !l.visit && isVisit(vm, l.sc, l.on, { agency_id: l.sc, trainer: ts.has(l.sc) }) ? { ...l, visit: true } : l));
+}
 
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -14,9 +23,15 @@ const day = (s) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10))
 export const dmy = (s) => (iso(s) ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1]} ${s.slice(0, 4)}` : "");
 const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
 const cap = (w) => (w ? w[0].toUpperCase() + w.slice(1) : "");
-// The running contract of one crew from the board's schedule: the current leg with the latest sign-on, never a visit.
+// The running contract of one crew from the board's schedule: the current leg with the latest sign-on, never a visit, and
+// never Rita's card that a TDG file dated AFTER its sign-on contradicts (the file has them On board another hull — the
+// board draws that card off, §11; 23 Oct 2026 review: Gayda's Allure card beat her real Jewel contract on the Hub).
+const hull = (s) => String(s == null ? "" : s).trim().toLowerCase();
 export function currentLeg(legs, sc) {
-  const mine = (Array.isArray(legs) ? legs : []).filter((l) => l && l.sc === sc && l.is_current && l.ours !== false && !l.visit && iso(l.on));
+  const all = Array.isArray(legs) ? legs : [];
+  const fileLegs = all.filter((r) => r && r.sc === sc && r.source === "registry" && r.is_current && iso(r.fileAt));
+  const contradicted = (l) => l.source === "assignment" && fileLegs.some((r) => hull(r.ship) !== hull(l.ship) && r.fileAt > l.on);
+  const mine = all.filter((l) => l && l.sc === sc && l.is_current && l.ours !== false && !l.visit && iso(l.on) && !contradicted(l));
   mine.sort((a, b) => (a.on < b.on ? 1 : a.on > b.on ? -1 : 0));
   return mine[0] || null;
 }

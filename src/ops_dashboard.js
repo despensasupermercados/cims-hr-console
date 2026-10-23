@@ -129,6 +129,8 @@ export function buildOps(input) {
     for (const e of ems) if (e.signOff) ends.push(e.signOff);
     const until = ends.length ? ends.sort().pop() : null;
     const dd = until ? daysBetween(today, until) : null;
+    // a hull not in service yet with nobody planned (Norwegian Getaway before 16 Nov 2026) is no uncovered ship (boardIssues' rule)
+    if (!seats.length && !ends.length && sec.from && sec.from > today) continue;
     const tier = (past || dd == null || dd < 0) ? "past" : dd < 60 ? "lt2" : dd < 120 ? "lt4" : "ok";
     (coverage[sec.brand] = coverage[sec.brand] || []).push({ code, ship: sec.ship, tier, until: past ? (seats.find((s) => s.signOff && s.signOff < today) || {}).signOff || until : until });
   }
