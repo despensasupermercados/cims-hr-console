@@ -37,7 +37,8 @@ test("text the auditor typed is text, never markup", () => {
   assert.match(m.html, /&lt;img src=x/);
 });
 
-test("not wired: nothing in the Worker sends it until Miguel signs off the render", () => {
-  const w = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8") + readFileSync(new URL("../src/audit_request.js", import.meta.url), "utf8");
-  assert.doesNotMatch(w, /hr\.audit\.followup\.v1|followupEmail/);
+test("wired (Miguel signed off the render, 23 Oct 2026): the hourly sweep sends it from audit_request.js", () => {
+  const w = readFileSync(new URL("../src/audit_request.js", import.meta.url), "utf8");
+  assert.match(w, /followupEmail\(\{ owner: b\.owner, due: b\.due\.map\(item\), late: b\.late\.map\(item\), link: AUDIT_ORIGIN \+ "\/#fu" \}\)/);
+  assert.match(w, /try \{ out\.followups = await sendFollowups\(env\); \}/);
 });

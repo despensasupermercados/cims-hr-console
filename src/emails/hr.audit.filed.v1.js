@@ -1,7 +1,7 @@
 // hr.audit.filed.v1 — the audit is filed (docs/AUDIT_DESIGN.md "Filed": "summary email to Miguel with Rita, Ray, Rolando
 // in copy"; the mock-up's B7 "Where it goes"). Built ONLY from what the filing stored: the grade (audit_eval), the steps
 // and what the documents said (audit_visit_data, data.ctx), the follow-ups. Never from a later read.
-// NOT WIRED TO SEND (19 Oct 2026): an email ships only after Miguel signs off its render (CIMS email standard §5).
+// WIRED 23 Oct 2026 (Miguel signed off the render): sent by audit_request.js sendFiledMails when the audit is filed.
 // Never to the crew. Nothing here is money (§1): the score is said as the score the Score Card reads, never its points.
 // Spacing is table-cell padding only (Outlook desktop / Word): blk() in audit_kit; pinned by test/audit_email_outlook.test.js.
 import { frame, row, card, blk, pill, esc, fmtWhen, fmtDate, T, FH, FB, FM } from "./audit_kit.js";

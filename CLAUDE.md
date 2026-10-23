@@ -1748,8 +1748,18 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   the count against OBP then the shelf, the crew — never a replacement, points, money or the dispatch rating;
   `hr.audit.dispatch.v1` to Rita alone: the crew's 1–5 on TDG's travel, hotel and joining and, new on the Crew step, an
   optional note in their words, kept only beside a rating), built from what the filing stored; proofs under
-  `docs/mockups/audit_filed_20261019/`. Wiring the send waits on Miguel's sign-off of the renders (CIMS email standard §5;
-  `test/audit_filed_email.test.js` fails if anything outside `src/emails` imports them). Still to build: Rolando's
+  `docs/mockups/audit_filed_20261019/`. **WIRED 23 Oct 2026** (Miguel: "You need to merge them and have these emails ready
+  to go"): filing sends both at once (`sendFiledMails` in `audit_request.js`; `FILED_TO` Miguel, `FILED_CC` Rita, Ray,
+  Rolando; `DISPATCH_TO` Rita, only when the crew rated the dispatch), each logged on `audit_send_log` (`filed` /
+  `dispatch`); one that did not go is retried by the hourly sweep for `FILED_RETRY_DAYS` = 3 (only one that was tried: an
+  audit filed before the wiring is never emailed late), never twice once sent, and an email never undoes the filing. The
+  filed visit keeps what it did with the last visit's follow-ups (`data.fuSeen`) so the email says it as filed. **The
+  follow-up reminder** (`hr.audit.followup.v1`, render `docs/mockups/audit_followup_20261020/`, wired the same day):
+  `sendFollowups` in the sweep, from 07:00 Miami (`FOLLOWUP_TZ`, `FOLLOWUP_HOUR`), one email per owner per day with what
+  falls due that day and, under it, what is still open past its date (`followupBatches`; an owner with only late items hears
+  nothing that day); the owner's address from `OWNER_EMAIL` (the five names the audit offers), anything else logged
+  `no_recipient`, never guessed; link `audit.cims.work/#fu`. Pinned by `test/audit_visit.test.js`,
+  `test/audit_filed_email.test.js`, `test/audit_followup_email.test.js`. Still to build: Rolando's
   Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship

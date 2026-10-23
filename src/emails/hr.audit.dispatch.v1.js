@@ -2,7 +2,7 @@
 // the dispatch (travel, hotel, joining), not on the specialist ... reaches Rita; it stays out of the crew's evaluation";
 // the mock-up's B7: "Dispatch note to Rita"). The crew's rating of how TDG got them aboard, asked by the auditor, and
 // their own words when given. Only when a rating was given. Never in the audit's score, never to the crew.
-// NOT WIRED TO SEND (19 Oct 2026): an email ships only after Miguel signs off its render (CIMS email standard §5).
+// WIRED 23 Oct 2026 (Miguel signed off the render): sent by audit_request.js sendFiledMails when a rating was given.
 import { frame, row, card, blk, esc, fmtWhen, fmtDate, T, FH, FB } from "./audit_kit.js";
 import { visitWhen } from "./hr.audit.filed.v1.js";
 

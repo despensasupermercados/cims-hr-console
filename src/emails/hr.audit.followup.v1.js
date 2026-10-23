@@ -4,7 +4,7 @@
 // the Follow-ups page with a line on what was done, or Dexter ticks it Fixed at the next audit. Then the emails stop.
 // One email per owner per day: what falls due that day, and under it what is still open past its date, so an owner
 // with three items due on one day gets one email, not three. To the owner only, never to the crew.
-// NOT WIRED TO SEND (20 Oct 2026): an email ships only after Miguel signs off its render (CIMS email standard §5).
+// WIRED 23 Oct 2026 (Miguel signed off the render): the hourly sweep sends it (audit_request.js sendFollowups), 07:00 Miami.
 import { frame, row, card, blk, esc, fmtDate, pill, T, FH, FB } from "./audit_kit.js";
 
 export const TEMPLATE_ID = "hr.audit.followup.v1";
