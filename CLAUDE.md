@@ -1054,6 +1054,34 @@ on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
   date); the earmark bench lists everyone for an NCL hull (no NCL brand rule); NCL's ship code (the pass reads "GE");
   NCL's ordering steps on the Crew Hub (it shows Royal & Celebrity's); NCL's shipboard manager title.
 
+## 10m. THE END-OF-CONTRACT CREW SURVEY — Miguel, 22–23 Oct 2026 (feedback, NEVER money)
+"build one that function for .. all now 4 customers .. triggered once the seafarer sign off .. u will use the seafarer email ..
+cc rita and myself .. when the seafarer answer .. his personal email and cc onboardsupport@DG3.com .. under the hr console under
+reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or ok, 3. call it shipboard manager"; proofs under
+`docs/mockups/crew_survey_20261022/`). Pinned by `test/crew_survey.test.js` (real SQLite, the page's script in vm).
+- **One survey, Rita's 19 statements word for word** (Forms "Seafarer End-of-Contract / Exit Survey", keyed q01–q19 in HER order so
+  the Forms history stays comparable) on five screens + "the one thing we should fix first". Scale No / Not really / Partly / Mostly /
+  Yes = 1–5. The supervisor statement names the line's title: Royal GSM, Celebrity DCM, Azamara BOM, NCL **shipboard manager**.
+- **Who is asked**: a contract the Keyman board shows ENDED (offSource tdg / rita / card — a projected sign-off that passed is
+  held, still aboard, never asked), never a training visit, the morning after (`surveyDue`: off before today, within
+  `SURVEY_CATCHUP_DAYS` = 14, never before the switch went on). One per contract (`ux_crew_survey_contract` on sc + sign-on).
+- **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own
+  address (Rita's override first; TDG's "-" is none → listed on the report's loop, never guessed), **CC Rita + Miguel**, reply-to
+  Rita, 07:00 Miami; **one reminder** after `SURVEY_REMIND_DAYS` = 5 (the same email, "Still a minute"). On Send, his copy goes
+  To him, **CC onboardsupport@dg3.com**; Rita answers "the one thing to fix first" within a week (the email says so). A failed
+  invitation leaves no row (tried next morning); a failed copy is logged, the answers are kept.
+- **The page**: `GET/POST /hub/survey/<token>` (hub.cims.work, no login, the link is the key — `newHubToken`, open
+  `SURVEY_LINK_DAYS` = 30), answers taken ONCE (`checkAnswers`: every statement a whole 1–5), the address shown masked.
+- **Reports › Crew survey** (`GET /api/survey/report`, `surveyReport`): answers, overall, would sail again, answer rate, **need a
+  call** (3+ answers at 1–2; Rita logs the call, `POST /api/survey/call`), where it hurts (lowest first), the fixes, by line, the
+  loop (signed off → asked → opened → answered, and who has no email), every answer (Forms rows tagged). Period + line chips.
+- **The switch**: Keyman › Automation "Crew survey" (`/api/survey/auto`, `crew_survey_auto_enabled` + `_since`), OFF until Miguel
+  switches it on. `GET /api/survey/preview?id=&what=page|invite|reminder|answers` shows a crew's real data, makes no link, sends nothing.
+- **Never money, never the cruise line**: `crew_survey` (migrations/0040) is read by nothing on the Score Card / bonus path, and
+  nothing is sent outside CIMS. The Forms history (source `forms`, `form_no`) is read by `readFormsSurvey` — who it was is a full
+  name or the schedule that day, never a guess (§6). The two client Forms exports Miguel attached on 22 Oct are the SHIP MANAGER's
+  review (Shipboard Feedback, money-adjacent), not this survey.
+
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
 <date>.xlsx`, two tabs, **ACTIVE and INACTIVE**, four columns (CREW ID · CREW NAME · COMPLETED CONTRACTS
