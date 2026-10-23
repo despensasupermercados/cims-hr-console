@@ -72,7 +72,7 @@ export function installWelcome(deps) {
     const mail = welcomeEmail({ ...ctx0, links: { hub: o + "/hub/" + link.token, expense: o + "/hub/expense.xlsx", icons: o + "/hub/i" } });
     const res = await sendMail(env, { to: rc.to, cc: rc.cc.length ? rc.cc : undefined, replyTo: WELCOME_CC, subject: mail.subject, html: mail.html, text: mail.text,
       templateId: WELCOME_TEMPLATE, idempotencyKey: WELCOME_TEMPLATE + ":" + sc + ":" + onKey + (resend ? ":" + Date.now() : ""), critical: true });
-    if (!res || res.ok === false) return { ...out, ok: false, error: "mail_failed", detail: res && res.error ? String(res.error).slice(0, 200) : null };
+    if (!res || res.ok !== true) return { ...out, ok: false, error: "mail_failed", detail: res && res.error ? String(res.error).slice(0, 200) : null };
     const now = new Date().toISOString();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO welcome_send (sc, on_key, sent_at, sent_by, to_json) VALUES (?,?,?,?,?) ON CONFLICT(sc, on_key) DO UPDATE SET sent_at=excluded.sent_at, sent_by=excluded.sent_by, to_json=excluded.to_json")
