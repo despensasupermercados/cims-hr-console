@@ -10,7 +10,8 @@ import { ensureAuditTables } from "../src/audit_store.js";
 import { installAuditRequest } from "../src/audit_request.js";
 import { applyOverride } from "../src/override.js";
 import { auditScore } from "../src/audit.js";
-import { startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, AUDIT_RULES_JS, WORKSTATION, TOOLS } from "../src/audit_steps.js";
+import { gatherAuto } from "../src/score_auto.js";
+import { startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, AUDIT_RULES_JS, WORKSTATION, TOOLS, fillVisit, obpMatches } from "../src/audit_steps.js";
 
 /* ------------------------------------------------ harness ------------------------------------------------ */
 function d1() {
@@ -91,9 +92,17 @@ test("the clean start: every checklist full, inventory starts on what the crew's
 test("what holds Next: each reason in its own step, under its own field", () => {
   const d = startVisit(CTX);
   const by = (step) => visitProblems(d, CTX, "2026-10-19").filter((p) => p.step === step).map((p) => p.field);
-  assert.deepEqual(by("workstation"), [], "a full desktop is one tap");
-  assert.deepEqual(by("machines").sort(), ["down:S2", "p43:S1"], "a Pattern 43 mark to confirm, a machine the crew reported down");
-  assert.deepEqual(by("inventory"), ["repair:x1"], "a repair item the crew found is confirmed or not found");
+  assert.deepEqual(by("workstation"), [], "a full desktop needs no tap");
+  // ONE way to answer (Miguel, 19 Oct 2026: "the dual thing .. not my favorite"): every answer starts in its normal state
+  assert.deepEqual(by("machines"), [], "the machine the crew reported down starts running again, the Pattern 43 mark starts not seen");
+  assert.deepEqual([d.hw.machines.S2.down, d.hw.machines.S1.p43], ["running", "not_seen"]);
+  assert.deepEqual(by("inventory"), [], "the repair item the crew found starts on the shelf");
+  assert.equal(d.inv.repairs.x1, "confirmed");
+  // the server's guard stays for whatever arrives without them (the site is open: a stranger's input)
+  const raw = JSON.parse(JSON.stringify(d)); raw.hw.machines.S1.p43 = null; raw.hw.machines.S2.down = null; delete raw.inv.repairs.x1;
+  const rby = (step) => visitProblems(raw, CTX).filter((p) => p.step === step).map((p) => p.field);
+  assert.deepEqual(rby("machines").sort(), ["down:S2", "p43:S1"]);
+  assert.deepEqual(rby("inventory"), ["repair:x1"]);
   assert.deepEqual(by("ratings"), ["inventory", "technical", "collaterals"]);
   assert.deepEqual(by("overall"), ["strengths", "improve"], "Overall is optional; strengths and to improve are not");
   d.hw.machines.S1.p43 = "seen";
@@ -109,6 +118,24 @@ test("what holds Next: each reason in its own step, under its own field", () => 
   assert.deepEqual(visitProblems(d, CTX, "2026-10-19").filter((p) => p.field.startsWith("fu_")).map((p) => p.field), ["fu_owner", "fu_due", "fu_text"], "an owner, a date not passed, what");
   d.inv.accurate = false; const noGaps = Object.assign({}, CTX, { diff: [] });
   assert.ok(visitProblems(d, noGaps).some((p) => p.field === "lines"), "'discrepancies' with no line says which");
+});
+
+test("the OBP verdict is measured from the lines, never asked; a kept draft gets the same normal answers, never over one given", () => {
+  const d = startVisit(CTX);
+  assert.equal(obpMatches(d, CTX), false, "the crew counted 0 where OBP says 5");
+  assert.equal(d.inv.accurate, false);
+  d.inv.lines.B2 = { shelf: 5 };
+  assert.equal(obpMatches(d, CTX), true, "the shelf says OBP is right after all");
+  d.inv.added.push({ part_no: "C3", shelf: 2 });
+  assert.equal(obpMatches(d, Object.assign({}, CTX, { obp: { C3: 4 } })), false, "a line Dexter adds is off unless its shelf is OBP's number");
+  assert.equal(obpMatches(d, Object.assign({}, CTX, { obp: { C3: 2 } })), true);
+  assert.equal(obpMatches({ inv: {} }, { diff: [{ kind: "timing", part_no: "T", obp: 2, counted: 1 }] }), true, "a timing line is not a discrepancy (1 Oct rule)");
+  const old = { hw: { labeled: null, machines: { S1: { checks: {}, p43: null } } }, inv: { lines: {}, added: [], repairs: {} }, crew: { hon: null } };
+  fillVisit(old, CTX);
+  assert.deepEqual([old.hw.labeled, old.hw.machines.S1.p43, old.hw.machines.S2.down, old.inv.repairs.x1, old.inv.accurate, old.crew.hon], [true, "not_seen", "running", "confirmed", false, "yes"], "a draft kept from before the change");
+  const kept = { hw: { labeled: false, machines: { S1: { p43: "seen" }, S2: { down: "still" } } }, inv: { repairs: { x1: "not_found" } }, crew: { hon: "na" } };
+  fillVisit(kept, CTX);
+  assert.deepEqual([kept.hw.labeled, kept.hw.machines.S1.p43, kept.hw.machines.S2.down, kept.inv.repairs.x1, kept.crew.hon], [false, "seen", "still", "not_found", "na"], "an answer given is never overwritten");
 });
 
 test("the score is the Score Card's own rule, and the note carries every reason", () => {
@@ -242,7 +269,8 @@ test("filing: refused with the reasons and nothing written; then the visit, the 
   const t = setup();
   const id = await completeRequest(t);
   const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
-  const bad = await t.call("POST", "/api/audit/request/grade", { id, visit: startVisit({ machines: v.machines, diff: v.count.diff }) });
+  const unanswered = startVisit({ machines: v.machines, diff: v.count.diff }); unanswered.hw.machines.S1.p43 = null; // what a stranger's POST may carry
+  const bad = await t.call("POST", "/api/audit/request/grade", { id, visit: unanswered });
   assert.equal(bad.status, 400);
   const bj = await bad.json();
   assert.ok(bj.problems.some((p) => p.field === "p43:S1") && bj.problems.some((p) => p.field === "inventory"));
@@ -366,7 +394,7 @@ test("P1: the internal crew file prints the audit under its contract; the crew-f
   const p = buildCrewProfile(PROFILE({ audits: [AUDIT_ROW], auditFollowups: [{ request_id: "ar_1", owner: "Rolando", due: "2026-11-18", text: "MFD refresher", status: "fixed", closed_at: "2026-11-02T10:00:00Z" }] }));
   const f = feedbackFile(p, "2026-10-19");
   const it = f.groups.flatMap((g) => g.items).find((x) => x.kind === "audit");
-  assert.equal(it.label, "Printshop audit");
+  assert.equal(it.label, "Printshop Ops Audit");
   assert.deepEqual(it.tags, [["Score", "4/5"], ["Inventory", "3/5"], ["Technical", "4/5"], ["Collaterals", "5/5"], ["Ship", "Pursuit"]]);
   assert.deepEqual(it.lines.map((l) => l.label), ["Strengths", "To improve", "Agreed", "Follow-up"]);
   assert.match(it.lines[3].text, /^Rolando by 2026-11-18: MFD refresher \(fixed 2026-11-02\)$/);
@@ -380,7 +408,8 @@ test("P1: the internal crew file prints the audit under its contract; the crew-f
 test("P1: the profile's data wave reads the audits with the rest (§12), never a TEST request's", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const one = W.slice(W.indexOf("async function apiCrewOne"), W.indexOf("async function apiCrewSave"));
-  const at = one.indexOf("auditFuRes] = await Promise.all([");
+  // the wave may carry more reads after the audits (the crew survey, 23 Oct 2026): the audits must still be in it
+  const m = /auditFuRes(?:, \w+)*\] = await Promise\.all\(\[/.exec(one), at = m ? m.index : -1;
   assert.ok(at > 0, "the audits ride the profile's one data wave");
   const wave = one.slice(at, one.indexOf("\n  ]);", at));
   assert.match(wave, /FROM audit_eval e .*COALESCE\(r\.test_mode, 0\) = 0/);
@@ -472,4 +501,55 @@ test("the page: History and Follow-ups are routes, the doors are on the home, a 
   for (const s of ['if (h === "hist") return historyView();', 'if (h === "fu") return followupsView();', 'data-go="hist"', 'data-go="fu"', '"/api/audit/followup/close"', 'b.classList.contains("sure")'])
     assert.ok(src.includes(s), s);
   return import("../src/audit_ui.js").then((m) => { new Function(m.AUDIT_HTML.split("<script>").slice(-1)[0].split("</script>")[0]); });
+});
+
+test("before the visit: a management list read with no life row is 'part life not read', never clean", () => {
+  const b = beforeVisit({ machines: [{ serial: "AC58011020823", label: "PROD 1", lifeRead: false, life: [] }] });
+  assert.equal(b.length, 1);
+  assert.match(b[0].t, /part life not read/);
+  assert.deepEqual(beforeVisit({ machines: [{ serial: "S", label: "P", lifeRead: true, life: [] }] }), []);
+});
+
+// THE WIRE, END TO END (Miguel, 21 Oct 2026: "just wana make sure the wire is done and correctly .. triple check"). The grade
+// is filed through the audit route on real SQLite and the Score Card's automatic read (score_auto.gatherAuto, the code behind
+// /api/score/auto that pre-fills the "Dexter's audit — 10%" slider) reads the SAME database: no hand-written audit_eval row in
+// between. 5 = 10, 4 = 8, 3 or below = 0, none = 10; the lowest in the contract; this contract's ship only; a TEST request never.
+test("the wire: a filed audit reaches the Score Card's Dexter's audit slider", async () => {
+  const t = setup();
+  const card = (sc, ship, on, off) => gatherAuto({ DB: t.env.DB }, { sc, ship, signOn: on, signOff: off, crewName: "", today: new Date().toISOString().slice(0, 10) }, { engine: "none" });
+  const today = new Date().toISOString().slice(0, 10), on = "2026-04-01", off = "2099-12-31";
+  const before = await card("SC-1", "Oasis", on, off);
+  assert.equal(before.sliders.sComm, 10, "no audit yet: full points");
+  assert.match(before.evidence.find((e) => e.factor === "sComm").text, /No audit in this contract/);
+  // John: Inventory 4, Technical 5, Collaterals 5, no Overall -> 4.67 rounded down = 4 -> 8 points
+  const id1 = await completeRequest(t, "SC-1");
+  const v1 = await (await t.call("GET", "/api/audit/visit?id=" + id1)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id1);
+  const f1 = await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: cleanVisit(v1) }, { email: "Dexter.Lawrence@dg3.com", open: true })).json();
+  assert.deepEqual([f1.ok, f1.score, f1.from], [true, 4, "average"]);
+  const a1 = await card("SC-1", "Oasis", on, off);
+  assert.equal(a1.sliders.sComm, 8, "4/5 = 8 of 10");
+  assert.equal(a1.evidence.find((e) => e.factor === "sComm" && e.source === "Audit").text, "Dexter's audit 4/5");
+  assert.ok(a1.evidence.some((e) => /open audit site, without a sign-in/.test(e.text)), "an open-site grade is said on the card");
+  assert.deepEqual(a1.allAudits.map((a) => [a.id, a.ship, a.score]), [[id1, "Oasis", 4]], "the chip opens this request");
+  assert.equal((await card("SC-1", "MV OASIS OF THE SEAS", on, off)).sliders.sComm, 8, "the ship as TDG writes it");
+  assert.equal((await card("SC-1", "Allure", on, off)).sliders.sComm, 10, "another ship's contract is not this audit's");
+  assert.equal((await card("SC-1", "Oasis", "2025-01-01", "2025-06-01")).sliders.sComm, 10, "an earlier contract is not this audit's");
+  assert.equal((await card("SC-2", "Oasis", on, off)).sliders.sComm, 10, "another seafarer's audit is not his");
+  // Ana, the next audit on the ship (one at a time): Overall 3 with a sentence -> 3 -> 0 points
+  const id2 = await completeRequest(t, "SC-2");
+  const v2 = await (await t.call("GET", "/api/audit/visit?id=" + id2)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id2);
+  const d2 = cleanVisit(v2); d2.ov.overall = 3; d2.ov.why = "Shelf and OBP were far apart on the toner lines.";
+  const f2 = await (await t.call("POST", "/api/audit/request/grade", { id: id2, visit: d2 })).json();
+  assert.deepEqual([f2.ok, f2.score, f2.from], [true, 3, "overall"]);
+  assert.equal((await card("SC-2", "Oasis", on, off)).sliders.sComm, 0, "3 or below = 0");
+  // the lowest in the contract when there are two
+  t.db.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, filed_by, filed_at) SELECT 'av_x', 'ar_other', agency_id, ship, 5,5,5,5, 5, 'overall', filed_by, filed_at FROM audit_eval WHERE request_id=?").run(id2);
+  const two = await card("SC-2", "Oasis", on, off);
+  assert.equal(two.sliders.sComm, 0); assert.match(two.evidence.find((e) => e.factor === "sComm").text, /3\/5 \(lowest of 2\)/);
+  // a TEST request's grade is a rehearsal: never the seafarer's score
+  t.db.prepare("UPDATE audit_request SET test_mode=1 WHERE id=?").run(id1);
+  assert.equal((await card("SC-1", "Oasis", on, off)).sliders.sComm, 10, "a TEST request never reaches the Score Card");
+  assert.ok(today >= on);
 });

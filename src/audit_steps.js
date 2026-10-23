@@ -136,12 +136,12 @@ export function makeRules() {
 
   /* --------------------------------- the clean start --------------------------------- */
   // ctx: { machines: [{serial, down, p43, life}], diff: [{part_no, obp, counted, diff, kind}], extras: [{id}], followups: [{id}] }
-  // Inventory starts on what the crew's count says: lines that differ = "No, discrepancies"; none = "Yes, accurate".
+  // Inventory starts on what the crew's count says (obpMatches): a line that differs is a discrepancy until the shelf says otherwise.
   function startVisit(ctx) {
     const machines = {};
     for (const m of (ctx && ctx.machines) || []) machines[m.serial] = { checks: {}, p43: null, down: null, note: "" };
     const gaps = ((ctx && ctx.diff) || []).filter((d) => d.kind === "gap");
-    return {
+    return fillVisit({
       v: VISIT_VERSION, openedAt: null,
       ws: { missing: [] },
       hw: { labeled: true, machines, tools: { missing: [] } },
@@ -150,7 +150,44 @@ export function makeRules() {
       crew: { training: [], trainingOther: "", ppe: { missing: [] }, hon: "yes", dispatch: null, dispatchNote: "" },
       ov: { overall: null, why: "", strengths: "", improve: "", agreed: "", recommendBlock: false, followup: null },
       close: {},
-    };
+    }, ctx);
+  }
+
+  // ONE way to answer (Miguel, 19 Oct 2026, on three screens: "i dont like this game of dual stuff"; "the dual thing .. not my
+  // favorite"). Every answer starts in its normal state and Dexter taps only what is wrong: the hardware is labeled, a machine
+  // the crew reported down is running again, a Pattern 43 mark is not seen on a fresh print, a repair item is on the shelf, the
+  // HON app is in use. Filled on a new visit AND on a draft kept from before, so nothing on screen waits on a second control.
+  // The required checks in visitProblems stay, as the guard for whatever arrives without them.
+  function fillVisit(d, ctx) {
+    if (!d || typeof d !== "object") return d;
+    const hw = d.hw || (d.hw = {});
+    if (hw.labeled !== true && hw.labeled !== false) hw.labeled = true;
+    const ms = hw.machines || (hw.machines = {});
+    for (const m of (ctx && ctx.machines) || []) {
+      const a = ms[m.serial] || (ms[m.serial] = { checks: {}, p43: null, down: null, note: "" });
+      if (m.down && a.down !== "still" && a.down !== "running") a.down = "running";
+      if (m.p43 && m.p43.state === "findings" && a.p43 !== "seen" && a.p43 !== "not_seen") a.p43 = "not_seen";
+    }
+    const inv = d.inv || (d.inv = {}), rep = inv.repairs || (inv.repairs = {});
+    for (const x of (ctx && ctx.extras) || []) if (rep[x.id] !== "confirmed" && rep[x.id] !== "not_found") rep[x.id] = "confirmed";
+    inv.accurate = obpMatches(d, ctx);
+    const crew = d.crew || (d.crew = {});
+    if (!["yes", "no", "na"].includes(crew.hon)) crew.hon = "yes";
+    return d;
+  }
+  // Does OBP match the shelf: measured from the lines, never asked. A line the crew's blind count put off OBP stays off unless the
+  // shelf Dexter types equals OBP; a line he adds is off unless its shelf equals OBP's number (when the page knows it). Timing
+  // lines (one unit, OBP moved that day) are not discrepancies (the 1 Oct rule).
+  function obpMatches(d, ctx) {
+    const inv = (d && d.inv) || {}, lines = inv.lines || {}, obpOf = (ctx && ctx.obp) || {};
+    const num = (x) => (x == null || x === "" || isNaN(Number(x)) ? null : Number(x));
+    for (const x of (ctx && ctx.diff) || []) {
+      if (x.kind !== "gap") continue;
+      const L = lines[x.part_no] || {}, shelf = num(L.shelf) != null ? num(L.shelf) : num(x.counted);
+      if (shelf == null || num(x.obp) == null || shelf !== num(x.obp)) return false;
+    }
+    for (const a of inv.added || []) { const o = num(obpOf[a.part_no]); if (o == null || num(a.shelf) !== o) return false; }
+    return true;
   }
 
   /* --------------------------------- what the server keeps --------------------------------- */
@@ -231,7 +268,7 @@ export function makeRules() {
     if (inv.accurate !== true && inv.accurate !== false) add("inventory", "accurate", "Say whether OBP matches the shelf.");
     if (inv.accurate === false) {
       const shown = ((ctx && ctx.diff) || []).filter((x) => x.kind === "gap").length + (inv.added || []).length;
-      if (!shown) add("inventory", "lines", "No discrepancies: add the line that is off, or answer “Yes, accurate”.");
+      if (!shown) add("inventory", "lines", "OBP is marked off but no line is: add the line that is off.");
     }
     for (const a of inv.added || []) if (a.shelf == null) add("inventory", "added:" + a.part_no, a.part_no + ": what is on the shelf?");
     for (const x of (ctx && ctx.extras) || []) if (!(inv.repairs || {})[x.id]) add("inventory", "repair:" + x.id, "“" + x.text + "”: confirm it is on the shelf, or not found.");
@@ -299,6 +336,7 @@ export function makeRules() {
       if (items.length) out.push({ tone: "a", step: "machines", t: name + " · Pattern 43: " + items.map((i) => sentence(i.head)).join("; "), s: (items[0].part ? "Points to " + sentence(items[0].part) + " · " : "") + "provisional, Rolando confirms · see it on the machine" });
       const life = m.life || [];
       if (life.length) out.push({ tone: "a", step: "machines", t: name + " · " + life.length + (life.length === 1 ? " part" : " parts") + " past rated life", s: life.map((x) => partName(x.name) + " " + x.pct + "%").join(" · ") + " · copy quality decides" });
+      else if (m.lifeRead === false) out.push({ tone: "a", step: "machines", t: name + " · part life not read", s: "The management list on file has no parts-life page · ask for the whole Machine Management List" });
     }
     const gaps = diff.filter((x) => x.kind === "gap"), timing = diff.filter((x) => x.kind === "timing");
     if (gaps.length || extras.length) out.push({ tone: "a", step: "inventory", t: "Count: " + [gaps.length ? gaps.length + (gaps.length === 1 ? " line differs" : " lines differ") : "", extras.length ? extras.length + " not in OBP" : ""].filter(Boolean).join(" · "), s: "Counted blind · verify on the shelf" });
@@ -308,11 +346,11 @@ export function makeRules() {
   const sentence = (v) => { const t = String(v || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
   const partName = (n) => String(n || "").replace(/\s*\((?:[A-Za-z.]+\s*)?%\)\s*$/, "");
 
-  return { VISIT_VERSION, STEPS, PHOTO_STEPS, WORKSTATION, MACHINE_CHECKS, TOOLS, TRAINING, PPE, RATING_TEXT, FOLLOW_OWNERS, TEXT_MIN, TEXT_MAX, FOLLOW_DAYS, AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems, parseCount, plusDays, startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, ordinal, beforeVisit, partName };
+  return { VISIT_VERSION, STEPS, PHOTO_STEPS, WORKSTATION, MACHINE_CHECKS, TOOLS, TRAINING, PPE, RATING_TEXT, FOLLOW_OWNERS, TEXT_MIN, TEXT_MAX, FOLLOW_DAYS, AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems, parseCount, plusDays, startVisit, fillVisit, obpMatches, normalizeVisit, visitProblems, evalOf, repeatCounts, ordinal, beforeVisit, partName };
 }
 
 const R = makeRules();
-export const { VISIT_VERSION, STEPS, PHOTO_STEPS, WORKSTATION, MACHINE_CHECKS, TOOLS, TRAINING, PPE, RATING_TEXT, FOLLOW_OWNERS, TEXT_MIN, TEXT_MAX, FOLLOW_DAYS, AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems, parseCount, plusDays, startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, ordinal, beforeVisit, partName } = R;
+export const { VISIT_VERSION, STEPS, PHOTO_STEPS, WORKSTATION, MACHINE_CHECKS, TOOLS, TRAINING, PPE, RATING_TEXT, FOLLOW_OWNERS, TEXT_MIN, TEXT_MAX, FOLLOW_DAYS, AUDIT_RATINGS, GRADE_NOTE_MIN, rating, auditScore, gradeProblems, parseCount, plusDays, startVisit, fillVisit, obpMatches, normalizeVisit, visitProblems, evalOf, repeatCounts, ordinal, beforeVisit, partName } = R;
 
 /* --------------------------------- the same rules on the phone --------------------------------- */
 export const AUDIT_RULES_JS = "window.AR = (function () {\n\"use strict\";\nvar __name = function (f) { return f; };\nreturn (" + makeRules.toString() + ")();\n})();";

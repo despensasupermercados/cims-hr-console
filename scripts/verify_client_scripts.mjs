@@ -46,6 +46,8 @@ export const RENDERED = [
   ["SBM_CLOSED_HTML", new URL("../src/sbm.js", import.meta.url), "sbmClosedHtml", ["expired"]],
   // Printshop Audit, the seafarer's upload page (public, token in the URL) and its closed page (14 Oct 2026)
   ["AUDIT_UPLOAD_HTML", new URL("../src/audit_upload_ui.js", import.meta.url), "auditUploadHtml", [{ token: "sample-token-0123456789", ship: "Oasis", crew: "John Gorre" }]],
+  // The end-of-contract crew survey, the seafarer's page (public, token in the URL; 23 Oct 2026)
+  ["CREW_SURVEY_HTML", new URL("../src/crew_survey_page.js", import.meta.url), "surveyPage", [{ first: "Raymond", ship: "Celebrity Infinity", shipShort: "Infinity", brand: "Celebrity", on: "1 Mar 2026", off: "22 Oct 2026", aboard: "7 mo 21 d", email: "ray•••@gmail.com" }]],
 ];
 
 // Evaluate the real src/worker.js (a temp copy next to it with the page constants exported, so
@@ -117,7 +119,11 @@ export async function verifyClientScripts() {
     const html = pages[name];
     if (!html || !html.length) throw new Error(`${name} is empty`);
     // Every inline script, whatever its attributes (type=module, defer, ...); external src= tags have no body.
-    const scripts = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((x) => x[1]);
+    // A data block (type="application/json", the crew survey's model) is checked as JSON, not run as JavaScript.
+    const tags = [...html.matchAll(/<script\b(?![^>]*\bsrc=)([^>]*)>([\s\S]*?)<\/script>/g)];
+    const isData = (attrs) => /\btype=["']?application\/(?:ld\+)?json/i.test(attrs);
+    for (const t of tags) if (isData(t[1])) JSON.parse(t[2]); // throws SyntaxError
+    const scripts = tags.filter((t) => !isData(t[1])).map((t) => t[2]);
     // SBM_CLOSED_HTML is a static "link expired" notice with no script by design — it is included
     // so that if it ever GAINS one, that script is parsed from day one rather than slipping the gate.
     if (!scripts.length && name !== "SBM_CLOSED_HTML") throw new Error(`no inline scripts in ${name}`);

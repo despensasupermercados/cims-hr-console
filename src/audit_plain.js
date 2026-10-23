@@ -199,12 +199,33 @@ export async function rewritePlain(env, text, { engine, claudeModel, workersMode
 }
 
 // ONE INCIDENT, ONE ENTRY (Miguel, 15 Oct 2026: "if you find the same identical report ... or if you see that it's the same
-// problem, just merge them into one"). Two field-intel reports are the same incident when their text is the same, or when
-// they carry the same dollar amount (a rush cost, $100 or more) within 14 days of each other. The newer report leads; the
-// others ride on it (`others`: who, when, full text) so nothing anyone wrote is lost — the page shows them under
-// "Full report" and the header names every reporter. Deterministic: no model decides what is a duplicate.
+// problem, just merge them into one"). Two field-intel reports are the same incident when their text is the same, or,
+// within 14 days of each other, when they carry the same dollar amount (a rush cost, $100 or more) or the same COUNTS:
+// two or more whole numbers of 3 or more in both, a repeat counted again (Miguel, 20 Oct 2026, "2. yes": Ray's two reports
+// on Kevin Jugao, 8 and 10 Sep 2026, both "17 boxes" entered against 1 used and "35 boxes" in the locker, no dollar amount,
+// read as two incidents; Medidas, Onward, two reports of one visit: "4 drums, 4 fuser units" in both). A count is never a
+// date, a time, a year, a duration ("7-day"), a size ("8.5 x 11"), a percentage, a part number or a dollar amount. A
+// shared DATE alone is not enough: Resposo's takeover write-up and a damaged lamp both name 18 July 2026 and are two
+// incidents (checked on every pair of filed reports, 20 Oct 2026). A missed merge costs a second line; a wrong one hides an
+// incident under another's headline, so the rule stays narrow. The newer report
+// leads; the others ride on it (`others`: who, when, full text) so nothing anyone wrote is lost — the page shows them
+// under "Full report" and the header names every reporter. Deterministic: no model decides what is a duplicate.
 const dollars = (s) => new Set((String(s).match(/\$\s?\d[\d,]*(?:\.\d+)?/g) || []).map((x) => Number(x.replace(/[$,\s]/g, ""))).filter((n) => n >= 100));
 const dayNo = (iso) => Math.floor(Date.parse(String(iso || "").slice(0, 10) + "T00:00:00Z") / 86400000);
+const NOT_COUNTS = [
+  /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g,                                              // 08/30/2026, 8/30
+  /\b\d+(?:\.\d+)?\s?(?:x|×)\s?\d+(?:\.\d+)?\b/gi,                                  // 8.5 x 11, 11x17
+  /\b\d+(?:\.\d+)?\s?-?\s?(?:days?|weeks?|months?|years?|yrs?|hours?|hrs?|h|minutes?|mins?)\b/gi, // 7-day, 4 months
+  /\b\d+(?:\.\d+)?\s?%/g,                                                                // 100%
+  /\b(?:19|20)\d{2}\b/g,                                                                  // a year
+  /[a-z]+-?\d+[a-z0-9-]*|\d+[a-z]+[a-z0-9-]*/gi,                                           // part numbers: TN623K, DU-105, 3rd
+];
+// The counts a report names, a repeat kept: "4 drums, 4 fuser units" is [4, 4].
+export const countsOf = (text) => {
+  let t = stripDates(text);
+  for (const rx of NOT_COUNTS) t = t.replace(rx, " ");
+  return numTokens(t).filter((x) => !x.cash && /^\d+$/.test(x.v) && Number(x.v) >= 3).map((x) => x.v);
+};
 export function sameIncident(a, b) {
   const ta = clean(a.full || a.text).toLowerCase(), tb = clean(b.full || b.text).toLowerCase();
   if (ta && ta === tb) return true;
@@ -212,7 +233,10 @@ export function sameIncident(a, b) {
   if (!(gap <= 14)) return false;
   const da = dollars(ta), db = dollars(tb);
   for (const x of da) if (db.has(x)) return true;
-  return false;
+  const left = countsOf(tb);
+  let shared = 0;
+  for (const x of countsOf(ta)) { const i = left.indexOf(x); if (i >= 0) { left.splice(i, 1); shared++; } }
+  return shared >= 2;
 }
 export function mergeIntel(feed) {
   const out = [];

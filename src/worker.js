@@ -14,7 +14,7 @@ import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
 import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
-import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName } from "./travel_match.js";
+import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName, clientFromBill } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, sgaPeriodFromName, SGA_COL_KEYS } from "./sga.js";
 import { archiveKey, sourceRecord, safeName, SOURCE_COLS } from "./sga_archive.js";
 import * as XLSX from "xlsx";
@@ -50,7 +50,7 @@ import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
-import { classifyWindow } from "./scorequeue.js";
+import { classifyWindow, defaultScoreLeg, commitBlock } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements, monthsLabel } from "./seafarer_movements.js";
@@ -73,10 +73,13 @@ import { guardMailer } from "./mail_guard.js";
 import { installAudit } from "./audit_routes.js";
 import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
+import { AUDIT_NAME, auditIconFor, markSvg } from "./audit_brand.js";
+import * as AUDIT_ICON_FILES from "./audit_brand_icons.js";
 import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 import { installHub, HUB_DDL } from "./crew_hub_routes.js";
 import { hubHomePage, HUB_HOST } from "./crew_hub.js";
 import { installWelcome, WELCOME_DDL } from "./welcome_send.js";
+import { installSurvey, SURVEY_DDL, SURVEY_ALTERS } from "./crew_survey_send.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -112,6 +115,11 @@ const ensureWelcome = memoEnsure(async (env) => { await ensureHubLink(env); awai
 const _welcome = installWelcome({ ensure: ensureWelcome, boardLegs: (env) => boardLegs(env), linkFor: (env, sc, who) => _hub.linkFor(env, sc, who),
   contacts: (env) => (env.TIMECARD_DB ? env.TIMECARD_DB.prepare("SELECT client, ship, code, email, role FROM ship_contact").all().then((r) => r.results || []) : Promise.resolve([])),
   sendMail: sendViaMailer, json, today: () => TODAY(), origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
+// The end-of-contract crew survey (Miguel, 22–23 Oct 2026, src/crew_survey_send.js): /hub/survey/<token> public, the
+// Reports › Crew survey page and the Automation switch signed in; the daily run is OFF until switched on. Feedback only (§1).
+const ensureSurvey = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); for (const q of SURVEY_DDL) await env.DB.prepare(q).run(); for (const q of SURVEY_ALTERS) await addColumn(env, q); }, SURVEY_DDL.concat(SURVEY_ALTERS).join("\n"));
+const _survey = installSurvey({ ensure: ensureSurvey, boardLegs: (env) => boardLegs(env), sendMail: sendViaMailer, json, today: () => TODAY(),
+  origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 // Since 16 Oct 2026 only CURRENT seats (an earmark's planned sign-off is not a sign-off to instruct), each carrying what the
@@ -253,6 +261,9 @@ export default {
       // the await stays INSIDE this try, so the §11 error-boundary invariant is unchanged.)
       const res = await (async () => {
       // ---- public brand icons (no auth) ----
+      // Printshop Ops Audit (Miguel, 20 Oct 2026): audit.cims.work answers the icon paths with the audit's mark; cims.work
+      // keeps the CIMS icon. src/audit_brand.js holds the drawing and the paths.
+      { const ai = auditIconFor(p, isAuditHost(url.hostname)); if (ai) return assetResponse(AUDIT_ICON_FILES[ai[0]], ai[1]); }
       if (p === "/favicon.ico")          return assetResponse(ICO_B64, "image/x-icon");
       if (p === "/apple-touch-icon.png" || p === "/apple-touch-icon-precomposed.png")
                                          return assetResponse(PNG180_B64, "image/png");
@@ -281,6 +292,8 @@ export default {
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
       // The Crew Hub: /hub/<token> and /hub/expense.xlsx answer without a session (the link is the key); the two /api/hub/ routes need one.
+      // The crew survey (its page is a /hub/ path, so it is asked first).
+      if (p.startsWith("/hub/survey/") || p.startsWith("/api/survey/")) { const _s = await _survey.handle(p, request, env, url, session); if (_s) return _s; }
       if (p.startsWith("/hub/") || p.startsWith("/api/hub/")) { const _w = await _welcome.handle(p, request, env, url, session); if (_w) return _w; const _h = await _hub(p, request, env, url, session); if (_h) return _h; }
       // Printshop Audit: the shell on audit.cims.work (and cims.work/audit), its manifest and service worker, and
       // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
@@ -462,6 +475,8 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // The welcome-aboard email on the sign-on morning (src/welcome_send.js), when its switch is on.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_welcome.run(env, event).catch(function (e) { console.error("welcome_send", (e && e.stack) || e); }));
+    // The end-of-contract crew survey, 3 days after the sign-off (src/crew_survey_send.js), when its switch is on.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(_survey.run(env, event).catch(function (e) { console.error("crew_survey", (e && e.stack) || e); }));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
     // Printshop Audit sweep: 12-hour reminder, 24-hour overdue note to the auditor, reads that did not finish (audit_request.js).
@@ -1506,13 +1521,15 @@ async function apiTravel(env, url) {
   if (kind) { where.push("kind=?"); bind.push(kind); }
   if (where.length) sql += " WHERE " + where.join(" AND ");
   sql += " ORDER BY year DESC, month, crew_name";
-  const [rowsRes, yearsRes, crewRes, ackRes] = await Promise.all([
+  const [rowsRes, yearsRes, crewRes, ackRes, billRes] = await Promise.all([
     env.DB.prepare(sql).bind(...bind).all(),
     env.DB.prepare("SELECT DISTINCT year FROM travel_expense ORDER BY year DESC").all(),
     env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(),
     env.DB.prepare("SELECT key, label, ack_by, ack_at FROM travel_ack ORDER BY ack_at DESC").all().catch(() => ({ results: [] })),
+    // the brand TDG billed each person under, per month — the cruise line of a ledger row with no ship (clientFromBill)
+    env.DB.prepare("SELECT year, month, crew_name, brand FROM sga_line WHERE brand IS NOT NULL AND brand<>''").all().catch(() => ({ results: [] })),
   ]);
-  const records = annotateTravel(rowsRes.results, crewRes.results);
+  const records = clientFromBill(annotateTravel(rowsRes.results, crewRes.results), billRes.results || [], crewRes.results);
   const years = yearsRes.results.map(r => r.year);
   const today = TODAY(); // the DATA basis (UTC), like the dashboard — test/date_basis.test.js
   const closed = Object.fromEntries(years.map((y) => [y, closedMonths(today, y)]));
@@ -2210,7 +2227,7 @@ async function apiCrewOne(env, url, session) {
   await Promise.all([ensureKeyman(env), ensureCrewExtras(env), ensureRegistrySnapshot(env), ensureContractCount(env)]);
   const today = TODAY();
   const none = () => ({ results: [] });
-  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes, trainerRow, auditRes, auditOpenRes, auditFuRes] = await Promise.all([
+  const [row, ov, ctRes, rsRow, HIST, editsRes, ccRow, notesRes, ready, intelRes, fbReqRes, fbRespRes, sbmReqRes, sbmRes, cardsRes, deployRes, dismissRes, statusRes, travelRes, actRes, instrRes, linkRes, openCards, tdgEmRes, namesRes, endsRes, trainerRow, auditRes, auditOpenRes, auditFuRes, surveyRes] = await Promise.all([
     env.DB.prepare("SELECT crew.*, " + TDG_ABSENT_COL + " FROM crew " + TDG_ABSENT_JOIN + " WHERE crew.agency_id = ?").bind(id).first(),
     env.DB.prepare("SELECT * FROM crew_override WHERE agency_id=?").bind(id).first(),
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act, imported_at FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
@@ -2246,6 +2263,8 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT e.request_id, e.ship, e.r_inventory, e.r_technical, e.r_collaterals, e.r_overall, e.score, e.score_from, e.note, e.filed_at, d.data_json FROM audit_eval e LEFT JOIN audit_visit_data d ON d.request_id = e.request_id LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT r.id, r.ship, r.status, r.sent_at, r.created_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND r.test_mode = 0 AND r.status IN ('sent','complete') AND e.request_id IS NULL ORDER BY r.created_at DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT request_id, owner, due, text, status, closed_at FROM audit_followup WHERE agency_id=? ORDER BY created_at").bind(id).all().catch(none),
+    // his own end-of-contract survey answers (23 Oct 2026); a database without the table, or the column, reads empty
+    env.DB.prepare("SELECT * FROM crew_survey WHERE agency_id=? AND submitted_at IS NOT NULL ORDER BY submitted_at DESC").bind(id).all().catch(none),
   ]);
   if (!row) return json({ error: "not found" }, 404);
   const crew = applyOverride(row, ov);
@@ -2263,7 +2282,7 @@ async function apiCrewOne(env, url, session) {
     edits: editsRes.results, notes: notesRes.results, ready, intel: intelRes.results, fbReqs: fbReqRes.results, fbResp: fbRespRes.results,
     sbmRequests: sbmReqRes.results, sbm: sbmRes.results, cards: cardsRes.results, deploys: deployRes.results, dismissals: dismissRes.results,
     statusRows: statusRes.results, travel: travelRowsFor(travelRes.results, { agency_id: id }, namesRes.results), activity: actRes.results, instr: instrRes.results, links: linkRes.results,
-    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, audits: auditRes.results, auditOpen: auditOpenRes.results, auditFollowups: auditFuRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
+    fleetLegs: HIST, openCards, tdgEarmarks: tdgEmRes.results, ends: endsRes.results, audits: auditRes.results, auditOpen: auditOpenRes.results, auditFollowups: auditFuRes.results, surveys: surveyRes.results, names: Object.fromEntries((namesRes.results || []).map((n) => [n.agency_id, [n.first_name, n.last_name].filter(Boolean).join(" ")])),
   });
   // `tdg` = the crew row as the last import wrote it, `override` = what a person typed over it: the Edit crew window
   // shows TDG's value under every field someone changed, with Reset to TDG (12 Oct 2026).
@@ -2521,7 +2540,8 @@ async function rotationSections(env) {
   const tdgCount = countMapOf(_cnt);
   const tdgAdded = {}; for (const r of _cnt) if (r && r.sc) tdgAdded[r.sc] = completedSince(r.as_of, ccRowOf(r), today); // finished since the count file (8 Oct 2026)
   const shipHome = {}, shipBrand = {};
-  for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : "Royal"); }
+  const shipFrom = {}; // a hull entering service: its first day (VESSEL_REF `from`)
+  for (const v of VESSEL_REF) { const k = normShip(v.name); shipHome[k] = v.homeport || null; if (v.from) shipFrom[k] = v.from; shipBrand[k] = (v.brand === "CEL" ? "Celebrity" : v.brand === "NCL" ? "NCL" : "Royal"); } // NCL: Norwegian Getaway, 20 Oct 2026 (it read Royal: "Getaway of the Seas", a GSM)
   const brandFor = (ship) => { const k = normShip(ship); if (shipBrand[k]) return shipBrand[k]; if (AZ.indexOf(k) >= 0) return "Azamara"; if (k.indexOf("ncl") >= 0 || k.indexOf("norwegian") >= 0) return "NCL"; return "Royal"; };
   const crewRows = crewRowsRes.results;
   const _trainers = trainerSet((trainerRes && trainerRes.results) || []);
@@ -2733,7 +2753,7 @@ async function rotationSections(env) {
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
-  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending" || regOf(x.asgId).verdict === "earmarked")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore, trainer: !!c.trainer  })); };
+  const drawSeat = (c, base, ship, k, enr, sEnr, x) => { const _pdList=(_pdBy[(brandFor(ship)==='Royal'?'Royal Caribbean':brandFor(ship))+'|'+ship]||[]);const _onC=resolveCity({date:enr.signOn||sEnr.on,seed:enr.embark||sEnr.embark||shipHome[k],override:null,portDays:_pdList});const _offC=resolveCity({date:enr.signOff||sEnr.off,seed:enr.disembark||sEnr.disembark||shipHome[k],override:null,portDays:_pdList});(promByShip[ship] = promByShip[ship] || []).push(Object.assign({}, base, { ship, seq: enr.seq || 1, state: x.state, assignment_id: x.asgId || null, registry: regOf(x.asgId), confirmed: !!x.confirmed, deployedAt: deployedAtOf(x.asgId), file: x.file ? { status: x.file.status, ship: x.file.ship, at: x.file.at, vesselAt: x.file.vesselAt } : null, vessel_key: vkOf(ship), signOn: enr.signOn || sEnr.on || null, signOff: enr.signOff || sEnr.off || null, aboard: !!((enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today), awaiting: !!(x.state === "yellow" && !x.confirmed && x.asgId && (enr.signOn || sEnr.on) && (enr.signOn || sEnr.on) <= today && (!regOf(x.asgId) || regOf(x.asgId).verdict === "pending" || regOf(x.asgId).verdict === "earmarked")), dateSource: enr.dateSource || null, dateSourceAt: enr.dateSourceAt || null, offSource: enr.offSource || null, offAt: enr.offAt || null, reliever: enr.reliever || null, heldByFile: !!enr.heldByFile, overridden: !!enr.overridden, onKey: enr.onKey || null, offConfirmed: !!enr.offConfirmed, onConfirmed: !!enr.onConfirmed, eccr: (enr.hasEdit ? !!enr.eccr : base.eccr), air: (enr.hasEdit ? !!enr.air : base.air), hotel: (enr.hasEdit ? !!enr.hotel : base.hotel), embark: enr.embark || sEnr.embark || shipHome[k] || null, disembark: enr.disembark || sEnr.disembark || shipHome[k] || null, disembarkSrc: enr.disembark ? "rita" : sEnr.disembark ? (sEnr.src || "counter") : shipHome[k] ? "home" : null, current: c.status === "On board", on_city: _onC.city, on_conf: _onC.conf, off_city: _offC.city, off_conf: _offC.conf, docs: docsBy[c.agency_id] || null, jrWarn: (isJr(cmap[c.agency_id].rank) && jrRule[k] && jrRule[k] !== "open") ? jrRule[k] : null, visit: !!(enr.visit || x.visit), shoreTeam: !!x.shore, trainer: !!c.trainer, earmarkedHere: !!x.here  })); };
   const plannedScs = new Set((openAsg || []).filter((a) => !overriddenAsg.has(a.id)).map((a) => a.sc).filter(Boolean));
   // TDG'S EARMARK IS DRAWN (6 Oct 2026): a crew the file has Earmarked for a hull the console knows appears
   // on that hull as "EARMARKED · TDG" — from the file, no card needed. Rita's own card on that hull carries
@@ -2802,7 +2822,7 @@ async function rotationSections(env) {
         const asg0 = cardAsg[sc + "|" + k] || (openOnHull[sc + "|" + k] || {}).id || null, asg = (asg0 && !overriddenAsg.has(asg0)) ? asg0 : null;
         // Rita's card on the same hull is CONFIRMED by the file: drawn through the card's own path (state
         // yellow + confirmed renders green "ABOARD · TDG REGISTRY", Remove kept) — one card, not two.
-        drawSeat(c, base, w.ship, k, enr, sEnr, { state: asg ? "yellow" : "green", asgId: asg, confirmed: !!asg, file: w });
+        drawSeat(c, base, w.ship, k, enr, sEnr, { state: asg ? "yellow" : "green", asgId: asg, confirmed: !!asg, file: w, here: earmarkedHere });
         if (asg) absorbed.add(asg);
         seats[sc] = { key: k, ship: w.ship, dated: !!(enr.signOn || sEnr.on) };
         seatKey = k;
@@ -2824,6 +2844,9 @@ async function rotationSections(env) {
   for (const a of (openAsg || [])) { const cs = shipOf(a.ship) || a.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // a ship with only a projection still gets a section
   for (const d of ((depRes && depRes.results) || [])) { const cs = shipOf(d.ship) || d.ship; if (!cs) continue; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and so does one with only a sent line
   for (const sc of earmarkSc) { const cs = fileOf[sc].ship; const kk = normShip(cs); if (!shipNames[kk] && validShip.has(kk)) shipNames[kk] = cs; } // ...and one TDG earmarks someone for
+  // ...and a hull entering service (VESSEL_REF `from`: Norwegian Getaway, 16 Nov 2026 — Miguel, 20 Oct 2026, "yes get away i the
+  // console"): it has its section before anyone is placed on it, so Rita can drag its first printer onto it.
+  for (const v of VESSEL_REF) if (v.from) { const kk = normShip(v.name); if (!shipNames[kk]) shipNames[kk] = v.name; }
   // Yellow cards that are not already standing on the board: a projection whose contract has not
   // started, or a crew Rita has placed on a ship they do not otherwise appear on. One feed, one
   // renderer — the board no longer synthesises a second reliever list of its own.
@@ -2966,7 +2989,7 @@ async function rotationSections(env) {
       .map(h => ({ name: h.name, sc: h.sc, ours: !!h.ours, on: h.on, off: h.off, byFile: !!h.byFile, offSource: h.offSource || null, reliever: h.reliever ? { name: h.reliever.name || null, sc: h.reliever.sc } : null }));
     for (const x of (byShip[ship] || [])) { if (cur.has(x.agency_id) || schedScs.has(x.agency_id) || !x.signOn || !x.signOff || x.signOn === x.signOff || x.signOff >= today) continue; history.push({ name: x.name, sc: x.agency_id, ours: true, on: x.signOn, off: x.signOff }); }
     history.sort((a, b) => (a.off || "") < (b.off || "") ? 1 : -1);
-    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, visits, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history };
+    return { ship, brand: brandFor(ship), onboard: crew.filter(x => x.current).length, jrPsRule: jrRule[k] || null, crew, visits, projections: projByShip[ship] || [], deployed: depByShip[ship] || [], history, from: shipFrom[k] && shipFrom[k] > today ? shipFrom[k] : null };
   });
   sections.sort((a, b) => a.ship < b.ship ? -1 : a.ship > b.ship ? 1 : 0);
   // WHAT IS LEFT TO CLEAN UP (board_truth.boardIssues): the board applies the file; this lists only what a
@@ -2991,7 +3014,7 @@ async function rotationSections(env) {
     }).filter((x) => x.sc && cmap[x.sc]);
     const heldAboard = new Set(crew.filter((c) => c.fileRaw && c.fileRaw.status === "On board" && c.fileRaw.ship).map((c) => normShip(c.fileRaw.ship)));
     const secs = sections.map((x) => ({
-      ship: x.ship, key: normShip(x.ship),
+      ship: x.ship, key: normShip(x.ship), notYet: !!x.from, // not in service yet: no printer is no gap
       seated: x.crew.some((c) => c.state !== "yellow" || c.confirmed),
       fileAboard: heldAboard.has(normShip(x.ship)),
       aboardCards: x.crew.filter((c) => c.state === "yellow" && !c.confirmed).map((c) => (c.registry && c.registry.verdict) || "pending")
@@ -3469,15 +3492,11 @@ async function apiBonusCrew(env, url) {
   // since the Contract Counter table is only as fresh as its last upload (2026-07-06) and knows nothing
   // of relief-board contracts. Fall back to the latest Counter leg.
   const td = TODAY();
-  let current = null, bestPast = null, bestFut = null;
-  for (const h of HIST) {
-    if (!h.ours || h.sc !== cr.agency_id || !h.on) continue;
-    const off = h.off || "9999"; // TBA sign-off = still aboard (same rule as the board and deriveStatus)
-    if (h.on <= td && off >= td) { if (!current || off > (current.off || "9999")) current = h; } // contract spanning today
-    else if (off < td) { if (!bestPast || off > bestPast.off) bestPast = h; }                    // last completed
-    else { if (!bestFut || off < (bestFut.off || "9999")) bestFut = h; }                          // next one
-  }
-  const sched = current || bestPast || bestFut;  // the contract being scored: current first, else most-recent
+  // The contract being scored is ONE definition, src/scorequeue.js defaultScoreLeg (night watch, 17 Oct 2026): an ENDED
+  // contract nobody has scored yet before a contract that has only begun. "Current first, else most recent" opened Olid,
+  // Alonzo, Santos, De Torres, Noche and Resposo on the hull they joined in October, not the one they left in July/August.
+  const pickd = defaultScoreLeg(HIST, cr.agency_id, td, { outcomes: outs.results || [] });
+  const sched = pickd.leg;
   let lastLeg = sched ? { on: sched.on || null, off: sched.off || null, ship: sched.ship || null } : null; // TBA off stays blank for manual entry
   // Already committed for this contract? Prefill the COMMITTED span, not the board's (planned vs
   // actual drift, snapshot vs grid). The commit path's double-commit guard is an exact (start,end)
@@ -3490,13 +3509,16 @@ async function apiBonusCrew(env, url) {
     const leg = await env.DB.prepare("SELECT sign_on, proj_off, act_off, ship FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL ORDER BY seq DESC LIMIT 1").bind(cr.agency_id).first();
     lastLeg = leg ? { on: leg.sign_on || null, off: leg.act_off || leg.proj_off || null, ship: leg.ship || null } : null;
   }
+  // Whether the span the card opens on may be committed, in the commit's own words (Miguel, 17 Oct 2026: after the
+  // sign-off, oldest first, wait for TDG). The commit route decides again; this only lets the page say why up front.
+  const block = (lastLeg && lastLeg.on && lastLeg.off && !lastLeg.committed) ? commitBlock(HIST, cr.agency_id, td, outs.results || [], lastLeg.on, lastLeg.off) : null;
   const legRows = legRowsRes.results;
   const legN = fullContracts(legRows.map(legShape));
   // cumulative completed -> grade/pay (never resets): TDG's stated count, else baseline + derived legs.
   // `count` (the consecutive bonus count: ledger + ladder) is untouched by this — that is money (§1).
   const cc = cumulativeContracts(tdgRow ? tdgRow.completed : null, baseline, legN, tdgRow ? completedSince(tdgRow.as_of, ccRowOf(tdgRow), new Date().toISOString().slice(0, 10)) : 0);
   const effN = cc.n;
-  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg });
+  return json({ crew: cr, count, contracts: effN, contracts_source: cc.source, contracts_as_of: tdgRow ? (tdgRow.as_of || null) : null, contracts_added: cc.added, rank: psRank(effN, true), base_salary_usd: psSalary(effN), baseline_set: baseline != null, nextRungIfClean: ladderValue(count + 1), outcomes: outs.results, lastLeg, scoring: { why: pickd.why, block } });
 }
 // Fleet-wide bonus ledger: one row per crew with contract count, consecutive count, next rung,
 // last committed outcome, and total paid. Read-only money view (one bulk pass, no per-crew fan-out).
@@ -3679,7 +3701,9 @@ const ensureBonusV2 = memoEnsure(async (env) => {
   await env.DB.prepare("INSERT OR IGNORE INTO bonus_policy (id,version,effective_at,ladder_json,floor_pct,weights_json,eval_rule,gates_json,agg_policy,notes) SELECT 'policy-v2', 2, '2026-10-15', ladder_json, floor_pct, weights_json, eval_rule, gates_json, agg_policy, 'v1 weights and gates unchanged. sComm = Dexter''s audit, not Communication. The Score Card pre-fills from the systems (bonus.js autoScore, 15-16 Oct 2026).' FROM bonus_policy WHERE version = 1").run();
   try { await env.DB.prepare("ALTER TABLE bonus_outcome ADD COLUMN evidence_json TEXT").run(); }
   catch (e) { if (!/duplicate column/i.test(String((e && e.message) || e))) throw e; }
-}, "policy-v2+v1seed");
+  // One outcome per contract span, by the database (migrations/0033, 17 Oct 2026): the commit's backstop below relied on it.
+  await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS ux_bonus_outcome_span ON bonus_outcome(crew_id, span_start, span_end) WHERE corrects_id IS NULL").run();
+}, "policy-v2+v1seed+span-unique");
 // The automatic read for the span and ships being committed, re-run on the server (cached AI answers only: a commit never
 // waits on a model), kept beside the outcome. Never blocks a commit: a failed read is stored as the failure.
 async function commitEvidence(env, cr, b, ships) {
@@ -3723,6 +3747,16 @@ async function apiBonusCommit(request, env, session) {
     return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"),
       result: { score: dup.score_pct, gate: dup.gate, pay: dup.pay_usd, count: dup.count_before, nextCount: dup.count_after, rung: ladderValue(dup.count_after) } });
   }
+  // AFTER THE SIGN-OFF, OLDEST FIRST, AND TDG ENDS IT (Miguel, 17 Oct 2026, answers to the logic review). The server is the
+  // authority: a span whose sign-off has not come, a contract TDG still has On board (held, or past a projected sign-off),
+  // a training visit, or a newer contract while an older one inside SCORE_RECENT_DAYS has no outcome — refused, 409, in
+  // words the page prints. Read on the ONE schedule (boardLegs, §11), the same one the card's default span came from.
+  const [HIST, prior] = await Promise.all([
+    boardLegs(env),
+    env.DB.prepare("SELECT span_start, span_end FROM bonus_outcome WHERE crew_id=?").bind(cr.id).all(),
+  ]);
+  const blk = commitBlock(HIST, cr.agency_id, TODAY(), prior.results || [], b.spanStart, b.spanEnd);
+  if (blk) return json(blk, 409);
   const ships = (Array.isArray(b.ships) && b.ships.filter(Boolean).length) ? b.ships.filter(Boolean) : [cr.vessel_observed || "—"];
   const g = b.gates || {};
   const endReason = (!g.complete && g.compassion) ? "compassionate" : (g.complete ? "completed" : (b.endReason || "early_relief"));
@@ -3730,21 +3764,25 @@ async function apiBonusCommit(request, env, session) {
   const groupId = cr.agency_id + "-C" + grpN;
   const cid = "ct_" + crypto.randomUUID();
   const now = new Date().toISOString();
-  await env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now).run();
-  for (let i = 0; i < ships.length; i++) {
-    await env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
-      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now).run();
-  }
   const oid = "bo_" + crypto.randomUUID();
   await ensureBonusV2(env);
   const evidence = await commitEvidence(env, cr, b, ships);
+  // The contract, its legs and the outcome are ONE transaction (D1 batch), written after the evidence read: a racing
+  // second commit that passed the pre-check trips ux_bonus_outcome_span and leaves NOTHING behind — before 17 Oct 2026
+  // the contract and assignment rows were written first, one by one, so a refused outcome left an orphan contract.
+  const writes = [env.DB.prepare("INSERT INTO contract (id,crew_id,contract_group_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?)").bind(cid, cr.id, groupId, "Closed", now, now)];
+  for (let i = 0; i < ships.length; i++) {
+    writes.push(env.DB.prepare("INSERT INTO assignment (id,contract_id,vessel_name,is_transfer,sign_on,actual_sign_off,end_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind("as_" + crypto.randomUUID(), cid, ships[i], i > 0 ? 1 : 0, b.spanStart, b.spanEnd, endReason, now, now));
+  }
+  writes.push(env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+    .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence));
   try {
-    await env.DB.prepare("INSERT INTO bonus_outcome (id,contract_id,contract_group_id,crew_id,policy_version,scorecard_json,score_pct,gate,gate_note,count_before,count_after,pay_usd,span_start,span_end,ships_json,committed_by,committed_at,evidence_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(oid, cid, groupId, cr.id, POLICY_VERSION, JSON.stringify(r.breakdown), r.score, r.gate, (b.gateNote || "").trim() || null, r.count, r.nextCount, r.pay, b.spanStart, b.spanEnd, JSON.stringify(ships), (session && session.email) || "system", now, evidence).run();
+    await env.DB.batch(writes);
   } catch (e) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
-    // SELECT trips UNIQUE(crew_id,span_start,span_end) (migration 0004, primary outcomes only). Return the
-    // already-recorded outcome as a duplicate instead of double-paying / double-counting.
+    // SELECT trips ux_bonus_outcome_span (migrations/0033, primary outcomes only) and the whole batch rolls back. Return
+    // the already-recorded outcome as a duplicate instead of double-paying / double-counting.
     const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
     if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
       result: { score: ex.score_pct, gate: ex.gate, pay: ex.pay_usd, count: ex.count_before, nextCount: ex.count_after, rung: ladderValue(ex.count_after) } });
@@ -4492,6 +4530,8 @@ input,select{font-family:inherit;font-size:13.5px;padding:9px 12px;border:1px so
    The rail is the Crew tab's (crrail); the cards are hairline white with one big number, two greys and soft fills. */
 #tvwrap .crrail{flex:0 0 236px;min-width:236px;max-width:236px}
 #tvwrap .crrail .crfacet input{width:16px;height:16px;margin:0;flex:0 0 auto;accent-color:var(--navy);pointer-events:none}
+#tvwrap .crrail .crfacet input[type=checkbox]{appearance:auto;-webkit-appearance:checkbox;width:16px;height:16px;border-radius:4px;background:none;box-shadow:none;transition:none}
+#tvwrap .crrail .crfacet input[type=checkbox]::after{display:none}
 #tvwrap .crfacet span:first-of-type{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tvfacets{display:flex;flex-direction:column;gap:18px}
 .tvfacets>div+div{border-top:1px solid var(--line);padding-top:16px}
@@ -5310,10 +5350,10 @@ const LOGIN_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta
 <link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>${STYLE}
-#g{min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,var(--deep),var(--navy));padding:24px}
-.box{background:#fff;border-radius:16px;padding:34px 30px;width:360px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
+#g{min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;background:linear-gradient(135deg,var(--deep),var(--navy));padding:24px}
+.box{box-sizing:border-box;background:#fff;border-radius:16px;padding:34px 30px;width:360px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center}
 .box h1{color:var(--navy);font-size:20px;margin:14px 0 4px}.box p{color:var(--mut);font-size:13px;margin-bottom:20px}
-.box input{width:100%;text-align:center}.box button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:var(--green);color:#fff;font-weight:700;font-family:'Outfit';font-size:15px;cursor:pointer}
+.box input{box-sizing:border-box;width:100%;text-align:center}.box button{width:100%;margin-top:12px;padding:12px;border:0;border-radius:10px;background:var(--green);color:#fff;font-weight:700;font-family:'Outfit';font-size:15px;cursor:pointer}
 .msg{font-size:12.5px;margin-top:12px;min-height:16px;color:var(--mut)}
 </style></head><body><div id=g><div class=box>
 <div class=brandmark style="margin:0 auto">D</div>
@@ -5354,8 +5394,11 @@ document.getElementById('email').addEventListener('keydown',e=>{if(e.key==='Ente
 </script></body></html>`;
 // audit.cims.work's sign-in: the same page and the same allowlist, saying where you are (it read "HR Operational Console",
 // which looked like the wrong site).
-const AUDIT_LOGIN_HTML = LOGIN_HTML.replace("<title>DG3 CIMS · Sign in</title>", "<title>Printshop Audit · Sign in</title>")
-  .replace("<h1>HR Operational Console</h1>", "<h1>Printshop Audit</h1>");
+const AUDIT_LOGIN_HTML = LOGIN_HTML.replace("<title>DG3 CIMS · Sign in</title>", "<title>" + AUDIT_NAME + " · Sign in</title>")
+  .replace('<link rel=icon href="/favicon.ico" sizes=any><link rel=apple-touch-icon href="/apple-touch-icon.png">',
+    '<link rel=icon href="/audit/favicon.ico" sizes=any><link rel=apple-touch-icon href="/audit/icon-180.png">')
+  .replace('<div class=brandmark style="margin:0 auto">D</div>', '<div style="width:56px;margin:0 auto;line-height:0">' + markSvg(56) + "</div>")
+  .replace("<h1>HR Operational Console</h1>", "<h1>" + AUDIT_NAME + "</h1>");
 
 const FB_HTML = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>CIMS Crew Feedback</title>
@@ -5477,7 +5520,7 @@ document.addEventListener('click',function(e){
   rows.forEach(function(r){tb.appendChild(r);});
 });
 function dot(st){return {'On board':'#5FB946','On Vacation':'#B0741A','Reserved':'#C9A46A','Earmarked':'#1E6FD0','Inactive':'#9aa7b6','Not for Rehire':'#9B4D4D'}[st]||'#9aa7b6';}
-function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN'))return'NCL';return'Royal';}
+function brandOf(v){v=(v||'').toUpperCase();if(v.includes('CELEBRITY'))return'Celebrity';if(v.includes('AZAMARA'))return'Azamara';if(v.includes('NCL')||v.includes('NORWEGIAN')||v.includes('GETAWAY'))return'NCL';return'Royal';}
 function docChip(label,d){if(!d)return'';const days=(new Date(d)-new Date())/86400000;const cls=days<0?'red':days<90?'amber':'ok';return '<span class="cchip '+cls+'">'+label+' '+d+'</span>';}
 // TAB SWITCHES (16 Sep 2026). Miguel: "when I change tabs still slower". Every tab refetched from
 // scratch, so going back to a tab you were just on cost a full round trip — perf_log measured 620-1100ms
@@ -5547,7 +5590,7 @@ function prefetchTabs(delay){clearTimeout(window._pfT);window._pfT=setTimeout(fu
 // I want it when I refresh to stay where it is .. and go all the way up of the tab I am on"). The open tab
 // rides in the URL hash (replaceState: no extra Back entries); a reload opens that tab at its top.
 var TABS=['dashboard','crew','contracts','rotation','feedback','compliance','billing','travel','fleet','reports','data','settings','ask'];
-function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}return TABS.indexOf(h)>=0?h:'dashboard';}
+function tabFromHash(){var h='';try{h=String(location.hash||'').replace(/^#/,'');}catch(_){}if(h.indexOf('crew/')===0)return 'crew';return TABS.indexOf(h)>=0?h:'dashboard';}
 async function show(tab){
   VIEW_GEN++;
   var _vw=document.getElementById('view');if(_vw)_vw.classList.remove('wide','full');
@@ -6482,6 +6525,9 @@ var TLBL={};    // key -> label (the registry's spelling when matched, else the 
 function tKey(r){return r.agency_id||r.crew_name;}
 function tLabel(r){return r.crew_display||r.crew_name;}
 var TCLIENT={royal:'Royal',celebrity:'Celebrity',azamara:'Azamara',ncl:'NCL',shoreside:'Shoreside'};
+// a crew row neither its ship nor TDG's bill places (clientFromBill) is 'none': listed as Not placed, never a guessed line
+function tvPlace(rs){return rs.map(function(r){if(!r.client&&(r.kind||'crew')!=='shoreside')r.client='none';return r;});}
+TCLIENT.none='Not placed';
 var TMN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // THE TRAVEL TAB, REDESIGNED (Miguel, 17 Oct 2026: "improve this .. user experience and user interface .. fresh, young, luxury
@@ -6496,14 +6542,14 @@ async function renderTravel(){
   $('#view').innerHTML='<div class=muted style="padding:18px 2px">Loading travel…</div>';
   try{ TRV=await cachedJson('/api/travel',travelRefresh); if(TRV&&TRV.error)throw new Error(TRV.error); }
   catch(e){ if(_g!==VIEW_GEN)return; $('#view').innerHTML='<div class="tvcard"><b>Could not load travel data.</b><div style="margin-top:10px"><button class="btn" onclick="renderTravel()">Retry</button></div></div>'; return; }
-  TRVALL=TRV.records||[];
+  TRVALL=tvPlace(TRV.records||[]);
   if(TRV.budgetMo)TBUD=TRV.budgetMo;
   // TDG's bill (the SGA, §10j) rides beside the workbook: the comparison and the Training centre view read it.
   if(_g!==VIEW_GEN)return;
   try{ SGA=await cachedJson('/api/sga',travelRefresh); if(SGA&&SGA.error)SGA=null; }catch(e){ SGA=null; }
   if(_g!==VIEW_GEN)return;
   TSEL=null;
-  TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};
+  TF={q:'',year:'',month:'',cat:'',kind:'crew',client:'',withTr:false};
   // The rail's shell is drawn ONCE (the search box keeps its focus while Rita types); paintTravel fills #tvfacets.
   $('#view').innerHTML='<div class=bar style="margin:0;justify-content:flex-end">'
     +'<button class="btn ghost crfbtn" onclick="document.getElementById(&quot;trrail&quot;).classList.toggle(&quot;open&quot;)">Filters</button></div>'
@@ -6518,7 +6564,7 @@ async function renderTravel(){
     +'</div>';
   paintTravel();
 }
-function clearTravelFilters(){TF={q:'',year:'',month:'',cat:'',kind:'crew',client:''};TSEL=null;var q=document.getElementById('tq');if(q)q.value='';paintTravel();}
+function clearTravelFilters(){TF={q:'',year:'',month:'',cat:'',kind:'crew',client:'',withTr:false};TSEL=null;var q=document.getElementById('tq');if(q)q.value='';paintTravel();}
 // The years the tab can show: the workbook's (TRV.years) and the bill's (lines, summary, training) together — the Training
 // centre view has TDG's years even when the workbook does not.
 function tYears(){
@@ -6532,13 +6578,22 @@ function tYears(){
 function travelRefresh(){
   var e=API_CACHE['/api/travel'],sg=API_CACHE['/api/sga'];
   if(!e||!e.data||e.data.error||!document.getElementById('trrail')){renderTravel();return;}
-  TRV=e.data;TRVALL=TRV.records||[];if(TRV.budgetMo)TBUD=TRV.budgetMo;
+  TRV=e.data;TRVALL=tvPlace(TRV.records||[]);if(TRV.budgetMo)TBUD=TRV.budgetMo;
   if(sg&&sg.data&&!sg.data.error)SGA=sg.data;
   if(TF.year&&tYears().indexOf(+TF.year)<0)TF.year='';
   paintTravel();
 }
 // ---- the rail ---------------------------------------------------------------------------------------------------------
-var TV_VIEWS=[['crew','Crew travel'],['shoreside','Shoreside team'],['all','Crew + shoreside'],['training','Training centre']];
+// THE VIEWS ARE TICKS, ONE OR SEVERAL (Miguel, 20 Oct 2026: "allow to select multiple items .. u can single them out and then I
+// can select one or multiple"). TF.kind keeps its meaning — 'crew', 'shoreside', '' (both) or 'training' (the training centre
+// ALONE, its own page) — and TF.withTr adds TDG's training statement to a travel view: the hero, the months, the rail and
+// Where it goes carry it; the budget never does (crew travel alone, §10j); a cruise line excludes it (the centre has none).
+var TV_VIEWS=[['crew','Crew travel'],['shoreside','Shoreside team'],['training','Training centre']];
+function tvViews(){if(TF.kind==='training')return ['training'];var v=[];if(TF.kind!=='shoreside')v.push('crew');if(TF.kind!=='crew')v.push('shoreside');if(TF.withTr)v.push('training');return v;}
+function tvSetViews(v){var c=v.indexOf('crew')>=0,s=v.indexOf('shoreside')>=0,t=v.indexOf('training')>=0;TF.kind=(c&&s)?'':c?'crew':s?'shoreside':'training';TF.withTr=t&&TF.kind!=='training';if(TF.kind==='training'){TF.month='';TF.cat='';TF.client='';}}
+// TDG's training statement for a year and months, in one travel category where the bill has the same column (air, hotel, other)
+function trCol(c){return c==='air'?'air':c==='hotel'?'hotel':c==='other'?'other':null;}
+function trS(y,ms,c){if(!TF.withTr||TF.client||TF.kind==='training')return 0;return ((SGA&&SGA.training)||[]).filter(function(r){return r.year===y&&(!ms||ms.indexOf(r.month)>=0);}).reduce(function(a,r){if(!c)return a+(+r.total||0);var k=trCol(c);return a+(k&&!r.summary_only?(+r[k]||0):0);},0);}
 function tvRow(kind,key,label,amount,on,radio,dot){
   return '<div class="crfacet" data-tv="'+kind+'" data-key="'+escHtml(String(key))+'"><input type='+(radio?'radio':'checkbox')+(on?' checked':'')+'><span>'+(dot?'<i style="background:'+dot+'"></i>':'')+label+'</span><span class=n>'+(amount==null?'':amount)+'</span></div>';
 }
@@ -6554,30 +6609,35 @@ function tvRail(){
   var inPer=function(r){return TF.month?r.month===+TF.month:r.month<=closedOf(r.year);};
   var val=function(r){return TF.cat?(r[TF.cat]||0):(r.total||0);};
   var trainSum=function(y){return ((SGA&&SGA.training)||[]).filter(function(r){return !y||r.year===y;}).reduce(function(a,r){return a+(+r.total||0);},0);};
-  var h='<div><div class=crlbl style="margin-bottom:6px">View</div>'+TV_VIEWS.map(function(v){
-      var amt=v[0]==='training'?trainSum(LYr):base.filter(function(r){return r.year===LYr&&inPer(r)&&catOk(r)&&(v[0]==='all'||kindOf(r)===v[0]);}).reduce(function(a,r){return a+val(r);},0);
-      var on=(v[0]==='all'?TF.kind==='':TF.kind===v[0]);
-      return tvRow('kind',v[0],v[1],tvK(amt),on,true);}).join('')+'</div>';
+  var trP=function(y,m){return ((SGA&&SGA.training)||[]).filter(function(r){return r.year===y&&(m?r.month===m:(TF.month?r.month===+TF.month:r.month<=closedOf(y)));}).reduce(function(a,r){if(!TF.cat)return a+(+r.total||0);var k=trCol(TF.cat);return a+(k&&!r.summary_only?(+r[k]||0):0);},0);};
+  var withT=TF.withTr&&!TF.client&&TF.kind!=='training';
+  var VW=tvViews();
+  var h='<div><div class=crlbl style="margin-bottom:2px">View</div><div class=tvsub style="margin:0 0 6px;font-size:11.5px">Tick one or several</div>'+TV_VIEWS.map(function(v){
+      var amt=v[0]==='training'?(TF.kind==='training'?trainSum(LYr):trP(LYr)):base.filter(function(r){return r.year===LYr&&inPer(r)&&catOk(r)&&kindOf(r)===v[0];}).reduce(function(a,r){return a+val(r);},0);
+      return tvRow('kind',v[0],v[1],tvK(amt),VW.indexOf(v[0])>=0,false);}).join('')+'</div>';
   h+='<div><div class=crlbl style="margin-bottom:6px">Year</div>'+tvRow('year','','All years · latest',null,!TF.year,true)+years.map(function(y){
-      var amt=TF.kind==='training'?trainSum(y):base.filter(function(r){return r.year===y&&inPer(r)&&catOk(r)&&(!TF.kind||kindOf(r)===TF.kind);}).reduce(function(a,r){return a+val(r);},0);
+      var amt=TF.kind==='training'?trainSum(y):base.filter(function(r){return r.year===y&&inPer(r)&&catOk(r)&&(!TF.kind||kindOf(r)===TF.kind);}).reduce(function(a,r){return a+val(r);},0)+(withT?trP(y):0);
       return tvRow('year',y,String(y),tvK(amt),String(TF.year)===String(y),true);}).join('')+'</div>';
   if(TF.kind!=='training'){
     var scY=TRVALL.filter(function(r){return r.year===LYr&&(!TF.kind||kindOf(r)===TF.kind)&&(!TF.client||r.client===TF.client);});
-    var moAmt=[];for(var m=1;m<=12;m++)moAmt[m]=scY.filter(function(r){return r.month===m&&catOk(r);}).reduce(function(a,r){return a+val(r);},0);
+    var moAmt=[];for(var m=1;m<=12;m++)moAmt[m]=scY.filter(function(r){return r.month===m&&catOk(r);}).reduce(function(a,r){return a+val(r);},0)+(withT&&LYr?trP(LYr,m):0);
     h+='<div><div class=crlbl style="margin-bottom:8px">Month</div><div class=tvmo>'
       +'<button class="all'+(!TF.month?' on':'')+'" data-tv="month" data-key="">All months</button>'
       +TMN.slice(1).map(function(n,i){var m=i+1;return '<button class="'+(String(TF.month)===String(m)?'on':'')+(moAmt[m]?'':' none')+'" data-tv="month" data-key="'+m+'" title="'+n+' '+(LYr||'')+(moAmt[m]?' · '+usd0(moAmt[m]):' · nothing on file')+'">'+n+'</button>';}).join('')
       +'</div></div>';
     var mSel=TF.month?[+TF.month]:null;
     var inP=scY.filter(inPer);
-    var tot=inP.reduce(function(a,r){return a+(r.total||0);},0);
+    var trY=withT&&LYr?((SGA&&SGA.training)||[]).filter(function(r){return r.year===LYr&&(TF.month?r.month===+TF.month:r.month<=closedOf(LYr));}):[];
+    var trOf=function(c){var k=c?trCol(c):null;return trY.reduce(function(a,r){return a+(!c?(+r.total||0):(k&&!r.summary_only?(+r[k]||0):0));},0);};
+    var tot=inP.reduce(function(a,r){return a+(r.total||0);},0)+trOf(null);
     h+='<div><div class=crlbl style="margin-bottom:6px">Category</div>'+tvRow('cat','','All categories',tvK(tot),!TF.cat,true)
-      +TCATS.map(function(c){var a=inP.reduce(function(s,r){return s+(r[c]||0);},0);if(!a&&TF.cat!==c)return '';return tvRow('cat',c,TCATLAB[c],tvK(a),TF.cat===c,true);}).join('')+'</div>';
+      +TCATS.map(function(c){var a=inP.reduce(function(s,r){return s+(r[c]||0);},0)+trOf(c);if(!a&&TF.cat!==c)return '';return tvRow('cat',c,TCATLAB[c],tvK(a),TF.cat===c,true);}).join('')+'</div>';
     if(TF.kind!=='shoreside'){
       var scC=TRVALL.filter(function(r){return r.year===LYr&&(!TF.kind||kindOf(r)===TF.kind)&&kindOf(r)!=='shoreside'&&inPer(r)&&catOk(r);});
       var CLR={royal:'#1E6FD0',celebrity:'#16293D',azamara:'#8A5A00',ncl:'#2E9E5B'};
       h+='<div><div class=crlbl style="margin-bottom:6px">Cruise line</div>'+tvRow('client','','All cruise lines',null,!TF.client,true)
-        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);if(!a&&TF.client!==c)return '';return tvRow('client',c,TCLIENT[c],tvK(a),TF.client===c,true,CLR[c]);}).join('')+'</div>';
+        +['royal','celebrity','azamara','ncl'].map(function(c){var a=scC.filter(function(r){return r.client===c;}).reduce(function(s,r){return s+val(r);},0);return tvRow('client',c,TCLIENT[c],tvK(a)||'$0',TF.client===c,true,CLR[c]);}).join('')
+        +(function(){var a=scC.filter(function(r){return r.client==='none';}).reduce(function(s,r){return s+val(r);},0);return a||TF.client==='none'?tvRow('client','none','Not placed',tvK(a)||'$0',TF.client==='none',true,'#B6C1CF'):'';})()+'</div>';
     }
   }
   el.innerHTML=h;
@@ -6588,7 +6648,7 @@ function tvRail(){
 function tvRailClick(e){
   var el=e.target.closest?e.target.closest('[data-tv]'):null;if(!el)return;
   var k=el.getAttribute('data-tv'),v=el.getAttribute('data-key');
-  if(k==='kind'){TF.kind=(v==='all'?'':v);}
+  if(k==='kind'){var cur=tvViews(),i=cur.indexOf(v);if(i>=0){if(cur.length===1)return;cur.splice(i,1);}else cur.push(v);tvSetViews(cur);}
   else if(k==='year'){TF.year=v;}
   else if(k==='month'){TF.month=(String(TF.month)===v?'':v);}
   else if(k==='cat'){TF.cat=(TF.cat===v?'':v);}
@@ -6838,16 +6898,17 @@ function paintTravel(){
   var P=tPeriod(sc),LY=P.LY,PY=P.PY,lastMo=P.lastMo,openMo=P.openMo,months=P.months,cat=P.cat,catName=cat?TCATLAB[cat]:'';
   var t=document.getElementById('trbody');if(!t)return;
   if(!LY){t.innerHTML='<div class=tvcard><b>No travel on file for this view.</b><div class=tvsub>Widen the filters on the left.</div></div>';return;}
-  var hasPY=!!PY&&sc.some(function(r){return r.year===PY;});   // no rows for the previous year → '—', never '$0'
-  var ytdA=tSum(sc,LY,months,cat), ytdB=TBUD*P.budgetMonths, ytdP=hasPY?tSum(sc,PY,months,cat):null;
-  var allA=cat?tSum(sc,LY,months,null):ytdA;        // every category, for the share line
+  var hasPY=!!PY&&(sc.some(function(r){return r.year===PY;})||trS(PY,null,null)>0);   // no rows for the previous year → '—', never '$0'
+  var ytdA=tSum(sc,LY,months,cat)+trS(LY,months,cat), ytdB=TBUD*P.budgetMonths, ytdP=hasPY?tSum(sc,PY,months,cat)+trS(PY,months,cat):null;
+  var allA=cat?tSum(sc,LY,months,null)+trS(LY,months,null):ytdA;        // every category, for the share line
   var annual=TBUD*12;
   var fullProj=P.mo?0:(lastMo?(ytdA/lastMo*12):0);
   // The budget is the whole fleet's crew travel (Miguel, 15 Oct 2026: no other budget exists; 16 Oct: "$15,000 per month ..
   // only for crew related travels .. shoreside team and training center dont have a budget .. we only compare YOY"). A
   // cruise-line slice, the shoreside view or ONE category has no budget of its own: actuals and last year only.
-  var budgeted=!TF.client&&TF.kind==='crew'&&!cat;
-  var scopeName=TF.client?TCLIENT[TF.client]+' crew travel':(TF.kind==='shoreside'?'Shoreside team':(TF.kind==='crew'?'Crew travel':'Crew + shoreside'));
+  var withT=TF.withTr&&!TF.client;
+  var budgeted=!TF.client&&TF.kind==='crew'&&!cat&&!withT;
+  var scopeName=(TF.client?TCLIENT[TF.client]+' crew travel':(TF.kind==='shoreside'?'Shoreside team':(TF.kind==='crew'?'Crew travel':'Crew + shoreside')))+(withT?' + training centre':'');
   var yoyPill=function(){if(ytdP==null||!ytdP)return '<span class="tvpill mut">No '+(PY||'previous year')+' to compare</span>';var d=Math.round((ytdA-ytdP)/ytdP*100);return '<span class="tvpill '+(d>0?'bad':'ok')+'">'+(d>0?'▲ ':'▼ ')+Math.abs(d)+'% vs '+PY+'</span>';};
   // ---- the hero: the number, the verdict, the pace ----
   var h='<div class="tvcard tvhero"><div>';
@@ -6874,7 +6935,7 @@ function paintTravel(){
                        :'<div class=tvfact><div class=v>'+usd0(annual-ytdA)+'</div><div class=l>'+(ytdA<=annual?'under':'over')+' the year’s budget</div></div>'))
       +'</div>';
   } else {
-    h+='<div class=tvlab>'+(TF.kind==='shoreside'||TF.client||cat?'No budget for this view · year against year':'Year against year')+'</div>';
+    h+='<div class=tvlab>'+(TF.kind==='shoreside'||TF.client||cat||withT?'No budget for this view · year against year':'Year against year')+'</div>';
     h+='<div class=tvfacts style="margin-top:12px;border-top:0;padding-top:0">'
       +'<div class=tvfact><div class=v>'+(ytdP==null?'—':usd0(ytdP))+'</div><div class=l>'+(PY||'Last year')+', same '+(P.mo?'month':'months')+'</div></div>'
       +'<div class=tvfact><div class=v>'+(ytdP==null?'—':((ytdA-ytdP>=0?'+':'')+usd0(ytdA-ytdP)))+'</div><div class=l>the difference</div></div>'
@@ -6892,16 +6953,20 @@ function paintTravel(){
   h+=tvDecisions({sc:sc,LY:LY,PY:PY,P:P,cat:cat,budgeted:budgeted,hasPY:hasPY,outs:outs,med:med});
   // ---- month by month: the quiet year-over-year (tBars) ----
   var dim=function(m){return P.mo&&m!==P.mo?';opacity:.35':'';};
-  var curB=[],prevB=[];for(var m=1;m<=12;m++){curB[m]=tSum(sc,LY,[m],budgeted?null:cat);prevB[m]=hasPY?tSum(sc,PY,[m],budgeted?null:cat):0;}
+  var curB=[],prevB=[];for(var m=1;m<=12;m++){curB[m]=tSum(sc,LY,[m],budgeted?null:cat)+trS(LY,[m],cat);prevB[m]=hasPY?tSum(sc,PY,[m],budgeted?null:cat)+trS(PY,[m],cat):0;}
   h+='<div class=tvcard><div class=tvh>Month by month <small>'+LY+(cat?' · '+catName:'')+(budgeted?' · dashed line '+usd0(TBUD)+' a month':'')+'</small></div><div style="margin-top:10px"></div>';
   h+=budgeted?tBars(curB,{prev:hasPY?prevB:null,ly:LY,py:PY,budget:TBUD,upto:lastMo,dim:dim,color:function(m,a){return a>TBUD?'var(--red)':'var(--navy)';}})
              :tBars(curB,{prev:hasPY?prevB:null,ly:LY,py:PY,upto:lastMo,dim:dim});
   h+='</div>';
   // ---- where it goes · who ----
-  var catRows=(cat?[cat]:TCATS).map(function(c){return {c:c,l:tSum(sc,LY,months,c),p:hasPY?tSum(sc,PY,months,c):null};}).filter(function(x){return x.l||x.p;}).sort(function(a,b){return b.l-a.l;});
+  // the training centre is one row of its own (it is TDG's statement, not travel); with one category picked it is inside that row
+  var catRows=(cat?[cat]:TCATS).map(function(c){return {c:c,l:tSum(sc,LY,months,c)+(cat?trS(LY,months,c):0),p:hasPY?tSum(sc,PY,months,c)+(cat?trS(PY,months,c):0):null};});
+  if(withT&&!cat)catRows.push({c:'__tr',l:trS(LY,months,null),p:hasPY?trS(PY,months,null):null});
+  catRows=catRows.filter(function(x){return x.l||x.p;}).sort(function(a,b){return b.l-a.l;});
+  var cLab=function(c){return c==='__tr'?'Training centre':TCATLAB[c];};
   var catMax=Math.max.apply(null,catRows.map(function(x){return Math.max(x.l,x.p||0);}).concat([1]));
   var wg='<div class=tvcard><div class=tvh>Where it goes <small>'+P.span+' '+LY+(hasPY?' · pale = '+PY:'')+'</small></div><div style="margin-top:8px">';
-  wg+=catRows.map(function(x){var d=(x.p&&x.p>0)?Math.round((x.l-x.p)/x.p*100):null;return '<div class=tvcat onclick="tvGo(&quot;cat&quot;,&quot;'+(cat?'':x.c)+'&quot;)" title="'+TCATLAB[x.c]+' · '+usd0(x.l)+(x.p!=null?' · '+PY+' '+usd0(x.p):'')+'"><span>'+TCATLAB[x.c]+'</span><span class=bar><em style="width:'+((x.p||0)/catMax*100).toFixed(1)+'%"></em><i style="width:'+(x.l/catMax*100).toFixed(1)+'%"></i></span><b>'+usd0(x.l)+'</b><span class="d '+(d==null?'':(d>0?'up':'dn'))+'">'+(d==null?'':(d>0?'+':'')+d+'%')+'</span></div>';}).join('')||'<div class=tvsub>Nothing in this period.</div>';
+  wg+=catRows.map(function(x){var d=(x.p&&x.p>0)?Math.round((x.l-x.p)/x.p*100):null;return '<div class=tvcat'+(x.c==='__tr'?' style="cursor:default"':' onclick="tvGo(&quot;cat&quot;,&quot;'+(cat?'':x.c)+'&quot;)"')+' title="'+cLab(x.c)+' · '+usd0(x.l)+(x.p!=null?' · '+PY+' '+usd0(x.p):'')+'"><span>'+cLab(x.c)+'</span><span class=bar><em style="width:'+((x.p||0)/catMax*100).toFixed(1)+'%"></em><i style="width:'+(x.l/catMax*100).toFixed(1)+'%"></i></span><b>'+usd0(x.l)+'</b><span class="d '+(d==null?'':(d>0?'up':'dn'))+'">'+(d==null?'':(d>0?'+':'')+d+'%')+'</span></div>';}).join('')||'<div class=tvsub>Nothing in this period.</div>';
   wg+='</div></div>';
   var byp={};TLBL={};sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0;}).forEach(function(r){var v=cat?(r[cat]||0):r.total;if(cat&&!v)return;var k=tKey(r);byp[k]=(byp[k]||0)+v;TLBL[k]=tLabel(r);});
   TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,8);
@@ -7109,7 +7174,7 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
 function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
   return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
 // Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
-function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(!_n&&sec&&sec.from)return '<div class="rcard ghostslot" style="cursor:default" title="Drag a seafarer onto this ship to earmark them"><div class=gp>+</div><div class=gt>First printer</div><div class=gc>IN SERVICE '+escHtml(fmtDateS(sec.from)).toUpperCase()+' · DRAG A SEAFARER HERE</div></div>';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();
@@ -7714,7 +7779,8 @@ async function saveNote(id){
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
 // Two switches since 16 Oct 2026, one per email: the T-14 sign-off instructions and the T-7 sign-off link (/api/autosend kind).
-async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}}
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}try{var v=await (await fetch('/api/survey/auto')).json();window.AUTO_SURV=!!v.enabled;applyChromeToggles();}catch(e){}}
+async function survToggleClick(){var c=document.getElementById('survToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the crew survey ON? 3 days after a contract ends (07:00 Miami time), the seafarer gets the end-of-contract survey, CC Rita and Miguel, and one reminder after 5 days. Contracts that ended before today are not asked.'))return;try{var r=await (await fetch('/api/survey/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_SURV=!!r.enabled;applyChromeToggles();alert('The crew survey is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 // The welcome-aboard email (19 Oct 2026): its own switch. On = the sign-on morning, the ship's mailbox + the personal address, CC Rita; a contract that started before the switch went on is never emailed.
 async function welToggleClick(){var c=document.getElementById('welToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the welcome email ON? On the sign-on day at 07:00 Miami time, the welcome-aboard email goes to the ship\\'s mailbox and the personal address, CC Rita. Crew who signed on before today are not emailed.'))return;try{var r=await (await fetch('/api/hub/welcome/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_WEL=!!r.enabled;applyChromeToggles();alert('The welcome email is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function autoToggleClick(kind){var link=kind==='signoff';var c=document.getElementById(link?'linkToggleCb':'autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm(link?'Turn the T-7 sign-off link ON? Every crew 7 days before their sign-off gets the sign-off link email. Crew already inside the 7 days are not emailed.':'Turn the sign-off instructions ON? Every crew 14 days before their sign-off gets the instructions email, CC onboardsupport@dg3.com. Crew already inside the 14 days are not emailed.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:link?'signoff':'instructions',enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();alert((link?'The T-7 sign-off link':'The sign-off instructions')+' email is now '+((link?r.signoff:r.instructions)?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
@@ -7780,7 +7846,7 @@ async function renderRotation(){
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
-    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span><span id="survToggle" onclick="survToggleClick()" title="3 days after a contract ends, 07:00 Miami time: the end-of-contract crew survey to the seafarer, CC Rita and Miguel; one reminder after 5 days" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew survey <input type=checkbox id="survToggleCb" style="pointer-events:none"></span></div></div>'
     +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'
@@ -7804,9 +7870,9 @@ async function renderRotation(){
 }
 // 13 Oct 2026: every re-render rebuilt the rail with Crew auto-timing unchecked and no GSM review switch, while the
 // emails stayed armed on the server. The last known values are kept and painted back.
-function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
+function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var sv=document.getElementById('survToggleCb');if(sv&&window.AUTO_SURV!=null)sv.checked=!!window.AUTO_SURV;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
-var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara'};
+var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara',NCL:'Norwegian'};
 function rotRail(shown,total){
   var secs=(ROT&&ROT.sections)||[],brands={},ships={},names={},line={},yrs={};
   secs.forEach(function(s){
@@ -7914,7 +7980,7 @@ function drawRotation(){
     // crew + history only, so the FUTURE yellow cards (sec.projections), the 'sent to TDG' lines
     // (sec.deployed) and the Junior PS rule (sec.jrPsRule) were silently dropped on the way to the page:
     // 26 of Rita's projections never rendered and the Jr gate on drop never had a rule to check.
-    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,visits:s.visits||[],history:hist};
+    return {bench:s.bench,ship:s.ship,brand:s.brand,onboard:s.onboard,crew:sfilt(s.crew),projections:pfilt(s.projections),deployed:s.deployed||[],jrPsRule:s.jrPsRule||null,from:s.from||null,visits:s.visits||[],history:hist};
   });
   // A status tile, a year or a month: a ship with nobody in it leaves the board (it used to stay, empty).
   if(ROT_F||ROT_YEAR||ROT_MONTHS.length)secs=secs.filter(function(s){return s.crew.length>0||s.projections.length>0;});
@@ -8128,6 +8194,8 @@ function rpset(p){RPT_P=p;rptSbm();}
 // right. Each report is a menu entry; future modules (Bonus & Money, Manpower,
 // Travel Spend) slot in as new entries + one render function each.
 function renderReports(){
+  // Reports uses the page's width (Miguel, 23 Oct 2026, the Crew survey: "can use more the width of the page").
+  var _vw=document.getElementById('view');if(_vw)_vw.classList.add('wide','full');
   $('#view').innerHTML='<style>'
    +'.dswrap{display:grid;grid-template-columns:238px 1fr;gap:0;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(20,45,72,.06)}'
    +'.dsside{background:var(--navy);padding:22px 14px;display:flex;flex-direction:column;min-height:540px}'
@@ -8144,6 +8212,7 @@ function renderReports(){
    +'.dsdg3{margin-top:auto;padding:12px 8px 0;border-top:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);font-size:8px;letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;gap:8px}'
    +'.dsdg3 b{color:var(--green);font-family:Outfit;font-size:13px;letter-spacing:2px}'
    +'.dsmain{padding:22px 24px;min-width:0}'
+   +'@media(max-width:760px){.dswrap{grid-template-columns:minmax(0,1fr)}.dsside{min-height:0;padding:14px 12px}.dsside .dssub,.dsside .dsline,.dsdg3{display:none}.dsmain{padding:16px 14px}}'
    +'</style>'
    +'<div class=dswrap>'
    +'<aside class=dsside>'
@@ -8151,6 +8220,7 @@ function renderReports(){
      +'<div class=dsline></div>'
      +'<div class=dssub>Reports<br>Operational Intelligence</div>'
      +'<button class="dsnav rptmenu on" data-rpt="sbm">Shipboard Feedback</button>'
+     +'<button class="dsnav rptmenu" data-rpt="survey">Crew survey<span style="font-size:9px;letter-spacing:.08em;background:var(--green);color:#fff;border-radius:99px;padding:2px 7px;margin-left:8px;vertical-align:1px">NEW</span></button>'
      +'<a class=dsnav href="/go/recruitment" target=_blank rel=noopener style="text-decoration:none">Recruitment &#8599;</a>'
      +'<button class="dsnav soon" tabindex=-1>Bonus &amp; Money<small>soon</small></button>'
      +'<button class="dsnav soon" tabindex=-1>Manpower<small>soon</small></button>'
@@ -8162,7 +8232,134 @@ function renderReports(){
   document.querySelectorAll('.rptmenu').forEach(function(b){b.onclick=function(){document.querySelectorAll('.rptmenu').forEach(function(x){x.classList.remove('on');});b.classList.add('on');rptShow(b.getAttribute('data-rpt'));};});
   rptShow('sbm');
 }
-function rptShow(r){ if(r==='sbm')return rptSbm(); }
+function rptShow(r){ if(r==='sbm')return rptSbm(); if(r==='survey')return rptCrewSurvey(); }
+// Reports › Crew survey (Miguel, 22–23 Oct 2026; the approved mock-up docs/mockups/crew_survey_20261022/report.html).
+// GET /api/survey/report does the counting (src/crew_survey.js surveyReport); this draws it. Feedback only (§1).
+var SRV_P='All',SRV_L='all',SRV_GEN=0,SRV_D=null,SRV_OPEN={},SRV_ALL=false;
+var SRV_LN={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara',NCL:'Norwegian'};
+function srvPill(v){if(v==null)return '<span class=mu>&mdash;</span>';var c=v>=4?'g':(v===3?'a':'r');return '<span class="svp '+c+'">'+v+'</span>';}
+function srvDay(s){if(!s)return '';var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return (+s.slice(8,10))+' '+M[+s.slice(5,7)-1]+' '+s.slice(0,4);}
+function srvWho(name,sc){return sc?'<a href="#" data-crew="'+escHtml(sc)+'" class=svlink>'+escHtml(name||sc)+'</a>':escHtml(name||'Name not given');}
+async function rptCrewSurvey(){
+  var gen=++SRV_GEN,vg=VIEW_GEN;
+  if(!SRV_D)$('#rptbody').innerHTML='<div class=csub style="padding:14px 4px">Loading the crew survey&hellip;</div>';
+  var d;
+  try{var r=await fetch('/api/survey/report?p='+encodeURIComponent(SRV_P)+'&line='+encodeURIComponent(SRV_L),{cache:'no-store'});d=await r.json();if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));}
+  catch(e){if(gen!==SRV_GEN||vg!==VIEW_GEN)return;$('#rptbody').innerHTML='<div class=rblk style="border-left:3px solid var(--red)">Could not load the crew survey: '+escHtml(e.message)+' <button class="btn ghost" onclick="rptCrewSurvey()">Try again</button></div>';return;}
+  if(gen!==SRV_GEN||vg!==VIEW_GEN||!document.getElementById('rptbody'))return;
+  SRV_D=d;srvDraw();
+}
+// The crew survey, built from the Shipboard Feedback report's own parts (Miguel, 23 Oct 2026: "is messy the report now .. u
+// have to think about unit .. logging a call is somewhere else in the app"): the same head and chips, the live band, the KPI
+// tiles, two-column blocks, the red watchlist and plain tables. A call to a seafarer is a note on his profile, never here.
+function srvDraw(){
+  var d=SRV_D,Q={},LN=['Royal','Celebrity','Azamara','NCL'];(d.questions||[]).forEach(function(q){Q[q.key]=q;});
+  var chip=function(k,v,lab,on){return '<button class="pchip'+(on?' on':'')+'" data-svk="'+k+'" data-svv="'+v+'">'+lab+'</button>';};
+  var col=function(v){return v==null?'var(--mut)':(v>=4.5?'var(--green-d)':(v>=4?'var(--navy)':(v>=3?'var(--amber)':'var(--red)')));};
+  var mc=d.minCell||3,f2=function(v){return v==null?'&mdash;':v.toFixed(2);};
+  var h='<style>'
+   +'.svsep{width:1px;height:22px;background:var(--line);margin:0 4px}'
+   +'.svp{display:inline-block;min-width:26px;text-align:center;font-weight:700;border-radius:99px;padding:2px 8px;font-size:12.5px}.svp.g{background:#EAF5E4;color:#3E7F2E}.svp.a{background:#F6EEE1;color:#B7791F}.svp.r{background:#F4E5E3;color:#96281B}'
+   +'.svtag{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 7px;margin-left:6px}'
+   +'.svlink{color:var(--navy);font-weight:700;text-decoration:none}.svlink:hover{text-decoration:underline}.mu{color:var(--mut)}'
+   +'.svw .tbl td,.svw .tbl th{text-align:left;vertical-align:top}.svw .tbl td.c,.svw .tbl th.c{text-align:center}.svw .tbl td.r,.svw .tbl th.r{text-align:right}'
+   +'.svx{overflow-x:auto;-webkit-overflow-scrolling:touch}.svx.wide .tbl{min-width:560px}.svx.wide .tbl{min-width:720px}'
+   +'.svst .frow .fl{width:190px;color:var(--ink)}.svw .tbl td.nw{white-space:nowrap}.svlp .frow .fl{width:96px}'
+   +'.svwl{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}.svwl:last-of-type{border-bottom:0}.svwl .q{flex-basis:100%;color:var(--mut);font-size:12.5px}'
+   +'.svdet{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:4px 18px;margin-top:8px}.svdet div{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.4}'
+   +'.svrow{cursor:pointer}.svrow:hover td{background:#F7F9FB}'
+   +'.svskip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12.5px}'
+   +'@media(max-width:560px){#rptbody .kgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.svst .frow .fl{width:130px}.svx.fx .tbl{min-width:420px}}'
+   +'</style>';
+  h+='<div class=rpthead><h2>Crew survey</h2>'
+   +['30D','QTD','YTD','All'].map(function(p){return chip('p',p,p,p===SRV_P);}).join('')
+   +'<span class=svsep></span>'
+   +chip('l','all','All lines',SRV_L==='all')+LN.map(function(l){return chip('l',l,l==='NCL'?'Norwegian':l,SRV_L===l);}).join('')
+   +'<a class=pchip style="text-decoration:none" href="/api/survey/report.pdf?p='+encodeURIComponent(SRV_P)+'&line='+encodeURIComponent(SRV_L)+'" download>PDF</a>'
+   +'</div>';
+  var src=d.sources||{};
+  h+='<div class=liveband>&#9679; LIVE DATA &mdash; '+(src.forms||0)+' answers imported from the Microsoft Forms survey &middot; '+(src.console||0)+' from the console &middot; '
+   +(d.enabled?'asked 3 days after each sign-off since '+srvDay(d.since):'the daily invitation is off')+'</div>';
+  if(!d.n){
+    h+='<div class=rblk><div class=csub style="padding:14px 4px">No answers in this period. Widen the range &mdash; the Forms history starts in 2024.</div></div>';
+    $('#rptbody').innerHTML=h;srvBind();return;
+  }
+  // ---- KPI strip
+  var lowN=d.n<(d.minRead||20),W=d.watch||[];
+  var tile=function(l,v,s,c){return '<div class=ktile><div class=kl>'+l+'</div><div class=kv'+(c?' style="color:'+c+'"':'')+'>'+v+'</div><div class=csub style="margin-top:8px">'+s+'</div></div>';};
+  h+='<div class=kgrid>'
+   +tile('Answers',d.n,lowN?'<span style="color:var(--amber);font-weight:700">Below '+(d.minRead||20)+': a floor check</span>':(d.quick?d.quick+' quick, left out of the averages':'in the period'))
+   +tile('Overall',f2(d.overall)+'<small>/5</small>',d.fives+' gave 5')
+   +tile('Would sail again',d.wouldReturn?d.wouldReturn.yes+'<small> of '+d.wouldReturn.of+'</small>':'&mdash;','4 or 5 on &ldquo;Would return&rdquo;')
+   +tile('Same answer to all',d.allSame+'<small> of '+d.n+'</small>','one number all the way down',d.allSame*2>=d.n?'var(--red)':'')
+   +tile('Answer rate',d.rate?Math.round(d.rate.answered/d.rate.of*100)+'<small>%</small>':'&mdash;',d.rate?d.rate.answered+' of '+d.rate.of+' asked &middot; target 60%':'starts with the console&rsquo;s invitations')
+   +tile('Watchlist',W.length,'3+ answers at 1&ndash;2 or would not return',W.length?'var(--red)':'var(--green-d)')
+   +'</div>';
+  // ---- by cruise line + lowest statements
+  var ret=(d.themes||[]).filter(function(t){return t.title==='Would return';})[0];
+  var bl={};(d.byLine||[]).forEach(function(x){bl[x.line]=x;});
+  h+='<div class=rgrid2>';
+  h+='<div class="rblk svw"><h3>By cruise line</h3><table class=tbl><thead><tr><th>Line</th><th class=r>Answers</th><th class=r>Overall</th><th class=r>Would return</th></tr></thead><tbody>'
+   +LN.filter(function(l){return SRV_L==='all'||SRV_L===l;}).map(function(l){var x=bl[l]||{n:0},rc=ret&&ret.cells[l],ok=x.n>=mc,rok=rc&&rc.n>=mc;
+     return '<tr><td>'+escHtml(SRV_LN[l]||l)+'</td><td class=r>'+(d.byLineCount[l]||0)+'</td><td class=r style="font-weight:800;color:'+(ok?col(x.avg):'var(--mut)')+'">'+(ok?f2(x.avg):'&mdash;')+'</td><td class=r style="font-weight:800;color:'+(rok?col(rc.avg):'var(--mut)')+'">'+(rok?f2(rc.avg):'&mdash;')+'</td></tr>';}).join('')
+   +'</tbody></table><div class=csub style="margin-top:8px">A line with fewer than '+mc+' answers shows a dash: one person is not a line.</div></div>';
+  var low=(d.statements||[]).filter(function(s){return s.avg<5;}),at5=(d.statements||[]).length-low.length;
+  h+='<div class="rblk svst"><h3>Lowest statements</h3>'
+   +(low.length?low.slice(0,7).map(function(s){return '<div class=frow title="'+escHtml((Q[s.key]||{}).text||'')+'"><span class=fl>'+escHtml(s.short)+'</span><span class=fbar><i style="width:'+Math.round(s.avg/5*100)+'%;background:#1E6FD0"></i></span><span class=fn style="color:'+col(s.avg)+'">'+s.avg.toFixed(1)+'</span></div>';}).join('')
+     :'<div class=csub>Every statement averages 5.0.</div>')
+   +'<div class=csub style="margin-top:8px">'+(low.length>7?(low.length-7)+' more below 5 &middot; ':'')+(at5?at5+' at 5.0 &middot; ':'')+'hover a statement for its words.</div></div>';
+  h+='</div>';
+  // ---- watchlist (the Shipboard Feedback report's own block)
+  if(W.length){
+    h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--red)"><h3 style="color:var(--red)">Watchlist &middot; '+W.length+'</h3>'
+     +W.map(function(c){var why=[];if((c.why||[]).indexOf('low')>=0)why.push(c.low.length+' answers at 1&ndash;2');if((c.why||[]).indexOf('return')>=0)why.push('would return '+c.ret);
+       return '<div class=svwl><span>'+srvWho(c.name,c.agency_id)+'</span><span class=csub>'+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)+' &middot; <b style="color:var(--red)">'+why.join(' &middot; ')+'</b>'+(c.low.length?' &middot; '+c.low.map(function(x){return escHtml(x.short)+' '+x.v;}).join(', '):'')+'</span>'
+        +(c.fix?'<span class=q>&ldquo;'+escHtml(c.fix)+'&rdquo;</span>':'')+'</div>';}).join('')
+     +'<div class=csub style="margin-top:8px">A follow-up is a note on the seafarer&rsquo;s profile: tap the name.</div></div>';
+  }else{
+    h+='<div class=rblk style="margin-top:12px;border-left:3px solid var(--green)"><h3 style="color:var(--green-d)">Watchlist</h3><div class=csub style="padding:4px 2px">Clear &mdash; no answer in this period has 3 or more statements at 1&ndash;2 or would not return.</div></div>';
+  }
+  // ---- what they asked us to fix + are we hearing from everyone
+  h+='<div class=rgrid2>';
+  var G=d.fixGroups||[];
+  h+='<div class="rblk svw"><h3>What they asked us to fix</h3>'
+   +(G.length?'<div class="svx fx"><table class=tbl><thead><tr><th>Theme</th><th>Owner</th><th class=r>Mentions</th></tr></thead><tbody>'
+     +G.map(function(g){var ex=g.items[0];return '<tr><td><b>'+escHtml(g.label)+'</b>'+(ex?'<div class=csub style="margin-top:2px">&ldquo;'+escHtml(ex.clause)+'&rdquo;</div>':'')+'</td><td class=nw>'+(g.owner?escHtml(g.owner):'<span class=mu>not set</span>')+'</td><td class=r style="font-weight:800;color:'+(g.hot?'var(--red)':'var(--navy)')+'">'+g.n+'</td></tr>';}).join('')
+     +'</tbody></table></div><div class=csub style="margin-top:8px">Grouped by keyword, no AI; one answer can ask about two themes.'+(d.thanks?' '+d.thanks+' wrote thanks or &ldquo;all good&rdquo;, not counted as a fix.':'')+' Every answer&rsquo;s own words are in the table below.</div>'
+     :'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
+  var L=d.loop,lmax=Math.max(1,L.signedOff,L.invited);
+  var bar=function(lab,n){return '<div class=frow><span class=fl>'+lab+'</span><span class=fbar><i style="width:'+Math.round(n/lmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+n+'</span></div>';};
+  h+='<div class="rblk svlp"><h3>Are we hearing from everyone?</h3>'
+   +bar('Signed off',L.signedOff)+bar('Asked',L.invited)+bar('Opened',L.opened)+bar('Answered',L.answered)
+   +(d.waiting.length?'<div class=csub style="margin-top:8px">Waiting: '+d.waiting.map(function(w){return srvWho(w.name,w.agency_id)+' ('+escHtml(w.ship||'')+', asked '+srvDay(w.invited_at)+(w.reminded_at?', reminded':'')+')';}).join(', ')+'.</div>':'')
+   +(L.noEmail.length?'<div class=csub style="margin-top:8px;color:var(--red)">No email on file, never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+')';}).join(', ')+'. Add it in Edit crew.</div>':'')
+   +((L.skipped||[]).length?'<div class=csub style="margin-top:8px">Not asked, on purpose:</div>'+L.skipped.map(function(x){return '<div class=svskip>'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join(''):'')
+   +'<div class=csub style="margin-top:8px">Signed off counts the contracts the Keyman board shows ended in the period; the other three count the console&rsquo;s invitations.</div></div>';
+  h+='</div>';
+  // ---- the latest answers (the Shipboard Feedback report's Latest reviews); all of them one tap away
+  var LS=SRV_ALL?d.list:d.list.slice(0,10);
+  h+='<div class="rblk svw" style="margin-top:12px"><h3>'+(SRV_ALL?'Every answer &middot; '+d.list.length:'Latest answers')+'</h3><div class="svx wide"><table class=tbl><thead><tr><th>Date</th><th>Seafarer</th><th>Ship</th><th class=c>Overall</th><th class=c>Again</th><th class=c>Low</th><th>In their words</th></tr></thead><tbody>'
+   +LS.map(function(x){var open=!!SRV_OPEN[x.id];
+     return '<tr class=svrow data-svrow="'+escHtml(x.id)+'"><td style="white-space:nowrap">'+escHtml(x.at||'')+'</td><td>'+srvWho(x.name,x.agency_id)+(x.source==='forms'?'<span class=svtag>Forms</span>':'')+(x.quick?'<span class=svtag title="The same answer to every statement in '+(x.secs||0)+' seconds">Quick</span>':'')+'</td><td>'+escHtml(x.ship||'')+'</td><td class=c>'+srvPill(x.overall)+'</td><td class=c>'+srvPill(x.ret)+'</td><td class=c>'+(x.low?'<b style="color:var(--red)">'+x.low+'</b>':'<span class=mu>0</span>')+'</td><td>'+(x.words?escHtml(x.fix):'<span class=mu>'+(x.fix?escHtml(x.fix):'&mdash;')+'</span>')
+      +(open?'<div class=svdet>'+(d.questions||[]).map(function(q){return '<div>'+srvPill(x.answers[q.key])+'<span>'+escHtml(q.text)+'</span></div>';}).join('')+'</div>':'')+'</td></tr>';}).join('')
+   +'</tbody></table></div>'+(d.list.length>10?'<div style="margin-top:10px"><button class=pchip data-svall=1>'+(SRV_ALL?'Show the latest 10':'Show all '+d.list.length)+'</button></div>':'')+'<div class=csub style="margin-top:8px">Tap a row for every statement. Quick = the same answer to every statement in under a minute: listed, left out of the averages.</div></div>';
+  h+='<div class=csub style="margin-top:14px;opacity:.75">Crew survey &middot; feedback only: never the Score Card or the bonus, never sent to the cruise line.</div>';
+  $('#rptbody').innerHTML=h;srvBind();
+}
+function srvBind(){
+  var b=document.getElementById('rptbody');if(!b)return;
+  b.querySelectorAll('[data-svk]').forEach(function(el){el.onclick=function(){if(el.getAttribute('data-svk')==='p')SRV_P=el.getAttribute('data-svv');else SRV_L=el.getAttribute('data-svv');rptCrewSurvey();};});
+  b.querySelectorAll('[data-crew]').forEach(function(el){el.onclick=function(ev){ev.preventDefault();ev.stopPropagation();openCrew(el.getAttribute('data-crew'));};});
+  b.querySelectorAll('[data-svrow]').forEach(function(el){el.onclick=function(){var id=el.getAttribute('data-svrow');SRV_OPEN[id]=!SRV_OPEN[id];srvDraw();};});
+  b.querySelectorAll('[data-svall]').forEach(function(el){el.onclick=function(){SRV_ALL=!SRV_ALL;srvDraw();};});
+  b.querySelectorAll('[data-svsend]').forEach(function(el){el.onclick=function(){srvSendAnyway(el.getAttribute('data-svsend'),el.getAttribute('data-svon'),el.getAttribute('data-svname'),el);};});
+}
+async function srvSendAnyway(sc,on,name,btn){
+  if(!confirm('Send the end-of-contract survey to '+(name||sc)+' anyway? It goes to his own email, CC Rita and Miguel.'))return;
+  if(btn)btn.disabled=true;
+  try{var r=await fetch('/api/survey/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:sc,on:on})});var j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error==='no_email'?'no email on file':(j.error||('HTTP '+r.status)));apiDirty&&apiDirty();rptCrewSurvey();}
+  catch(e){alert('Not sent: '+e.message);if(btn)btn.disabled=false;}
+}
 function rtrend(pts,ymin,ymax){
   var w=320,h=130,pad=26,n=pts.length,dx=(w-pad*2)/Math.max(1,n-1),sp=(ymax-ymin)||1;
   var co=pts.map(function(p,i){return [pad+i*dx,h-pad-((p.y-ymin)/sp)*(h-pad*2)];});
@@ -9137,8 +9334,8 @@ var PF_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontim
 function pfPeople(PE,sc){
   var sl=(PE.slots||[]).map(function(s){var lab=String(s.label).split(' · ')[0];return '<div class="pf2slot '+s.state+'"><b>'+escHtml(lab)+'</b><span>'+(s.state==='answered'?('Answered '+fmtDateS(s.at)):(s.state==='pending'?('Asked '+fmtDateS(s.at)):(s.state==='na'?'Not assessed':'Never asked')))+'</span></div>';}).join('');
   var fd=(PE.feed||[]).map(function(f){
-    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='audit'?'Audit':(f.kind==='comment'?'Comment':'Note'))));
-    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'||f.kind==='audit'?'feedback':'typed');
+    var kind=f.kind==='intel'?'Field intel':(f.kind==='feedback'?'Feedback':(f.kind==='review'?'Shipboard review':(f.kind==='audit'?'Audit':(f.kind==='survey'?'Crew survey':(f.kind==='comment'?'Comment':'Note')))));
+    var src=f.kind==='intel'?'intel':(f.kind==='feedback'||f.kind==='review'||f.kind==='audit'||f.kind==='survey'?'feedback':'typed');
     var body='';
     if(f.kind==='intel'){var ps=f.parts||[];var head=pfIntelHead(f);var rest=ps.filter(function(p){return p.label!=='Summary';});
       body='<div>'+escHtml(head)+'</div>'+(rest.length?'<details class=pf2more><summary>Full report</summary>'+rest.map(function(p){return '<div style="margin-top:6px">'+(p.label?'<b>'+escHtml(p.label)+':</b> ':'')+escHtml(p.text)+'</div>';}).join('')+'</details>':'')
@@ -9146,6 +9343,7 @@ function pfPeople(PE,sc){
     else if(f.kind==='feedback'){var a=f.answers||{};body='<div class=pf2tk>'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((PF_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div style="margin-top:4px">“'+escHtml(a.note)+'”</div>':'')+(f.superseded?'<div class=pf2mut>Earlier answer · kept, not used</div>':'');}
     else if(f.kind==='review')body='<div><b>'+(f.rating!=null?f.rating+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'</div>'+(f.text?'<div>“'+escHtml(f.text)+'”</div>':'');
     else if(f.kind==='audit')body=pfAudit(f);
+    else if(f.kind==='survey')body=pfSurvey(f);
     else body='<div style="font-size:14px">“'+escHtml(f.text)+'”</div>';
     return '<div class=pf2fd><div><b>'+fmtDateS(String(f.at||'').slice(0,10))+'</b>'+pfSrc(src,kind+(f.who&&f.kind!=='intel'?(' · '+String(f.who).split(' · ')[0]):''))+'</div><div>'+body+'</div></div>';
   }).join('');
@@ -9154,6 +9352,13 @@ function pfPeople(PE,sc){
 }
 // Dexter's printshop audit on the profile (19 Oct 2026, P1): the score and how it was reached, the four ratings, the three
 // boxes, the follow-up with its state, and the way back to the whole audit on the audit app. Never the crew's to read.
+// His own end-of-contract survey (23 Oct 2026): what he said about the contract. Feedback only, never scored (\u00a71).
+function pfSurvey(f){
+  var pill=function(v){return v==null?'-':'<b style="color:'+(v>=4?'#3E7F2E':(v===3?'#B7791F':'#96281B'))+'">'+v+'/5</b>';};
+  return '<div>Overall '+pill(f.overall)+' &middot; Would return '+pill(f.ret)+' &middot; '+f.fives+' of '+f.of+' at 5'+(f.ship?' &middot; '+escHtml(niceShip(f.ship)):'')+(f.source==='forms'?' <span class=pf2mut>&middot; Forms survey</span>':'')+(f.quick?' <span class=pf2mut>&middot; quick (same answer to everything)</span>':'')+'</div>'
+    +((f.low||[]).length?'<div class=pf2tk style="margin-top:4px">'+f.low.map(function(x){return '<span class=pf2tick style="color:#96281B">'+escHtml(x.short+' \u00b7 '+x.v)+'</span>';}).join('')+'</div>':'')
+    +(f.fix?'<div style="margin-top:4px">Fix first: &ldquo;'+escHtml(f.fix)+'&rdquo;</div>':'');
+}
 function pfAudit(f){
   var R=f.ratings||{},rt=function(l,v){return v==null?'':'<span class="pf2tick'+(v<=3?' lo':' on')+'">'+l+' · '+escHtml(v)+'</span>';};
   var h='<div><b>'+(f.score!=null?escHtml(f.score)+'/5':'')+'</b>'+(f.ship?' · '+escHtml(niceShip(f.ship)):'')+'<span class=pf2mut> · '+(f.from==='overall'?'the Overall rating':'average of the three, rounded down')+'</span></div>'
@@ -9332,7 +9537,7 @@ function card(c){
    +comp
    +'</div></div>';
 }
-var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brilliance","Constellation","Eclipse","Edge","Enchantment","Equinox","Explorer","Freedom","Grandeur","Harmony","Icon","Independence","Infinity","Jewel","Legend","Liberty","Mariner","Millennium","Navigator","Oasis","Odyssey","Ovation","Quantum","Radiance","Reflection","Rhapsody","Serenade","Silhouette","Spectrum","Star","Summit","Symphony","Utopia","Vision","Voyager","Wonder","Xcel","Azamara Journey","Azamara Onward","Azamara Pursuit","Azamara Quest"];
+var SHIP_LIST=["Adventure","Allure","Anthem","Apex","Ascent","Beyond","Brilliance","Constellation","Eclipse","Edge","Enchantment","Equinox","Explorer","Freedom","Grandeur","Harmony","Icon","Independence","Infinity","Jewel","Legend","Liberty","Mariner","Millennium","Navigator","Oasis","Odyssey","Ovation","Quantum","Radiance","Reflection","Rhapsody","Serenade","Silhouette","Spectrum","Star","Summit","Symphony","Utopia","Vision","Voyager","Wonder","Xcel","Azamara Journey","Azamara Onward","Azamara Pursuit","Azamara Quest","Norwegian Getaway"];
 function shipOptions(sel){return '<option value="">—</option>'+SHIP_LIST.map(function(s){var full='MV '+s.toUpperCase();var m=(sel&&(sel===full||sel===s||sel.toUpperCase().indexOf(s.toUpperCase())>=0));return '<option value="'+full+'"'+(m?' selected':'')+'>'+s+'</option>';}).join('');}
 // "" = Auto (let the app derive status from the schedule). A named pick becomes a manual override that
 // wins (e.g. Rita pulling an auto-retired crew back to Earmarked).
@@ -9496,7 +9701,7 @@ async function ntLoad(){
   var items=[];
   (rs[1].notes||[]).forEach(function(n){items.push({kind:'note',at:n.ts,id:n.id,text:n.text,who:n.created_by?ntWho(n.created_by):null,archived:n.archived_at,archivedBy:n.archived_by});});
   (rs[2].intel||[]).forEach(function(x){items.push({kind:'intel',at:x.ts,id:x.id,text:x.summary,who:x.reporter,confidence:x.confidence,contractNo:x.contract_no,edited:x.edited_at});});
-  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});else if(f.kind==='audit')items.push({kind:'audit',at:f.at,who:'Dexter',audit:f});});
+  ((P.people&&P.people.feed)||[]).forEach(function(f){if(f.kind==='feedback'||f.kind==='review')items.push({kind:f.kind,at:f.at,who:f.who,answers:f.answers,rating:f.rating,text:f.text,ship:f.ship,superseded:f.superseded});else if(f.kind==='audit')items.push({kind:'audit',at:f.at,who:'Dexter',audit:f});else if(f.kind==='survey')items.push({kind:'survey',at:f.at,who:'His survey',survey:f});});
   // a note written before authors were recorded: the activity row of the same second names them (as on the profile)
   var feedNotes=((P.people&&P.people.feed)||[]).filter(function(f){return f.kind==='note'&&f.who;});
   items.forEach(function(it){if(it.kind==='note'&&!it.who){var m=feedNotes.filter(function(f){return f.at===it.at;})[0];if(m)it.who=m.who;}});
@@ -9509,10 +9714,10 @@ function ntGroup(day){var K=NOTES_STATE.contracts||[],today=new Date().toISOStri
 function ntDraw(){
   var S=NOTES_STATE,w=document.getElementById('crewmodal');if(!S||!w)return;
   var _dr=document.getElementById('newNote');if(_dr)S.draft=_dr.value; // the draft survives a chip or an archive (13 Oct 2026)
-  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'||it.kind==='audit'?'feedback':it.kind]++;});
+  var cnt={all:0,note:0,intel:0,feedback:0};S.items.forEach(function(it){if(it.archived)return;cnt.all++;cnt[it.kind==='review'||it.kind==='audit'||it.kind==='survey'?'feedback':it.kind]++;});
   var chip=function(k,l){return '<button class="ntchip'+(S.filter===k?' sel':'')+'" onclick="NOTES_STATE.filter=\\''+k+'\\';ntDraw()">'+l+' · '+cnt[k]+'</button>';};
   var cur=(S.contracts||[]).filter(function(k){return k.current;})[0]||(S.contracts||[])[0]||null;
-  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&(it.kind==='review'||it.kind==='audit'));});
+  var shown=S.items.filter(function(it){return S.filter==='all'||it.kind===S.filter||(S.filter==='feedback'&&(it.kind==='review'||it.kind==='audit'||it.kind==='survey'));});
   var body='',lastKey=null;
   shown.forEach(function(it){
     var day=String(it.at||'').slice(0,10),k=ntGroup(day),key=k?(k.ship+k.on):'none';
@@ -9531,7 +9736,7 @@ var NT_FBK={order:'Rush order',rushcause:'Rush cause',rushcost:'Rush cost',ontim
 function ntItem(it){
   var when=fmtDateS(String(it.at||'').slice(0,10))+(it.kind==='note'&&it.at&&String(it.at).length>10?' · '+new Date(it.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}):'');
   var col={note:['#E3EDFB','#1E6FD0'],intel:['#F8ECEB','#A0321F'],feedback:['#F1ECFA','#5A3FA6'],review:['#F1ECFA','#5A3FA6'],audit:['#F1ECFA','#5A3FA6']}[it.kind];
-  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop audit'}[it.kind];
+  var tag={note:'Note',intel:'Field intel',feedback:'Feedback',review:'Shipboard review',audit:'Printshop Ops Audit',survey:'Crew survey'}[it.kind];
   var body='',acts='';
   if(it.kind==='note'){body='<div class=nttext>'+escHtml(it.text)+'</div>';
     acts=it.archived?('<div class=ntacts><span>Archived '+fmtDateS(String(it.archived).slice(0,10))+(it.archivedBy?' by '+escHtml(ntWho(it.archivedBy)):'')+'</span><a href="#" onclick="ntArchive('+it.id+',true);return false">Restore</a></div>'):('<div class=ntacts><a href="#" onclick="ntArchive('+it.id+',false);return false">Archive</a></div>');}
@@ -9539,6 +9744,7 @@ function ntItem(it){
     acts='<div class=ntacts><span>'+escHtml([it.confidence?it.confidence+' match':'',it.contractNo!=null?'contract '+it.contractNo:'','never scored',it.edited?'edited':''].filter(Boolean).join(' · '))+'</span><a href="#" onclick="intelEdit(NOTES_STATE.id,\\''+escHtml(it.id)+'\\');return false">Edit summary</a></div>';}
   else if(it.kind==='feedback'){var a=it.answers||{};body='<div class=pf2tk style="margin-top:6px">'+Object.keys(a).filter(function(k){return k!=='note'&&a[k]!==''&&a[k]!=null;}).map(function(k){return '<span class=pf2tick>'+escHtml((NT_FBK[k]||k)+' · '+a[k])+'</span>';}).join('')+'</div>'+(a.note?'<div class=nttext>“'+escHtml(a.note)+'”</div>':'')+(it.superseded?'<div class=echint>Earlier answer · kept, not used</div>':'');}
   else if(it.kind==='audit')body='<div class=nttext>'+pfAudit(it.audit)+'</div>';
+  else if(it.kind==='survey')body='<div class=nttext>'+pfSurvey(it.survey)+'</div>';
   else body='<div class=nttext><b>'+(it.rating!=null?it.rating+'/5':'')+'</b>'+(it.ship?' · '+escHtml(niceShip(it.ship)):'')+(it.text?' — “'+escHtml(it.text)+'”':'')+'</div>';
   return '<div class="ntitem'+(it.archived?' ntarch':'')+'"><div style="flex:1;min-width:0">'
     +'<div class=nthead><b>'+escHtml(it.who||'Author not recorded')+'</b><span class=pfsrc><i style="background:'+col[1]+'"></i>'+tag+'</span><span class=ntwhen>'+when+'</span></div>'+body+acts+'</div></div>';
@@ -9903,6 +10109,19 @@ function swResultBox(pf,st){
    +(gt.length?'<div class=gateflag>Gate armed: '+gt.join(', ')+' — would reset the bonus</div>':'')
    +(pending.length?'<div class=hint style="margin-top:6px">Still pending: '+pending.join(', ')+'. Dexter\u2019s audit (10) + supervisor eval (15) are added on the Score Card to reach 100%.</div>':'<div class=hint style="margin-top:6px">Ray and Rolando are in. Dexter\u2019s audit and the supervisor evaluation are added on the Score Card.</div>')+'</div>';
 }
+// Why a span cannot be committed yet, in words (Miguel, 17 Oct 2026). The server decides (apiBonusCommit, commitBlock);
+// the card says it before the click and after a refusal.
+function scBlockMsg(e){
+  if(!e||!e.error)return '';
+  var sh=e.ship?escHtml(e.ship):'';
+  if(e.error==='not_ended')return 'This contract signs off on '+fmtDateS(e.off)+'. A bonus is committed after the sign-off.';
+  if(e.error==='held_by_tdg')return 'TDG still lists this crew On board'+(sh?' '+sh:'')+' past the sign-off ('+fmtDateS(e.off)+'). The contract is scored once TDG ends it.';
+  if(e.error==='still_aboard')return 'This contract is still running'+(sh?' on '+sh:'')+(e.off?' (sign-off '+fmtDateS(e.off)+', not confirmed by TDG)':'')+'. It is scored once TDG ends it.';
+  if(e.error==='visit')return 'These dates are a training visit, not a contract. Visits are not scored.';
+  if(e.error==='older_first')return 'An older contract has no outcome yet'+(sh?': '+sh:'')+', '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. Score that one first.';
+  if(e.error==='already_scored')return 'A bonus is already recorded for '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+', which overlaps these dates. One outcome per contract.';
+  return '';
+}
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
   _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,notes:[]}; _PF={sliders:{},rush:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
@@ -9910,6 +10129,8 @@ async function openScore(id){
   var _blockCommit=(!d.baseline_set&&!_hasHist);
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
   var hist=d.outcomes.length?('<div class=hint style="margin-top:6px">Prior outcomes: '+d.outcomes.length+' · latest count '+d.outcomes[0].count_after+'</div>'):'';
+  var _blkMsg=scBlockMsg(d.scoring&&d.scoring.block);
+  if(_blkMsg)warn+='<div class=warn>'+_blkMsg+'</div>';
   var _st=(cr.status||'').toLowerCase();
   var _onship=_st.indexOf('board')>=0;
   var scCls=_onship?'sc-on':'sc-off';
@@ -10073,7 +10294,7 @@ async function commitBonus(){
     gates:{complete:$('#gComplete').checked,compassion:$('#gCompassion').checked,rush:$('#gRush').checked,audit:$('#gAudit').checked},
     gateNote:$('#gateNote')?$('#gateNote').value:''};
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
-  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||('Error: '+res.error));return;}
+  if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||scBlockMsg(res)||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
   $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
@@ -10089,7 +10310,11 @@ function mClose(){$('#modalRoot').innerHTML='';}
 // started. Used by the rotation/contract toggles, bonus gates, and the Retired tag.
 function tgFlip(id){var c=document.getElementById(id);if(!c)return;if(typeof _TOUCHED==='object')_TOUCHED[id]=1;c.checked=!c.checked;c.dispatchEvent(new Event('change',{bubbles:true}));}
 try{if('scrollRestoration' in history)history.scrollRestoration='manual';if(window.scrollTo)window.scrollTo(0,0);}catch(_){}
+// A LINK TO ONE SEAFARER (20 Oct 2026, the audit briefing's "Open the profile"): cims.work/#crew/SC-0039935 opens the Crew
+// tab (tabFromHash), then that profile; the list's render gives up when the profile is drawn after it (VIEW_GEN).
+var _crewLink=/^#crew\\/(SC-[A-Za-z0-9-]+)$/.exec(String(location.hash||''));
 show(tabFromHash());
 prefetchTabs(1200);
+if(_crewLink)openCrew(_crewLink[1]);
 </script>
 <div id=modalRoot></div></body></html>`;

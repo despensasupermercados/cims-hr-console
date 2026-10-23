@@ -188,14 +188,14 @@ test("S1b: /api/feedback/crew?on= lists an answer from before the sign-on as ear
   assert.equal(r.ok, true);
   d.prepare("INSERT INTO feedback_request2 (id,crew_id,role,token_hash,status,requested_at) VALUES ('fr1','c1','ray','x','answered','2026-07-20T11:00:00Z')").run();
   d.prepare("INSERT INTO feedback_response2 (id,request_id,crew_id,role,answers_json,submitted_at) VALUES ('fp1','fr1','c1','ray',?,'2026-07-20T11:30:27Z')")
-    .run(JSON.stringify({ order: "Yes", rushcause: "Crew ordering failure", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "No" }));
+    .run(JSON.stringify({ order: "Yes", rushcause: "Crew ordering failure", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "Yes" }));
   // Resposo's Ray answer of 20 Jul 2026 was given for the Reflection contract (16 Jan -> 17 Jul)
   r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129&on=2026-01-16"))).json();
-  assert.equal(r.answers.ray.acc, "Accurate"); assert.equal(r.prefill.sliders.sAcc, 25); assert.equal(r.prefill.gates.rush, true); assert.equal(r.previous.length, 0);
+  assert.equal(r.answers.ray.acc, "Accurate"); assert.equal(r.prefill.sliders.sAcc, 25); assert.equal(r.prefill.gates.audit, true); assert.ok(!r.prefill.gates.rush, "Ray's rush answer is evidence only (17 Oct 2026)"); assert.equal(r.previous.length, 0);
   // the Apex contract (embarked 7 Oct): the same answer is from before its sign-on
   r = await (await W.apiFeedbackCrew(env, url("id=SC-0038129&on=2026-10-07"))).json();
   assert.equal(r.answers.ray, undefined, "not this contract's answer");
-  assert.equal(r.prefill.sliders.sAcc, undefined); assert.ok(!r.prefill.gates.rush, "no rush gate from the previous contract");
+  assert.equal(r.prefill.sliders.sAcc, undefined); assert.ok(!r.prefill.gates.audit, "no audit gate from the previous contract");
   assert.equal(r.previous.length, 1); assert.equal(r.previous[0].why, "before_sign_on"); assert.equal(r.previous[0].role, "ray");
   assert.equal(r.on, "2026-10-07");
   // without a sign-on (the Inputs page, the feedback board) the answer is served as before

@@ -1,0 +1,73 @@
+<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Crew survey · Reports mock-up</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel=stylesheet>
+<style>:root{--navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--gink:#3E7F2E;--line:#E4E9F0;--mut:#6B7C93;--ink:#16293D;--bg:#EEF1F5}
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:'DM Sans',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+h1,h2,h3{font-family:Outfit,Helvetica,Arial,sans-serif}
+.topbar{background:var(--deep);color:#fff;display:flex;align-items:center;gap:26px;padding:0 24px;height:54px}
+.topbar .wm{font-family:Outfit,Helvetica,Arial,sans-serif;font-weight:800;letter-spacing:4px;font-size:18px}
+.topbar nav{display:flex;gap:4px}.topbar nav span{font-size:13.5px;font-weight:600;color:#9FB0C3;padding:8px 12px;border-radius:8px}.topbar nav span.on{background:#2A4566;color:#fff}
+.page{max-width:1360px;margin:20px auto;padding:0 20px}
+.dswrap{display:grid;grid-template-columns:238px 1fr;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(20,45,72,.06)}
+.dsside{background:var(--navy);padding:22px 14px;display:flex;flex-direction:column;min-height:900px}
+.dswm{font-family:Outfit,Helvetica,Arial,sans-serif;font-size:24px;font-weight:800;color:#fff;letter-spacing:4px;padding:0 6px}
+.dsline{height:2px;background:var(--green);width:112px;margin:8px 6px 7px}
+.dssub{font-size:8px;font-weight:600;color:#8B9AAC;letter-spacing:2px;text-transform:uppercase;line-height:1.6;padding:0 6px 18px}
+.dsnav{display:block;color:#B8C4D2;font:600 14px 'DM Sans',Helvetica,Arial,sans-serif;padding:9px 11px;border-radius:8px;margin:1px 0}
+.dsnav.on{background:#2D4A6B;color:#fff}.dsnav.new:after{content:"NEW";font-size:9px;letter-spacing:.08em;background:var(--green);color:#fff;border-radius:99px;padding:2px 7px;margin-left:8px;vertical-align:1px}
+.dsnav.soon{color:#5F7590}.dsnav small{font-size:9px;letter-spacing:.08em;text-transform:uppercase;margin-left:6px}
+.dsmain{padding:24px 26px 34px;min-width:0}
+.rh{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.rh h2{font-size:24px;color:var(--deep);margin-right:auto}
+.pc{font-size:12px;font-weight:700;padding:5px 11px;border-radius:99px;border:1px solid var(--line);color:var(--mut);background:#fff}.pc.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+.band{margin:14px 0 18px;background:#F4F8F1;border:1px solid #DDEBD5;color:#3B5530;border-radius:12px;padding:10px 14px;font-size:13px;line-height:1.5}
+.band b{color:var(--gink)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.k{border:1px solid var(--line);border-radius:14px;padding:14px 16px;position:relative;overflow:hidden}.k:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--c,#5FB946)}
+.k .l{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--mut)}.k .v{font-family:Outfit,Helvetica,Arial,sans-serif;font-size:30px;font-weight:700;color:var(--deep);margin-top:4px}.k .s{font-size:12px;color:var(--mut)}
+.grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px;margin-top:16px}
+.blk{border:1px solid var(--line);border-radius:14px;padding:16px 18px}.blk h3{font-size:15px;color:var(--deep);margin-bottom:4px}.blk .sub{font-size:12.5px;color:var(--mut);margin-bottom:12px}
+.call{background:#FBF2F0;border:1px solid #F0D3CD;border-radius:14px;padding:16px 18px;margin-top:16px;display:flex;gap:12px;align-items:center}
+.call .who{flex:1}.call .who b{font-family:Outfit,Helvetica,Arial,sans-serif;font-size:18px;color:#7A2418}.call .who div{font-size:13px;color:#6B4A44;margin-top:3px;line-height:1.5}
+.btn{font:700 13px 'DM Sans',Helvetica,Arial,sans-serif;border-radius:10px;padding:9px 14px;border:1px solid var(--line);background:#fff;color:var(--navy);white-space:nowrap}.btn.g{background:var(--green);border-color:var(--green);color:#fff}
+.bar{display:grid;grid-template-columns:200px 1fr 40px 48px;gap:10px;align-items:center;padding:6px 0;font-size:13px}
+.btrack{height:8px;background:#EEF1F5;border-radius:99px;overflow:hidden}.btrack i{display:block;height:100%;border-radius:99px}.bv{font-weight:700;text-align:right;color:var(--deep)}.bl{font-size:11.5px;color:#BC3B2C;font-weight:700}
+.fx{padding:11px 0;border-bottom:1px solid #F0F2F5}.fx:last-child{border:0}.fxq{font-family:Outfit,Helvetica,Arial,sans-serif;font-size:15.5px;font-weight:600;color:var(--deep);line-height:1.4}.fxw{font-size:12px;color:var(--mut);margin-top:4px}
+.bcs-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.bc{background:#F7F9FB;border-radius:12px;padding:12px 14px}.bc.soon{opacity:.55}.bcn{font-size:12px;font-weight:700;color:var(--mut)}.bcv{font-family:Outfit,Helvetica,Arial,sans-serif;font-size:26px;font-weight:700;color:var(--deep)}.bcs{font-size:11.5px;color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:10px 8px;border-bottom:1px solid #F0F2F5}td.c{text-align:center}.mu{color:var(--mut)}tr.hot td{background:#FDF6F4}
+.p{display:inline-block;min-width:26px;text-align:center;font-weight:700;border-radius:99px;padding:2px 8px;font-size:12.5px}.p.g{background:#EAF5E4;color:#3E7F2E}.p.a{background:#F6EEE1;color:#B7791F}.p.r{background:#F4E5E3;color:#96281B}
+.pipe{display:flex;gap:10px;margin-top:4px}.pipe div{flex:1;background:#F7F9FB;border-radius:12px;padding:12px 14px}.pipe b{display:block;font-family:Outfit,Helvetica,Arial,sans-serif;font-size:22px;color:var(--deep)}.pipe span{font-size:12px;color:var(--mut)}
+.note{font-size:12px;color:var(--mut);margin-top:10px;line-height:1.5}
+</style></head><body>
+<div class=topbar><div class=wm>CIMS</div><nav><span>Dashboard</span><span>Crew</span><span>Keyman</span><span>Contracts &amp; Bonus</span><span>Travel</span><span>Data</span><span class=on>Reports</span></nav></div>
+<div class=page><div class=dswrap>
+<aside class=dsside><div class=dswm>CIMS</div><div class=dsline></div><div class=dssub>Reports<br>Operational Intelligence</div>
+<div class=dsnav>Shipboard Feedback</div><div class="dsnav on new">Crew survey</div><div class=dsnav>Recruitment &#8599;</div>
+<div class="dsnav soon">Bonus &amp; Money<small>soon</small></div><div class="dsnav soon">Manpower<small>soon</small></div><div class="dsnav soon">Travel Spend<small>soon</small></div></aside>
+<main class=dsmain>
+<div class=rh><h2>Crew survey</h2>
+ <span class=pc>30D</span><span class=pc>QTD</span><span class=pc>YTD</span><span class="pc on">All</span><span class=sep></span>
+ <span class="pc on">All lines</span><span class=pc>Royal</span><span class=pc>Celebrity</span><span class=pc>Azamara</span><span class=pc>NCL</span></div>
+<div class=band>What the seafarer says at the end of a contract, in his own words. <b>8 answers imported</b> from the Forms survey (Aug &ndash; Oct 2026, the export Rita holds). From go-live every signed-off seafarer is asked automatically and this page fills itself. Feedback only: never the Score Card, never the bonus.</div>
+<div class=kpis>
+ <div class=k><div class=l>Answers</div><div class=v>8</div><div class=s>5 Royal · 3 Celebrity</div></div>
+ <div class=k style="--c:#1E6FD0"><div class=l>Answered</div><div class=v>&mdash;</div><div class=s>of those asked · from go-live</div></div>
+ <div class=k><div class=l>Overall satisfaction</div><div class=v>4.4<span style="font-size:15px;color:#9CA3AF"> / 5</span></div><div class=s>6 of 8 gave a 5</div></div>
+ <div class=k><div class=l>Would come back</div><div class=v>88%</div><div class=s>7 of 8 answered 4 or 5</div></div>
+ <div class=k style="--c:#BC3B2C"><div class=l>Needs a call</div><div class=v>1</div><div class=s>3 or more answers at 1&ndash;2</div></div>
+</div>
+<div class=call><div class=who><b>Ryan Marto · Quantum of the Seas</b><div>Answered 6 Oct 2026. <b>1</b> on inventory, shore-side support, feedback, room to grow, overall and <b>would return</b>. No line in his words. Matches the field reports on his record.</div></div>
+ <span class=btn>Open his profile</span><span class="btn g">Log the call</span></div>
+<div class=grid>
+ <div class=blk><h3>Where it hurts</h3><div class=sub>The 8 lowest of the 19 statements, average out of 5. The other 11 are 4.62 or above.</div><div class=bar><div class=bq>Constructive feedback</div><div class=btrack><i style="width:84%;background:#BC3B2C"></i></div><div class=bv>4.38</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Overall satisfaction</div><div class=btrack><i style="width:84%;background:#BC3B2C"></i></div><div class=bv>4.38</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Room to grow</div><div class=btrack><i style="width:84%;background:#BC3B2C"></i></div><div class=bv>4.38</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Systems, SOPs & workflows</div><div class=btrack><i style="width:84%;background:#BC3B2C"></i></div><div class=bv>4.38</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Would return</div><div class=btrack><i style="width:84%;background:#BC3B2C"></i></div><div class=bv>4.38</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Inventory availability</div><div class=btrack><i style="width:88%;background:#BC3B2C"></i></div><div class=bv>4.50</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Shore-side support</div><div class=btrack><i style="width:88%;background:#BC3B2C"></i></div><div class=bv>4.50</div><div class=bl>1 low</div></div><div class=bar><div class=bq>Onboarding & handover</div><div class=btrack><i style="width:91%;background:#B7791F"></i></div><div class=bv>4.62</div><div class=bl></div></div></div>
+ <div class=blk><h3>The one thing to fix first</h3><div class=sub>In their words. Blank and &ldquo;nothing&rdquo; answers left out.</div><div class=fx><div class=fxq>&ldquo;DG3 has been good to me since my first contract. The return of the internet allowance, and more in-depth training on production machine troubleshooting, to better understand how the print machine works.&rdquo;</div><div class=fxw>Jeremy Padilla · Celebrity Ascent · 19 Sep</div></div><div class=fx><div class=fxq>&ldquo;Hotel accommodations before embarking.&rdquo;</div><div class=fxw>Raymond Quiming · Celebrity Infinity · 19 Sep</div></div><div class=fx><div class=fxq>&ldquo;Nothing on my side, my contract went so smooth this time. Thank you for everything.&rdquo;</div><div class=fxw>Allen Cedilla · Brilliance of the Seas · 13 Aug</div></div></div>
+</div>
+<div class=grid style="grid-template-columns:1fr 1fr">
+ <div class=blk><h3>By cruise line</h3><div class=sub>Overall satisfaction, average out of 5.</div><div class=bcs-row><div class=bc><div class=bcn>Royal</div><div class=bcv>4.0</div><div class=bcs>5 answers</div></div><div class=bc><div class=bcn>Celebrity</div><div class=bcv>5.0</div><div class=bcs>3 answers</div></div><div class="bc soon"><div class=bcn>Azamara</div><div class=bcv>&mdash;</div><div class=bcs>none yet</div></div><div class="bc soon"><div class=bcn>NCL</div><div class=bcv>&mdash;</div><div class=bcs>none yet</div></div></div></div>
+ <div class=blk><h3>The loop</h3><div class=sub>From go-live, per period.</div><div class=pipe><div><b>&mdash;</b><span>Signed off</span></div><div><b>&mdash;</b><span>Invited</span></div><div><b>&mdash;</b><span>Opened</span></div><div><b>&mdash;</b><span>Answered</span></div></div>
+ <div class=note>Invited the morning after the sign-off, 07:00 Miami. A training visit is never asked. One reminder after 5 days if no answer (your call).</div></div>
+</div>
+<div class=blk style="margin-top:16px"><h3>Every answer</h3><div class=sub>Newest first. A row opens the full answer and the seafarer's profile.</div>
+<table><tr><th>Date</th><th>Seafarer</th><th>Ship</th><th>Line</th><th style="text-align:center">Overall</th><th style="text-align:center">Return</th><th style="text-align:center">Low (1&ndash;2)</th><th>Words</th><th>From</th></tr><tr class=hot><td>6 Oct</td><td><b>Ryan Marto</b></td><td>Quantum of the Seas</td><td>Royal</td><td class=c><span class="p r">1</span></td><td class=c><span class="p r">1</span></td><td class=c><span class="p r">7</span></td><td class=mu>&mdash;</td><td class=mu>Forms</td></tr><tr><td>2 Oct</td><td><b>Andrea Joyce M. Calayag</b></td><td>Navigator of the Seas</td><td>Royal</td><td class=c><span class="p g">4</span></td><td class=c><span class="p g">4</span></td><td class=c><span class=mu>0</span></td><td class=mu>&mdash;</td><td class=mu>Forms</td></tr><tr><td>19 Sep</td><td><b>Jeremy Padilla</b></td><td>Celebrity Ascent</td><td>Celebrity</td><td class=c><span class="p g">5</span></td><td class=c><span class="p g">5</span></td><td class=c><span class=mu>0</span></td><td class=mu>&#10003;</td><td class=mu>Forms</td></tr><tr><td>19 Sep</td><td><b>Edward Francis Guazon</b></td><td>Liberty of the Seas</td><td>Royal</td><td class=c><span class="p g">5</span></td><td class=c><span class="p g">5</span></td><td class=c><span class=mu>0</span></td><td class=mu>&mdash;</td><td class=mu>Forms</td></tr><tr><td>19 Sep</td><td><b>Manuel Reyes</b></td><td>Odyssey of the Seas</td><td>Royal</td><td class=c><span class="p g">5</span></td><td class=c><span class="p g">5</span></td><td class=c><span class=mu>0</span></td><td class=mu>&#10003;</td><td class=mu>Forms</td></tr><tr><td>19 Sep</td><td><b>Raymond Quiming</b></td><td>Celebrity Infinity</td><td>Celebrity</td><td class=c><span class="p g">5</span></td><td class=c><span class="p g">5</span></td><td class=c><span class=mu>0</span></td><td class=mu>&#10003;</td><td class=mu>Forms</td></tr><tr><td>19 Sep</td><td><b>Darryl Ramos</b></td><td>Celebrity Constellation</td><td>Celebrity</td><td class=c><span class="p g">5</span></td><td class=c><span class="p g">5</span></td><td class=c><span class=mu>0</span></td><td class=mu>&#10003;</td><td class=mu>Forms</td></tr><tr><td>13 Aug</td><td><b>Allen Cedilla</b></td><td>Brilliance of the Seas</td><td>Royal</td><td class=c><span class="p g">5</span></td><td class=c><span class="p g">5</span></td><td class=c><span class=mu>0</span></td><td class=mu>&#10003;</td><td class=mu>Forms</td></tr></table></div>
+</main></div></div></body></html>

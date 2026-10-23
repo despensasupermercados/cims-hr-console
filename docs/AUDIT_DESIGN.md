@@ -146,8 +146,11 @@ a bottom bar. Rules the build is held to:
   phone is in. This makes the app an installable PWA with a service worker and an upload queue, not a plain page.
 - **Photos are the evidence.** A full-width Take photo button on every step that takes evidence; photos shrunk on
   the phone before upload (longest side 1600px, ~300 KB); each tagged with its step and machine.
-- **One tap when nothing is wrong.** Every checklist step starts clean (All present / Pass / Accurate / Nothing
-  missing). A clean ship is seven taps, three ratings and three short sentences.
+- **One tap when nothing is wrong, and one way to answer.** Every row starts in its normal state (present, working,
+  not seen, running now, found, in use, still open) with a green tick; Dexter taps only what is wrong and taps again to
+  undo — never a Yes / No pair (Miguel, 19 Oct 2026: "i dont like this game of dual stuff.. make it one"). Whether OBP
+  matches the shelf is measured from the lines he types, never asked. A clean ship is seven taps, three ratings and
+  three short sentences.
 - **Thumb sizes.** Rows 52px, chips 40px, rating squares 54px, bottom buttons 52px, text inputs 16px (no iOS zoom).
   Back top-left, the next action in the bottom bar, always the same place.
 - **A required answer holds Next with the reason under the field**, never a failure at the end.

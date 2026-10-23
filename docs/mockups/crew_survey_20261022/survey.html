@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your contract, in your words · CIMS</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#1B3A5C;--deep:#142D48;--green:#5FB946;--gink:#3E7F2E;--mint:#EAF5E4;
+  --bg:#F5F6F2;--card:#FFFFFF;--ink:#16293D;--body:#3F4A57;--mut:#7A8594;--line:#E6E9E2;
+  --red:#B4483A;--redt:#F7E6E2;--amber:#B7791F;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{font-family:'DM Sans',Helvetica,Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+h1,h2,h3,.fh{font-family:'Outfit',Helvetica,Arial,sans-serif;letter-spacing:-.015em}
+button{font:inherit;cursor:pointer}
+
+/* mock-up only: switch cruise line + screen */
+.mock{background:#2B2118;color:#F3E9DC;font-size:12px;padding:8px 14px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.mock b{letter-spacing:.08em;margin-right:4px}
+.mock button{padding:3px 11px;border-radius:99px;border:1px solid #6b5a45;background:transparent;color:#F3E9DC}
+.mock button.on{background:#F3E9DC;color:#2B2118;font-weight:700}
+.mock span{opacity:.5;margin:0 4px}
+
+.wrap{max-width:560px;margin:0 auto;padding:18px 18px 64px}
+.top{display:flex;align-items:center;justify-content:space-between;padding:6px 2px 18px}
+.wm{font-family:'Outfit',Helvetica,Arial,sans-serif;font-weight:800;font-size:17px;letter-spacing:4px;color:var(--navy);line-height:1}
+.wm i{display:block;width:44px;height:2px;background:var(--green);margin-top:5px}
+.chip{font-size:11.5px;font-weight:700;color:var(--navy);background:#fff;border:1px solid var(--line);padding:6px 11px;border-radius:99px;display:flex;align-items:center;gap:7px}
+.chip i{width:8px;height:8px;border-radius:50%;background:var(--brand,#1E6FD0)}
+
+.card{background:var(--card);border-radius:24px;box-shadow:0 1px 2px rgba(22,41,61,.04),0 8px 28px rgba(22,41,61,.06);padding:26px 22px}
+.eyebrow{font-size:11.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--gink)}
+
+/* intro */
+.hero h1{font-size:34px;line-height:1.08;margin:12px 0 10px;color:var(--deep)}
+.hero h1 em{font-style:normal;color:var(--mut)}
+.hero p{font-size:16px;line-height:1.55;color:var(--body)}
+.strip{margin:22px 0 4px;border-radius:18px;background:linear-gradient(135deg,#1B3A5C,#24507c);color:#fff;padding:18px 18px 16px;position:relative;overflow:hidden}
+.strip:after{content:"";position:absolute;right:-30px;top:-30px;width:140px;height:140px;border-radius:50%;background:rgba(95,185,70,.18)}
+.strip .ship{font-family:'Outfit',Helvetica,Arial,sans-serif;font-size:22px;font-weight:700}
+.strip .ln{font-size:12px;color:#B9C7D8;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px}
+.strip .row{display:flex;gap:18px;margin-top:14px}
+.strip .row div{font-size:11px;color:#B9C7D8;letter-spacing:.08em;text-transform:uppercase}
+.strip .row b{display:block;font-family:'Outfit',Helvetica,Arial,sans-serif;font-size:16px;color:#fff;letter-spacing:0;text-transform:none;margin-top:3px}
+.facts{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 22px}
+.facts span{font-size:13px;color:var(--body);background:var(--bg);padding:7px 12px;border-radius:99px}
+.facts b{color:var(--ink)}
+.go{display:block;width:100%;border:0;border-radius:16px;background:var(--green);color:#fff;font-weight:700;font-size:17px;padding:17px;box-shadow:0 6px 16px rgba(95,185,70,.32);transition:transform .12s}
+.go:active{transform:scale(.985)}
+.go[disabled]{background:#C8D3C2;box-shadow:none;cursor:default}
+.fine{text-align:center;font-size:12.5px;color:var(--mut);margin-top:12px;line-height:1.5}
+
+/* questions */
+.prog{display:flex;gap:6px;margin:4px 2px 18px}
+.prog i{flex:1;height:5px;border-radius:99px;background:#DFE4DA}
+.prog i.pd{background:var(--green)}
+.prog i.pn{background:linear-gradient(90deg,var(--green) var(--p,0%),#DFE4DA var(--p,0%))}
+.shead{display:flex;align-items:baseline;justify-content:space-between;margin:0 2px 6px}
+.shead h2{font-size:24px;color:var(--deep)}
+.shead small{font-size:12.5px;color:var(--mut)}
+.sintro{font-size:14.5px;color:var(--body);margin:0 2px 16px;line-height:1.5}
+.q{background:#fff;border-radius:20px;padding:18px 16px 16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(22,41,61,.04),0 4px 16px rgba(22,41,61,.04);border:1.5px solid transparent;transition:border-color .15s}
+.q.ans{border-color:#D7EBCD}
+.q p{font-size:16px;line-height:1.4;font-weight:600;color:var(--ink);margin-bottom:14px}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}
+.scale button{border:1.5px solid var(--line);background:#FAFBF8;border-radius:14px;padding:10px 0 8px;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--body);transition:all .12s}
+.scale button b{font-family:'Outfit',Helvetica,Arial,sans-serif;font-size:19px;color:var(--ink)}
+.scale button span{font-size:10px;letter-spacing:.02em;line-height:1.1;text-align:center;min-height:11px}
+.scale button:hover{border-color:#C9D6C1}
+.scale button.on{background:var(--navy);border-color:var(--navy);color:#C8D6E6}
+.scale button.on b{color:#fff}
+.scale button.on.lo{background:var(--red);border-color:var(--red);color:#F6D9D3}
+.ends{display:flex;justify-content:space-between;font-size:11px;color:var(--mut);margin-top:7px;padding:0 4px}
+textarea{width:100%;min-height:120px;border:1.5px solid var(--line);border-radius:16px;padding:14px;font:15px/1.5 'DM Sans',Helvetica,Arial;color:var(--ink);background:#FAFBF8;resize:vertical}
+textarea:focus{outline:none;border-color:var(--green);background:#fff}
+.nav{display:flex;gap:10px;margin-top:8px}
+.back{border:1.5px solid var(--line);background:#fff;color:var(--navy);font-weight:700;border-radius:16px;padding:16px 18px}
+.nav .go{flex:1}
+.left{font-size:12.5px;color:var(--mut);text-align:center;margin-top:10px}
+
+/* done */
+.done{text-align:center;padding:34px 22px 28px}
+.tick{width:84px;height:84px;border-radius:50%;background:var(--mint);margin:0 auto 18px;display:grid;place-items:center}
+.tick svg{width:42px;height:42px}
+.tick path{stroke:var(--green);stroke-width:4;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:48;stroke-dashoffset:48;animation:draw .5s .15s ease forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.done h1{font-size:30px;color:var(--deep);line-height:1.1;margin-bottom:10px}
+.done p{font-size:15.5px;color:var(--body);line-height:1.55;max-width:38ch;margin:0 auto}
+.copy{margin:22px auto 0;background:var(--bg);border-radius:16px;padding:14px 16px;text-align:left;font-size:13.5px;color:var(--body);line-height:1.5}
+.copy b{color:var(--ink)}
+.sign{margin-top:22px;font-size:13.5px;color:var(--mut)}
+.sign b{display:block;color:var(--ink);font-size:15px}
+.foot{text-align:center;font-size:11.5px;color:var(--mut);margin-top:26px;line-height:1.6}
+.hide{display:none}
+@media (max-width:420px){.hero h1{font-size:30px}.scale button span{font-size:9px}}
+</style>
+</head>
+<body>
+<div class="mock"><b>MOCK-UP</b>
+  <button data-b="royal" class="on">Royal Caribbean</button><button data-b="celebrity">Celebrity</button><button data-b="azamara">Azamara</button><button data-b="ncl">NCL</button>
+  <span>|</span>
+  <button data-s="0" class="on">Start</button><button data-s="1">Questions</button><button data-s="5">Last step</button><button data-s="6">Done</button>
+</div>
+
+<div class="wrap">
+  <div class="top"><div class="wm">CIMS<i></i></div><div class="chip" id="brandchip"><i></i><span>Royal Caribbean</span></div></div>
+  <div id="app"></div>
+  <div class="foot">Cruise Industry Managed Services · a division of DG3<br>Your link is yours alone. No login, nothing to install.</div>
+</div>
+
+<script>
+// What the link knows (filled by the console from the board's ONE schedule, §10d).
+var BRANDS={
+  royal:{name:'Royal Caribbean',color:'#1E6FD0',ship:'Quantum of the Seas',code:'QN',on:'22 Feb 2026',off:'20 Oct 2026',len:'7 mo 28 d',mgr:'GSM'},
+  celebrity:{name:'Celebrity Cruises',color:'#2B2B2B',ship:'Celebrity Infinity',code:'IN',on:'7 Mar 2026',off:'12 Oct 2026',len:'7 mo 5 d',mgr:'DCM'},
+  azamara:{name:'Azamara',color:'#0E5A7A',ship:'Azamara Quest',code:'QS',on:'2 May 2026',off:'30 Sep 2026',len:'4 mo 28 d',mgr:'BOM'},
+  ncl:{name:'Norwegian Cruise Line',color:'#0A3D91',ship:'Norwegian Getaway',code:'GE',on:'16 Nov 2025',off:'14 Jun 2026',len:'6 mo 29 d',mgr:'manager'}
+};
+var who={first:'Raymond',email:'raymond•••@gmail.com'};
+// Rita's 19 statements, word for word (Forms, Dec 2025), so every answer since
+// then stays comparable. Grouped into five short screens by topic.
+var SECTIONS=[
+  {t:'The job',i:'Before you boarded and your first weeks.',q:[
+    'I have received clear expectations for my job.',
+    'The onboarding and handover process prepared me adequately for my role.',
+    'The equipment and tools provided allowed me to perform my job effectively.',
+    'Training received prior to embarkation met the actual job requirements onboard.']},
+  {t:'The print shop',i:'How the work itself ran.',q:[
+    'Systems, SOPs, and workflows onboard were clear and practical.',
+    'Inventory availability supported uninterrupted job performance.',
+    'Workload and scheduling were reasonable for the role.',
+    'Communication between departments was effective.']},
+  {t:'Support',i:'The people behind you, aboard and ashore.',q:[
+    'My direct supervisor{M} provided clear direction and expectations.',
+    'I received timely support when issues or escalations arose.',
+    'Shore-side support was accessible and effective when needed.',
+    'I received constructive feedback on my performance.',
+    'I had opportunities to learn, improve, or grow in my role.']},
+  {t:'You',i:'How you were treated, and how you were paid.',q:[
+    'I felt respected and treated fairly onboard.',
+    'Crew welfare, rest periods, and well-being were taken seriously.',
+    'Contract terms matched what was originally communicated.',
+    'Pay, benefits, and contract administration were handled accurately and on time.']},
+  {t:'Overall',i:'Two last ones, then one in your own words.',q:[
+    'Overall, I am satisfied with my contract experience.',
+    'I would consider returning for another contract.'],open:true}
+];
+var LBL=['No','Not really','Partly','Mostly','Yes'];
+var brand='royal',step=0,ans={},fix='';
+var $=function(s){return document.querySelector(s)};
+function total(){return SECTIONS.reduce(function(n,s){return n+s.q.length},0)}
+function answered(){return Object.keys(ans).length}
+
+function render(){
+  var B=BRANDS[brand];
+  document.documentElement.style.setProperty('--brand',B.color);
+  $('#brandchip span').textContent=B.name;
+  var h='';
+  if(step===0){
+    h='<div class="card hero"><div class="eyebrow">Contract complete</div>'
+     +'<h1>How was '+B.ship.replace(/^(Celebrity|Azamara|Norwegian) /,'').replace(/ of the Seas$/,'')+', '+who.first+'?<br><em>Tell us straight.</em></h1>'
+     +'<p>You know what worked and what got in the way better than anyone. Three minutes, and Rita reads every answer herself.</p>'
+     +'<div class="strip"><div class="ln">Your contract</div><div class="ship">'+B.ship+'</div>'
+     +'<div class="row"><div>Signed on<b>'+B.on+'</b></div><div>Signed off<b>'+B.off+'</b></div><div>Aboard<b>'+B.len+'</b></div></div></div>'
+     +'<div class="facts"><span><b>3</b> minutes</span><span><b>19</b> quick taps</span><span><b>1</b> line in your words</span></div>'
+     +'<button class="go" onclick="go(1)">Start</button>'
+     +'<div class="fine">Your answers go to the CIMS team, never to the cruise line, and they never touch your bonus.</div></div>';
+  } else if(step<=5){
+    var S=SECTIONS[step-1],base=0;for(var k=0;k<step-1;k++)base+=SECTIONS[k].q.length;
+    var inS=S.q.filter(function(_,j){return ans[base+j]}).length;
+    h='<div class="prog">'+SECTIONS.map(function(_,j){return j<step-1?'<i class="pd"></i>':j===step-1?'<i class="pn" style="--p:'+Math.round(inS/S.q.length*100)+'%"></i>':'<i></i>'}).join('')+'</div>'
+     +'<div class="shead"><h2>'+S.t+'</h2><small>'+step+' of 5</small></div><div class="sintro">'+S.i+'</div>';
+    S.q.forEach(function(q,j){
+      var n=base+j,v=ans[n];
+      h+='<div class="q'+(v?' ans':'')+'"><p>'+q.replace('{M}',B.mgr==='manager'?'':' ('+B.mgr+')')+'</p><div class="scale">'
+       +[1,2,3,4,5].map(function(x){return '<button class="'+(v===x?'on'+(x<=2?' lo':''):'')+'" onclick="pick('+n+','+x+')"><b>'+x+'</b><span>'+LBL[x-1]+'</span></button>'}).join('')
+       +'</div></div>';
+    });
+    if(S.open){
+      h+='<div class="q'+(fix?' ans':'')+'"><p>What is the one thing we should fix first to improve the seafarer experience?</p>'
+       +'<textarea placeholder="Hotel before embarking, a part that never arrived, training you wish you had… anything." oninput="fix=this.value">'+fix+'</textarea>'
+       +'<div class="ends"><span>Optional, but this is the one we act on.</span><span></span></div></div>';
+    }
+    var ok=inS===S.q.length;
+    h+='<div class="nav"><button class="back" onclick="go('+(step-1)+')">Back</button>'
+     +'<button class="go"'+(ok?'':' disabled')+' onclick="go('+(step+1)+')">'+(step===5?'Send my answers':'Next')+'</button></div>'
+     +'<div class="left">'+(total()-answered())+' to go'+(step===5?' · you can change any answer before you send':'')+'</div>';
+  } else {
+    h='<div class="card done"><div class="tick"><svg viewBox="0 0 48 48"><path d="M13 25 l8 8 l15 -17"/></svg></div>'
+     +'<h1>Thank you, '+who.first+'.</h1>'
+     +'<p>Your answers are with the CIMS team. Rita reads every one, and when you name something to fix, she writes back.</p>'
+     +'<div class="copy">A copy of your answers is on its way to <b>'+who.email+'</b>, with Onboard Support in copy, so you can reply to it any time.</div>'
+     +'<div class="sign"><b>Rita Berenyi</b>Manager, People &amp; Culture · enjoy your time home</div></div>';
+  }
+  $('#app').innerHTML=h;
+  document.querySelectorAll('[data-s]').forEach(function(b){b.classList.toggle('on',+b.getAttribute('data-s')===(step>=1&&step<=4?1:step))});
+}
+function pick(n,x){ans[n]=x;render()}
+function go(s){step=s;render();window.scrollTo(0,0)}
+document.querySelectorAll('[data-b]').forEach(function(b){b.onclick=function(){brand=b.getAttribute('data-b');document.querySelectorAll('[data-b]').forEach(function(x){x.classList.toggle('on',x===b)});render()}});
+document.querySelectorAll('[data-s]').forEach(function(b){b.onclick=function(){var s=+b.getAttribute('data-s');
+  if(s>=5){var n=0;SECTIONS.slice(0,4).forEach(function(S){S.q.forEach(function(){ans[n]=ans[n]||[5,4,5,4,3,5,4,4,5,5,2,4,4,5,5,4,4][n%17];n++})});}
+  if(s===6){ans[17]=ans[17]||4;ans[18]=ans[18]||5;fix=fix||'Hotel before embarking.'}
+  go(s)}});
+render();
+</script>
+</body>
+</html>

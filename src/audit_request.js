@@ -14,13 +14,14 @@
 // TEST MODE until Miguel signs off the rendered emails (CIMS email standard §5): with AUDIT_LIVE unset every email goes
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
-import { aboardNow, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems } from "./audit.js";
+import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
 import { p43ReadState, mmlReadState, coverFor } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
 import { auditUploadHtml, auditClosedHtml } from "./audit_upload_ui.js";
 import { normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, PHOTO_STEPS, VISIT_VERSION } from "./audit_steps.js";
+import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
 
 export const LINK_DAYS = 14;
 export const RESEND_MIN = 15;             // a request is not re-sent sooner than this              // the upload page stays open this long after the request
@@ -81,7 +82,10 @@ export function installAuditRequest(deps) {
   // The newest live file per machine and kind, with what the crew is told about it.
   function slot(ups, serial, kind) {
     const u = ups.filter((x) => x.serial === serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
+    // A machine list read with no life row never says "No part past its rated life" (Miguel, 20 Oct 2026: "u didnt read the
+    // files correctly"): a read filed before lifeRows was kept, or one with none, says what is true. Nothing stored changes.
+    const s = u && u.read && u.read.summary, noLife = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && !(s.lifeRows > 0));
+    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
   }
   // What the reads found per machine — ONE definition for the documents-in email and the audit's Machines step.
   function machinesRead(s, lines, intransit) {
@@ -108,9 +112,10 @@ export function installAuditRequest(deps) {
     if (!ship || !sc) return json({ error: "ship_and_sc_required" }, 400);
     await ensureAudit(env);
     if (session.open && !(await aboardHere(env, ship, sc))) return json({ ok: false, error: "not_aboard", detail: "The board does not have this seafarer aboard " + ship + "." }, 422);
-    const [crew, cts, H, open] = await Promise.all([
+    const [crew, cts, H, open, onShip] = await Promise.all([
       crewOf(env, sc), contacts(env), hon(env, "ship", ship),
-      env.DB.prepare("SELECT r.id, r.status, r.sent_at, r.due_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND (r.status IN ('draft','sent') OR (r.status = 'complete' AND e.request_id IS NULL AND r.test_mode = 0)) ORDER BY r.created_at DESC LIMIT 1").bind(sc).first(),
+      env.DB.prepare("SELECT r.id, r.status, r.sent_at, r.due_at FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.agency_id=? AND " + OPEN_REQ_SQL + " ORDER BY r.created_at DESC LIMIT 1").bind(sc).first(),
+      env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null),
     ]);
     if (!crew) return json({ error: "crew_not_found" }, 404);
     const addr = addressFor({ contacts: cts, ship, personal: crew.email });
@@ -120,17 +125,28 @@ export function installAuditRequest(deps) {
       to: live ? addr.to : [session.email], cc: live && !session.open ? addr.cc : [], shown: addr.shown, noPersonal: !!addr.noPersonal, blocked: addr.ok ? null : addr.reason,
       machines: H && H.ok ? H.presses : null, lines: H && H.ok && H.obp ? blindLines(H.obp.lines).length : null, obpAsOf: H && H.obp ? H.obp.asOf : null,
       hon: !!(H && H.ok), honError: H && !H.ok ? H.error : (H ? null : "HON did not answer"),
-      dueAt: plusHours(now(), REQUEST_HOURS), open: open || null,
+      dueAt: plusHours(now(), REQUEST_HOURS), remindAt: REMIND_HOURS, open: open || null,
+      // who is copied and who replies, by name (the addresses stay off the open site): the first of AUDIT_REQUEST_CC
+      // takes the replies when live, the auditor in test mode (sendRequest)
+      copyNames: live ? csv(env.AUDIT_REQUEST_CC).map(nameOf) : [], replyTo: nameOf(live ? (csv(env.AUDIT_REQUEST_CC)[0] || session.email) : session.email),
+      // one person at a time per ship: another seafarer's request still open on this ship (Miguel, 20 Oct 2026)
+      shipOpen: onShip && onShip.agency_id !== sc ? { id: onShip.id, crew: onShip.crew_name, sc: onShip.agency_id } : null,
     });
   }
+
+  // The request already open on the ship: this seafarer's (the page opens it) or another's (one person at a time per ship).
+  const shipTaken = (o, sc, ship) => o.agency_id === sc
+    ? json({ ok: false, error: "already_open", id: o.id }, 409)
+    : json({ ok: false, error: "ship_busy", id: o.id, crew: o.crew_name || null, detail: "One audit at a time on " + ship + ": " + (o.crew_name || "another seafarer") + "'s request is open. File it, then ask the next." }, 409);
 
   async function create(request, env, url, session) {
     const b = await request.json().catch(() => ({}));
     const ship = String(b.ship || "").trim(), sc = String(b.sc || "").trim();
     if (!ship || !sc) return json({ error: "ship_and_sc_required" }, 400);
     await ensureAudit(env);
-    const open = await env.DB.prepare("SELECT id FROM audit_request WHERE agency_id=? AND normalized_ship=? AND status IN ('draft','sent') LIMIT 1").bind(sc, normShip(ship)).first().catch(() => null);
-    if (open) return json({ ok: false, error: "already_open", id: open.id }, 409);
+    // ONE PERSON AT A TIME PER SHIP (Miguel, 20 Oct 2026): any request still open on this ship, for anyone, stops a new one
+    const onShip = await env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null);
+    if (onShip) return shipTaken(onShip, sc, ship);
     // OPEN MODE asks only a seafarer the board has aboard THAT ship: no request for any id to any ship's mailbox
     if (session.open && !(await aboardHere(env, ship, sc))) return json({ ok: false, error: "not_aboard", detail: "The board does not have this seafarer aboard " + ship + "." }, 422);
     const [crew, cts, H] = await Promise.all([crewOf(env, sc), contacts(env), hon(env, "ship", ship)]);
@@ -151,8 +167,8 @@ export function installAuditRequest(deps) {
     } catch (e) {
       // the unique open-request index: a second tap, or a second visitor, while the first request is being made
       if (/UNIQUE/i.test(String((e && e.message) || e))) {
-        const o = await env.DB.prepare("SELECT id FROM audit_request WHERE agency_id=? AND normalized_ship=? AND status IN ('draft','sent') LIMIT 1").bind(sc, normShip(ship)).first().catch(() => null);
-        return json({ ok: false, error: "already_open", id: o ? o.id : null }, 409);
+        const o = await env.DB.prepare(SHIP_OPEN_SQL).bind(normShip(ship)).first().catch(() => null);
+        return shipTaken(o || { id: null, agency_id: sc }, sc, ship);
       }
       throw e;
     }
@@ -242,8 +258,11 @@ export function installAuditRequest(deps) {
     ]);
     const read = machinesRead(s, obp.lines, obp.intransit);
     const machines = read.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down,
-      p43: m.p43 ? { state: m.p43.state, items: ((m.p43.legend && m.p43.legend.items) || []).map((i) => ({ head: i.head, detail: i.detail || null, where: i.where || null, part: i.part || null, check: i.check && i.check.say ? i.check.say : null })) } : null,
-      life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })) }));
+      p43: m.p43 ? { state: m.p43.state, items: ((m.p43.legend && m.p43.legend.items) || []).map((i) => ({ head: i.head, detail: i.detail || null, where: i.where || null, part: i.part || null, check: i.check && i.check.say ? i.check.say : null, pointsTo: i.pointsTo || null, pages: Array.isArray(i.pages) ? i.pages : [], ink: i.ink || null, mark: i.mark || null, src: (i.check && i.check.src) || null })) } : null,
+      life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })),
+      // "No part past its rated life" only from a read that carried life rows; a read filed before the count was kept
+      // (lifeRows absent) or one with none is "part life not read", never a clean machine
+      lifeRead: m.mml ? m.mml.lifeRows > 0 : null }));
     const diff = countDiff(obp.lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const extras = s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted }));
     const parts = blindLines(obp.lines).map((l) => { const o = obp.lines.find((x) => String(x.part_number || x.part_no || "").trim() === l.part_no); return { part_no: l.part_no, description: l.description, obp: o && Number.isFinite(Number(o.on_hand)) ? Number(o.on_hand) : null, counted: s.counted[l.part_no] == null ? null : s.counted[l.part_no] }; });
@@ -289,7 +308,7 @@ export function installAuditRequest(deps) {
     if (problems.length || e.problems.length) return json({ ok: false, error: "invalid", problems, fields: e.problems }, 400);
     d.repeat = repeatCounts(c.prevData, d);
     // what the documents said, kept with the visit: the filed record never depends on a later read
-    d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life })) };
+    d.ctx = { asOf: c.asOf, diff: c.diff, extras: c.extras, machines: c.machines.map((m) => ({ serial: m.serial, label: m.label, model: m.model, down: m.down, p43: m.p43, life: m.life, lifeRead: m.lifeRead })) };
     const at = now(), vid = "av_" + crypto.randomUUID();
     const opened = d.openedAt && d.openedAt >= String(req.complete_at || "") && d.openedAt <= at ? d.openedAt : at;
     const by = session.open ? session.email + " (open site, no sign-in)" : session.email;
@@ -409,7 +428,7 @@ export function installAuditRequest(deps) {
     if (!rotationSections) return true;
     const board = await rotationSections(env).catch(() => null);
     const sec = ((board && board.sections) || []).find((x) => normShip(x.ship) === normShip(ship));
-    return !!(sec && (sec.crew || []).some((c) => aboardNow(c) && c.agency_id === sc));
+    return !!(sec && aboardOf(sec).some((c) => c.agency_id === sc));
   }
 
   async function crewState(env, req) {
@@ -623,13 +642,31 @@ export function installAuditRequest(deps) {
   // History (19 Oct 2026; docs/AUDIT_DESIGN.md "History" and W1's rail: History · Open follow-ups): every filed audit by
   // ship, crew and date, and every follow-up with its state. It reads only what a filing wrote (the grade, the visit, its
   // steps, its photos) and decides nothing; a TEST request is a rehearsal and is never listed. One wave (§12).
+  // One filed visit in numbers: the presses' checks, the shelf against OBP, the crew's needs. A line's shelf is Dexter's
+  // number where he typed one, else the crew's count (the page's own rule, obpMatches).
+  function foundOf(d) {
+    const ms = Object.values((d.hw && d.hw.machines) || {});
+    const n = (f) => ms.filter(f).length;
+    const lines = (d.inv && d.inv.lines) || {}, diff = ((d.ctx && d.ctx.diff) || []).filter((x) => x.kind === "gap");
+    let above = 0, below = 0;
+    for (const x of diff) { const L = lines[x.part_no], shelf = L && L.shelf != null ? L.shelf : x.counted; if (shelf > x.obp) above++; else if (shelf < x.obp) below++; }
+    const crew = d.crew || {}, ov = d.ov || {};
+    return {
+      machines: { presses: ms.length, test: n((m) => (m.checks || {}).test === "finding"), scan: n((m) => (m.checks || {}).scan === "finding"), collab: n((m) => (m.checks || {}).collab === "finding"), p43: n((m) => m.p43 === "seen"), down: n((m) => m.down === "still") },
+      inv: { accurate: d.inv && typeof d.inv.accurate === "boolean" ? d.inv.accurate : null, above, below, added: ((d.inv && d.inv.added) || []).length, notInObp: ((d.ctx && d.ctx.extras) || []).length, notFound: Object.values((d.inv && d.inv.repairs) || {}).filter((v) => v === "not_found").length },
+      crew: { training: (crew.training || []).slice(), trainingOther: crew.trainingOther || "", ppe: ((crew.ppe && crew.ppe.missing) || []).length, hon: crew.hon || null, block: !!ov.recommendBlock },
+      why: { inventory: ((d.rt || {}).why || {}).inventory || "", technical: ((d.rt || {}).why || {}).technical || "", collaterals: ((d.rt || {}).why || {}).collaterals || "", overall: ov.why || "" },
+    };
+  }
   async function history(env) {
     await ensureAudit(env);
     const NOT_TEST = "COALESCE(r.test_mode, 0) = 0";
-    const [ev, fu, ph] = await Promise.all([
+    const [ev, fu, ph, fm] = await Promise.all([
       env.DB.prepare("SELECT e.request_id, e.ship, e.agency_id, e.r_inventory, e.r_technical, e.r_collaterals, e.r_overall, e.score, e.score_from, e.filed_by, e.filed_at, r.crew_name, v.opened_at, d.data_json FROM audit_eval e JOIN audit_request r ON r.id = e.request_id LEFT JOIN audit_visit v ON v.id = e.visit_id LEFT JOIN audit_visit_data d ON d.request_id = e.request_id WHERE " + NOT_TEST + " ORDER BY e.filed_at DESC LIMIT 500").all(),
       env.DB.prepare("SELECT f.id, f.request_id, f.ship, f.agency_id, f.crew_name, f.owner, f.due, f.text, f.status, f.carried, f.created_by, f.created_at, f.closed_at, f.closed_by, f.closed_visit_id FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE " + NOT_TEST + " ORDER BY f.created_at DESC LIMIT 500").all(),
       env.DB.prepare("SELECT request_id, COUNT(*) AS n FROM audit_file GROUP BY request_id").all().catch(() => ({ results: [] })),
+      // the audits before the app (the Forms survey, src/audit_forms.js): read beside the filed ones, never scored
+      env.DB.prepare("SELECT * FROM audit_forms ORDER BY audit_date DESC").all().catch(() => ({ results: [] })),
     ]);
     const photos = new Map((ph.results || []).map((x) => [x.request_id, Number(x.n) || 0]));
     const fuOf = {};
@@ -645,13 +682,27 @@ export function installAuditRequest(deps) {
         steps: !!d,
         missing: d ? { ws: (d.ws && d.ws.missing) || [], tools: (hw.tools && hw.tools.missing) || [], ppe: (crew.ppe && crew.ppe.missing) || [] } : null,
         repeat: (d && d.repeat) || {},
+        // what the visit found, for the History page to add up (every number read from the filed steps, nothing guessed)
+        found: d ? foundOf(d) : null,
         photos: photos.get(e.request_id) || 0,
         followups: { open: st.filter((x) => x === "open").length, fixed: st.filter((x) => x === "fixed").length },
       };
     });
     const followups = (fu.results || []).map((f) => ({ id: f.id, request: f.request_id, ship: f.ship, sc: f.agency_id, crew: f.crew_name || null, owner: f.owner, due: f.due || null, text: f.text,
       status: f.status, carried: Number(f.carried) || 0, createdAt: f.created_at, createdBy: f.created_by || null, closedAt: f.closed_at || null, closedBy: f.closed_by || null, closedOnVisit: !!f.closed_visit_id }));
-    return json({ today: now().slice(0, 10), audits, followups });
+    const forms = (fm.results || []).map((r) => formsHistoryRow(formsFromRow(r)));
+    const all = audits.concat(forms).sort((a, b) => String(b.filedAt || "").localeCompare(String(a.filedAt || "")));
+    return json(Object.assign({ today: now().slice(0, 10), audits: all, followups }, forms.length ? { forms: { n: forms.length, source: FORMS_SOURCE } } : {}));
+  }
+
+  // One audit from the Forms survey, as typed (History's row opens it). Read only; never scored.
+  async function formsOne(env, url) {
+    const id = String(url.searchParams.get("id") || "").slice(0, 40);
+    if (!/^forms-\d{1,4}$/.test(id)) return json({ ok: false, error: "id_required" }, 400);
+    await ensureAudit(env);
+    const r = await env.DB.prepare("SELECT * FROM audit_forms WHERE id=?").bind(id).first().catch(() => null);
+    if (!r) return json({ ok: false, error: "not_found" }, 404);
+    return json({ ok: true, today: now().slice(0, 10), source: FORMS_SOURCE, audit: formsFromRow(r) });
   }
 
   // A follow-up closed from the list: the person it was asked of did it before the next visit. The next visit's own
@@ -712,9 +763,10 @@ export function installAuditRequest(deps) {
       if (p === "/api/audit/visit/photo" && request.method === "GET") return servePhoto(env, url);
       return json({ error: "not found" }, 404);
     }
-    if (p === "/api/audit/history" || p === "/api/audit/followup/close") {
+    if (p === "/api/audit/history" || p === "/api/audit/followup/close" || p === "/api/audit/forms") {
       if (!session) return json({ error: "unauthorized" }, 401);
       if (p === "/api/audit/history" && request.method === "GET") return history(env);
+      if (p === "/api/audit/forms" && request.method === "GET") return formsOne(env, url);
       if (p === "/api/audit/followup/close" && request.method === "POST") return closeFollowup(request, env, session);
       return json({ error: "not found" }, 404);
     }

@@ -83,7 +83,7 @@ test("a field report is flagged only with its own words as the quote", () => {
 test("PARTS_DB and HON_DB are read, never written", () => {
   const s = readFileSync(new URL("../src/score_auto.js", import.meta.url), "utf8");
   const hits = [...s.matchAll(/(PARTS_DB|HON_DB)\.prepare\(\s*["'`]([^"'`]*)/g)];
-  assert.equal(hits.length, 2);
+  assert.equal(hits.length, 3, "the Parts Portal's misses, HON's handovers, OBP's clicks (20 Oct 2026)");
   for (const m of hits) assert.match(m[2].trim(), /^SELECT\b/i);
   assert.doesNotMatch(s, /(PARTS_DB|HON_DB)\.(batch|exec)\(/);
 });
@@ -236,4 +236,81 @@ test("S5: a Parts Portal or HON read that FAILS is said on the card, never read 
   assert.equal(r.sources.partsRead, false); assert.equal(r.sources.honRead, false);
   assert.ok(!r.gates.rush, "a failed read never arms a gate either");
   assert.equal(r.sliders.sHand, 0, "the handover factor still cannot be earned without a signed HON row — the card says why");
+});
+
+// OBP's clicks (Jerwin's daily clicks.csv, read by the weekly-orders app into cims-hon's D1 since 20 Oct 2026): the mono
+// share of PRESS clicks on the card's ships over the contract. The rule (under 20% = 5) is bonus.js's, unchanged.
+test("mono: OBP's press clicks on the card's ships over the contract feed the mono factor", async () => {
+  const CLICKS = [{ ship: "Navigator", c: 75000, m: 25000, a: "2026-04-01", b: "2026-10-18" }, { ship: "Quantum", c: 90000, m: 9000, a: "2026-04-01", b: "2026-10-18" },
+    { ship: "Anthem", c: 50000, m: 1000, a: "2026-05-02", b: "2026-10-18" }];
+  let bound = null;
+  const st = (rows, keep) => ({ bind: (...a) => { if (keep) bound = a; return { all: async () => ({ results: rows }), first: async () => rows[0] || null, run: async () => ({}) }; } });
+  const env = (hon) => ({ DB: { prepare: (sql) => st(/FROM crew$/.test(sql) ? ROSTER : []) }, PARTS_DB: { prepare: () => st([]) }, HON_DB: hon });
+  const clicksOnly = (rows) => ({ prepare: (sql) => (/weekly_obp_clicks/.test(sql) ? st(rows, true) : { bind: () => ({ all: async () => ({ results: [] }) }) }) });
+  const base = { sc: "SC-1", signOn: "2026-04-01", signOff: "2026-11-05", crewName: "Ryan Marto", today: "2026-11-10" };
+  const nav = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Navigator of the Seas" }, { engine: "none" });
+  assert.equal(nav.sliders.sMono, 0, "Navigator 25% mono: 20% or more = 0");
+  assert.deepEqual(bound, ["2026-04-01", "2026-11-05"], "the contract's own days");
+  const ev = nav.evidence.filter((e) => e.factor === "sMono").map((e) => e.text).join(" | ");
+  assert.match(ev, /Mono 25% of press clicks/);
+  assert.match(ev, /Press clicks on Navigator, 2026-04-01 to 2026-10-18: 25,000 mono of 100,000/);
+  assert.doesNotMatch(ev, /Quantum|Anthem/, "another ship's clicks are not his");
+  const q = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Quantum" }, { engine: "none" });
+  assert.equal(q.sliders.sMono, 5, "Quantum 9.1% mono: under 20% = 5");
+  const tr = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Quantum, Anthem" }, { engine: "none" });
+  assert.match(tr.evidence.map((e) => e.text).join(" | "), /Press clicks on Quantum, Anthem, 2026-04-01 to 2026-10-18: 10,000 mono of 150,000/, "a transfer is every ship on the card");
+  const late = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Anthem", signOn: "2026-04-20" }, { engine: "none" });
+  assert.match(late.evidence.map((e) => e.text).join(" | "), /OBP's clicks on file begin 2026-05-02; the contract began 2026-04-20/, "a contract older than the clicks on file says so");
+  // Azamara: the clicks file's ShipIDs for the Azamara hulls are not on OBP's ship list yet, so no row carries the name
+  const az = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Azamara Quest" }, { engine: "none" });
+  assert.equal(az.sliders.sMono, 5);
+  assert.match(az.evidence.map((e) => e.text).join(" | "), /No click data for this contract yet: full points/);
+  // before the weekly app has created its table: no data, not a failure
+  const noTable = { prepare: (sql) => (/weekly_obp_clicks/.test(sql) ? { bind: () => ({ all: async () => { throw new Error("D1_ERROR: no such table: weekly_obp_clicks"); } }) } : { bind: () => ({ all: async () => ({ results: [] }) }) }) };
+  const nt = await gatherAuto(env(noTable), { ...base, ship: "Navigator" }, { engine: "none" });
+  assert.equal(nt.sliders.sMono, 5); assert.equal(nt.sources.clicksRead, true);
+  assert.doesNotMatch(nt.evidence.map((e) => e.text).join(" | "), /could not be read/);
+  // any other error is said on the card, never read as "no data"
+  const boom = { prepare: (sql) => (/weekly_obp_clicks/.test(sql) ? { bind: () => ({ all: async () => { throw new Error("D1_ERROR: storage"); } }) } : { bind: () => ({ all: async () => ({ results: [] }) }) }) };
+  const bm = await gatherAuto(env(boom), { ...base, ship: "Navigator" }, { engine: "none" });
+  assert.equal(bm.sources.clicksRead, false);
+  assert.match(bm.evidence.map((e) => e.text).join(" | "), /OBP's clicks could not be read \(D1_ERROR: storage\): mono was NOT checked/);
+  // no sign-on or no ship: nothing dated is read
+  bound = null;
+  await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Navigator", signOn: "" }, { engine: "none" });
+  assert.equal(bound, null);
+});
+
+test("aboardOn: a training visitor holds no seat and is never charged a miss (Miguel, 17 Oct 2026: never charged)", async () => {
+  const { aboardOn, missOwnerByBoard } = await import("../src/score_auto.js");
+  const { buildCrewIndex } = await import("../src/travel_match.js");
+  const ix = buildCrewIndex([{ agency_id: "SC-0041465", first_name: "Jonathan", last_name: "Alonzo" }, { agency_id: "SC-7", first_name: "A.J.", last_name: "Balena" }]);
+  const legs = [
+    { sc: "SC-0041465", name: "Jonathan Alonzo", ship: "Pursuit", on: "2026-10-16", off: "2026-10-16", is_current: true, visit: true },
+    { sc: "SC-7", name: "A.J. Balena", ship: "Pursuit", on: "2026-10-16", off: "2027-03-16", is_current: true },
+  ];
+  assert.deepEqual(aboardOn(legs, "Pursuit", "2026-10-16").map((a) => a.sc), ["SC-7"]);
+  const order = { ship: "Pursuit", submitted_at: "2026-10-16", requester: "Jonathan Alonzo" };
+  assert.equal(missOwnerByBoard(order, "SC-0041465", ix, legs).mine, false, "the visitor is not charged even when he typed the order");
+  assert.equal(missOwnerByBoard(order, "SC-7", ix, legs).mine, true, "the seat aboard is: the only crew aboard");
+});
+
+test("an audit belongs to the contract it was REQUESTED in, whenever Dexter grades it (Miguel, 17 Oct 2026)", async () => {
+  const { autoScore } = await import("../src/bonus.js");
+  // contract A: Quantum, 1 Mar -> 31 Oct; Dexter asks on 25 Oct, grades 3/5 on 20 Nov; contract B starts 10 Nov
+  const aud = [{ id: "ar1", score: 3, at: "2026-11-20T10:00:00Z", requestedAt: "2026-10-25T09:00:00Z" }];
+  const A = autoScore({ signOn: "2026-03-01", signOff: "2026-10-31", today: "2026-12-01", audits: aud });
+  assert.equal(A.sliders.sComm, 0, "A's audit, a 3: 0 points");
+  const B = autoScore({ signOn: "2026-11-10", signOff: "2027-06-10", today: "2026-12-01", audits: aud });
+  assert.equal(B.sliders.sComm, 10, "graded during B, asked during A: not B's (the grading-day window gave B the 3)");
+  // graded more than 30 days after the sign-off: still A's (the old window lost it)
+  const late = autoScore({ signOn: "2026-03-01", signOff: "2026-10-31", today: "2027-01-10", audits: [{ ...aud[0], at: "2026-12-15T10:00:00Z" }] });
+  assert.equal(late.sliders.sComm, 0);
+  // an audit with no request date keeps the grading window
+  const legacy = autoScore({ signOn: "2026-03-01", signOff: "2026-10-31", today: "2026-12-01", audits: [{ id: "v1", score: 4, at: "2026-11-15" }] });
+  assert.equal(legacy.sliders.sComm, 8);
+  // the read carries the request's date: sent, else created
+  const src = (await import("node:fs")).readFileSync(new URL("../src/score_auto.js", import.meta.url), "utf8");
+  assert.match(src, /COALESCE\(r\.sent_at, r\.created_at\) AS requested_at FROM audit_eval e LEFT JOIN audit_request r/);
+  assert.match(src, /requestedAt: a\.requested_at \|\| null/);
 });
