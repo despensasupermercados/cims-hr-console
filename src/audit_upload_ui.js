@@ -32,6 +32,9 @@ const PAGE_CSS = String.raw`
 .up.busy{border-style:solid;cursor:default}
 .up .fn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .up .prog{grid-column:1 / -1}
+.asx{border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;gap:8px;font-size:13.5px;line-height:1.45}
+.asx.m{border-color:var(--amberm,var(--line));background:var(--amberbg)}
+.asx .t{font-weight:700;color:var(--ink)}.asx .k{font-weight:700;color:var(--mut);font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;display:block}
 .fixl{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;font-weight:600;color:var(--red)}.fixl .ic{width:16px;height:16px;margin-top:2px}
 .cat{padding:12px 24px 6px;font-size:12.5px;font-weight:600;color:var(--mut);background:var(--soft)}
 .cline{display:grid;grid-template-columns:minmax(0,1fr) 88px;gap:14px;align-items:center;padding:12px 24px}
@@ -133,7 +136,16 @@ const SCRIPT = String.raw`
     else { cls += " bad"; chip = '<span class="chip r">Send again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     var input = (S.status === "sent" && !m.down && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + (kind === "p43" ? "Pattern 43" : "Machine Management List") + " for " + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
     var fix = s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !b && s.say ? '<div class="fixl">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>" : "";
-    return '<label class="' + cls + '">' + input + '<div style="min-width:0"><b>' + label + '</b><div class="xs">' + sub + "</div></div>" + chip + bar + "</label>" + fix;
+    return '<label class="' + cls + '">' + input + '<div style="min-width:0"><b>' + label + '</b><div class="xs">' + sub + "</div></div>" + chip + bar + "</label>" + fix + (kind === "p43" && !m.down && !b ? assess(s) : "");
+  }
+  /* what the scan shows, told to the crew the moment it is read (R1, Miguel 23 Oct 2026): built by the server from HON's
+     measurement (audit_read.p43Assess); the page only draws it */
+  function assess(s) {
+    var a = s && s.read_state === "ok" && s.assess; if (!a) return "";
+    if (a.state === "clean") return '<div class="asx"><span class="t">' + esc(a.head) + "</span></div>";
+    return '<div class="asx m"><span class="t">' + esc(a.head) + "</span>" + a.items.map(function (i) {
+      return '<div><b>' + esc(i.title) + "</b>" + i.lines.map(function (l) { return '<div style="margin-top:6px"><span class="k">' + esc(l[0]) + "</span>" + esc(l[1]) + "</div>"; }).join("") + "</div>";
+    }).join("") + (a.after ? '<div class="sm">' + esc(a.after) + "</div>" : "") + "</div>";
   }
   function docTask(kind, icn, cls, title, sub) {
     var live = S.machines.filter(function (m) { return !m.down; }), ok = live.filter(function (m) { return m[kind] && m[kind].read_state === "ok"; }).length;

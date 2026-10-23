@@ -15,7 +15,7 @@
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
 import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
-import { p43ReadState, mmlReadState, coverFor } from "./audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
@@ -550,9 +550,18 @@ export function installAuditRequest(deps) {
     // THE BLIND SHEET: part number, description, category, his own number. Never OBP's on-hand (pinned by test).
     return {
       ship: req.ship, crew: req.crew_name, auditor: nameOf(req.auditor), dueAt: req.due_at, status: req.status, test: !!req.test_mode,
-      machines: s.machines.map((m) => ({ serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43: slot(s.uploads, m.serial, "p43"), mgmt: slot(s.uploads, m.serial, "mgmt") })),
+      machines: s.machines.map((m) => ({ serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43: assessed(slot(s.uploads, m.serial, "p43"), s.uploads, m.serial, req), mgmt: slot(s.uploads, m.serial, "mgmt") })),
       lines: s.lines, counted: s.counted, extras: s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted })), gate: { open: s.gate.open, missing: s.gate.missing.map((m) => m.say) },
     };
+  }
+
+  // The crew's Pattern 43 row carries what the scan shows (R1, audit_read.p43Assess): the crew's page only, never the blind
+  // count's numbers — a mark is about the press, not the shelf.
+  function assessed(sl, ups, serial, req) {
+    if (!sl || sl.read_state !== "ok") return sl;
+    const u = ups.find((x) => x.id === sl.id);
+    const a = p43Assess(u && u.read && u.read.summary, String(nameOf(req.auditor) || "").trim().split(/\s+/)[0] || "");
+    return a ? Object.assign({}, sl, { assess: a }) : sl;
   }
 
   async function upload(request, env, url, req) {

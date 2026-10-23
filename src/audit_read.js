@@ -19,6 +19,30 @@ export function p43ReadState(res) {
   return { read_state: "unreadable", say: "Could not measure this bundle: " + why + ". Print Pattern 43 again and scan all 12 pages as one PDF.", summary: { state: res.state, legend: L } };
 }
 
+// THE CREW IS TOLD WHAT THE SCAN SHOWS (R1; Miguel, 23 Oct 2026: "is not that Rolando needs to approve .. is that you the AI
+// tell the crew the assessment of it"). Until then the crew read "Received" and only the team saw the marks. Built from what
+// HON measured and the DG3 tech library rule each mark carries, the same lines the audit app shows Dexter (audit_ui
+// p43Lines); nothing is guessed and nothing says "replace" (copy quality decides). auditor = the first name who sees the
+// same reading before the visit. summary = the stored read's summary ({ state, legend }); null when it says nothing.
+const sentenceCase = (t) => { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
+export function p43Assess(summary, auditor) {
+  if (!summary || (summary.state !== "clean" && summary.state !== "findings")) return null;
+  const items = ((summary.legend && summary.legend.items) || []);
+  if (summary.state === "clean" || !items.length) return { state: "clean", head: "No marks on any page. Nothing to do for this press.", items: [] };
+  const out = items.map((i) => {
+    const w = String(i.where || "").split(" · ").filter(Boolean), pg = Array.isArray(i.pages) ? i.pages : [], ink = String(i.ink || "").toLowerCase();
+    const lines = [];
+    if (w.length) lines.push(["Where", w.map((x, k) => sentenceCase(x) + (pg.length === w.length ? " (page " + pg[k] + ")" : "")).join(" · ") + (pg.length && pg.length !== w.length ? " · pages " + pg.join(", ") : "")]);
+    if (ink && ink !== "black" && w.length > 1 && /half tone|full tone/i.test(w[0])) lines.push(["What it means", "The same mark shows on the " + ink + " page and on every colour mixed with " + ink + ", so it comes from the " + ink + " unit alone. The transfer belt or the scanner would mark every colour."]);
+    if (i.part) lines.push(["Points to", "The " + String(i.part).toLowerCase() + (i.check && i.check.src ? " (" + i.check.src + ")" : "") + "."]);
+    const chk = i.check && i.check.say ? i.check.say : (typeof i.check === "string" ? i.check : "");
+    if (chk) lines.push(["Check on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and follow the line along its length: " : "") + chk + "."]);
+    return { title: sentenceCase(i.head || i.mark || "A mark") + (i.detail ? " · " + i.detail : ""), lines };
+  });
+  return { state: "findings", head: out.length + (out.length === 1 ? " mark" : " marks") + " on this press.", items: out,
+    after: "Keep printing. Parts are changed on copy quality, not on a mark: if it shows on customer copies, open a ticket with Tech Support." + (auditor ? " " + auditor + " sees the same reading before the visit." : "") };
+}
+
 export function mmlReadState(res) {
   if (!res) return { read_state: "failed", say: "The reader did not answer. It will try again within the hour." };
   if (res.ok === false) {
