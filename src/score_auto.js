@@ -5,7 +5,8 @@
 //   DB                           — Dexter's grades (audit_eval), Ray's live answers, the crew's field reports;
 //   the intel engine             — whether a field report names an order-accuracy or par problem, with a QUOTE that must
 //                                  be in the report word for word (otherwise no flag), kept in score_intel_flag.
-// No click feed exists yet (OBP's clicks table is being added to the nightly export): mono is null = full points.
+//   HON_DB weekly_obp_clicks       — OBP's daily clicks per machine (Jerwin's clicks.csv, read by the weekly-orders app
+//                                  since 20 Oct 2026): the mono share of PRESS clicks on the card's ships over the contract.
 import { autoScore } from "./bonus.js";
 import { buildCrewIndex, matchTravelName } from "./travel_match.js";
 
@@ -148,6 +149,22 @@ export function missOwnerByBoard(m, sc, ix, legs) {
   return { mine: !!owner && owner.sc === sc, who: named.who, joint: named.joint, rule: "board", why,
     owner: owner ? owner.name : null, aboard: aboard.map((a) => a.name), unplaced: owner ? [] : ["(two crew aboard 4+ weeks, the order names neither)"], others: owner && owner.sc !== sc ? [owner.name] : [] };
 }
+// MONO (Miguel, 15 Oct 2026: "presses only, under 20% of clicks over the contract"). OBP's rows are the day's clicks per
+// machine (they equal the day's meter change); the share is the press mono over press colour + mono on the card's ships
+// for the contract's days. It is the SHIP's share: two printers on one hull share it. No press click on those ships in
+// those days = no data (null, full points by the rule in bonus.js).
+export function monoShare(rows, keys) {
+  const hit = (rows || []).filter((r) => r && keys.includes(shipKey(r.ship)));
+  const c = hit.reduce((t, r) => t + (Number(r.c) || 0), 0), m = hit.reduce((t, r) => t + (Number(r.m) || 0), 0);
+  if (!hit.length || c + m <= 0) return null;
+  const days = hit.map((r) => [day(r.a), day(r.b)]).filter(([a, b]) => a && b);
+  return { pct: (m / (c + m)) * 100, mono: m, total: c + m, ships: hit.map((r) => r.ship), from: days.map((d) => d[0]).sort()[0] || null, to: days.map((d) => d[1]).sort().pop() || null };
+}
+const fmtN = (n) => Math.round(n).toLocaleString("en-US");
+export function monoLine(x, on) {
+  const late = x.from > on ? " (OBP's clicks on file begin " + x.from + "; the contract began " + on + ")" : "";
+  return "Press clicks on " + x.ships.join(", ") + ", " + x.from + " to " + x.to + late + ": " + fmtN(x.mono) + " mono of " + fmtN(x.total) + " (all presses on the ship)";
+}
 // deps: { ensure (score_intel_flag guard), engine, claudeModel, workersModel, boardLegs: async () => legs (the ONE schedule) }
 // in: { sc, ship ("A" or "A, B" for a transfer), signOn, signOff, crewName, today }
 export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, today }, deps = {}) {
@@ -161,7 +178,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   // factor lost, from a storage error nobody saw. The failure is kept apart from an empty answer.
   const failed = {};
   const fail = (k) => (e) => { failed[k] = String((e && e.message) || e).slice(0, 160); return none(); };
-  const [misses, hons, audits, intel, resp, roster, legs] = await Promise.all([
+  const [misses, hons, audits, intel, resp, roster, legs, clicks] = await Promise.all([
     env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(fail("parts")) : none(),
     env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(fail("hon")) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
@@ -170,6 +187,9 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
     env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
     env.PARTS_DB && on && keys.length && deps.boardLegs ? Promise.resolve().then(deps.boardLegs).catch(() => null) : null,
+    // presses only (is_mfd 0), per ship, the contract's days; a table not created yet is no data, any other error is said
+    env.HON_DB && on && keys.length ? env.HON_DB.prepare("SELECT ship, SUM(color) AS c, SUM(mono) AS m, MIN(day) AS a, MAX(day) AS b FROM weekly_obp_clicks WHERE is_mfd = 0 AND ship IS NOT NULL AND day >= ? AND day <= ? GROUP BY ship").bind(on, off).all()
+      .catch((e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail("clicks")(e))) : none(),
   ]);
   // An answer given BEFORE this contract's sign-on is the previous contract's (16 Oct 2026): nobody superseded it because
   // nobody asked again, and it pre-filled this contract's factors. It is listed as earlier feedback, not used (§11c).
@@ -220,7 +240,8 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   // `requestedAt` decides which contract the audit is (bonus.js autoScore, Miguel 17 Oct 2026: "The one it was requested in")
   const allAud = (audits.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at, requestedAt: a.requested_at || null, open: /no sign-in/.test(String(a.filed_by || "")) }));
   const aud = keys.length ? allAud.filter((a) => keys.includes(shipKey(a.ship))) : [];
-  const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: null });
+  const mono = monoShare(clicks.results || [], keys);
+  const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: mono ? { pct: mono.pct } : null });
   const notes = [];
   for (const m of notMine) {
     const head = "Vessel-side miss " + m.ref + " · " + day(m.at) + " · " + (m.ship || "") + " · placed by " + m.by;
@@ -230,12 +251,14 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   for (const r of earlier) notes.push({ factor: r.role === "ray" ? "sOrder" : r.role === "rolando" ? "sHand" : null, text: (r.role === "ray" ? "Ray" : r.role === "rolando" ? "Rolando" : r.role) + "'s answer of " + day(r.submitted_at) + " is from before this contract (sign-on " + on + "): kept as earlier feedback, not used", source: "Windows" });
   if (failed.parts) notes.push({ factor: "sOrder", text: "The Parts Portal could not be read (" + failed.parts + "): vessel-side misses were NOT checked", source: "Parts Portal" });
   if (failed.hon) notes.push({ factor: "sHand", text: "HON could not be read (" + failed.hon + "): the handover was NOT checked", source: "HON" });
+  if (failed.clicks) notes.push({ factor: "sMono", text: "OBP's clicks could not be read (" + failed.clicks + "): mono was NOT checked", source: "OBP clicks" });
+  else if (mono) notes.push({ factor: "sMono", text: monoLine(mono, on), source: "OBP clicks" });
   if (!keys.length) notes.push({ factor: "sOrder", text: "No ship on the Score Card: the Parts Portal, HON and the audits were not checked", source: "Score Card" });
   if (!on) notes.push({ factor: "sOrder", text: "No sign-on date: misses and field reports were not checked", source: "Score Card" });
   if (unread) notes.push({ factor: "sAcc", text: unread + " field report" + (unread === 1 ? "" : "s") + " in this contract not read yet (" + (deps.engine && deps.engine !== "none" ? "read on the next open" : "no AI engine") + "): check them on the crew's Notes", source: "Field intel" });
   for (const a of res.audits || []) if (a.open) notes.push({ factor: "sComm", text: "The audit grade was filed on the open audit site, without a sign-in", source: "Audit" });
   return { ok: true, ...res, evidence: (res.evidence || []).concat(notes), unread, allAudits: allAud,
-    sources: { parts: !!env.PARTS_DB, hon: !!env.HON_DB, clicks: false, partsRead: !!env.PARTS_DB && !failed.parts, honRead: !!env.HON_DB && !failed.hon } };
+    sources: { parts: !!env.PARTS_DB, hon: !!env.HON_DB, clicks: !!env.HON_DB, partsRead: !!env.PARTS_DB && !failed.parts, honRead: !!env.HON_DB && !failed.hon, clicksRead: !!env.HON_DB && !failed.clicks } };
 }
 
 // The seafarer's audits for the Inputs page: one light read, no Parts Portal, HON or AI.
