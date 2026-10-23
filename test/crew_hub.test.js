@@ -237,3 +237,18 @@ test("crew view: the Data tab carries it, and the audit and examples read no mon
   const body = W.slice(W.indexOf("async function hubBonusCount("), W.indexOf("async function crewCount("));
   assert.doesNotMatch(body, /INSERT|UPDATE|DELETE/i);
 });
+
+// Norwegian (the Getaway pilot): its own ordering steps, opened first for a crew on an NCL hull (Miguel, 23 Oct 2026: "we
+// need to bring them now because the crew has them"). Royal & Celebrity and Azamara keep theirs, as before.
+test("ordering: three tabs; an NCL crew opens on Norwegian's MXP steps, Azamara on Azamara's, everyone else on Royal & Celebrity", () => {
+  const page = (brand) => hubPage({ first: "Joe", ship: "Norwegian Getaway", brand, on: "2026-11-09", off: "2026-12-24", offSource: "rita", today: "2026-11-10" });
+  const checked = (h) => (h.match(/id="(t\d)" checked/) || [])[1];
+  assert.equal(checked(page("NCL")), "t3");
+  assert.equal(checked(page("Azamara")), "t2");
+  assert.equal(checked(page("Royal")), "t1");
+  const h = page("NCL");
+  assert.match(h, /<label for="t3">Norwegian<\/label>/);
+  assert.match(h, /raised in MXP, NCL's own system/);
+  assert.match(h, /an order closes two days before the storing date/);
+  assert.match(h, /#t3:checked~\.p3\{display:block\}|#t3:checked~\.p3\{/);
+});
