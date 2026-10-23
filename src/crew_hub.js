@@ -97,8 +97,10 @@ export function hubPage(m) {
     "Inspect and accept the whole delivery on OBP within 24 hours. Report any shortage with backup data, per the SOP."];
   // Norwegian (the Getaway pilot, in service 16 Nov 2026). NCL orders through its own MXP system from a template DG3 built
   // for the ship; the steps are what the Brain holds on it (recD2YcbbX9kaEHn0, rec2sYS0HGZgAGZkv, rec2S1tG9DnBiOmtt,
-  // rec1chZ7sqWRJ2g5e). Miguel, 23 Oct 2026: "we need to bring them now because the crew has them".
-  const NCL = ["Every two weeks the Getaway order is raised in MXP, NCL's own system, from the template DG3 built for the ship. Have your counts and what you need ready for it.",
+  // rec1chZ7sqWRJ2g5e). Miguel, 23 Oct 2026: "we need to bring them now because the crew has them"; then, who does what:
+  // "the printer update OBP .. MXP will be managed by the linen keeper for right now".
+  const NCL = ["Every two weeks the ship's linen keeper raises the Getaway order in MXP, NCL's own system, from the template DG3 built for the ship. Give the linen keeper your counts and what you need in time.",
+    "You keep OBP up to date every day, like on every ship. It is the record DG3 checks the order against.",
     "Watch NCL's storing dates: an order closes two days before the storing date.", "Tell shoreside management about any request, change or approval.",
     "DG3 shoreside approves the order. Apollo, NCL's warehouse in Miami, receives it and trucks it to the port for the storing date.",
     "Check the delivery against the order the day it comes aboard. Report any shortage to shoreside within 24 hours, with backup data."];

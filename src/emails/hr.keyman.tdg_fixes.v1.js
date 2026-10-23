@@ -18,19 +18,23 @@ export function tdgFixesEmail({ fixes = [], asOf, today, from = "Rita", test = f
   const held = fixes.filter((f) => f.kind === "held"), undated = fixes.filter((f) => f.kind === "undated");
   const n = fixes.length;
   const subject = (test ? "[TEST] " : "") + "To correct in TDG · " + n + (n === 1 ? " seafarer" : " seafarers") + (asOf ? " · file of " + short(asOf) : "");
-  const head = n === 1 ? "One seafarer to correct in TDG." : n + " seafarers to correct in TDG.";
-  const head2 = "The next AdvancedQuery closes each one.";
-  const lead = "Joy, the console reads TDG's AdvancedQuery" + (asOf ? " of " + esc(fmtDate(asOf)) : "") + ". On these rows the file says one thing and the ships have already moved on. Nothing changes on our side until TDG's file does.";
-  const stats = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${statCell(held.length, "still On board after relief", "red")}${statCell(undated.length, "On board, no embark date", "amber")}${statCell(n, "in all", "")}</tr></table>`;
+  // Phone first (Miguel, 23 Oct 2026, on the render: "the mobile version needs work"): a headline that fits two lines at
+  // 375px, stat labels of two words, the pill ABOVE the name (a long name never shares its line), the note in two short lines.
+  const head = (n === 1 ? "One" : n) + " to correct in TDG.";
+  const head2 = "The next file closes " + (n === 1 ? "it." : "them.");
+  const lead = "Joy, on these rows TDG's AdvancedQuery" + (asOf ? " of " + esc(short(asOf)) : "") + " still says what the ships have moved past. Nothing changes on our side until TDG's file does.";
+  const stats = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${statCell(held.length, "Still on board", "red")}${statCell(undated.length, "No embark date", "amber")}${statCell(n, "In all", "")}</tr></table>`;
   const item = (f) => {
     const ship = shipFullName(f.ship, f.brand) || f.ship;
-    const top = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td style="font-family:${FH};font-size:22px;font-weight:600;color:${T.navy};line-height:1.25;">${esc(f.name || f.surname)}</td><td align="right" valign="top" style="padding-left:10px;">${f.kind === "held" ? pill("Still On board", "red") : pill("No embark date", "amber")}</td></tr></table>`;
+    const tone = f.kind === "held" ? "red" : "amber";
+    const top = blk("", f.kind === "held" ? pill("Still On board", "red") : pill("No embark date", "amber"))
+      + blk(`padding-top:10px;font-family:${FH};font-size:22px;font-weight:600;color:${T.navy};line-height:1.2;`, `<span class="nm">${esc(f.name || f.surname)}</span>`);
     const id = blk(`padding-top:4px;font-family:${FB};font-size:13px;color:${T.slate};`, esc(ship) + (f.code ? " · " + esc(f.code) : ""));
     const said = f.kind === "held"
-      ? "TDG's file has " + esc(first(f.name)) + " On board with no debark date. " + (f.byName ? esc(f.byName) + " signed on " + esc(ship) + (f.byOn ? " on " + esc(fmtDate(f.byOn)) : "") + " as the reliever." : "The reliever has signed on.")
-      : "TDG's file has " + esc(first(f.name)) + " On board " + esc(ship) + " with no EMBARKEDDATE, so the board cannot date the contract.";
-    const ask = f.kind === "held" ? "Please enter " + esc(first(f.name)) + "'s debark date in TDG." : "Please enter the embark date in TDG.";
-    return card(top + id + blk(`padding-top:12px;font-family:${FB};font-size:14px;color:${T.body};line-height:1.5;border-left:3px solid ${f.kind === "held" ? T.red : T.amber};padding-left:12px;`, said + "<br><b style=\"color:" + T.navy + ";\">" + ask + "</b>"));
+      ? "TDG: On board, no debark date. " + (f.byName ? esc(f.byName) + " signed on" + (f.byOn ? " " + esc(short(f.byOn)) : "") + " as the reliever." : "The reliever has signed on.")
+      : "TDG: On board, no embark date. The board cannot date the contract.";
+    const ask = f.kind === "held" ? "Please enter " + esc(first(f.name)) + "'s debark date." : "Please enter " + esc(first(f.name)) + "'s embark date.";
+    return card(top + id + blk(`padding-top:12px;font-family:${FB};font-size:14px;color:${T.body};line-height:1.5;`, said + "<br><b style=\"color:" + T.navy + ";\">" + ask + "</b>"), tone);
   };
   const rows = [
     test ? row(card(`<div style="font-family:${FB};font-size:13px;color:${T.amberInk};font-weight:700;">TEST MODE · sent to you only.</div>`)) : "",
@@ -42,8 +46,8 @@ export function tdgFixesEmail({ fixes = [], asOf, today, from = "Rita", test = f
   const html = frame({ preheader: head + " " + head2, eyebrow: "To correct in TDG", date: asOf ? "File of " + short(asOf) : "", head, head2, lead, rows, footer });
   const line = (f) => "- " + (f.name || f.surname) + " · " + (shipFullName(f.ship, f.brand) || f.ship) + ": " + (f.kind === "held"
     ? "still On board in TDG; " + (f.byName ? f.byName + " signed on" + (f.byOn ? " " + fmtDate(f.byOn) : "") + " as the reliever" : "the reliever has signed on") + ". Please enter the debark date."
-    : "On board with no embark date. Please enter the embark date.");
-  const text = [head + " " + head2, "Joy, the console reads TDG's AdvancedQuery" + (asOf ? " of " + fmtDate(asOf) : "") + ". On these rows the file says one thing and the ships have already moved on.", fixes.map(line).join("\n"), "Questions on any of them, reply to this email. " + from + "."].join("\n\n");
+    : "On board with no embark date. Please enter " + first(f.name) + "'s embark date.");
+  const text = [head + " " + head2, "Joy, on these rows TDG's AdvancedQuery" + (asOf ? " of " + fmtDate(asOf) : "") + " still says what the ships have moved past.", fixes.map(line).join("\n"), "Questions on any of them, reply to this email. " + from + "."].join("\n\n");
   return { subject, html, text };
 }
 
