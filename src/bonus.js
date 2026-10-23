@@ -45,7 +45,10 @@ export function mapFeedbackToScore(answers) {
   const out = { gates: {}, sliders: {}, evidence: [], gateNote: [] };
   const ray = answers.ray, rol = answers.rolando, dex = answers.dexter;
   if (ray) {
-    if (ray.order === "Yes" && ray.rushcause === "Crew ordering failure") { out.gates.rush = true; out.gateNote.push("Rush from crew ordering failure" + (ray.rushcost ? (" — $" + Number(ray.rushcost).toLocaleString()) : "") + " (Ray)"); }
+    // THE RUSH GATE IS THE PARTS PORTAL'S (Miguel, 17 Oct 2026: "Portal miss only"): a vessel-side miss charged by the
+    // whose-miss rule (autoScore, score_auto.missOwnerByBoard) resets the streak; Ray's "crew ordering failure" answer is
+    // evidence on the card, never a reset. Ray's 13 Oct answer armed the rush gate on Ryan Marto's Score Card ($1,807.75)
+    // while the Portal has no missed order of any kind on Quantum — Ray's word against the system, on a crew it does not charge.
     if (ray.audit === "Yes") { out.gates.audit = true; out.gateNote.push("Failed inventory audit (Ray)"); }
     // ALL OR NOTHING (Miguel, 15 Oct 2026: "Partial doesn't really work"): only the best answer earns the factor.
     // Until then "Mostly" gave 14 of 20, "Minor errors" 17 of 25, "Some gaps" 9 of 15.
@@ -102,7 +105,7 @@ const inSpan = (d, on, off) => { const x = day(d); return !!x && (!on || x >= on
 // (a report at 08:00 and Ray's answer at 15:00 the same day: Ray answered AFTER it).
 const instant = (v) => { const t = Date.parse(String(v || "").trim().replace(" ", "T")); return isNaN(t) ? null : t; };
 // in: { signOn, signOff, answers:{ray,rolando,dexter}, rayAt (ISO the answer was given), misses:[{ref,at,total}],
-//       handover:{signedAt,id}|null, audits:[{score,at,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null,
+//       handover:{signedAt,id}|null, audits:[{score,at (graded),requestedAt,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null,
 //       today (ISO day; default the clock) }
 // Without a sign-on nothing dated is counted (a blank start read every miss in the ship's history); a contract whose
 // sign-off is still ahead (or blank) is running, so its handover is not due yet and keeps the window's value.
@@ -131,7 +134,11 @@ export function autoScore(inp) {
     sliders.sHand = x.handover ? FW.sHand : 0;
     evidence.push({ factor: "sHand", text: x.handover ? "HON handover signed " + day(x.handover.signedAt) : "No signed HON handover for this sign-off", source: "HON" });
   }
-  const audits = (x.audits || []).filter((a) => a.score != null && inSpan(a.at, on, off ? addDays(off, 30) : ""));
+  // THE AUDIT BELONGS TO THE CONTRACT IT WAS REQUESTED IN (Miguel, 17 Oct 2026: "The one it was requested in"), whenever
+  // Dexter grades it: a request sent in the last days of a contract and graded after the next one began scored the NEXT
+  // contract, and one graded more than 30 days after the sign-off scored none. An audit with no request date keeps the
+  // grading window (sign-on to sign-off + 30 days).
+  const audits = (x.audits || []).filter((a) => a.score != null && (a.requestedAt ? inSpan(a.requestedAt, on, off) : inSpan(a.at, on, off ? addDays(off, 30) : "")));
   const worst = audits.length ? Math.min(...audits.map((a) => Number(a.score))) : null;
   sliders.sComm = auditPoints(worst);
   evidence.push({ factor: "sComm", text: worst == null ? "No audit in this contract: full points" : "Dexter's audit " + worst + "/5" + (audits.length > 1 ? " (lowest of " + audits.length + ")" : ""), source: "Audit" });

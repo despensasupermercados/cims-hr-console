@@ -34,21 +34,21 @@ test("a new feedback window supersedes the old answers: kept in previous, out of
     const r = await W.default.fetch(new Request("https://t.local" + path, { method: body ? "POST" : "GET", headers: { "content-type": "application/json", ...(auth ? { cookie: "cims_sid=" + sess } : {}) }, body: body ? JSON.stringify(body) : undefined }), env, { waitUntil() {} });
     return r.json();
   };
-  // contract 1: Ray reports a rush caused by the crew
+  // contract 1: Ray reports a failed inventory audit (his gate; his rush answer is evidence only since 17 Oct 2026)
   const w1 = await call("/api/feedback/request", { agency_id: "SC-1", role: "ray" });
   assert.equal(w1.ok, true);
   const t1 = new URL(w1.link).searchParams.get("t");
-  const s1 = await call("/api/feedback/submit", { t: t1, answers: { order: "Yes", rushcause: "Crew ordering failure", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "No" } }, false);
+  const s1 = await call("/api/feedback/submit", { t: t1, answers: { order: "Yes", rushcause: "Crew ordering failure", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "Yes" } }, false);
   assert.equal(s1.ok, true);
   let f = await call("/api/feedback/crew?id=SC-1");
-  assert.equal(f.prefill.gates.rush, true, "contract 1's Score Card shows the rush");
+  assert.equal(f.prefill.gates.audit, true, "contract 1's Score Card shows the failed audit");
   assert.equal(f.previous.length, 0);
   // contract 2: Rita fires a new Ray window (a second later: two links signed in the same second are the same token)
   await new Promise((r) => setTimeout(r, 1100));
   const w2 = await call("/api/feedback/request", { agency_id: "SC-1", role: "ray" });
   assert.equal(w2.ok, true);
   f = await call("/api/feedback/crew?id=SC-1");
-  assert.equal(f.prefill.gates.rush, undefined, "contract 2 starts clean: the old rush is NOT pre-ticked");
+  assert.equal(f.prefill.gates.audit, undefined, "contract 2 starts clean: the old audit gate is NOT pre-ticked");
   assert.deepEqual(f.answers, {}, "no current answer until Ray answers the new window");
   assert.equal(f.previous.length, 1, "the contract-1 answer is kept");
   assert.equal(f.previous[0].role, "ray");
@@ -61,7 +61,7 @@ test("a new feedback window supersedes the old answers: kept in previous, out of
   assert.equal((await call("/api/feedback/submit", { t: t2, answers: { order: "No", ontime: "Always", acc: "Accurate", par: "Maintained", audit: "No" } }, false)).ok, true);
   f = await call("/api/feedback/crew?id=SC-1");
   assert.equal(f.answers.ray.order, "No");
-  assert.equal(f.prefill.gates.rush, undefined);
+  assert.equal(f.prefill.gates.audit, undefined);
   assert.equal(f.previous.length, 1);
   // the in-app form answered twice keeps the first answer too
   await call("/api/feedback/score", { agency_id: "SC-1", role: "dexter", answers: { assessed: "Yes", overall: "Good" } });

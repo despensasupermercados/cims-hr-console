@@ -639,6 +639,36 @@ movable; the commit is a money user's click; committed outcomes are never touche
   the same day (it never had the 0001 seed); `ensureBonusV2` seeds v1 first on any database that lacks it. (4) with no miss,
   on-time ordering is Ray's on-time answer, all or nothing — as built. Pinned by `test/score_auto.test.js`,
   `test/bonus_policy_v2.test.js`.
+- **Miguel's answers of 17 Oct 2026** (the logic review; money, §1: his merge — PR #287, which also carries the night watch's
+  #281): (1) **The rush gate is the Parts Portal's** ("Portal miss only"): a vessel-side miss charged by the whose-miss rule
+  resets the streak; Ray's "crew ordering failure" answer is evidence on the card, never a reset (`mapFeedbackToScore`) — it
+  armed the gate on Ryan Marto's card ($1,807.75, Quantum) with no missed order of any kind in the Portal. Ray's failed
+  inventory audit stays a gate ("Ray, as today"). (2) **No shipboard review = 3**, the default, unchanged. (3) **A transfer
+  is ONE contract** ("One contract"): legs 21 days or less apart (`contracts.GAP_DAYS`), any ship, are one Score Card
+  (`scorequeue.scoreContracts`; ships "Explorer, Jewel") — Jaramiz Melen Tuazon's Explorer leg alone was committable while
+  he sails Jewel, two counts on one TDG contract. An OVERLAP is not merged (TDG's two files disagreeing, §11d); a training
+  visit is no contract (`visits.js`). (4) **After the sign-off, oldest first, and TDG ends it** ("After sign-off, oldest
+  first", "Wait for TDG"): the card opens on the OLDEST ended contract no outcome covers within `SCORE_RECENT_DAYS` = 180
+  (`defaultScoreLeg`, why `ended_unscored`), else the running one (`current` / `held`), else the most recent, else the next;
+  the commit refuses (`commitBlock`, 409, `apiBonusCommit`, before the evidence read and every write) a sign-off still ahead
+  (`not_ended`), a contract TDG still has On board past the sign-off (`held_by_tdg`: Belhida, Apex, 7 Oct) or still running
+  past a projected one (`still_aboard`), a visit (`visit`), a newer contract while an older one inside the window has no
+  outcome (`older_first`), and a span overlapping an outcome already recorded (`already_scored`: one outcome per contract —
+  the exact span stays the duplicate path; a span moved by a day, or Radiance's Counter contract from 6 Mar beside the
+  file's from 5 Oct, used to pay twice). `/api/bonus/crew` returns `scoring: { why, block }` and the card prints the reason in words
+  (`scBlockMsg`) before the click and after a refusal. The night watch's first cut (#281) opened a running contract ending
+  sooner before an older unscored one; Miguel chose the other order. (5) **A training visitor is never charged a miss**:
+  `aboardOn` skips `visit` legs, so the seat aboard is the one charged, whoever typed the order. (6) Simulated on the
+  16 Oct 2026 file's legs: the card opens on 7 ended contracts nobody has scored (Agbada, Estandian, Madrinico, Ramos, Reyes,
+  Sison, Villacortes), 49 running ones are refused until their sign-off, Belhida is held, no transfer to merge there.
+  (7) **An audit belongs to the contract it was REQUESTED in** (his second round, "The one it was requested in"), whenever
+  Dexter grades it: `autoScore` reads `requestedAt` (`COALESCE(audit_request.sent_at, created_at)`, `gatherAuto`) inside the
+  contract's sign-on to sign-off; an audit with no request date keeps the grading window (sign-off + 30 days). A request sent
+  in a contract's last days and graded after the next one began scored the NEXT contract; one graded 30+ days late scored none.
+  (8) **Jonathan Placer Alonzo's full contracts are scored** ("Score full contracts", replacing the morning's "not scored",
+  given when he was described only as staff): his Rhapsody / Symphony contract (Dec 2025 – Sep 2026) gets a Score Card like
+  any printer's; his training visits are never scored and never charged a miss (Brain rec3g5Cx8YWu1ANyn). Pinned by
+  `test/scorequeue.test.js`, `test/feedback.test.js`, `test/score_auto.test.js`.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
 "redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas
@@ -1525,6 +1555,11 @@ questions (his answers land in the sections they change). Pinned by `test/review
   only the unused `/api/crew/import` page drew one.
 - **Maria's "former crew" is `isOffFleet(status)`**, never the manual tag (a tagged crew TDG has On board left her active
   lists; Not for Rehire could not be listed by name).
+- **One outcome per contract span, by the database** (money, §1: Miguel's merge). The commit's backstop cited a
+  `UNIQUE(crew_id,span_start,span_end)` "migration 0004" that no migration created (production: non-unique indexes only), so
+  two racing commits paid twice. `ux_bonus_outcome_span` (migrations/0033, primary outcomes only, `ensureBonusV2` at runtime)
+  and the contract + legs + outcome written as ONE batch after the evidence read: a refused second click leaves nothing.
+  Pinned by `test/bonus_policy_v2.test.js` on real SQLite.
 
 **Miguel's answers of 17 Oct 2026 to the review** (Brain recICJGsDk6oJJpSd). Pinned by `test/review_1017_board.test.js`.
 - **THE RELIEVER IS ONE RULE** (`src/reliever.js`; "Adopt it everywhere"): the first person to sign on the hull after him,

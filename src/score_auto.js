@@ -118,7 +118,8 @@ const daysBetween = (a, b) => Math.round((Date.parse(day(b) + "T00:00:00Z") - Da
 export function aboardOn(legs, ship, date) {
   const k = shipKey(ship), d = day(date), by = new Map();
   for (const l of legs || []) {
-    if (!l || !l.sc || !l.on || shipKey(l.ship) !== k) continue;
+    // a training visit holds no seat (visits.js): the visitor is never the one charged (Miguel, 17 Oct 2026, "never charged")
+    if (!l || !l.sc || !l.on || l.visit || shipKey(l.ship) !== k) continue;
     const on = day(l.on), off = day(l.off);
     // an ENDED contract with no recorded end cannot say he was aboard later (16 Oct 2026: it read as aboard for ever)
     if (on > d || (!l.is_current && (!off || off < d))) continue;
@@ -164,7 +165,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(fail("parts")) : none(),
     env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(fail("hon")) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
-    env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(none),
+    env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by, COALESCE(r.sent_at, r.created_at) AS requested_at FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(none),
     on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
     env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
     env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
@@ -216,7 +217,8 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   }
   // audits of THIS contract: on one of its ships (an audit of the next or previous contract on another hull is not his
   // score here); every audit of the seafarer still comes back as allAudits for the list
-  const allAud = (audits.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at, open: /no sign-in/.test(String(a.filed_by || "")) }));
+  // `requestedAt` decides which contract the audit is (bonus.js autoScore, Miguel 17 Oct 2026: "The one it was requested in")
+  const allAud = (audits.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at, requestedAt: a.requested_at || null, open: /no sign-in/.test(String(a.filed_by || "")) }));
   const aud = keys.length ? allAud.filter((a) => keys.includes(shipKey(a.ship))) : [];
   const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: null });
   const notes = [];
