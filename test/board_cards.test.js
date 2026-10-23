@@ -629,11 +629,14 @@ test("a card the file confirms renders once, green, with Remove; the ship lists 
   assert.doesNotMatch(sec, /Also served this ship/);
 });
 
-test("the Keyman tab uses the whole window (Miguel, 9 Oct 2026: 'utilize a bit more of the screen .. more space to the cards'); the other wide tabs keep their cap", () => {
+test("the Keyman tab uses the whole window (Miguel, 9 Oct 2026: 'utilize a bit more of the screen .. more space to the cards'); the other wide tabs keep their cap (Reports full width since 23 Oct 2026)", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   assert.match(W, /\.wrap\.full\{max-width:none;padding:22px 28px\}/);
   const rr = W.slice(W.indexOf("async function renderRotation(){"), W.indexOf("\n}", W.indexOf("async function renderRotation(){")));
   assert.match(rr, /_vw\.classList\.add\('wide','full'\);/);
   assert.match(W, /_vw\.classList\.remove\('wide','full'\);/, "show() drops both before any other tab renders");
-  assert.equal((W.match(/classList\.add\('wide','full'\)/g) || []).length, 1, "only the Keyman tab is full-width");
+  // Reports too (Miguel, 23 Oct 2026, the Crew survey: "the report page can use more the width of the page").
+  const rp = W.slice(W.indexOf("function renderReports(){"), W.indexOf("\n}", W.indexOf("function renderReports(){")));
+  assert.match(rp, /_vw\.classList\.add\('wide','full'\);/);
+  assert.equal((W.match(/classList\.add\('wide','full'\)/g) || []).length, 2, "only the Keyman and Reports tabs are full-width");
 });

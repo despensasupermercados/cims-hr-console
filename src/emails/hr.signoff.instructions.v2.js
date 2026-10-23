@@ -38,7 +38,9 @@ const MON = ["January", "February", "March", "April", "May", "June", "July", "Au
 
 // The shipboard manager, by brand (Miguel, 16 Oct 2026).
 export const MANAGER = { Azamara: ["BOM", "Business Operations Manager"], Royal: ["GSM", "Guest Services Manager"], Celebrity: ["DCM", "Digital Communication Manager"] };
-export const managerOf = (brand) => MANAGER[brand] || MANAGER.Royal;
+// A brand with no title on record (NCL, the Getaway pilot, 20 Oct 2026) reads "your shipboard manager", never Royal's GSM.
+// A missing brand is still Royal (instructionsEmail defaults it), as before.
+export const managerOf = (brand) => MANAGER[brand] || null;
 
 const iso = (v) => (v && /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : null);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -59,6 +61,7 @@ export function shipFullName(ship, brand) {
   if (brand === "Royal") return /of the seas$/i.test(s) ? s : s + " of the Seas";
   if (brand === "Celebrity") return /^celebrity /i.test(s) ? s : "Celebrity " + s;
   if (brand === "Azamara") return /^azamara /i.test(s) ? s : "Azamara " + s;
+  if (brand === "NCL") return /^norwegian /i.test(s) ? s : "Norwegian " + s; // "Getaway" -> "Norwegian Getaway"
   return s;
 }
 // The board's ports are the itinerary's capitals ("HONG KONG, CHINA", "ORLANDO (PORT CANAVERAL), FLORIDA"): the city, in words.
@@ -98,7 +101,7 @@ export function instructionsEmail(d) {
   const off = iso(d.signOff), on = iso(d.signOn);
   const today = iso(d.today) || new Date().toISOString().slice(0, 10);
   const brand = d.brand || "Royal";
-  const [mgr, mgrLong] = managerOf(brand);
+  const mt = managerOf(brand), mgrSay = mt ? mt[0] + " (" + mt[1] + ")" : "shipboard manager", mgr = mt ? mt[0] : "shipboard manager";
   const ship = shipFullName(d.ship, brand);
   const port = portName(d.port);
   const rel = d.reliever && d.reliever.name ? d.reliever : null;
@@ -195,7 +198,7 @@ export function instructionsEmail(d) {
     `Complete all eleven sections and save each one: machine status, recurring issues, open tickets, stock and orders, tools, risks and active projects.`,
     `Count the inventory and tools and <b>sign your count</b>. ${RelFirst} records and signs their own count on joining; a signed count is never rewritten.`,
     `<b>Submit your notes</b> before you leave. They go to you, ${rel ? relFirst + " " : "your reliever "}and onboardsupport<wbr>@dg3.com, which reaches the whole CIMS team.`,
-    `<b>Print a short copy</b>: leave one for ${relFirst} and give one to your ${mgr} (${mgrLong}).`,
+    `<b>Print a short copy</b>: leave one for ${relFirst} and give one to your ${mgrSay}.`,
   ];
   const bonusBox = bonus ? `<tr><td style="padding:12px 0 0 40px;">${note(`<b style="color:${C.navy};">This handover now counts toward your bonus.</b> For contracts ending on or after 1 Nov 2026, the Ship handover factor (10 points) of your Score Card is your submitted Digital Handover Notes for this ship, signed in the 30 days before your sign-off and up to 10 days after it. No submitted notes, no points.`, C.green, C.gtint)}</td></tr>` : "";
 
@@ -270,7 +273,7 @@ ${phase("Your last day", off ? longDate(off) : "")}
 ${step(6, "Final inventory count", p(`Count and submit it in your handover notes by <b>${off ? longDate(off) : "your last day"}</b>, even if your day runs late. Ray Guerra and Jonathan Placer Alonzo receive it.`) +
  p(`Your signed count closes your accountability for company property. ${RelFirst} records their own count beside yours.`, "padding-top:10px;"))}
 ${step(7, "Machine part usage reports", p(`Pull the management list that shows your part usage reports. Contact the technical team for support if needed.`))}
-${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgr} (${mgrLong}). Make sure it is completed before you leave.`))}
+${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgrSay}. Make sure it is completed before you leave.`))}
 
 <tr><td class="px" style="padding:28px 32px 0 32px;">
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${C.border};border-radius:16px;"><tr><td style="padding:18px 20px;">

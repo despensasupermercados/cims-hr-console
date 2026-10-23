@@ -97,6 +97,11 @@ When the state changes:
 1. **Update the brief.**
    - What the subject is and how it works now, with a record id on every line.
    - Start with "Rewritten by hand <date>, replacing <date>" so the age is visible.
+   - End it with `[hand YYYY-MM-DD]` on its own line. The nightly never rewrites
+     a brief without its own `[auto ...]` stamp, so a hand brief is yours to keep
+     current. The stamp lets every read say how old it is and whether the
+     subject has moved since (the-brain PR, 20 Oct 2026). Without it, a read says
+     the age is unknown.
 2. **Update open_items.**
    - One line per item: `[OPEN · owner · topic]`, the next date, the record id.
    - Drop what closed. History stays in the ledger and logs.

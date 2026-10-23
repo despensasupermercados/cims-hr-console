@@ -334,6 +334,7 @@ export function makeRules() {
       if (items.length) out.push({ tone: "a", step: "machines", t: name + " · Pattern 43: " + items.map((i) => sentence(i.head)).join("; "), s: (items[0].part ? "Points to " + sentence(items[0].part) + " · " : "") + "provisional, Rolando confirms · see it on the machine" });
       const life = m.life || [];
       if (life.length) out.push({ tone: "a", step: "machines", t: name + " · " + life.length + (life.length === 1 ? " part" : " parts") + " past rated life", s: life.map((x) => partName(x.name) + " " + x.pct + "%").join(" · ") + " · copy quality decides" });
+      else if (m.lifeRead === false) out.push({ tone: "a", step: "machines", t: name + " · part life not read", s: "The management list on file has no parts-life page · ask for the whole Machine Management List" });
     }
     const gaps = diff.filter((x) => x.kind === "gap"), timing = diff.filter((x) => x.kind === "timing");
     if (gaps.length || extras.length) out.push({ tone: "a", step: "inventory", t: "Count: " + [gaps.length ? gaps.length + (gaps.length === 1 ? " line differs" : " lines differ") : "", extras.length ? extras.length + " not in OBP" : ""].filter(Boolean).join(" · "), s: "Counted blind · verify on the shelf" });

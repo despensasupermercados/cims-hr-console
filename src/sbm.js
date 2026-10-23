@@ -88,7 +88,7 @@ export function sbmBrandForShip(ship, vesselRef) {
     const n = normShip(v.name);
     if (n && k.indexOf(n) >= 0 && (!best || n.length > best.n.length)) best = { n, brand: v.brand };
   }
-  return best ? (best.brand === "CEL" ? "Celebrity" : "Royal Caribbean") : null;
+  return best ? (best.brand === "CEL" ? "Celebrity" : best.brand === "NCL" ? "NCL" : "Royal Caribbean") : null;
 }
 
 /* ---------------------- config: recipient fallback ---------------------- */

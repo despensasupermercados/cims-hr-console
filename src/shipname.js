@@ -12,6 +12,9 @@ export function normShip(s) { return String(s == null ? "" : s).toLowerCase().re
 // writes "MV AZAMARA QUEST" while keyman/schedule use the bare short name "Quest". Map both.
 export const AZ_DISP = { journey: "Journey", onward: "Onward", quest: "Quest", pursuit: "Pursuit" };
 export const AZAMARA_SHORT = Object.keys(AZ_DISP);
+// Norwegian Cruise Line (Miguel, 20 Oct 2026: "yes get away i the console"): the pilot hull, Norwegian Getaway, in
+// VESSEL_REF as "Getaway" (brand NCL). The board, TDG's short form and a typed "MV GETAWAY" carry no brand word.
+export const NCL_SHORT = ["getaway"];
 
 // Precompute the VESSEL_REF match keys once (longest-first so "Constellation" beats "Star" etc.).
 export function buildShipKeys(vesselRef) {
@@ -59,6 +62,8 @@ export function clientOf(vessel) {
   if (v.includes("CELEBRITY")) return "Celebrity";
   if (v.includes("AZAMARA")) return "Azamara";
   if (v.includes("NCL") || v.includes("NORWEGIAN")) return "NCL";
+  const k = normShip(raw);
+  if (NCL_SHORT.some((s) => k.indexOf(s) >= 0)) return "NCL"; // "Getaway" alone is Norwegian, never Royal (20 Oct 2026)
   return "Royal Caribbean";
 }
 

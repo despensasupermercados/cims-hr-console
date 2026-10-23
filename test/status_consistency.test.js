@@ -82,7 +82,7 @@ test("no route iterates the frozen constant directly: Score Card dates and the s
   for (const [fn, src] of [["async function apiBonusCrew(", "async function apiBonusCrew("], ["async function apiScoreQueue(", "async function loadFeedbackState("]]) {
     const b = body(fn), w = body(src);
     assert.match(w, /boardLegs\(env\)/, src + " must take the schedule from boardLegs(env)");
-    assert.match(b, /for \(const h of HIST\)/, fn + " must consume the live legs (HIST)");
+    assert.match(b, /for \(const h of HIST\)|defaultScoreLeg\(HIST, /, fn + " must consume the live legs (HIST)"); // apiBonusCrew hands HIST to defaultScoreLeg (17 Oct 2026)
     assert.doesNotMatch(b, /SHIP_HISTORY/, fn + " must not touch the frozen constant at all");
     assert.match(w, /Promise\.all\(\[[^\]]*boardLegs\(env\)/, src + " must fetch boardLegs inside its read wave, not as an extra round trip (§12)");
   }

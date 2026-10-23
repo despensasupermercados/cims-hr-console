@@ -94,8 +94,23 @@ test("the request window is 24 hours", () => {
 });
 
 test("the migration is the same statements that reach production", () => {
-  const sql = ["0024_audit.sql", "0025_audit_plain.sql", "0026_audit_eval.sql", "0030_audit_token.sql", "0035_audit_visit.sql"].map((f) => readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8")).join("\n");
+  const sql = ["0024_audit.sql", "0025_audit_plain.sql", "0026_audit_eval.sql", "0030_audit_token.sql", "0035_audit_visit.sql", "0037_audit_one_per_ship.sql", "0039_audit_forms.sql"].map((f) => readFileSync(new URL("../migrations/" + f, import.meta.url), "utf8")).join("\n");
   const stmts = sql.split("\n").filter((l) => l && !l.startsWith("--")).map((l) => l.replace(/;$/, ""));
   assert.deepEqual(stmts, AUDIT_DDL);
   for (const s of AUDIT_DDL) assert.match(s, /^CREATE (TABLE|INDEX|UNIQUE INDEX) IF NOT EXISTS /);
+});
+
+test("one definition of an open request: the SQL and the JS agree on every state", async () => {
+  const { OPEN_REQ_SQL, isOpenRequest } = await import("../src/audit.js");
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE audit_request (id TEXT, status TEXT, test_mode INTEGER); CREATE TABLE audit_eval (request_id TEXT, score INTEGER)");
+  const rows = [["draft", 0, null], ["sent", 0, null], ["sent", 1, null], ["complete", 0, null], ["complete", 0, 4], ["complete", 1, null], ["cancelled", 0, null]];
+  rows.forEach(([status, test, grade], i) => {
+    db.prepare("INSERT INTO audit_request VALUES (?,?,?)").run("r" + i, status, test);
+    if (grade != null) db.prepare("INSERT INTO audit_eval VALUES (?,?)").run("r" + i, grade);
+  });
+  const sql = new Set(db.prepare("SELECT r.id FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE " + OPEN_REQ_SQL).all().map((x) => x.id));
+  rows.forEach(([status, test, grade], i) => assert.equal(sql.has("r" + i), isOpenRequest({ status, test_mode: test, grade }), status + " test=" + test + " grade=" + grade));
+  assert.deepEqual([...sql].sort(), ["r0", "r1", "r2", "r3"], "draft, sent (live or test), and in-not-graded live");
 });

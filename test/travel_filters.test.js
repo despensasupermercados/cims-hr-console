@@ -216,3 +216,58 @@ test("Acknowledge hides a decision for everyone until its number changes (Miguel
   // a held bill is never acknowledged away: it loaded nothing until Rita loads it
   assert.doesNotMatch(fn("tvDecisions"), /out\.push\(\{k:[^}]*is held/);
 });
+
+test("View is ticks: one, several or all (Miguel, 20 Oct 2026: \"allow to select multiple items .. u can single them out\")", async () => {
+  const p = await openTravel();
+  const tick = (v) => p.run("tvRailClick({target:{closest:function(){return {getAttribute:function(a){return a==='data-tv'?'kind':'" + v + "';}};}}})");
+  const hero = () => { const b = p.body(); return b.slice(0, b.indexOf("Needs a decision")); };
+  assert.equal((p.rail().match(/data-tv="kind"[^>]*><input type=checkbox/g) || []).length, 3, "three ticks: crew, shoreside, training centre");
+  assert.doesNotMatch(p.rail(), /Crew \+ shoreside/, "the combination is two ticks, not a row of its own");
+  // crew alone: the budget, as before
+  assert.match(hero(), /Crew travel · 2026 to date/); assert.match(hero(), /\$102,200/); assert.match(hero(), /On budget/);
+  // + shoreside: both kinds of travel, no budget
+  tick("shoreside");
+  assert.equal(p.run("TF.kind"), "", "crew + shoreside is the old 'both'");
+  assert.match(hero(), /Crew \+ shoreside · 2026 to date/); assert.match(hero(), /\$102,900/); assert.doesNotMatch(hero(), /On budget|Over budget/);
+  // + training centre: TDG's training statement joins the hero, the months and Where it goes
+  tick("training");
+  assert.equal(p.run("TF.withTr"), true);
+  assert.match(hero(), /Crew \+ shoreside \+ training centre · 2026 to date/);
+  assert.match(hero(), /\$103,900/, "102,900 of travel + 1,000 of the training statement");
+  assert.match(hero(), /No budget for this view · year against year/);
+  assert.match(p.body(), /<span>Training centre<\/span>.*?<b>\$1,000<\/b>/s, "the centre is one row of Where it goes");
+  // a cruise line has no training centre: the slice is travel only
+  p.run("TF.client='celebrity';paintTravel()");
+  assert.doesNotMatch(hero(), /training centre/); p.run("TF.client='';paintTravel()");
+  // single it out: untick the two travel views and the training centre's own page opens
+  tick("crew"); tick("shoreside");
+  assert.equal(p.run("TF.kind"), "training");
+  assert.match(p.body(), /Training centre · 2026 through Jan/);
+  tick("training");
+  assert.equal(p.run("TF.kind"), "training", "the last tick stays: a view is never empty");
+  // back to crew alone
+  tick("crew"); tick("training");
+  assert.equal(p.run("TF.kind"), "crew"); assert.equal(p.run("TF.withTr"), false);
+  assert.match(hero(), /On budget/, "crew alone gets its budget back");
+});
+
+test("Cruise line lists all four lines, a line with nothing in the period at $0 (Miguel, 20 Oct 2026: \"u can display all 4 crusielines\")", async () => {
+  const p = await openTravel();
+  p.run("TF.kind='crew';TF.client='';TF.cat='';TF.month='';paintTravel()");
+  const keys = (p.rail().match(/data-tv="client" data-key="(\w*)"/g) || []).map(s => s.match(/data-key="(\w*)"/)[1]);
+  assert.deepEqual(keys, ["", "royal", "celebrity", "azamara", "ncl"], "All + the four lines, in order, whatever the spend");
+  assert.match(p.rail(), /data-tv="client" data-key="azamara"[^>]*>.*?Azamara<\/span><span class=n>\$0</s, "no spend reads $0, never blank");
+  // a month with Royal alone still lists the other three
+  p.run("TF.month='3';paintTravel()");
+  assert.equal((p.rail().match(/data-tv="client" data-key="\w+"/g) || []).length, 4);
+});
+
+test("a crew row neither its ship nor TDG's bill places is listed as Not placed, never a guessed line", async () => {
+  const p = await openTravel();
+  p.run("TF.kind='crew';TF.client='';TF.cat='';TF.month='';paintTravel()");
+  assert.doesNotMatch(p.rail(), /Not placed/, "nothing unplaced: no row");
+  p.run("TRVALL.push(tvPlace([{year:2026,month:3,kind:'crew',client:null,air:777,total:777,crew_name:'Nobody, Ned',leg:'on'}])[0]);paintTravel()");
+  assert.match(p.rail(), /data-tv="client" data-key="none"[^>]*>.*?Not placed<\/span><span class=n>\$777</s);
+  p.run("TF.client='none';paintTravel()");
+  assert.match(p.body(), /\$777/, "picking it shows those rows");
+});
