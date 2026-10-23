@@ -84,7 +84,9 @@ export const FIX_THEMES = [
 ];
 const PRAISE_RX = /\b(nothing|not lacking|impeccable|excellent|works fine|all (is )?good|no complaints?)\b/i;
 const ASK_RX = /\b(please|requests?|i hope (next|to|that|we|i)|would like (to have|a|an|more)|wish|maybe|bring (it )?back|increase|provide|(?<!anything )more (?!to |than )\w+|do \d|should|never|not enough|too (much|many|long|short|late|little)|late|delay\w*|lack\w*|difficult)\b/i;
-const clausesOf = (t) => String(t == null ? "" : t).split(/(?<=[.;!?])\s+|\n+|,\s+|\s+-\s+/).map((x) => x.replace(/^and\s+/i, "").trim()).filter(Boolean);
+// "but" / "except" / "however" start a new clause: "The hotel was excellent but the flight was delayed" is a travel ask,
+// never thanks because its first half praises (23 Oct 2026 review)
+const clausesOf = (t) => String(t == null ? "" : t).split(/(?<=[.;!?])\s+|\n+|,\s+|\s+-\s+|\s+(?=(?:but|except|however|although|though)\b)/i).map((x) => x.replace(/^and\s+/i, "").trim()).filter(Boolean);
 // The themes one written answer asks about, and whether it asks for anything at all.
 export function fixThemes(text) {
   if (isNothing(text)) return { themes: [], ask: false };
@@ -144,9 +146,11 @@ export function surveyDue(legs, today, since) {
 }
 
 // One reminder, SURVEY_REMIND_DAYS after the invitation, while the link is open and nothing was sent back.
+// Counted in CALENDAR days: the run fires on the hour and the invitation is stamped seconds after it, so an exact 5×24h cut
+// slipped every reminder to day 6 (23 Oct 2026 review).
 export function remindDue(rows, nowIso) {
-  const cut = new Date(Date.parse(nowIso) - SURVEY_REMIND_DAYS * 864e5).toISOString();
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.source === "console" && r.invited_at && r.invited_at <= cut && !r.reminded_at && !r.submitted_at && (!r.expires_at || r.expires_at > nowIso));
+  const cut = addDays(String(nowIso).slice(0, 10), -SURVEY_REMIND_DAYS);
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.source === "console" && r.invited_at && String(r.invited_at).slice(0, 10) <= cut && !r.reminded_at && !r.submitted_at && (!r.expires_at || r.expires_at > nowIso));
 }
 
 // What the seafarer sent: every statement a whole 1–5, the open line optional text. Anything else is refused, never
@@ -243,7 +247,8 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
     overall: r.answers[OVERALL] ?? null, ret: r.answers[RETURN] ?? null, low: lowKeys(r.answers).length, words: fixThemes(r.fix_text).ask,
     answers: r.answers, fix: r.fix_text || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r), same: allSame(r.answers),
   }));
-  const waiting = asked.filter((r) => !r.submitted_at).map((r) => ({ id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, invited_at: iso(r.invited_at), reminded_at: iso(r.reminded_at), opened: !!r.opened_at, expires_at: iso(r.expires_at) }));
+  // waiting = the link still open; one past SURVEY_LINK_DAYS is not "waiting", it closed unanswered (23 Oct 2026 review)
+  const waiting = asked.filter((r) => !r.submitted_at && (!r.expires_at || iso(r.expires_at) >= today)).map((r) => ({ id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, invited_at: iso(r.invited_at), reminded_at: iso(r.reminded_at), opened: !!r.opened_at, expires_at: iso(r.expires_at) }));
   // The theme table: every line (the line chip does not narrow it), the period's scored answers, the number behind each cell.
   const inPeriod = (Array.isArray(rows) ? rows : []).filter((r) => r && r.submitted_at && r.answers && iso(r.submitted_at) >= from && !quickAnswer(r));
   const cell = (rs, keys) => { const xs = []; let n = 0; for (const r of rs) { const v = keys.map((k) => r.answers[k]).filter(Number.isInteger); if (v.length) { n++; xs.push(...v); } } return { n, avg: round2(avg(xs)) }; };

@@ -102,8 +102,11 @@ export function composeSurveyReport(r, { today, lineLabel } = {}) {
   if (W8.length) {
     const rows = W8.slice(0, 4).map((c) => {
       const why = [(c.why || []).includes("low") ? c.low.length + " answers at 1-2" : "", (c.why || []).includes("return") ? "would return " + c.ret : ""].filter(Boolean).join(" · ");
-      const detail = wrap(why + (c.low.length ? "  ·  " + c.low.map((x) => x.short + " " + x.v).join(", ") : ""), W - 24, 7.5, false).slice(0, 3);
-      const words = c.fix ? wrap("“" + c.fix + "”", W - 24, 7.5, false).slice(0, 2) : [];
+      // one page (Miguel approved it so): what does not fit is said, never cut silently (23 Oct 2026 review)
+      const TAIL = " … more on the console";
+      const more = (lines, n) => (lines.length > n ? lines.slice(0, n - 1).concat([fit(lines[n - 1], W - 24 - Pdf.width(TAIL, 7.5, false), 7.5, false).replace(/\.\.\.$/, "") + TAIL]) : lines);
+      const detail = more(wrap(why + (c.low.length ? "  ·  " + c.low.map((x) => x.short + " " + x.v).join(", ") : ""), W - 24, 7.5, false), 3);
+      const words = c.fix ? more(wrap("“" + c.fix + "”", W - 24, 7.5, false), 2) : [];
       return { c, detail, words, h: 14 + detail.length * 10 + words.length * 10 + 6 };
     });
     const h = 22 + rows.reduce((s, x) => s + x.h, 0) + (W8.length > 4 ? 12 : 0);
@@ -135,8 +138,9 @@ export function composeSurveyReport(r, { today, lineLabel } = {}) {
   else {
     caps("THEME", L, t); caps("OWNER", L + 300, t); rtext("MENTIONS", R, t, { size: 6.5, bold: true, color: SLATE });
     t += 10; pdf.hline(L, R, t, LINE); t += 5;
-    for (const gp of groups) {
-      if (t > PAGE_H - 96) break;
+    for (let gi = 0; gi < groups.length; gi++) {
+      const gp = groups[gi];
+      if (t > PAGE_H - 96) { pdf.textAt("+ " + (groups.length - gi) + " more theme" + (groups.length - gi === 1 ? "" : "s") + " on the console.", L, t, { size: 7.5, color: SLATE }); t += 12; break; }
       const ex = gp.items[0], exw = ex ? wrap("“" + ex.clause + "”  - " + (ex.name || "name not given"), W - 60, 7.3, false) : [];
       const exl = exw.length > 2 ? [exw[0], fit(exw[1] + " " + exw[2], W - 60, 7.3, false)] : exw;
       pdf.textAt(gp.label, L, t, { size: 9, bold: true, color: NAVY });

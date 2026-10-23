@@ -613,8 +613,10 @@ async function sendViaMailer(env, envelope) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ app: "cims-hr-console", from: env.MAIL_FROM || "CIMS <cims@cims.work>", ...envelope })
     });
-    const out = await res.json().catch(() => ({}));
-    return out && typeof out === "object" ? out : { ok: false, error: "bad mailer response" };
+    const out = await res.json().catch(() => null);
+    // the mailer answers { ok: true, ... } on success (every live sender reads !out.ok as failure); an HTML 500 or a body
+    // without ok is a mail that did not go — never {} read as "sent" by a caller checking ok === false (welcome, survey)
+    return out && typeof out === "object" && typeof out.ok === "boolean" ? out : { ok: false, error: "bad mailer response (HTTP " + res.status + ")" };
   } catch (e) {
     return { ok: false, error: "mailer call threw: " + String(e && e.message || e).slice(0, 300) };
   }

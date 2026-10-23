@@ -28,7 +28,7 @@ const LEGS = [
   { sc: "SC-6", name: "Signs Off Today", ship: "Wonder of the Seas", brand: "Royal", on: "2026-03-23", off: TODAY, is_current: false, ours: true, offSource: "tdg" },
 ];
 
-function setup({ mailOk = true, legs = LEGS } = {}) {
+function setup({ mailOk = true, legs = LEGS, mailReply = null } = {}) {
   const d = new DatabaseSync(":memory:");
   d.exec("CREATE TABLE crew (id TEXT, agency_id TEXT, first_name TEXT, last_name TEXT, email TEXT)");
   d.exec("CREATE TABLE crew_override (agency_id TEXT, email TEXT)");
@@ -41,7 +41,7 @@ function setup({ mailOk = true, legs = LEGS } = {}) {
   const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "Content-Type": "application/json" } });
   const mail = [];
   const s = installSurvey({ ensure: async (e) => { for (const q of SURVEY_DDL) await e.DB.prepare(q).run(); for (const q of SURVEY_ALTERS) await e.DB.prepare(q).run().catch((x) => { if (!/duplicate column/.test(x.message)) throw x; }); }, boardLegs: async () => legs,
-    sendMail: async (e, m) => { mail.push(m); return mailOk ? { ok: true } : { ok: false, error: "down" }; }, json, today: () => TODAY, origin: () => "https://hub.cims.work" });
+    sendMail: async (e, m) => { mail.push(m); return mailReply || (mailOk ? { ok: true } : { ok: false, error: "down" }); }, json, today: () => TODAY, origin: () => "https://hub.cims.work" });
   return { d, env, s, mail };
 }
 const GATE = { scheduledTime: Date.UTC(2026, 9, 23, 11, 0) }; // 07:00 Miami time (EDT)
@@ -523,4 +523,59 @@ test("what they asked us to fix reads asks, never thanks (the real Forms answers
   assert.equal(T("Do 1 ship in 1 full contract. this will be great seafarer experience."), "other");
   const g = fixGroups([{ text: "More printer toner", name: "a" }, { text: "The hotel was far", name: "b" }, { text: "The hotel was far", name: "c" }, { text: "The hotel was far", name: "d" }]);
   assert.equal(g[g.length - 1].key, "other", "Other asks last");
+});
+
+// The 23 Oct 2026 review: each of these failed on the code as merged in #330–#337.
+test("review: the invitation row is written whole, so a failed write after the email can never leave a dead link", async () => {
+  const f = setup();
+  f.env.DB.batch = async () => { throw new Error("D1 batch failed"); }; // the old code stamped invited_at in a batch AFTER the email
+  const r = await f.s.invite(f.env, LEGS[0]);
+  assert.equal(r.sent, true);
+  const row = f.d.prepare("SELECT invited_at, invited_by, invite_to_json FROM crew_survey").get();
+  assert.ok(row.invited_at && row.invited_by && row.invite_to_json);
+  const page = await call(f.s, f.env, "GET", "/hub/survey/" + tokenOf(f.mail[0]), null, null);
+  assert.equal(page.status, 200, "the emailed link opens");
+});
+
+test("review: a mailer reply without ok (an HTML 500 read as {}) is a mail that did not go: no row, tried next morning", async () => {
+  const f = setup({ mailReply: {} });
+  assert.equal((await f.s.invite(f.env, LEGS[0])).error, "mail_failed");
+  assert.equal(f.d.prepare("SELECT COUNT(*) n FROM crew_survey").get().n, 0);
+});
+
+test("review: the reminder goes on calendar day 5, though the invitation is stamped seconds after the hour", () => {
+  const row = { source: "console", invited_at: "2026-10-23T11:00:02.512Z", reminded_at: null, submitted_at: null, expires_at: "2026-11-22T23:59:59Z" };
+  assert.equal(remindDue([row], "2026-10-27T11:00:00.000Z").length, 0, "day 4: not yet");
+  assert.equal(remindDue([row], "2026-10-28T11:00:00.000Z").length, 1, "day 5");
+});
+
+test("review: praise and a complaint in one clause joined by but / except is an ask, never thanks", () => {
+  const T = (t) => { const f = fixThemes(t); return f.ask ? f.themes.join("+") || "other" : "thanks"; };
+  assert.equal(T("The hotel was excellent but the flight was delayed for two days"), "travel");
+  assert.equal(T("No complaints except the internet onboard is too slow"), "pay");
+  assert.equal(T("All good but the handover was only 2 days"), "handover");
+  assert.equal(T("All Excellent"), "thanks", "thanks stays thanks");
+});
+
+test("review: an invitation whose link closed is not 'waiting'", () => {
+  const rows = [
+    { id: "a", source: "console", agency_id: "SC-1", crew_name: "Open Link", ship: "Infinity", brand: "Celebrity", invited_at: "2026-10-10T11:00:00Z", expires_at: "2026-11-09T23:59:59Z" },
+    { id: "b", source: "console", agency_id: "SC-4", crew_name: "Closed Link", ship: "Quest", brand: "Azamara", invited_at: "2026-09-01T11:00:00Z", expires_at: "2026-10-01T23:59:59Z" }];
+  const r = surveyReport({ rows, ended: [], today: TODAY });
+  assert.deepEqual(r.loop.waiting ? r.loop.waiting.map((x) => x.name) : r.waiting.map((x) => x.name), ["Open Link"]);
+});
+
+test("review: the answers preview has a value for every statement, travel included", async () => {
+  const f = setup();
+  const res = await call(f.s, f.env, "GET", "/api/survey/preview?id=SC-1&what=answers");
+  assert.doesNotMatch(await res.text(), /undefined/);
+});
+
+test("review: the one-page PDF says what it could not fit, never cuts a seafarer's words silently", () => {
+  const long = "The hotel was excellent but the flight was delayed for two days and nobody told us, the transfer from the airport never came and we waited six hours, please provide a hotel before joining and a proper handover of at least one week ENDOFWORDS";
+  const low = Object.fromEntries(KEYS.map((k) => [k, 1]));
+  const rows = [1, 2, 3].map((i) => ({ id: "r" + i, source: "console", agency_id: "SC-" + i, crew_name: "Person " + i, ship: "Infinity", brand: "Celebrity",
+    invited_at: "2026-10-01T11:00:00Z", submitted_at: "2026-10-0" + i + "T12:00:00Z", answers: low, answer_secs: 400, fix_text: long }));
+  const txt = Buffer.from(composeSurveyReport(surveyReport({ rows, ended: [], today: TODAY }), { today: TODAY })).toString("latin1");
+  assert.ok(txt.includes("more on the console"), "the cut is said");
 });

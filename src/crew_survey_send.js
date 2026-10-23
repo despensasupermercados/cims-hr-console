@@ -50,22 +50,21 @@ export function installSurvey(deps) {
     const id = "srv_" + crypto.randomUUID(), token = newHubToken(), now = new Date().toISOString(), t = today();
     const expires = addDays(t, SURVEY_LINK_DAYS) + "T23:59:59Z";
     const name = [crew.first_name, crew.last_name].filter(Boolean).join(" ").trim();
-    const ins = await env.DB.prepare("INSERT OR IGNORE INTO crew_survey (id, source, agency_id, crew_name, ship, brand, on_key, sign_off, token, email, expires_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(id, "console", leg.sc, name, leg.ship, leg.brand || null, iso(leg.on), iso(leg.off), token, String(crew.email).trim(), expires, now).run();
+    const cc = SURVEY_CC.filter((c) => c.toLowerCase() !== String(crew.email).trim().toLowerCase());
+    // the row is written whole (invited_at with it): a stamp written AFTER the email could fail and leave the emailed link
+    // dead (rowByToken needs invited_at) and the contract skipped every morning after (23 Oct 2026 review)
+    const ins = await env.DB.prepare("INSERT OR IGNORE INTO crew_survey (id, source, agency_id, crew_name, ship, brand, on_key, sign_off, token, email, expires_at, created_at, invited_at, invited_by, invite_to_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(id, "console", leg.sc, name, leg.ship, leg.brand || null, iso(leg.on), iso(leg.off), token, String(crew.email).trim(), expires, now, now, by, JSON.stringify({ to: [String(crew.email).trim()], cc })).run();
     if (!ins || !ins.meta || !ins.meta.changes) return { ok: false, error: "already_invited" };
     const o = String(base || origin(env)).replace(/\/+$/, "");
     const mail = surveyInviteEmail(mailData({ ...leg, first: crew.first_name, crew_name: name, on_key: iso(leg.on), sign_off: iso(leg.off), expires_at: expires, port: leg.disembark || null }, o + "/hub/survey/" + token, t, false));
-    const cc = SURVEY_CC.filter((c) => c.toLowerCase() !== String(crew.email).trim().toLowerCase());
     const res = await sendMail(env, { to: [String(crew.email).trim()], cc, replyTo: SURVEY_REPLY_TO, subject: mail.subject, html: mail.html, text: mail.text,
       templateId: INVITE_TEMPLATE, idempotencyKey: INVITE_TEMPLATE + ":" + leg.sc + ":" + iso(leg.on), critical: true });
-    if (!res || res.ok === false) {
-      await env.DB.prepare("DELETE FROM crew_survey WHERE id=? AND invited_at IS NULL").bind(id).run();
+    if (!res || res.ok !== true) {
+      await env.DB.prepare("DELETE FROM crew_survey WHERE id=? AND submitted_at IS NULL").bind(id).run();
       return { ok: false, error: "mail_failed", detail: res && res.error ? String(res.error).slice(0, 200) : null };
     }
-    await env.DB.batch([
-      env.DB.prepare("UPDATE crew_survey SET invited_at=?, invited_by=?, invite_to_json=? WHERE id=?").bind(now, by, JSON.stringify({ to: [String(crew.email).trim()], cc }), id),
-      log(env, by, "crew_survey_invite", leg.sc + " " + leg.ship + " off " + iso(leg.off) + " to " + String(crew.email).trim()),
-    ]);
+    await log(env, by, "crew_survey_invite", leg.sc + " " + leg.ship + " off " + iso(leg.off) + " to " + String(crew.email).trim()).run().catch(() => {});
     return { ok: true, sent: true, id, sc: leg.sc };
   }
 
@@ -76,7 +75,7 @@ export function installSurvey(deps) {
     const cc = SURVEY_CC.filter((c) => c.toLowerCase() !== String(row.email).toLowerCase());
     const res = await sendMail(env, { to: [row.email], cc, replyTo: SURVEY_REPLY_TO, subject: mail.subject, html: mail.html, text: mail.text,
       templateId: INVITE_TEMPLATE + ".reminder", idempotencyKey: INVITE_TEMPLATE + ".reminder:" + row.id, critical: true });
-    if (!res || res.ok === false) return { ok: false, error: "mail_failed" };
+    if (!res || res.ok !== true) return { ok: false, error: "mail_failed" };
     const now = new Date().toISOString();
     await env.DB.batch([
       env.DB.prepare("UPDATE crew_survey SET reminded_at=? WHERE id=? AND reminded_at IS NULL").bind(now, row.id),
@@ -157,9 +156,9 @@ export function installSurvey(deps) {
     const cc = [SURVEY_ANSWERS_CC].filter((x) => x.toLowerCase() !== String(row.email).toLowerCase());
     const res = await sendMail(env, { to: [row.email], cc, replyTo: SURVEY_REPLY_TO, subject: mail.subject, html: mail.html, text: mail.text,
       templateId: ANSWERS_TEMPLATE, idempotencyKey: ANSWERS_TEMPLATE + ":" + row.id, critical: true }).catch((e) => ({ ok: false, error: String(e && e.message || e) }));
-    if (res && res.ok !== false) await env.DB.prepare("UPDATE crew_survey SET copy_sent_at=? WHERE id=?").bind(new Date().toISOString(), row.id).run().catch(() => {});
+    if (res && res.ok === true) await env.DB.prepare("UPDATE crew_survey SET copy_sent_at=? WHERE id=?").bind(new Date().toISOString(), row.id).run().catch(() => {});
     else await log(env, "system", "crew_survey_copy_failed", row.id + " " + String(res && res.error || "").slice(0, 200)).run().catch(() => {});
-    return json({ ok: true, copy: !!(res && res.ok !== false) });
+    return json({ ok: true, copy: !!(res && res.ok === true) });
   }
 
   // ---- the report ----
@@ -195,8 +194,8 @@ export function installSurvey(deps) {
     const row = { crew_name: name, first: crew.first_name, ship: leg.ship, brand: leg.brand || null, on_key: iso(leg.on), sign_off: iso(leg.off), expires_at: addDays(today(), SURVEY_LINK_DAYS), port: leg.disembark || null };
     if (what === "invite" || what === "reminder") return page(surveyInviteEmail(mailData(row, url.origin + "/api/survey/preview?what=page&id=" + encodeURIComponent(sc), today(), what === "reminder")).html);
     if (what === "answers") {
-      const answers = Object.fromEntries(KEYS.map((k, i) => [k, [5, 4, 5, 4, 5, 2, 5, 4, 5, 3, 5, 5, 5, 5, 5, 3, 4, 5, 5][i]]));
-      return page(surveyAnswersEmail({ first: firstWord(crew.first_name), ship: leg.ship, brand: leg.brand, when: dmy(today()), answers, fix: "A sample line: what he would ask us to fix first." }).html);
+      const answers = Object.fromEntries(KEYS.map((k, i) => [k, [5, 4, 5, 4, 5, 2, 5, 4, 5, 3, 5, 5, 5, 5, 5, 3, 4, 5, 5, 4][i % 20] || 4]));
+      return page(surveyAnswersEmail({ first: firstWord(crew.first_name), ship: leg.ship, brand: leg.brand, when: dmy(today()), answers, fix: "A sample line: what they would ask us to fix first." }).html);
     }
     return page(surveyPage({ first: firstWord(crew.first_name), ship: leg.ship, shipShort: shortOf(leg.ship), brand: leg.brand, on: dmy(leg.on), off: dmy(leg.off), aboard: aboardOf(leg.on, leg.off), email: maskEmail(crew.email) })
       .replace("<body ", "<body data-preview=\"1\" "));
