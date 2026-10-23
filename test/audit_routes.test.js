@@ -176,14 +176,11 @@ test("ships: aboard as the Keyman board draws it — the awaiting card and the e
     { ship: "Edge", brand: "Celebrity", crew: [
       { agency_id: "SC-40", name: "Gone Ashore", current: false, aboard: true, signOn: "2026-03-01", contracts: 1 },
     ], projections: [] },
-    // Miguel, 23 Oct 2026, Marto on Quantum past his sign-off with Cedilla aboard since 22 Oct: "if the crew is not onbaord..
-    // no need to display here". The held seat is off the audit; the reliever and an overdue projected seat stay.
+    // Miguel, 23 Oct 2026 (a change hiding Marto was reverted): TDG still has him On board past the sign-off, so the audit
+    // lists him as the board does, beside his reliever, until TDG's file signs him off.
     { ship: "Quantum", brand: "Royal", crew: [
       { agency_id: "SC-50", name: "Ryan Paolo Marto", current: true, heldByFile: true, aboard: true, signOn: "2026-01-29", signOff: "2026-10-22", contracts: 4 },
       { agency_id: "SC-51", name: "Allen Edward Cedilla", current: true, aboard: true, signOn: "2026-10-22", signOff: "2027-05-22", contracts: 2 },
-    ], projections: [] },
-    { ship: "Anthem", brand: "Royal", crew: [
-      { agency_id: "SC-60", name: "Overdue Projected", current: true, aboard: true, signOn: "2026-03-01", signOff: "2026-10-01", contracts: 3 },
     ], projections: [] },
   ] };
   const H3 = installAudit({ json, htmlResponse, ensureAudit: async () => {}, rotationSections: async () => board, TODAY: () => "2026-10-20", crewProfile: H_PROFILE });
@@ -193,8 +190,7 @@ test("ships: aboard as the Keyman board draws it — the awaiting card and the e
   assert.deepEqual(of("Grandeur"), ["SC-20"], "the awaiting card is aboard; the plan after it is not");
   assert.deepEqual(of("Xcel"), ["SC-30"], "TDG's Earmarked word for the hull he is on: aboard");
   assert.deepEqual(of("Edge"), [], "an ashore crew is still nobody aboard");
-  assert.deepEqual(of("Quantum"), ["SC-51"], "held past the sign-off with the reliever aboard: off the audit, the reliever stays");
-  assert.deepEqual(of("Anthem"), ["SC-60"], "a projected sign-off that passed with nobody relieving: still aboard");
+  assert.deepEqual(of("Quantum"), ["SC-50", "SC-51"], "held past the sign-off: listed until TDG signs him off, beside the reliever");
 });
 
 // Miguel, 20 Oct 2026, the briefing's "Audits of Pursuit" read "The 61 Forms audits are not imported yet": "ensure this is
