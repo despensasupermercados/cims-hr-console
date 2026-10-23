@@ -158,7 +158,10 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     no_presses: "HON's register has no press for this ship.", already_open: "A request is already open for this crew.", not_sent: "The email did not go. Nothing was sent; try again.", crew_not_found: "This crew is not in the console.", no_obp_list: "HON has no OBP stock list for this ship, so there is nothing to count.", not_aboard: "The board does not have this seafarer aboard this ship." };
   /* a lost connection reads as one, never the browser's "Failed to fetch" */
   function why(e) { var m = String((e && e.message) || e || ""); return e && e.name === "TypeError" && m.indexOf("no answer") !== 0 ? "no connection" : m; }
-  function fail(e) { $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(why(e)) + ".</span>" + '<button class="retry" data-retry>Try again</button></div>'; dock(""); }
+  function fail(e) {
+    // a Forms-survey audit on the open site (no sign-in): Dexter's notes are read signed in only (23 Oct 2026)
+    if (String(e && e.message) === "sign_in_needed") { $("main").innerHTML = '<section class="help"><span class="chip n">Signed in only</span><div class="t"><b class="h4">Dexter&#8217;s notes from the Forms survey are read signed in</b><span class="sm">This site is open without a sign-in, so the notes on a named seafarer are not shown here. Open them in the HR console: <a href="https://cims.work/audit' + esc(location.hash || "") + '">cims.work/audit</a>.</span></div></section>'; dock(""); return; }
+    $("main").innerHTML = '<div class="err">' + ic("warning-circle") + "<span>Could not load: " + esc(why(e)) + ".</span>" + '<button class="retry" data-retry>Try again</button></div>'; dock(""); }
 
   // One status word per request, said the same way on every screen.
   function reqStatus(r) {

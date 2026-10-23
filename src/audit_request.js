@@ -826,7 +826,12 @@ export function installAuditRequest(deps) {
   }
 
   // One audit from the Forms survey, as typed (History's row opens it). Read only; never scored.
-  async function formsOne(env, url) {
+  // Dexter's words on it (probation recommendations, a warning on a named seafarer) are read SIGNED IN only: on the open
+  // audit site (AUDIT_OPEN, no login) the page says so and sends the reader to cims.work/audit. Held for Miguel's call
+  // (Brain recyttF8K7As5YBqo: "load as is, or show Dexter's words to signed-in users only"); 23 Oct 2026, the rows were
+  // loaded before he answered, so the narrower of his two options stands until he picks.
+  async function formsOne(env, url, session) {
+    if (session && session.open) return json({ ok: false, error: "sign_in_needed" }, 403);
     const id = String(url.searchParams.get("id") || "").slice(0, 40);
     if (!/^forms-\d{1,4}$/.test(id)) return json({ ok: false, error: "id_required" }, 400);
     await ensureAudit(env);
@@ -896,7 +901,7 @@ export function installAuditRequest(deps) {
     if (p === "/api/audit/history" || p === "/api/audit/followup/close" || p === "/api/audit/forms") {
       if (!session) return json({ error: "unauthorized" }, 401);
       if (p === "/api/audit/history" && request.method === "GET") return history(env);
-      if (p === "/api/audit/forms" && request.method === "GET") return formsOne(env, url);
+      if (p === "/api/audit/forms" && request.method === "GET") return formsOne(env, url, session);
       if (p === "/api/audit/followup/close" && request.method === "POST") return closeFollowup(request, env, session);
       return json({ error: "not found" }, 404);
     }
