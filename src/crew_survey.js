@@ -63,6 +63,18 @@ export const SURVEY_CC = ["Rita.Berenyi@dg3.com", "Miguel.Sanmartin@dg3.com"];
 export const SURVEY_REPLY_TO = "Rita.Berenyi@dg3.com";
 export const SURVEY_ANSWERS_CC = "onboardsupport@dg3.com";
 export const NEEDS_CALL_LOW = 3;         // three or more answers at 1–2
+export const NEEDS_CALL_RETURN = 2;      // or "Would return" at 1–2 (Miguel, 23 Oct 2026, the HR view: "said they would not return")
+// The HR view (Miguel, 23 Oct 2026). Under SURVEY_MIN_READ answers the averages are a floor check, not a measure, and the page
+// says so; a cell of the theme table with fewer than SURVEY_MIN_CELL answers stays grey; a quarter shows on the trend only
+// with SURVEY_MIN_QUARTER answers; a fix theme named by FIX_HOT people in the period leads, in red.
+export const SURVEY_MIN_READ = 20, SURVEY_MIN_CELL = 3, SURVEY_MIN_QUARTER = 10, FIX_HOT = 3;
+// The written fix, grouped by keyword (no model) and owned (Miguel, 23 Oct 2026: "2. yes" to these three owners). A fix that
+// names two themes is under both; one that names none is "Other", no owner set.
+export const FIX_THEMES = [
+  { key: "travel", label: "Travel & joining", owner: "Rita / TDG", rx: /\b(hotels?|flights?|fl(?:y|ew|ight)|airports?|airfare|travel\w*|tickets?|visas?|joining|embark\w*|transfers?|accommodations?|luggage|baggage)\b/i },
+  { key: "pay", label: "Pay & benefits", owner: "Miguel", rx: /\b(pay|paid|payroll|salary|salaries|wages?|allowances?|internet|wifi|wi-fi|bonus(?:es)?|benefits?|allotments?|money|reimburs\w*|expenses?)\b/i },
+  { key: "training", label: "Training", owner: "Ray / Rolando", rx: /\b(train\w*|troubleshoot\w*|courses?|learn\w*|teach\w*|skills?)\b/i },
+];
 // An answer is "quick" when every statement got the same number in under a minute (Miguel, 23 Oct 2026: "4. ok"): it stays
 // listed and counted, but leaves the averages, so a tap-through on 5 does not lift the score. Forms answers have no timing.
 export const QUICK_SECS = 60;
@@ -156,6 +168,45 @@ export function periodFrom(p, today) {
 const avg = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
 const round2 = (x) => (x == null ? null : Math.round(x * 100) / 100);
 
+// The clause of a written fix that names the theme (Jeremy's one sentence carries two fixes); the whole text when it is short.
+export function fixClause(text, rx) {
+  const t = String(text == null ? "" : text).trim();
+  if (t.length <= 90 || !rx) return t;
+  const parts = t.split(/(?<=[.;!?])\s+|,\s+|\s+-\s+/).map((x) => x.replace(/^and\s+/i, "").trim()).filter(Boolean);
+  const hit = parts.find((x) => rx.test(x));
+  return hit && hit.length < t.length ? "\u2026" + hit.replace(/[.,;]+$/, "") + "\u2026" : t;
+}
+export function fixGroups(fixes) {
+  const by = new Map(FIX_THEMES.map((t) => [t.key, { key: t.key, label: t.label, owner: t.owner, items: [] }]));
+  by.set("other", { key: "other", label: "Other", owner: null, items: [] });
+  for (const f of fixes || []) {
+    const hits = FIX_THEMES.filter((t) => t.rx.test(f.text || ""));
+    if (!hits.length) by.get("other").items.push({ ...f, clause: fixClause(f.text, null) });
+    for (const t of hits) by.get(t.key).items.push({ ...f, clause: fixClause(f.text, t.rx) });
+  }
+  return [...by.values()].filter((g) => g.items.length).map((g) => ({ ...g, n: g.items.length, hot: g.key !== "other" && g.items.length >= FIX_HOT }))
+    .sort((a, b) => (b.hot - a.hot) || (b.n - a.n) || ((a.key === "other") - (b.key === "other")));
+}
+// Every answer the same number (all 5s, mostly): the ceiling the HR view warns about.
+export const allSame = (ans) => { const v = KEYS.map((k) => ans && ans[k]).filter(Number.isInteger); return v.length > 1 && v.every((x) => x === v[0]); };
+const quarterOf = (d) => d.slice(0, 4) + "-Q" + (Math.floor((+d.slice(5, 7) - 1) / 3) + 1);
+const PERIOD_WORDS = { "30D": "in the last 30 days", QTD: "this quarter", YTD: "this year", All: "on file" };
+// The answer in its first line (the CIMS report layout): ONE definition, read by the page and the leadership PDF.
+export function surveyHeadline(r) {
+  const n = r.n, calls = (r.needsCall || []).length, words = PERIOD_WORDS[r.p] || "on file";
+  if (!n) return { lead: "No answers " + words + ".", rest: "", sub: r.enabled ? "The invitations go 3 days after each sign-off; the first answers land here." : "The daily invitation is off." };
+  const o = r.overall;
+  let lead = calls ? calls + (calls === 1 ? " seafarer needs" : " seafarers need") + " a call." :
+    o == null ? n + " answer" + (n === 1 ? "" : "s") + " " + words + "." :
+    o >= 4.5 ? "Crew say they are happy." : o >= 4 ? "Crew are mostly satisfied." : o >= 3 ? "Crew are lukewarm." : "Crew are unhappy.";
+  const worst = (r.statements || [])[0];
+  const rest = n < SURVEY_MIN_READ ? "We are hearing from too few to be sure." : (worst && worst.avg < 4 ? worst.short + " is where it hurts." : "");
+  const same = r.allSame || 0;
+  const sub = n + " answer" + (n === 1 ? "" : "s") + " " + words + (same ? ", " + same + " of them the same number to every statement" : "") + "."
+    + (n < SURVEY_MIN_READ ? " Read the scores as a floor check, not a measure, until there are " + SURVEY_MIN_READ + " answers. The words say more." : "");
+  return { lead, rest, sub };
+}
+
 // rows: crew_survey rows (answers parsed); ended: the board's ended contracts (for the loop's "signed off"); p: period;
 // line: a cruise line or "all".
 export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
@@ -170,7 +221,8 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
     .filter((s) => s.n).sort((a, b) => a.avg - b.avg || b.low - a.low || a.key.localeCompare(b.key));
   const ov = q(OVERALL), rt = q(RETURN);
   const byLine = LINES.map((b) => { const xs = scored.filter((r) => r.brand === b).map((r) => r.answers[OVERALL]).filter(Number.isInteger); return { line: b, n: xs.length, avg: round2(avg(xs)) }; });
-  const calls = answered.filter((r) => lowKeys(r.answers).length >= NEEDS_CALL_LOW).map((r) => ({
+  const callWhy = (r) => { const w = []; if (lowKeys(r.answers).length >= NEEDS_CALL_LOW) w.push("low"); if (Number.isInteger(r.answers[RETURN]) && r.answers[RETURN] <= NEEDS_CALL_RETURN) w.push("return"); return w; };
+  const calls = answered.filter((r) => callWhy(r).length).map((r) => ({ why: callWhy(r), ret: r.answers[RETURN] ?? null,
     id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, at: iso(r.submitted_at), fix: r.fix_text || null,
     low: lowKeys(r.answers).map((k) => ({ key: k, short: QUESTIONS.find((x) => x.key === k).short, v: r.answers[k] })),
     called_at: r.called_at || null, called_by: r.called_by || null, call_note: r.call_note || null,
@@ -190,19 +242,44 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
   const list = answered.slice().sort((a, b) => (a.submitted_at < b.submitted_at ? 1 : -1)).map((r) => ({
     id: r.id, at: iso(r.submitted_at), name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, line: r.brand || null, source: r.source,
     overall: r.answers[OVERALL] ?? null, ret: r.answers[RETURN] ?? null, low: lowKeys(r.answers).length, words: !isNothing(r.fix_text),
-    answers: r.answers, fix: r.fix_text || null, called_at: r.called_at || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r),
+    answers: r.answers, fix: r.fix_text || null, called_at: r.called_at || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r), same: allSame(r.answers),
   }));
   const waiting = asked.filter((r) => !r.submitted_at).map((r) => ({ id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, invited_at: iso(r.invited_at), reminded_at: iso(r.reminded_at), opened: !!r.opened_at, expires_at: iso(r.expires_at) }));
-  return {
-    p, line, from, n: answered.length, quick: answered.length - scored.length,
+  // Nobody to call: name the answer that is furthest from perfect (the lowest average, never a quick one), so a 3 is not lost.
+  let closest = null;
+  if (!calls.length) {
+    const avgOf = (r) => avg(KEYS.map((k) => r.answers[k]).filter(Number.isInteger));
+    const c = scored.filter((r) => avgOf(r) < 5).sort((a, b) => avgOf(a) - avgOf(b) || (a.submitted_at < b.submitted_at ? 1 : -1))[0];
+    if (c) closest = { id: c.id, name: c.crew_name, agency_id: c.agency_id || null, ship: c.ship, at: iso(c.submitted_at), ret: c.answers[RETURN] ?? null,
+      low: KEYS.filter((k) => Number.isInteger(c.answers[k]) && c.answers[k] <= 3).map((k) => ({ key: k, short: QUESTIONS.find((x) => x.key === k).short, v: c.answers[k] })),
+      fours: KEYS.filter((k) => c.answers[k] === 4).length };
+  }
+  // The theme table: every line (the line chip does not narrow it), the period's scored answers, the number behind each cell.
+  const inPeriod = (Array.isArray(rows) ? rows : []).filter((r) => r && r.submitted_at && r.answers && iso(r.submitted_at) >= from && !quickAnswer(r));
+  const cell = (rs, keys) => { const xs = []; let n = 0; for (const r of rs) { const v = keys.map((k) => r.answers[k]).filter(Number.isInteger); if (v.length) { n++; xs.push(...v); } } return { n, avg: round2(avg(xs)) }; };
+  const themeRows = SECTIONS.filter((x) => !x.open).map((x) => ({ title: x.title, keys: x.keys })).concat([{ title: "Would return", keys: [RETURN] }]);
+  const themes = themeRows.map((t) => ({ title: t.title, keys: t.keys, short: t.keys.map((k) => QUESTIONS.find((x) => x.key === k).short),
+    cells: Object.fromEntries(LINES.map((b) => [b, cell(inPeriod.filter((r) => r.brand === b), t.keys)])), all: cell(inPeriod, t.keys) }));
+  // The trend: every period, this line; a quarter is drawn only with SURVEY_MIN_QUARTER answers.
+  const qs = new Map();
+  for (const r of all.filter((x) => x.submitted_at && x.answers && !quickAnswer(x))) { const k = quarterOf(iso(r.submitted_at)); if (!qs.has(k)) qs.set(k, []); qs.get(k).push(r); }
+  const quarters = [...qs.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([q, rs]) => {
+    const o = rs.map((r) => r.answers[OVERALL]).filter(Number.isInteger), t = rs.map((r) => r.answers[RETURN]).filter(Number.isInteger);
+    return { q, n: rs.length, overall: round2(avg(o)), wouldReturn: t.length ? { yes: t.filter((v) => v >= 4).length, of: t.length } : null, shown: rs.length >= SURVEY_MIN_QUARTER };
+  });
+  const out = {
+    p, line, from, n: answered.length, quick: answered.length - scored.length, allSame: answered.filter((r) => allSame(r.answers)).length,
     byLineCount: Object.fromEntries(LINES.map((b) => [b, answered.filter((r) => r.brand === b).length])),
     overall: round2(avg(ov)), fives: ov.filter((v) => v === 5).length,
     wouldReturn: rt.length ? { yes: rt.filter((v) => v >= 4).length, of: rt.length } : null,
     rate: asked.length ? { answered: loop.answered, of: asked.length } : null,
     needsCall: calls.filter((c) => !c.called_at), called: calls.filter((c) => c.called_at),
-    statements, fixes, byLine, loop, list, waiting,
+    statements, fixes, fixGroups: fixGroups(fixes), byLine, loop, list, waiting, closest, themes, quarters,
+    minRead: SURVEY_MIN_READ, minCell: SURVEY_MIN_CELL, minQuarter: SURVEY_MIN_QUARTER,
     questions: QUESTIONS.map((x) => ({ key: x.key, short: x.short, text: statementFor(x, null) })),
   };
+  out.headline = surveyHeadline(out);
+  return out;
 }
 
 // ---- the Forms history (Rita's export "Seafarer End-of-Contract _ Exit Survey(1-64).xlsx") ------------------------------

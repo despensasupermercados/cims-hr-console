@@ -6,10 +6,11 @@
 // like the welcome email) and reminds once after 5 days. The reads are injected by the Worker, so this module never imports
 // it. FEEDBACK ONLY (§1). Pinned by test/crew_survey.test.js on real SQLite.
 import { SURVEY_DDL, SURVEY_ALTERS, surveySkip, SURVEY_CC, SURVEY_REPLY_TO, SURVEY_ANSWERS_CC, SURVEY_LINK_DAYS, SURVEY_TZ, SURVEY_HOUR, KEYS,
-  surveyDue, remindDue, checkAnswers, surveyReport, emailOk, firstWord, addDays } from "./crew_survey.js";
+  surveyDue, remindDue, checkAnswers, surveyReport, surveyHeadline, emailOk, firstWord, addDays } from "./crew_survey.js";
 import { surveyInviteEmail } from "./emails/hr.survey.invite.v1.js";
 import { surveyAnswersEmail } from "./emails/hr.survey.answers.v1.js";
 import { surveyPage, surveyThanksPage, surveyGonePage } from "./crew_survey_page.js";
+import { composeSurveyReport } from "./crew_survey_pdf.js";
 import { shipCode, shipWord } from "./ship_codes.js";
 import { mdShort, mdParts } from "./span_md.js";
 import { newHubToken, TOKEN_RX } from "./crew_hub_routes.js";
@@ -177,7 +178,8 @@ export function installSurvey(deps) {
     const p = ["30D", "QTD", "YTD", "All"].includes(url.searchParams.get("p")) ? url.searchParams.get("p") : "All";
     const line = ["Royal", "Celebrity", "Azamara", "NCL"].includes(url.searchParams.get("line")) ? url.searchParams.get("line") : "all";
     const rep = surveyReport({ rows, ended, today: today(), p, line });
-    return { ...rep, enabled: (await setting(env, "crew_survey_auto_enabled")) === "true", since: await setting(env, "crew_survey_auto_since"),
+    const enabled = (await setting(env, "crew_survey_auto_enabled")) === "true";
+    return { ...rep, enabled, headline: surveyHeadline({ ...rep, enabled }), since: await setting(env, "crew_survey_auto_since"),
       sources: { console: rows.filter((r) => r.source === "console").length, forms: rows.filter((r) => r.source === "forms").length } };
   }
 
@@ -212,6 +214,12 @@ export function installSurvey(deps) {
     if (!session) return json({ error: "unauthorized" }, 401);
     const who = session.email || null;
     if (p === "/api/survey/report" && request.method === "GET") return json(await reportData(env, url));
+    // The one page for leadership (Miguel, 23 Oct 2026: "4. pdf"): the same report, internal, a download only.
+    if (p === "/api/survey/report.pdf" && request.method === "GET") {
+      const rep = await reportData(env, url);
+      return new Response(composeSurveyReport(rep, { today: today() }), { headers: { "Content-Type": "application/pdf", "Cache-Control": "no-store",
+        "Content-Disposition": 'attachment; filename="CIMS crew survey ' + today() + '.pdf"' } });
+    }
     if (p === "/api/survey/preview" && request.method === "GET") return preview(env, url);
     // Send anyway: a contract the run did not ask (surveySkip, or one that ended before the switch) — Rita's choice, by hand.
     if (p === "/api/survey/send" && request.method === "POST") {

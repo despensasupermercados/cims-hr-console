@@ -1091,6 +1091,20 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   - **Quick answers**: the page sends the seconds from Start to Send (`answer_secs`, migrations/0041, `SURVEY_ALTERS` through
     `addColumn`); the same answer to every statement in under `QUICK_SECS` = 60 is listed and tagged Quick but left out of
     every average (`quickAnswer`). Forms answers have no timing, so never quick.
+- **THE HR VIEW** (Miguel, 23 Oct 2026, of the mock-up `docs/mockups/crew_survey_report_hrvp_20261023/`: "1. no. 2. yes. 3. not ..
+  4. pdf"). The page answers in its first line (`surveyHeadline`, ONE definition, the page and the PDF read it): under
+  `SURVEY_MIN_READ` = 20 answers it says "We are hearing from too few to be sure" and that the scores are a floor check. Five tiles
+  (answers by line, would sail again, overall, **same answer to every statement** — `allSame`, the ceiling: 4 of the first 7 —,
+  answer rate vs a 60% target); **People to call** = 3+ statements at 1–2 OR "Would return" at 1–2 (`NEEDS_CALL_RETURN`), and
+  with nobody to call the answer furthest from perfect is named (`closest`); **Where it hurts** = the four themes + Would return
+  × the four lines, every line whatever the chip, the n under each cell, under `SURVEY_MIN_CELL` = 3 grey; **What they asked us
+  to fix** grouped by keyword, no model (`FIX_THEMES`, owners Miguel approved: Travel & joining → Rita / TDG, Pay & benefits →
+  Miguel, Training → Ray / Rolando; none → Other, no owner), the clause that names the theme (`fixClause`), a theme named by
+  `FIX_HOT` = 3 leads in red; every statement below 5; **By quarter** only with `SURVEY_MIN_QUARTER` = 10 answers. **No
+  retention block** ("Who came back": "once they are done .. is mostly coz they cost me money and I dont want them back") and
+  **no "left after 3+ contracts" call rule** ("not coz of the same thing"). **The leadership PDF** (`GET /api/survey/report.pdf`,
+  `src/crew_survey_pdf.js`, one page, internal, a download only, never emailed). The Reports frame stacks on a phone (its rail
+  squeezed the body to 46px on main).
 - **The switch**: Keyman › Automation "Crew survey" (`/api/survey/auto`, `crew_survey_auto_enabled` + `_since`), OFF until Miguel
   switches it on. `GET /api/survey/preview?id=&what=page|invite|reminder|answers` shows a crew's real data, makes no link, sends nothing.
 - **Never money, never the cruise line**: `crew_survey` (migrations/0040) is read by nothing on the Score Card / bonus path, and
