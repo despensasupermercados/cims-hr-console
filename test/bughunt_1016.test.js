@@ -180,3 +180,44 @@ test("12. the Score Card: the Windows are asked with the card's sign-on, and the
   assert.equal(els.gRush.checked, false, "a rush gate the read does not confirm is cleared");
   assert.equal(String(els.sComm.value), "10");
 });
+
+// NIGHT WATCH, 20 Oct 2026 — the contract modal posted both port selects as they stood. A seat whose sign-off is not a
+// turnaround day shows the ship's HOMEPORT SEED as the selected option, so ticking AIR and Save stored the seed as Rita's
+// typed port: production's contract_edit held eight (Noche, Constellation, disembark "San Juan"; embark "Los Angeles",
+// "Sydney", "Port Canaveral", "Colon", "Galveston", "Fort Lauderdale" ×2), and the seat then reads disembarkSrc "rita" —
+// the sign-off email would print the seed (§11e, §11f). A port is sent when Rita changed it; unchanged, the port already
+// saved for THIS contract is sent again (never cleared); else nothing.
+test("night watch 20 Oct: the contract modal writes a port only when Rita changed it, keeps the one she saved, never the seed", async () => {
+  const { ctx, els } = pageContext();
+  const field = (value, attrs = {}) => ({ value, checked: false, textContent: "", getAttribute: (k) => (k in attrs ? attrs[k] : null), setAttribute(k, v) { attrs[k] = v; } });
+  const sent = [];
+  ctx.fetch = (u, o) => { sent.push({ u: String(u), body: o && o.body ? JSON.parse(o.body) : null }); return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: "stop" }) }); };
+  const save = async (emb, dis) => {
+    Object.assign(els, { eKey: field("2026-10-05"), eEmb: emb, eDis: dis, eOn: field("2026-10-05"), eOff: field("2027-05-05", { "data-init": "2027-05-05", "data-proj": "1" }), eShip: field("Constellation"), cEccr: field(""), cAir: Object.assign(field(""), { checked: true }), cHotel: field(""), cOn: field(""), cOff: field(""), cmtmsg: field("") });
+    sent.length = 0; await ctx.saveContract("SC-0044814", 1);
+    return sent.find((x) => x.u === "/api/rotation/contract").body;
+  };
+  // Noche on Constellation: nothing typed, the selects show the seed (embark from the itinerary's day, disembark the seed)
+  const a = await save(field("KOTOR, MONTENEGRO", { "data-init": "KOTOR, MONTENEGRO", "data-saved": "" }), field("San Juan", { "data-init": "San Juan", "data-saved": "" }));
+  assert.equal(a.disembark, null, "the homeport seed the modal only displayed is not written as Rita's port");
+  assert.equal(a.embark, null, "nor the displayed embark port");
+  assert.equal(a.air, true, "the tick she made is saved");
+  assert.equal(a.sign_off, null, "the projected sign-off stays projected (8 Oct 2026)");
+  // a port she saved earlier, the select showing the itinerary's port: the saved one is sent again, never cleared
+  const b = await save(field("KOTOR, MONTENEGRO", { "data-init": "KOTOR, MONTENEGRO", "data-saved": "KOTOR, MONTENEGRO" }), field("TAMPA, FLORIDA", { "data-init": "TAMPA, FLORIDA", "data-saved": "SAN JUAN, PUERTO RICO" }));
+  assert.deepEqual([b.embark, b.disembark], ["KOTOR, MONTENEGRO", "SAN JUAN, PUERTO RICO"]);
+  // a port she picked: sent
+  const c = await save(field("KOTOR, MONTENEGRO", { "data-init": "KOTOR, MONTENEGRO", "data-saved": "" }), field("CARTAGENA, COLOMBIA", { "data-init": "San Juan", "data-saved": "" }));
+  assert.deepEqual([c.embark, c.disembark], [null, "CARTAGENA, COLOMBIA"]);
+  // the saved row is the contract's: by on_key, else an unkeyed row at the same position
+  const P = [{ seq: 1, on_key: "2026-03-01", embark: "OLD", disembark: "OLD" }, { seq: 2, on_key: "2026-10-05", embark: "E", disembark: "D" }, { seq: 3, on_key: null, embark: "U", disembark: "V" }];
+  assert.equal(ctx.savedPorts(P, "2026-10-05", 1).disembark, "D");
+  assert.equal(ctx.savedPorts(P, "2027-01-01", 3).embark, "U");
+  assert.equal(JSON.stringify(ctx.savedPorts(P, "2027-01-01", 9)), "{}", "no saved row for this contract: nothing to keep");
+  // the open path carries what was saved and what was shown; the read returns the saved ports
+  assert.match(APP_HTML, /<select id=eDis data-saved="'\+escHtml\(_sp\.disembark\|\|''\)\+'"/);
+  assert.match(APP_HTML, /\['eEmb','eDis'\]\.forEach\(function\(x\)\{var s=document\.getElementById\(x\);if\(s\)s\.setAttribute\('data-init',s\.value\|\|''\);\}\);/);
+  const W = readFileSync(SRC, "utf-8");
+  assert.match(W, /SELECT sc, seq, sign_on, sign_off, ship, on_key, embark, disembark, updated_at FROM contract_edit WHERE sc=\?/);
+  assert.match(W, /ready: r \|\| \{ eccr: 0, air: 0, hotel: 0, note: "" \}, ports \}\);/);
+});
