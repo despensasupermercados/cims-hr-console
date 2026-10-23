@@ -8309,8 +8309,8 @@ function srvDraw(){
   var G=d.fixGroups||[];
   h+='<div class="rblk svw"><h3>What they asked us to fix</h3>'
    +(G.length?'<div class="svx fx"><table class=tbl><thead><tr><th>Theme</th><th>Owner</th><th class=r>Mentions</th></tr></thead><tbody>'
-     +G.map(function(g){var ex=g.items[0];return '<tr><td><b>'+escHtml(g.label)+'</b>'+(ex?'<div class=csub style="margin-top:2px">&ldquo;'+escHtml(ex.clause)+'&rdquo;</div>':'')+'</td><td class=nw>'+(g.owner?escHtml(g.owner):'<span class=mu>&mdash;</span>')+'</td><td class=r style="font-weight:800;color:'+(g.hot?'var(--red)':'var(--navy)')+'">'+g.n+'</td></tr>';}).join('')
-     +'</tbody></table></div><div class=csub style="margin-top:8px">Grouped by keyword, no AI. Every answer&rsquo;s own words are in the table below.</div>'
+     +G.map(function(g){var ex=g.items[0];return '<tr><td><b>'+escHtml(g.label)+'</b>'+(ex?'<div class=csub style="margin-top:2px">&ldquo;'+escHtml(ex.clause)+'&rdquo;</div>':'')+'</td><td class=nw>'+(g.owner?escHtml(g.owner):'<span class=mu>not set</span>')+'</td><td class=r style="font-weight:800;color:'+(g.hot?'var(--red)':'var(--navy)')+'">'+g.n+'</td></tr>';}).join('')
+     +'</tbody></table></div><div class=csub style="margin-top:8px">Grouped by keyword, no AI; one answer can ask about two themes.'+(d.thanks?' '+d.thanks+' wrote thanks or &ldquo;all good&rdquo;, not counted as a fix.':'')+' Every answer&rsquo;s own words are in the table below.</div>'
      :'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
   var L=d.loop,lmax=Math.max(1,L.signedOff,L.invited);
   var bar=function(lab,n){return '<div class=frow><span class=fl>'+lab+'</span><span class=fbar><i style="width:'+Math.round(n/lmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+n+'</span></div>';};

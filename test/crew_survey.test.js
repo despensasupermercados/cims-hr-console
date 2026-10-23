@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { QUESTIONS, KEYS, FORMS_KEYS, SECTIONS, surveySkip, quickAnswer, QUICK_SECS, SUPERVISOR, statementFor, surveyDue, remindDue, checkAnswers, isNothing, surveyReport, periodFrom,
   readFormsSurvey, formsSurveyColumns, formsDay, SURVEY_DDL, SURVEY_ALTERS, SURVEY_CC, SURVEY_ANSWERS_CC, SURVEY_REPLY_TO,
-  fixGroups, fixClause, allSame, surveyHeadline, FIX_THEMES } from "../src/crew_survey.js";
+  fixGroups, fixClause, fixThemes, allSame, FIX_THEMES } from "../src/crew_survey.js";
 import { composeSurveyReport } from "../src/crew_survey_pdf.js";
 import { installSurvey, maskEmail, endedLegs } from "../src/crew_survey_send.js";
 import { surveyInviteEmail } from "../src/emails/hr.survey.invite.v1.js";
@@ -407,12 +407,12 @@ const REAL7 = [
   F("Andrea Joyce M. Calayag", "Navigator of the Seas", "Royal", "2026-10-02", { q01: 4, q04: 4, q05: 3, q15: 4, q16: 4, q17: 4, q18: 4, q19: 4 }, null),
 ];
 
-test("the HR view on the real answers: the headline says how little we know, an empty watchlist, themes by line with n", () => {
+test("the HR view on the real answers: an empty watchlist, themes by line with n, thanks counted apart", () => {
   const r = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" });
   assert.equal(r.n, 7);
   assert.equal(r.allSame, 4, "Darryl, Raymond, Manuel, Edward: the same number to every statement");
-  assert.deepEqual(r.headline, { lead: "Crew say they are happy.", rest: "We are hearing from too few to be sure.",
-    sub: "7 answers this year, 4 of them the same number to every statement. Read the scores as a floor check, not a measure, until there are 20 answers. The words say more." });
+  assert.equal(r.thanks, 3, "'Nothing on my side', 'Nothing', 'For me its nothing to improve'");
+  assert.equal(r.unwritten, 2);
   assert.equal(r.watch.length, 0);
   const job = r.themes.find((t) => t.title === "The job");
   assert.deepEqual(job.cells.Royal, { n: 4, avg: 4.75 });
@@ -427,7 +427,7 @@ test("the HR view on the real answers: the headline says how little we know, an 
 });
 
 test("the fixes, grouped by keyword with their owners (Miguel: '2. yes'); one sentence with two fixes counts under both", () => {
-  assert.deepEqual(FIX_THEMES.map((t) => [t.label, t.owner]), [["Travel & joining", "Rita / TDG"], ["Pay & benefits", "Miguel"], ["Training", "Ray / Rolando"]]);
+  assert.deepEqual(FIX_THEMES.map((t) => [t.label, t.owner]), [["Travel & joining", "Rita / TDG"], ["Handover time", "Ray / Rolando"], ["Pay & benefits", "Miguel"], ["Training", "Ray / Rolando"]]);
   const r = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" });
   const by = Object.fromEntries(r.fixGroups.map((g) => [g.key, g]));
   assert.deepEqual(Object.keys(by).sort(), ["pay", "training", "travel"], "'Nothing on my side' and 'For me its nothing to improve' are not fixes");
@@ -438,7 +438,7 @@ test("the fixes, grouped by keyword with their owners (Miguel: '2. yes'); one se
   assert.equal(by.pay.hot, false);
   const three = fixGroups([1, 2, 3].map((i) => ({ text: "The hotel was far " + i, name: "x" + i })));
   assert.equal(three[0].hot, true, "a theme named by 3 leads, in red");
-  assert.deepEqual(fixGroups([{ text: "More printer toner", name: "y" }]).map((g) => [g.key, g.owner]), [["other", null]], "no keyword: Other, no owner set");
+  assert.deepEqual(fixGroups([{ text: "More printer toner", name: "y" }]).map((g) => [g.key, g.owner]), [["other", null]], "no keyword, but an ask: Other asks, no owner set");
   assert.equal(fixClause("short text", /x/), "short text");
   assert.equal(allSame({ q01: 4, q02: 4 }), true);
   assert.equal(allSame({ q01: 4, q02: 5 }), false);
@@ -450,21 +450,19 @@ test("the watchlist: 3 statements at 1-2, or would not return; no 'left after 3 
   assert.equal(r.watch.length, 1);
   assert.deepEqual(r.watch[0].why, ["return"]);
   assert.equal(r.watch[0].ret, 2);
-  assert.equal(r.headline.lead, "1 seafarer is on the watchlist.");
   const ret3 = { ...ret2, answers: { ...ret2.answers, q19: 3 } };
   assert.equal(surveyReport({ rows: [ret3], ended: [], today: TODAY, p: "All" }).watch.length, 0, "a 3 is not on the watchlist");
-  assert.equal(surveyHeadline({ n: 0, p: "QTD", enabled: true }).lead, "No answers this quarter.");
   const src = readFileSync(new URL("../src/crew_survey.js", import.meta.url), "utf8");
   assert.ok(!/came back|completed contracts|contract_count/i.test(src.replace(/\/\/.*$/gm, "")), "no retention block (Miguel: '1. no')");
 });
 
-test("the leadership PDF (Miguel: '4. pdf'): one page, the same headline, internal, a download only", async () => {
+test("the leadership PDF (Miguel: '4. pdf'): one page, the page's sections in its order, internal, a download only", async () => {
   const r = { ...surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" }), sources: { forms: 7, console: 0 } };
   const bytes = composeSurveyReport(r, { today: TODAY });
   const txt = Buffer.from(bytes).toString("latin1");
   assert.ok(txt.startsWith("%PDF-"));
   assert.equal((txt.match(/\/Type\s*\/Page\b/g) || []).length, 1, "one page");
-  for (const w of ["Crew say they are happy.", "Crew survey  -  internal", "Watchlist", "Clear: no answer in this period", "Where it hurts, by cruise line", "Travel & joining", "owner Rita / TDG", "Pay & benefits", "never sent to a cruise line"])
+  for (const w of ["Crew survey", "Internal - CIMS HR", "SAME TO ALL", "BY CRUISE LINE", "LOWEST STATEMENTS", "WATCHLIST", "Clear - no answer in this period", "WHAT THEY ASKED US TO FIX", "Travel & joining", "Rita / TDG", "Pay & benefits", "3 wrote thanks", "never sent to a cruise line"])
     assert.ok(txt.includes(w), "the PDF says: " + w);
   const { env, s } = setup();
   const res = await call(s, env, "GET", "/api/survey/report.pdf?p=YTD");
@@ -501,4 +499,28 @@ test("the report page is the Shipboard Feedback report's parts, no call logging,
   vm.runInContext("SRV_ALL=true;srvDraw()", ctx);
   assert.equal((body.innerHTML.match(/data-svrow=/g) || []).length, 12);
   assert.ok(!/srvLogCall/.test(W), "the call-logging function is gone");
+});
+
+// Miguel, 23 Oct 2026, of the report on the 62 Forms answers: "it does not make any sense". Read on the real Forms text: thanks
+// were listed under "What they asked us to fix", a praise of the perks read as a pay ask, "the training was not lacking" as a
+// training ask, and five people asking for a longer handover had no theme.
+test("what they asked us to fix reads asks, never thanks (the real Forms answers)", () => {
+  const T = (t) => { const f = fixThemes(t); return f.ask ? f.themes.join("+") || "other" : "thanks"; };
+  assert.equal(T("So far, all perks, benefits and guidance are impeccable. Nothing yet for me suggest. My contract has been a fun one."), "thanks");
+  assert.equal(T("I learned everything I needed to know and the training was not lacking. Right now I don't see anything that needs to be improved."), "thanks");
+  assert.equal(T("I probably don't have anything more to say because all the help and guidance was always there when needed."), "thanks");
+  assert.equal(T("All Excellent"), "thanks");
+  assert.equal(T("Nothing on my mind right now. I was very happy with my role and team ... this job gives a fine job that allows to travel grow, live, enjoy and learn."), "thanks");
+  assert.equal(T("I would like to take this opportunity to sincerely thank all of you for your support. I am hopeful and excited about the possibility of continuing."), "thanks");
+  assert.equal(T("Please make the turnover period 3 to 4 weeks, I think 2 weeks is not enough for the new hire"), "handover");
+  assert.equal(T("1 day hotel before joining the ship and 1 week or 3 days hand over to properly endorse the job has been left."), "travel+handover");
+  assert.equal(T("instead of putting the crew to direct to ship (joining crew), the crew deserve to rest for a day before working."), "travel");
+  assert.equal(T("Comparing the workload to Royal Caribbean & Azamara, Azamara is Different salary here should be different also raising salary will be great."), "pay");
+  assert.equal(T("Increase salary and change the HMO provider to one that is accepted in most hospitals."), "pay");
+  assert.equal(T("Stripes, maybe we can have 2 stipes same like print specialist in Royal."), "pay");
+  assert.equal(T("To have a overnight hotel accommodation or a flight that we can able to embark the ship early so we can attend the required pre-departure training for new sign-ons."), "travel", "pre-departure training is the reason for the hotel, not a training ask");
+  assert.equal(T("all is good; I hope next contract my request will be granted in one ship with my wife"), "other");
+  assert.equal(T("Do 1 ship in 1 full contract. this will be great seafarer experience."), "other");
+  const g = fixGroups([{ text: "More printer toner", name: "a" }, { text: "The hotel was far", name: "b" }, { text: "The hotel was far", name: "c" }, { text: "The hotel was far", name: "d" }]);
+  assert.equal(g[g.length - 1].key, "other", "Other asks last");
 });

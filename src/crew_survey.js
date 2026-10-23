@@ -70,11 +70,28 @@ export const NEEDS_CALL_RETURN = 2;      // or "Would return" at 1–2 (Miguel, 
 export const SURVEY_MIN_READ = 20, SURVEY_MIN_CELL = 3, SURVEY_MIN_QUARTER = 10, FIX_HOT = 3;
 // The written fix, grouped by keyword (no model) and owned (Miguel, 23 Oct 2026: "2. yes" to these three owners). A fix that
 // names two themes is under both; one that names none is "Other", no owner set.
+// What a seafarer asked us to fix, by keyword, no model (Miguel, 23 Oct 2026: "2. yes"; then, of the report built on it, "it does
+// not make any sense"). Read CLAUSE by clause: a clause that names a theme counts only when it is not praise or a "nothing"
+// ("perks, benefits and guidance are impeccable" is not a pay ask; "the training was not lacking" is not a training ask). A
+// written answer with no theme counts as "Other asks" only when a clause asks or complains (ASK_RX); the rest is thanks.
+// Handover is its own theme (the lowest statement on the Forms history, and five of them asked for a longer one); owner
+// Ray / Rolando (Miguel, 23 Oct 2026: "do it", on the suggestion).
 export const FIX_THEMES = [
-  { key: "travel", label: "Travel & joining", owner: "Rita / TDG", rx: /\b(hotels?|flights?|fl(?:y|ew|ight)|airports?|airfare|travel\w*|tickets?|visas?|joining|embark\w*|transfers?|accommodations?|luggage|baggage)\b/i },
-  { key: "pay", label: "Pay & benefits", owner: "Miguel", rx: /\b(pay|paid|payroll|salary|salaries|wages?|allowances?|internet|wifi|wi-fi|bonus(?:es)?|benefits?|allotments?|money|reimburs\w*|expenses?)\b/i },
-  { key: "training", label: "Training", owner: "Ray / Rolando", rx: /\b(train\w*|troubleshoot\w*|courses?|learn\w*|teach\w*|skills?)\b/i },
+  { key: "travel", label: "Travel & joining", owner: "Rita / TDG", rx: /\b(hotels?|flights?|airports?|airfare|layovers?|lounges?|tickets?|visas?|joining|embark\w*|transfers?|transportation|accommodations?|luggage|baggage|jet ?lags?|rest)\b/i },
+  { key: "handover", label: "Handover time", owner: "Ray / Rolando", rx: /\b(hand ?-?overs?|turn ?-?overs?|endors\w*)\b/i },
+  { key: "pay", label: "Pay & benefits", owner: "Miguel", rx: /\b(pay|payroll|salary|salaries|wages?|allowances?|internet|wi-?fi|bonus(?:es)?|benefits?|compensation|hmo|stripes?|stipes|service awards?|allotments?|reimburs\w*)\b/i },
+  { key: "training", label: "Training", owner: "Ray / Rolando", rx: /\b((more|better|additional|deeper|further|proper|in[- ]depth)\s+(\w+\s+){0,2}training|troubleshoot\w*|courses?)\b/i },
 ];
+const PRAISE_RX = /\b(nothing|not lacking|impeccable|excellent|works fine|all (is )?good|no complaints?)\b/i;
+const ASK_RX = /\b(please|requests?|i hope (next|to|that|we|i)|would like (to have|a|an|more)|wish|maybe|bring (it )?back|increase|provide|(?<!anything )more (?!to |than )\w+|do \d|should|never|not enough|too (much|many|long|short|late|little)|late|delay\w*|lack\w*|difficult)\b/i;
+const clausesOf = (t) => String(t == null ? "" : t).split(/(?<=[.;!?])\s+|\n+|,\s+|\s+-\s+/).map((x) => x.replace(/^and\s+/i, "").trim()).filter(Boolean);
+// The themes one written answer asks about, and whether it asks for anything at all.
+export function fixThemes(text) {
+  if (isNothing(text)) return { themes: [], ask: false };
+  const cl = clausesOf(text).filter((c) => !PRAISE_RX.test(c));
+  const themes = FIX_THEMES.filter((t) => cl.some((c) => t.rx.test(c))).map((t) => t.key);
+  return { themes, ask: themes.length > 0 || cl.some((c) => ASK_RX.test(c)) };
+}
 // An answer is "quick" when every statement got the same number in under a minute (Miguel, 23 Oct 2026: "4. ok"): it stays
 // listed and counted, but leaves the averages, so a tap-through on 5 does not lift the score. Forms answers have no timing.
 export const QUICK_SECS = 60;
@@ -172,41 +189,24 @@ const round2 = (x) => (x == null ? null : Math.round(x * 100) / 100);
 export function fixClause(text, rx) {
   const t = String(text == null ? "" : text).trim();
   if (t.length <= 90 || !rx) return t;
-  const parts = t.split(/(?<=[.;!?])\s+|,\s+|\s+-\s+/).map((x) => x.replace(/^and\s+/i, "").trim()).filter(Boolean);
-  const hit = parts.find((x) => rx.test(x));
+  const hit = clausesOf(t).find((x) => rx.test(x) && !PRAISE_RX.test(x));
   return hit && hit.length < t.length ? "\u2026" + hit.replace(/[.,;]+$/, "") + "\u2026" : t;
 }
 export function fixGroups(fixes) {
   const by = new Map(FIX_THEMES.map((t) => [t.key, { key: t.key, label: t.label, owner: t.owner, items: [] }]));
-  by.set("other", { key: "other", label: "Other", owner: null, items: [] });
+  by.set("other", { key: "other", label: "Other asks", owner: null, items: [] });
   for (const f of fixes || []) {
-    const hits = FIX_THEMES.filter((t) => t.rx.test(f.text || ""));
-    if (!hits.length) by.get("other").items.push({ ...f, clause: fixClause(f.text, null) });
-    for (const t of hits) by.get(t.key).items.push({ ...f, clause: fixClause(f.text, t.rx) });
+    const { themes, ask } = fixThemes(f.text);
+    if (!ask) continue;
+    if (!themes.length) by.get("other").items.push({ ...f, clause: fixClause(f.text, null) });
+    for (const k of themes) by.get(k).items.push({ ...f, clause: fixClause(f.text, FIX_THEMES.find((t) => t.key === k).rx) });
   }
   return [...by.values()].filter((g) => g.items.length).map((g) => ({ ...g, n: g.items.length, hot: g.key !== "other" && g.items.length >= FIX_HOT }))
-    .sort((a, b) => (b.hot - a.hot) || (b.n - a.n) || ((a.key === "other") - (b.key === "other")));
+    .sort((a, b) => ((a.key === "other") - (b.key === "other")) || (b.hot - a.hot) || (b.n - a.n));
 }
 // Every answer the same number (all 5s, mostly): the ceiling the HR view warns about.
 export const allSame = (ans) => { const v = KEYS.map((k) => ans && ans[k]).filter(Number.isInteger); return v.length > 1 && v.every((x) => x === v[0]); };
 const quarterOf = (d) => d.slice(0, 4) + "-Q" + (Math.floor((+d.slice(5, 7) - 1) / 3) + 1);
-const PERIOD_WORDS = { "30D": "in the last 30 days", QTD: "this quarter", YTD: "this year", All: "on file" };
-// The answer in its first line (the CIMS report layout): ONE definition, read by the page and the leadership PDF.
-export function surveyHeadline(r) {
-  const n = r.n, calls = (r.watch || []).length, words = PERIOD_WORDS[r.p] || "on file";
-  if (!n) return { lead: "No answers " + words + ".", rest: "", sub: r.enabled ? "The invitations go 3 days after each sign-off; the first answers land here." : "The daily invitation is off." };
-  const o = r.overall;
-  let lead = calls ? calls + (calls === 1 ? " seafarer is" : " seafarers are") + " on the watchlist." :
-    o == null ? n + " answer" + (n === 1 ? "" : "s") + " " + words + "." :
-    o >= 4.5 ? "Crew say they are happy." : o >= 4 ? "Crew are mostly satisfied." : o >= 3 ? "Crew are lukewarm." : "Crew are unhappy.";
-  const worst = (r.statements || [])[0];
-  const rest = n < SURVEY_MIN_READ ? "We are hearing from too few to be sure." : (worst && worst.avg < 4 ? worst.short + " is where it hurts." : "");
-  const same = r.allSame || 0;
-  const sub = n + " answer" + (n === 1 ? "" : "s") + " " + words + (same ? ", " + same + " of them the same number to every statement" : "") + "."
-    + (n < SURVEY_MIN_READ ? " Read the scores as a floor check, not a measure, until there are " + SURVEY_MIN_READ + " answers. The words say more." : "");
-  return { lead, rest, sub };
-}
-
 // rows: crew_survey rows (answers parsed); ended: the board's ended contracts (for the loop's "signed off"); p: period;
 // line: a cruise line or "all".
 export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
@@ -226,7 +226,7 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
     id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, at: iso(r.submitted_at), fix: r.fix_text || null,
     low: lowKeys(r.answers).map((k) => ({ key: k, short: QUESTIONS.find((x) => x.key === k).short, v: r.answers[k] })),
   }));
-  const fixes = answered.filter((r) => !isNothing(r.fix_text)).map((r) => ({ id: r.id, text: r.fix_text, name: r.crew_name, ship: r.ship, at: iso(r.submitted_at) }))
+  const fixes = answered.filter((r) => fixThemes(r.fix_text).ask).map((r) => ({ id: r.id, text: r.fix_text, name: r.crew_name, ship: r.ship, at: iso(r.submitted_at) }))
     .sort((a, b) => (a.at < b.at ? 1 : -1));
   const endedIn = (Array.isArray(ended) ? ended : []).filter((l) => iso(l.off) >= from && inLine(l.brand));
   const loop = {
@@ -240,7 +240,7 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
   };
   const list = answered.slice().sort((a, b) => (a.submitted_at < b.submitted_at ? 1 : -1)).map((r) => ({
     id: r.id, at: iso(r.submitted_at), name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, line: r.brand || null, source: r.source,
-    overall: r.answers[OVERALL] ?? null, ret: r.answers[RETURN] ?? null, low: lowKeys(r.answers).length, words: !isNothing(r.fix_text),
+    overall: r.answers[OVERALL] ?? null, ret: r.answers[RETURN] ?? null, low: lowKeys(r.answers).length, words: fixThemes(r.fix_text).ask,
     answers: r.answers, fix: r.fix_text || null, secs: Number.isInteger(r.answer_secs) ? r.answer_secs : null, quick: quickAnswer(r), same: allSame(r.answers),
   }));
   const waiting = asked.filter((r) => !r.submitted_at).map((r) => ({ id: r.id, name: r.crew_name, agency_id: r.agency_id || null, ship: r.ship, invited_at: iso(r.invited_at), reminded_at: iso(r.reminded_at), opened: !!r.opened_at, expires_at: iso(r.expires_at) }));
@@ -263,11 +263,12 @@ export function surveyReport({ rows, ended, today, p = "All", line = "all" }) {
     overall: round2(avg(ov)), fives: ov.filter((v) => v === 5).length,
     wouldReturn: rt.length ? { yes: rt.filter((v) => v >= 4).length, of: rt.length } : null,
     rate: asked.length ? { answered: loop.answered, of: asked.length } : null,
+    // written answers that ask for nothing (thanks, "all good"), and answers with nothing written
+    thanks: answered.filter((r) => String(r.fix_text || "").trim() && !fixThemes(r.fix_text).ask).length, unwritten: answered.filter((r) => !String(r.fix_text || "").trim()).length,
     watch: calls, statements, fixes, fixGroups: fixGroups(fixes), byLine, loop, list, waiting, themes, quarters,
     minRead: SURVEY_MIN_READ, minCell: SURVEY_MIN_CELL, minQuarter: SURVEY_MIN_QUARTER,
     questions: QUESTIONS.map((x) => ({ key: x.key, short: x.short, text: statementFor(x, null) })),
   };
-  out.headline = surveyHeadline(out);
   return out;
 }
 

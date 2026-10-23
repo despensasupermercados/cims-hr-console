@@ -6,7 +6,7 @@
 // like the welcome email) and reminds once after 5 days. The reads are injected by the Worker, so this module never imports
 // it. FEEDBACK ONLY (§1). Pinned by test/crew_survey.test.js on real SQLite.
 import { SURVEY_DDL, SURVEY_ALTERS, surveySkip, SURVEY_CC, SURVEY_REPLY_TO, SURVEY_ANSWERS_CC, SURVEY_LINK_DAYS, SURVEY_TZ, SURVEY_HOUR, KEYS,
-  surveyDue, remindDue, checkAnswers, surveyReport, surveyHeadline, emailOk, firstWord, addDays } from "./crew_survey.js";
+  surveyDue, remindDue, checkAnswers, surveyReport, emailOk, firstWord, addDays } from "./crew_survey.js";
 import { surveyInviteEmail } from "./emails/hr.survey.invite.v1.js";
 import { surveyAnswersEmail } from "./emails/hr.survey.answers.v1.js";
 import { surveyPage, surveyThanksPage, surveyGonePage } from "./crew_survey_page.js";
@@ -179,7 +179,7 @@ export function installSurvey(deps) {
     const line = ["Royal", "Celebrity", "Azamara", "NCL"].includes(url.searchParams.get("line")) ? url.searchParams.get("line") : "all";
     const rep = surveyReport({ rows, ended, today: today(), p, line });
     const enabled = (await setting(env, "crew_survey_auto_enabled")) === "true";
-    return { ...rep, enabled, headline: surveyHeadline({ ...rep, enabled }), since: await setting(env, "crew_survey_auto_since"),
+    return { ...rep, enabled, since: await setting(env, "crew_survey_auto_since"),
       sources: { console: rows.filter((r) => r.source === "console").length, forms: rows.filter((r) => r.source === "forms").length } };
   }
 

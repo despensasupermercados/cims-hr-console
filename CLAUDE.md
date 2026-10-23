@@ -1111,6 +1111,21 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   the report**: `POST /api/survey/call` and `srvLogCall` are removed; a follow-up is a note on the seafarer's profile (the name links
   there). The `called_*` columns stay in D1, unread (no schema change). A new report on Reports uses these parts, never its own.
   Pinned by `test/crew_survey.test.js` (the page run in node:vm).
+- **THE REPORT MAKES SENSE OR SAYS NOTHING** (Miguel, 23 Oct 2026, on the leadership PDF built from the HR view: "report needs
+  re-do .. it does not make any sense"). Read on the 62 Forms answers, "What they asked us to fix" listed thanks ("All Excellent",
+  "all good") as fixes, read "perks, benefits ... are impeccable" as a pay ask and "the training was not lacking" as a training
+  ask, and had no theme for the five who asked for a longer handover. `fixThemes(text)` now reads CLAUSE by clause: a clause with
+  praise or a "nothing" (`PRAISE_RX`) names no theme; an answer with no theme is an **Other ask** only when a clause asks or
+  complains (`ASK_RX`: please, hope, maybe, increase, more X, should, never, not enough, late…); everything else is thanks,
+  counted apart (`thanks`, `unwritten`) and said under the table, never listed as a fix. Themes: Travel & joining (Rita / TDG, now
+  with rest / layover / transportation, without "travel" alone), **Handover time** (hand over / turnover / endorse — owner Ray /
+  Rolando, Miguel 23 Oct 2026: "do it"), Pay & benefits (Miguel, now with compensation / HMO / stripes / service awards), Training (Ray / Rolando, only
+  "more / in-depth … training" or troubleshooting — "pre-departure training" is the reason for a hotel, not an ask). Other asks
+  last. On the 62: Travel 12, Pay 12, Handover 5, Training 1, Other 3, thanks 22. **The PDF mirrors the page**: the letterhead,
+  "Crew survey" + period · line · answers and their source, the six tiles, By cruise line | Lowest statements, the Watchlist block
+  (every low statement by name, his words, never cut), What they asked us to fix as a table (theme · owner · mentions, one example
+  in their words), the thanks count, the footer. Gone from it and from the code: the headline sentence (`surveyHeadline`) and the
+  theme × line heat table ("The job", "You" told a reader nothing).
 - **The switch**: Keyman › Automation "Crew survey" (`/api/survey/auto`, `crew_survey_auto_enabled` + `_since`), OFF until Miguel
   switches it on. `GET /api/survey/preview?id=&what=page|invite|reminder|answers` shows a crew's real data, makes no link, sends nothing.
 - **Never money, never the cruise line**: `crew_survey` (migrations/0040) is read by nothing on the Score Card / bonus path, and
