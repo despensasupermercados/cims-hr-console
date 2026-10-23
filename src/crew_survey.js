@@ -114,7 +114,7 @@ export function checkAnswers(body) {
 export const lowKeys = (ans) => KEYS.filter((k) => ans && Number.isInteger(ans[k]) && ans[k] <= 2);
 
 // "Nothing", "none", "nothing to improve" and the like are not something to fix; "Nothing arrived on time" is.
-export const isNothing = (t) => { const x = String(t == null ? "" : t).trim(); return !x || /^(n\/?a|none|nil|no|-+|\.+|no comments?|nothing(\s+(to\s+\w+|at all|for now|so far|else|really|much|in particular|special))*)[\s.!,]*$/i.test(x) || /^for me it'?s nothing/i.test(x); };
+export const isNothing = (t) => { const x = String(t == null ? "" : t).trim(); return !x || /^(n\/?a|none|nil|no|-+|\.+|no comments?|nothing(\s+(to\s+\w+|at all|for now|so far|else|really|much|in particular|special))*)[\s.!,]*$/i.test(x) || /^(for me it'?s nothing|nothing on my (side|part|end)\b)/i.test(x); };
 
 // ---- the report: Reports › Crew survey -------------------------------------------------------------------------------
 export const LINES = ["Royal", "Celebrity", "Azamara", "NCL"];

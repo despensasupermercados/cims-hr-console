@@ -100,7 +100,7 @@ test("answers: every statement a whole 1–5, the line optional text; anything e
   assert.equal(ok.answers.q01, 3);
   assert.equal(ok.fix, "The hotel\n before embarking.");
   assert.equal(checkAnswers({ answers: ALL5 }).fix, null);
-  assert.ok(isNothing("Nothing") && isNothing("none.") && isNothing("N/A") && isNothing("Nothing to improve.") && isNothing("No comment") && !isNothing("Nothing arrived on time") && !isNothing("No hotel before embarking"));
+  assert.ok(isNothing("Nothing") && isNothing("none.") && isNothing("N/A") && isNothing("Nothing to improve.") && isNothing("No comment") && isNothing("Nothing on my side, my contract went so smooth this time.") && isNothing("For me its nothing to improve.") && !isNothing("Nothing arrived on time") && !isNothing("No hotel before embarking"));
 });
 
 test("the emails: canonical letterhead, no rgba or gradient, bgcolor paired, the name escaped", () => {
