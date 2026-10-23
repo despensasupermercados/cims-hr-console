@@ -427,7 +427,7 @@ test("the HR view on the real answers: an empty watchlist, themes by line with n
 });
 
 test("the fixes, grouped by keyword with their owners (Miguel: '2. yes'); one sentence with two fixes counts under both", () => {
-  assert.deepEqual(FIX_THEMES.map((t) => [t.label, t.owner]), [["Travel & joining", "Rita / TDG"], ["Handover time", null], ["Pay & benefits", "Miguel"], ["Training", "Ray / Rolando"]]);
+  assert.deepEqual(FIX_THEMES.map((t) => [t.label, t.owner]), [["Travel & joining", "Rita / TDG"], ["Handover time", "Ray / Rolando"], ["Pay & benefits", "Miguel"], ["Training", "Ray / Rolando"]]);
   const r = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" });
   const by = Object.fromEntries(r.fixGroups.map((g) => [g.key, g]));
   assert.deepEqual(Object.keys(by).sort(), ["pay", "training", "travel"], "'Nothing on my side' and 'For me its nothing to improve' are not fixes");

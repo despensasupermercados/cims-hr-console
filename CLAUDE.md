@@ -1118,8 +1118,8 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   praise or a "nothing" (`PRAISE_RX`) names no theme; an answer with no theme is an **Other ask** only when a clause asks or
   complains (`ASK_RX`: please, hope, maybe, increase, more X, should, never, not enough, late…); everything else is thanks,
   counted apart (`thanks`, `unwritten`) and said under the table, never listed as a fix. Themes: Travel & joining (Rita / TDG, now
-  with rest / layover / transportation, without "travel" alone), **Handover time** (hand over / turnover / endorse — owner NOT SET,
-  Miguel's to name), Pay & benefits (Miguel, now with compensation / HMO / stripes / service awards), Training (Ray / Rolando, only
+  with rest / layover / transportation, without "travel" alone), **Handover time** (hand over / turnover / endorse — owner Ray /
+  Rolando, Miguel 23 Oct 2026: "do it"), Pay & benefits (Miguel, now with compensation / HMO / stripes / service awards), Training (Ray / Rolando, only
   "more / in-depth … training" or troubleshooting — "pre-departure training" is the reason for a hotel, not an ask). Other asks
   last. On the 62: Travel 12, Pay 12, Handover 5, Training 1, Other 3, thanks 22. **The PDF mirrors the page**: the letterhead,
   "Crew survey" + period · line · answers and their source, the six tiles, By cruise line | Lowest statements, the Watchlist block

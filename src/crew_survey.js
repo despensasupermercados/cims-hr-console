@@ -74,11 +74,11 @@ export const SURVEY_MIN_READ = 20, SURVEY_MIN_CELL = 3, SURVEY_MIN_QUARTER = 10,
 // not make any sense"). Read CLAUSE by clause: a clause that names a theme counts only when it is not praise or a "nothing"
 // ("perks, benefits and guidance are impeccable" is not a pay ask; "the training was not lacking" is not a training ask). A
 // written answer with no theme counts as "Other asks" only when a clause asks or complains (ASK_RX); the rest is thanks.
-// Handover is its own theme (the lowest statement on the Forms history, and five of them asked for a longer one); its owner
-// is Miguel's to name, so it reads "owner not set" until he does.
+// Handover is its own theme (the lowest statement on the Forms history, and five of them asked for a longer one); owner
+// Ray / Rolando (Miguel, 23 Oct 2026: "do it", on the suggestion).
 export const FIX_THEMES = [
   { key: "travel", label: "Travel & joining", owner: "Rita / TDG", rx: /\b(hotels?|flights?|airports?|airfare|layovers?|lounges?|tickets?|visas?|joining|embark\w*|transfers?|transportation|accommodations?|luggage|baggage|jet ?lags?|rest)\b/i },
-  { key: "handover", label: "Handover time", owner: null, rx: /\b(hand ?-?overs?|turn ?-?overs?|endors\w*)\b/i },
+  { key: "handover", label: "Handover time", owner: "Ray / Rolando", rx: /\b(hand ?-?overs?|turn ?-?overs?|endors\w*)\b/i },
   { key: "pay", label: "Pay & benefits", owner: "Miguel", rx: /\b(pay|payroll|salary|salaries|wages?|allowances?|internet|wi-?fi|bonus(?:es)?|benefits?|compensation|hmo|stripes?|stipes|service awards?|allotments?|reimburs\w*)\b/i },
   { key: "training", label: "Training", owner: "Ray / Rolando", rx: /\b((more|better|additional|deeper|further|proper|in[- ]depth)\s+(\w+\s+){0,2}training|troubleshoot\w*|courses?)\b/i },
 ];
