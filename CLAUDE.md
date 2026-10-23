@@ -1084,7 +1084,10 @@ on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
   null — no title on record; never Royal's GSM). Royal, Celebrity and Azamara read exactly as before.
 - **Before service**: the hull has its section with nobody on it (anchored by VESSEL_REF `from`), drawn "First printer · in
   service Nov 16, 2026 · drag a seafarer here"; it is no "empty hull" row until that day (`boardIssues` `notYet`). Rita places
-  Joe Art by dragging his card onto it (the relief panel's slot needs a printer to follow). The Keyman rail groups it under
+  Joe Art by tapping the slot ("First printer · … · PICK OR DRAG A SEAFARER": `firstPrinter` opens a side sheet over
+  `/api/relief/crew`, a pick goes through `/api/rotation/project`, the drag's route; Miguel, 23 Oct 2026: "I cannot add a
+  printer under ncl" — with the Norwegian filter on, nobody was on screen to drag, and the relief panel needs a printer to
+  follow) or by dragging his card onto it. The earmark starts today; Rita sets his 9 Nov sign-on on the card. The Keyman rail groups it under
   "Norwegian"; the audit landing has a "Norwegian" tile saying "In service Nov 16".
 - **Open, Miguel's to answer**: the pilot term is 45 + 45 days (rec98ZTCYo7X2PkPO) but a projection is 7 months (Rita types the
   date); the earmark bench lists everyone for an NCL hull (no NCL brand rule); NCL's ship code (the pass reads "GE");

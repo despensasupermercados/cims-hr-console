@@ -1,6 +1,7 @@
 // /api/relief/crew — the reliever picker's rows: status, ship, open projections, document standing (2026-09-15).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { RELIEF_CREW_PICKER_SQL } from "../src/relief_api.js";
 
 let DatabaseSync = null;
@@ -49,4 +50,11 @@ test("the reliever modal's crew line says what it requires and hides after the p
   assert.doesNotMatch(RELIEF_HTML, /required to activate/);
   assert.match(RELIEF_HTML, /<span id="mreq"[^>]*> — pick a seafarer to save this card<\/span>/);
   assert.match(RELIEF_HTML, /cur\.crew_id=id;if\(\$\("mreq"\)\)\$\("mreq"\)\.style\.display="none";/);
+});
+
+// Getaway's "First printer" picker (Miguel, 23 Oct 2026: "I cannot add a printer under ncl"): the empty hull has no
+// relief-board row, so the board's own picker earmarks through /api/rotation/project, which is keyed on the agency id.
+test("the /api/relief/crew rows carry the agency id the first-printer picker earmarks with", () => {
+  const src = readFileSync(new URL("../src/relief_api.js", import.meta.url), "utf8");
+  assert.match(src, /id: r\.id, agency_id: r\.agency_id \|\| null, name: r\.name/);
 });
