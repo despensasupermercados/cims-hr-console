@@ -9,6 +9,7 @@ import { mastRows } from "../src/cims-mast.js";
 import { auditRequestEmail } from "../src/emails/hr.audit.request.v1.js";
 import { docsInEmail } from "../src/emails/hr.audit.docsin.v1.js";
 import { overdueEmail } from "../src/emails/hr.audit.overdue.v1.js";
+import { followupEmail } from "../src/emails/hr.audit.followup.v1.js";
 import { filedEmail } from "../src/emails/hr.audit.filed.v1.js";
 import { dispatchEmail } from "../src/emails/hr.audit.dispatch.v1.js";
 
@@ -32,6 +33,9 @@ const EMAILS = {
       ctx: { asOf: "2026-10-13", machines: [{ serial: "S1", label: "PROD 1", model: "C4070", p43: { items: [{ head: "LINES" }] }, life: [{ name: "Drum Unit/K (%)", pct: 112 }] }], diff: [{ kind: "gap", part_no: "B2", description: "Toner C", obp: 5, counted: 0 }], extras: [] } } }),
   dispatch: dispatchEmail({ ship: "Oasis", crew: "John Gorre", auditor: "Dexter Lawrence", openedAt: "2026-10-12T09:00:00Z", filedAt: "2026-10-14T17:00:00Z", rating: 2, note: "No hotel booking", signOn: "2026-06-02", link: "https://audit.cims.work/#q=ar_4" }),
   overdue: overdueEmail({ ship: "Pursuit", crew: "Kevin Leif Jugao", dueAt: "2026-10-17T10:34:53.589Z", missing: [{ say: "Pattern 43 for M1" }, "The count"] }),
+  "follow-up reminder": followupEmail({ owner: "Rita", link: "https://audit.cims.work/#followups",
+    due: [{ ship: "Edge", text: "Safety shoes", askedAt: "2026-09-22", due: "2026-10-20", crew: "Ana R." }, { ship: "Pursuit", text: "Book the hotel", askedAt: "2026-10-06", due: "2026-10-20" }],
+    late: [{ ship: "Odyssey", text: "Coveralls", askedAt: "2026-09-12", due: "2026-10-12", carried: 1 }] }),
 };
 // The letterhead is the canonical cims-mast.js, byte-identical in every CIMS repo (CIMS email standard §1): it is not
 // judged here — changing it is an estate-wide change of its own.
