@@ -8197,6 +8197,7 @@ function renderReports(){
    +'.dsdg3{margin-top:auto;padding:12px 8px 0;border-top:1px solid rgba(255,255,255,.1);color:rgba(255,255,255,.45);font-size:8px;letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;gap:8px}'
    +'.dsdg3 b{color:var(--green);font-family:Outfit;font-size:13px;letter-spacing:2px}'
    +'.dsmain{padding:22px 24px;min-width:0}'
+   +'@media(max-width:760px){.dswrap{grid-template-columns:minmax(0,1fr)}.dsside{min-height:0;padding:14px 12px}.dsside .dssub,.dsside .dsline,.dsdg3{display:none}.dsmain{padding:16px 14px}}'
    +'</style>'
    +'<div class=dswrap>'
    +'<aside class=dsside>'
@@ -8255,6 +8256,10 @@ function srvDraw(){
    +'.svx{overflow-x:auto;-webkit-overflow-scrolling:touch}.svx .svt{min-width:640px}@media (max-width:560px){.svpipe{grid-template-columns:repeat(2,minmax(0,1fr))}}.svdet{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:4px 18px;padding:4px 0 8px}.svdet div{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.4}.svdet div span:last-child{color:var(--ink)}'
    +'.svg3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}.svg3>.span2{grid-column:span 2}.svbars{columns:2;column-gap:32px}.svbars>.svbar{break-inside:avoid}'
    +'@media(max-width:1180px){.svg3{grid-template-columns:minmax(0,1fr)}.svg3>.span2{grid-column:auto}}@media(max-width:760px){.svbars{columns:1}}'
+   +'.svhead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:4px 0 14px}.svh{font-family:Outfit;font-size:28px;font-weight:600;letter-spacing:-.4px;color:var(--navy);line-height:1.15}.svh span{color:#9CA3AF}.svsub{font-size:14px;color:var(--ink);margin-top:6px;max-width:820px;line-height:1.5}'
+   +'.svg2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:12px;align-items:start}.svx .svhm{min-width:430px}.svhm td,.svhm th{padding:8px 6px}@media(max-width:1180px){.svg2{grid-template-columns:minmax(0,1fr)}}'
+   +'.svhm td{text-align:center;font-weight:700}.svhm td:first-child{text-align:left;font-weight:400}.svhm td small{display:block;font-size:10.5px;font-weight:500;color:var(--mut)}.svhm th{text-align:center}.svhm th:first-child{text-align:left}.svhm .c5{background:#E7F3E1;color:#3E7F2E}.svhm .c4{background:#F0F6EC;color:#3E7F2E}.svhm .c3{background:#F6EEE1;color:#B7791F}.svhm .c2{background:#F4E5E3;color:#96281B}.svhm .cn{color:#C4C9D0;font-weight:500}'
+   +'.svth{border-left:3px solid #E0A23B;padding:2px 0 2px 12px;margin:12px 0}.svth.hot{border-left-color:#96281B}.svtl{font-family:Outfit;font-size:14px;font-weight:600;color:var(--navy)}.svth.hot .svtl{color:#96281B}.svtl span{font-family:inherit;font-size:12px;font-weight:400;color:var(--mut);margin-left:6px}.svtl span b{color:var(--navy)}'
    +'.svnote{font-size:12px;color:var(--mut);margin-top:10px;line-height:1.5}.mu{color:var(--mut)}.svlink{color:var(--navy);font-weight:700;text-decoration:none}.svlink:hover{text-decoration:underline}'
    +'</style>';
   h+='<div class=rpthead><h2>Crew survey</h2>'
@@ -8262,57 +8267,75 @@ function srvDraw(){
    +'<span class=svsep></span>'
    +chip('l','all','All lines',SRV_L==='all')+['Royal','Celebrity','Azamara','NCL'].map(function(l){return chip('l',l,l==='NCL'?'Norwegian':l,SRV_L===l);}).join('')
    +'</div>';
-  var src=d.sources||{};
+  var src=d.sources||{},hl=d.headline||{lead:'',rest:'',sub:''};
   h+='<div class=svband><b>End-of-contract survey.</b> '+(d.enabled?'3 days after a contract ends the seafarer is asked (switched on '+srvDay(d.since)+'); one reminder after 5 days.':'The daily invitation is <b>off</b>: switch on <b>Crew survey</b> in the Keyman tab&rsquo;s Automation to ask every seafarer 3 days after the sign-off.')
    +' '+(src.forms?src.forms+' answers came from the Microsoft Forms survey before the console. ':'')+'Feedback only: never the Score Card or the bonus, never sent to the cruise line.</div>';
+  // the answer in its first line (surveyHeadline: one definition, the page and the PDF read it)
+  h+='<div class=svhead><div><div class=svh>'+escHtml(hl.lead)+(hl.rest?' <span>'+escHtml(hl.rest)+'</span>':'')+'</div><div class=svsub>'+escHtml(hl.sub)+'</div></div>'
+   +'<a class="btn ghost" href="/api/survey/report.pdf?p='+encodeURIComponent(SRV_P)+'&line='+encodeURIComponent(SRV_L)+'" download>Download PDF</a></div>';
   var rate=d.rate?Math.round(d.rate.answered/d.rate.of*100)+'<small>%</small>':'&mdash;';
-  var ret=d.wouldReturn?Math.round(d.wouldReturn.yes/d.wouldReturn.of*100)+'<small>%</small>':'&mdash;';
+  var lowN=d.n<(d.minRead||20),sameHi=d.n&&d.allSame*2>=d.n;
   h+='<div class=svk>'
-   +'<div class=k><div class=l>Answers</div><div class=v>'+d.n+'</div><div class=s>'+(d.line==='all'?['Royal','Celebrity','Azamara','NCL'].filter(function(l){return d.byLineCount[l];}).map(function(l){return d.byLineCount[l]+' '+(l==='NCL'?'Norwegian':l);}).join(' · ')||'none yet':(SRV_LN[d.line]||d.line))+'</div></div>'
+   +'<div class=k style="--c:'+(lowN?'#B7791F':'#5FB946')+'"><div class=l>Answers</div><div class=v>'+d.n+'</div><div class=s>'+(d.line==='all'?['Royal','Celebrity','Azamara','NCL'].map(function(l){return (d.byLineCount[l]||0)+' '+(l==='NCL'?'Norwegian':l);}).join(' &middot; '):(SRV_LN[d.line]||d.line))+'</div>'+(lowN?'<div class=s style="color:#B7791F;font-weight:700;margin-top:4px">Below '+(d.minRead||20)+': too few to compare lines</div>':'')+'</div>'
+   +'<div class=k><div class=l>Would sail with us again</div><div class=v>'+(d.wouldReturn?d.wouldReturn.yes+' <small>of '+d.wouldReturn.of+'</small>':'&mdash;')+'</div><div class=s>4 or 5 on &ldquo;Would return&rdquo;</div></div>'
    +'<div class=k><div class=l>Overall</div><div class=v>'+(d.overall==null?'&mdash;':d.overall.toFixed(2)+'<small>/5</small>')+'</div><div class=s>'+d.fives+' gave 5'+(d.quick?' &middot; '+d.quick+' quick left out':'')+'</div></div>'
-   +'<div class=k><div class=l>Would sail with us again</div><div class=v>'+ret+'</div><div class=s>'+(d.wouldReturn?d.wouldReturn.yes+' of '+d.wouldReturn.of+' at 4 or 5':'no answers yet')+'</div></div>'
-   +'<div class=k><div class=l>Answer rate</div><div class=v>'+rate+'</div><div class=s>'+(d.rate?d.rate.answered+' of '+d.rate.of+' asked':'starts when the switch is on')+'</div></div>'
-   +'<div class=k style="--c:'+(d.needsCall.length?'#96281B':'#5FB946')+'"><div class=l>Need a call</div><div class=v>'+d.needsCall.length+'</div><div class=s>3 or more answers at 1&ndash;2</div></div>'
+   +'<div class=k style="--c:'+(sameHi?'#96281B':'#5FB946')+'"><div class=l>Same answer to every statement</div><div class=v>'+(d.n?d.allSame+' <small>of '+d.n+'</small>':'&mdash;')+'</div><div class=s>'+(sameHi?'Mostly a ceiling: read their words':'one number tapped all the way down')+'</div></div>'
+   +'<div class=k style="--c:'+(d.rate?(d.rate.answered/d.rate.of<0.6?'#B7791F':'#5FB946'):'#9CA3AF')+'"><div class=l>Answer rate</div><div class=v>'+rate+'</div><div class=s>'+(d.rate?d.rate.answered+' of '+d.rate.of+' asked &middot; target 60%':'counts the console&rsquo;s invitations')+'</div></div>'
    +'</div>';
-  // ---- who needs a call, then who was called
+  // people to call (3+ statements at 1-2, or would not return) | where it hurts, theme x line
+  var cardCall='<div class=rblk><h3>People to call</h3><div class=csub style="margin-bottom:10px">3 or more statements at 1&ndash;2, or &ldquo;Would return&rdquo; at 1&ndash;2. Rita logs the call; the row leaves the list.</div>';
   d.needsCall.forEach(function(c){
-    h+='<div class=svcall><div class=who><b>'+srvWho(c.name,c.agency_id)+'</b> &middot; '+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)
-     +'<div>Low on: '+c.low.map(function(x){return escHtml(x.short)+' ('+x.v+')';}).join(', ')+'</div>'
+    var why=[];if((c.why||[]).indexOf('low')>=0)why.push(c.low.length+' answers at 1&ndash;2');if((c.why||[]).indexOf('return')>=0)why.push('would return '+c.ret);
+    cardCall+='<div class=svcall><div class=who><b>'+srvWho(c.name,c.agency_id)+'</b> &middot; '+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)
+     +'<div>'+why.join(' &middot; ')+(c.low.length?' &middot; '+c.low.map(function(x){return escHtml(x.short)+' ('+x.v+')';}).join(', '):'')+'</div>'
      +(c.fix?'<div>Asked us to fix: &ldquo;'+escHtml(c.fix)+'&rdquo;</div>':'')+'</div>'
      +'<button class="btn g" data-svcall="'+escHtml(c.id)+'" data-svname="'+escHtml(c.name||'')+'">Log the call</button></div>';
   });
+  if(!d.needsCall.length){
+    var cl=d.closest;
+    cardCall+='<div class="svcall done"><div class=who><b>Nobody to call.</b><div>'+(cl?'Closest: '+srvWho(cl.name,cl.agency_id)+' &middot; '+escHtml(cl.ship||'')+' &middot; '+srvDay(cl.at)+'. '
+      +[cl.low.length?cl.low.map(function(x){return escHtml(x.short)+' '+x.v;}).join(', '):'',cl.fours?cl.fours+' statement'+(cl.fours===1?'':'s')+' at 4':'',cl.ret!=null?'would return '+cl.ret:''].filter(Boolean).join(' &middot; ')+'. Worth five minutes.':'Every answer is a 5 across the board.')+'</div></div>'
+      +(cl?'<button class="btn ghost" data-svcall="'+escHtml(cl.id)+'" data-svname="'+escHtml(cl.name||'')+'">Log a call</button>':'')+'</div>';
+  }
   d.called.forEach(function(c){
-    h+='<div class="svcall done"><div class=who><b>'+srvWho(c.name,c.agency_id)+'</b> &middot; '+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)
+    cardCall+='<div class="svcall done"><div class=who><b>'+srvWho(c.name,c.agency_id)+'</b> &middot; '+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)
      +'<div>Called '+srvDay((c.called_at||'').slice(0,10))+(c.called_by?' by '+escHtml(c.called_by):'')+(c.call_note?' &middot; '+escHtml(c.call_note):'')+'</div></div></div>';
   });
-  if(!d.n){
-    h+='<div class=rblk style="margin-top:12px"><div class=csub style="padding:8px 2px">No answers in this period. '+(SRV_P!=='All'||SRV_L!=='all'?'Widen the range or pick All lines.':'The first answers arrive once the switch is on.')+'</div></div>';
-  }else{
-    h+='<div class=svg3>';
-    h+='<div class="rblk span2"><h3>Where it hurts</h3><div class=csub style="margin-bottom:8px">Every statement, the lowest average first.</div><div class=svbars>'
-     +d.statements.map(function(s){var col=s.avg>=4.5?'#5FB946':(s.avg>=4?'#8FBF6A':(s.avg>=3?'#E0A23B':'#C2412F'));
-       return '<div class=svbar title="'+escHtml((Q[s.key]||{}).text||'')+'"><span>'+escHtml(s.short)+'</span><span class=svtr><i style="width:'+Math.round(s.avg/5*100)+'%;background:'+col+'"></i></span><span class=svbv>'+s.avg.toFixed(1)+'</span><span class=svbl>'+(s.low?s.low+' low':'')+'</span></div>';}).join('')+'</div></div>';
-    h+='<div class=rblk><h3>The one thing to fix first</h3><div class=csub style="margin-bottom:4px">In their words, newest first.</div>'
-     +(d.fixes.length?d.fixes.slice(0,12).map(function(f){return '<div class=svfx><div class=svfq>&ldquo;'+escHtml(f.text)+'&rdquo;</div><div class=svfw>'+srvWho(f.name,null)+' &middot; '+escHtml(f.ship||'')+' &middot; '+srvDay(f.at)+'</div></div>';}).join('')
-       +(d.fixes.length>12?'<div class=svnote>'+(d.fixes.length-12)+' more under Every answer.</div>':''):'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
-    h+='</div>';
-    h+='<div class=svg3>';
-    h+='<div class=rblk><h3>By cruise line</h3><div class=svlines>'+d.byLine.map(function(b){return '<div class="svlc'+(b.n?'':' none')+'"><div class=n>'+(SRV_LN[b.line]||b.line)+'</div><div class=v>'+(b.avg==null?'&mdash;':b.avg.toFixed(2))+'</div><div class=s>'+(b.n?b.n+' answer'+(b.n===1?'':'s')+' &middot; overall':'no answers yet')+'</div></div>';}).join('')+'</div></div>';
-    var L=d.loop;
-    h+='<div class=rblk><h3>The loop</h3><div class=svpipe><div><b>'+L.signedOff+'</b><span>signed off</span></div><div><b>'+L.invited+'</b><span>asked</span></div><div><b>'+L.opened+'</b><span>opened</span></div><div><b>'+L.answered+'</b><span>answered</span></div></div>'
+  cardCall+='<div class=svnote>Calls owed '+d.needsCall.length+' &middot; calls logged '+d.called.length+'.</div></div>';
+  var mc=d.minCell||3,cls=function(c){if(!c||c.n<mc||c.avg==null)return 'cn';return c.avg>=4.5?'c5':(c.avg>=4?'c4':(c.avg>=3?'c3':'c2'));};
+  var td=function(c){return '<td class='+cls(c)+'>'+(c&&c.n>=mc&&c.avg!=null?c.avg.toFixed(2):'&mdash;')+'<small>n '+(c?c.n:0)+'</small></td>';};
+  var cardHeat='<div class=rblk><h3>Where it hurts, by cruise line</h3><div class=csub style="margin-bottom:8px">Average per theme, the number of answers under it. Fewer than '+mc+' answers stays grey, so one person cannot paint a whole line. Every line, whatever the chip above.</div>'
+   +'<div class=svx><table class="svt svhm"><thead><tr><th>Theme</th><th>Royal</th><th>Celebrity</th><th>Azamara</th><th>NCL</th><th>All</th></tr></thead><tbody>'
+   +(d.themes||[]).map(function(t){return '<tr><td title="'+t.short.map(escHtml).join(', ')+'"><b>'+escHtml(t.title)+'</b></td>'+['Royal','Celebrity','Azamara','NCL'].map(function(l){return td(t.cells[l]);}).join('')+td(t.all)+'</tr>';}).join('')
+   +'</tbody></table></div><div class=svnote>Hover a theme for its statements.</div></div>';
+  h+='<div class=svg2>'+cardCall+cardHeat+'</div>';
+  // what they asked us to fix, by theme and owner | every statement, lowest first
+  var cardFix='<div class=rblk><h3>What they asked us to fix</h3><div class=csub style="margin-bottom:6px">Their words, grouped by keyword (no AI), each theme with its owner. A theme named by 3 or more in the period leads, in red.</div>'
+   +((d.fixGroups||[]).length?d.fixGroups.map(function(g){
+      return '<div class="svth'+(g.hot?' hot':'')+'"><div class=svtl>'+escHtml(g.label)+' <span>'+(g.owner?'owner <b>'+escHtml(g.owner)+'</b>':'no owner set')+' &middot; '+g.n+' mention'+(g.n===1?'':'s')+'</span></div>'
+       +g.items.slice(0,4).map(function(f){return '<div class=svfx><div class=svfq title="'+escHtml(f.text)+'">&ldquo;'+escHtml(f.clause)+'&rdquo;</div><div class=svfw>'+srvWho(f.name,null)+' &middot; '+escHtml(f.ship||'')+' &middot; '+srvDay(f.at)+'</div></div>';}).join('')
+       +(g.items.length>4?'<div class=svnote>'+(g.items.length-4)+' more under Every answer.</div>':'')+'</div>';}).join('')
+     :'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
+  var cardSt='<div class=rblk><h3>Every statement below 5</h3><div class=csub style="margin-bottom:8px">The lowest average first.</div>'
+   +(d.statements.length?d.statements.filter(function(s){return s.avg<5;}).map(function(s){var col=s.avg>=4.5?'#5FB946':(s.avg>=4?'#8FBF6A':(s.avg>=3?'#E0A23B':'#C2412F'));
+       return '<div class=svbar title="'+escHtml((Q[s.key]||{}).text||'')+'"><span>'+escHtml(s.short)+'</span><span class=svtr><i style="width:'+Math.round(s.avg/5*100)+'%;background:'+col+'"></i></span><span class=svbv>'+s.avg.toFixed(1)+'</span><span class=svbl>'+(s.low?s.low+' low':'')+'</span></div>';}).join('')
+     +(function(){var k=d.statements.filter(function(s){return s.avg>=5;}).length;return k?'<div class=svnote>'+k+' more at 5.0 from everyone who answered.</div>':'';})()
+     :'<div class=csub>No answers in this period.</div>')+'</div>';
+  h+='<div class=svg2>'+cardFix+cardSt+'</div>';
+  // the trend, the loop, who has not answered yet
+  var mq=d.minQuarter||10,qs=d.quarters||[],shown=qs.filter(function(q){return q.shown;});
+  var cardQ='<div class=rblk><h3>By quarter</h3><div class=csub style="margin-bottom:8px">Overall and &ldquo;would return&rdquo;, with the number of answers.</div>'
+   +(shown.length?'<table class=svt><thead><tr><th>Quarter</th><th class=c>Answers</th><th class=c>Overall</th><th class=c>Would return</th></tr></thead><tbody>'+shown.map(function(q){return '<tr><td>'+escHtml(q.q.replace('-',' '))+'</td><td class=c>'+q.n+'</td><td class=c>'+(q.overall==null?'&mdash;':q.overall.toFixed(2))+'</td><td class=c>'+(q.wouldReturn?q.wouldReturn.yes+' of '+q.wouldReturn.of:'&mdash;')+'</td></tr>';}).join('')+'</tbody></table>':'')
+   +(qs.length>shown.length?'<div class=svnote>A quarter shows here once it has '+mq+' answers; a trend on fewer is noise. Not yet: '+qs.filter(function(q){return !q.shown;}).map(function(q){return escHtml(q.q.replace('-',' '))+' ('+q.n+')';}).join(', ')+'.</div>':(qs.length?'':'<div class=csub>No answers yet.</div>'))+'</div>';
+  var L=d.loop;
+  var cardLoop='<div class=rblk><h3>Are we hearing from everyone?</h3><div class=svpipe><div><b>'+L.signedOff+'</b><span>signed off</span></div><div><b>'+L.invited+'</b><span>asked</span></div><div><b>'+L.opened+'</b><span>opened</span></div><div><b>'+L.answered+'</b><span>answered</span></div></div>'
      +((L.skipped||[]).length?'<div class=svnote><b>Not asked, on purpose:</b>'+L.skipped.map(function(x){return '<div style="display:flex;gap:8px;align-items:center;margin-top:6px">'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join('')+'<div style="margin-top:6px">Checked the morning the invitation would go: a reason recorded later does not recall one already sent.</div></div>':'')
      +(L.noEmail.length?'<div class=svnote style="color:#96281B">No email on file, so never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+', off '+srvDay(x.off)+')';}).join(', ')+'. Add the address in Edit crew.</div>':'')
      +'<div class=svnote>Signed off = contracts the Keyman board shows ended (TDG&rsquo;s debark, Rita&rsquo;s date or a reliever) in the period. Asked, opened and answered count the console&rsquo;s invitations only.</div></div>';
-    h+='<div class=rblk><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3>'
+  var cardWait='<div class=rblk><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3>'
      +(d.waiting.length?d.waiting.map(function(w){return '<div class=svfx><div style="font-weight:700;color:var(--navy)">'+srvWho(w.name,w.agency_id)+' <span class=mu style="font-weight:400">&middot; '+escHtml(w.ship||'')+'</span></div><div class=svfw>Asked '+srvDay(w.invited_at)+' &middot; '+(w.reminded_at?'reminded '+srvDay(w.reminded_at):'no reminder yet')+' &middot; '+(w.opened?'opened':'not opened')+' &middot; open to '+srvDay(w.expires_at)+'</div></div>';}).join('')
-       :'<div class=csub>Nobody is waiting. Every seafarer asked in this period has answered.</div>')+'</div>';
-    h+='</div>';
-  }
-  if(!d.n&&d.waiting.length){
-    h+='<div class=rblk style="margin-top:12px"><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3><div class=svx><table class=svt><thead><tr><th>Seafarer</th><th>Ship</th><th>Asked</th><th>Reminder</th><th>Opened</th><th>Link open to</th></tr></thead><tbody>'
-     +d.waiting.map(function(w){return '<tr><td>'+srvWho(w.name,w.agency_id)+'</td><td>'+escHtml(w.ship||'')+'</td><td>'+srvDay(w.invited_at)+'</td><td>'+(w.reminded_at?srvDay(w.reminded_at):'<span class=mu>not yet</span>')+'</td><td>'+(w.opened?'Yes':'<span class=mu>No</span>')+'</td><td>'+srvDay(w.expires_at)+'</td></tr>';}).join('')
-     +'</tbody></table></div></div>';
-  }
+       :'<div class=csub>Nobody is waiting.</div>')+'</div>';
+  h+='<div class=svg3>'+cardQ+cardLoop+cardWait+'</div>';
   if(d.list.length){
     h+='<div class=rblk style="margin-top:12px"><h3>Every answer &middot; '+d.list.length+'</h3><div class=svx><table class=svt><thead><tr><th>Date</th><th>Seafarer</th><th>Ship</th><th class=c>Overall</th><th class=c>Again</th><th class=c>Low</th><th>In their words</th></tr></thead><tbody>'
      +d.list.map(function(x){var open=!!SRV_OPEN[x.id];

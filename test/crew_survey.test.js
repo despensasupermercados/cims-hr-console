@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { QUESTIONS, KEYS, FORMS_KEYS, SECTIONS, surveySkip, quickAnswer, QUICK_SECS, SUPERVISOR, statementFor, surveyDue, remindDue, checkAnswers, isNothing, surveyReport, periodFrom,
-  readFormsSurvey, formsSurveyColumns, formsDay, SURVEY_DDL, SURVEY_ALTERS, SURVEY_CC, SURVEY_ANSWERS_CC, SURVEY_REPLY_TO } from "../src/crew_survey.js";
+  readFormsSurvey, formsSurveyColumns, formsDay, SURVEY_DDL, SURVEY_ALTERS, SURVEY_CC, SURVEY_ANSWERS_CC, SURVEY_REPLY_TO,
+  fixGroups, fixClause, allSame, surveyHeadline, FIX_THEMES } from "../src/crew_survey.js";
+import { composeSurveyReport } from "../src/crew_survey_pdf.js";
 import { installSurvey, maskEmail, endedLegs } from "../src/crew_survey_send.js";
 import { surveyInviteEmail } from "../src/emails/hr.survey.invite.v1.js";
 import { surveyAnswersEmail } from "../src/emails/hr.survey.answers.v1.js";
@@ -294,7 +296,7 @@ test("periods and the Forms history reader", () => {
 });
 
 test("never money, never the cruise line: the survey modules import nothing from the bonus path", () => {
-  for (const f of ["crew_survey.js", "crew_survey_send.js", "crew_survey_page.js", "emails/hr.survey.invite.v1.js", "emails/hr.survey.answers.v1.js"]) {
+  for (const f of ["crew_survey.js", "crew_survey_send.js", "crew_survey_page.js", "crew_survey_pdf.js", "emails/hr.survey.invite.v1.js", "emails/hr.survey.answers.v1.js"]) {
     const src = readFileSync(new URL("../src/" + f, import.meta.url), "utf8");
     assert.ok(!/from\s+["'][^"']*(bonus|score_auto|seval)[^"']*["']/.test(src), f + " imports from the bonus path");
     assert.ok(!/bonus_outcome/.test(src.replace(/\/\/.*$/gm, "")), f + " names bonus_outcome");
@@ -389,4 +391,93 @@ test("his own answers on his profile and in the internal crew file, never on his
   assert.ok(item.lines.some((l) => l.label === "Fix first" && l.text === "Hotel before embarking"));
   const stmt = readFileSync(new URL("../src/statement.js", import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
   assert.ok(!/crew_survey|kind === "survey"/.test(stmt), "the crew's statement never prints his survey");
+});
+
+// ---- 23 Oct 2026, the HR view (Miguel: "1. no. 2. yes. 3. not .. 4. pdf") -------------------------------------------------
+// The seven Forms answers on file that day, as they are (Marto's deleted): four all 5s, one 3 on onboarding, Jeremy's two
+// fixes in one sentence, Andrea's 3 on SOPs and seven 4s.
+const F = (name, ship, brand, at, diff, fix) => ({ id: "f_" + name.split(" ")[0], source: "forms", crew_name: name, ship, brand, submitted_at: at + "T12:00:00Z",
+  answers: Object.fromEntries(KEYS.filter((k) => k !== "q20").map((k) => [k, diff[k] || 5])), fix_text: fix });
+const REAL7 = [
+  F("Allen Cedilla", "Brilliance of the Seas", "Royal", "2026-08-13", { q02: 3 }, "Nothing on my side, my contract went so smooth this time. Thank you for everything"),
+  F("Darryl Ramos", "Celebrity Constellation", "Celebrity", "2026-09-19", {}, "Nothing"),
+  F("Raymond Quiming", "Celebrity Infinity", "Celebrity", "2026-09-19", {}, "hotel accommodations before embarking."),
+  F("Manuel Reyes", "Odyssey of the Seas", "Royal", "2026-09-19", {}, "For me its nothing to improve."),
+  F("Edward Francis Guazon", "Liberty of the Seas", "Royal", "2026-09-19", {}, null),
+  F("Jeremy Padilla", "Celebrity Ascent", "Celebrity", "2026-09-19", { q11: 4 }, "DG3 Has Been Good To Me Since My First Contract, Probably Some Suggestion I Could State Is The Return Of The Internet Allowance, And A More In Depth Training Regarding  Production Machine Troubleshooting. To Better Understand How The Print Machine Works."),
+  F("Andrea Joyce M. Calayag", "Navigator of the Seas", "Royal", "2026-10-02", { q01: 4, q04: 4, q05: 3, q15: 4, q16: 4, q17: 4, q18: 4, q19: 4 }, null),
+];
+
+test("the HR view on the real answers: the headline says how little we know, nobody to call but the closest, themes by line with n", () => {
+  const r = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" });
+  assert.equal(r.n, 7);
+  assert.equal(r.allSame, 4, "Darryl, Raymond, Manuel, Edward: the same number to every statement");
+  assert.deepEqual(r.headline, { lead: "Crew say they are happy.", rest: "We are hearing from too few to be sure.",
+    sub: "7 answers this year, 4 of them the same number to every statement. Read the scores as a floor check, not a measure, until there are 20 answers. The words say more." });
+  assert.equal(r.needsCall.length, 0);
+  assert.equal(r.closest.name, "Andrea Joyce M. Calayag", "the answer furthest from perfect");
+  assert.deepEqual(r.closest.low.map((x) => [x.short, x.v]), [["Systems, SOPs & workflows", 3]]);
+  assert.equal(r.closest.fours, 7);
+  const job = r.themes.find((t) => t.title === "The job");
+  assert.deepEqual(job.cells.Royal, { n: 4, avg: 4.75 });
+  assert.deepEqual(job.cells.Celebrity, { n: 3, avg: 5 });
+  assert.deepEqual(job.cells.Azamara, { n: 0, avg: null });
+  assert.deepEqual(job.all, { n: 7, avg: 4.86 });
+  assert.deepEqual(r.themes.map((t) => t.title), ["The job", "The print shop", "Support", "You", "Would return"]);
+  const royalOnly = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD", line: "Royal" });
+  assert.equal(royalOnly.n, 4);
+  assert.deepEqual(royalOnly.themes[0].cells.Celebrity, { n: 3, avg: 5 }, "the theme table is every line, whatever the chip");
+  assert.deepEqual(r.quarters.map((q) => [q.q, q.n, q.shown]), [["2026-Q3", 6, false], ["2026-Q4", 1, false]], "a quarter shows with 10 answers");
+});
+
+test("the fixes, grouped by keyword with their owners (Miguel: '2. yes'); one sentence with two fixes counts under both", () => {
+  assert.deepEqual(FIX_THEMES.map((t) => [t.label, t.owner]), [["Travel & joining", "Rita / TDG"], ["Pay & benefits", "Miguel"], ["Training", "Ray / Rolando"]]);
+  const r = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" });
+  const by = Object.fromEntries(r.fixGroups.map((g) => [g.key, g]));
+  assert.deepEqual(Object.keys(by).sort(), ["pay", "training", "travel"], "'Nothing on my side' and 'For me its nothing to improve' are not fixes");
+  assert.equal(by.travel.items[0].name, "Raymond Quiming");
+  assert.equal(by.travel.items[0].clause, "hotel accommodations before embarking.");
+  assert.equal(by.pay.items[0].clause, "\u2026Probably Some Suggestion I Could State Is The Return Of The Internet Allowance\u2026");
+  assert.match(by.training.items[0].clause, /^\u2026A More In Depth Training Regarding {2}Production Machine Troubleshooting\u2026$/);
+  assert.equal(by.pay.hot, false);
+  const three = fixGroups([1, 2, 3].map((i) => ({ text: "The hotel was far " + i, name: "x" + i })));
+  assert.equal(three[0].hot, true, "a theme named by 3 leads, in red");
+  assert.deepEqual(fixGroups([{ text: "More printer toner", name: "y" }]).map((g) => [g.key, g.owner]), [["other", null]], "no keyword: Other, no owner set");
+  assert.equal(fixClause("short text", /x/), "short text");
+  assert.equal(allSame({ q01: 4, q02: 4 }), true);
+  assert.equal(allSame({ q01: 4, q02: 5 }), false);
+});
+
+test("people to call: 3 statements at 1-2, or would not return; no 'left after 3 contracts' rule (Miguel: '3. not')", () => {
+  const ret2 = { ...REAL7[1], id: "r2", answers: { ...REAL7[1].answers, q19: 2 } };
+  const r = surveyReport({ rows: [ret2], ended: [], today: TODAY, p: "All" });
+  assert.equal(r.needsCall.length, 1);
+  assert.deepEqual(r.needsCall[0].why, ["return"]);
+  assert.equal(r.needsCall[0].ret, 2);
+  assert.equal(r.closest, null);
+  assert.equal(r.headline.lead, "1 seafarer needs a call.");
+  const ret3 = { ...ret2, answers: { ...ret2.answers, q19: 3 } };
+  assert.equal(surveyReport({ rows: [ret3], ended: [], today: TODAY, p: "All" }).needsCall.length, 0, "a 3 is not a call");
+  assert.equal(surveyHeadline({ n: 0, p: "QTD", enabled: true }).lead, "No answers this quarter.");
+  const src = readFileSync(new URL("../src/crew_survey.js", import.meta.url), "utf8");
+  assert.ok(!/came back|completed contracts|contract_count/i.test(src.replace(/\/\/.*$/gm, "")), "no retention block (Miguel: '1. no')");
+});
+
+test("the leadership PDF (Miguel: '4. pdf'): one page, the same headline, internal, a download only", async () => {
+  const r = { ...surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" }), sources: { forms: 7, console: 0 } };
+  const bytes = composeSurveyReport(r, { today: TODAY });
+  const txt = Buffer.from(bytes).toString("latin1");
+  assert.ok(txt.startsWith("%PDF-"));
+  assert.equal((txt.match(/\/Type\s*\/Page\b/g) || []).length, 1, "one page");
+  for (const w of ["Crew say they are happy.", "Crew survey  -  internal", "People to call", "Closest: Andrea Joyce M. Calayag", "Where it hurts, by cruise line", "Travel & joining", "owner Rita / TDG", "Pay & benefits", "never sent to a cruise line"])
+    assert.ok(txt.includes(w), "the PDF says: " + w);
+  const { env, s } = setup();
+  const res = await call(s, env, "GET", "/api/survey/report.pdf?p=YTD");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Content-Type"), "application/pdf");
+  assert.match(res.headers.get("Content-Disposition"), /^attachment; filename="CIMS crew survey 2026-10-23\.pdf"$/);
+  assert.equal((await call(s, env, "GET", "/api/survey/report.pdf", null, null)).status, 401, "signed in only");
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  assert.ok(W.includes("/api/survey/report.pdf?p=") && W.includes("Download PDF"), "the page offers the download");
+  assert.ok(!/report\.pdf[^\n]*sendMail|sendMail[^\n]*report\.pdf/.test(readFileSync(new URL("../src/crew_survey_send.js", import.meta.url), "utf8")), "never emailed");
 });
