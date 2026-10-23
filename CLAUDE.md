@@ -1858,7 +1858,7 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   match); the desk counts an item missing only once the form offered it (the SOPs box first appears on row 36, 5 May 2025); the
   score is the filed audit's rule (Overall, else the average rounded down) for reading only. **Who it was on is never
   guessed** (§6, §10): a full name the travel name bridge places on ONE crew, or a first name the schedule has aboard that hull
-  that day; anything else keeps the name as typed, unlinked, with why. On 20 Oct 2026: 52 imported, 39 placed, 13 not.
+  that day; anything else keeps the name as typed, unlinked, with why. The code shipped 20 Oct 2026 (#325) but the rows were NOT written then (CLAUDE.md said they were; production had 0 on 23 Oct). Loaded 23 Oct 2026 from Miguel's re-sent export: 52 imported, 39 placed, 13 not, 9 test rows skipped, read with the crew roster and the schedule (Counter + registry legs) as of that day; production checked byte for byte against the local read; staging holds 26 of the 52 (the test set). A second run changes nothing (`INSERT OR IGNORE`, `form_no` UNIQUE).
   **Never the Score Card**: the bonus reads `audit_eval` only; an audit from the survey counting there is a money change,
   Miguel's to make (pinned by `test/audit_forms.test.js`). The files stay in Miguel's OneDrive (the links need a DG3 sign-in).
 - **The 20 Oct 2026 corrections** (Miguel, looking at the live app). (1) **Aboard is the Keyman board's seat** ("this is
