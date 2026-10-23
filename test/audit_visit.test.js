@@ -408,7 +408,8 @@ test("P1: the internal crew file prints the audit under its contract; the crew-f
 test("P1: the profile's data wave reads the audits with the rest (§12), never a TEST request's", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const one = W.slice(W.indexOf("async function apiCrewOne"), W.indexOf("async function apiCrewSave"));
-  const at = one.indexOf("auditFuRes] = await Promise.all([");
+  // the wave may carry more reads after the audits (the crew survey, 23 Oct 2026): the audits must still be in it
+  const m = /auditFuRes(?:, \w+)*\] = await Promise\.all\(\[/.exec(one), at = m ? m.index : -1;
   assert.ok(at > 0, "the audits ride the profile's one data wave");
   const wave = one.slice(at, one.indexOf("\n  ]);", at));
   assert.match(wave, /FROM audit_eval e .*COALESCE\(r\.test_mode, 0\) = 0/);

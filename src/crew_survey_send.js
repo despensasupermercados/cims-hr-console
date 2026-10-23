@@ -5,7 +5,7 @@
 // crew's real data; it makes no link and sends nothing). The daily run invites the morning after the sign-off (07:00 Miami,
 // like the welcome email) and reminds once after 5 days. The reads are injected by the Worker, so this module never imports
 // it. FEEDBACK ONLY (§1). Pinned by test/crew_survey.test.js on real SQLite.
-import { SURVEY_DDL, SURVEY_CC, SURVEY_REPLY_TO, SURVEY_ANSWERS_CC, SURVEY_LINK_DAYS, SURVEY_TZ, SURVEY_HOUR, KEYS,
+import { SURVEY_DDL, SURVEY_ALTERS, surveySkip, SURVEY_CC, SURVEY_REPLY_TO, SURVEY_ANSWERS_CC, SURVEY_LINK_DAYS, SURVEY_TZ, SURVEY_HOUR, KEYS,
   surveyDue, remindDue, checkAnswers, surveyReport, emailOk, firstWord, addDays } from "./crew_survey.js";
 import { surveyInviteEmail } from "./emails/hr.survey.invite.v1.js";
 import { surveyAnswersEmail } from "./emails/hr.survey.answers.v1.js";
@@ -15,7 +15,7 @@ import { mdShort, mdParts } from "./span_md.js";
 import { newHubToken, TOKEN_RX } from "./crew_hub_routes.js";
 
 export const INVITE_TEMPLATE = "hr.survey.invite.v1", ANSWERS_TEMPLATE = "hr.survey.answers.v1";
-export { SURVEY_DDL };
+export { SURVEY_DDL, SURVEY_ALTERS };
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const iso = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
 export const dmy = (s) => (iso(s) ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1]} ${s.slice(0, 4)}` : "");
@@ -87,6 +87,21 @@ export function installSurvey(deps) {
   const setting = async (env, k) => { try { const r = await env.DB.prepare("SELECT v FROM app_setting WHERE k=?").bind(k).first(); return r ? r.v : null; } catch { return null; } };
   const hourIn = (now) => new Intl.DateTimeFormat("en-US", { timeZone: SURVEY_TZ, hour: "2-digit", hour12: false }).formatToParts(now).find((p) => p.type === "hour").value;
 
+  // Why a contract is not asked (surveySkip): TDG's word (registry_snapshot) or Rita's manual status for Not for Rehire, and
+  // the end reason Rita recorded for that contract (contract_end, keyed sc + its sign-on). Read once per run / report.
+  async function skipLookup(env) {
+    const none = () => ({ results: [] });
+    const [rs, ov, ends] = await Promise.all([
+      env.DB.prepare("SELECT agency_id, status, raw_status FROM registry_snapshot").all().catch(none),
+      env.DB.prepare("SELECT agency_id, status FROM crew_override WHERE status IS NOT NULL AND status <> ''").all().catch(none),
+      env.DB.prepare("SELECT sc, on_key, reason FROM contract_end").all().catch(none),
+    ]);
+    const snap = Object.fromEntries((rs.results || []).map((r) => [r.agency_id, r]));
+    const man = Object.fromEntries((ov.results || []).map((r) => [r.agency_id, r.status]));
+    const end = Object.fromEntries((ends.results || []).map((r) => [r.sc + "|" + r.on_key, r.reason]));
+    return (leg) => surveySkip({ rawStatus: snap[leg.sc] && (snap[leg.sc].raw_status || snap[leg.sc].status), status: man[leg.sc], endReason: end[leg.sc + "|" + iso(leg.on)] });
+  }
+
   // The daily run: 07:00 Miami time, the switch, the contracts that ended, one invitation each; then the reminders.
   async function run(env, event) {
     const now = event && event.scheduledTime ? new Date(event.scheduledTime) : new Date();
@@ -94,8 +109,11 @@ export function installSurvey(deps) {
     if ((await setting(env, "crew_survey_auto_enabled")) !== "true") return { skipped: "disabled" };
     await ensure(env);
     const since = await setting(env, "crew_survey_auto_since");
-    const report = { invited: [], failed: [], reminded: [] };
+    const report = { invited: [], failed: [], reminded: [], skipped: [] };
+    const skipOf = await skipLookup(env);
     for (const leg of surveyDue(await boardLegs(env), today(), since)) {
+      const why = skipOf(leg);
+      if (why) { report.skipped.push({ sc: leg.sc, ship: leg.ship, off: iso(leg.off), why }); continue; } // listed on the report, Send anyway
       if (await env.DB.prepare("SELECT 1 FROM crew_survey WHERE source='console' AND agency_id=? AND on_key=?").bind(leg.sc, iso(leg.on)).first()) continue;
       const r = await invite(env, leg).catch((e) => ({ ok: false, error: String(e && e.message || e).slice(0, 160) }));
       (r.sent ? report.invited : report.failed).push({ sc: leg.sc, ship: leg.ship, off: iso(leg.off), error: r.error || null });
@@ -130,7 +148,7 @@ export function installSurvey(deps) {
     const c = checkAnswers(b);
     if (!c.ok) return json({ ok: false, error: c.error, missing: c.missing || null }, 400);
     const now = new Date().toISOString();
-    const up = await env.DB.prepare("UPDATE crew_survey SET submitted_at=?, answers_json=?, fix_text=? WHERE id=? AND submitted_at IS NULL").bind(now, JSON.stringify(c.answers), c.fix, row.id).run();
+    const up = await env.DB.prepare("UPDATE crew_survey SET submitted_at=?, answers_json=?, fix_text=?, answer_secs=? WHERE id=? AND submitted_at IS NULL").bind(now, JSON.stringify(c.answers), c.fix, c.secs, row.id).run();
     if (!up || !up.meta || !up.meta.changes) return json({ ok: false, error: "already_sent" }, 409);
     await log(env, row.agency_id || "seafarer", "crew_survey_answer", (row.agency_id || row.crew_name) + " " + row.ship + " · " + KEYS.filter((k) => c.answers[k] <= 2).length + " low").run().catch(() => {});
     // His copy: his own address, Onboard Support in copy (never the same address twice). The answers are kept whatever the mail does.
@@ -146,14 +164,16 @@ export function installSurvey(deps) {
   // ---- the report ----
   async function reportData(env, url) {
     await ensure(env);
-    const [rowsR, legs, crewR] = await Promise.all([
+    const [rowsR, legs, crewR, skipOf] = await Promise.all([
       env.DB.prepare("SELECT * FROM crew_survey").all(),
       boardLegs(env).catch(() => []),
       env.DB.prepare("SELECT c.agency_id, c.first_name, c.last_name, COALESCE(NULLIF(o.email,''), c.email) AS email FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id").all(),
+      skipLookup(env),
     ]);
     const crew = Object.fromEntries(((crewR && crewR.results) || []).map((c) => [c.agency_id, c]));
     const rows = ((rowsR && rowsR.results) || []).map(parseRow).map((r) => (r.agency_id && crew[r.agency_id] && r.source === "console" ? r : r));
-    const ended = endedLegs(legs).map((l) => ({ ...l, name: l.name || (crew[l.sc] ? [crew[l.sc].first_name, crew[l.sc].last_name].filter(Boolean).join(" ") : null), noEmail: !(crew[l.sc] && emailOk(crew[l.sc].email)) }));
+    const ended = endedLegs(legs).map((l) => ({ ...l, name: l.name || (crew[l.sc] ? [crew[l.sc].first_name, crew[l.sc].last_name].filter(Boolean).join(" ") : null), noEmail: !(crew[l.sc] && emailOk(crew[l.sc].email)),
+      skip: skipOf(l), asked: rows.some((r) => r.source === "console" && r.agency_id === l.sc && r.on_key === iso(l.on)) })).map((l) => (l.asked ? { ...l, skip: null } : l));
     const p = ["30D", "QTD", "YTD", "All"].includes(url.searchParams.get("p")) ? url.searchParams.get("p") : "All";
     const line = ["Royal", "Celebrity", "Azamara", "NCL"].includes(url.searchParams.get("line")) ? url.searchParams.get("line") : "all";
     const rep = surveyReport({ rows, ended, today: today(), p, line });
@@ -193,6 +213,16 @@ export function installSurvey(deps) {
     const who = session.email || null;
     if (p === "/api/survey/report" && request.method === "GET") return json(await reportData(env, url));
     if (p === "/api/survey/preview" && request.method === "GET") return preview(env, url);
+    // Send anyway: a contract the run did not ask (surveySkip, or one that ended before the switch) — Rita's choice, by hand.
+    if (p === "/api/survey/send" && request.method === "POST") {
+      const b = await request.json().catch(() => ({}));
+      const sc = String(b.sc || ""), on = iso(String(b.on || ""));
+      if (!sc || !on) return json({ error: "bad_request" }, 400);
+      const leg = endedLegs(await boardLegs(env)).find((l) => l.sc === sc && iso(l.on) === on);
+      if (!leg) return json({ error: "no_ended_contract" }, 404);
+      const r = await invite(env, leg, { by: who || "console" });
+      return json(r, r.ok ? 200 : (r.error === "already_invited" ? 409 : 400));
+    }
     if (p === "/api/survey/call" && request.method === "POST") {
       await ensure(env);
       const b = await request.json().catch(() => ({}));

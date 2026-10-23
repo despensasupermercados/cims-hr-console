@@ -5,8 +5,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { QUESTIONS, KEYS, SECTIONS, SUPERVISOR, statementFor, surveyDue, remindDue, checkAnswers, isNothing, surveyReport, periodFrom,
-  readFormsSurvey, formsSurveyColumns, formsDay, SURVEY_DDL, SURVEY_CC, SURVEY_ANSWERS_CC, SURVEY_REPLY_TO } from "../src/crew_survey.js";
+import { QUESTIONS, KEYS, FORMS_KEYS, SECTIONS, surveySkip, quickAnswer, QUICK_SECS, SUPERVISOR, statementFor, surveyDue, remindDue, checkAnswers, isNothing, surveyReport, periodFrom,
+  readFormsSurvey, formsSurveyColumns, formsDay, SURVEY_DDL, SURVEY_ALTERS, SURVEY_CC, SURVEY_ANSWERS_CC, SURVEY_REPLY_TO } from "../src/crew_survey.js";
 import { installSurvey, maskEmail, endedLegs } from "../src/crew_survey_send.js";
 import { surveyInviteEmail } from "../src/emails/hr.survey.invite.v1.js";
 import { surveyAnswersEmail } from "../src/emails/hr.survey.answers.v1.js";
@@ -38,7 +38,7 @@ function setup({ mailOk = true, legs = LEGS } = {}) {
   const env = { DB: { prepare: (s) => stmt(s), batch: async (st) => { const o = []; for (const x of st) o.push(await x.run()); return o; } } };
   const json = (o, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { "Content-Type": "application/json" } });
   const mail = [];
-  const s = installSurvey({ ensure: async (e) => { for (const q of SURVEY_DDL) await e.DB.prepare(q).run(); }, boardLegs: async () => legs,
+  const s = installSurvey({ ensure: async (e) => { for (const q of SURVEY_DDL) await e.DB.prepare(q).run(); for (const q of SURVEY_ALTERS) await e.DB.prepare(q).run().catch((x) => { if (!/duplicate column/.test(x.message)) throw x; }); }, boardLegs: async () => legs,
     sendMail: async (e, m) => { mail.push(m); return mailOk ? { ok: true } : { ok: false, error: "down" }; }, json, today: () => TODAY, origin: () => "https://hub.cims.work" });
   return { d, env, s, mail };
 }
@@ -54,9 +54,12 @@ const tokenOf = (m) => /\/hub\/survey\/([A-Za-z0-9_-]+)/.exec(m.html)[1];
 
 test("node:sqlite is available, so the tests below actually run", () => assert.ok(DatabaseSync));
 
-test("the questions: Rita's 19, in her order, every one on one of the five screens once", () => {
-  assert.equal(QUESTIONS.length, 19);
-  assert.deepEqual(KEYS, Array.from({ length: 19 }, (_, i) => "q" + String(i + 1).padStart(2, "0")));
+test("the questions: Rita's 19 in her order + travel & joining (q20), every one on one of the five screens once", () => {
+  assert.equal(QUESTIONS.length, 20);
+  assert.deepEqual(KEYS, Array.from({ length: 20 }, (_, i) => "q" + String(i + 1).padStart(2, "0")));
+  assert.deepEqual(FORMS_KEYS, KEYS.slice(0, 19), "the Forms survey asked Rita's 19, never q20");
+  assert.equal(QUESTIONS[19].text, "My travel, hotel and joining arrangements were well organized.");
+  assert.deepEqual(SECTIONS[0].keys, ["q01", "q02", "q03", "q04", "q20"], "travel sits with the job and the first weeks");
   const onScreens = SECTIONS.flatMap((s) => s.keys).sort();
   assert.deepEqual(onScreens, KEYS.slice().sort());
   assert.equal(SECTIONS.filter((s) => s.open).length, 1, "one open question, on the last screen");
@@ -119,7 +122,8 @@ test("the emails: canonical letterhead, no rgba or gradient, bgcolor paired, the
   assert.match(inv.subject, /^Welcome home/);
   assert.match(rem.subject, /^Still a minute/);
   assert.ok(rem.html.includes("A REMINDER"));
-  assert.ok(ans.html.includes("17 of 19 at 5"));
+  assert.ok(ans.html.includes("18 of 20 at 5"));
+  assert.ok(inv.html.includes("20 taps."));
   assert.ok(ans.html.includes("(DCM)"), "the brand's own supervisor title");
   // Nothing promised, nothing left pending (Miguel, 23 Oct 2026: "make them generic all of them .. I don't want anything
   // standing or pending"): no reply, no deadline, in any email or on the page the seafarer reads.
@@ -155,7 +159,8 @@ test("the page: its script runs, walks the five screens, posts the 19 answers an
   await new Promise((r) => setTimeout(r, 5));
   assert.equal(posted.length, 1);
   assert.equal(posted[0][0], "/hub/survey/tok");
-  assert.equal(Object.keys(posted[0][1].answers).length, 19);
+  assert.equal(Object.keys(posted[0][1].answers).length, 20);
+  assert.ok(Number.isInteger(posted[0][1].secs) && posted[0][1].secs >= 0, "the page sends how long it took, Start to Send");
   assert.equal(posted[0][1].fix, "Parts arrive late");
   assert.match(app.innerHTML, /Thank you, Raymond\./);
   assert.match(app.innerHTML, /ray•••@gmail\.com/);
@@ -273,10 +278,11 @@ test("periods and the Forms history reader", () => {
   assert.equal(periodFrom("30D", TODAY), "2026-09-23");
   assert.equal(formsDay("8/13/26 11:41:42"), "2026-08-13");
   assert.equal(formsDay(46248), "2026-08-14");
-  const header = ["ID", "Start time", "Completion time", "Email", "Name", "Write your name", "Select your current or last ship", ...QUESTIONS.map((q) => q.text.replace("{M}", "")), "What is the one thing we should fix first to improve the seafarer experience?"];
+  // Rita's export carries her 19 statements, never q20
+  const header = ["ID", "Start time", "Completion time", "Email", "Name", "Write your name", "Select your current or last ship", ...QUESTIONS.filter((q) => q.key !== "q20").map((q) => q.text.replace("{M}", "")), "What is the one thing we should fix first to improve the seafarer experience?"];
   const c = formsSurveyColumns(header);
   assert.equal(Object.keys(c.keys).length, 19);
-  const row = (id, v) => [id, "", "10/6/26 09:00:00", "", "", "Ryan Marto", "Quantum", ...KEYS.map(() => v), "Nothing"];
+  const row = (id, v) => [id, "", "10/6/26 09:00:00", "", "", "Ryan Marto", "Quantum", ...FORMS_KEYS.map(() => v), "Nothing"];
   const out = readFormsSurvey([header, row(57, 4), [58, "", "10/7/26 09:00:00", "", "", "X", "Y", 5], row(59, 2)], { place: (n) => (n === "Ryan Marto" ? { sc: "SC-0029999", why: "full name" } : null), brandOf: () => "Royal" });
   assert.deepEqual(out.rows.map((r) => r.form_no), [57, 59]);
   assert.deepEqual(out.skipped, [{ form: 58, why: "not every statement answered" }]);
@@ -294,4 +300,91 @@ test("never money, never the cruise line: the survey modules import nothing from
   assert.equal(maskEmail("raymond.quiming@gmail.com"), "ray•••@gmail.com");
   const mig = readFileSync(new URL("../migrations/0040_crew_survey.sql", import.meta.url), "utf8");
   for (const q of SURVEY_DDL) assert.ok(mig.includes(q), "the migration mirrors SURVEY_DDL");
+  const mig41 = readFileSync(new URL("../migrations/0041_crew_survey_secs.sql", import.meta.url), "utf8");
+  for (const q of SURVEY_ALTERS) assert.ok(mig41.includes(q), "0041 mirrors SURVEY_ALTERS");
+});
+
+// ---- 23 Oct 2026, Miguel: "2. yes to all. 3. yes do it. 4. ok." --------------------------------------------------------
+
+test("who is not asked: Not for Rehire (TDG's word or Rita's), Performance, Medical, Compassionate; anyone else is", () => {
+  assert.equal(surveySkip({ rawStatus: "Not for Rehire" }), "not_for_rehire");
+  assert.equal(surveySkip({ rawStatus: "On Vacation", status: "Not for rehire" }), "not_for_rehire", "Rita's manual status counts too");
+  assert.equal(surveySkip({ endReason: "Performance" }), "performance");
+  assert.equal(surveySkip({ endReason: "Medical" }), "medical");
+  assert.equal(surveySkip({ endReason: "Compassionate" }), "compassionate");
+  for (const r of ["Completed", "Resigned", "Early relief", "Emergency", "Other", null]) assert.equal(surveySkip({ rawStatus: "On Vacation", endReason: r }), null, String(r));
+});
+
+test("the run skips them, the report lists them with the reason, Send anyway asks him by hand", async () => {
+  const { d, env, s, mail } = setup();
+  d.exec("CREATE TABLE registry_snapshot (agency_id TEXT, status TEXT, raw_status TEXT)");
+  d.exec("CREATE TABLE contract_end (sc TEXT, on_key TEXT, reason TEXT)");
+  d.exec("INSERT INTO registry_snapshot VALUES ('SC-1','Inactive','Not for Rehire')");
+  await call(s, env, "POST", "/api/survey/auto", { enabled: true });
+  d.prepare("UPDATE app_setting SET v='2026-10-15' WHERE k='crew_survey_auto_since'").run();
+  const rep = await s.run(env, GATE);
+  assert.deepEqual(rep.invited, [], "Not for Rehire is never asked");
+  assert.deepEqual(rep.skipped.map((x) => [x.sc, x.why]), [["SC-1", "not_for_rehire"]]);
+  assert.equal(mail.length, 0);
+  const r = await (await call(s, env, "GET", "/api/survey/report")).json();
+  assert.deepEqual(r.loop.skipped.map((x) => [x.sc, x.on, x.label]), [["SC-1", "2026-03-01", "Not for Rehire"]]);
+  const sent = await call(s, env, "POST", "/api/survey/send", { sc: "SC-1", on: "2026-03-01" });
+  assert.equal(sent.status, 200);
+  assert.deepEqual(mail[0].to, ["raymond.quiming@gmail.com"]);
+  const r2 = await (await call(s, env, "GET", "/api/survey/report")).json();
+  assert.equal(r2.loop.skipped.length, 0, "once asked by hand he leaves the not-asked list");
+  assert.equal((await call(s, env, "POST", "/api/survey/send", { sc: "SC-1", on: "2026-03-01" })).status, 409, "never twice");
+  assert.equal((await call(s, env, "POST", "/api/survey/send", { sc: "SC-2", on: "2026-03-01" })).status, 404, "a projection is no ended contract");
+  assert.equal((await call(s, env, "POST", "/api/survey/send", { sc: "SC-1", on: "2026-03-01" }, null)).status, 401);
+  // the end reason Rita recorded for that contract
+  const t = setup();
+  t.d.exec("CREATE TABLE contract_end (sc TEXT, on_key TEXT, reason TEXT)");
+  t.d.exec("INSERT INTO contract_end VALUES ('SC-1','2026-03-01','Medical')");
+  await call(t.s, t.env, "POST", "/api/survey/auto", { enabled: true });
+  t.d.prepare("UPDATE app_setting SET v='2026-10-15' WHERE k='crew_survey_auto_since'").run();
+  assert.deepEqual((await t.s.run(t.env, GATE)).skipped.map((x) => x.why), ["medical"]);
+});
+
+test("quick answers: the time is kept, the same answer to everything in under a minute is listed but left out of the averages", async () => {
+  const { d, env, s, mail } = setup();
+  await s.invite(env, LEGS[0]);
+  await call(s, env, "POST", "/hub/survey/" + tokenOf(mail[0]), { answers: ALL5, fix: "", secs: 22 }, null);
+  assert.equal(d.prepare("SELECT answer_secs FROM crew_survey").get().answer_secs, 22);
+  d.exec("INSERT INTO crew_survey (id, source, agency_id, crew_name, ship, brand, submitted_at, answers_json, form_no, created_at) VALUES ('srv_forms_1','forms','SC-4','Long Ago','Quest','Azamara','2026-10-01T12:00:00Z','" + JSON.stringify({ ...ALL5, q18: 3 }) + "',1,'x')");
+  const r = await (await call(s, env, "GET", "/api/survey/report")).json();
+  assert.equal(r.n, 2);
+  assert.equal(r.quick, 1);
+  assert.equal(r.overall, 3, "the quick all-5 answer does not lift the average");
+  assert.equal(r.list.find((x) => x.source === "console").quick, true);
+  assert.equal(quickAnswer({ source: "console", answer_secs: QUICK_SECS, answers: ALL5 }), false, "a full minute is not quick");
+  assert.equal(quickAnswer({ source: "console", answer_secs: 10, answers: { ...ALL5, q03: 4 } }), false, "different answers are not a tap-through");
+  assert.equal(quickAnswer({ source: "forms", answers: ALL5 }), false, "Forms answers have no timing");
+  assert.equal(checkAnswers({ answers: ALL5, secs: -3 }).secs, null);
+  assert.equal(checkAnswers({ answers: ALL5, secs: "40" }).secs, null);
+});
+
+test("his own answers on his profile and in the internal crew file, never on his statement", async () => {
+  const { buildCrewProfile, feedbackFile } = await import("../src/crew_profile.js");
+  const ans = { ...ALL5, q06: 1, q10: 2, q14: 2, q18: 4 };
+  const P = buildCrewProfile({
+    today: "2026-10-23", crew: { agency_id: "SC-1", status: "On Vacation", first_name: "Raymond", last_name: "Quiming" }, override: null,
+    snap: { agency_id: "SC-1", status: "On Vacation", raw_status: "On Vacation", vessel: "Celebrity Infinity", run_at: "2026-10-23T09:00:00Z", embarked_at: "2026-03-01", debarked_at: "2026-10-22" },
+    count: null, countAdded: 0, grade: null,
+    legs: [{ ship: "Infinity", sc: "SC-1", ours: true, on: "2026-03-01", off: "2026-10-22", is_current: false, source: "registry", offSource: "tdg", brand: "Celebrity" }],
+    counter: [], edits: [], notes: [], ready: null, intel: [], fbReqs: [], fbResp: [], sbmRequests: [], sbm: [], cards: [], deploys: [], dismissals: [],
+    statusRows: [], travel: [], activity: [], instr: [], links: [], fleetLegs: [], openCards: [], tdgEarmarks: [], ends: [], audits: [], auditOpen: [], auditFollowups: [], names: {},
+    surveys: [{ id: "srv_1", source: "console", ship: "Celebrity Infinity", submitted_at: "2026-10-23T14:02:00Z", answers_json: JSON.stringify(ans), fix_text: "Hotel before embarking", answer_secs: 140 }],
+  });
+  const f = P.people.feed.find((x) => x.kind === "survey");
+  assert.ok(f, "the survey is in What people said");
+  assert.equal(f.overall, 4);
+  assert.deepEqual(f.low.map((x) => x.key), ["q06", "q10", "q14"]);
+  assert.equal(f.fix, "Hotel before embarking");
+  assert.equal(f.quick, false);
+  const file = feedbackFile(P, "2026-10-23");
+  const item = file.groups.flatMap((g) => g.items).find((i) => i.kind === "survey");
+  assert.ok(item && item.label === "Crew survey (his own answers)");
+  assert.ok(item.lines.some((l) => l.label === "Fix first" && l.text === "Hotel before embarking"));
+  const stmt = readFileSync(new URL("../src/statement.js", import.meta.url), "utf8").replace(/\/\/.*$/gm, "");
+  assert.ok(!/crew_survey|kind === "survey"/.test(stmt), "the crew's statement never prints his survey");
 });

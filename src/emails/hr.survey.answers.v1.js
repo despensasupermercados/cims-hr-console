@@ -50,7 +50,7 @@ ${mastRows()}
 ${fixBox}
 <tr><td class="px" style="padding:22px 32px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
  <tr><td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.gink};border-bottom:1px solid ${C.border};padding-bottom:8px;">YOUR ANSWERS</td>
-  <td align="right" style="font-family:${FB};font-size:12px;color:${C.slate};border-bottom:1px solid ${C.border};padding-bottom:8px;white-space:nowrap;">${fives} of 19 at 5</td></tr>
+  <td align="right" style="font-family:${FB};font-size:12px;color:${C.slate};border-bottom:1px solid ${C.border};padding-bottom:8px;white-space:nowrap;">${fives} of ${QUESTIONS.length} at 5</td></tr>
  ${rows}</table></td></tr>
 <tr><td class="px" style="padding:24px 32px 28px;">
  <div style="font-family:${FB};font-size:15px;line-height:1.6;color:${C.body};">Something you did not get to say? Reply to this email. It reaches Rita and Onboard Support.</div>
