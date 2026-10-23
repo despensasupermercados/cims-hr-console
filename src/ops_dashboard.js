@@ -79,8 +79,12 @@ export function buildOps(input) {
       // TDG still has them On board past a sign-off the board knows (held, §10d), or aboard with no embark date:
       // both are TDG's to correct, listed once in the TDG card and never as a crew change.
       if (s.heldByFile) {
-        const other = seats.find((o) => o !== s && o.signOn);
-        fixes.push({ code, ship: sec.ship, brand: sec.brand, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "held", off: s.signOff || null, by: other ? sn(other.name, other.agency_id) : null, byName: other ? other.name : null, byOn: other ? other.signOn : null });
+        // the reliever is the board's one rule (§11f: leg.reliever), never "the other seat with a sign-on" — on a two-printer
+        // hull that is the colleague, and a seat held past Rita's typed date may have no reliever at all
+        const rel = s.reliever && s.reliever.sc ? s.reliever : null;
+        const relSeat = rel ? seats.concat(ems).find((o) => o.agency_id === rel.sc) : null;
+        const byName = rel ? (rel.name || (relSeat && relSeat.name) || null) : null;
+        fixes.push({ code, ship: sec.ship, brand: sec.brand, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "held", off: s.signOff || null, by: byName ? sn(byName, rel.sc) : null, byName, byOn: rel ? (rel.on || (relSeat && relSeat.signOn) || null) : null });
         continue;
       }
       if (!s.signOn) fixes.push({ code, ship: sec.ship, brand: sec.brand, sc: s.agency_id, name: s.name, surname: sn(s.name, s.agency_id), kind: "undated" });

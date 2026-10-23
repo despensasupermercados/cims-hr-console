@@ -24,7 +24,7 @@ const dayN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)
 // What the crew confirms, ONE list for the email and the page (the four lines v1's page carried, in plain words; v1's fifth,
 // "I have read my summary", is what confirming means).
 export const CONFIRMS = (ship, port) => [
-  "My sign-off date" + (port ? " and port" : "") + " above are right.",
+  port ? "My sign-off date and port above are right." : "My sign-off date above is right.",
   "My Digital Handover Notes are submitted and my count is signed.",
   "Stock and par levels are left as required, and reported as they are.",
   "Every open machine issue is written down for my reliever.",
@@ -62,7 +62,7 @@ export function linkEmail(d) {
     <td align="right" style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1px;line-height:16px;color:${C.green};white-space:nowrap;padding-left:14px;">${go ? go[1] : ""}</td></tr></table></td></tr>
   <tr><td class="pp" style="padding:20px 22px 0 22px;">
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-    <td class="rside" width="38%" valign="top">${lab("From")}${code(esc(shipCode(ship) || "&nbsp;"))}${under(esc(ship || "Your ship"))}</td>
+    <td class="rside" width="38%" valign="top">${lab("From")}${code(shipCode(ship) ? esc(shipCode(ship)) : "&nbsp;")}${under(esc(ship || "Your ship"))}</td>
     <td class="rmid" width="24%" valign="top" style="padding:0 8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:36px;"><tr>${dot}<td style="padding:0 2px;">${hair(true, C.grey)}</td>${dot}</tr></table></td>
     <td class="rside" width="38%" valign="top" align="right" style="text-align:right;">${lab("To", "right")}${code("HOME")}${under(port ? "via " + esc(port) : "Port to be confirmed")}</td>
    </tr></table></td></tr>

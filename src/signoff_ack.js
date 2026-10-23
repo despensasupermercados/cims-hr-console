@@ -186,6 +186,12 @@ export function installAck(deps) {
 
   // Months and days have ONE definition (span_md, §11e).
   function aboardOf(a, b) { return mdShort(a, b) || null; }
+  // Never ask to confirm a sign-off that has already passed (the instructions' rule, 17 Oct 2026: a held seat's board
+  // sign-off is the reliever's embark, so the pass would read "One week to go" for a date already behind him).
+  function passedOff(pass, r) {
+    var off = String((pass && pass.off) || (r && r.sign_off_date) || "").slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(off) && off < new Date().toISOString().slice(0, 10) ? off : null;
+  }
 
   // ---- Endpoints ---------------------------------------------------------------
   // POST /api/ack/request   (session-gated; any allowlisted user)
@@ -203,13 +209,15 @@ export function installAck(deps) {
     var prev = await env.DB.prepare("SELECT status FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).first();
     if (prev && prev.status === "acknowledged" && !b.force) return json({ ok: false, error: "already_acknowledged" }, 409);
     var token = await signToken({ p: "ack", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + ACK_TTL }, env.SESSION_SECRET);
+    var pass = passOf(r, await contextFor(env, r.sc));
+    var past = passedOff(pass, r);
+    if (b.send && past) return json({ ok: false, error: "signoff_passed", sign_off: past }, 409);
     var th = await sha256hex(token);
     var now = new Date().toISOString();
     await env.DB.prepare("DELETE FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).run();
     var ackId = "ack_" + crypto.randomUUID();
-    var pass = passOf(r, await contextFor(env, r.sc));
     await env.DB.prepare("INSERT INTO ack_request (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at,pass_json) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)")
-      .bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, (session && session.email) || null, now, JSON.stringify(pass)).run();
+      .bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, pass.port || r.port, r.sign_off_date, (session && session.email) || null, now, JSON.stringify(pass)).run();
     var link = new URL(request.url).origin + "/ack?t=" + token;
     var emailed = false;
     if (b.send && r.email) {
@@ -304,13 +312,14 @@ export function installAck(deps) {
     var r = await resolveSignoff(env, String(sc), parseInt(seq), ovr || null);
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
+    var pass = passOf(r, (ovr && ovr.ctx) || await contextFor(env, r.sc));
+    if (passedOff(pass, r)) return { emailed: false, error: "signoff_passed", crew_name: r.crew_name, to: r.email };
     var token = await signToken({ p: "ack", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + ACK_TTL }, env.SESSION_SECRET);
     var th = await sha256hex(token);
     var now = new Date().toISOString();
     await env.DB.prepare("DELETE FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).run();
     var ackId = "ack_" + crypto.randomUUID();
-    var pass = passOf(r, (ovr && ovr.ctx) || await contextFor(env, r.sc));
-    await env.DB.prepare("INSERT INTO ack_request (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at,pass_json) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)").bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now, JSON.stringify(pass)).run();
+    await env.DB.prepare("INSERT INTO ack_request (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at,pass_json) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)").bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, pass.port || r.port, r.sign_off_date, "auto-timing", now, JSON.stringify(pass)).run();
     var link = origin + "/ack?t=" + token;
     try { await sendAckRequest(env, { to: r.email, pass: pass, link: link, ack_id: ackId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
     catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }

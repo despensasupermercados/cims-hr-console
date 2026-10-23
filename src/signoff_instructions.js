@@ -157,14 +157,14 @@ export function installInstr(deps) {
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)")
       .bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, (session && session.email) || null, now).run();
     var link = new URL(request.url).origin + "/instr?t=" + token;
-    var emailed = false;
+    var emailed = false, rp = null;
     if (b.send && r.email) {
       try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
       catch (e) { await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq); }
-      if (emailed) await sendRelieverPass(env, r, ctx);
+      if (emailed) rp = await sendRelieverPass(env, r, ctx);
     }
     await logActivity(env, session && session.email, "instr_request", r.sc + " #" + r.seq);
-    return json({ ok: true, link: link, crew_name: r.crew_name, emailed: emailed, hasEmail: !!r.email });
+    return json({ ok: true, link: link, crew_name: r.crew_name, emailed: emailed, hasEmail: !!r.email, reliever: rp });
   }
 
   // GET /api/instr/form?t=  (PUBLIC, token) — snapshot for the landing page

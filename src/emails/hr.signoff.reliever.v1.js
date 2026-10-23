@@ -83,7 +83,7 @@ export function relieverEmail(d) {
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>${esc(subject)}</title>
 <style>a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}@media only screen and (max-width:620px){.c{width:100%!important}.px{padding-left:16px!important;padding-right:16px!important}.hl{font-size:28px!important}.fr{padding:0!important}.pp{padding-left:16px!important;padding-right:16px!important}.pc{padding:8px!important}}</style></head>
 <body style="margin:0;padding:0;background:${C.page};">
-<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${C.page};">${esc(subject)}. ${overlap ? "You are aboard together from " + shortDate(overlap.from) + "." : "Here is how to reach " + (o.first || firstWord(o.name)) + "."}</div>
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${C.page};">${esc(subject)}. ${overlap ? "You are aboard together from " + shortDate(overlap.from) + "." : "Here is how to reach " + esc(o.first || firstWord(o.name)) + "."}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.page}" style="background:${C.page};"><tr><td class="fr" align="center" style="padding:24px 12px;">
 <table role="presentation" class="c" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="width:100%;max-width:600px;background:#FFFFFF;">
 ${mastRows()}
@@ -95,7 +95,7 @@ ${steps.map((t, i) => li(i + 1, t)).join("")}
 <tr><td height="28" style="height:28px;font-size:0;line-height:0;">&nbsp;</td></tr>
 <tr><td class="px" style="padding:20px 32px 24px 32px;font-family:${FB};font-size:12px;color:${C.slate};line-height:1.5;border-top:1px solid #E5E7EB;">CIMS · Cruise Industry Managed Services · sent to the incoming Printer Specialist once TDG has the crew change. ${of} gets your contact in the sign-off email.</td></tr>
 </table></td></tr></table></body></html>`;
-  const text = [`You take over from ${o.first || firstWord(o.name)}, ${d.firstName || ""}. ${ship}${off ? ", sign-off " + longDate(off) : ""}${port ? ", " + port : ""}.`,
+  const text = [`You take over from ${o.first || firstWord(o.name)}${d.firstName ? ", " + String(d.firstName).replace(/\.+$/, "") : ""}. ${ship}${off ? ", sign-off " + longDate(off) : ""}${port ? ", " + port : ""}.`,
     overlap ? `You are aboard together from ${longDate(overlap.from)} (${mdWords(overlap.from, off)}).` : `You may or may not meet aboard, so a short message before the sign-off helps.`,
     [o.name, ph ? "Mobile: " + ph.shown + (ph.wa ? " (WhatsApp " + ph.wa + ")" : "") : "", em ? "Email: " + em : ""].filter(Boolean).join("\n"),
     "1. Say hello before the sign-off.\n2. Read the Digital Handover Notes: " + HON_URL + ", select " + ship + ". No login.\n3. Count and sign your own count when you join.",
