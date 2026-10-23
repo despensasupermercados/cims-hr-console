@@ -238,7 +238,7 @@ test("the seafarer's page: opens with no login, records the open, takes the answ
   assert.equal((await call(s, env, "GET", "/hub/survey/" + tok, null, null)).status, 410, "a closed link");
 });
 
-test("the report: needs a call at 3+ lows, Log the call, the loop, the lines; signed in only", async () => {
+test("the report: the watchlist at 3+ lows, the loop, the lines; no call is logged here; signed in only", async () => {
   const { env, s, mail } = setup();
   await s.invite(env, LEGS[0]);
   await call(s, env, "POST", "/hub/survey/" + tokenOf(mail[0]), { answers: { ...ALL5, q06: 1, q10: 2, q14: 2, q19: 4 }, fix: "Inventory never on time" }, null);
@@ -246,8 +246,8 @@ test("the report: needs a call at 3+ lows, Log the call, the loop, the lines; si
   const r = await (await call(s, env, "GET", "/api/survey/report")).json();
   assert.equal(r.n, 1);
   assert.equal(r.byLineCount.Celebrity, 1);
-  assert.equal(r.needsCall.length, 1);
-  assert.deepEqual(r.needsCall[0].low.map((x) => x.key), ["q06", "q10", "q14"]);
+  assert.equal(r.watch.length, 1);
+  assert.deepEqual(r.watch[0].low.map((x) => x.key), ["q06", "q10", "q14"]);
   assert.equal(r.statements[0].key, "q06", "where it hurts: lowest first");
   assert.deepEqual(r.wouldReturn, { yes: 1, of: 1 });
   assert.deepEqual(r.rate, { answered: 1, of: 1 });
@@ -255,14 +255,13 @@ test("the report: needs a call at 3+ lows, Log the call, the loop, the lines; si
   assert.deepEqual(r.loop.noEmail.map((x) => x.sc), ["SC-5"]);
   assert.equal(r.fixes[0].text, "Inventory never on time");
   assert.equal(r.enabled, false);
-  const c = await (await call(s, env, "POST", "/api/survey/call", { id: r.needsCall[0].id, note: "Spoke Friday" })).json();
-  assert.equal(c.ok, true);
+  const c = await call(s, env, "POST", "/api/survey/call", { id: r.watch[0].id, note: "Spoke Friday" });
+  assert.notEqual(c.status, 200, "a call is a note on the profile, never logged on the report (Miguel, 23 Oct 2026)");
   const r2 = await (await call(s, env, "GET", "/api/survey/report?line=Royal")).json();
   assert.equal(r2.n, 0, "a line filter");
   const r3 = await (await call(s, env, "GET", "/api/survey/report")).json();
-  assert.equal(r3.needsCall.length, 0);
-  assert.equal(r3.called[0].call_note, "Spoke Friday");
-  assert.equal(r3.called[0].called_by, SESSION.email);
+  assert.equal(r3.watch.length, 1, "the watchlist is the period's answers, nothing ticks it off");
+  assert.equal(r3.called, undefined);
 });
 
 test("preview: a crew's real data, no link made, nothing sent", async () => {
@@ -408,16 +407,13 @@ const REAL7 = [
   F("Andrea Joyce M. Calayag", "Navigator of the Seas", "Royal", "2026-10-02", { q01: 4, q04: 4, q05: 3, q15: 4, q16: 4, q17: 4, q18: 4, q19: 4 }, null),
 ];
 
-test("the HR view on the real answers: the headline says how little we know, nobody to call but the closest, themes by line with n", () => {
+test("the HR view on the real answers: the headline says how little we know, an empty watchlist, themes by line with n", () => {
   const r = surveyReport({ rows: REAL7, ended: [], today: TODAY, p: "YTD" });
   assert.equal(r.n, 7);
   assert.equal(r.allSame, 4, "Darryl, Raymond, Manuel, Edward: the same number to every statement");
   assert.deepEqual(r.headline, { lead: "Crew say they are happy.", rest: "We are hearing from too few to be sure.",
     sub: "7 answers this year, 4 of them the same number to every statement. Read the scores as a floor check, not a measure, until there are 20 answers. The words say more." });
-  assert.equal(r.needsCall.length, 0);
-  assert.equal(r.closest.name, "Andrea Joyce M. Calayag", "the answer furthest from perfect");
-  assert.deepEqual(r.closest.low.map((x) => [x.short, x.v]), [["Systems, SOPs & workflows", 3]]);
-  assert.equal(r.closest.fours, 7);
+  assert.equal(r.watch.length, 0);
   const job = r.themes.find((t) => t.title === "The job");
   assert.deepEqual(job.cells.Royal, { n: 4, avg: 4.75 });
   assert.deepEqual(job.cells.Celebrity, { n: 3, avg: 5 });
@@ -448,16 +444,15 @@ test("the fixes, grouped by keyword with their owners (Miguel: '2. yes'); one se
   assert.equal(allSame({ q01: 4, q02: 5 }), false);
 });
 
-test("people to call: 3 statements at 1-2, or would not return; no 'left after 3 contracts' rule (Miguel: '3. not')", () => {
+test("the watchlist: 3 statements at 1-2, or would not return; no 'left after 3 contracts' rule (Miguel: '3. not')", () => {
   const ret2 = { ...REAL7[1], id: "r2", answers: { ...REAL7[1].answers, q19: 2 } };
   const r = surveyReport({ rows: [ret2], ended: [], today: TODAY, p: "All" });
-  assert.equal(r.needsCall.length, 1);
-  assert.deepEqual(r.needsCall[0].why, ["return"]);
-  assert.equal(r.needsCall[0].ret, 2);
-  assert.equal(r.closest, null);
-  assert.equal(r.headline.lead, "1 seafarer needs a call.");
+  assert.equal(r.watch.length, 1);
+  assert.deepEqual(r.watch[0].why, ["return"]);
+  assert.equal(r.watch[0].ret, 2);
+  assert.equal(r.headline.lead, "1 seafarer is on the watchlist.");
   const ret3 = { ...ret2, answers: { ...ret2.answers, q19: 3 } };
-  assert.equal(surveyReport({ rows: [ret3], ended: [], today: TODAY, p: "All" }).needsCall.length, 0, "a 3 is not a call");
+  assert.equal(surveyReport({ rows: [ret3], ended: [], today: TODAY, p: "All" }).watch.length, 0, "a 3 is not on the watchlist");
   assert.equal(surveyHeadline({ n: 0, p: "QTD", enabled: true }).lead, "No answers this quarter.");
   const src = readFileSync(new URL("../src/crew_survey.js", import.meta.url), "utf8");
   assert.ok(!/came back|completed contracts|contract_count/i.test(src.replace(/\/\/.*$/gm, "")), "no retention block (Miguel: '1. no')");
@@ -469,7 +464,7 @@ test("the leadership PDF (Miguel: '4. pdf'): one page, the same headline, intern
   const txt = Buffer.from(bytes).toString("latin1");
   assert.ok(txt.startsWith("%PDF-"));
   assert.equal((txt.match(/\/Type\s*\/Page\b/g) || []).length, 1, "one page");
-  for (const w of ["Crew say they are happy.", "Crew survey  -  internal", "People to call", "Closest: Andrea Joyce M. Calayag", "Where it hurts, by cruise line", "Travel & joining", "owner Rita / TDG", "Pay & benefits", "never sent to a cruise line"])
+  for (const w of ["Crew say they are happy.", "Crew survey  -  internal", "Watchlist", "Clear: no answer in this period", "Where it hurts, by cruise line", "Travel & joining", "owner Rita / TDG", "Pay & benefits", "never sent to a cruise line"])
     assert.ok(txt.includes(w), "the PDF says: " + w);
   const { env, s } = setup();
   const res = await call(s, env, "GET", "/api/survey/report.pdf?p=YTD");
@@ -478,6 +473,32 @@ test("the leadership PDF (Miguel: '4. pdf'): one page, the same headline, intern
   assert.match(res.headers.get("Content-Disposition"), /^attachment; filename="CIMS crew survey 2026-10-23\.pdf"$/);
   assert.equal((await call(s, env, "GET", "/api/survey/report.pdf", null, null)).status, 401, "signed in only");
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.ok(W.includes("/api/survey/report.pdf?p=") && W.includes("Download PDF"), "the page offers the download");
+  assert.ok(W.includes("/api/survey/report.pdf?p="), "the page offers the download");
   assert.ok(!/report\.pdf[^\n]*sendMail|sendMail[^\n]*report\.pdf/.test(readFileSync(new URL("../src/crew_survey_send.js", import.meta.url), "utf8")), "never emailed");
+});
+
+// Miguel, 23 Oct 2026, on the HR view: "is messy the report now .. u have to think about unit .. logging a call is somewhere else
+// in the app. so is a no go". The page is drawn with the Shipboard Feedback report's own parts, and logs no call.
+test("the report page is the Shipboard Feedback report's parts, no call logging, the latest 10 answers", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const cut = (a, b) => { const i = W.indexOf(a); const j = W.indexOf(b, i); assert.ok(i > 0 && j > i, a); return W.slice(i, j); };
+  const code = cut("function escHtml(s){", "\n") + "\n" + cut("var SRV_P=", "async function rptCrewSurvey(") + cut("function srvDraw(){", "async function srvSendAnyway(");
+  const body = { innerHTML: "", querySelectorAll: () => [] };
+  const ctx = { document: { getElementById: () => body }, $: () => body, openCrew() {}, rptCrewSurvey() {} };
+  vm.createContext(ctx); vm.runInContext(code, ctx);
+  const rows = Array.from({ length: 12 }, (_, i) => ({ ...REAL7[i % 7], id: "z" + i }));
+  rows[0] = { ...rows[0], answers: { ...rows[0].answers, q06: 1, q10: 2, q14: 2 } };
+  ctx.SRV_D = { ...surveyReport({ rows, ended: [], today: TODAY, p: "All" }), enabled: true, since: "2026-10-23", sources: { forms: 12, console: 0 } };
+  vm.runInContext("srvDraw()", ctx);
+  const h = body.innerHTML;
+  for (const cls of ["rpthead", "liveband", "kgrid", "ktile", "rgrid2", "rblk"]) assert.ok(h.includes("class=" + cls) || h.includes('class="' + cls) || h.includes(" " + cls + '"'), "uses ." + cls);
+  assert.match(h, /Watchlist &middot; 1/);
+  assert.ok(!/Log the call|data-svcall|People to call|svcall/.test(h), "no call is logged on the report");
+  assert.ok(!/svhm|svband|svg3/.test(h), "the HR view's own heat map, band and three-column grid are gone");
+  assert.match(h, /Latest answers/);
+  assert.equal((h.match(/data-svrow=/g) || []).length, 10, "the latest 10");
+  assert.match(h, /Show all 12/);
+  vm.runInContext("SRV_ALL=true;srvDraw()", ctx);
+  assert.equal((body.innerHTML.match(/data-svrow=/g) || []).length, 12);
+  assert.ok(!/srvLogCall/.test(W), "the call-logging function is gone");
 });

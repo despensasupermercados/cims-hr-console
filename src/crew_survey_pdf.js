@@ -62,9 +62,9 @@ export function composeSurveyReport(r, { today, lineLabel } = {}) {
   });
   t += 68;
 
-  // people to call
-  t = heading("People to call", t);
-  const calls = r.needsCall || [];
+  // the watchlist (3+ statements at 1-2, or would not return); a call is a note on the profile, never logged here
+  t = heading("Watchlist", t);
+  const calls = r.watch || [];
   if (calls.length) {
     for (const c of calls.slice(0, 5)) {
       const why = [(c.low || []).length >= 3 ? (c.low || []).length + " answers at 1-2" : "", c.why && c.why.includes("return") ? "would return " + c.ret : ""].filter(Boolean).join(" · ");
@@ -76,13 +76,9 @@ export function composeSurveyReport(r, { today, lineLabel } = {}) {
     }
     if (calls.length > 5) { pdf.textAt("+ " + (calls.length - 5) + " more on the console.", L, t, { size: 8, color: SLATE }); t += 12; }
   } else {
-    const c = r.closest;
-    const line = "Nobody to call: no answer has 3 statements at 1-2 or would not return."
-      + (c ? " Closest: " + (c.name || "name not given") + ", " + (c.ship || "") + " (" + [c.low.length ? c.low.map((x) => x.short + " " + x.v).join(", ") : "", c.fours ? c.fours + " at 4" : ""].filter(Boolean).join("; ") + ")." : "");
-    const ls = wrap(line, W - 20, 8.5, false);
-    pdf.rrect(L, t, W, 10 + ls.length * 11.5, 5, CLOUD);
-    ls.forEach((x, i) => pdf.textAt(x, L + 10, t + 6 + i * 11.5, { size: 8.5, color: INK }));
-    t += 16 + ls.length * 11.5;
+    pdf.rrect(L, t, W, 22, 5, CLOUD);
+    pdf.textAt("Clear: no answer in this period has 3 statements at 1-2 or would not return.", L + 10, t + 6, { size: 8.5, color: INK });
+    t += 28;
   }
   t += 6;
 
