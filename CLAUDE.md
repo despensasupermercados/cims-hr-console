@@ -601,8 +601,14 @@ movable; the commit is a money user's click; committed outcomes are never touche
 - **Dexter's audit (10) replaces "Communication (Rita)":** the audit score (Overall, else the average rounded down) — 5 = 10,
   4 = 8, 3 or below = 0; no audit in the contract (filed up to 30 days after the sign-off) = 10; several = the lowest.
 - **Mono (5):** presses only, under 20% of clicks over the contract = 5, else 0; no click data = 5. The data is OBP's clicks
-  table (ClicksDate, Color, Mono, is_mfd per machine); Jerwin is adding a daily month-to-date clicks file to the nightly
-  export to obp-csv@cims.work (Miguel asked 15 Oct 2026). The reader is not built yet: until then, full points.
+  table (ClicksDate, Color, Mono, is_mfd per machine); Jerwin added a daily clicks file to obp-csv@cims.work (Miguel asked
+  15 Oct 2026; first file 19 Oct: `ShipID,EquipmentID,ClicksDate,Color,Mono,TotalColor,TotalMono,is_mfd`, every machine
+  every day from 1 Jan 2026, Color / Mono = the day's clicks). The weekly-orders app reads it into cims-hon's D1
+  `weekly_obp_clicks` (weekly_orders_email PR #51; ShipID → name from OBP's own tblShips, IT's 9 Jul extract — ShipIDs 1,
+  2, 3 and 50, likely the Azamara hulls, are not on it and carry no name, so Azamara reads "no click data" until they are
+  given). `score_auto.js` reads it in the wave (`monoShare`: press mono over press colour + mono on the card's ships for the
+  contract's days, one SELECT, `HON_DB`); it is the SHIP's share (two printers on a hull share it); clicks on file that
+  begin after the sign-on say so; a failed read is said (`sources.clicksRead`), a table not created yet is no data.
 - **Supervisor evaluation (15):** unchanged (the shipboard manager review, `seval.js`).
 - **The Score Card:** feedback links for Ray and Rolando only; Dexter is a green chip ("Dexter · audit 4/5 · date") opening
   the audit when one exists, nothing when none. The Inputs page lists every audit of the seafarer ("Not applicable · no audit
@@ -639,6 +645,36 @@ movable; the commit is a money user's click; committed outcomes are never touche
   the same day (it never had the 0001 seed); `ensureBonusV2` seeds v1 first on any database that lacks it. (4) with no miss,
   on-time ordering is Ray's on-time answer, all or nothing — as built. Pinned by `test/score_auto.test.js`,
   `test/bonus_policy_v2.test.js`.
+- **Miguel's answers of 17 Oct 2026** (the logic review; money, §1: his merge — PR #287, which also carries the night watch's
+  #281): (1) **The rush gate is the Parts Portal's** ("Portal miss only"): a vessel-side miss charged by the whose-miss rule
+  resets the streak; Ray's "crew ordering failure" answer is evidence on the card, never a reset (`mapFeedbackToScore`) — it
+  armed the gate on Ryan Marto's card ($1,807.75, Quantum) with no missed order of any kind in the Portal. Ray's failed
+  inventory audit stays a gate ("Ray, as today"). (2) **No shipboard review = 3**, the default, unchanged. (3) **A transfer
+  is ONE contract** ("One contract"): legs 21 days or less apart (`contracts.GAP_DAYS`), any ship, are one Score Card
+  (`scorequeue.scoreContracts`; ships "Explorer, Jewel") — Jaramiz Melen Tuazon's Explorer leg alone was committable while
+  he sails Jewel, two counts on one TDG contract. An OVERLAP is not merged (TDG's two files disagreeing, §11d); a training
+  visit is no contract (`visits.js`). (4) **After the sign-off, oldest first, and TDG ends it** ("After sign-off, oldest
+  first", "Wait for TDG"): the card opens on the OLDEST ended contract no outcome covers within `SCORE_RECENT_DAYS` = 180
+  (`defaultScoreLeg`, why `ended_unscored`), else the running one (`current` / `held`), else the most recent, else the next;
+  the commit refuses (`commitBlock`, 409, `apiBonusCommit`, before the evidence read and every write) a sign-off still ahead
+  (`not_ended`), a contract TDG still has On board past the sign-off (`held_by_tdg`: Belhida, Apex, 7 Oct) or still running
+  past a projected one (`still_aboard`), a visit (`visit`), a newer contract while an older one inside the window has no
+  outcome (`older_first`), and a span overlapping an outcome already recorded (`already_scored`: one outcome per contract —
+  the exact span stays the duplicate path; a span moved by a day, or Radiance's Counter contract from 6 Mar beside the
+  file's from 5 Oct, used to pay twice). `/api/bonus/crew` returns `scoring: { why, block }` and the card prints the reason in words
+  (`scBlockMsg`) before the click and after a refusal. The night watch's first cut (#281) opened a running contract ending
+  sooner before an older unscored one; Miguel chose the other order. (5) **A training visitor is never charged a miss**:
+  `aboardOn` skips `visit` legs, so the seat aboard is the one charged, whoever typed the order. (6) Simulated on the
+  16 Oct 2026 file's legs: the card opens on 7 ended contracts nobody has scored (Agbada, Estandian, Madrinico, Ramos, Reyes,
+  Sison, Villacortes), 49 running ones are refused until their sign-off, Belhida is held, no transfer to merge there.
+  (7) **An audit belongs to the contract it was REQUESTED in** (his second round, "The one it was requested in"), whenever
+  Dexter grades it: `autoScore` reads `requestedAt` (`COALESCE(audit_request.sent_at, created_at)`, `gatherAuto`) inside the
+  contract's sign-on to sign-off; an audit with no request date keeps the grading window (sign-off + 30 days). A request sent
+  in a contract's last days and graded after the next one began scored the NEXT contract; one graded 30+ days late scored none.
+  (8) **Jonathan Placer Alonzo's full contracts are scored** ("Score full contracts", replacing the morning's "not scored",
+  given when he was described only as staff): his Rhapsody / Symphony contract (Dec 2025 – Sep 2026) gets a Score Card like
+  any printer's; his training visits are never scored and never charged a miss (Brain rec3g5Cx8YWu1ANyn). Pinned by
+  `test/scorequeue.test.js`, `test/feedback.test.js`, `test/score_auto.test.js`.
 
 ## 10h. THE OPERATIONAL DASHBOARD — Miguel, 13 Oct 2026 (mock-up B v4 "each fact once", then "deploy")
 "redesign this dashboard .. items that would allow Rita to monitor and make decisions"; four rounds on the canvas
@@ -974,7 +1010,9 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   sign-off** (no cross-over in `legsFromRegistry`, never the cross-over's reliever, not picked by `seatContexts`, not the
   profile's before/after); **not a completed contract** (its debark never adds to TDG's count: `completedSince`, the
   `CC_*_SQL` join reads the mark and the tag); **off the bench and the seats** (a "Training visit · trainer" line under the
-  ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard). Time at sea still counts its days. The
+  ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard); **off the crew's statement** (Miguel, 21 Oct
+  2026: "left off the crew's statement, is a training visit"; `statementContracts` skips the leg, so its row and its days are
+  not printed — the PDF, its email and the internal crew file's statement pages). The profile's time at sea still counts its days. The
   mark belongs to the trip that embarked that day: a later file that moves the embark makes it a new trip. (The same
   morning this was Jonathan's id alone, PR #284, then a per-trip tick, PR #285.) Checked on the 17 Oct 2026 production
   data before merging: Score Card inputs, statements and schedule legs identical for all 108 crew. Pinned by
@@ -1032,6 +1070,107 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   email (sent, to whom, or who it would go to). **A look writes nothing**: the preview and the audit read the SAME model as
   the crew's link (`modelFor`), make no link and record no visit; the welcome preview's hub button opens the console
   preview, never a real link. **hub.cims.work** with no link is the hub's landing page (`hubHomePage`), never the console.
+
+## 10l. NORWEGIAN GETAWAY — NCL's pilot hull on the console (Miguel, 20 Oct 2026: "yes get away i the console")
+In service **16 Nov 2026** (Brain rec2lUszqqzau4xns, which supersedes the tracker's 15 Nov and the 12 Nov anchor; the ship's
+auto-brief still reads 16 Oct, flagged to Miguel); the first printer, Joe Art Eresmas (SC-0038131, now aboard Solstice), signs
+on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
+- **One hull, brand NCL**: `VESSEL_REF` row `Getaway` (brand `NCL`, Breakaway, Miami, `from: "2026-11-16"`), the D1 `vessel`
+  row `ves_getaway` (`migrations/0038`: projection.js refuses an unknown ship), "Norwegian Getaway" on Edit crew's ship list.
+- **"Getaway" alone is Norwegian, never Royal Caribbean.** Every path that decided a cruise line read the bare name as Royal:
+  the board's `brandFor` (VESSEL_REF brand `NCL` → `NCL`), `clientOf` (`NCL_SHORT`), `travelClientOf`, the page's `brandOf`,
+  the GSM review's `sbmBrandForShip` (NCL: no recipient configured → skipped and logged, never Royal Caribbean's).
+- **The crew's words**: the sign-off instructions say "Norwegian Getaway" and "your shipboard manager" (`managerOf(NCL)` is
+  null — no title on record; never Royal's GSM). Royal, Celebrity and Azamara read exactly as before.
+- **Before service**: the hull has its section with nobody on it (anchored by VESSEL_REF `from`), drawn "First printer · in
+  service Nov 16, 2026 · drag a seafarer here"; it is no "empty hull" row until that day (`boardIssues` `notYet`). Rita places
+  Joe Art by tapping the slot ("First printer · … · PICK OR DRAG A SEAFARER": `firstPrinter` opens a side sheet over
+  `/api/relief/crew`, a pick goes through `/api/rotation/project`, the drag's route; Miguel, 23 Oct 2026: "I cannot add a
+  printer under ncl" — with the Norwegian filter on, nobody was on screen to drag, and the relief panel needs a printer to
+  follow) or by dragging his card onto it. The earmark starts today; Rita sets his 9 Nov sign-on on the card. The Keyman rail groups it under
+  "Norwegian"; the audit landing has a "Norwegian" tile saying "In service Nov 16".
+- **Open, Miguel's to answer**: the pilot term is 45 + 45 days (rec98ZTCYo7X2PkPO) but a projection is 7 months (Rita types the
+  date); the earmark bench lists everyone for an NCL hull (no NCL brand rule); NCL's ship code (the pass reads "GE");
+  NCL's ordering steps on the Crew Hub (it shows Royal & Celebrity's); NCL's shipboard manager title.
+
+## 10m. THE END-OF-CONTRACT CREW SURVEY — Miguel, 22–23 Oct 2026 (feedback, NEVER money)
+"build one that function for .. all now 4 customers .. triggered once the seafarer sign off .. u will use the seafarer email ..
+cc rita and myself .. when the seafarer answer .. his personal email and cc onboardsupport@DG3.com .. under the hr console under
+reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or ok, 3. call it shipboard manager"; proofs under
+`docs/mockups/crew_survey_20261022/`). Pinned by `test/crew_survey.test.js` (real SQLite, the page's script in vm).
+- **One survey, Rita's 19 statements word for word** (Forms "Seafarer End-of-Contract / Exit Survey", keyed q01–q19 in HER order so
+  the Forms history stays comparable) on five screens + "the one thing we should fix first". Scale No / Not really / Partly / Mostly /
+  Yes = 1–5. The supervisor statement names the line's title: Royal GSM, Celebrity DCM, Azamara BOM, NCL **shipboard manager**.
+- **Who is asked**: a contract the Keyman board shows ENDED (offSource tdg / rita / card — a projected sign-off that passed is
+  held, still aboard, never asked), never a training visit, **3 days after the sign-off** (`surveyDue`: off on or before
+  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 14, never before the switch went on; Miguel, 23 Oct 2026,
+  "ok go ahead": the delay gives Rita time to record why a contract ended, so a Performance / Medical / Compassionate end
+  is not asked — it was the morning after until then). One per contract (`ux_crew_survey_contract` on sc + sign-on).
+- **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own
+  address (Rita's override first; TDG's "-" is none → listed on the report's loop, never guessed), **CC Rita + Miguel**, reply-to
+  Rita, 07:00 Miami; **one reminder** after `SURVEY_REMIND_DAYS` = 5 (the same email, "Still a minute"). On Send, his copy goes
+  To him, **CC onboardsupport@dg3.com**. **Nothing is promised back** (Miguel, 23 Oct 2026: "make them generic all of them .. I
+  don't want anything standing or pending"): no email or page tells the seafarer that Rita replies or by when — "we read every
+  one", "the whole CIMS team sees it"; pinned by `test/crew_survey.test.js`. A failed
+  invitation leaves no row (tried next morning); a failed copy is logged, the answers are kept.
+- **The page**: `GET/POST /hub/survey/<token>` (hub.cims.work, no login, the link is the key — `newHubToken`, open
+  `SURVEY_LINK_DAYS` = 30), answers taken ONCE (`checkAnswers`: every statement a whole 1–5), the address shown masked.
+- **Reports › Crew survey** (`GET /api/survey/report`, `surveyReport`): answers, overall, would sail again, answer rate, **the
+  watchlist** (3+ answers at 1–2; nothing is logged here — see THE PAGE IS ONE APP below), where it hurts (lowest first), the fixes, by line, the
+  loop (signed off → asked → opened → answered, and who has no email), every answer (Forms rows tagged). Period + line chips.
+- **23 Oct 2026, Miguel's "2. yes to all. 3. yes do it. 4. ok."** Pinned by `test/crew_survey.test.js`.
+  - **Who is NOT asked** (`surveySkip`, read the morning the invitation would go): TDG's word or Rita's manual status Not for
+    Rehire, or the contract's recorded end reason (`contract_end`) Performance, Medical or Compassionate. Each is listed on the
+    report under "Not asked, on purpose" with its reason and **Send anyway** (`POST /api/survey/send` {sc, on}, the same
+    `invite`). A reason recorded after the invitation went cannot recall it (said on the report).
+  - **His answers are on his profile** ("What people said", kind `survey`; the Notes window under Feedback) and in the
+    internal crew file (`feedbackFile`, "Crew survey (his own answers)"), never the statement or anything the crew reads.
+  - **q20 "My travel, hotel and joining arrangements were well organized."** (Travel & joining, on the first screen). Rita's
+    19 stay as q01–q19 so the history compares; `FORMS_KEYS` = the 19 the Forms survey asked; a Forms answer never has q20.
+  - **Quick answers**: the page sends the seconds from Start to Send (`answer_secs`, migrations/0041, `SURVEY_ALTERS` through
+    `addColumn`); the same answer to every statement in under `QUICK_SECS` = 60 is listed and tagged Quick but left out of
+    every average (`quickAnswer`). Forms answers have no timing, so never quick.
+- **THE HR VIEW** (Miguel, 23 Oct 2026: "1. no. 2. yes. 3. not .. 4. pdf"), the rules that stay: under `SURVEY_MIN_READ` = 20
+  answers the scores are a floor check (`surveyHeadline`, read by the PDF); **same answer to every statement** (`allSame`, the
+  ceiling); **the watchlist** = 3+ statements at 1–2 OR "Would return" at 1–2 (`NEEDS_CALL_RETURN`), `watch` on the report — every
+  such answer of the period, nothing ticks it off; **What they asked us to fix** grouped by keyword, no model (`FIX_THEMES`, owners
+  Miguel approved: Travel & joining → Rita / TDG, Pay & benefits → Miguel, Training → Ray / Rolando; none → Other, no owner), the
+  clause that names the theme (`fixClause`), `FIX_HOT` = 3 in red; a line under `SURVEY_MIN_CELL` = 3 answers shows a dash. **No
+  retention block** ("once they are done .. is mostly coz they cost me money and I dont want them back") and **no "left after 3+
+  contracts" rule**. **The leadership PDF** (`GET /api/survey/report.pdf`, `src/crew_survey_pdf.js`, one page, internal, a
+  download only, never emailed). The Reports frame stacks on a phone.
+- **THE PAGE IS ONE APP, NOT ITS OWN** (Miguel, 23 Oct 2026, the same afternoon, on the HR view's page: "is messy the report now ..
+  u have to think about unit .. logging a call is somewhere else in the app. so is a no go .. the way is displaying all the shit is
+  just horrible"). `srvDraw` is drawn with the **Shipboard Feedback report's own parts** — `rpthead` + `pchip` (period, line, PDF),
+  `liveband`, `kgrid`/`ktile` (Answers · Overall · Would sail again · Same answer to all · Answer rate · Watchlist), `rgrid2` of `rblk`
+  (By cruise line table | Lowest statements `frow` bars), the red-ruled **Watchlist** block (green "Clear" when empty, as the
+  Shipboard Feedback watchlist), `rgrid2` (What they asked us to fix table | Are we hearing from everyone? `frow` bars + waiting, no
+  email, Not asked on purpose with Send anyway), **Latest answers** (10, "Show all N", a row opens every statement), the one-line
+  footer. Gone: the big headline, the band, the heat map, the call cards, By quarter, the three-column grid. **No call is logged on
+  the report**: `POST /api/survey/call` and `srvLogCall` are removed; a follow-up is a note on the seafarer's profile (the name links
+  there). The `called_*` columns stay in D1, unread (no schema change). A new report on Reports uses these parts, never its own.
+  Pinned by `test/crew_survey.test.js` (the page run in node:vm).
+- **THE REPORT MAKES SENSE OR SAYS NOTHING** (Miguel, 23 Oct 2026, on the leadership PDF built from the HR view: "report needs
+  re-do .. it does not make any sense"). Read on the 62 Forms answers, "What they asked us to fix" listed thanks ("All Excellent",
+  "all good") as fixes, read "perks, benefits ... are impeccable" as a pay ask and "the training was not lacking" as a training
+  ask, and had no theme for the five who asked for a longer handover. `fixThemes(text)` now reads CLAUSE by clause: a clause with
+  praise or a "nothing" (`PRAISE_RX`) names no theme; an answer with no theme is an **Other ask** only when a clause asks or
+  complains (`ASK_RX`: please, hope, maybe, increase, more X, should, never, not enough, late…); everything else is thanks,
+  counted apart (`thanks`, `unwritten`) and said under the table, never listed as a fix. Themes: Travel & joining (Rita / TDG, now
+  with rest / layover / transportation, without "travel" alone), **Handover time** (hand over / turnover / endorse — owner Ray /
+  Rolando, Miguel 23 Oct 2026: "do it"), Pay & benefits (Miguel, now with compensation / HMO / stripes / service awards), Training (Ray / Rolando, only
+  "more / in-depth … training" or troubleshooting — "pre-departure training" is the reason for a hotel, not an ask). Other asks
+  last. On the 62: Travel 12, Pay 12, Handover 5, Training 1, Other 3, thanks 22. **The PDF mirrors the page**: the letterhead,
+  "Crew survey" + period · line · answers and their source, the six tiles, By cruise line | Lowest statements, the Watchlist block
+  (every low statement by name, his words, never cut), What they asked us to fix as a table (theme · owner · mentions, one example
+  in their words), the thanks count, the footer. Gone from it and from the code: the headline sentence (`surveyHeadline`) and the
+  theme × line heat table ("The job", "You" told a reader nothing).
+- **The switch**: Keyman › Automation "Crew survey" (`/api/survey/auto`, `crew_survey_auto_enabled` + `_since`), OFF until Miguel
+  switches it on. `GET /api/survey/preview?id=&what=page|invite|reminder|answers` shows a crew's real data, makes no link, sends nothing.
+- **Never money, never the cruise line**: `crew_survey` (migrations/0040) is read by nothing on the Score Card / bonus path, and
+  nothing is sent outside CIMS. The Forms history (source `forms`, `form_no`) is read by `readFormsSurvey` — who it was is a full
+  name or the schedule that day, never a guess (§6). The two client Forms exports Miguel attached on 22 Oct are the SHIP MANAGER's
+  review (Shipboard Feedback, money-adjacent), not this survey.
 
 ## 10c. THE CONTRACT COUNT IS AN IMPORT, NOT A CALCULATION — Miguel, 24 Sep 2026
 TDG publishes each seafarer's completed-contract count: `DG3 Printer Specialist Completed Contract as of
@@ -1292,7 +1431,11 @@ Pinned by `test/bughunt_1008.test.js`.
   (Miguel, 9 Oct 2026).
 - **Only what Rita changes is written.** Edit crew posts changed fields only (`crewEditBody` vs `CREW_EDIT_INIT`); the
   contract modal sends a PROJECTED sign-off only when changed (`offToSave`) — an untouched projection posted back became
-  "Rita's" date. Saves report a refused response and keep the modal open.
+  "Rita's" date. Saves report a refused response and keep the modal open. **The ports too** (night watch, 20 Oct 2026: the
+  modal posted both port selects as they stood, so a tick saved the homeport seed as Rita's port — production held eight,
+  Noche's disembark "San Juan" among them, and a saved port reads `disembarkSrc` "rita"): a port is sent when she changed
+  it, else the port already saved for that contract (`/api/rotation/crew` returns `ports`; `savedPorts`, `portToSave`),
+  else nothing. The eight rows already saved are data for Miguel, never repaired by the watcher.
 - **Contributor answers, crew names and ports are text** (`escHtml`, `fbEsc`, `rEsc`): the Score Card's evidence ran HTML
   from the public `/fb` link inside a money user's session.
 - **Dates are calendar dates**: month arithmetic clamps to the month's end (`addMonthsISO`, `plusMonths`); the page compares
@@ -1425,6 +1568,11 @@ questions (his answers land in the sections they change). Pinned by `test/review
   only the unused `/api/crew/import` page drew one.
 - **Maria's "former crew" is `isOffFleet(status)`**, never the manual tag (a tagged crew TDG has On board left her active
   lists; Not for Rehire could not be listed by name).
+- **One outcome per contract span, by the database** (money, §1: Miguel's merge). The commit's backstop cited a
+  `UNIQUE(crew_id,span_start,span_end)` "migration 0004" that no migration created (production: non-unique indexes only), so
+  two racing commits paid twice. `ux_bonus_outcome_span` (migrations/0033, primary outcomes only, `ensureBonusV2` at runtime)
+  and the contract + legs + outcome written as ONE batch after the evidence read: a refused second click leaves nothing.
+  Pinned by `test/bonus_policy_v2.test.js` on real SQLite.
 
 **Miguel's answers of 17 Oct 2026 to the review** (Brain recICJGsDk6oJJpSd). Pinned by `test/review_1017_board.test.js`.
 - **THE RELIEVER IS ONE RULE** (`src/reliever.js`; "Adopt it everywhere"): the first person to sign on the hull after him,
@@ -1594,8 +1742,15 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   never only an empty address (`#zz` stayed on its placeholders). Measured live the same day: the worker runs at the
   visitor's edge (`cf-placement: local-EWR / local-MIA`), not beside D1 in Prague, so each schema check and read crosses
   the Atlantic (~100 ms a trip) — reported to Miguel, not changed here. Pinned by `test/audit_page_boot.test.js`.
-  Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
-  the import of the 61 (I1), the web rail (W1).
+  **The filed and dispatch emails are rendered, NOT wired** (`hr.audit.filed.v1` to Miguel, cc Rita, Ray, Rolando:
+  the score in words and how it was reached, each rating with its sentence, the three boxes, the follow-up and what this
+  visit settled from the last one, the desk and the tools with "2nd time", each machine against what the documents said,
+  the count against OBP then the shelf, the crew — never a replacement, points, money or the dispatch rating;
+  `hr.audit.dispatch.v1` to Rita alone: the crew's 1–5 on TDG's travel, hotel and joining and, new on the Crew step, an
+  optional note in their words, kept only beside a rating), built from what the filing stored; proofs under
+  `docs/mockups/audit_filed_20261019/`. Wiring the send waits on Miguel's sign-off of the renders (CIMS email standard §5;
+  `test/audit_filed_email.test.js` fails if anything outside `src/emails` imports them). Still to build: Rolando's
+  Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`
@@ -1638,6 +1793,33 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   things (a row per press for each file, the blind count with a search, Machine won't print? with its reason), Send once
   everything is in; OBP's number never shown. Renders: scratchpad harness `aud/run.mjs` on live read-only data. Pinned by
   `test/audit_page_boot.test.js` (rewritten to the new markup, same intent), `test/audit_brand.test.js`.
+- **THE AUDITS BEFORE THE APP — the Forms survey** (Miguel, 20 Oct 2026, asked "Import the Forms survey into History?":
+  "yes to all on the 5th point"). `src/audit_forms.js` (pure) reads Miguel's export `Printshop_Audit1-61.xlsx` (Sep 2024 – Sep
+  2026) into `audit_forms` (migrations/0039, in `AUDIT_DDL`), written ONCE by the session, staging first. History lists them
+  beside the filed audits, each marked "Forms survey", and `#q=forms-N` opens one as typed (`/api/audit/forms`). Rules: the 9
+  test rows are listed by number with the reason and not imported (`FORMS_TESTS`: ships "Test"/"ABC Test", keyboard filler,
+  pasted news, Star of the Seas before she sailed); the ship from its code or name (two misspellings named, never a near
+  match); the desk counts an item missing only once the form offered it (the SOPs box first appears on row 36, 5 May 2025); the
+  score is the filed audit's rule (Overall, else the average rounded down) for reading only. **Who it was on is never
+  guessed** (§6, §10): a full name the travel name bridge places on ONE crew, or a first name the schedule has aboard that hull
+  that day; anything else keeps the name as typed, unlinked, with why. On 20 Oct 2026: 52 imported, 39 placed, 13 not.
+  **Never the Score Card**: the bonus reads `audit_eval` only; an audit from the survey counting there is a money change,
+  Miguel's to make (pinned by `test/audit_forms.test.js`). The files stay in Miguel's OneDrive (the links need a DG3 sign-in).
+- **The 20 Oct 2026 corrections** (Miguel, looking at the live app). (1) **Aboard is the Keyman board's seat** ("this is
+  wrong.. look at the hr console", Grandeur read "Nobody aboard"): `aboardOf(sec)` in `src/audit.js` — TDG's On board seat,
+  TDG's Earmarked word for the hull a contract still runs on (`earmarkedHere`, Purnama on Xcel), and Rita's card past its
+  sign-on drawn "awaiting the TDG file" (Corpin on Grandeur, a projection with `awaiting`); the landing, the open-mode pass
+  and the request guard all read it. (2) **The briefing's "Audits of <ship>" reads the Forms survey too** (`audit_forms` by
+  hull, newest first, marked "Forms survey"); it said "The 61 Forms audits are not imported yet". (3) **No clean part life
+  without life rows** ("u didnt read the files correctly"): Kevin Jugao's Pursuit list read "No part past its rated life",
+  and the copy Miguel re-sent is pages 25–50 of the 52-page Machine Management List — the life % (p5, p7–15) is not in it.
+  `mmlReadState`: a machine list whose read carries no life row is `wrong_doc` ("No parts-life page was found … upload the
+  whole list"); the summary keeps `lifeRows`; the page says "Part life not read" for `lifeRead === false` (a read filed
+  before `lifeRows` was kept counts as not read), never "No part past its rated life". (4) **A Pattern 43 mark is said in
+  full** ("elaborate a bit more on the assessment"): `p43Lines` on the page — where (each page of the bundle), what it means
+  (one colour channel, not the belt or the scanner), what it points to (the DG3 tech library) and how to tell which on
+  board — every line from HON's measurement and the library's rule, nothing guessed. Pinned by `test/audit_routes.test.js`,
+  `test/audit_request.test.js`, `test/audit_visit.test.js`.
 - **Nothing here is money** (§1): `test/audit_guards.test.js`. Staging emails nobody but `MAIL_ONLY_TO` and runs no cron
   (`src/mail_guard.js`).
 - **The 15 Oct 2026 review** (three reviews, every finding traced; pinned by `test/audit_request.test.js`,

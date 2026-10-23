@@ -26,7 +26,7 @@ export function auditShellPath(host, path) {
 export const auditBase = (host) => (isAuditHost(host) ? "/" : "/audit");
 
 /* --------------------------------- names and dates --------------------------------- */
-export const normShip = (s) => String(s || "").toLowerCase().replace(/^(celebrity|azamara|royal caribbean)\s+/i, "")
+export const normShip = (s) => String(s || "").toLowerCase().replace(/^(celebrity|azamara|royal caribbean|norwegian)\s+/i, "") /* "Norwegian Getaway" = "Getaway" (20 Oct 2026) */
   .replace(/\bof the seas\b/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 export const iso = (d) => (d ? String(d).slice(0, 10) : null);
 export function plusHours(at, h) { const t = Date.parse(at); return isNaN(t) ? null : new Date(t + h * 3600 * 1000).toISOString(); }
@@ -151,7 +151,18 @@ export const OPEN_REQ_SQL = "(r.status IN ('draft','sent') OR (r.status = 'compl
 export const SHIP_OPEN_SQL = "SELECT r.id, r.agency_id, r.crew_name, r.status FROM audit_request r LEFT JOIN audit_eval e ON e.request_id = r.id WHERE r.normalized_ship = ? AND " + OPEN_REQ_SQL + " ORDER BY r.created_at DESC LIMIT 1";
 export const isOpenRequest = (r) => !!r && (r.status === "draft" || r.status === "sent" || (r.status === "complete" && r.grade == null && !r.test_mode));
 
-export const aboardNow = (c) => !!(c && c.current && (c.aboard || !c.signOn));
+export const aboardNow = (c) => !!(c && (c.current || c.earmarkedHere) && (c.aboard || !c.signOn));
+// WHO IS ABOARD A SHIP, AS THE KEYMAN BOARD DRAWS IT (Miguel, 20 Oct 2026, on Grandeur reading "Nobody aboard": "this is
+// wrong.. look at the hr console"). Three kinds of seat, read off the board's section, never decided here:
+// TDG's On board seat; TDG's "Earmarked" word for the hull a contract is still RUNNING on (Purnama, Xcel — the board seats
+// him, `earmarkedHere`); and Rita's card whose sign-on has passed, green "ABOARD · AWAITING TDG FILE" (Corpin, Grandeur —
+// a projection with `awaiting`). One person once, the seat first.
+export function aboardOf(sec) {
+  const seen = new Set(), out = [];
+  for (const c of [].concat((sec && sec.crew) || [], ((sec && sec.projections) || []).filter((p) => p && p.awaiting)))
+    if (c && c.agency_id && !seen.has(c.agency_id) && (c.awaiting || aboardNow(c))) { seen.add(c.agency_id); out.push(c); }
+  return out;
+}
 
 export function gateState({ request, machines, uploads, down, lines, counted, requireRead = true }) {
   const missing = [];

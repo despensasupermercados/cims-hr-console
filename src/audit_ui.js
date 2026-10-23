@@ -82,7 +82,12 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   /* how long something took between two instants: hours and minutes inside a day, else months and days (never a day count) */
   function took(a, b) {
     var ms = Date.parse(b) - Date.parse(a); if (isNaN(ms) || ms < 0) return "";
-    if (ms < 864e5) { var h = Math.floor(ms / 36e5), mi = Math.round((ms % 36e5) / 6e4); return h ? h + (h === 1 ? " hour" : " hours") + (mi ? " " + mi + (mi === 1 ? " minute" : " minutes") : "") : Math.max(1, mi) + (mi === 1 ? " minute" : " minutes"); }
+    if (ms < 864e5) {
+      /* whole minutes first, at least one: "1 minutes" (under 30 seconds) and "1 hour 60 minutes" (59:30) were both shown */
+      var t = Math.max(1, Math.round(ms / 6e4)), h = Math.floor(t / 60), mi = t % 60;
+      var hs = h ? h + (h === 1 ? " hour" : " hours") : "", ms2 = mi ? mi + (mi === 1 ? " minute" : " minutes") : "";
+      return hs && ms2 ? hs + " " + ms2 : hs || ms2;
+    }
     return md(a, b);
   }
   function pct(a, b) { return b > 0 ? Math.max(0, Math.min(100, Math.round(a * 100 / b))) : 0; }
@@ -149,7 +154,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
      Pick the customer, and its ships line up by what Dexter has to do: contracts ending within 30 days with no audit
      first, then every other contract not audited, then the ones audited this contract, then the hulls nobody is aboard.
      An audit belongs to the contract it was asked in (Miguel, 16 Oct 2026): the server says it per seafarer (audit). */
-  var CUSTS = [["Royal", "Royal Caribbean"], ["Celebrity", "Celebrity"], ["Azamara", "Azamara"], ["NCL", "NCL"]];
+  var CUSTS = [["Royal", "Royal Caribbean"], ["Celebrity", "Celebrity"], ["Azamara", "Azamara"], ["NCL", "Norwegian"]];
   function brandOf(s) { return s.brand === "Royal" ? "Royal Caribbean" : (s.brand || ""); }
   function custOf(s) { return s.brand || "Other"; }
   function custName(k) { for (var i = 0; i < CUSTS.length; i++) if (CUSTS[i][0] === k) return CUSTS[i][1]; return k; }
@@ -227,7 +232,9 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var list = byCust[k], crewed = list.filter(function (s) { return lead(s); }).length, soon = list.filter(function (s) { return bandOf(s) === "soon"; }).length;
       return '<button type="button" class="tile' + (S.cust === k ? " on" : "") + '" data-cust="' + esc(k) + '" aria-pressed="' + (S.cust === k) + '"><span class="tile-top"><b class="tile-name">' + esc(custName(k)) + "</b></span>"
         + '<span class="sm">' + list.length + (list.length === 1 ? " ship" : " ships") + " · " + (crewed === list.length ? "all crewed" : crewed + " crewed") + "</span>"
-        + '<span class="tile-alert ' + (soon ? "a" : "g") + '">' + (soon ? soon + (soon === 1 ? " ends" : " end") + " within 30 days" : "Nothing ends within 30 days") + "</span></button>";
+        // a customer whose ships are not in service yet (Norwegian Getaway, from 16 Nov 2026) says when, not "0 crewed"
+        + (list.every(function (s) { return s.from; }) ? '<span class="tile-alert g">In service ' + esc(fmtD(list.map(function (s) { return s.from; }).sort()[0])) + "</span></button>"
+          : '<span class="tile-alert ' + (soon ? "a" : "g") + '">' + (soon ? soon + (soon === 1 ? " ends" : " end") + " within 30 days" : "Nothing ends within 30 days") + "</span></button>");
     }).join("") + "</section>";
   }
   function greeting() { var h = new Date().getHours(), nm = first(meName()); return (h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening") + (nm ? ", " + nm : ""); }
@@ -431,7 +438,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       var lastA = sa[0];
       h += '<section class="grid3">'
         + '<div class="card feat rowm"><span class="fi' + (r && r.his && r.his.count ? " r" : "") + '">' + ic("shopping-cart") + '</span><span class="xs">Rush orders this contract</span><b class="h3">' + rushT[0] + '</b><p class="sm">' + rushT[1] + "</p></div>"
-        + '<div class="card feat rowm"><span class="fi n">' + ic("list") + '</span><span class="xs">Audits of ' + esc(ship) + '</span><b class="h3">' + (lastA ? (sa.length === 1 ? "1 filed" : sa.length + " filed") : "None filed yet") + '</b><p class="sm">' + (lastA ? "Last: " + esc(lastA.crew || "") + ", " + fmtD(lastA.at, true) + (lastA.score != null ? " · score " + esc(lastA.score) + "/5" : "") : "The 61 Forms audits are not imported yet.") + "</p></div>"
+        + '<div class="card feat rowm"><span class="fi n">' + ic("list") + '</span><span class="xs">Audits of ' + esc(ship) + '</span><b class="h3">' + (lastA ? (sa.length === 1 ? "1 filed" : sa.length + " filed") : "None filed yet") + '</b><p class="sm">' + (lastA ? "Last: " + (lastA.crew ? esc(lastA.crew) + ", " : "") + fmtD(lastA.at, true) + (lastA.source === "forms" ? " · Forms survey" : "") + (lastA.score != null ? " · score " + esc(lastA.score) + "/5" : "") : "No audit of " + esc(ship) + " on record.") + "</p></div>"
         + '<div class="card feat rowm"><span class="fi a">' + ic("flag") + '</span><span class="xs">Open follow-ups</span><b class="h3">' + (fu.length ? fu.length + " open" : "None") + '</b><p class="sm">' + (fu.length ? esc(fu[0].text) + (fu[0].owner ? " · " + esc(fu[0].owner) : "") + (fu[0].due ? " · due " + fmtD(fu[0].due) : "") : "Nothing carried over from an earlier audit of " + esc(ship) + ".") + "</p></div>"
         + "</section>";
       h += rushOrders(r, first(b.crew.name));
@@ -543,10 +550,11 @@ export const AUDIT_HTML = String.raw`<!doctype html>
       h += '<div class="card pad sec"><div class="hstack"><span class="fi">' + ic("printer") + '</span><div style="min-width:0"><b class="h3">' + esc(m.label) + '</b><div class="sm">' + esc([m.model, m.serial].filter(Boolean).join(" · ")) + "</div></div></div>";
       if (m.down) h += '<div class="finding"><div class="hstack"><span class="chip a">Reported down</span><b class="h4">&#8220;' + esc(m.down) + '&#8221;</b></div><p class="sm">Verify on board: running again, or still down.</p></div>';
       else {
-        h += items.length ? items.map(function (i) { return '<div class="finding"><div class="hstack"><span class="chip a">Pattern 43</span><b class="h4">' + esc(sentence(i.head)) + "</b></div>" + (i.where || i.detail ? '<p class="txt">' + esc(i.where || i.detail) + "</p>" : "") + (i.check ? '<p class="sm">Observation · ' + esc(i.check) + "</p>" : "") + "</div>"; }).join("")
+        h += items.length ? items.map(function (i) { return '<div class="finding"><div class="hstack"><span class="chip a">Pattern 43</span><b class="h4">' + esc(sentence(i.head)) + "</b></div>" + p43More(i) + "</div>"; }).join("")
           : '<div class="finding ok"><div class="hstack"><span class="chip g">Pattern 43</span><b class="h4">' + (m.p43 ? "No mark found" : "Not read") + "</b></div></div>";
         h += life.length ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">' + life.length + (life.length === 1 ? " part" : " parts") + ' past its rated life</b></div><p class="txt">' + life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%"; }).join(" · ") + "</p></div>"
-          : '<div class="finding ok"><div class="hstack"><span class="chip g">Management list</span><b class="h4">No part past its rated life</b></div></div>';
+          : (m.lifeRead === false ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">Part life not read</b></div><p class="sm">The file on record has no parts-life page (Developing unit count, Special parts counter: pages 5 and 7 to 15 of the Machine Management List). Ask for the whole list.</p></div>'
+          : '<div class="finding ok"><div class="hstack"><span class="chip g">Management list</span><b class="h4">' + (m.lifeRead ? "No part past its rated life" : "Not read") + "</b></div></div>");
         if (items.length || life.length) h += '<p class="txt"><b>Recommendation:</b> have this machine looked at. Parts are changed on copy quality, not on a count.</p>';
       }
       h += "</div>";
@@ -782,7 +790,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   STEP.before = function (v) {
     var b = v.before || [];
     var h = b.length ? b.map(function (x) { return '<div class="card pad-m sec tight"><div class="hstack"><span class="chip ' + (x.tone === "a" ? "a" : "m") + '">' + (x.step === "inventory" ? "Count" : "Machines") + '</span><b class="h4">' + esc(x.t) + '</b></div><p class="sm">' + esc(x.s) + "</p></div>"; }).join("")
-      : '<div class="card pad-m sec tight"><div class="hstack"><span class="chip g">The documents</span><b class="h4">Nothing found</b></div><p class="sm">Pattern 43 clean, no part past its rated life, the count agrees with OBP.</p></div>';
+      : '<div class="card pad-m sec tight"><div class="hstack"><span class="chip g">The documents</span><b class="h4">Nothing found</b></div><p class="sm">Pattern 43 clean, the part life read, the count agrees with OBP.</p></div>';
     return h + '<p class="sm">Every step saves on this phone as you tap. No signal: it is kept here and sent when the server answers.</p><button type="button" class="ul" data-go="q=' + esc(v.id) + '">Open what the documents said</button>';
   };
   STEP.workstation = function (v, d) {
@@ -819,7 +827,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         }
         if (!m.down) h += (m.life || []).length
           ? '<div class="info line-t"><span class="xs">Management list · ' + m.life.length + (m.life.length === 1 ? " part" : " parts") + ' past rated life · information</span><span class="sm">' + m.life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " (" + esc(x.cover) + ")" : " (not on the OBP list)"); }).join(" · ") + ". Copy quality decides, never the counter.</span></div>"
-          : '<div class="info line-t"><span class="xs">Management list</span><span class="sm">No part past its rated life. Parts are changed on copy quality, not on a count.</span></div>';
+          : (m.lifeRead === false ? '<div class="info line-t"><span class="xs">Management list</span><span class="sm">Part life not read: the file on record has no parts-life page. Read the counters on the machine if you can.</span></div>'
+          : '<div class="info line-t"><span class="xs">Management list</span><span class="sm">' + (m.lifeRead ? "No part past its rated life. Parts are changed on copy quality, not on a count." : "Not read.") + "</span></div>");
       }
       if (finding || stillDown) h += '<div class="pad-m line-t sec tight">' + lbl("What you found" + (finding ? " · required" : ""), box("m:" + m.serial, a.note, "One sentence, what you saw on " + m.label)) + whyMsg(probs, "note:" + m.serial) + "</div>";
       h += "</div>";
@@ -890,7 +899,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     AR.PPE.forEach(function (p) { var was = v.previous && v.previous.sameCrew && (v.previous.ppeMissing || []).indexOf(p.key) >= 0; h += itemRow("ppe", p.key, p.label, "", pm.indexOf(p.key) >= 0, was, 1); });
     h += tapRow("hon", "x", "Uses the HON app", "", d.crew.hon === "no", ["", "Not in use"]) + "</div>";
     var t = AR.RATING_TEXT.dispatch;
-    h += '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">' + esc(t.label) + '</b><span class="chip m">For Rita · in no score</span></div><span class="xs">' + esc(t.hint) + "</span>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label) + "</div>";
+    h += '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">' + esc(t.label) + '</b><span class="chip m">For Rita · in no score</span></div><span class="xs">' + esc(t.hint) + "</span>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label)
+      + (d.crew.dispatch != null ? lbl("What " + fn + " said · optional", box("disp-note", d.crew.dispatchNote, "The flight, the hotel, the joining, in their words")) : "") + "</div>";
     return h + photoStrip(v, "crew");
   };
   function scoreWhy(d) {
@@ -961,6 +971,18 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function labelOf(k) { var all = []; AR.WORKSTATION.forEach(function (g) { all = all.concat(g.items); }); all = all.concat(AR.TOOLS, AR.PPE); var x = all.filter(function (i) { return i.key === k; })[0]; return x ? x.label : k; }
   function stepNo(key) { for (var i = 0; i < AR.STEPS.length; i++) if (AR.STEPS[i].key === key) return i + 1; return 7; }
   function sentence(t) { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); }
+  /* A Pattern 43 mark, said in full (Miguel, 20 Oct 2026: "i would like the ai to elaborate a bit more on the assessment").
+     Every line is built from what HON measured and the DG3 tech library's rule it carries; nothing is guessed: where it
+     shows (each page of the bundle), why that isolates one colour, what it points to and how to tell which on board. */
+  function p43Lines(i) {
+    var out = [], w = String(i.where || "").split(" · ").filter(Boolean), pg = i.pages || [], ink = String(i.ink || "").toLowerCase();
+    if (w.length) out.push(["Where", w.map(function (x, k) { return sentence(x) + (pg.length === w.length ? " (page " + pg[k] + ")" : ""); }).join(" · ") + (pg.length && pg.length !== w.length ? " · pages " + pg.join(", ") : "")]);
+    if (ink && ink !== "black" && w.length > 1 && /half tone|full tone/i.test(w[0])) out.push(["What it means", "The same mark on the " + ink + " page and on the mixes that carry " + ink + ": one colour, " + ink + ". The transfer belt or the scanner would mark every colour."]);
+    if (i.part) out.push(["Points to", sentence(i.part) + (i.src ? " · " + i.src : "")]);
+    if (i.check) out.push(["To tell which on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and follow the line along its length: " : "") + i.check + "."]);
+    return out;
+  }
+  function p43More(i) { var L = p43Lines(i); if (!L.length) return i.detail ? '<p class="txt">' + esc(i.detail) + "</p>" : ""; return L.map(function (l) { return '<p class="sm"><b>' + esc(l[0]) + "</b> · " + esc(l[1]) + "</p>"; }).join(""); }
 
   /* the side of the stepper on a wide screen: what the documents said, the seafarer, the ship's last audit */
   function visitSide(v) {
@@ -1076,6 +1098,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         else if (f === "inv-note") d.inv.note = t.value;
         else if (f.indexOf("why:") === 0) d.rt.why[f.slice(4)] = t.value;
         else if (f === "train-other") d.crew.trainingOther = t.value;
+        else if (f === "disp-note") d.crew.dispatchNote = t.value;
         else if (f === "ov-why") d.ov.why = t.value;
         else if (f === "strengths" || f === "improve" || f === "agreed") d.ov[f] = t.value;
         else if (f === "fu-due") d.ov.followup.due = t.value;
@@ -1176,7 +1199,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var fuOpen = H.followups.filter(function (f) { return f.status === "open"; }), fuLate = fuOpen.filter(function (f) { return f.due && f.due < today; });
     if (!H.audits.length || !list.length) {
       h += '<section class="card pad sec tight"><b class="h3">' + (H.audits.length ? "No audit filed in this period" : "No audit filed yet") + '</b><p class="txt">' + (H.audits.length ? "Pick another customer or period." : "An audit is filed from its request, once the crew&#8217;s documents are in and Dexter has been aboard. The first one lands here with its score.") + "</p>"
-        + '<div class="before line-t" style="padding-top:14px"><span class="chip n">Before the app</span><span class="txt">The 61 audits from the Forms survey join this page once they are imported.</span></div></section>';
+        + '<div class="before line-t" style="padding-top:14px"><span class="chip n">Before the app</span><span class="txt">' + formsLine(H) + "</span></div></section>";
       $("main").innerHTML = h; return;
     }
     // the numbers, read from the filed audits in view
@@ -1214,7 +1237,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     h += '<section class="sec"><div class="sec-hd"><h2 class="h2">Keeps coming back</h2><span class="sm">Missing at two audits or more</span></div><div class="card clip">'
       + (back.length ? back.map(function (e, i) { return '<div class="kb' + (i ? " line-t" : "") + '"><div><b>' + esc(labelOf(e.k)) + '</b><div class="sm">' + esc(e.grp) + '</div></div><div class="sm">' + esc(e.ships.join(", ")) + '</div><div class="hstack kb-c"><span class="chip a">' + e.ships.length + " audits</span>" + e.again.map(function (s) { return '<span class="chip r">' + esc(s) + " · again</span>"; }).join("") + "</div></div>"; }).join("")
         : '<div class="pad-m"><p class="sm">Nothing yet: no item missing at two audits in this view.</p></div>')
-      + '<div class="pad-m line-t soft before"><span class="chip n">Before the app</span><span class="txt">The 61 audits from the Forms survey join this page once they are imported.</span></div></div></section>';
+      + '<div class="pad-m line-t soft before"><span class="chip n">Before the app</span><span class="txt">' + formsLine(H) + "</span></div></div></section>";
     // the three areas, added up
     var sum = function (f) { return withF.reduce(function (s, a) { return s + (f(a.found) || 0); }, 0); };
     var cnt = function (f) { return withF.filter(function (a) { return f(a.found); }).length; };
@@ -1236,7 +1259,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         var R = a.ratings, miss = a.missing ? a.missing.ws.concat(a.missing.tools, a.missing.ppe || []) : null, fo = a.followups;
         var missT = miss == null ? "Graded before the audit had steps" : miss.length ? miss.map(function (k) { var t = (a.repeat || {})[k] || 1; return esc(labelOf(k)) + (t > 1 ? ' <span class="chip r">' + esc(AR.ordinal(t)) + " time</span>" : ""); }).join("<br>") : "Nothing";
         var crewS = esc(a.crew || "");
-        return '<tr data-go="q=' + esc(a.id) + '"><td class="f-date">' + fmtD(a.filedAt) + '</td><td class="f-ship"><b>' + esc(a.ship) + '</b><div class="xs">' + esc(custName(custOfShip(a.ship))) + '<span class="m-inl"> · ' + fmtD(a.filedAt) + (crewS ? " · " + crewS : "") + '</span></div></td><td class="f-crew">' + crewS + '</td><td class="f-score"><span class="chip ' + (a.score <= 3 ? "r" : "g") + '">' + esc(a.score) + " / 5</span></td>"
+        return '<tr data-go="q=' + esc(a.id) + '"><td class="f-date">' + fmtD(a.filedAt) + (a.source === "forms" ? '<div class="xs">Forms survey</div>' : "") + '</td><td class="f-ship"><b>' + esc(a.ship) + '</b><div class="xs">' + esc(custName(custOfShip(a.ship))) + '<span class="m-inl"> · ' + fmtD(a.filedAt) + (crewS ? " · " + crewS : "") + '</span></div></td><td class="f-crew">' + crewS + '</td><td class="f-score"><span class="chip ' + (a.score <= 3 ? "r" : "g") + '">' + esc(a.score) + " / 5</span></td>"
           + '<td class="f-rates" data-l="Inv · Tech · Coll · Overall"><span class="rs4">' + rsq(R.inventory) + rsq(R.technical) + rsq(R.collaterals) + rsq(R.overall) + "</span></td>"
           + '<td class="f-miss sm" data-l="Missing">' + missT + "</td>"
           + '<td class="f-fu" data-l="Follow-ups">' + (fo.open ? '<span class="chip a">' + fo.open + " open</span>" : fo.fixed ? '<span class="sm">' + fo.fixed + " done</span>" : '<span class="sm">None</span>') + "</td>"
@@ -1314,6 +1337,49 @@ export const AUDIT_HTML = String.raw`<!doctype html>
      Nothing is recomputed but the counts the page adds up from the filed steps. */
   function ckl(kind, html) { return '<div class="ck"><span class="' + kind + '">' + ic(kind === "c" ? "b:check" : kind === "x" ? "b:x" : "b:exclamation-mark") + "</span><span>" + html + "</span></div>"; }
   function shd(n, title, sub, chip) { return '<div class="shd"><span class="num">' + n + '</span><div class="shd-t"><b class="h3">' + title + '</b><div class="sm">' + sub + "</div></div>" + (chip || "") + "</div>"; }
+  /* ---------------- The audits before the app: the Forms survey, Sep 2024 to Sep 2026 (src/audit_forms.js) ---------------- */
+  function formsLine(H) {
+    return H.forms ? H.forms.n + " audits from the Forms survey, Sep 2024 to Sep 2026, are read here beside the app&#8217;s, each marked Forms survey. Kept as typed; none of them reaches the Score Card."
+      : "The audits from the Forms survey join this page once they are imported.";
+  }
+  function formsView(id) {
+    chrome("hist"); dock("");
+    $("main").innerHTML = skel(4);
+    var key = "f" + id; S.view = key;
+    withShips(api("/api/audit/forms?id=" + encodeURIComponent(id))).then(function (r) {
+      if (S.view !== key) return;
+      var a = r.audit, R = a.ratings || {}, N = a.notes || {}, sh = (S.ships || []).filter(function (x) { return x.ship === a.ship; })[0] || {};
+      var lo = a.score != null && a.score <= 3, who = a.sc ? esc(a.crew) : a.crewRaw ? esc(a.crewRaw) : "No name on the form";
+      var why = a.scoreFrom === "overall" ? "The Overall rating Dexter gave" : "Overall not given: the average of inventory, technical and collaterals, rounded down";
+      var links = '<div class="links line-t">' + (a.sc ? '<a class="arrow" href="https://cims.work/#crew/' + esc(encodeURIComponent(a.sc)) + '" target="_blank" rel="noopener">' + esc(first(a.crew)) + "&#8217;s profile in the HR console" + ic("arrow-right") + "</a>" : "")
+        + '<button type="button" class="arrow" data-go="hist">Every audit' + ic("arrow-right") + "</button></div>";
+      var h = '<section class="split hero">' + head({ back: ["hist", "History"], eyebrow: "Forms survey" + (brandOf(sh) ? " · " + brandOf(sh) : ""), title: esc(a.ship), lead: who + ". Audited " + fmtD(a.date, true) + ", filed by Dexter on the Forms survey, before the app.", more: links })
+        + '<aside class="navy sec"><div class="hstack" style="gap:18px;flex-wrap:nowrap"><div class="ring big' + (lo ? " lo" : "") + '"><b class="h">' + (a.score == null ? "–" : esc(a.score)) + '</b><span class="of">/5</span></div><div class="sec tight"><b class="h3">' + (a.score == null ? "No score" : "Score " + esc(a.score) + " of 5") + '</b><span class="sm">' + why + "</span></div></div>"
+        + '<div class="fourr">' + RT.map(function (t) { var x = R[t[0]]; return '<div><b class="h"' + (x == null ? ' style="color:#9FB2C8"' : x <= 3 ? ' style="color:#F2A99D"' : "") + ">" + (x == null ? "–" : esc(x)) + "</b><span>" + t[1] + "</span></div>"; }).join("") + "</div>"
+        + (R.dispatch != null ? '<p class="xs line-w">Dispatch, for Rita: ' + esc(R.dispatch) + " / 5 · TDG&#8217;s travel, never part of this score</p>" : "") + "</aside></section>";
+      // who it is on: placed by the rule in src/audit_forms.js, or the name as typed and why it is not placed
+      if (!a.sc) h += '<section class="help"><span class="chip n">Not linked to a crew</span><div class="t"><b class="h4">' + (a.crewRaw ? "Typed on the form: " + esc(a.crewRaw) : "No name on the form") + '</b><span class="sm">' + esc(a.placedWhy ? a.placedWhy.charAt(0).toUpperCase() + a.placedWhy.slice(1) : "") + ". The import never guesses who an audit is on.</span></div></section>";
+      // Dexter's words, as he typed them
+      var said = [["Inventory", N.inventory], ["Technical", N.technical], ["Customer collaterals", N.collaterals], ["Dispatch and arrival", N.dispatch], ["Overall", N.feedback]].filter(function (x) { return x[1]; });
+      h += '<section class="card clip">' + shd(1, "What Dexter wrote", "His words on the form, as typed", "") + '<div class="sbody">'
+        + (said.length ? said.map(function (x) { return '<div class="q"><b>' + x[0] + '</b><span class="txt">' + esc(x[1]) + "</span></div>"; }).join("") : '<p class="sm">No words beside the ratings.</p>') + "</div></section>";
+      // the desk and the tools: missing against what the form offered that day
+      var dm = a.deskMissing, tl = a.tools;
+      var b2 = (dm == null ? '<p class="sm">The desk was not answered.</p>' : dm.length ? dm.map(function (k) { return ckl("x", "<b>" + esc(labelOf(k)) + "</b>"); }).join("") : ckl("c", "Everything the form asked about was on the desk"))
+        + (a.labels == null ? "" : ckl(a.labels ? "c" : "x", a.labels ? "Hardware labeled" : "<b>Hardware not labeled</b>"))
+        + (tl == null ? '<p class="sm">Tools not on inventory: none listed.</p>' : tl.length ? tl.map(function (k) { return ckl("x", "<b>" + esc(labelOf(k)) + "</b> " + '<span class="sm">not on inventory</span>'); }).join("") : ckl("c", "Every tool on inventory"));
+      h += '<section class="card clip">' + shd(2, "Desk &amp; tools", "DG3 folder, OneNote, bookmarks, labels, the tool list", (dm && dm.length) || (tl && tl.length) ? '<span class="chip r">' + ((dm || []).length + (tl || []).length) + " missing</span>" : '<span class="chip g">All present</span>') + '<div class="sbody">' + b2 + "</div></section>";
+      // the shelf and the presses, as the form asked them
+      var b3 = [["OBP count", N.obp], ["Repair items not in OBP", N.repair]].filter(function (x) { return x[1]; }).map(function (x) { return '<div class="q"><b>' + x[0] + '</b><span class="txt">' + esc(x[1]) + "</span></div>"; }).join("")
+        + ((a.checks || []).length ? '<div class="q"><b>Machine checks run</b><span class="txt">' + esc(a.checks.join(" · ")) + "</span></div>" : "");
+      if (b3) h += '<section class="card clip">' + shd(3, "Inventory &amp; machines", "What the form asked about the shelf and the presses", "") + '<div class="sbody">' + b3 + "</div></section>";
+      var fl = a.files || [];
+      if (fl.length) h += '<section class="card pad sec tight"><b class="h3">' + one(fl.length, "file") + ' on the form</b><p class="sm">Kept in Miguel&#8217;s OneDrive (Microsoft Forms); opening one needs a DG3 sign-in.</p>'
+        + fl.map(function (u) { var n = decodeURIComponent(String(u).split("/").pop() || "file"); return '<a class="arrow" style="max-width:100%" href="' + esc(u) + '" target="_blank" rel="noopener"><span style="min-width:0;overflow-wrap:anywhere">' + esc(n) + "</span>" + ic("arrow-right") + "</a>"; }).join("") + "</section>";
+      h += '<p class="xs" style="margin:0">' + esc(r.source) + " · form " + esc(a.form) + (a.shipRaw && a.shipRaw !== a.ship ? " · ship typed &#8220;" + esc(a.shipRaw) + "&#8221;" : "") + (a.contracts ? " · contracts at DG3, as typed: " + esc(a.contracts) : "") + "</p>";
+      $("main").innerHTML = h;
+    }).catch(function (e) { if (S.view === key) fail(e); });
+  }
   function reportView(d, key) {
     api("/api/audit/visit?id=" + encodeURIComponent(d.id)).then(function (v) {
       if (S.view !== key) return;
@@ -1416,6 +1482,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (h.indexOf("s=") === 0) return shipView(h.slice(2));
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }
+    if (h.indexOf("q=forms-") === 0) return formsView(h.slice(2));
     if (h.indexOf("q=") === 0) return requestDetail(h.slice(2));
     if (h.indexOf("a=") === 0) { var p3 = h.slice(2).split("|"); lsSet("aud:s:" + p3[0], Math.max(1, Number(p3[1]) || 1)); return stepView(p3[0], p3[1]); }
     /* the 15 Oct grade screen is the audit's Ratings step now: an old link opens the audit */

@@ -124,7 +124,7 @@ export function travelClientOf(ship, raw) {
   const s = fold(ship).trim();
   if (!s) return null;
   if (s.startsWith("azamara")) return "azamara";
-  if (/\bncl\b|norwegian/.test(s)) return "ncl";
+  if (/\bncl\b|norwegian|\bgetaway\b/.test(s)) return "ncl";
   if (CELEBRITY.has(s.replace(/^celebrity\s+/, ""))) return "celebrity";
   return "royal";
 }

@@ -10,6 +10,7 @@ import { ensureAuditTables } from "../src/audit_store.js";
 import { installAuditRequest } from "../src/audit_request.js";
 import { applyOverride } from "../src/override.js";
 import { auditScore } from "../src/audit.js";
+import { gatherAuto } from "../src/score_auto.js";
 import { startVisit, normalizeVisit, visitProblems, evalOf, repeatCounts, beforeVisit, AUDIT_RULES_JS, WORKSTATION, TOOLS, fillVisit, obpMatches } from "../src/audit_steps.js";
 
 /* ------------------------------------------------ harness ------------------------------------------------ */
@@ -407,7 +408,8 @@ test("P1: the internal crew file prints the audit under its contract; the crew-f
 test("P1: the profile's data wave reads the audits with the rest (§12), never a TEST request's", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
   const one = W.slice(W.indexOf("async function apiCrewOne"), W.indexOf("async function apiCrewSave"));
-  const at = one.indexOf("auditFuRes] = await Promise.all([");
+  // the wave may carry more reads after the audits (the crew survey, 23 Oct 2026): the audits must still be in it
+  const m = /auditFuRes(?:, \w+)*\] = await Promise\.all\(\[/.exec(one), at = m ? m.index : -1;
   assert.ok(at > 0, "the audits ride the profile's one data wave");
   const wave = one.slice(at, one.indexOf("\n  ]);", at));
   assert.match(wave, /FROM audit_eval e .*COALESCE\(r\.test_mode, 0\) = 0/);
@@ -499,4 +501,55 @@ test("the page: History and Follow-ups are routes, the doors are on the home, a 
   for (const s of ['if (h === "hist") return historyView();', 'if (h === "fu") return followupsView();', 'data-go="hist"', 'data-go="fu"', '"/api/audit/followup/close"', 'b.classList.contains("sure")'])
     assert.ok(src.includes(s), s);
   return import("../src/audit_ui.js").then((m) => { new Function(m.AUDIT_HTML.split("<script>").slice(-1)[0].split("</script>")[0]); });
+});
+
+test("before the visit: a management list read with no life row is 'part life not read', never clean", () => {
+  const b = beforeVisit({ machines: [{ serial: "AC58011020823", label: "PROD 1", lifeRead: false, life: [] }] });
+  assert.equal(b.length, 1);
+  assert.match(b[0].t, /part life not read/);
+  assert.deepEqual(beforeVisit({ machines: [{ serial: "S", label: "P", lifeRead: true, life: [] }] }), []);
+});
+
+// THE WIRE, END TO END (Miguel, 21 Oct 2026: "just wana make sure the wire is done and correctly .. triple check"). The grade
+// is filed through the audit route on real SQLite and the Score Card's automatic read (score_auto.gatherAuto, the code behind
+// /api/score/auto that pre-fills the "Dexter's audit — 10%" slider) reads the SAME database: no hand-written audit_eval row in
+// between. 5 = 10, 4 = 8, 3 or below = 0, none = 10; the lowest in the contract; this contract's ship only; a TEST request never.
+test("the wire: a filed audit reaches the Score Card's Dexter's audit slider", async () => {
+  const t = setup();
+  const card = (sc, ship, on, off) => gatherAuto({ DB: t.env.DB }, { sc, ship, signOn: on, signOff: off, crewName: "", today: new Date().toISOString().slice(0, 10) }, { engine: "none" });
+  const today = new Date().toISOString().slice(0, 10), on = "2026-04-01", off = "2099-12-31";
+  const before = await card("SC-1", "Oasis", on, off);
+  assert.equal(before.sliders.sComm, 10, "no audit yet: full points");
+  assert.match(before.evidence.find((e) => e.factor === "sComm").text, /No audit in this contract/);
+  // John: Inventory 4, Technical 5, Collaterals 5, no Overall -> 4.67 rounded down = 4 -> 8 points
+  const id1 = await completeRequest(t, "SC-1");
+  const v1 = await (await t.call("GET", "/api/audit/visit?id=" + id1)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id1);
+  const f1 = await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: cleanVisit(v1) }, { email: "Dexter.Lawrence@dg3.com", open: true })).json();
+  assert.deepEqual([f1.ok, f1.score, f1.from], [true, 4, "average"]);
+  const a1 = await card("SC-1", "Oasis", on, off);
+  assert.equal(a1.sliders.sComm, 8, "4/5 = 8 of 10");
+  assert.equal(a1.evidence.find((e) => e.factor === "sComm" && e.source === "Audit").text, "Dexter's audit 4/5");
+  assert.ok(a1.evidence.some((e) => /open audit site, without a sign-in/.test(e.text)), "an open-site grade is said on the card");
+  assert.deepEqual(a1.allAudits.map((a) => [a.id, a.ship, a.score]), [[id1, "Oasis", 4]], "the chip opens this request");
+  assert.equal((await card("SC-1", "MV OASIS OF THE SEAS", on, off)).sliders.sComm, 8, "the ship as TDG writes it");
+  assert.equal((await card("SC-1", "Allure", on, off)).sliders.sComm, 10, "another ship's contract is not this audit's");
+  assert.equal((await card("SC-1", "Oasis", "2025-01-01", "2025-06-01")).sliders.sComm, 10, "an earlier contract is not this audit's");
+  assert.equal((await card("SC-2", "Oasis", on, off)).sliders.sComm, 10, "another seafarer's audit is not his");
+  // Ana, the next audit on the ship (one at a time): Overall 3 with a sentence -> 3 -> 0 points
+  const id2 = await completeRequest(t, "SC-2");
+  const v2 = await (await t.call("GET", "/api/audit/visit?id=" + id2)).json();
+  t.db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 7200e3).toISOString(), id2);
+  const d2 = cleanVisit(v2); d2.ov.overall = 3; d2.ov.why = "Shelf and OBP were far apart on the toner lines.";
+  const f2 = await (await t.call("POST", "/api/audit/request/grade", { id: id2, visit: d2 })).json();
+  assert.deepEqual([f2.ok, f2.score, f2.from], [true, 3, "overall"]);
+  assert.equal((await card("SC-2", "Oasis", on, off)).sliders.sComm, 0, "3 or below = 0");
+  // the lowest in the contract when there are two
+  t.db.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, filed_by, filed_at) SELECT 'av_x', 'ar_other', agency_id, ship, 5,5,5,5, 5, 'overall', filed_by, filed_at FROM audit_eval WHERE request_id=?").run(id2);
+  const two = await card("SC-2", "Oasis", on, off);
+  assert.equal(two.sliders.sComm, 0); assert.match(two.evidence.find((e) => e.factor === "sComm").text, /3\/5 \(lowest of 2\)/);
+  // a TEST request's grade is a rehearsal: never the seafarer's score
+  t.db.prepare("UPDATE audit_request SET test_mode=1 WHERE id=?").run(id1);
+  assert.equal((await card("SC-1", "Oasis", on, off)).sliders.sComm, 10, "a TEST request never reaches the Score Card");
+  assert.ok(today >= on);
 });

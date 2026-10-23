@@ -12,6 +12,7 @@
 import { VESSEL_REF } from "./vessel_ref.js";
 import { mdShort } from "./span_md.js";
 import { pickReliever } from "./reliever.js";
+import { QUESTIONS, OVERALL, RETURN, lowKeys, isNothing, quickAnswer, statementFor } from "./crew_survey.js";
 import { buildShipKeys, canonShipWith, normShip, AZAMARA_SHORT } from "./shipname.js";
 
 const SHIP_KEYS = buildShipKeys(VESSEL_REF);
@@ -248,6 +249,18 @@ export function buildCrewProfile(input) {
       missing: D ? A(D.ws && D.ws.missing).length + A(D.hw && D.hw.tools && D.hw.tools.missing).length : null,
       followups: auFu.filter((f) => f.request_id === a.request_id).map((f) => ({ owner: f.owner, due: f.due || null, text: f.text, status: f.status, closed: day(f.closed_at) })) });
   }
+  // His own end-of-contract survey (Miguel, 23 Oct 2026: "yes to all"): what he said about the contract, beside what others
+  // said about him. Internal: the crew file prints it, the crew's statement and email never do. Feedback only, never scored.
+  for (const v of A(I.surveys)) {
+    let ans = null; try { ans = v.answers_json ? JSON.parse(v.answers_json) : null; } catch (e) { ans = null; }
+    if (!ans) continue;
+    const answered = QUESTIONS.filter((q) => Number.isInteger(ans[q.key]));
+    feed.push({ at: v.submitted_at, kind: "survey", src: "survey", who: "Crew survey", ship: v.ship || null, source: v.source || "console",
+      overall: Number.isInteger(ans[OVERALL]) ? ans[OVERALL] : null, ret: Number.isInteger(ans[RETURN]) ? ans[RETURN] : null,
+      fives: answered.filter((q) => ans[q.key] === 5).length, of: answered.length,
+      low: lowKeys(ans).map((k) => { const q = QUESTIONS.find((x) => x.key === k); return { key: k, short: q.short, text: statementFor(q, null), v: ans[k] }; }),
+      fix: isNothing(v.fix_text) ? null : v.fix_text, quick: quickAnswer({ source: v.source, answer_secs: v.answer_secs, answers: ans }) });
+  }
   feed.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
   const slots = FB.map((f) => {
     const live = resp.filter((r) => r.role === f.role && !r.superseded_at).sort((a, b) => String(b.submitted_at).localeCompare(String(a.submitted_at)))[0];
@@ -334,7 +347,9 @@ function normStatusWord(s) {
 // passed, a projected one stays "projected".
 export function statementContracts(legs, sc, today) {
   const t = iso(today) || new Date().toISOString().slice(0, 10);
-  const rows = (Array.isArray(legs) ? legs : []).filter((l) => l && l.sc === sc && l.ours !== false && iso(l.on))
+  // A training visit is not a contract: it is left off the crew's statement (Miguel, 21 Oct 2026: "left off the crew's
+  // statement, is a training visit"; visits.js marks the leg). Neither its row nor its days are printed.
+  const rows = (Array.isArray(legs) ? legs : []).filter((l) => l && l.sc === sc && l.ours !== false && !l.visit && iso(l.on))
     .sort((a, b) => (a.on < b.on ? -1 : a.on > b.on ? 1 : 0));
   let seaDays = 0;
   const contracts = rows.map((l, i) => {
@@ -366,7 +381,7 @@ export function feedbackFile(profile, today) {
   const P = profile || {}, t = iso(today) || new Date().toISOString().slice(0, 10);
   const K = (Array.isArray(P.contracts) ? P.contracts : []).filter((k) => k && iso(k.on));
   const feed = (P.people && Array.isArray(P.people.feed)) ? P.people.feed : [];
-  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review", audit: "Printshop Ops Audit" };
+  const KIND = { note: "Note", comment: "Comment", intel: "Field intel", feedback: "Feedback", review: "Shipboard review", audit: "Printshop Ops Audit", survey: "Crew survey (his own answers)" };
   const groupOf = (d) => K.find((k) => d >= k.on && d <= (k.current ? t : (k.off && k.off < t ? k.off : t))) || null; // a running contract (overdue / held) runs to today
   const groups = K.map((k) => ({ key: k.on, contract: { n: k.n, ship: k.ship, on: k.on, off: k.off || null, current: !!k.current, earlyDays: k.earlyDays || 0, earlyText: k.earlyText || "", end: k.end || null }, items: [] }));
   const between = { key: "between", contract: null, items: [] };
@@ -392,6 +407,13 @@ export function feedbackFile(profile, today) {
       if (f.ship) item.tags.push(["Ship", f.ship]);
       item.lines = [["Strengths", f.strengths], ["To improve", f.improve], ["Agreed", f.agreed], [null, f.note]].filter((x) => x[1]).map((x) => ({ label: x[0], text: String(x[1]) }))
         .concat((Array.isArray(f.followups) ? f.followups : []).map((u) => ({ label: "Follow-up", text: u.owner + (u.due ? " by " + u.due : "") + ": " + u.text + (u.status === "fixed" ? " (fixed " + (u.closed || "") + ")" : " (open)") })));
+    } else if (f.kind === "survey") {
+      item.tags = [["Overall", f.overall != null ? f.overall + "/5" : "-"], ["Would return", f.ret != null ? f.ret + "/5" : "-"], ["At 5", f.fives + " of " + f.of]];
+      if (f.ship) item.tags.push(["Ship", f.ship]);
+      if (f.source === "forms") item.tags.push(["From", "Forms survey"]);
+      if (f.quick) item.tags.push(["Quick", "same answer to every statement in under a minute"]);
+      item.lines = (Array.isArray(f.low) ? f.low : []).map((x) => ({ label: "Low (" + x.v + ")", text: x.text }))
+        .concat(f.fix ? [{ label: "Fix first", text: String(f.fix) }] : []);
     } else item.lines = [{ label: null, text: String(f.text || "") }];
     (k ? groups.find((g) => g.key === k.on) : between).items.push(item);
   }

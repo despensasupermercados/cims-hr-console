@@ -160,3 +160,39 @@ test("ships: the server says which ship has a request still open (one person at 
   assert.equal(await open({ status: "complete", grade: 4 }), false, "graded is finished");
   assert.equal(await open({ status: "complete", test_mode: 1 }), false, "a TEST request in cannot be graded: finished");
 });
+
+// Miguel, 20 Oct 2026, on Grandeur reading "Nobody aboard": "this is wrong.. look at the hr console". The landing reads
+// the board's three kinds of seat: TDG's On board seat, TDG's Earmarked word for the hull a contract still runs on
+// (earmarkedHere, Purnama on Xcel), and Rita's card past its sign-on, green "awaiting the TDG file" (Corpin on Grandeur).
+test("ships: aboard as the Keyman board draws it — the awaiting card and the earmarked-here seat count", async () => {
+  const board = { sections: [
+    { ship: "Grandeur", brand: "Royal", crew: [], projections: [
+      { agency_id: "SC-20", name: "Archiegale Corpin", state: "yellow", aboard: true, awaiting: true, signOn: "2026-10-07", signOff: "2027-05-07", contracts: 2 },
+      { agency_id: "SC-21", name: "Next Person", state: "yellow", aboard: false, awaiting: false, signOn: "2027-05-07", contracts: 1 },
+    ] },
+    { ship: "Xcel", brand: "Celebrity", crew: [
+      { agency_id: "SC-30", name: "Ida Purnama", current: false, earmarkedHere: true, aboard: true, signOn: "2026-04-21", signOff: "2026-11-21", contracts: 4 },
+    ], projections: [] },
+    { ship: "Edge", brand: "Celebrity", crew: [
+      { agency_id: "SC-40", name: "Gone Ashore", current: false, aboard: true, signOn: "2026-03-01", contracts: 1 },
+    ], projections: [] },
+  ] };
+  const H3 = installAudit({ json, htmlResponse, ensureAudit: async () => {}, rotationSections: async () => board, TODAY: () => "2026-10-20", crewProfile: H_PROFILE });
+  const u = new URL("https://audit.cims.work/api/audit/ships");
+  const r = await (await H3(u.pathname, new Request(u), { DB: fakeDb() }, u, S)).json();
+  const of = (n) => r.ships.find((s) => s.ship === n).aboard.map((c) => c.sc);
+  assert.deepEqual(of("Grandeur"), ["SC-20"], "the awaiting card is aboard; the plan after it is not");
+  assert.deepEqual(of("Xcel"), ["SC-30"], "TDG's Earmarked word for the hull he is on: aboard");
+  assert.deepEqual(of("Edge"), [], "an ashore crew is still nobody aboard");
+});
+
+// Miguel, 20 Oct 2026, the briefing's "Audits of Pursuit" read "The 61 Forms audits are not imported yet": "ensure this is
+// wire correctly". The card reads the ship's filed audits AND its Forms survey audits, newest first.
+test("the briefing's ship audits include the Forms survey's, newest first", async () => {
+  const db = { prepare: (sql) => { const s = { bind: () => s, first: async () => null, run: async () => ({}),
+    all: async () => ({ results: /FROM audit_forms/.test(sql) ? [{ id: "forms-12", crew_name: "Kevin Jugao", crew_raw: "Kevin", score: 4, audit_date: "2025-06-03" }]
+      : /JOIN audit_eval e ON e\.request_id = r\.id WHERE r\.normalized_ship/.test(sql) ? [{ id: "ar_1", crew_name: "John Gorre", score: 5, filed_at: "2026-09-01T10:00:00Z" }] : [] }) }; return s; } };
+  const b = await (await call("https://audit.cims.work/api/audit/brief?ship=Oasis&sc=SC-1", S, { DB: db })).json();
+  assert.deepEqual(b.shipAudits.map((a) => [a.id, a.source || "app", a.score]), [["ar_1", "app", 5], ["forms-12", "forms", 4]]);
+  assert.equal(b.shipAudits[1].crew, "Kevin Jugao");
+});

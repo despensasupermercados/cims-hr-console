@@ -89,7 +89,7 @@ const KIND_ORDER = ["empty_hull", "overridden", "file_only", "status_unread", "u
 //   file        : fileWordBySc
 //   cards       : [{ sc, name, ship, aboard, on, verdict, at, fileStatus, fileShip, overridden }] Rita's open cards
 //   completed   : { "sc|key": off }                   known completions (completedOff)
-//   sections    : [{ ship, key, seated, fileAboard, aboardCards }] every hull on the board
+//   sections    : [{ ship, key, seated, fileAboard, aboardCards, notYet }] every hull on the board
 //   fileKept    : the console holds a copy of the latest file (registry_snapshot)
 export function boardIssues({ crew, file, cards, completed, sections, fileKept = true, confirmedSc: shownSc } = {}) {
   const rows = [];
@@ -101,6 +101,7 @@ export function boardIssues({ crew, file, cards, completed, sections, fileKept =
   const confirmedSc = shownSc instanceof Set ? shownSc : new Set((cards || []).filter((k) => k.verdict === "confirmed").map((k) => k.sc));
   for (const s of (sections || [])) {
     if (s.seated || s.fileAboard) continue;
+    if (s.notYet) continue; // a hull not in service yet (Norwegian Getaway before 16 Nov 2026) has no printer to miss
     if ((s.aboardCards || []).some((v) => v !== "ashore" && v !== "elsewhere")) continue;
     rows.push({ kind: "empty_hull", sc: null, name: s.ship, ship: s.ship, text: fileKept ? "No printer on board per the TDG file" : "No printer on board in the TDG uploads the console kept" });
   }

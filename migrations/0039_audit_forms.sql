@@ -1,0 +1,6 @@
+-- The audits before the app (Miguel, 20 Oct 2026: "yes to all on the 5th point", "Import the Forms survey into History?").
+-- Mirrors AUDIT_DDL in src/audit_store.js. One row per audit of the Forms survey "Printshop Audit" (Sep 2024 to Sep 2026),
+-- read by src/audit_forms.js and written once by the session, staging first. History only: the Score Card reads
+-- audit_eval and never this table (CLAUDE.md section 1). The test rows of the survey are not imported (FORMS_TESTS).
+CREATE TABLE IF NOT EXISTS audit_forms (id TEXT PRIMARY KEY, form_no INTEGER NOT NULL UNIQUE, audit_date TEXT NOT NULL, ship TEXT NOT NULL, normalized_ship TEXT NOT NULL, ship_raw TEXT, crew_raw TEXT, agency_id TEXT, crew_name TEXT, placed TEXT NOT NULL, placed_why TEXT, contracts_raw TEXT, r_inventory INTEGER, r_technical INTEGER, r_collaterals INTEGER, r_dispatch INTEGER, r_overall INTEGER, score INTEGER, score_from TEXT, notes_json TEXT, labels INTEGER, desk_missing_json TEXT, tools_json TEXT, checks_json TEXT, files_json TEXT, started_raw TEXT, completed_raw TEXT, imported_at TEXT NOT NULL, imported_by TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_audit_forms_ship ON audit_forms (normalized_ship, audit_date);
