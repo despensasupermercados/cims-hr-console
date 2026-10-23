@@ -51,3 +51,25 @@ test("not wired: nothing outside src/emails imports either until Miguel signs of
   const users = readdirSync(dir).filter((f) => f.endsWith(".js")).filter((f) => /hr\.keyman\.tdg_fixes\.v1|hr\.signoff\.reliever\.v1/.test(readFileSync(new URL(f, dir), "utf8")));
   assert.deepEqual(users, []);
 });
+
+// The 7-day sign-off link email in the pass style (Miguel, 23 Oct 2026: "give me the mocks up .. yes or no on rebuilding the
+// 7-day sign-off link email in the same pass style"; proofs docs/mockups/signoff_link_20261023/). A mock-up until he says yes:
+// the button opens the confirmation page and confirms nothing by itself (a mail scanner opens every link), one button, no box.
+import { linkEmail, CONFIRMS } from "../src/emails/hr.signoff.link.v2.js";
+test("the 7-day email in the pass style: one week to go, the dates, the four lines, one button that confirms nothing by itself", () => {
+  const m = linkEmail({ firstName: "Kevin", crewName: "Kevin Leif Jugao", position: "Printer Specialist", ship: "Pursuit", brand: "Azamara",
+    signOn: "2026-05-24", signOff: "2026-10-31", port: "BARCELONA, SPAIN", today: "2026-10-24", link: "https://cims.work/ack?t=x" });
+  assert.equal(m.subject, "One week to go · Confirm your sign-off · Azamara Pursuit · 31 Oct");
+  const t = plain(m.html);
+  for (const s of ["One week to go, Kevin.", "Confirm your sign-off.", "7 DAYS TO GO", "PR", "via Barcelona", "24 May 2026", "31 Oct 2026",
+    "5 mo 7 d aboard Azamara Pursuit", "Confirm my sign-off", "Nothing is recorded until you tap it there."]) assert.ok(t.includes(s), s);
+  for (const c of CONFIRMS("Azamara Pursuit", "Barcelona")) assert.ok(t.includes(c), c);
+  assert.equal((m.html.match(/<a href="https:\/\/cims\.work\/ack\?t=x"/g) || []).length, 1, "one button");
+  assert.doesNotMatch(t.replace(/hon\.cims\.work/g, ""), /\bHON\b/);
+  assert.doesNotMatch(m.html, /rgba\(|gradient|type="checkbox"/); assert.match(m.html, /CRUISE INDUSTRY MANAGED SERVICES/);
+  assert.doesNotMatch(t, /\b(his|her|he|she)\b/i);
+});
+test("not wired: nothing outside src/emails imports the 7-day pass email until Miguel says yes", () => {
+  const dir = new URL("../src/", import.meta.url);
+  assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".js")).filter((f) => /hr\.signoff\.link\.v2/.test(readFileSync(new URL(f, dir), "utf8"))), []);
+});
