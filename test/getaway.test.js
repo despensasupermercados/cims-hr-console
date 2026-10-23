@@ -42,7 +42,9 @@ test("the board's one brand decision maps NCL; the page reads 'Norwegian' and ke
   assert.match(SRC, /"Azamara Quest","Norwegian Getaway"\];/); // Edit crew's ship list writes "MV NORWEGIAN GETAWAY"
   // a hull entering service has its section before anyone is on it, and says how to place the first printer
   assert.match(SRC, /for \(const v of VESSEL_REF\) if \(v\.from\) \{ const kk = normShip\(v\.name\); if \(!shipNames\[kk\]\) shipNames\[kk\] = v\.name; \}/);
-  assert.match(SRC, /if\(!_n&&sec&&sec\.from\)return .*First printer.*DRAG A SEAFARER HERE/);
+  assert.match(SRC, /if\(!_n&&sec&&sec\.from\)return .*firstPrinter\(.*First printer.*PICK OR DRAG A SEAFARER/);
+  // the slot opens a picker (no relief-board row exists for a hull with no printer); the pick goes through the drag's route
+  assert.match(SRC, /async function fpPick\(el\)\{[^]*?await createProjection\(aid,FP_SHIP\)/);
 });
 
 test("the vessel row the projection and relief paths look up is on record", () => {
@@ -85,6 +87,8 @@ test("the empty Getaway section says when it enters service and how to place its
   const slot = vm();
   const h = slot(undefined, [], { from: "2026-11-16", crew: [] });
   assert.match(h, /First printer/);
-  assert.match(h, /IN SERVICE NOV 16, 2026 · DRAG A SEAFARER HERE/);
+  assert.match(h, /IN SERVICE NOV 16, 2026 · PICK OR DRAG A SEAFARER/);
+  assert.match(h, /data-ship="" onclick="firstPrinter\(this\.getAttribute/); // a tap opens the picker for this ship
+  assert.equal(slot(undefined, [], { from: "2026-11-16", ship: "Getaway", crew: [] }).includes('data-ship="Getaway"'), true);
   assert.equal(slot(undefined, [], { crew: [] }), ""); // an empty hull in service: as before, no slot
 });

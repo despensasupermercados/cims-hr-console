@@ -4630,15 +4630,17 @@ details.tvfold[open]>summary::after{transform:rotate(-135deg);margin-top:4px}
 .rcard.plan.aboard{box-shadow:none;border-color:#C99A00!important}
 .rcard:hover{border-color:#B9C6D6;box-shadow:0 4px 14px rgba(20,45,72,.08)}
 .rcard.plan:hover{border-color:#C99A00!important}
-.rhead{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:center;min-height:44px}
+.rhead{display:grid;grid-template-columns:minmax(0,1fr) max-content;column-gap:16px;align-items:center;min-height:44px}
 .rhcol{min-width:0}
 .rcard .rnm{font-size:16px;line-height:20px;margin-bottom:2px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;letter-spacing:-.01em}
 .rcard .rrank{font-size:10px;letter-spacing:.08em;line-height:14px;padding:0 6px;border:1px solid #C9D2DE;border-radius:4px;vertical-align:0}
 .rlab{font-size:10px;letter-spacing:.06em;line-height:18px;padding:0 8px;border-radius:9px;font-weight:800}
 .rcard .rleg{font-size:11.5px;line-height:16px;color:var(--mut)}
 .rcard .offchip{position:static;margin:0;padding:0;background:none;color:var(--navy);text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:64px;font-weight:700;letter-spacing:0}
-.rcard .offchip b{font-size:28px;line-height:28px;letter-spacing:-.03em;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
-.rcard .offchip.long b{font-size:22px;line-height:28px;letter-spacing:-.02em}
+/* the countdown never reaches the card's edge (Miguel, 23 Oct 2026: the "d" of "1 mo 6 d" touched the border): no negative
+   tracking (engines measure it differently), a hair of room after the last glyph, and the size follows the card */
+.rcard .offchip b{font-size:min(28px,12.5cqi);line-height:28px;letter-spacing:0;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap;padding-right:.08em}
+.rcard .offchip.long b{font-size:min(22px,10cqi);line-height:28px;letter-spacing:0}
 .rcard .offchip i{font-style:normal;font-size:10px;line-height:12px;letter-spacing:.08em;font-weight:700;color:var(--mut)}
 .rcard .offchip.crit{background:none;color:#B42318}.rcard .offchip.due{background:none;color:#9a6410}
 .rcard .offchip.mut b{color:#B6C0CC;font-weight:400}
@@ -7177,7 +7179,40 @@ function benchToast(nm,ship,r){var t=document.getElementById('ebtoast');if(t&&t.
 function nextSlot(rb,sec,n){var b=sec&&sec.bench;if(!(n>=3)){var _eb=benchBox(rb,sec);if(_eb)return _eb;}var who=(b&&b.after)||'';var avail=b&&b.total?(' &middot; '+b.total+' AVAILABLE'):'';
   return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(who)+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+(b&&b.date?('FROM '+fmtMD(b.date).toUpperCase()):'NEXT EARMARK')+avail+'</div></div>';}
 // Four side by side is the maximum (Miguel, 7 Oct 2026): a ship already showing four cards gets no slot.
-function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(!_n&&sec&&sec.from)return '<div class="rcard ghostslot" style="cursor:default" title="Drag a seafarer onto this ship to earmark them"><div class=gp>+</div><div class=gt>First printer</div><div class=gc>IN SERVICE '+escHtml(fmtDateS(sec.from)).toUpperCase()+' · DRAG A SEAFARER HERE</div></div>';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
+// A hull entering service has no printer to relieve, so it has no row on the relief board and its slot cannot open the
+// relief panel; with the cruise line filtered to it, nobody is on screen to drag either (Miguel, 23 Oct 2026, Getaway with
+// the Norwegian filter on: "I cannot add a printer under ncl"). The slot opens this list instead: one tap earmarks the
+// seafarer through the drag's own route (/api/rotation/project); the dates are set on the card afterwards.
+var FP_ROWS=null,FP_SHIP='';
+async function firstPrinter(ship){
+  if(!ship)return;FP_SHIP=ship;var w=openSheet('fp2');var c=w.querySelector('.modcard');
+  c.innerHTML=sheetHead(null,'First printer for '+escHtml(ship),'Pick the seafarer. The earmark starts today; set the sign-on and sign-off on the card after.')
+    +'<div class=ecbody><input id=fpq type=search autocomplete=off placeholder="Search a name or a ship" oninput="fpDraw()" style="width:100%;height:40px;border:1px solid var(--line);border-radius:10px;padding:0 12px;font-size:14px;margin:14px 0 8px">'
+    +'<div id=fplist class=muted style="padding:10px 2px">Loading the crew&hellip;</div></div>';
+  var q=document.getElementById('fpq');if(q)q.focus();
+  try{if(!FP_ROWS){var r=await fetch('/api/relief/crew');var j=await r.json();FP_ROWS=(j&&j.crew)||[];}}catch(e){var l=document.getElementById('fplist');if(l)l.textContent='Could not load the crew. Close and try again.';return;}
+  fpDraw();
+}
+function fpDraw(){
+  var l=document.getElementById('fplist');if(!l||!FP_ROWS)return;
+  var q=rotFold((document.getElementById('fpq')||{}).value||'');
+  var rank=function(s){return s==='On Vacation'||s==='Reserved'?0:s==='On board'?1:s==='Earmarked'?2:3;};
+  var rows=FP_ROWS.filter(function(x){return x.agency_id&&(!q||rotFold((x.name||'')+' '+(x.vessel||'')+' '+(x.planned||'')).indexOf(q)>=0);})
+    .sort(function(a,b){return rank(a.status)-rank(b.status)||String(a.name).localeCompare(String(b.name));});
+  if(!rows.length){l.innerHTML='Nobody matches.';return;}
+  l.className='';
+  l.innerHTML=rows.slice(0,60).map(function(x){
+    var sub=[x.status||'',x.vessel?shipShort(x.vessel):'',x.planned?('earmarked '+x.planned):''].filter(Boolean).map(escHtml).join(' &middot; ');
+    return '<button type=button class=fprow data-aid="'+escHtml(x.agency_id)+'" data-nm="'+escHtml(x.name||'')+'" onclick="fpPick(this)" style="display:block;width:100%;text-align:left;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 6px;cursor:pointer;font:inherit">'
+      +'<b style="color:var(--navy)">'+escHtml(x.name||'')+'</b><div class=csub style="margin-top:2px">'+sub+'</div></button>';
+  }).join('')+(rows.length>60?'<div class=csub style="padding:4px 2px">'+(rows.length-60)+' more: narrow the search.</div>':'');
+}
+async function fpPick(el){
+  var aid=el.getAttribute('data-aid'),nm=el.getAttribute('data-nm');
+  if(!confirm('Earmark '+nm+' as the first printer on '+FP_SHIP+'?'))return;
+  closeCrewModal();FP_ROWS=null;await createProjection(aid,FP_SHIP);
+}
+function reliefSlot(rb,projs,sec){var _n=((sec&&sec.crew)||[]).length+(projs||[]).length;if(_n>=4)return '';if(!_n&&sec&&sec.from)return '<div class="rcard ghostslot" data-ship="'+escHtml(sec.ship||'')+'" onclick="firstPrinter(this.getAttribute(&quot;data-ship&quot;))" title="Pick the seafarer, or drag one onto this ship"><div class=gp>+</div><div class=gt>First printer</div><div class=gc>IN SERVICE '+escHtml(fmtDateS(sec.from)).toUpperCase()+' · PICK OR DRAG A SEAFARER</div></div>';if(rb&&!rb.printer&&sec&&sec.crew&&sec.crew.length)return nextSlot(rb,sec,_n);if(!rb||!rb.printer)return '';if(rb.reliever&&rb.reliever.aboard){var _eb=benchBox(rb,sec);if(_eb)return _eb;var ra=offSpan(rb.reliever.off_date);var rchip=!ra?'NO OFF DATE':(ra.ago?('OFF '+ra.t.toUpperCase()+' AGO'):('OFF IN '+ra.t.toUpperCase()));return '<div class="rcard ghostslot" data-vk="'+rb.vessel_key+'" data-aid="new" onclick="openRelief(this)" title="Add the earmark after '+escHtml(rb.reliever.crew_name||'')+'"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+rchip+'</div></div>';}if(rb.reliever&&projs&&projs.some(function(p){return (p.assignment_id&&p.assignment_id===rb.reliever.id)||(p.name&&p.name===rb.reliever.crew_name);}))return nextSlot(rb,sec,_n);var d=rb.days_to_off;var cls=(rb.urgency==='overdue'||rb.urgency==='critical')?' crit':(rb.urgency==='due')?' due':'';var os=offSpan(rb.printer.off_date);var chip=!os?'NO OFF DATE':(os.ago?('OFF '+os.t.toUpperCase()+' AGO'):('OFF IN '+os.t.toUpperCase()));if(rb.reliever){var r=rb.reliever;return '<div class="rcard rlvr" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="reliever"><div class=rnm>'+escHtml(r.crew_name||'')+' <span class=rlab>RELIEVER</span></div><div class=rleg><i class=reldot></i>Signs on'+(r.auto_on?' (follows printer)':'')+'</div><div class=rleg2><i class=ondot></i><b class="pc pc-'+(r.on_conf||'na')+'" title="'+(CONF_T[r.on_conf]||'')+'">'+(r.on_city?niceCity(r.on_city):'TBA')+'</b> ON '+(r.on_date||'TBA')+'</div></div>';}var _eb2=benchBox(rb,sec);if(_eb2)return _eb2;return '<div class="rcard ghostslot'+cls+'" data-vk="'+rb.vessel_key+'" onclick="openRelief(this)" title="Add an earmark for this seat"><div class=gp>+</div><div class=gt>Add earmark</div><div class=gc>'+chip+'</div></div>';}window.addEventListener('message',function(e){if(e&&e.data&&e.data.t==='reliefReady'){var rf=document.getElementById('reliefovl');if(rf){clearTimeout(rf._t);var _if=rf.querySelector('iframe');if(_if)_if.style.opacity='1';}return;}if(e&&e.data&&e.data.t==='reliefClose'){reliefDismiss();if(e.data.error==='board'){try{alert('The relief board could not open this ship. Try again in a moment.');}catch(_){}}if(e.data.changed){try{apiDirty();renderRotation();}catch(_){}}}});function rcDrag(e,el){dragStart(el,el.getAttribute('data-crew'));}
 function rcClickP(el){el.getAttribute('data-plan')?openRelief(el):cardClick(el.getAttribute('data-crew'),parseInt(el.getAttribute('data-seq'),10));}
 async function planDelete(e,el){
   e.stopPropagation();

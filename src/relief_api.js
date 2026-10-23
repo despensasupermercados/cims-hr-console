@@ -386,7 +386,7 @@ export async function handleRelief(request, url, env) {
     const today = new Date().toISOString().slice(0, 10);
     const rows = (await env.DB.prepare(RELIEF_CREW_PICKER_SQL).all()).results || [];
     const crew = rows.map((r) => ({
-      id: r.id, name: r.name, status: r.status || null, rank: r.rank || null, vessel: r.vessel || null,
+      id: r.id, agency_id: r.agency_id || null, name: r.name, status: r.status || null, rank: r.rank || null, vessel: r.vessel || null,
       planned: r.planned || null, docs: docBadge(r, today),
     }));
     return jsonResp({ crew });
