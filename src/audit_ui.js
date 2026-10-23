@@ -54,7 +54,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
 </head><body>
 <header class="appbar"><div class="appbar-in"><a class="brand" href="#" aria-label="Printshop Ops Audit, home">` + markSvg(36) + String.raw`<b>Printshop Ops Audit</b></a><span class="who" id="who"></span><button class="ib" id="ibh" data-go="hist" aria-label="History" title="History"></button><button class="ib" id="ibf" data-go="fu" aria-label="Follow-ups" title="Follow-ups"></button></div></header>
 <div class="offl" id="offl" hidden><div>No signal. What you see was loaded earlier.</div></div>
-<main class="wrap" id="main"><div class="card clip"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main>
+<div class="shell"><nav class="wrail" id="wrail" aria-label="Audit"></nav><main class="wrap" id="main"><div class="card clip"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div></main></div>
 <div id="dockslot"></div>
 <script>window.__IC=` + JSON.stringify(ICONS) + String.raw`;window.__MARK=` + JSON.stringify(markSvg(40)) + String.raw`;</script>
 <script>` + AUDIT_RULES_JS + String.raw`</script>
@@ -106,6 +106,27 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var n = S.counts && S.counts.openFollowups ? S.counts.openFollowups : 0, b = $("fub");
     if (b) { b.hidden = !n; b.textContent = n ? String(n) : ""; }
     $("ibf").setAttribute("aria-label", n ? "Follow-ups, " + n + " open" : "Follow-ups");
+    wrail();
+  }
+  /* THE WEB RAIL (W1; Miguel, 23 Oct 2026, "yeah I like that. do it"; AUDIT_DESIGN.md: "rail: In progress · Ships · History ·
+     Open follow-ups"): on a computer the app keeps the console's left column, the same pages in the middle. Drawn from what
+     the page already holds (the ships list and its counts), no request of its own. Hidden on a phone (the app bar's two
+     buttons stay) and during the audit itself, which has its own step rail. */
+  function wrail() {
+    var el = $("wrail"); if (!el) return;
+    var cur = S.cur || "", ships = S.ships || [], open = ships.filter(function (x) { return x.open && x.last; });
+    var aboard = ships.filter(function (x) { return (x.aboard || []).length; }).length, fu = S.counts && S.counts.openFollowups ? S.counts.openFollowups : 0, filed = S.counts && S.counts.filed ? S.counts.filed : 0;
+    var home = !cur || /^(s|b|r)=/.test(cur);
+    var item = function (go, on, icn, label, n, red) { return '<button type="button" class="wr-i' + (on ? " on" : "") + '" data-go="' + go + '"' + (on ? ' aria-current="page"' : "") + ">" + ic(icn) + "<span>" + label + "</span>" + (n ? '<span class="wr-n' + (red ? " r" : "") + '">' + n + "</span>" : "") + "</button>"; };
+    var h = '<div class="wr-sec">' + item("", home, "boat", "Ships", aboard) + item("hist", cur === "hist", "clock-counter-clockwise", "History", filed) + item("fu", cur === "fu", "flag", "Follow-ups", fu, true) + "</div>";
+    h += '<div class="wr-h">In progress' + (open.length ? " · " + open.length : "") + "</div>";
+    h += open.length ? open.map(function (x) {
+      var r = x.last, on = cur === "q=" + r.id || cur.indexOf("q=" + r.id + "|") === 0;
+      var late = r.status === "sent" && (r.overdue || (r.due && Date.parse(r.due) < Date.now()));
+      var st = r.status === "complete" ? "Documents in" : late ? "Past the deadline" : r.status === "sent" ? "Waiting on " + first(r.crew) + (r.due ? " · " + left(r.due) : "") : "Being sent";
+      return '<button type="button" class="wr-r' + (on ? " on" : "") + '" data-go="q=' + esc(r.id) + '"><b>' + esc(x.ship) + " · " + esc(first(r.crew)) + '</b><span class="' + (late ? "r" : r.status === "complete" ? "g" : "") + '">' + esc(st) + "</span></button>";
+    }).join("") : '<p class="wr-none">Nothing open.</p>';
+    el.innerHTML = h;
   }
   function head(o) {
     return '<div class="sec' + (o.tight ? " tight" : "") + '">' + (o.back ? '<button type="button" class="arrow" data-go="' + esc(o.back[0]) + '">' + ic("arrow-left") + esc(o.back[1]) + "</button>" : "")
@@ -1479,6 +1500,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     var raw = location.hash.replace(/^#/, ""), h;
     try { h = decodeURIComponent(raw); } catch (e) { h = raw; }
     S.prev = S.cur; S.cur = h;
+    if (document.body && document.body.classList) document.body.classList.toggle("instep", h.indexOf("a=") === 0);
     if (h.indexOf("s=") === 0) return shipView(h.slice(2));
     if (h.indexOf("b=") === 0) { var p = h.slice(2).split("|"); return briefView(p[0], p[1]); }
     if (h.indexOf("r=") === 0) { var p2 = h.slice(2).split("|"); return requestView(p2[0], p2[1]); }

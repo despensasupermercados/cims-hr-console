@@ -307,3 +307,21 @@ test("History reads the Forms survey's audits, marked; one opens as typed, linke
   assert.match(q, /Tools not on inventory: none listed\./);
   assert.doesNotMatch(q, /profile in the HR console/, "no profile link for a crew the import did not place");
 });
+
+// W1, the web rail (Miguel, 23 Oct 2026: "yeah I like that. do it"): a computer keeps a left column with Ships, History,
+// Follow-ups (the open count) and every request in progress, drawn from the ships list the page already holds; the
+// audit itself (#a=) hides it, since it has its own step rail. Phone widths hide it in CSS (min-width:1101px).
+test("W1: the web rail lists Ships, History, Follow-ups and each request in progress, the current page marked", async () => {
+  const P = boot("", { "/api/me": { email: "Dexter.Lawrence@dg3.com", open: true }, "/api/audit/ships": { ...SHIPS, counts: { filed: 3, openFollowups: 2 } } });
+  await settle();
+  assert.deepEqual(P.errors, []);
+  const r = P.$("wrail").innerHTML;
+  assert.match(r, /class="wr-i on" data-go="" aria-current="page">[^]*?Ships/, "home marks Ships");
+  assert.match(r, /data-go="hist">[^]*?History<\/span><span class="wr-n">3</);
+  assert.match(r, /data-go="fu">[^]*?Follow-ups<\/span><span class="wr-n r">2</);
+  assert.match(r, /In progress · 1/); assert.match(r, /data-go="q=ar_1"><b>Pursuit · Kevin<\/b><span class="">Waiting on Kevin/);
+  assert.equal(P.$("body").classList.contains("instep"), false);
+  const H = boot("hist", { "/api/me": { email: "Dexter.Lawrence@dg3.com" }, "/api/audit/ships": SHIPS, "/api/audit/history": { audits: [], followups: [] } });
+  await settle();
+  assert.match(H.$("wrail").innerHTML, /class="wr-i on" data-go="hist"/);
+});
