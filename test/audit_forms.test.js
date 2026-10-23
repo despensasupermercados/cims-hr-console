@@ -117,6 +117,12 @@ test("History reads the survey's audits beside the filed ones; one opens as type
   assert.equal((await get("/api/audit/forms?id=forms-2")).status, 404);
   const u = new URL("https://audit.cims.work/api/audit/forms?id=forms-61");
   assert.equal((await R.handle(u.pathname, new Request(u), env, u, null)).status, 401);
+  // the open audit site (no sign-in) never serves Dexter's words on a Forms audit; a signed-in user does (23 Oct 2026)
+  const open = await R.handle(u.pathname, new Request(u), env, u, { email: "Dexter.Lawrence@dg3.com", open: true });
+  assert.equal(open.status, 403);
+  assert.deepEqual(await open.json(), { ok: false, error: "sign_in_needed" });
+  const signed = await (await get("/api/audit/forms?id=forms-61")).json();
+  assert.equal(signed.ok, true); assert.ok(signed.audit.notes);
 });
 
 test("the Score Card never reads the survey (section 1): only the audit app does", () => {

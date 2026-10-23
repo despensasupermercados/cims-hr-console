@@ -40,7 +40,7 @@ function boot(hash, api, opt = {}) {
       const p = new URL(u, "https://audit.cims.work").pathname; calls.push(p);
       if (api[p] === HANG) return new Promise(() => {});
       if (api[p] === DOWN) return Promise.reject(new TypeError("Failed to fetch"));
-      return p in api ? json(api[p]) : json({ error: "not found" }, 404);
+      return p in api ? json(api[p], (api[p] && api[p].__status) || 200) : json({ error: "not found" }, 404);
     },
     addEventListener() {}, scrollTo() {},
   };
@@ -306,6 +306,18 @@ test("History reads the Forms survey's audits, marked; one opens as typed, linke
   assert.match(q, /<b>Crunchtime<\/b>/);
   assert.match(q, /Tools not on inventory: none listed\./);
   assert.doesNotMatch(q, /profile in the HR console/, "no profile link for a crew the import did not place");
+});
+
+// 23 Oct 2026: Dexter's words on a Forms-survey audit are read signed in only. On the open audit site the server answers
+// sign_in_needed and the page sends the reader to cims.work/audit instead of "Could not load".
+test("Forms audit on the open site: a 'signed in only' card, never the notes, never an error", async () => {
+  const Q = boot("#q=forms-51", { "/api/me": { email: "Dexter.Lawrence@dg3.com", open: true }, "/api/audit/ships": SHIPS, "/api/audit/forms": { ok: false, error: "sign_in_needed", __status: 403 } });
+  await settle();
+  assert.deepEqual(Q.errors, []);
+  const q = Q.$("main").innerHTML;
+  assert.match(q, /Signed in only/);
+  assert.match(q, /href="https:\/\/cims\.work\/audit#q=forms-51"/);
+  assert.doesNotMatch(q, /Could not load/);
 });
 
 // W1, the web rail (Miguel, 23 Oct 2026: "yeah I like that. do it"): a computer keeps a left column with Ships, History,
