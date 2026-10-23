@@ -1735,8 +1735,15 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   never only an empty address (`#zz` stayed on its placeholders). Measured live the same day: the worker runs at the
   visitor's edge (`cf-placement: local-EWR / local-MIA`), not beside D1 in Prague, so each schema check and read crosses
   the Atlantic (~100 ms a trip) — reported to Miguel, not changed here. Pinned by `test/audit_page_boot.test.js`.
-  Still to build: the filed / dispatch emails (render first, Miguel signs off), Rolando's Pattern 43 confirmation (R1),
-  the import of the 61 (I1), the web rail (W1).
+  **The filed and dispatch emails are rendered, NOT wired** (`hr.audit.filed.v1` to Miguel, cc Rita, Ray, Rolando:
+  the score in words and how it was reached, each rating with its sentence, the three boxes, the follow-up and what this
+  visit settled from the last one, the desk and the tools with "2nd time", each machine against what the documents said,
+  the count against OBP then the shelf, the crew — never a replacement, points, money or the dispatch rating;
+  `hr.audit.dispatch.v1` to Rita alone: the crew's 1–5 on TDG's travel, hotel and joining and, new on the Crew step, an
+  optional note in their words, kept only beside a rating), built from what the filing stored; proofs under
+  `docs/mockups/audit_filed_20261019/`. Wiring the send waits on Miguel's sign-off of the renders (CIMS email standard §5;
+  `test/audit_filed_email.test.js` fails if anything outside `src/emails` imports them). Still to build: Rolando's
+  Pattern 43 confirmation (R1), the import of the 61 (I1), the web rail (W1).
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

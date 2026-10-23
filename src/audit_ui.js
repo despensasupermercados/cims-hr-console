@@ -899,7 +899,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     AR.PPE.forEach(function (p) { var was = v.previous && v.previous.sameCrew && (v.previous.ppeMissing || []).indexOf(p.key) >= 0; h += itemRow("ppe", p.key, p.label, "", pm.indexOf(p.key) >= 0, was, 1); });
     h += tapRow("hon", "x", "Uses the HON app", "", d.crew.hon === "no", ["", "Not in use"]) + "</div>";
     var t = AR.RATING_TEXT.dispatch;
-    h += '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">' + esc(t.label) + '</b><span class="chip m">For Rita · in no score</span></div><span class="xs">' + esc(t.hint) + "</span>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label) + "</div>";
+    h += '<div class="card pad-m sec tight"><div class="sec-hd"><b class="h4">' + esc(t.label) + '</b><span class="chip m">For Rita · in no score</span></div><span class="xs">' + esc(t.hint) + "</span>" + rateRow("disp", "dispatch", d.crew.dispatch, t.label)
+      + (d.crew.dispatch != null ? lbl("What " + fn + " said · optional", box("disp-note", d.crew.dispatchNote, "The flight, the hotel, the joining, in their words")) : "") + "</div>";
     return h + photoStrip(v, "crew");
   };
   function scoreWhy(d) {
@@ -1097,6 +1098,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         else if (f === "inv-note") d.inv.note = t.value;
         else if (f.indexOf("why:") === 0) d.rt.why[f.slice(4)] = t.value;
         else if (f === "train-other") d.crew.trainingOther = t.value;
+        else if (f === "disp-note") d.crew.dispatchNote = t.value;
         else if (f === "ov-why") d.ov.why = t.value;
         else if (f === "strengths" || f === "improve" || f === "agreed") d.ov[f] = t.value;
         else if (f === "fu-due") d.ov.followup.due = t.value;

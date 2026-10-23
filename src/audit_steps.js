@@ -147,7 +147,7 @@ export function makeRules() {
       hw: { labeled: true, machines, tools: { missing: [] } },
       inv: { accurate: !gaps.length, lines: {}, added: [], repairs: {}, note: "" },
       rt: { inventory: null, technical: null, collaterals: null, why: { inventory: "", technical: "", collaterals: "" } },
-      crew: { training: [], trainingOther: "", ppe: { missing: [] }, hon: "yes", dispatch: null },
+      crew: { training: [], trainingOther: "", ppe: { missing: [] }, hon: "yes", dispatch: null, dispatchNote: "" },
       ov: { overall: null, why: "", strengths: "", improve: "", agreed: "", recommendBlock: false, followup: null },
       close: {},
     }, ctx);
@@ -238,7 +238,9 @@ export function makeRules() {
       rt: { inventory: rating(rt.inventory), technical: rating(rt.technical), collaterals: rating(rt.collaterals),
         why: { inventory: txt((rt.why || {}).inventory, 600), technical: txt((rt.why || {}).technical, 600), collaterals: txt((rt.why || {}).collaterals, 600) } },
       crew: { training: pick(crew.training, TRAIN_KEYS), trainingOther: txt(crew.trainingOther, 120), ppe: { missing: pick(crew.ppe && crew.ppe.missing, PPE_KEYS) },
-        hon: ["yes", "no", "na"].includes(crew.hon) ? crew.hon : null, dispatch: rating(crew.dispatch) },
+        hon: ["yes", "no", "na"].includes(crew.hon) ? crew.hon : null, dispatch: rating(crew.dispatch),
+        // the crew's own words on the travel, for Rita's dispatch note (optional; kept only beside a rating)
+        dispatchNote: rating(crew.dispatch) == null ? "" : txt(crew.dispatchNote, 600) },
       ov: { overall: rating(ov.overall), why: txt(ov.why, 600), strengths: txt(ov.strengths), improve: txt(ov.improve), agreed: txt(ov.agreed),
         recommendBlock: ov.recommendBlock === true, followup },
       close,
