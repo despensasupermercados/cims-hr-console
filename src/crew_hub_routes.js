@@ -8,7 +8,7 @@ import { hubPage, hubGonePage } from "./crew_hub.js";
 import { nextPayday } from "./payroll.js";
 import { shipCode } from "./ship_codes.js";
 import { EXPENSE_XLSX_B64, CALENDAR_PNG_B64 } from "./hub_assets.js";
-import { currentLeg, welcomeContext } from "./welcome_context.js";
+import { currentLeg, welcomeContext, markCardVisits } from "./welcome_context.js";
 import { welcomeEmail } from "./emails/hr.welcome.v1.js";
 import { shipMailbox } from "./audit.js";
 export { currentLeg };
@@ -43,14 +43,22 @@ const PAGE_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Cache-Contro
 export function installHub(deps) {
   const { ensure, boardLegs, bonusCount, json, today } = deps;
   const page = (html, status = 200) => new Response(html, { status, headers: PAGE_HEADERS });
+  // the schedule as the Hub reads it: the board's legs, a trainer's card trip marked a visit (welcome_context.markCardVisits)
+  const legsOf = async (env) => {
+    const rowsOf = (sql) => Promise.resolve().then(() => env.DB.prepare(sql).all()).then((r) => (r && r.results) || []).catch(() => []);
+    const [legs, vis, tr] = await Promise.all([boardLegs(env), rowsOf("SELECT sc, on_key, kind FROM contract_visit"), rowsOf("SELECT sc FROM crew_trainer")]);
+    return markCardVisits(legs, vis, tr);
+  };
 
   // ONE model for the crew's page, the console's preview and the audit (19 Oct 2026: "I wanna make sure I know what the crew
   // is seeing"): the preview and the audit read exactly what the link serves, never a copy.
   async function modelFor(env, sc) {
+    // a read that FAILS is not "between contracts" or "no count on record": boardLegs throws on a failed read by design (§11c),
+    // and the page says it could not load rather than tell a seafarer aboard that Rita has his next contract (23 Oct 2026)
     const [crew, legs, count] = await Promise.all([
       env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew WHERE agency_id=?").bind(sc).first(),
-      boardLegs(env).catch(() => []),
-      bonusCount(env, sc).catch(() => null),
+      legsOf(env),
+      bonusCount(env, sc),
     ]);
     if (!crew) return null;
     const leg = currentLeg(legs, sc);
@@ -61,11 +69,13 @@ export function installHub(deps) {
     await ensure(env);
     const row = await env.DB.prepare("SELECT token, agency_id FROM crew_hub_link WHERE token=? AND revoked_at IS NULL").bind(token).first();
     if (!row) return page(hubGonePage(), 404);
-    const m = await modelFor(env, row.agency_id);
+    let m;
+    try { m = await modelFor(env, row.agency_id); } catch { return unavailable(); }
     if (!m) return page(hubGonePage(), 404);
     try { await env.DB.prepare("UPDATE crew_hub_link SET last_seen_at=? WHERE token=?").bind(new Date().toISOString(), token).run(); } catch {}
     return page(hubPage(m.model));
   }
+  const unavailable = () => notice("We could not load your page right now. Please try again in a few minutes.", 503);
   const notice = (msg, status = 404) => new Response(`<!DOCTYPE html><meta charset="utf-8"><body style="margin:0;font:15px/1.5 Helvetica,Arial,sans-serif;color:#374151;background:#F3F4F6;padding:28px">${msg}</body>`, { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
 
   async function linkFor(env, sc, who) {
@@ -103,7 +113,7 @@ export function installHub(deps) {
       const sc = String(url.searchParams.get("id") || "").trim();
       const [crew, legs] = await Promise.all([
         sc ? env.DB.prepare("SELECT agency_id, first_name, last_name, rank_observed FROM crew WHERE agency_id=?").bind(sc).first() : null,
-        boardLegs(env).catch(() => []),
+        legsOf(env).catch(() => []),
       ]);
       if (!crew) return notice("No such crew.");
       const origin = String(env.HUB_ORIGIN || url.origin).replace(/\/+$/, "");
@@ -118,14 +128,16 @@ export function installHub(deps) {
     // recorded; the audit lists every value on it with its source; the examples pick one crew per case the page can be in.
     if (p === "/api/hub/preview" && request.method === "GET") {
       if (!session) return json({ error: "unauthorized" }, 401);
-      const m = await modelFor(env, String(url.searchParams.get("id") || "").trim());
+      let m;
+      try { m = await modelFor(env, String(url.searchParams.get("id") || "").trim()); } catch { return unavailable(); }
       return m ? page(hubPage(m.model)) : notice("No such crew.");
     }
     if (p === "/api/hub/audit" && request.method === "GET") {
       if (!session) return json({ error: "unauthorized" }, 401);
       await ensure(env);
       const sc = String(url.searchParams.get("id") || "").trim();
-      const m = await modelFor(env, sc);
+      let m;
+      try { m = await modelFor(env, sc); } catch (e) { return json({ error: "read_failed", detail: String((e && e.message) || e).slice(0, 160) }, 503); }
       if (!m) return json({ error: "not_found" }, 404);
       const [links, sent, detail, cts, mail] = await Promise.all([
         env.DB.prepare("SELECT created_at, created_by, revoked_at, last_seen_at FROM crew_hub_link WHERE agency_id=? ORDER BY created_at DESC").bind(sc).all().then((r) => r.results || []).catch(() => []),

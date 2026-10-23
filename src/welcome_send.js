@@ -7,9 +7,10 @@
 // sign-on day, catching up WELCOME_CATCHUP_DAYS if a run was
 // missed; it is OFF until switched on, and switching on never emails a contract that started before that day. A training
 // visit is never welcomed. Nothing here is money (§1). Pinned by test/welcome_send.test.js.
-import { welcomeContext, currentLeg } from "./welcome_context.js";
+import { welcomeContext, currentLeg, markCardVisits } from "./welcome_context.js";
 import { welcomeEmail } from "./emails/hr.welcome.v1.js";
 import { shipMailbox } from "./audit.js";
+import { ABSORB_DAYS } from "./counter_sync.js";
 
 export const WELCOME_TEMPLATE = "hr.welcome.v1";
 export const WELCOME_CATCHUP_DAYS = 2;
@@ -49,11 +50,23 @@ export function welcomeDue(legs, today, since) {
 export function installWelcome(deps) {
   const { ensure, boardLegs, linkFor, contacts, sendMail, json, today, origin } = deps;
 
+  // the schedule as the welcome reads it: the board's legs, a trainer's card trip marked a visit (welcome_context)
+  const legsOf = async (env) => {
+    const rowsOf = (sql) => Promise.resolve().then(() => env.DB.prepare(sql).all()).then((r) => (r && r.results) || []).catch(() => []);
+    const [legs, vis, tr] = await Promise.all([boardLegs(env), rowsOf("SELECT sc, on_key, kind FROM contract_visit"), rowsOf("SELECT sc FROM crew_trainer")]);
+    return markCardVisits(legs, vis, tr);
+  };
+  // The welcome already sent for THIS contract: its sign-on can move by a few days after the send (Rita's card said 9 Nov,
+  // TDG's file embarks him 8 Nov and absorbs the card — the file absorbs within ABSORB_DAYS, §10d), so a row within
+  // ABSORB_DAYS of the sign-on is the same contract, never a second welcome to the ship and his address (23 Oct 2026 review).
+  const priorFor = (env, sc, on) => env.DB.prepare("SELECT sent_at, to_json, on_key FROM welcome_send WHERE sc=? AND on_key BETWEEN ? AND ? ORDER BY on_key DESC LIMIT 1")
+    .bind(sc, addDays(on, -ABSORB_DAYS), addDays(on, ABSORB_DAYS)).first();
+
   async function sendFor(env, sc, { by = "system", resend = false, dry = false, base } = {}) {
     await ensure(env);
     const [crew, legs, cts] = await Promise.all([
       env.DB.prepare("SELECT c.agency_id, c.first_name, c.last_name, c.rank_observed, COALESCE(NULLIF(o.email,''), c.email) AS email FROM crew c LEFT JOIN crew_override o ON o.agency_id = c.agency_id WHERE c.agency_id=?").bind(sc).first(),
-      boardLegs(env),
+      legsOf(env),
       contacts(env).catch(() => []),
     ]);
     if (!crew) return { ok: false, error: "not_found" };
@@ -62,7 +75,7 @@ export function installWelcome(deps) {
     const leg = currentLeg(legs, sc);
     const onKey = leg.on;
     const rc = welcomeRecipients({ contacts: cts, ship: leg.ship, personal: crew.email });
-    const prior = await env.DB.prepare("SELECT sent_at, to_json FROM welcome_send WHERE sc=? AND on_key=?").bind(sc, onKey).first();
+    const prior = await priorFor(env, sc, onKey);
     const out = { ok: true, sc, ship: leg.ship, on: onKey, to: rc.to, cc: rc.cc, noShipMailbox: !rc.ship, noPersonal: !rc.personal, sent_before: prior ? prior.sent_at : null };
     if (!rc.to.length) return { ...out, ok: false, error: "no_recipient" };
     if (dry) return out;
@@ -93,10 +106,10 @@ export function installWelcome(deps) {
     if ((await setting(env, "welcome_auto_enabled")) !== "true") return { skipped: "disabled" };
     await ensure(env);
     const t = today(), since = await setting(env, "welcome_auto_since");
-    const due = welcomeDue(await boardLegs(env), t, since);
+    const due = welcomeDue(await legsOf(env), t, since);
     const report = { sent: [], failed: [] };
     for (const leg of due) {
-      if (await env.DB.prepare("SELECT 1 FROM welcome_send WHERE sc=? AND on_key=?").bind(leg.sc, leg.on).first()) continue;
+      if (await priorFor(env, leg.sc, leg.on)) continue;
       const r = await sendFor(env, leg.sc, { by: "auto" }).catch((e) => ({ ok: false, error: String(e && e.message || e).slice(0, 160) }));
       (r.sent ? report.sent : report.failed).push({ sc: leg.sc, ship: leg.ship, on: leg.on, error: r.error || null });
     }
