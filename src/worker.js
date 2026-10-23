@@ -79,6 +79,7 @@ import { ensureAuditTables, AUDIT_DDL } from "./audit_store.js";
 import { installHub, HUB_DDL } from "./crew_hub_routes.js";
 import { hubHomePage, HUB_HOST } from "./crew_hub.js";
 import { installWelcome, WELCOME_DDL } from "./welcome_send.js";
+import { installSurvey, SURVEY_DDL } from "./crew_survey_send.js";
 
 const _autoInstr = installInstr({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, instrContext: instrSeatContext, sendViaMailer, boardLegs });
 const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256hex, logActivity, applyOverride, VESSEL_REF, sendViaMailer, boardLegs });
@@ -114,6 +115,11 @@ const ensureWelcome = memoEnsure(async (env) => { await ensureHubLink(env); awai
 const _welcome = installWelcome({ ensure: ensureWelcome, boardLegs: (env) => boardLegs(env), linkFor: (env, sc, who) => _hub.linkFor(env, sc, who),
   contacts: (env) => (env.TIMECARD_DB ? env.TIMECARD_DB.prepare("SELECT client, ship, code, email, role FROM ship_contact").all().then((r) => r.results || []) : Promise.resolve([])),
   sendMail: sendViaMailer, json, today: () => TODAY(), origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
+// The end-of-contract crew survey (Miguel, 22–23 Oct 2026, src/crew_survey_send.js): /hub/survey/<token> public, the
+// Reports › Crew survey page and the Automation switch signed in; the daily run is OFF until switched on. Feedback only (§1).
+const ensureSurvey = memoEnsure(async (env) => { await env.DB.prepare("CREATE TABLE IF NOT EXISTS app_setting (k TEXT PRIMARY KEY, v TEXT)").run(); for (const q of SURVEY_DDL) await env.DB.prepare(q).run(); }, SURVEY_DDL.join("\n"));
+const _survey = installSurvey({ ensure: ensureSurvey, boardLegs: (env) => boardLegs(env), sendMail: sendViaMailer, json, today: () => TODAY(),
+  origin: (env) => env.HUB_ORIGIN || "https://cims.work" });
 // Live legs for auto-timing: the SAME resolved dates the Keyman board displays
 // and billing uses (rotationSections), NOT the historical keyman_contract3.
 // Since 16 Oct 2026 only CURRENT seats (an earmark's planned sign-off is not a sign-off to instruct), each carrying what the
@@ -286,6 +292,8 @@ export default {
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
       // The Crew Hub: /hub/<token> and /hub/expense.xlsx answer without a session (the link is the key); the two /api/hub/ routes need one.
+      // The crew survey (its page is a /hub/ path, so it is asked first).
+      if (p.startsWith("/hub/survey/") || p.startsWith("/api/survey/")) { const _s = await _survey.handle(p, request, env, url, session); if (_s) return _s; }
       if (p.startsWith("/hub/") || p.startsWith("/api/hub/")) { const _w = await _welcome.handle(p, request, env, url, session); if (_w) return _w; const _h = await _hub(p, request, env, url, session); if (_h) return _h; }
       // Printshop Audit: the shell on audit.cims.work (and cims.work/audit), its manifest and service worker, and
       // every /api/audit/ route — inside this boundary, session-gated except the two static assets (src/audit_routes.js).
@@ -467,6 +475,8 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
     if (ctx && ctx.waitUntil) ctx.waitUntil(_runAutoSend(env, event));
     // The welcome-aboard email on the sign-on morning (src/welcome_send.js), when its switch is on.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_welcome.run(env, event).catch(function (e) { console.error("welcome_send", (e && e.stack) || e); }));
+    // The end-of-contract crew survey, the morning after the sign-off (src/crew_survey_send.js), when its switch is on.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(_survey.run(env, event).catch(function (e) { console.error("crew_survey", (e && e.stack) || e); }));
     // SBM review sweep (T-7 invite / T-4 reminder). Guarded so a sweep failure can never break the existing cron.
     if (ctx && ctx.waitUntil) ctx.waitUntil(_sbm.sbmDailySweep(env).catch(function (e) { console.error("sbm_sweep", (e && e.stack) || e); }));
     // Printshop Audit sweep: 12-hour reminder, 24-hour overdue note to the auditor, reads that did not finish (audit_request.js).
@@ -7752,7 +7762,8 @@ async function saveNote(id){
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
 // Two switches since 16 Oct 2026, one per email: the T-14 sign-off instructions and the T-7 sign-off link (/api/autosend kind).
-async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}}
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}try{var v=await (await fetch('/api/survey/auto')).json();window.AUTO_SURV=!!v.enabled;applyChromeToggles();}catch(e){}}
+async function survToggleClick(){var c=document.getElementById('survToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the crew survey ON? The morning after a contract ends (07:00 Miami time), the seafarer gets the end-of-contract survey, CC Rita and Miguel, and one reminder after 5 days. Contracts that ended before today are not asked.'))return;try{var r=await (await fetch('/api/survey/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_SURV=!!r.enabled;applyChromeToggles();alert('The crew survey is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 // The welcome-aboard email (19 Oct 2026): its own switch. On = the sign-on morning, the ship's mailbox + the personal address, CC Rita; a contract that started before the switch went on is never emailed.
 async function welToggleClick(){var c=document.getElementById('welToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the welcome email ON? On the sign-on day at 07:00 Miami time, the welcome-aboard email goes to the ship\\'s mailbox and the personal address, CC Rita. Crew who signed on before today are not emailed.'))return;try{var r=await (await fetch('/api/hub/welcome/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_WEL=!!r.enabled;applyChromeToggles();alert('The welcome email is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 async function autoToggleClick(kind){var link=kind==='signoff';var c=document.getElementById(link?'linkToggleCb':'autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm(link?'Turn the T-7 sign-off link ON? Every crew 7 days before their sign-off gets the sign-off link email. Crew already inside the 7 days are not emailed.':'Turn the sign-off instructions ON? Every crew 14 days before their sign-off gets the instructions email, CC onboardsupport@dg3.com. Crew already inside the 14 days are not emailed.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:link?'signoff':'instructions',enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();alert((link?'The T-7 sign-off link':'The sign-off instructions')+' email is now '+((link?r.signoff:r.instructions)?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
@@ -7818,7 +7829,7 @@ async function renderRotation(){
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
-    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span><span id="survToggle" onclick="survToggleClick()" title="The morning after a contract ends, 07:00 Miami time: the end-of-contract crew survey to the seafarer, CC Rita and Miguel; one reminder after 5 days" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew survey <input type=checkbox id="survToggleCb" style="pointer-events:none"></span></div></div>'
     +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'
@@ -7842,7 +7853,7 @@ async function renderRotation(){
 }
 // 13 Oct 2026: every re-render rebuilt the rail with Crew auto-timing unchecked and no GSM review switch, while the
 // emails stayed armed on the server. The last known values are kept and painted back.
-function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
+function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var sv=document.getElementById('survToggleCb');if(sv&&window.AUTO_SURV!=null)sv.checked=!!window.AUTO_SURV;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
 var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara',NCL:'Norwegian'};
 function rotRail(shown,total){
@@ -8189,6 +8200,7 @@ function renderReports(){
      +'<div class=dsline></div>'
      +'<div class=dssub>Reports<br>Operational Intelligence</div>'
      +'<button class="dsnav rptmenu on" data-rpt="sbm">Shipboard Feedback</button>'
+     +'<button class="dsnav rptmenu" data-rpt="survey">Crew survey<span style="font-size:9px;letter-spacing:.08em;background:var(--green);color:#fff;border-radius:99px;padding:2px 7px;margin-left:8px;vertical-align:1px">NEW</span></button>'
      +'<a class=dsnav href="/go/recruitment" target=_blank rel=noopener style="text-decoration:none">Recruitment &#8599;</a>'
      +'<button class="dsnav soon" tabindex=-1>Bonus &amp; Money<small>soon</small></button>'
      +'<button class="dsnav soon" tabindex=-1>Manpower<small>soon</small></button>'
@@ -8200,7 +8212,119 @@ function renderReports(){
   document.querySelectorAll('.rptmenu').forEach(function(b){b.onclick=function(){document.querySelectorAll('.rptmenu').forEach(function(x){x.classList.remove('on');});b.classList.add('on');rptShow(b.getAttribute('data-rpt'));};});
   rptShow('sbm');
 }
-function rptShow(r){ if(r==='sbm')return rptSbm(); }
+function rptShow(r){ if(r==='sbm')return rptSbm(); if(r==='survey')return rptCrewSurvey(); }
+// Reports › Crew survey (Miguel, 22–23 Oct 2026; the approved mock-up docs/mockups/crew_survey_20261022/report.html).
+// GET /api/survey/report does the counting (src/crew_survey.js surveyReport); this draws it. Feedback only (§1).
+var SRV_P='All',SRV_L='all',SRV_GEN=0,SRV_D=null,SRV_OPEN={};
+var SRV_LN={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara',NCL:'Norwegian'};
+function srvPill(v){if(v==null)return '<span class=mu>&mdash;</span>';var c=v>=4?'g':(v===3?'a':'r');return '<span class="svp '+c+'">'+v+'</span>';}
+function srvDay(s){if(!s)return '';var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return (+s.slice(8,10))+' '+M[+s.slice(5,7)-1]+' '+s.slice(0,4);}
+function srvWho(name,sc){return sc?'<a href="#" data-crew="'+escHtml(sc)+'" class=svlink>'+escHtml(name||sc)+'</a>':escHtml(name||'Name not given');}
+async function rptCrewSurvey(){
+  var gen=++SRV_GEN,vg=VIEW_GEN;
+  if(!SRV_D)$('#rptbody').innerHTML='<div class=csub style="padding:14px 4px">Loading the crew survey&hellip;</div>';
+  var d;
+  try{var r=await fetch('/api/survey/report?p='+encodeURIComponent(SRV_P)+'&line='+encodeURIComponent(SRV_L),{cache:'no-store'});d=await r.json();if(!r.ok||d.error)throw new Error(d.error||('HTTP '+r.status));}
+  catch(e){if(gen!==SRV_GEN||vg!==VIEW_GEN)return;$('#rptbody').innerHTML='<div class=rblk style="border-left:3px solid var(--red)">Could not load the crew survey: '+escHtml(e.message)+' <button class="btn ghost" onclick="rptCrewSurvey()">Try again</button></div>';return;}
+  if(gen!==SRV_GEN||vg!==VIEW_GEN||!document.getElementById('rptbody'))return;
+  SRV_D=d;srvDraw();
+}
+function srvDraw(){
+  var d=SRV_D,Q={};(d.questions||[]).forEach(function(q){Q[q.key]=q;});
+  var chip=function(k,v,lab,on){return '<button class="pchip'+(on?' on':'')+'" data-svk="'+k+'" data-svv="'+v+'">'+lab+'</button>';};
+  var h='<style>'
+   +'.svsep{width:1px;height:22px;background:var(--line);margin:0 4px}'
+   +'.svband{margin:10px 0 16px;background:#F4F8F1;border:1px solid #DDEBD5;color:#3B5530;border-radius:12px;padding:10px 14px;font-size:13px;line-height:1.5}.svband b{color:#3E7F2E}'
+   +'.svk{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px}'
+   +'.svk .k{border:1px solid var(--line);border-radius:12px;padding:13px 15px;position:relative;overflow:hidden;background:var(--surface)}.svk .k:before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--c,#5FB946)}'
+   +'.svk .l{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.svk .v{font-family:Outfit;font-size:28px;font-weight:700;color:var(--navy);margin-top:4px}.svk .v small{font-size:13px;color:var(--mut);font-weight:600}.svk .s{font-size:12px;color:var(--mut)}'
+   +'.svcall{background:#FBF2F0;border:1px solid #F0D3CD;border-radius:12px;padding:14px 16px;margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}.svcall .who{flex:1;min-width:220px}.svcall .who b{font-family:Outfit;font-size:17px;color:#7A2418}.svcall .who div{font-size:13px;color:#6B4A44;margin-top:3px;line-height:1.5}'
+   +'.svcall.done{background:#F7F9FB;border-color:var(--line)}.svcall.done .who b{color:var(--navy)}.svcall.done .who div{color:var(--mut)}'
+   +'.svbar{display:grid;grid-template-columns:minmax(110px,190px) minmax(56px,1fr) 34px 46px;gap:10px;align-items:center;padding:5px 0;font-size:13px}'
+   +'.svtr{height:8px;background:#EEF1F5;border-radius:99px;overflow:hidden}.svtr i{display:block;height:100%;border-radius:99px}.svbv{font-weight:700;text-align:right;color:var(--navy)}.svbl{font-size:11.5px;color:#BC3B2C;font-weight:700}'
+   +'.svfx{padding:10px 0;border-bottom:1px solid #F0F2F5}.svfx:last-child{border:0}.svfq{font-family:Outfit;font-size:15px;font-weight:600;color:var(--navy);line-height:1.4}.svfw{font-size:12px;color:var(--mut);margin-top:4px}'
+   +'.svlines{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.svlc{background:#F7F9FB;border-radius:12px;padding:12px 14px}.svlc.none{opacity:.55}.svlc .n{font-size:12px;font-weight:700;color:var(--mut)}.svlc .v{font-family:Outfit;font-size:24px;font-weight:700;color:var(--navy)}.svlc .s{font-size:11.5px;color:var(--mut)}'
+   +'.svpipe{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.svpipe div{min-width:0;background:#F7F9FB;border-radius:12px;padding:12px 14px}.svpipe b{display:block;font-family:Outfit;font-size:22px;color:var(--navy)}.svpipe span{font-size:12px;color:var(--mut)}'
+   +'.svp{display:inline-block;min-width:26px;text-align:center;font-weight:700;border-radius:99px;padding:2px 8px;font-size:12.5px}.svp.g{background:#EAF5E4;color:#3E7F2E}.svp.a{background:#F6EEE1;color:#B7791F}.svp.r{background:#F4E5E3;color:#96281B}'
+   +'.svt{width:100%;border-collapse:collapse;font-size:13px}.svt th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:8px;border-bottom:1px solid var(--line)}.svt td{padding:9px 8px;border-bottom:1px solid #F0F2F5;vertical-align:top}.svt td.c{text-align:center}.svt tr.hot td{background:#FDF6F4}.svt tr.row{cursor:pointer}.svt tr.row:hover td{background:#F7F9FB}'
+   +'.svtag{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 7px;margin-left:6px}'
+   +'.svx{overflow-x:auto;-webkit-overflow-scrolling:touch}.svx .svt{min-width:640px}@media (max-width:560px){.svpipe{grid-template-columns:repeat(2,minmax(0,1fr))}}.svdet{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:4px 18px;padding:4px 0 8px}.svdet div{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.4}.svdet div span:last-child{color:var(--ink)}'
+   +'.svnote{font-size:12px;color:var(--mut);margin-top:10px;line-height:1.5}.mu{color:var(--mut)}.svlink{color:var(--navy);font-weight:700;text-decoration:none}.svlink:hover{text-decoration:underline}'
+   +'</style>';
+  h+='<div class=rpthead><h2>Crew survey</h2>'
+   +['30D','QTD','YTD','All'].map(function(p){return chip('p',p,p,p===SRV_P);}).join('')
+   +'<span class=svsep></span>'
+   +chip('l','all','All lines',SRV_L==='all')+['Royal','Celebrity','Azamara','NCL'].map(function(l){return chip('l',l,l==='NCL'?'Norwegian':l,SRV_L===l);}).join('')
+   +'</div>';
+  var src=d.sources||{};
+  h+='<div class=svband><b>End-of-contract survey.</b> '+(d.enabled?'The morning after a contract ends the seafarer is asked (switched on '+srvDay(d.since)+'); one reminder after 5 days.':'The daily invitation is <b>off</b>: switch on <b>Crew survey</b> in the Keyman tab&rsquo;s Automation to ask every seafarer the morning after the sign-off.')
+   +' '+(src.forms?src.forms+' answers came from the Microsoft Forms survey before the console. ':'')+'Feedback only: never the Score Card or the bonus, never sent to the cruise line.</div>';
+  var rate=d.rate?Math.round(d.rate.answered/d.rate.of*100)+'<small>%</small>':'&mdash;';
+  var ret=d.wouldReturn?Math.round(d.wouldReturn.yes/d.wouldReturn.of*100)+'<small>%</small>':'&mdash;';
+  h+='<div class=svk>'
+   +'<div class=k><div class=l>Answers</div><div class=v>'+d.n+'</div><div class=s>'+(d.line==='all'?['Royal','Celebrity','Azamara','NCL'].filter(function(l){return d.byLineCount[l];}).map(function(l){return d.byLineCount[l]+' '+(l==='NCL'?'Norwegian':l);}).join(' · ')||'none yet':(SRV_LN[d.line]||d.line))+'</div></div>'
+   +'<div class=k><div class=l>Overall</div><div class=v>'+(d.overall==null?'&mdash;':d.overall.toFixed(2)+'<small>/5</small>')+'</div><div class=s>'+d.fives+' gave 5</div></div>'
+   +'<div class=k><div class=l>Would sail with us again</div><div class=v>'+ret+'</div><div class=s>'+(d.wouldReturn?d.wouldReturn.yes+' of '+d.wouldReturn.of+' at 4 or 5':'no answers yet')+'</div></div>'
+   +'<div class=k><div class=l>Answer rate</div><div class=v>'+rate+'</div><div class=s>'+(d.rate?d.rate.answered+' of '+d.rate.of+' asked':'starts when the switch is on')+'</div></div>'
+   +'<div class=k style="--c:'+(d.needsCall.length?'#96281B':'#5FB946')+'"><div class=l>Need a call</div><div class=v>'+d.needsCall.length+'</div><div class=s>3 or more answers at 1&ndash;2</div></div>'
+   +'</div>';
+  // ---- who needs a call, then who was called
+  d.needsCall.forEach(function(c){
+    h+='<div class=svcall><div class=who><b>'+srvWho(c.name,c.agency_id)+'</b> &middot; '+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)
+     +'<div>Low on: '+c.low.map(function(x){return escHtml(x.short)+' ('+x.v+')';}).join(', ')+'</div>'
+     +(c.fix?'<div>Asked us to fix: &ldquo;'+escHtml(c.fix)+'&rdquo;</div>':'')+'</div>'
+     +'<button class="btn g" data-svcall="'+escHtml(c.id)+'" data-svname="'+escHtml(c.name||'')+'">Log the call</button></div>';
+  });
+  d.called.forEach(function(c){
+    h+='<div class="svcall done"><div class=who><b>'+srvWho(c.name,c.agency_id)+'</b> &middot; '+escHtml(c.ship||'')+' &middot; '+srvDay(c.at)
+     +'<div>Called '+srvDay((c.called_at||'').slice(0,10))+(c.called_by?' by '+escHtml(c.called_by):'')+(c.call_note?' &middot; '+escHtml(c.call_note):'')+'</div></div></div>';
+  });
+  if(!d.n){
+    h+='<div class=rblk style="margin-top:12px"><div class=csub style="padding:8px 2px">No answers in this period. '+(SRV_P!=='All'||SRV_L!=='all'?'Widen the range or pick All lines.':'The first answers arrive once the switch is on.')+'</div></div>';
+  }else{
+    h+='<div class=rgrid2>';
+    h+='<div class=rblk><h3>Where it hurts</h3><div class=csub style="margin-bottom:8px">Every statement, the lowest average first.</div>'
+     +d.statements.map(function(s){var col=s.avg>=4.5?'#5FB946':(s.avg>=4?'#8FBF6A':(s.avg>=3?'#E0A23B':'#C2412F'));
+       return '<div class=svbar title="'+escHtml((Q[s.key]||{}).text||'')+'"><span>'+escHtml(s.short)+'</span><span class=svtr><i style="width:'+Math.round(s.avg/5*100)+'%;background:'+col+'"></i></span><span class=svbv>'+s.avg.toFixed(1)+'</span><span class=svbl>'+(s.low?s.low+' low':'')+'</span></div>';}).join('')+'</div>';
+    h+='<div class=rblk><h3>The one thing to fix first</h3><div class=csub style="margin-bottom:4px">In their words, newest first. Rita answers each within a week.</div>'
+     +(d.fixes.length?d.fixes.slice(0,12).map(function(f){return '<div class=svfx><div class=svfq>&ldquo;'+escHtml(f.text)+'&rdquo;</div><div class=svfw>'+srvWho(f.name,null)+' &middot; '+escHtml(f.ship||'')+' &middot; '+srvDay(f.at)+'</div></div>';}).join('')
+       +(d.fixes.length>12?'<div class=svnote>'+(d.fixes.length-12)+' more under Every answer.</div>':''):'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
+    h+='</div>';
+    h+='<div class=rgrid2>';
+    h+='<div class=rblk><h3>By cruise line</h3><div class=svlines>'+d.byLine.map(function(b){return '<div class="svlc'+(b.n?'':' none')+'"><div class=n>'+(SRV_LN[b.line]||b.line)+'</div><div class=v>'+(b.avg==null?'&mdash;':b.avg.toFixed(2))+'</div><div class=s>'+(b.n?b.n+' answer'+(b.n===1?'':'s')+' &middot; overall':'no answers yet')+'</div></div>';}).join('')+'</div></div>';
+    var L=d.loop;
+    h+='<div class=rblk><h3>The loop</h3><div class=svpipe><div><b>'+L.signedOff+'</b><span>signed off</span></div><div><b>'+L.invited+'</b><span>asked</span></div><div><b>'+L.opened+'</b><span>opened</span></div><div><b>'+L.answered+'</b><span>answered</span></div></div>'
+     +(L.noEmail.length?'<div class=svnote style="color:#96281B">No email on file, so never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+', off '+srvDay(x.off)+')';}).join(', ')+'. Add the address in Edit crew.</div>':'')
+     +'<div class=svnote>Signed off = contracts the Keyman board shows ended (TDG&rsquo;s debark, Rita&rsquo;s date or a reliever) in the period. Asked, opened and answered count the console&rsquo;s invitations only.</div></div>';
+    h+='</div>';
+  }
+  if(d.waiting.length){
+    h+='<div class=rblk style="margin-top:12px"><h3>Waiting for an answer &middot; '+d.waiting.length+'</h3><div class=svx><table class=svt><thead><tr><th>Seafarer</th><th>Ship</th><th>Asked</th><th>Reminder</th><th>Opened</th><th>Link open to</th></tr></thead><tbody>'
+     +d.waiting.map(function(w){return '<tr><td>'+srvWho(w.name,w.agency_id)+'</td><td>'+escHtml(w.ship||'')+'</td><td>'+srvDay(w.invited_at)+'</td><td>'+(w.reminded_at?srvDay(w.reminded_at):'<span class=mu>not yet</span>')+'</td><td>'+(w.opened?'Yes':'<span class=mu>No</span>')+'</td><td>'+srvDay(w.expires_at)+'</td></tr>';}).join('')
+     +'</tbody></table></div></div>';
+  }
+  if(d.list.length){
+    h+='<div class=rblk style="margin-top:12px"><h3>Every answer &middot; '+d.list.length+'</h3><div class=svx><table class=svt><thead><tr><th>Date</th><th>Seafarer</th><th>Ship</th><th class=c>Overall</th><th class=c>Again</th><th class=c>Low</th><th>In their words</th></tr></thead><tbody>'
+     +d.list.map(function(x){var open=!!SRV_OPEN[x.id];
+       var row='<tr class="row'+(x.low>=3?' hot':'')+'" data-svrow="'+escHtml(x.id)+'"><td style="white-space:nowrap">'+srvDay(x.at)+'</td><td>'+srvWho(x.name,x.agency_id)+(x.source==='forms'?'<span class=svtag>Forms</span>':'')+'</td><td>'+escHtml(x.ship||'')+'</td><td class=c>'+srvPill(x.overall)+'</td><td class=c>'+srvPill(x.ret)+'</td><td class=c>'+(x.low?'<b style="color:#96281B">'+x.low+'</b>':'<span class=mu>0</span>')+'</td><td>'+(x.words?escHtml(x.fix):'<span class=mu>'+(x.fix?escHtml(x.fix):'&mdash;')+'</span>')+'</td></tr>';
+       if(open)row+='<tr><td></td><td colspan=6><div class=svdet>'+(d.questions||[]).map(function(q){return '<div>'+srvPill(x.answers[q.key])+'<span>'+escHtml(q.text)+'</span></div>';}).join('')+'</div></td></tr>';
+       return row;}).join('')
+     +'</tbody></table></div><div class=svnote>Tap a row for the 19 answers. A row in red has 3 or more answers at 1&ndash;2.</div></div>';
+  }
+  $('#rptbody').innerHTML=h;
+  var b=document.getElementById('rptbody');
+  b.querySelectorAll('[data-svk]').forEach(function(el){el.onclick=function(){if(el.getAttribute('data-svk')==='p')SRV_P=el.getAttribute('data-svv');else SRV_L=el.getAttribute('data-svv');rptCrewSurvey();};});
+  b.querySelectorAll('[data-crew]').forEach(function(el){el.onclick=function(ev){ev.preventDefault();ev.stopPropagation();openCrew(el.getAttribute('data-crew'));};});
+  b.querySelectorAll('[data-svrow]').forEach(function(el){el.onclick=function(){var id=el.getAttribute('data-svrow');SRV_OPEN[id]=!SRV_OPEN[id];srvDraw();};});
+  b.querySelectorAll('[data-svcall]').forEach(function(el){el.onclick=function(){srvLogCall(el.getAttribute('data-svcall'),el.getAttribute('data-svname'),el);};});
+}
+async function srvLogCall(id,name,btn){
+  var note=prompt('Log the call to '+(name||'this seafarer')+'. What was said? (optional)','');
+  if(note===null)return;
+  if(btn)btn.disabled=true;
+  try{var r=await fetch('/api/survey/call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,note:note})});var j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||('HTTP '+r.status));apiDirty&&apiDirty();rptCrewSurvey();}
+  catch(e){alert('The call was not logged: '+e.message);if(btn)btn.disabled=false;}
+}
 function rtrend(pts,ymin,ymax){
   var w=320,h=130,pad=26,n=pts.length,dx=(w-pad*2)/Math.max(1,n-1),sp=(ymax-ymin)||1;
   var co=pts.map(function(p,i){return [pad+i*dx,h-pad-((p.y-ymin)/sp)*(h-pad*2)];});
