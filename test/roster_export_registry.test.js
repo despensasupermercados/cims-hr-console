@@ -11,6 +11,10 @@
  * and pin the rule in placeFromRegistry: TDG On board + embark already happened + a known hull, and
  * either nothing else dates the crew or the file's embark is strictly newer.
  *
+ * EXTENDED 24 Oct 2026 (Calayag SC-0045797): on a date TIE the file still names the HULL (dates stay
+ * today's — Rita's recorded sign-off included), and a row the file has DEBARKED closes the leg the
+ * console already knows. The tests at the bottom pin both, and what the debarked arm must never do.
+ *
  * Run: node --test test/roster_export_registry.test.js
  */
 import test from 'node:test';
@@ -24,6 +28,8 @@ const VESSELS = [
   { id: 'ves_constellation', name: 'Constellation', brand: 'Celebrity' },
   { id: 'ves_star', name: 'Star', brand: 'Royal Caribbean' },
   { id: 'ves_apex', name: 'Apex', brand: 'Celebrity' },
+  { id: 'ves_radiance', name: 'Radiance', brand: 'Royal Caribbean' },
+  { id: 'ves_navigator', name: 'Navigator', brand: 'Royal Caribbean' },
 ];
 const VIDX = vesselIndex(VESSELS);
 const TODAY = '2026-10-11';
@@ -58,7 +64,7 @@ test('a relief-board placement newer than the file is kept (the reliever aboard 
   assert.equal(placeFromRegistry(reliever, { status: 'On board', vessel: 'MV AZAMARA JOURNEY', embarked_at: '2026-07-25' }, VIDX, TODAY), null);
 });
 
-test('the file places nobody it does not have On board, nor a future embark', () => {
+test('the file places nobody it has neither On board nor debarked, nor on a future embark', () => {
   for (const status of ['Earmarked', 'On Vacation', 'Inactive', null]) {
     assert.equal(placeFromRegistry(blank, { status, vessel: 'MV AZAMARA JOURNEY', embarked_at: '2026-07-25' }, VIDX, TODAY), null, String(status));
   }
@@ -74,6 +80,49 @@ test('an unrecognised vessel places nobody — a guessed hull is worse than none
 test("TDG's DEBARKEDDATE is the only sign-off it supplies", () => {
   const p = placeFromRegistry(blank, { status: 'On board', vessel: 'MV AZAMARA JOURNEY', embarked_at: '2026-07-25', debarked_at: '2026-10-10' }, VIDX, TODAY);
   assert.equal(p.sign_off, '2026-10-10');
+});
+
+/* ------------------------------------------------------------------ *
+ * THE FILE'S WORD OUTLIVES THE LEG — 24 Oct 2026, Calayag SC-0045797.
+ *
+ * The Counter (and Rita's edit) said Navigator, 2 Feb → 25 Sep. TDG had her On board RADIANCE from
+ * the same 2 Feb — a date tie, so the 11 Oct rule kept the Counter's hull for the whole leg — and
+ * then recorded her debarked 2 Oct, which the export never read because only On-board rows were
+ * consulted. She owed September (aboard on the 30th), had filed her card, and was silently out of
+ * the timecard's denominator, with her hull: 46 active ships against TDG's 47.
+ * ------------------------------------------------------------------ */
+
+test('an On-board date tie keeps the dates, but the hull is the file\'s to name (§10d)', () => {
+  const counter = { ship: 'Navigator', brand: 'Royal Caribbean', sign_on: '2026-02-02', sign_off: '2026-09-25' };
+  const p = placeFromRegistry(counter, { status: 'On board', vessel: 'MV RADIANCE OF THE SEAS', embarked_at: '2026-02-02', debarked_at: null }, VIDX, TODAY);
+  // No sign_on/sign_off in the return: the console's dates — Rita's recorded sign-off — stand.
+  assert.deepEqual(p, { ship: 'Radiance', brand: 'Royal Caribbean' });
+});
+
+test('a debarked TDG row closes the leg: the debark is final and the hull is the file\'s (Calayag)', () => {
+  const counter = { ship: 'Navigator', brand: 'Royal Caribbean', sign_on: '2026-02-02', sign_off: '2026-09-25' };
+  const p = placeFromRegistry(counter, { status: 'On Vacation', vessel: 'MV RADIANCE OF THE SEAS', embarked_at: '2026-02-02', debarked_at: '2026-10-02' }, VIDX, '2026-10-24');
+  assert.deepEqual(p, { ship: 'Radiance', brand: 'Royal Caribbean', sign_on: '2026-02-02', sign_off: '2026-10-02' });
+});
+
+test('a debarked leg newer than the console\'s places the move the console missed', () => {
+  const stale = { ship: 'Summit', brand: 'Celebrity', sign_on: '2026-01-10', sign_off: '2026-06-01' };
+  const p = placeFromRegistry(stale, { status: 'On Vacation', vessel: 'MV CELEBRITY CONSTELLATION', embarked_at: '2026-07-01', debarked_at: '2026-10-02' }, VIDX, '2026-10-24');
+  assert.deepEqual(p, { ship: 'Constellation', brand: 'Celebrity', sign_on: '2026-07-01', sign_off: '2026-10-02' });
+});
+
+test('the debarked arm never resurrects, never rewinds, never trusts a self-contradicting row', () => {
+  // Maling: Inactive, an old file leg, NOTHING else dates him — he must not come back aboard.
+  assert.equal(placeFromRegistry(blank, { status: 'Inactive', vessel: 'MV RADIANCE OF THE SEAS', embarked_at: '2024-06-14', debarked_at: '2024-12-14' }, VIDX, '2026-10-24'), null);
+  // The console already knows a NEWER leg than the file's debarked one: the debark is history.
+  const newer = { ship: 'Constellation', brand: 'Celebrity', sign_on: '2026-10-05', sign_off: null };
+  assert.equal(placeFromRegistry(newer, { status: 'On Vacation', vessel: 'MV CELEBRITY SUMMIT', embarked_at: '2026-02-15', debarked_at: '2026-10-01' }, VIDX, '2026-10-24'), null);
+  // A debark BEFORE its own embark (Del Rosario's live row) places nobody.
+  const placed = { ship: 'Summit', brand: 'Celebrity', sign_on: '2026-02-22', sign_off: null };
+  assert.equal(placeFromRegistry(placed, { status: 'Inactive', vessel: 'MV CELEBRITY SUMMIT', embarked_at: '2026-02-22', debarked_at: '2025-10-24' }, VIDX, '2026-10-24'), null);
+  // Debarked but with no debark date on the row: the row says nothing usable.
+  const dated = { ship: 'Summit', brand: 'Celebrity', sign_on: '2026-02-22', sign_off: '2026-09-25' };
+  assert.equal(placeFromRegistry(dated, { status: 'On Vacation', vessel: 'MV CELEBRITY SUMMIT', embarked_at: '2026-02-22', debarked_at: null }, VIDX, '2026-10-24'), null);
 });
 
 /* ------------------------------------------------------------------ *
@@ -128,6 +177,19 @@ test('route: a Counter crew the file agrees with is byte-for-byte unchanged', as
   }));
   assert.equal(body.crew[0].ship, 'Apex');
   assert.equal(body.crew[0].sign_off, '2026-10-07', "Rita's recorded sign-off still reaches the timecard");
+});
+
+test('route: a debarked TDG row reaches the timecard — Calayag owed September and had dropped out', async () => {
+  const c = row('SC-0045797', 'Calayag', { ship: 'Navigator', brand: 'Royal Caribbean', sign_on: '2026-02-02', sign_off: '2026-09-25', status: 'On Vacation' });
+  const body = await call(envWith({
+    crew: [c],
+    legs: [{ sc: 'SC-0045797', seq: 1, ship: 'Navigator', sign_on: '2026-02-02', proj_off: '2026-09-18', act_off: null, imported_at: null }],
+    edits: [{ sc: 'SC-0045797', seq: 1, sign_on: '2026-02-02', sign_off: '2026-09-25', ship: 'Navigator', on_key: '2026-02-02', updated_at: '2026-08-01T00:00:00.000Z' }],
+    registry: [{ agency_id: 'SC-0045797', status: 'On Vacation', vessel: 'MV RADIANCE OF THE SEAS', embarked_at: '2026-02-02', debarked_at: '2026-10-02' }],
+  }));
+  assert.equal(body.crew[0].ship, 'Radiance', 'the file named the hull');
+  assert.equal(body.crew[0].sign_off, '2026-10-02', "the file's debark is final — she was aboard on 30 Sep and owes September");
+  assert.deepEqual(Object.keys(body.crew[0]).sort(), [...EXPORT_FIELDS].sort());
 });
 
 test('route: no field is added or dropped', async () => {
