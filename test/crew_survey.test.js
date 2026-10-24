@@ -1,7 +1,7 @@
 // THE CREW SURVEY (Miguel, 22–23 Oct 2026): one end-of-contract survey for all four cruise lines, asked the morning after
 // the sign-off (CC Rita and Miguel), one reminder after 5 days, his copy on answering (CC Onboard Support), the report under
 // Reports › Crew survey. Feedback only (§1). The routes run on real SQLite (node:sqlite); the page's own script runs in vm.
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -18,6 +18,10 @@ let DatabaseSync;
 try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted below */ }
 
 const TODAY = "2026-10-23";
+// The routes read TODAY through `today()` but stamp and check the link's expiry against the real clock (`new Date()`), so the
+// clock is pinned to the fixture's day: unpinned, every link expired on 23 Nov 2026 (TODAY + 30 days) and four tests went red
+// (night watch, 24 Oct 2026, found with the clock pushed 30 days ahead — a red main deploys nothing).
+mock.timers.enable({ apis: ["Date"], now: Date.parse(TODAY + "T12:00:00Z") });
 const ALL5 = Object.fromEntries(KEYS.map((k) => [k, 5]));
 const LEGS = [
   { sc: "SC-1", name: "Raymond Quiming", ship: "Infinity", brand: "Celebrity", on: "2026-03-01", off: "2026-10-19", is_current: false, ours: true, offSource: "tdg", disembark: "Fort Lauderdale" },
