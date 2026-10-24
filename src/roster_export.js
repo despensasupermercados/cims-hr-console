@@ -30,7 +30,9 @@
 //   registry_snapshot the latest TDG AdvancedQuery as uploaded (status, vessel, EMBARKEDDATE,
 //                     DEBARKEDDATE). Since 11 Oct 2026 it places a crew the TDG file has On board
 //                     when nothing above dates them, or when the file's embark is NEWER than the
-//                     date the export would otherwise send. See placeFromRegistry below.
+//                     date the export would otherwise send; since 24 Oct 2026 the file also names
+//                     the hull on a date tie, and its DEBARKEDDATE closes the same leg after the
+//                     crew leaves On board. See placeFromRegistry below.
 //
 // WHY assignment IS READ HERE (3 Sep 2026)
 // ship_leg is a one-time keyman_roster snapshot; nothing writes a CURRENT leg to
@@ -185,6 +187,23 @@ export function coverage(rows) {
 //     Constellation from 5 Oct). A tie keeps today's answer, Rita's recorded sign-off included.
 // Sign-off is TDG's DEBARKEDDATE or nothing: while the file has them On board they are aboard
 // (§10d HELD). Nothing is written, no status is touched, EXPORT_FIELDS is unchanged.
+//
+// AND THE FILE'S WORD OUTLIVES THE LEG — 24 Oct 2026, Calayag SC-0045797. Two gaps in the 11 Oct
+// rule, found the same way the 8 Oct hole was: the numbers stopped adding up (46 active ships
+// against TDG's 47 On-board hulls) with every check green.
+//   1. THE HULL ON A TIE. The Counter said Navigator from 2 Feb; TDG had her On board RADIANCE
+//      from the same 2 Feb. The embark dates tied, the tie kept today's answer, and the export
+//      said Navigator for the whole eight-month leg. A tie still keeps today's DATES (that is what
+//      the tie rule is for — Rita's recorded sign-off must stand, TDG's On-board row has none),
+//      but the HULL is the file's to name (§10d: the AdvancedQuery is the schedule).
+//   2. THE DEBARK. Only On-board rows were read, so the moment TDG recorded her debarked (2 Oct)
+//      the export fell back to the Counter's 25 Sep sign-off. She owed September (aboard on the
+//      30th), had filed her card, and was silently out of the denominator — with her hull.
+//      §10d: sign-off, the first the console knows, is TDG's own word, final. So a row the file
+//      no longer has On board still speaks, when it carries a real DEBARKEDDATE, about the leg the
+//      console already knows (embark on or after the current sign-on). It never resurrects a crew
+//      nothing else dates — an Inactive 2024 row must not put Maling back on Radiance — and a row
+//      that contradicts itself (debark before embark: Del Rosario's live row) places nobody.
 export function vesselIndex(vessels) {
   const rows = (vessels || []).filter((v) => v && v.name);
   const byKey = {};
@@ -194,15 +213,29 @@ export function vesselIndex(vessels) {
 
 export function placeFromRegistry(out, tdg, vidx, today) {
   if (!out || !tdg || !vidx) return null;
-  if (tdg.status !== 'On board') return null;
   const embark = /^\d{4}-\d{2}-\d{2}/.test(String(tdg.embarked_at || '')) ? String(tdg.embarked_at).slice(0, 10) : null;
   if (!embark || embark > today) return null;
   const name = canonShipWith(tdg.vessel, vidx.keys);
   const hull = name ? vidx.byKey[normShip(name)] : null;
   if (!hull) return null;
-  const current = out.sign_on ? String(out.sign_on).slice(0, 10) : null;
-  if (current && embark <= current) return null;
   const off = /^\d{4}-\d{2}-\d{2}/.test(String(tdg.debarked_at || '')) ? String(tdg.debarked_at).slice(0, 10) : null;
+  const current = out.sign_on ? String(out.sign_on).slice(0, 10) : null;
+
+  if (tdg.status === 'On board') {
+    if (current && embark < current) return null;
+    if (current && embark === current) {
+      // A date tie keeps today's dates — Rita's recorded sign-off included — but the hull is the
+      // file's to name. Returning no sign_on/sign_off keys leaves the console's dates untouched.
+      if (!out.ship || normShip(out.ship) === normShip(hull.name)) return null;
+      return { ship: hull.name, brand: hull.brand || null };
+    }
+    return { ship: hull.name, brand: hull.brand || null, sign_on: embark, sign_off: off };
+  }
+
+  // No longer On board: the row still closes the leg it describes, and only that.
+  if (!off || off < embark) return null;   // no real debark, or a row that contradicts itself
+  if (!current) return null;               // never resurrect a crew nothing else dates
+  if (embark < current) return null;       // the console already knows a newer leg
   return { ship: hull.name, brand: hull.brand || null, sign_on: embark, sign_off: off };
 }
 
@@ -233,7 +266,7 @@ export async function apiRosterExport(request, env) {
     env.DB.prepare(ROSTER_SQL).all(),
     env.DB.prepare('SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit').all().catch(() => ({ results: [] })),
     env.DB.prepare('SELECT sc, seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sign_on IS NOT NULL').all().catch(() => ({ results: [] })),
-    env.DB.prepare("SELECT agency_id, status, vessel, embarked_at, debarked_at FROM registry_snapshot WHERE status = 'On board'").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT agency_id, status, vessel, embarked_at, debarked_at FROM registry_snapshot WHERE status = 'On board' OR debarked_at IS NOT NULL").all().catch(() => ({ results: [] })),
     env.DB.prepare('SELECT id, name, brand FROM vessel').all().catch(() => ({ results: [] })),
   ]);
   const idx = indexEdits(editRes.results || []);
@@ -250,7 +283,8 @@ export async function apiRosterExport(request, env) {
     resolved[sc] = resolveLeg(leg, e && e.sc ? e : null);
   }
 
-  // The TDG file's On-board rows, one per crew (registry_snapshot is keyed on agency_id).
+  // The TDG file's rows that may place or close a leg — On board, or debarked with a date — one per
+  // crew (registry_snapshot is keyed on agency_id).
   const tdgBySc = {};
   for (const t of (tdgRes.results || [])) if (t && t.agency_id) tdgBySc[t.agency_id] = t;
   const vidx = vesselIndex(vesRes.results || []);
