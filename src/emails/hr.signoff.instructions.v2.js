@@ -16,7 +16,7 @@
 // one sentence, and a boarding pass: FROM the ship's code TO HOME via the sign-off port; the seafarer and position; signed
 // on · sign-off · audit window; a tear line; the reliever; a tear line; the one button, "Open my Digital Handover Notes".
 // The crew never reads "HON": the product is "Digital Handover Notes", hon.cims.work stays once as the address to type on a
-// ship's computer. The reliever's mobile and email are printed ONLY when TDG has the reliever (IN TDG: TDG's Earmarked row,
+// ship's computer. The reliever's mobile and email are printed ONLY when TDG has the reliever (the TDG PLANNING chip — read IN TDG until 26 Oct 2026: TDG's Earmarked row,
 // the file's own row, or Rita's card TDG also earmarks) — a plan only the console holds must reach nobody (§10d), and a
 // phone number in a crew email would reach the person before TDG has told them.
 // Built to the CIMS email standard: the canonical letterhead (cims-mast.js), tables and inline styles only, no rgba, no
@@ -152,11 +152,13 @@ export function instructionsEmail(d) {
     : relOn ? `Joins ${esc(ship || "the ship")} on ${shortDate(relOn)} ${relOn.slice(0, 4)}` : `Joining date to be confirmed`;
   const contact = (ph ? crow("Mobile", lnk("tel:" + ph.tel, esc(ph.shown)) + (ph.wa ? ` <span style="color:${C.grey};">&middot;</span> ` + lnk(ph.wa, "WhatsApp") : "")) : "")
     + (em ? crow("Email", lnk("mailto:" + em, esc(em).replace("@", "<wbr>@"))) : "");
+  // The chip sits on the label's row, so the reliever's name and date keep the full width on a phone ("TDG PLANNING", 26 Oct
+  // 2026, is wider than "IN TDG": beside the name it broke "Raymond Sample" onto two lines at 375px).
   const relBlock = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-   <td valign="top">${lab("Relieved by")}<div style="font-family:${FH};font-size:22px;font-weight:600;color:${rel ? C.navy : C.grey};line-height:28px;padding-top:4px;">${rel ? esc(rel.name) : "Not named yet"}</div>
-    <div style="font-family:${FB};font-size:13px;line-height:20px;color:${overlap ? C.gink : C.slate};padding-top:2px;">${relWhen}</div></td>
-   ${inTdg ? `<td valign="top" align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:5px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;color:${C.gink};white-space:nowrap;">IN TDG</td></tr></table></td>` : ""}
-  </tr></table>${contact ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">${contact}</table>` : ""}`;
+   <td valign="middle">${lab("Relieved by")}</td>
+   ${inTdg ? `<td valign="middle" align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:4px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;line-height:14px;color:${C.gink};white-space:nowrap;">TDG PLANNING</td></tr></table></td>` : ""}
+  </tr></table><div style="font-family:${FH};font-size:22px;font-weight:600;color:${rel ? C.navy : C.grey};line-height:28px;padding-top:4px;">${rel ? esc(rel.name) : "Not named yet"}</div>
+    <div style="font-family:${FB};font-size:13px;line-height:20px;color:${overlap ? C.gink : C.slate};padding-top:2px;">${relWhen}</div>${contact ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">${contact}</table>` : ""}`;
   const reviewFrom = off ? addDays(off, -14) : null, reviewTo = off ? addDays(off, -7) : null;
   const crewName = esc(d.crewName || d.firstName || "");
   const pass = `<tr><td class="px" style="padding:22px 32px 0 32px;">

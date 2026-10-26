@@ -887,10 +887,10 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   record" per bill. **A mail whose file is already loaded (same bytes → same key, status ok) is archived and receipted, never
   queued again** (`already_loaded`) — so re-sending a bill to sga@cims.work is the way to archive an original without
   re-applying the month. A failed archive is reported on the result and never blocks a load; a row that already holds the
-  bytes is never downgraded. **The ten workbooks Miguel uploaded on 15 Oct 2026 are loaded but their bytes are NOT in the
-  bucket**: this session parsed them outside the Worker, and neither the Microsoft 365 connector (1 MB upload cap) nor the D1
-  tool can carry a 2 MB binary — their `sga_source_file` rows say so (`r2_key` NULL, note). To keep them, drag each once on
-  Upload data (Replace → identical lines, then the archive) or email them to sga@cims.work once the Email Routing rule exists.
+  bytes is never downgraded. **Every bill July 2025 – September 2026 is kept** (Rita re-uploaded the 15 workbooks on Upload data,
+  23 Oct 2026, 19:59–20:12 UTC, Replace each time: 15 `sga_source_file` rows with an `r2_key`; lines and totals identical to the
+  15–16 Oct loads in every month; the six 2025 files are other copies than Miguel's, same figures). The rows of the copies parsed
+  outside the Worker on 15–16 Oct stay (`r2_key` NULL, note) as the record of those copies.
   Pinned by `test/sga_archive.test.js`, `test/mail_intake.test.js`.
 - **A BILL THAT DOES NOT RECONCILE IS HELD FOR RITA** (Miguel, 17 Oct 2026, of three options: "Hold it for Rita"). A workbook
   that arrives by itself — the inbox (`applyInbox`: the mail intake, the agent's rows) — whose lines + other charges do not
@@ -968,7 +968,11 @@ else TDG's undated Earmarked row). Sent by the daily auto-send (`auto_send.js`, 
 `auto_send_log`) and by the crew page's button, both through `sendInstructionsFor` / `apiInstrRequest`. Rules (Brain
 recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
 - Greeted by FIRST NAME (first word of TDG's first name). Signed by Rita; reply-to Rita; **CC onboardsupport@dg3.com**
-  (the whole CIMS team's distribution list).
+  (the whole CIMS team's distribution list) **and the ship's printshop mailbox** (Miguel, 26 Oct 2026: "u need to also cc the ship
+  where the seafarer is currently"; cims-timecard `ship_contact` via `audit.shipMailbox`, the welcome email's and the audit
+  request's mailbox, `instrCc` in `signoff_instructions.js`; no mailbox on record = onboardsupport alone, never guessed; the To
+  address never repeated). The handover-bonus paragraph matches the Score Card (`HON_FROM`, `pickHandover`: same ship, signed
+  sign-off −30 to +10 days, this crew as outgoing).
 - **Digital Handover Notes** (the HON app; open hon.cims.work, select the ship — no other click), mandatory; a short PRINTED
   copy still stays onboard: one for the reliever, one for the shipboard manager. The manager's title is the brand's:
   Azamara **BOM**, Royal **GSM**, Celebrity **DCM** (`MANAGER`). Never "GSM" fleet-wide.
@@ -988,15 +992,19 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   first name + surname) and TDG's position; Signed on · Sign-off · Audit window (sign-off −14 to −7); a tear line; the
   reliever; a tear line; the one button. **The crew never reads "HON"**: the product is "Digital Handover Notes";
   hon.cims.work stays once (step a) as the address to type on a ship's computer. **The reliever's mobile and email are
-  printed ONLY when TDG has the reliever** (`signoff_context.relieverInTdg`, the IN TDG chip: TDG's Earmarked row, a seat the
+  printed ONLY when TDG has the reliever** (`signoff_context.relieverInTdg`, the **TDG PLANNING** chip — Miguel, 26 Oct 2026, it read IN TDG; on the instructions pass it sits
+  on the "Relieved by" label's row so the name keeps the full width on a phone: TDG's Earmarked row, a seat the
   file put aboard, Rita's card the file confirms or earmarks for that hull — the dashboard's `tdgHas` reads the same; a
   card only the console holds, or "told Joy", is not): a plan only the console holds must reach nobody (§10d). A Philippine
   mobile reads "+63 917 555 0142" with tel: and WhatsApp links (`phoneOf`), anything else as written; TDG's "-" prints
   nothing. Every active crew had a phone and an email on file on 19 Oct 2026. **The reliever's handover pass is WIRED**
   (render approved 23 Oct 2026, "all approved"; `hr.signoff.reliever.v1`, proofs `docs/mockups/emails_20261023/`): it goes
   with the instructions email, the same send (the daily T-14 run and the crew page's button, `sendRelieverPass` in
-  `signoff_instructions.js`), TO the incoming printer — the outgoing one's name, mobile (WhatsApp) and email, "together"
-  only on an overlap, three steps (say hello, read the Digital Handover Notes, sign your own count); CC onboardsupport,
+  `signoff_instructions.js`), TO the incoming printer — the outgoing one's name, ONE "WhatsApp" row with the number (no second "Message X" line) and email,
+  "together" only on an overlap, three steps (say hello; **the Digital Handover Notes come by email** — HON mails the signed
+  notes to the outgoing, the incoming and onboardsupport, cims-hon `sendAssessmentEmail`, so the crew is not sent to
+  hon.cims.work; not there by the sign-on → reply and Rita sends it; sign your own count), Rita's signature block like the
+  instructions email (Miguel, 26 Oct 2026); CC onboardsupport,
   reply-to Rita. Only when TDG has the reliever (`rel.tdg`) and the reliever has an email; once per seat and reliever
   (`activity_log` `reliever_pass_sent`, key sc · sign-off · reliever); a failure is logged (`reliever_pass_failed`) and never
   blocks the instructions.
