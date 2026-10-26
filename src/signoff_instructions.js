@@ -18,6 +18,7 @@
 import { memoDdl } from "./ensure_memo.js";
 import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
 import { relieverEmail, TEMPLATE_ID as RELIEVER_TEMPLATE } from "./emails/hr.signoff.reliever.v1.js";
+import { shipMailbox } from "./audit.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
 // ACK_HTML in signoff_ack.js. /instr is a PUBLIC seafarer page and its inline <script> was
@@ -157,14 +158,14 @@ export function installInstr(deps) {
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)")
       .bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, (session && session.email) || null, now).run();
     var link = new URL(request.url).origin + "/instr?t=" + token;
-    var emailed = false, rp = null;
+    var emailed = false, rp = null, sentTo = null;
     if (b.send && r.email) {
-      try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
+      try { sentTo = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
       catch (e) { await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq); }
       if (emailed) rp = await sendRelieverPass(env, r, ctx);
     }
     await logActivity(env, session && session.email, "instr_request", r.sc + " #" + r.seq);
-    return json({ ok: true, link: link, crew_name: r.crew_name, emailed: emailed, hasEmail: !!r.email, reliever: rp });
+    return json({ ok: true, link: link, crew_name: r.crew_name, emailed: emailed, hasEmail: !!r.email, cc: sentTo ? sentTo.cc : null, reliever: rp });
   }
 
   // GET /api/instr/form?t=  (PUBLIC, token) — snapshot for the landing page
@@ -231,6 +232,21 @@ export function installInstr(deps) {
     return rel;
   }
 
+  // THE SHIP IS COPIED (Miguel, 26 Oct 2026, on Bernard Paqueo's Reflection email: "for this emial u need to also cc the ship
+  // where the seafarer is currently"): the printshop mailbox of the ship the seat is on (cims-timecard ship_contact, read only,
+  // the same mailbox the welcome email and the audit request use — audit.shipMailbox), beside onboardsupport. No mailbox on
+  // record = onboardsupport alone, never a guessed address; the same address as the To is never repeated.
+  async function instrCc(env, ship, to) {
+    var cc = [env.INSTR_CC || INSTR_CC];
+    if (!deps.contacts || !ship) return cc;
+    var rows = [];
+    try { rows = (await deps.contacts(env)) || []; } catch (e) { rows = []; }
+    var box = shipMailbox(rows, ship);
+    var seen = [String(to || "").toLowerCase()].concat(cc.map(function (x) { return String(x).toLowerCase(); }));
+    if (box && seen.indexOf(box.toLowerCase()) < 0) cc.push(box);
+    return cc;
+  }
+
   async function sendInstructions(env, o) {
     if (!env.MAILER) throw new Error("no_mailer");
     var r = o.r || {}, ctx = o.ctx || {};
@@ -241,13 +257,15 @@ export function installInstr(deps) {
       reliever: await relieverName(env, ctx.reliever || null),
       link: o.link, today: new Date().toISOString().slice(0, 10),
     });
+    var cc = await instrCc(env, ctx.ship || r.vessel, o.to);
     var out = await sendViaMailer(env, {
-      to: [o.to], cc: [env.INSTR_CC || INSTR_CC], replyTo: INSTR_REPLY_TO,
+      to: [o.to], cc: cc, replyTo: INSTR_REPLY_TO,
       subject: mail.subject, html: mail.html, text: mail.text,
       templateId: INSTR_TEMPLATE, critical: true,
       idempotencyKey: INSTR_TEMPLATE + ":" + o.instr_id
     });
-    if (!out.ok) throw new Error("mailer_" + (out.error || out.status || "failed"));
+    if (!out || out.ok !== true) throw new Error("mailer_" + ((out && (out.error || out.status)) || "failed"));
+    return { cc: cc };
   }
 
   // THE RELIEVER'S HANDOVER PASS (hr.signoff.reliever.v1; Miguel, 19 Oct 2026: "add .. the name .. phone and email of the
@@ -348,8 +366,9 @@ export function installInstr(deps) {
     var insId = "ins_" + crypto.randomUUID();
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
     var link = origin + "/instr?t=" + token;
-    try { await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); } catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
-    try { var rp = await sendRelieverPass(env, r, ctx); return { emailed: true, crew_name: r.crew_name, to: r.email, reliever: rp }; }
+    var sent;
+    try { sent = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); } catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+    try { var rp = await sendRelieverPass(env, r, ctx); return { emailed: true, crew_name: r.crew_name, to: r.email, cc: sent && sent.cc, reliever: rp }; }
     catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
   }
   instrHandle.sendInstructionsFor = sendInstructionsFor;

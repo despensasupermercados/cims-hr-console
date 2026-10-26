@@ -9,7 +9,7 @@
 // NOT WIRED TO SEND (23 Oct 2026): an email ships only after Miguel signs off its render (CIMS email standard §5).
 import { mastRows } from "../cims-mast.js";
 import { mdWords } from "../span_md.js";
-import { shipFullName, portName, phoneOf, shortDate, longDate, firstWord, HON_URL } from "./hr.signoff.instructions.v2.js";
+import { shipFullName, portName, phoneOf, shortDate, longDate, firstWord } from "./hr.signoff.instructions.v2.js";
 
 export const TEMPLATE_ID = "hr.signoff.reliever.v1";
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB",
@@ -35,7 +35,7 @@ export function relieverEmail(d) {
   const subject = "You take over from " + (o.first || firstWord(o.name)) + " on " + ship;
   // Phone first (Miguel, 23 Oct 2026, on the render: "the mobile version needs work"): a two-line headline at 375px, the
   // pass in rows that never sit three abreast (two dates side by side, the overlap a line of its own), the ship and the
-  // IN TDG chip in the pass's band so the name has its line, WhatsApp a row of its own.
+  // TDG PLANNING chip (read IN TDG until 26 Oct 2026) in the pass's band so the name has its line, WhatsApp a row of its own.
   const head = `Over to you, ${name}` + (/\.$/.test(name) ? "" : ".");
   const head2 = off ? `${of} signs off ${shortDate(off)}.` : `${of} hands over the seat.`;
   const lead = overlap
@@ -51,7 +51,9 @@ export function relieverEmail(d) {
  <td width="14" height="28" bgcolor="${C.cloud}" style="background:${C.cloud};font-size:0;line-height:0;border-radius:14px 0 0 14px;">&nbsp;</td></tr></table></td></tr>`;
   const cell = (k, v, w, al) => `<td width="${w}" valign="top" align="${al}" style="text-align:${al};padding:0;">${lab(k, al)}<div style="font-family:${FH};font-size:18px;font-weight:600;color:${C.navy};line-height:24px;padding-top:4px;white-space:nowrap;">${v}</div></td>`;
   const crow = (k, v) => `<tr><td width="76" valign="top" style="font-family:${FB};font-size:13px;line-height:26px;color:${C.slate};">${k}</td><td valign="top" style="font-family:${FB};font-size:15px;line-height:26px;color:${C.body};word-break:break-word;">${v}</td></tr>`;
-  const contact = (ph ? crow("Mobile", lnk("tel:" + ph.tel, esc(ph.shown))) + (ph.wa ? crow("WhatsApp", lnk(ph.wa, "Message " + of)) : "") : "")
+  // ONE row for the phone, named for what the crew use it for (Miguel, 26 Oct 2026: "use the wording whatsapp for the telephone
+  // and delete the [other] line"): WhatsApp + the number, opening the chat; a number WhatsApp cannot take reads Mobile.
+  const contact = (ph ? crow(ph.wa ? "WhatsApp" : "Mobile", lnk(ph.wa || "tel:" + ph.tel, esc(ph.shown))) : "")
     + (em ? crow("Email", lnk("mailto:" + em, esc(em).replace("@", "<wbr>@"))) : "");
 
   const pass = `<tr><td class="px" style="padding:22px 32px 0 32px;">
@@ -60,7 +62,7 @@ export function relieverEmail(d) {
   <tr><td bgcolor="${C.deep}" style="background:${C.deep};border-radius:16px 16px 0 0;padding:13px 22px;">
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td style="font-family:${FB};font-size:11px;font-weight:700;letter-spacing:2px;line-height:16px;color:${C.sub};">HANDOVER PASS</td>
-    <td align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:4px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;line-height:14px;color:${C.gink};white-space:nowrap;">IN TDG</td></tr></table></td></tr></table></td></tr>
+    <td align="right" style="padding-left:12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" align="right"><tr><td bgcolor="${C.gtint}" style="background:${C.gtint};border-radius:999px;padding:4px 10px;font-family:${FB};font-size:11px;font-weight:700;letter-spacing:0.6px;line-height:14px;color:${C.gink};white-space:nowrap;">TDG PLANNING</td></tr></table></td></tr></table></td></tr>
   <tr><td class="pp" style="padding:18px 22px 0 22px;">
    ${lab("You take over from")}<div style="font-family:${FH};font-size:22px;font-weight:600;color:${C.navy};line-height:28px;padding-top:4px;">${esc(o.name || "")}</div>${o.position ? `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:2px;">${esc(o.position)}${" · " + esc(ship)}</div>` : `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:2px;">${esc(ship)}</div>`}
    ${contact ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;">${contact}</table>` : `<div style="font-family:${FB};font-size:13px;color:${C.slate};padding-top:10px;">No mobile or email on file. Rita can put you in touch.</div>`}
@@ -77,7 +79,9 @@ export function relieverEmail(d) {
   <td valign="top" style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};padding-top:3px;">${t}</td></tr></table></td></tr>`;
   const steps = [
     `<b>Say hello before ${of} signs off.</b> A short message: who you are, when you join, and anything you want ready for you.`,
-    `<b>Read the Digital Handover Notes.</b> ${of} writes them before leaving. Open <a href="${HON_URL}" style="color:${C.navy};font-weight:700;">hon.cims.work</a> on any device, select ${esc(ship)}. No login.`,
+    // HON emails the signed notes to the incoming crew (cims-hon mailer.js sendAssessmentEmail: outgoing, incoming, onboardsupport)
+    // — the crew is told it arrives, not sent to look for it (Miguel, 26 Oct 2026); Rita is the fallback when it does not.
+    `<b>Your copy of the Digital Handover Notes comes by email.</b> ${of} writes them before leaving; once they are signed, a copy reaches this email address. Not there by your sign-on? Reply to this email and Rita sends it.`,
     `<b>Count and sign your own count when you join.</b> ${of} signs one count, you sign yours; a signed count is never rewritten.`,
   ];
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>${esc(subject)}</title>
@@ -91,14 +95,22 @@ ${mastRows()}
 <div style="font-family:${FB};font-size:15px;line-height:23px;color:${C.body};padding-top:12px;">${lead}</div></td></tr>
 ${pass}
 ${steps.map((t, i) => li(i + 1, t)).join("")}
-<tr><td class="px" style="padding:24px 32px 0 32px;font-family:${FB};font-size:14px;line-height:22px;color:${C.body};">Welcome aboard ${esc(ship)}. Questions, reply to this email.<br><b style="color:${C.navy};">Rita Berenyi</b> <span style="color:${C.slate};">· People &amp; Culture, CIMS</span></td></tr>
-<tr><td height="28" style="height:28px;font-size:0;line-height:0;">&nbsp;</td></tr>
-<tr><td class="px" style="padding:20px 32px 24px 32px;font-family:${FB};font-size:12px;color:${C.slate};line-height:1.5;border-top:1px solid #E5E7EB;">CIMS · Cruise Industry Managed Services · sent to the incoming Printer Specialist once TDG has the crew change. ${of} gets your contact in the sign-off email.</td></tr>
+<tr><td class="px" style="padding:28px 32px 28px 32px;">
+ <div style="font-family:${FH};font-size:18px;font-weight:600;color:${C.navy};line-height:24px;">Welcome aboard ${esc(ship)}.</div>
+ <div style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};padding:4px 0 14px 0;">Any question before you join, reply to this email.</div>
+ <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-left:3px solid ${C.green};padding:2px 0 2px 14px;">
+  <div style="font-family:${FH};font-size:15px;font-weight:600;color:${C.navy};line-height:20px;">Rita Berenyi</div>
+  <div style="font-family:${FB};font-size:13px;color:${C.body};line-height:20px;">Manager, People &amp; Culture</div>
+  <div style="font-family:${FB};font-size:13px;color:${C.slate};line-height:20px;padding-top:4px;">M +36 70 270 3245<br>E <a href="mailto:Rita.Berenyi@dg3.com" style="color:${C.navy};text-decoration:none;">Rita.Berenyi@dg3.com</a></div>
+  <div style="font-family:${FB};font-size:13px;color:${C.body};line-height:20px;padding-top:4px;">DG3 Diversified Global Graphics Group</div>
+ </td></tr></table></td></tr>
+<tr><td class="px" bgcolor="${C.cloud}" style="background:${C.cloud};padding:16px 32px;font-family:${FB};font-size:11px;line-height:17px;color:${C.slate};">CIMS · Cruise Industry Managed Services · sent to the incoming Printer Specialist once TDG has the crew change. ${of} gets your contact in the sign-off email.</td></tr>
 </table></td></tr></table></body></html>`;
   const text = [`You take over from ${o.first || firstWord(o.name)}${d.firstName ? ", " + String(d.firstName).replace(/\.+$/, "") : ""}. ${ship}${off ? ", sign-off " + longDate(off) : ""}${port ? ", " + port : ""}.`,
     overlap ? `You are aboard together from ${longDate(overlap.from)} (${mdWords(overlap.from, off)}).` : `You may or may not meet aboard, so a short message before the sign-off helps.`,
-    [o.name, ph ? "Mobile: " + ph.shown + (ph.wa ? " (WhatsApp " + ph.wa + ")" : "") : "", em ? "Email: " + em : ""].filter(Boolean).join("\n"),
-    "1. Say hello before the sign-off.\n2. Read the Digital Handover Notes: " + HON_URL + ", select " + ship + ". No login.\n3. Count and sign your own count when you join.",
-    "Rita Berenyi, People & Culture, CIMS"].join("\n\n");
+    [o.name, ph ? (ph.wa ? "WhatsApp: " + ph.shown + " (" + ph.wa + ")" : "Mobile: " + ph.shown) : "", em ? "Email: " + em : ""].filter(Boolean).join("\n"),
+    "1. Say hello before the sign-off.\n2. Your copy of the Digital Handover Notes comes by email when " + (o.first || firstWord(o.name)) + " signs them. Not there by your sign-on? Reply and Rita sends it.\n3. Count and sign your own count when you join.",
+    "Welcome aboard " + ship + ". Any question before you join, reply to this email.",
+    "Rita Berenyi\nManager, People & Culture\nM +36 70 270 3245\nE Rita.Berenyi@dg3.com\nDG3 Diversified Global Graphics Group"].join("\n\n");
   return { subject, html, text };
 }

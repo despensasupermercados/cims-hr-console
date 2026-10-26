@@ -31,8 +31,13 @@ test("the reliever's pass: the outgoing printer's contact, 'together' only on an
   assert.equal(a.subject, "You take over from Kevin on Azamara Pursuit");
   const t = plain(a.html);
   for (const s of ["Over to you, A.J.", "Kevin signs off 31 Oct.", "You take over Kevin's seat on Azamara Pursuit, signing off in Barcelona.",
-    "You are aboard together from 16 October", "+63 917 555 0142", "WhatsApp Message Kevin", "kevin.sample@example.com", "Together aboard 16 Oct–31 Oct · 15 days"]) assert.ok(t.includes(s), s);
+    "You are aboard together from 16 October", "WhatsApp +63 917 555 0142", "kevin.sample@example.com", "Together aboard 16 Oct–31 Oct · 15 days"]) assert.ok(t.includes(s), s);
   assert.ok(!t.includes("A.J.."), "one full stop after an initial");
+  // 26 Oct 2026 (Miguel): one WhatsApp row (no "Message Kevin" line), the notes come by email (no hon.cims.work), Rita signs
+  assert.ok(!t.includes("Message Kevin") && !/\bMobile\b/.test(t), "one row for the phone, named WhatsApp");
+  assert.ok(t.includes("Your copy of the Digital Handover Notes comes by email.") && t.includes("Reply to this email and Rita sends it."));
+  assert.ok(!a.html.includes("hon.cims.work"), "the incoming crew is not sent to look for the notes");
+  assert.ok(t.includes("Welcome aboard Azamara Pursuit.") && t.includes("Manager, People & Culture"));
   // phone first: two date cells side by side, never three abreast
   assert.equal((a.html.match(/width="50%"/g) || []).length, 2);
   assert.doesNotMatch(a.html, /width="33%"/);

@@ -102,7 +102,7 @@ test("no reliever named yet: the email still reads, and never invents a name", (
   assert.match(t, /You may not meet your reliever aboard, so your notes must carry everything\./);
   assert.match(t, /Your reliever must not inherit a shortage/);
   assert.match(t, /leave one for your reliever and give one to your BOM/);
-  assert.doesNotMatch(t, /IN TDG|Mobile|WhatsApp/);
+  assert.doesNotMatch(t, /TDG PLANNING|IN TDG|Mobile|WhatsApp/);
   assert.match(m.text, /Your reliever is not named yet\./);
 });
 
@@ -161,6 +161,7 @@ function senderHarness(opts = {}) {
     instrContext: opts.ctx ? async () => opts.ctx : async (env, sc) => seatContexts(SECTIONS)[sc] || null,
     boardLegs: async () => [{ ours: true, sc: opts.sc || "SC-K", is_current: true, on: "2026-05-02", off: opts.off || "2026-10-31", ship: "Pursuit", disembark: "HONG KONG, CHINA" }],
     sendViaMailer: async (env, e) => { sent.push(e); return { ok: true }; },
+    ...(opts.contacts ? { contacts: async () => opts.contacts } : {}),
   });
   return { h, sent, env: { DB: db, SESSION_SECRET: "s", MAILER: {} } };
 }
@@ -182,12 +183,12 @@ test("the T-14 send: v2 template, CC onboardsupport@dg3.com, reply to Rita, reli
   assert.equal(e.critical, true);
   const t = text(e.html);
   assert.match(t, /Two weeks to go, Kevin\./);
-  assert.match(t, /Relieved by A\.J\. Baleña/, "first word of the first name + the surname, not every given name");
+  assert.match(t, /Relieved by (TDG PLANNING )?A\.J\. Baleña/, "first word of the first name + the surname, not every given name");
   assert.doesNotMatch(t, /Lorenzo/);
   assert.match(t, /Seafarer Kevin Jugao/, "the pass names the crew as they say it");
   assert.match(t, /Signed on 2 May 2026 Sign-off 31 Oct 2026 Audit 17–24 Oct/);
   // TDG earmarks A.J. for Pursuit: IN TDG, and his mobile and email are on the pass so the two can be in touch
-  assert.match(t, /IN TDG/);
+  assert.match(t, /TDG PLANNING/); assert.doesNotMatch(t, /IN TDG/, "the chip reads TDG PLANNING (Miguel, 26 Oct 2026)");
   assert.match(t, /Mobile \+63 917 555 0142 · WhatsApp Email aj\.balena@example\.com/);
   assert.match(e.html, /href="tel:\+639175550142"/);
   assert.match(e.html, /href="https:\/\/wa\.me\/639175550142"/);
@@ -210,7 +211,7 @@ test("the manual send from the crew page reads the same board context", async (t
   const t = text(sent[0].html);
   assert.match(t, /To HOME via Hong Kong/);
   assert.match(t, /Sign-off 31 Oct 2026/);
-  assert.match(t, /Relieved by A\.J\. Baleña/);
+  assert.match(t, /Relieved by (TDG PLANNING )?A\.J\. Baleña/);
   assert.match(t, /select Azamara Pursuit\./);
 });
 
@@ -321,7 +322,8 @@ test("everything off: nothing runs", async () => {
 
 test("the worker feeds the board's context to both senders and keeps two switches in the rail", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
-  assert.equal((W.match(/instrContext: instrSeatContext, sendViaMailer, boardLegs \}\)/g) || []).length, 1, "installed once at module level (16 Oct 2026)");
+  assert.equal((W.match(/installInstr\(\{/g) || []).length, 1, "installed once at module level (16 Oct 2026)");
+  assert.match(W, /installInstr\(\{[^\n]*instrContext: instrSeatContext, sendViaMailer, boardLegs,\n\s*contacts: /, "with the board's context and the ship contacts (26 Oct 2026)");
   assert.match(W, /_autoInstr\(p, request, env, url, session\)/, "the fetch handler dispatches through the module-level handle");
   assert.match(W, /return Object\.values\(seatContexts\(sections\)\)\.map/);
   assert.match(W, /id="autoToggle" onclick="autoToggleClick\(&#39;instructions&#39;\)"/);
@@ -418,14 +420,14 @@ test("a training visit: never instructed, no sign-off link, never the reliever; 
 test("the reliever's phone and email are printed only when TDG has the reliever", () => {
   const base = { name: "Francis Pintucan", first: "Francis", on: null, phone: "09175550142", email: "francis@example.com" };
   const plan = text(instructionsEmail({ ...KEVIN, reliever: { ...base, tdg: false } }).html);
-  assert.doesNotMatch(plan, /IN TDG|Mobile|WhatsApp|francis@example\.com|555/, "a plan only the console holds reaches nobody (§10d)");
+  assert.doesNotMatch(plan, /TDG PLANNING|IN TDG|Mobile|WhatsApp|francis@example\.com|555/, "a plan only the console holds reaches nobody (§10d)");
   assert.match(plan, /Relieved by Francis Pintucan Joining date to be confirmed/);
   const inTdg = instructionsEmail({ ...KEVIN, reliever: { ...base, tdg: true } });
-  assert.match(text(inTdg.html), /IN TDG Mobile \+63 917 555 0142 · WhatsApp Email francis@example\.com/);
+  assert.match(text(inTdg.html), /TDG PLANNING Francis Pintucan Joining date to be confirmed Mobile \+63 917 555 0142 · WhatsApp Email francis@example\.com/);
   assert.match(text(inTdg.html), /A short message before you leave helps: introduce yourself/);
   // TDG has them but the crew row carries nothing usable: no empty rows, no "Mobile -"
   const bare = text(instructionsEmail({ ...KEVIN, reliever: { ...base, tdg: true, phone: "-", email: "n/a" } }).html);
-  assert.match(bare, /IN TDG/);
+  assert.match(bare, /TDG PLANNING/);
   assert.doesNotMatch(bare, /Mobile|Email francis|short message/);
 });
 
@@ -462,7 +464,7 @@ test("the pass: ship code to HOME, the three dates, the days to go said once in 
   assert.match(t, /Two weeks to go, Christjhelen\. Here is your sign-off pass\./);
   assert.match(t, /SIGN-OFF PASS 14 DAYS TO GO From OV Ovation of the Seas To HOME via Los Angeles/);
   assert.match(t, /Seafarer Christjhelen Racho Printer Specialist Signed on 22 Apr 2026 Sign-off 2 Nov 2026 Audit 19–26 Oct/);
-  assert.match(t, /Relieved by Francis Pintucan Joining date to be confirmed IN TDG/);
+  assert.match(t, /Relieved by TDG PLANNING Francis Pintucan Joining date to be confirmed/, "the chip on the label's row, the name full width (26 Oct 2026)");
   assert.equal((m.html.match(/Open my Digital Handover Notes/g) || []).length, 1);
   assert.match(m.html, /margin-right:-1\.6px;">To</, "a right-aligned spaced label is pulled back by its spacing");
   // no port, no sign-on: said, never guessed
@@ -515,4 +517,24 @@ test("the reliever's pass is not sent when TDG does not have the reliever, nor t
   H.env.DB.prepare = (sql) => { const st = prep(sql); if (/reliever_pass_sent/.test(sql)) st.first = async () => ({ x: 1 }); return st; };
   r = await H.h.sendInstructionsFor(H.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
   assert.equal(H.sent.length, 1); assert.equal(r.reliever.why, "already_sent");
+});
+
+// Miguel, 26 Oct 2026, on Bernard Paqueo's Celebrity Reflection email: "for this emial u need to also cc the ship where the
+// seafarer is currently". The ship's printshop mailbox (cims-timecard ship_contact, audit.shipMailbox) joins the copy.
+test("the instructions email copies the ship's mailbox beside onboardsupport; no mailbox on record = onboardsupport alone", async (tc) => {
+  tc.mock.timers.enable({ apis: ["Date"], now: ON_17_OCT });
+  const ctx = seatContexts(SECTIONS)["SC-K"];
+  const contacts = [{ ship: "Azamara Pursuit", email: "pursuit.printshop@azamara.example", role: "printer_specialist" }, { ship: "Celebrity Reflection", email: "rf@celebrity.example", role: "printer_specialist" }];
+  const H = senderHarness({ contacts });
+  const r = await H.h.sendInstructionsFor(H.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
+  assert.equal(r.emailed, true);
+  assert.deepEqual(H.sent[0].cc, ["onboardsupport@dg3.com", "pursuit.printshop@azamara.example"], "the ship he is on, never another hull's");
+  assert.deepEqual(r.cc, H.sent[0].cc, "the result names the copy");
+  assert.deepEqual(H.sent[1].cc, ["onboardsupport@dg3.com"], "the reliever's pass is unchanged");
+  const N = senderHarness({ contacts: [{ ship: "Celebrity Reflection", email: "rf@celebrity.example", role: "printer_specialist" }] });
+  await N.h.sendInstructionsFor(N.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
+  assert.deepEqual(N.sent[0].cc, ["onboardsupport@dg3.com"], "no mailbox for this ship: nothing guessed");
+  const D = senderHarness({ contacts: [{ ship: "Azamara Pursuit", email: "Kevin@example.com", role: "printer_specialist" }] });
+  await D.h.sendInstructionsFor(D.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
+  assert.deepEqual(D.sent[0].cc, ["onboardsupport@dg3.com"], "the To address is never copied again");
 });
