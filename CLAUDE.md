@@ -1148,7 +1148,7 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   Yes = 1–5. The supervisor statement names the line's title: Royal GSM, Celebrity DCM, Azamara BOM, NCL **shipboard manager**.
 - **Who is asked**: a contract the Keyman board shows ENDED (offSource tdg / rita / card — a projected sign-off that passed is
   held, still aboard, never asked), never a training visit, **3 days after the sign-off** (`surveyDue`: off on or before
-  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 14, never before the switch went on; Miguel, 23 Oct 2026,
+  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on; Miguel, 23 Oct 2026,
   "ok go ahead": the delay gives Rita time to record why a contract ended, so a Performance / Medical / Compassionate end
   is not asked — it was the morning after until then). One per contract (`ux_crew_survey_contract` on sc + sign-on).
 - **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own

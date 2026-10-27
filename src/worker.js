@@ -8358,8 +8358,21 @@ function srvDraw(){
   var src=d.sources||{};
   h+='<div class=liveband>&#9679; LIVE DATA &mdash; '+(src.forms||0)+' answers imported from the Microsoft Forms survey &middot; '+(src.console||0)+' from the console &middot; '
    +(d.enabled?'asked 3 days after each sign-off since '+srvDay(d.since):'the daily invitation is off')+'</div>';
+  // The loop is drawn in every period, answers or none (27 Oct 2026 review): with no answer yet it is the only place that
+  // names who has no email and who was not asked on purpose (Send anyway).
+  function loopHtml(){
+    var L=d.loop||{},lmax=Math.max(1,L.signedOff||0,L.invited||0);
+    var bar=function(lab,n){n=n||0;return '<div class=frow><span class=fl>'+lab+'</span><span class=fbar><i style="width:'+Math.round(n/lmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+n+'</span></div>';};
+    return '<div class="rblk svlp"><h3>Are we hearing from everyone?</h3>'
+     +bar('Signed off',L.signedOff)+bar('Asked',L.invited)+bar('Opened',L.opened)+bar('Answered',L.answered)
+     +((d.waiting||[]).length?'<div class=csub style="margin-top:8px">Waiting: '+d.waiting.map(function(w){return srvWho(w.name,w.agency_id)+' ('+escHtml(w.ship||'')+', asked '+srvDay(w.invited_at)+(w.reminded_at?', reminded':'')+')';}).join(', ')+'.</div>':'')
+     +((L.noEmail||[]).length?'<div class=csub style="margin-top:8px;color:var(--red)">No email on file, never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+')';}).join(', ')+'. Add it in Edit crew.</div>':'')
+     +((L.skipped||[]).length?'<div class=csub style="margin-top:8px">Not asked, on purpose:</div>'+L.skipped.map(function(x){return '<div class=svskip>'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join(''):'')
+     +'<div class=csub style="margin-top:8px">Signed off counts the contracts the Keyman board shows ended in the period; the other three count the console&rsquo;s invitations.</div></div>';
+  }
   if(!d.n){
     h+='<div class=rblk><div class=csub style="padding:14px 4px">No answers in this period. Widen the range &mdash; the Forms history starts in 2024.</div></div>';
+    h+='<div class=rgrid2 style="margin-top:12px">'+loopHtml()+'</div>';
     $('#rptbody').innerHTML=h;srvBind();return;
   }
   // ---- KPI strip
@@ -8405,14 +8418,7 @@ function srvDraw(){
      +G.map(function(g){var ex=g.items[0];return '<tr><td><b>'+escHtml(g.label)+'</b>'+(ex?'<div class=csub style="margin-top:2px">&ldquo;'+escHtml(ex.clause)+'&rdquo;</div>':'')+'</td><td class=nw>'+(g.owner?escHtml(g.owner):'<span class=mu>not set</span>')+'</td><td class=r style="font-weight:800;color:'+(g.hot?'var(--red)':'var(--navy)')+'">'+g.n+'</td></tr>';}).join('')
      +'</tbody></table></div><div class=csub style="margin-top:8px">Grouped by keyword, no AI; one answer can ask about two themes.'+(d.thanks?' '+d.thanks+' wrote thanks or &ldquo;all good&rdquo;, not counted as a fix.':'')+' Every answer&rsquo;s own words are in the table below.</div>'
      :'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
-  var L=d.loop,lmax=Math.max(1,L.signedOff,L.invited);
-  var bar=function(lab,n){return '<div class=frow><span class=fl>'+lab+'</span><span class=fbar><i style="width:'+Math.round(n/lmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+n+'</span></div>';};
-  h+='<div class="rblk svlp"><h3>Are we hearing from everyone?</h3>'
-   +bar('Signed off',L.signedOff)+bar('Asked',L.invited)+bar('Opened',L.opened)+bar('Answered',L.answered)
-   +(d.waiting.length?'<div class=csub style="margin-top:8px">Waiting: '+d.waiting.map(function(w){return srvWho(w.name,w.agency_id)+' ('+escHtml(w.ship||'')+', asked '+srvDay(w.invited_at)+(w.reminded_at?', reminded':'')+')';}).join(', ')+'.</div>':'')
-   +(L.noEmail.length?'<div class=csub style="margin-top:8px;color:var(--red)">No email on file, never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+')';}).join(', ')+'. Add it in Edit crew.</div>':'')
-   +((L.skipped||[]).length?'<div class=csub style="margin-top:8px">Not asked, on purpose:</div>'+L.skipped.map(function(x){return '<div class=svskip>'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join(''):'')
-   +'<div class=csub style="margin-top:8px">Signed off counts the contracts the Keyman board shows ended in the period; the other three count the console&rsquo;s invitations.</div></div>';
+  h+=loopHtml();
   h+='</div>';
   // ---- the latest answers (the Shipboard Feedback report's Latest reviews); all of them one tap away
   var LS=SRV_ALL?d.list:d.list.slice(0,10);
