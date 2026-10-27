@@ -112,7 +112,7 @@ test("apiBonusCrew opens the Score Card through defaultScoreLeg, never the inlin
   const body = src.slice(i, src.indexOf("\nasync function apiContracts(", i));
   assert.match(body, /defaultScoreLeg\(HIST, cr\.agency_id, td, \{ outcomes: outs\.results \|\| \[\] \}\)/);
   assert.doesNotMatch(body, /const sched = current \|\| bestPast \|\| bestFut/);
-  assert.match(src, /import \{ classifyWindow, defaultScoreLeg, commitBlock \} from "\.\/scorequeue\.js"/);
+  assert.match(src, /import \{ classifyWindow, defaultScoreLeg, commitBlock, scoreContracts \} from "\.\/scorequeue\.js"/);
 });
 
 /* ---- MIGUEL'S ANSWERS OF 17 OCT 2026: one contract per transfer, after the sign-off, oldest first, TDG ends it ---- */

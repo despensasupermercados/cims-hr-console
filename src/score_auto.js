@@ -160,6 +160,22 @@ export function monoShare(rows, keys) {
   const days = hit.map((r) => [day(r.a), day(r.b)]).filter(([a, b]) => a && b);
   return { pct: (m / (c + m)) * 100, mono: m, total: c + m, ships: hit.map((r) => r.ship), from: days.map((d) => d[0]).sort()[0] || null, to: days.map((d) => d[1]).sort().pop() || null };
 }
+// A TRANSFER reads each ship's clicks on that ship's own days (27 Oct 2026 review, Tuazon: "Explorer, Jewel" summed both
+// hulls over the whole contract — Explorer's October clicks were his successor's, 20.3% mono, 0 points, against 12.5% on
+// Jewel where he was). The crew's own legs on the card's ships, clipped to the contract: { shipKey: [[from, to], ...] }.
+// No leg found = null: whose clicks are whose is unknown, said on the card, never guessed.
+export function legWindows(legs, sc, keys, on, off) {
+  if (!Array.isArray(legs)) return null;
+  const out = {};
+  for (const l of legs) {
+    if (!l || l.sc !== sc || l.visit || l.ours === false || !day(l.on)) continue;
+    const k = shipKey(l.ship);
+    if (!keys.includes(k)) continue;
+    const a = day(l.on) > on ? day(l.on) : on, lo = day(l.off) || off, b = lo < off ? lo : off;
+    if (a <= b) (out[k] = out[k] || []).push([a, b]);
+  }
+  return Object.keys(out).length ? out : null;
+}
 const fmtN = (n) => Math.round(n).toLocaleString("en-US");
 export function monoLine(x, on) {
   const late = x.from > on ? " (OBP's clicks on file begin " + x.from + "; the contract began " + on + ")" : "";
@@ -186,9 +202,9 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
     env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
     env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
-    env.PARTS_DB && on && keys.length && deps.boardLegs ? Promise.resolve().then(deps.boardLegs).catch(() => null) : null,
+    ((env.PARTS_DB && on && keys.length) || (env.HON_DB && on && keys.length > 1)) && deps.boardLegs ? Promise.resolve().then(deps.boardLegs).catch(() => null) : null,
     // presses only (is_mfd 0), per ship, the contract's days; a table not created yet is no data, any other error is said
-    env.HON_DB && on && keys.length ? env.HON_DB.prepare("SELECT ship, SUM(color) AS c, SUM(mono) AS m, MIN(day) AS a, MAX(day) AS b FROM weekly_obp_clicks WHERE is_mfd = 0 AND ship IS NOT NULL AND day >= ? AND day <= ? GROUP BY ship").bind(on, off).all()
+    env.HON_DB && on && keys.length ? env.HON_DB.prepare("SELECT ship, " + (keys.length > 1 ? "day, " : "") + "SUM(color) AS c, SUM(mono) AS m, MIN(day) AS a, MAX(day) AS b FROM weekly_obp_clicks WHERE is_mfd = 0 AND ship IS NOT NULL AND day >= ? AND day <= ? GROUP BY ship" + (keys.length > 1 ? ", day" : "")).bind(on, off).all()
       .catch((e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail("clicks")(e))) : none(),
   ]);
   // An answer given BEFORE this contract's sign-on is the previous contract's (16 Oct 2026): nobody superseded it because
@@ -240,7 +256,13 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   // `requestedAt` decides which contract the audit is (bonus.js autoScore, Miguel 17 Oct 2026: "The one it was requested in")
   const allAud = (audits.results || []).map((a) => ({ id: a.request_id, ship: a.ship, score: a.score, at: a.filed_at, requestedAt: a.requested_at || null, open: /no sign-in/.test(String(a.filed_by || "")) }));
   const aud = keys.length ? allAud.filter((a) => keys.includes(shipKey(a.ship))) : [];
-  const mono = monoShare(clicks.results || [], keys);
+  let clickRows = clicks.results || [];
+  if (keys.length > 1 && !failed.clicks && clickRows.length) {
+    const win = legWindows(legs, sc, keys, on, off);
+    if (!win) { failed.clicks = "this contract's legs could not be read, so whose clicks are whose is unknown"; clickRows = []; }
+    else clickRows = clickRows.filter((r) => (win[shipKey(r.ship)] || []).some(([a, b]) => day(r.day) >= a && day(r.day) <= b));
+  }
+  const mono = monoShare(clickRows, keys);
   const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: mono ? { pct: mono.pct } : null });
   const notes = [];
   for (const m of notMine) {
