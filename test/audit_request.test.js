@@ -217,7 +217,7 @@ test("the emails keep the CIMS standard: letterhead, no rgba or gradient, a butt
   assert.doesNotMatch(docs.html, /\breplace\b/i); assert.match(docs.html, /copy shows marks above/);
 });
 
-test("Dexter's grade: only once the documents are in, a sentence for 3 or below, filed once, carried on the request", async () => {
+test("Dexter's grade: only once the documents are in, never a TEST request, and never three ratings alone (steps_required)", async () => {
   const t = setup();
   const { id } = await makeRequest(t);
   const g = (body) => t.call("POST", "/api/audit/request/grade", Object.assign({ id }, body));
@@ -227,18 +227,14 @@ test("Dexter's grade: only once the documents are in, a sentence for 3 or below,
   assert.equal(tr.status, 409, "a TEST request is a rehearsal: its grade would reach a real Score Card");
   assert.equal((await tr.json()).error, "test_request");
   t.db.prepare("UPDATE audit_request SET test_mode=0 WHERE id=?").run(id);
-  for (const v of [true, " 5 ", "0x5", [5], 4.5, "6"]) assert.equal((await g({ inventory: v, technical: 5, collaterals: 5 })).status, 400, "not a rating: " + JSON.stringify(v));
-  assert.deepEqual((await (await g({ inventory: 2, technical: 5, collaterals: 5, note: {} })).json()).fields, ["note"], "a note is text, never [object Object]");
-  const bad = await g({ inventory: 3, technical: 5, collaterals: 5 });
-  assert.equal(bad.status, 400); assert.deepEqual((await bad.json()).fields, ["note"]);
-  const ok = await (await g({ inventory: 3, technical: 5, collaterals: 4, overall: "", note: "OBP not updated after the drum change." })).json();
-  assert.deepEqual(ok, { ok: true, score: 4, from: "average" }, "no Overall: (3+5+4)/3 = 4");
-  assert.equal((await g({ inventory: 5, technical: 5, collaterals: 5, overall: 5 })).status, 409, "filed once, never rewritten");
-  const row = t.db.prepare("SELECT r_overall, score, score_from, filed_by FROM audit_eval").get();
-  assert.deepEqual({ ...row }, { r_overall: null, score: 4, score_from: "average", filed_by: "dexter.lawrence@dg3.com" });
-  assert.equal(t.db.prepare("SELECT status FROM audit_visit").get().status, "filed");
+  // the 15 Oct 2026 screen's three numbers are refused since 27 Oct 2026: the grade is filed with its steps (fileVisit,
+  // test/audit_visit.test.js) or not at all — on the open site anyone could POST three numbers onto a real Score Card
+  const bare = await g({ inventory: 3, technical: 5, collaterals: 4, overall: "", note: "OBP not updated after the drum change." });
+  assert.equal(bare.status, 400); assert.equal((await bare.json()).error, "steps_required");
+  assert.equal(t.db.prepare("SELECT COUNT(*) n FROM audit_eval").get().n, 0, "nothing filed");
+  assert.equal(t.db.prepare("SELECT COUNT(*) n FROM audit_visit").get().n, 0);
   const d = await (await t.call("GET", "/api/audit/request?id=" + id)).json();
-  assert.equal(d.grade.score, 4); assert.equal(d.grade.inventory, 3); assert.match(d.grade.note, /drum/);
+  assert.equal(d.grade, null); assert.equal(d.status, "complete", "still open for the audit on the ship");
 });
 
 test("open site: a request only to a seafarer aboard THAT ship; no re-send inside 15 minutes; an open-site grade says so; a graded request is not 'open'", async () => {
@@ -255,8 +251,12 @@ test("open site: a request only to a seafarer aboard THAT ship; no re-send insid
   assert.equal((await (await t.call("GET", "/api/audit/request?id=" + r.id, undefined, OPEN)).json()).cc, null);
   t.db.prepare("UPDATE audit_request SET status='complete', complete_at='2026-10-15T08:00:00Z' WHERE id=?").run(r.id);
   assert.equal((await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json()).open.id, r.id, "in, not graded: still open");
-  assert.equal((await t.call("POST", "/api/audit/request/grade", { id: r.id, inventory: 5, technical: 4, collaterals: 5 }, OPEN)).status, 200);
-  assert.match(t.db.prepare("SELECT filed_by FROM audit_eval").get().filed_by, /open site, no sign-in/);
+  assert.equal((await (await t.call("GET", "/api/audit/request?id=" + r.id, undefined, OPEN)).json()).auditor, null, "who asked is not shown on the open site");
+  assert.equal((await t.call("POST", "/api/audit/request/grade", { id: r.id, inventory: 5, technical: 4, collaterals: 5 }, OPEN)).status, 400, "three ratings alone are refused (steps_required)");
+  // filed with its steps (the open-site stamp on filed_by is pinned by test/audit_visit.test.js): the rows as fileVisit writes them
+  const by = "Dexter.Lawrence@dg3.com (open site, no sign-in)";
+  t.db.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES ('av_1', ?, 'Oasis', 'SC-1', ?, 'filed', '2026-10-15T09:00:00Z', '2026-10-15T09:00:00Z')").run(r.id, by);
+  t.db.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, note, filed_by, filed_at) VALUES ('av_1', ?, 'SC-1', 'Oasis', 5, 4, 5, NULL, 4, 'average', NULL, ?, '2026-10-15T09:00:00Z')").run(r.id, by);
   assert.equal((await (await t.call("GET", "/api/audit/request/preview?ship=Oasis&sc=SC-1")).json()).open, null, "graded: the way is open for the next audit");
 });
 

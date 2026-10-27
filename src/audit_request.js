@@ -14,7 +14,7 @@
 // TEST MODE until Miguel signs off the rendered emails (CIMS email standard §5): with AUDIT_LIVE unset every email goes
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
-import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, auditScore, gradeProblems, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
+import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
 import { p43ReadState, mmlReadState, coverFor, p43Assess } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
@@ -53,8 +53,14 @@ export const OWNER_EMAIL = { rolando: "Rolando.Abellan@dg3.com", ray: "Ray.Guerr
 export function ownerEmail(owner) {
   const t = String(owner || "").trim();
   if (/^[^@\s]+@dg3\.com$/i.test(t)) return t;
-  return OWNER_EMAIL[t.split(/\s+/)[0].toLowerCase()] || null;
+  // the WHOLE label — one of the five the audit offers, or that person's full name as the address spells it — never the
+  // first word alone (27 Oct 2026: a follow-up owned by a crew named "Ray Santos" went to Ray Guerra). A crew's name is no
+  // address here: logged no_recipient, never guessed.
+  return OWNER_BY_LABEL[t.toLowerCase()] || null;
 }
+const OWNER_BY_LABEL = Object.fromEntries(Object.entries(OWNER_EMAIL).flatMap(([k, v]) => [[k, v], [v.split("@")[0].replace(/\./g, " ").toLowerCase(), v]]));
+// a draft the create left behind is settled by the sweep after this long (the create takes seconds)
+export const DRAFT_STALE_MIN = 30;
 export const FILED_RETRY_DAYS = 3;        // a filed / dispatch email that did not go is tried again this long
 export const FOLLOWUP_TZ = "America/New_York", FOLLOWUP_HOUR = 7; // a follow-up's owner hears on its date, from 07:00 Miami
 // The day and hour in Miami: the follow-up's date is a calendar day there, never UTC's.
@@ -247,7 +253,7 @@ export function installAuditRequest(deps) {
     const ev = await env.DB.prepare("SELECT * FROM audit_eval WHERE request_id=?").bind(req.id).first().catch(() => null);
     return json({
       grade: ev ? { inventory: ev.r_inventory, technical: ev.r_technical, collaterals: ev.r_collaterals, overall: ev.r_overall, score: ev.score, from: ev.score_from, note: ev.note, by: ev.filed_by, at: ev.filed_at } : null,
-      id: req.id, ship: req.ship, sc: req.agency_id, crew: req.crew_name, status: req.status, test: !!req.test_mode, auditor: req.auditor,
+      id: req.id, ship: req.ship, sc: req.agency_id, crew: req.crew_name, status: req.status, test: !!req.test_mode, auditor: session && session.open ? null : req.auditor,
       to: req.to_ship, cc: session && session.open ? null : req.cc_personal, sentAt: req.sent_at, dueAt: req.due_at, completeAt: req.complete_at, overdueAt: req.overdue_at,
       machines: s.machines.map((m) => ({ serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43: slot(s.uploads, m.serial, "p43"), mgmt: slot(s.uploads, m.serial, "mgmt") })),
       count: { total: done.total, done: done.done }, extras: s.extras.length, gate: s.gate,
@@ -265,25 +271,10 @@ export function installAuditRequest(deps) {
     // a TEST request (emails to the auditor alone) is a rehearsal: its grade would reach a real seafarer's Score Card
     if (req.test_mode) return json({ ok: false, error: "test_request", detail: "A test request is a rehearsal and cannot be graded." }, 409);
     if (b.visit) return fileVisit(env, req, b.visit, session);
-    const r = { inventory: b.inventory, technical: b.technical, collaterals: b.collaterals, overall: b.overall === "" ? null : b.overall, note: b.note };
-    const bad = gradeProblems(r);
-    if (bad.length) return json({ ok: false, error: "invalid", fields: bad }, 400);
-    const sc = auditScore(r), at = now(), vid = "av_" + crypto.randomUUID();
-    // filed on the open site (no sign-in, 15 Oct 2026) says so on the record the Score Card reads
-    const by = session.open ? session.email + " (open site, no sign-in)" : session.email;
-    const note = String(r.note || "").trim().slice(0, 2000) || null;
-    try {
-      await env.DB.batch([
-        env.DB.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES (?,?,?,?,?,'filed',?,?)").bind(vid, req.id, req.ship, req.agency_id, by, at, at),
-        env.DB.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, note, filed_by, filed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-          .bind(vid, req.id, req.agency_id, req.ship, Number(r.inventory), Number(r.technical), Number(r.collaterals), r.overall == null ? null : Number(r.overall), sc.score, sc.from, note, by, at),
-      ]);
-    } catch (e) {
-      if (/UNIQUE/i.test(String((e && e.message) || e))) return json({ ok: false, error: "already_filed" }, 409);
-      throw e;
-    }
-    await logActivity(env, session.email, "audit_grade", req.id + " " + sc.score + (session.open ? " (open site)" : ""));
-    return json({ ok: true, score: sc.score, from: sc.from });
+    // Three ratings alone were the 15 Oct 2026 screen, replaced by the audit on the ship (B1–B7) on 19 Oct; the app no longer
+    // sends them, and on the open site (no sign-in) anyone could still file a Score-Card-feeding grade with three numbers
+    // (27 Oct 2026). The grade is filed with its steps, through fileVisit, or not at all.
+    return json({ ok: false, error: "steps_required", detail: "An audit is filed step by step from the audit app; three ratings alone are not accepted." }, 400);
   }
 
   /* ---------------------------------- the audit on the ship (B1–B7) ---------------------------------- */
@@ -374,6 +365,13 @@ export function installAuditRequest(deps) {
       if ((d.close[o.id] || "open") === "fixed") stmts.push(env.DB.prepare("UPDATE audit_followup SET status='fixed', closed_at=?, closed_visit_id=?, closed_by=? WHERE id=? AND status='open'").bind(at, vid, by, o.id));
       else stmts.push(env.DB.prepare("UPDATE audit_followup SET carried = carried + 1 WHERE id=? AND status='open'").bind(o.id));
     }
+    // THE EMAILS ARE OWED THE MOMENT THE AUDIT IS FILED (27 Oct 2026): one row with ok = 0 per email this filing owes — the
+    // filed email, and the dispatch note when the crew rated the dispatch — goes in the filing's own batch, so a
+    // sendFiledMails that throws before it logs anything (a read, the template) still leaves the rows the sweep retries
+    // for FILED_RETRY_DAYS. It used to leave no row, and the sweep retries rows only. sendLogged replaces them (ok = 0).
+    stmts.push(env.DB.prepare("INSERT OR IGNORE INTO audit_send_log (request_id, kind, sent_at, to_json, ok, note) VALUES (?,?,?,?,0,?)").bind(req.id, "filed", at, "{}", "not sent yet"));
+    const dispatchRating = d.crew && Number(d.crew.dispatch);
+    if (dispatchRating >= 1 && dispatchRating <= 5) stmts.push(env.DB.prepare("INSERT OR IGNORE INTO audit_send_log (request_id, kind, sent_at, to_json, ok, note) VALUES (?,?,?,?,0,?)").bind(req.id, "dispatch", at, "{}", "not sent yet"));
     try { await env.DB.batch(stmts); } catch (err) {
       if (/UNIQUE/i.test(String((err && err.message) || err))) return json({ ok: false, error: "already_filed" }, 409);
       throw err;
@@ -507,9 +505,11 @@ export function installAuditRequest(deps) {
     await ensureAudit(env);
     const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(String(b.id || "")).first();
     if (!req) return json({ error: "not_found" }, 404);
-    if (req.status !== "sent") return json({ error: "not_open", status: req.status }, 409);
+    // a draft (the create's email went but the row never became 'sent', or the mail never went) can be cancelled — it is
+    // "open" and holds the ship until then (27 Oct 2026; the sweep settles one on its own after DRAFT_STALE_MIN)
+    if (req.status !== "sent" && !(what === "cancel" && req.status === "draft")) return json({ error: "not_open", status: req.status }, 409);
     if (what === "cancel") {
-      await env.DB.prepare("UPDATE audit_request SET status='cancelled', cancelled_at=?, cancelled_by=? WHERE id=? AND status='sent'").bind(now(), session.email, req.id).run();
+      await env.DB.prepare("UPDATE audit_request SET status='cancelled', cancelled_at=?, cancelled_by=? WHERE id=? AND status IN ('sent','draft')").bind(now(), session.email, req.id).run();
       await logActivity(env, session.email, "audit_request_cancel", req.id);
       return json({ ok: true });
     }
@@ -521,7 +521,8 @@ export function installAuditRequest(deps) {
     }
     // resend: a fresh link (the one the crew holds keeps working), the same deadline. Not twice in RESEND_MIN: each one breaks the
     // link the crew already holds and emails the ship, Rolando and Ray again (a double tap, or anyone on the open site).
-    const last = await env.DB.prepare("SELECT MAX(sent_at) AS at FROM audit_send_log WHERE request_id=? AND kind LIKE 'request%'").bind(req.id).first().catch(() => null);
+    // only a request email that WENT counts (27 Oct 2026: a failed re-send blocked the next one for 15 minutes)
+    const last = await env.DB.prepare("SELECT MAX(sent_at) AS at FROM audit_send_log WHERE request_id=? AND kind LIKE 'request%' AND ok = 1").bind(req.id).first().catch(() => null);
     if (last && last.at && Date.now() - Date.parse(last.at) < RESEND_MIN * 60000) return json({ ok: false, error: "too_soon", detail: "The request went less than " + RESEND_MIN + " minutes ago." }, 429);
     const [crew, cts] = await Promise.all([crewOf(env, req.agency_id), contacts(env)]);
     const token = newToken();
@@ -721,8 +722,26 @@ export function installAuditRequest(deps) {
   /* ---------------------------------- the hourly sweep ---------------------------------- */
   async function sweep(env, origin = "https://audit.cims.work") {
     await ensureAudit(env);
-    const out = { reminded: 0, overdue: 0, read: 0, completed: 0 };
+    const out = { reminded: 0, overdue: 0, read: 0, completed: 0, drafts: 0 };
     const t0 = Date.now();
+    // A DRAFT THE CREATE LEFT BEHIND (27 Oct 2026): the request email went but the UPDATE to 'sent' did not land, or the
+    // mail never went and the cancel did not land. It is "open" (OPEN_REQ_SQL) and holds the ship for good, the crew's
+    // link said "Everything is in", cancel refused it. After DRAFT_STALE_MIN: a draft whose request email is on the log
+    // as sent becomes 'sent', dated by that send; one with no sent email is cancelled. Logged either way.
+    const drafts = (await env.DB.prepare("SELECT r.*, (SELECT MIN(l.sent_at) FROM audit_send_log l WHERE l.request_id = r.id AND l.kind LIKE 'request:%' AND l.ok = 1) AS mailed_at FROM audit_request r WHERE r.status='draft' AND r.created_at < ?")
+      .bind(new Date(Date.now() - DRAFT_STALE_MIN * 60000).toISOString()).all().catch(() => ({ results: [] }))).results || [];
+    for (const d of drafts) {
+      try {
+        if (d.mailed_at) {
+          await env.DB.prepare("UPDATE audit_request SET status='sent', sent_at=? WHERE id=? AND status='draft'").bind(d.mailed_at, d.id).run();
+          await logActivity(env, null, "audit_request_draft_sent", d.id + " (the request email went " + d.mailed_at + ")");
+        } else {
+          await env.DB.prepare("UPDATE audit_request SET status='cancelled', cancelled_at=?, cancelled_by=? WHERE id=? AND status='draft'").bind(now(), "system: the request email never went", d.id).run();
+          await logActivity(env, null, "audit_request_draft_cancelled", d.id);
+        }
+        out.drafts++;
+      } catch (e) { console.error("audit_sweep_draft", d.id, (e && e.message) || e); }
+    }
     const open = (await env.DB.prepare("SELECT * FROM audit_request WHERE status='sent'").all()).results || [];
     for (const req of open) {
       try {
@@ -899,7 +918,7 @@ export function installAuditRequest(deps) {
       const why = closedWhy(req);
       if (why) return json({ ok: false, error: why }, why === "unknown" ? 404 : 410);
       if (p === "/api/audit/u/state") return json(await crewState(env, req));
-      if (req.status !== "sent") return json({ ok: false, error: "closed", say: "Everything is in. Thank you." }, 409);
+      if (req.status !== "sent") return json({ ok: false, error: "closed", say: req.status === "complete" ? "Everything is in. Thank you." : req.status === "draft" ? "This request is not open yet." : "This request is closed." }, 409);
       if (p === "/api/audit/u/upload" && request.method === "POST") return upload(request, env, url, req);
       if (p === "/api/audit/u/read" && request.method === "POST") return json(await readUpload(env, req, url.searchParams.get("id") || ""));
       if (p === "/api/audit/u/count" && request.method === "POST") return saveCount(request, env, req);

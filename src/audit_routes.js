@@ -79,11 +79,16 @@ export function installAudit(deps) {
     }
     // THIS contract's audit (an audit belongs to the contract it was asked in, Miguel 16 Oct 2026): the newest live request
     // for the seafarer made on or after the contract's sign-on. The landing sorts by it: not audited first.
-    const auditOf = (sc, on) => { const r = (bySc[sc] || []).find((x) => !on || iso(x.created_at) >= on); return r ? { id: r.id, status: r.status, at: iso(r.created_at), grade: r.grade != null ? Number(r.grade) : null, open: isOpenRequest(r) } : null; };
+    // A seat with NO sign-on (an undated TDG row): only a request on THIS hull can be this contract's — any request of the
+    // crew, an older contract's on another ship, used to be read as it (27 Oct 2026); `undated` says the match is by hull.
+    const auditOf = (sc, on, ship) => {
+      const r = (bySc[sc] || []).find((x) => (on ? iso(x.created_at) >= on : normShip(x.ship) === normShip(ship)));
+      return r ? { id: r.id, status: r.status, at: iso(r.created_at), grade: r.grade != null ? Number(r.grade) : null, open: isOpenRequest(r), ...(on ? {} : { undated: true }) } : null;
+    };
     const out = [];
     for (const s of (board && board.sections) || []) {
       const aboard = aboardOf(s)
-        .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile, audit: auditOf(c.agency_id, iso(c.signOn)) }));
+        .map((c) => ({ sc: c.agency_id, name: c.name, rank: c.rank || null, signOn: iso(c.signOn), signOff: iso(c.signOff), contract: contractLabel(c.contracts, true), heldByFile: !!c.heldByFile, audit: auditOf(c.agency_id, iso(c.signOn), s.ship) }));
       const seen = new Set();
       const uniq = aboard.filter((c) => (seen.has(c.sc) ? false : (seen.add(c.sc), true)));
       const last = lastBy[normShip(s.ship)] || null;
