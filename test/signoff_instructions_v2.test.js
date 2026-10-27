@@ -28,7 +28,7 @@ test("Kevin's email: first name, Azamara title, the ship as HON lists it, the po
   assert.match(t, /You may or may not meet A\.J\. aboard, so your notes must carry everything\./);
   assert.doesNotMatch(t, /in person/i, "never promise an in-person handover (rec2dsh7hh8mIYwgV)");
   assert.match(t, /leave one for A\.J\. and give one to your BOM/);
-  assert.match(t, /Ray Guerra and Jonathan Placer Alonzo receive it/);
+  assert.match(t, /Ray Guerra, Rolando Abellan, Ohji Miranda and Jonathan Placer Alonzo receive the result/);
   assert.match(t, /Daily Planner/);
   assert.doesNotMatch(t, /Compass|Joemar/);
   assert.match(t, /Rita Berenyi/);
@@ -540,4 +540,26 @@ test("the instructions email copies the ship's mailbox beside onboardsupport; no
   const D = senderHarness({ contacts: [{ ship: "Azamara Pursuit", email: "Kevin@example.com", role: "printer_specialist" }] });
   await D.h.sendInstructionsFor(D.env, "SC-K", 20261031, "https://cims.work", { ship: ctx.ship, proj_off: ctx.off, act_off: null, port: ctx.port, ctx });
   assert.deepEqual(D.sent[0].cc, ["onboardsupport@dg3.com"], "the To address is never copied again");
+});
+
+// THE FINAL COUNT IS ITS OWN BLIND COUNT (Miguel, 27 Oct 2026; cims-hon stockCount.js): the email names the day it opens,
+// never "sign your count" in the notes, and the bonus box says a gap costs the factor only for contracts that read it.
+test("the final count: its own email, two days before, blind, against OBP and the reliever, never signed in the notes", () => {
+  const { html, text: plain } = instructionsEmail(KEVIN);
+  const t = text(html);
+  assert.match(t, /6 Final inventory count It opens at 9:00 ship time on 29 October and stays open to the end of 31 October, your last day\./);
+  assert.match(t, /The link comes in its own email that morning, to you and to the print shop's mailbox\./);
+  assert.match(t, /It is blind\. You see OBP's figure only after you send\./);
+  assert.match(t, /If they differ, update OBP the same day: a difference OBP closes by the next day is not a gap\./);
+  assert.match(t, /Any gap A\.J\. finds on joining goes against you\./);
+  assert.match(t, /Not counted in time\? OBP's figure stands as your count\./);
+  assert.match(t, /c\. Your inventory count is separate\. It opens two days before you sign off, by its own email: step 6\./);
+  assert.match(t, /Your submitted handover notes and a final count without gaps close your accountability\./);
+  assert.match(plain, /Your final inventory count opens at 9:00 ship time on 29 October and closes at the end of 31 October\./);
+  for (const s of [t, plain]) assert.doesNotMatch(s, /sign your count|signed count|signed final count|records their own count beside yours/i, "the count is not in the notes any more");
+  assert.match(text(instructionsEmail({ ...KEVIN, reliever: null }).html), /And with your reliever's count\. Any gap your reliever finds on joining goes against you\./);
+  assert.doesNotMatch(t, /A gap in your final count/, "before 1 Nov 2026 the Score Card does not read the count");
+  assert.match(text(instructionsEmail({ ...KEVIN, signOff: "2026-11-02" }).html), /No submitted notes, no points\. A gap in your final count also sets it to 0\./);
+  // FINAL_OPENS_DAYS_BEFORE is cims-hon's twin: the day moves with the sign-off, across a month end too.
+  assert.match(text(instructionsEmail({ ...KEVIN, signOff: "2026-12-01" }).html), /9:00 ship time on 29 November and stays open to the end of 1 December/);
 });

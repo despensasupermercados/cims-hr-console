@@ -76,6 +76,16 @@ export function welcomeEmail(d) {
   const L = Object.assign({ hon: HON_URL, jd: JD_URL, book: RITA_BOOK_URL }, d.links || {});
   const CAL = L.icons ? L.icons + "/calendar.png" : "";
   const P = d.prev && d.prev.name ? { name: esc(d.prev.name), first: esc(d.prev.first || d.prev.name), since: esc(d.prev.since || "") } : null;
+  // THE ARRIVAL COUNT (welcome_context.arrival): its own email carries the link; this names the day, in the tense of the day
+  // the welcome is read. A count after the predecessor's sign-off says so; no day on record keeps "TODAY", as before.
+  const count = (raw) => {
+    const e = raw ? String : esc, who = d.prev && d.prev.name ? e(d.prev.first || d.prev.name) : "the person who signed off";
+    const day = d.countDay ? e(d.countDay) : null, w = day ? d.countWhen : "today";
+    const when = w === "today" ? "today" : `on ${day}${d.countAfterPrev && d.prev && d.prev.name ? `, the day ${who} signs off` : ""}`;
+    return `Your arrival count ${w === "past" ? "opened" : "opens"} at 9:00 ship time ${when}, for 24 hours. The link comes in its own email. It is blind, and any gap you find goes against ${who}. It protects you.`;
+  };
+  const countLabel = d.countDay && d.countWhen && d.countWhen !== "today" ? String(d.countDay).split(" ").slice(0, 2).join(" ").toUpperCase() : "TODAY";
+  const countSay = count(false), countText = count(true);
   const D = { first: esc(d.first), name: esc(d.name), pos: esc(d.position || "Printer Specialist"), ship: esc(d.ship), shipShort: esc(d.shipShort || d.ship),
     code: esc(d.code || ""), port: esc(d.port || ""), on: esc(d.on), off: esc(d.off), months: esc(d.months || ""), today: esc(d.today),
     onShort: esc(String(d.on || "").split(" ").slice(0, 2).join(" ").toUpperCase()), nextPay: esc(d.nextPay || "In the Hub"),
@@ -107,7 +117,7 @@ export function welcomeEmail(d) {
      </tr></table></td></tr>
     ${tear}` : ""}
     <tr><td align="center" style="padding:16px 22px 20px 22px;">${btnG(L.hon, "Open the handover notes")}
-     <div style="font-family:${FB};font-size:12px;line-height:18px;color:${C.slate};padding-top:9px;">${P ? `Read ${P.first}&rsquo;s notes` : "Read the handover notes"}, count the inventory, sign it. Within 24 hours. No login.</div></td></tr>
+     <div style="font-family:${FB};font-size:12px;line-height:18px;color:${C.slate};padding-top:9px;">${P ? `Read ${P.first}&rsquo;s notes` : "Read the handover notes"}. Your count comes in its own email. No login.</div></td></tr>
    </table></td></tr></table></td></tr>`;
   
   const html = `<!DOCTYPE html>
@@ -135,7 +145,7 @@ export function welcomeEmail(d) {
   ${pass}
   
   ${secTitle("Your first 15 days", "four things")}
-  ${step("TODAY", "Count the inventory and sign it", "Your own count, signed in your Digital Handover Notes. Use the green button above. It protects you.", "")}
+  ${step(countLabel, "Count the shelf", countSay, "")}
   ${step("WEEK 1", "Finish the cruise line's training", "Log in to their app and complete every module. The cruise line checks it.", L.training ? btnS(L.training, "Open the training") : "")}
   ${step("DAY 7", "Onboarding call with Rita", "15 minutes. How is it going, what do you need. Here is Rita&rsquo;s calendar: book a time with her whenever you need.", btnS(L.onboarding || L.book, "Book a time with Rita", CAL))}
   ${step("DAY 15", "Expectations call", "What a good contract looks like, agreed together. Then one call a month. Book it on Rita&rsquo;s calendar.", btnS(L.review || L.book, "Book a time with Rita", CAL))}
@@ -195,7 +205,8 @@ export function welcomeEmail(d) {
     `Welcome aboard, ${d.first}${endDot(d.first)} ${d.shipShort || d.ship} is yours ${d.yours || "from today"}.`, "",
     `Ship: ${d.ship}${d.port ? " (joined in " + d.port + ")" : ""}`, `Signed on: ${d.on}`, `Sign-off: ${d.off} (${d.offSource === "tdg" ? "confirmed by TDG" : "TDG confirms it later"})`,
     ...(d.prev && d.prev.name ? [`You take over from: ${d.prev.name}`] : []), "",
-    `Today: open the Digital Handover Notes (${HON_URL}), count the inventory and sign it.`,
+    `Today: open the Digital Handover Notes (${HON_URL}) and read them.`,
+    `${countLabel === "TODAY" ? "Today" : countLabel}: count the shelf. ${countText}`,
     "Week 1: finish the cruise line's training. The cruise line checks it.",
     `Day 7: onboarding call with Rita, 15 minutes. Book a time on her calendar whenever you need: ${L.onboarding || L.book}`,
     `Day 15: expectations call. Book it on Rita's calendar: ${L.review || L.book}`, "",
