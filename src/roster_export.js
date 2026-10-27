@@ -229,7 +229,9 @@ export function placeFromRegistry(out, tdg, vidx, today) {
       if (!out.ship || normShip(out.ship) === normShip(hull.name)) return null;
       return { ship: hull.name, brand: hull.brand || null };
     }
-    return { ship: hull.name, brand: hull.brand || null, sign_on: embark, sign_off: off };
+    // A debark before the row's own embark is TDG's file contradicting itself (Ed Del Rosario's row, 16 Oct 2026): no sign-off,
+    // never a contract that ends before it starts (27 Oct 2026 review; the schedule reads the same, legsFromRegistry tdgOff).
+    return { ship: hull.name, brand: hull.brand || null, sign_on: embark, sign_off: off && off >= embark ? off : null };
   }
 
   // No longer On board: the row still closes the leg it describes, and only that.

@@ -54,3 +54,11 @@ test("the survey report draws who was not asked even in a period with no answer"
   assert.match(h, /No email on file, never asked/);
   assert.match(h, /data-svsend="SC-8"/, "Send anyway is reachable before the first answer comes in");
 });
+
+// Miguel, 17 Oct 2026 (§10j, merged in #287): "Portal miss only" — Ray's "Crew ordering failure" answer is evidence on the
+// card, never a reset. Both of Ray's forms still told him his answer arms the rush gate (27 Oct 2026 review).
+test("Ray's forms never say his answer arms the rush gate", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  assert.doesNotMatch(W, /arms the rush gate/);
+  assert.equal((W.match(/The rush gate is set only by a vessel-side miss in the Parts Portal\./g) || []).length, 2, "the public link and the in-app form");
+});

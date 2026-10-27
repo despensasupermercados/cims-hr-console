@@ -5447,7 +5447,7 @@ async function start(){
   var f='';
   if(d.role==='ray'){
     f+='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+sel('order',['No','Yes'],a.order||'No')+'</div>'
-     +'<div class=fg><label>If yes — cause</label>'+sel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause||'N/A')+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
+     +'<div class=fg><label>If yes — cause</label>'+sel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause||'N/A')+'<div class=hint>Shown on the Score Card as evidence. The rush gate is set only by a vessel-side miss in the Parts Portal.</div></div>'
      +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+fbEsc(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
      +'<div class=fg><label>Orders placed on time (par respected)?</label>'+sel('ontime',['Always','Mostly','Often late'],a.ontime||'Always')+'</div>'
      +'<div class=fg><label>Order accuracy</label>'+sel('acc',['Accurate','Minor errors','Frequent errors'],a.acc||'Accurate')+'</div>'
@@ -10163,7 +10163,7 @@ function swQuestions(){
   var role=_SW.role;var a=(_SW.rawAnswers&&_SW.rawAnswers[role])||{};var f='';
   if(role==='ray'){
     f='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+swSel('order',['No','Yes'],a.order)+'</div>'
-     +'<div class=fg><label>If yes — cause</label>'+swSel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause)+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
+     +'<div class=fg><label>If yes — cause</label>'+swSel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause)+'<div class=hint>Shown on the Score Card as evidence. The rush gate is set only by a vessel-side miss in the Parts Portal.</div></div>'
      +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+escHtml(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
      +'<div class=fg><label>Orders placed on time (par respected)?</label>'+swSel('ontime',['Always','Mostly','Often late'],a.ontime)+'</div>'
      +'<div class=fg><label>Order accuracy</label>'+swSel('acc',['Accurate','Minor errors','Frequent errors'],a.acc)+'</div>'
