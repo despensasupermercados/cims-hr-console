@@ -79,20 +79,32 @@ export function defaultScoreLeg(legs, sc, today, opts = {}) {
 //   already_scored — an outcome already covers part of these dates: one outcome per contract. The exact span is the
 //                    commit's duplicate path (returns the outcome, pays nothing); a span moved by a day used to slip past
 //                    it and pay the contract twice (Radiance: the Counter's 6 Mar contract and the file's 5 Oct one).
+//   span_invalid  — a date that is not an ISO day (27 Oct 2026 review: "2026-7-1" passed every check above, because the
+//                    route compared strings and this function stepped aside for a non-ISO span; a blank span is still the
+//                    route's span_required);
+//   transfer_partial — the span covers only part of a transfer (one Score Card, Miguel 17 Oct 2026: "One contract"); the
+//                    running case was refused as still_aboard, an ENDED transfer could be committed leg by leg (27 Oct 2026).
+// already_scored is contract-aware (27 Oct 2026): an outcome overlapping ANY leg of the contract the span belongs to blocks,
+// not only one overlapping the typed dates — the other leg of a scored transfer used to be committable as a second outcome.
+const blank = (v) => !String(v == null ? "" : v).trim();
 export function commitBlock(legs, sc, today, outcomes, spanStart, spanEnd) {
-  if (!ISO.test(spanStart || "") || !ISO.test(spanEnd || "")) return null;   // the commit's own span checks answer that
-  const prior = (outcomes || []).find((o) => o && o.span_start && o.span_end && spanStart <= o.span_end && spanEnd >= o.span_start);
+  if (blank(spanStart) || blank(spanEnd)) return null;                       // the route's span_required answers a blank span
+  if (!ISO.test(spanStart) || !ISO.test(spanEnd)) return { error: "span_invalid" };
+  const C = scoreContracts(legs, sc);
+  const mine = C.filter((c) => c.on <= spanEnd && (c.off || "9999") >= spanStart);
+  const reach = mine.reduce((r, c) => ({ on: c.on < r.on ? c.on : r.on, off: (c.off || "9999") > r.off ? (c.off || "9999") : r.off }), { on: spanStart, off: spanEnd });
+  const prior = (outcomes || []).find((o) => o && o.span_start && o.span_end && reach.on <= o.span_end && reach.off >= o.span_start);
   if (prior) return { error: "already_scored", on: prior.span_start, off: prior.span_end };
   if (spanEnd > today) return { error: "not_ended", off: spanEnd };
   const all = (legs || []).filter((h) => h && h.ours && h.sc === sc && ISO.test(h.on || ""));
   const hits = all.filter((h) => h.on <= spanEnd && (h.off || "9999") >= spanStart);
   if (hits.length && hits.every((h) => h.visit)) return { error: "visit" };
-  const C = scoreContracts(legs, sc);
-  const mine = C.filter((c) => c.on <= spanEnd && (c.off || "9999") >= spanStart);
   const held = mine.find((c) => c.held);
   if (held) return { error: "held_by_tdg", on: held.on, off: held.off, ship: held.ships.join(", ") };
   const running = mine.find((c) => c.current);
   if (running) return { error: "still_aboard", on: running.on, off: running.off, ship: running.ships.join(", ") };
+  const part = mine.find((c) => c.legs.length > 1 && c.legs.some((l) => l.on > spanEnd || (l.off && l.off < spanStart)));
+  if (part) return { error: "transfer_partial", on: part.on, off: part.off, ship: part.ships.join(", ") };
   const older = C.find((c) => endedBy(c, today) && c.off < spanStart && !mine.includes(c) && !covered(c, outcomes) && dayDiff(c.off, today) <= SCORE_RECENT_DAYS);
   if (older) return { error: "older_first", on: older.on, off: older.off, ship: older.ships.join(", ") };
   return null;

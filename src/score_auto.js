@@ -178,19 +178,30 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   // factor lost, from a storage error nobody saw. The failure is kept apart from an empty answer.
   const failed = {};
   const fail = (k) => (e) => { failed[k] = String((e && e.message) || e).slice(0, 160); return none(); };
+  // the console's own tables: a table a database does not have yet (staging, a test copy) is no data; anything else failed
+  const own = (k) => (e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail(k)(e));
   const [misses, hons, audits, intel, resp, roster, legs, clicks] = await Promise.all([
     env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(fail("parts")) : none(),
     env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(fail("hon")) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
-    env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by, COALESCE(r.sent_at, r.created_at) AS requested_at FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(none),
-    on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(none) : none(),
-    env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(none),
-    env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(none) : none(),
+    env.DB.prepare("SELECT e.visit_id, e.request_id, e.ship, e.score, e.filed_at, e.filed_by, COALESCE(r.sent_at, r.created_at) AS requested_at FROM audit_eval e LEFT JOIN audit_request r ON r.id = e.request_id WHERE e.agency_id=? AND COALESCE(r.test_mode, 0) = 0 ORDER BY e.filed_at DESC").bind(sc).all().catch(own("audits")),
+    on ? env.DB.prepare("SELECT id, reporter, summary, ts FROM crew_intel WHERE agency_id=? AND status='filed' AND ts >= ? AND ts <= ?").bind(sc, on, off + "T23:59:59").all().catch(own("field reports")) : none(),
+    env.DB.prepare("SELECT r.role, r.answers_json, r.submitted_at FROM feedback_response2 r JOIN crew c ON c.id = r.crew_id WHERE c.agency_id=? AND r.superseded_at IS NULL").bind(sc).all().catch(own("feedback")),
+    env.PARTS_DB && on && keys.length ? env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").bind().all().catch(own("roster")) : none(),
     env.PARTS_DB && on && keys.length && deps.boardLegs ? Promise.resolve().then(deps.boardLegs).catch(() => null) : null,
     // presses only (is_mfd 0), per ship, the contract's days; a table not created yet is no data, any other error is said
     env.HON_DB && on && keys.length ? env.HON_DB.prepare("SELECT ship, SUM(color) AS c, SUM(mono) AS m, MIN(day) AS a, MAX(day) AS b FROM weekly_obp_clicks WHERE is_mfd = 0 AND ship IS NOT NULL AND day >= ? AND day <= ? GROUP BY ship").bind(on, off).all()
       .catch((e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail("clicks")(e))) : none(),
   ]);
+  // The console's OWN tables (27 Oct 2026 review): a failed read of the audits, the field reports, the feedback answers or the
+  // roster used to come back as an empty answer — full audit points, no field-report zero, Ray's answer gone (and the page
+  // then took the Windows' pre-fill back to 0). The external sources (Parts Portal, HON, clicks) are optional and said per
+  // factor; a storage error on the console's own rows is no pre-fill at all, said once, nothing suggested.
+  const ownFailed = ["audits", "field reports", "feedback", "roster"].filter((k) => failed[k]);
+  if (ownFailed.length) {
+    return { ok: false, error: "read_failed", failed: Object.fromEntries(ownFailed.map((k) => [k, failed[k]])),
+      text: "The " + ownFailed.join(", ") + " could not be read (" + failed[ownFailed[0]] + "): nothing was pre-filled. Score from the evidence by hand." };
+  }
   // An answer given BEFORE this contract's sign-on is the previous contract's (16 Oct 2026): nobody superseded it because
   // nobody asked again, and it pre-filled this contract's factors. It is listed as earlier feedback, not used (§11c).
   const answers = {}; let rayAt = null; const earlier = [];

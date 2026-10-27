@@ -14,6 +14,21 @@
 // commit is filed + flagged but has NO bonus effect (ledger is append-only).
 import { memoDdl } from "./ensure_memo.js";
 
+// A review or a state row is this contract's when its sign-off key is the card's, else the nearest within this many days.
+export const SEVAL_NEAR_DAYS = 21;
+const dayN = (s) => Date.parse(String(s || "").slice(0, 10) + "T00:00:00Z");
+export function nearestOff(keys, off) {
+  const want = dayN(off);
+  if (isNaN(want)) return null;
+  let best = null, bestD = Infinity;
+  for (const k of keys || []) {
+    if (k === off) return k;
+    const d = Math.abs(dayN(k) - want) / 864e5;
+    if (!isNaN(d) && d <= SEVAL_NEAR_DAYS && d < bestD) { best = k; bestD = d; }
+  }
+  return best;
+}
+
 export function sevalValidValue(v) {
   const n = parseInt(v, 10);
   return (n >= 1 && n <= 5) ? n : null;
@@ -39,12 +54,19 @@ export function installSeval(deps) {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS seval_state (agency_id TEXT NOT NULL, crew_id TEXT, contract_signoff TEXT NOT NULL, value INTEGER, source TEXT NOT NULL DEFAULT 'none' CHECK (source IN ('auto','manual','none')), set_by TEXT, set_at TEXT, reason TEXT, PRIMARY KEY (agency_id, contract_signoff))").run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS seval_audit (id TEXT PRIMARY KEY, agency_id TEXT NOT NULL, contract_signoff TEXT NOT NULL, actor TEXT, old_value INTEGER, new_value INTEGER, old_source TEXT, new_source TEXT, reason TEXT, note TEXT, at TEXT NOT NULL)").run();
   }
+  // THE REVIEW OF THIS CONTRACT (27 Oct 2026 review). The GSM review is requested at T-7 and keyed on the board's sign-off
+  // that day — often the PROJECTED one; TDG's debark then dates the Score Card a few days away, and an exact key found no
+  // review: the manager's 2/5 was invisible and the eval defaulted to 3 (full 15 points, no forfeit). The row keyed on the
+  // exact sign-off wins; else the nearest within SEVAL_NEAR_DAYS, the same window the sign-off passes use for one seat.
   async function stateRow(env, sc, off) {
-    return env.DB.prepare("SELECT agency_id, crew_id, contract_signoff, value, source, set_by, set_at, reason FROM seval_state WHERE agency_id=? AND contract_signoff=?").bind(sc, off).first();
+    const rows = (await env.DB.prepare("SELECT agency_id, crew_id, contract_signoff, value, source, set_by, set_at, reason FROM seval_state WHERE agency_id=?").bind(sc).all()).results || [];
+    const key = nearestOff(rows.map((r) => r.contract_signoff), off);
+    return key == null ? null : rows.find((r) => r.contract_signoff === key) || null;
   }
   async function ratingsFor(env, sc, off) {
-    const rows = (await env.DB.prepare("SELECT r.rating AS rating FROM sbm_review_response r JOIN sbm_review_request q ON q.id=r.request_id WHERE q.agency_id=? AND q.contract_signoff=?").bind(sc, off).all()).results || [];
-    return rows.map(x => x.rating);
+    const rows = (await env.DB.prepare("SELECT r.rating AS rating, q.contract_signoff AS off FROM sbm_review_response r JOIN sbm_review_request q ON q.id=r.request_id WHERE q.agency_id=?").bind(sc).all()).results || [];
+    const key = nearestOff(rows.map((r) => r.off), off);
+    return key == null ? [] : rows.filter((r) => r.off === key).map((x) => x.rating);
   }
   async function audit(env, sc, off, actor, oldRow, newVal, newSrc, reason, note) {
     await env.DB.prepare("INSERT INTO seval_audit (id,agency_id,contract_signoff,actor,old_value,new_value,old_source,new_source,reason,note,at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
