@@ -76,7 +76,7 @@ export const ACK_HTML = String.raw`<!DOCTYPE html>
   function bad(msg){ text('h1', ''); $('h1').innerHTML = 'This link does not open.'; text('lead', msg || 'Reply to the email it came in, and Rita sends you a new one.'); $('card').hidden = true; }
   var first = '';
   function done(at){
-    $('h1').innerHTML = ''; $('h1').appendChild(document.createTextNode('Thank you' + (first ? ', ' + first : '') + '.'));
+    $('h1').innerHTML = ''; $('h1').appendChild(document.createTextNode('Thank you' + (first ? ', ' + first : '') + (first && first.slice(-1) === '.' ? '' : '.')));
     $('h1').appendChild(document.createElement('br')); var s = document.createElement('span'); s.textContent = 'Your sign-off is confirmed.'; $('h1').appendChild(s);
     text('lead', 'Rita has it. Safe travels home.'); text('tag', 'CONFIRMED'); text('says', 'You confirmed');
     $('act').hidden = true; $('done').hidden = false; text('stamp', stampOf(at || new Date().toISOString())); window.scrollTo(0, 0);

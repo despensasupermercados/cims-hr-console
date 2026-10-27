@@ -69,7 +69,7 @@ export function seatContexts(sections) {
     const relBy = new Map(prn.map((c, i) => [c, hits[i] ? hits[i].x : null]));
     for (const c of seats) {
       const pick = relBy.get(c) || null;
-      out[c.agency_id] = {
+      const ctx = {
         sc: c.agency_id,
         instruct: !c.visit, visit: !!c.visit,
         name: c.name || null,
@@ -80,6 +80,10 @@ export function seatContexts(sections) {
         port: portOf(c),
         reliever: pick ? { sc: pick.agency_id, name: pick.name || null, first: firstWord(pick.name), on: iso(pick.signOn), tdg: relieverInTdg(pick) } : null,
       };
+      // One crew on two hulls (a transfer entered before the next file): the seat that LEAVES FIRST is the one to instruct,
+      // whatever order the ships come in (27 Oct 2026 review: the last section used to win, by ship name).
+      const prev = out[c.agency_id];
+      if (!prev || (ctx.off && (!prev.off || ctx.off < prev.off))) out[c.agency_id] = ctx;
     }
   }
   return out;

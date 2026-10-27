@@ -113,7 +113,7 @@ function render(){
       + '<div class="left">' + (err ? '<span class="err">' + esc(err) + '</span>' : (total() - answered()) + ' to go' + (last ? ' · you can change any answer before you send' : '')) + '</div>';
   } else {
     h = '<div class="card done"><div class="tick"><svg viewBox="0 0 48 48"><path d="M13 25 l8 8 l15 -17"/></svg></div>'
-      + '<h1>Thank you, ' + esc(M.first) + '.</h1>'
+      + '<h1>Thank you, ' + esc(M.first) + (String(M.first || '').slice(-1) === '.' ? '' : '.') + '</h1>'
       + '<p>Your answers are with the CIMS team. We read every one, and what you tell us shapes how we support the next contract.</p>'
       + (M.email ? '<div class="copy">A copy of your answers is on its way to <b>' + esc(M.email) + '</b>, with Onboard Support in copy, so you can reply to it any time.</div>' : '')
       + '<div class="sign"><b>Rita Berenyi</b>Manager, People &amp; Culture · enjoy your time home</div></div>';
@@ -146,7 +146,7 @@ export function surveyPage(m) {
 // Answers already sent: the thank-you, never the form again.
 export function surveyThanksPage(m) {
   return shell("Thank you · CIMS", m && m.brand, `<div class="card done"><div class="tick"><svg viewBox="0 0 48 48"><path d="M13 25 l8 8 l15 -17"/></svg></div>
-<h1>Thank you, ${esc((m && m.first) || "there")}.</h1><p>Your answers reached the CIMS team${m && m.when ? " on " + esc(m.when) : ""}. We read every one. Something to add? Reply to the copy in your inbox.</p></div>`);
+<h1>Thank you, ${esc((m && m.first) || "there")}${/\.$/.test(String((m && m.first) || "")) ? "" : "."}</h1><p>Your answers reached the CIMS team${m && m.when ? " on " + esc(m.when) : ""}. We read every one. Something to add? Reply to the copy in your inbox.</p></div>`);
 }
 export function surveyGonePage() {
   return shell("Link closed · CIMS", null, `<div class="card done"><h1>This link has closed.</h1><p>Survey links stay open for 30 days. If you still want to tell us something, reply to Rita's email: she reads every one.</p></div>`);
