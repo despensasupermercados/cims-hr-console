@@ -24,13 +24,16 @@ export const dmy = (s) => (iso(s) ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1
 const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
 const cap = (w) => (w ? w[0].toUpperCase() + w.slice(1) : "");
 // The running contract of one crew from the board's schedule: the current leg with the latest sign-on, never a visit, and
-// never Rita's card that a TDG file dated AFTER its sign-on contradicts (the file has them On board another hull — the
-// board draws that card off, §11; 23 Oct 2026 review: Gayda's Allure card beat her real Jewel contract on the Hub).
+// never Rita's card that a TDG file dated AFTER its sign-on contradicts — the file has them On board another hull (23 Oct
+// 2026 review: Gayda's Allure card beat her real Jewel contract on the Hub) or ASHORE (27 Oct 2026 review: a card whose
+// sign-on passed while the later file still has the crew On Vacation, debarked from the last ship, is a relief that did
+// not happen; the board draws it off, §10d, and the Hub told him he was aboard). The file keeps one row per crew, so a
+// registry leg that is not current is the file saying "ashore". A crew the file lists with no embark date has no leg here.
 const hull = (s) => String(s == null ? "" : s).trim().toLowerCase();
 export function currentLeg(legs, sc) {
   const all = Array.isArray(legs) ? legs : [];
-  const fileLegs = all.filter((r) => r && r.sc === sc && r.source === "registry" && r.is_current && iso(r.fileAt));
-  const contradicted = (l) => l.source === "assignment" && fileLegs.some((r) => hull(r.ship) !== hull(l.ship) && r.fileAt > l.on);
+  const fileLegs = all.filter((r) => r && r.sc === sc && r.source === "registry" && iso(r.fileAt));
+  const contradicted = (l) => l.source === "assignment" && fileLegs.some((r) => r.fileAt > l.on && !(r.is_current && hull(r.ship) === hull(l.ship)));
   const mine = all.filter((l) => l && l.sc === sc && l.is_current && l.ours !== false && !l.visit && iso(l.on) && !contradicted(l));
   mine.sort((a, b) => (a.on < b.on ? 1 : a.on > b.on ? -1 : 0));
   return mine[0] || null;

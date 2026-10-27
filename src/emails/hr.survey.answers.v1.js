@@ -5,6 +5,7 @@
 import { mastRows } from "../cims-mast.js";
 import { QUESTIONS, SECTIONS, FIX_QUESTION, statementFor, isNothing } from "../crew_survey.js";
 import { esc } from "./hr.survey.invite.v1.js";
+import { endDot } from "./hr.signoff.instructions.v2.js";
 
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB", body: "#374151", grey: "#9CA3AF", line: "#F0F1F3" };
 const FB = "'DM Sans',Helvetica,Arial,sans-serif", FH = "'Outfit',Helvetica,Arial,sans-serif";
@@ -33,11 +34,11 @@ export function surveyAnswersEmail(d) {
   <div style="font-family:${FB};font-size:13.5px;line-height:1.55;color:${C.slate};margin-top:12px;">Thank you for telling us. The whole CIMS team sees it.</div>`
     : `<div style="font-family:${FB};font-size:14.5px;line-height:1.55;color:${C.body};margin-top:10px;">${d.fix ? "&ldquo;" + esc(d.fix) + "&rdquo; Thank you, that is good to hear." : "You left this one blank. If something comes to mind, reply to this email."}</div>`}
  </td></tr></table></td></tr>`;
-  const subject = `Your answers, ${d.first || "there"}. Thank you.`;
+  const subject = `Your answers, ${d.first || "there"}${endDot(d.first || "there")} Thank you.`;
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(subject)}</title>
 <style>@media (max-width:480px){.hl{font-size:30px !important}.px{padding-left:20px !important;padding-right:20px !important}}</style></head>
 <body style="margin:0;padding:0;background:#EEF0EC;">
-<div style="display:none;max-height:0;overflow:hidden;">Thank you, ${first}. Your answers, and the one thing you asked us to fix.</div>
+<div style="display:none;max-height:0;overflow:hidden;">Thank you, ${first}${endDot(first)} Your answers, and the one thing you asked us to fix.</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#EEF0EC" style="background:#EEF0EC;"><tr><td align="center" style="padding:0 0 32px;">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background:#FFFFFF;max-width:600px;width:100%;">
 ${mastRows()}
@@ -45,7 +46,7 @@ ${mastRows()}
  <td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.gink};">CREW SURVEY · RECEIVED</td>
  <td align="right" style="font-family:${FB};font-size:13px;color:${C.slate};">${esc(d.when)}</td></tr></table></td></tr>
 <tr><td class="px" style="padding:14px 32px 0;">
- <div class="hl" style="font-family:${FH};font-size:36px;font-weight:600;letter-spacing:-0.6px;line-height:1.1;color:${C.navy};">Thank you, ${first}.<br><span style="color:${C.grey};">Here is what you told us.</span></div>
+ <div class="hl" style="font-family:${FH};font-size:36px;font-weight:600;letter-spacing:-0.6px;line-height:1.1;color:${C.navy};">Thank you, ${first}${endDot(first)}<br><span style="color:${C.grey};">Here is what you told us.</span></div>
  <div style="font-family:${FB};font-size:15px;line-height:1.6;color:${C.body};margin-top:14px;">Your answers on ${esc(d.ship || "your contract")} are with the CIMS team. This copy is yours to keep, and Onboard Support has it too, so you can reply to this email any time.</div></td></tr>
 ${fixBox}
 <tr><td class="px" style="padding:22px 32px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
@@ -57,11 +58,11 @@ ${fixBox}
  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;"><tr>
   <td width="3" bgcolor="${C.green}" style="background:${C.green};width:3px;">&nbsp;</td>
   <td style="padding:2px 0 2px 12px;font-family:${FB};font-size:13px;line-height:1.6;color:${C.slate};"><b style="color:${C.navy};font-size:14px;">Rita Berenyi</b><br>Manager, People &amp; Culture<br>Rita.Berenyi@dg3.com · DG3 Diversified Global Graphics Group</td></tr></table></td></tr>
-<tr><td bgcolor="${C.cloud}" style="background:${C.cloud};padding:16px 32px;font-family:${FB};font-size:11.5px;line-height:1.6;color:${C.slate};">Sent by CIMS on behalf of DG3 Cruise Industry Managed Services to ${first}. Your answers stay with CIMS: never sent to the cruise line, never part of your bonus.</td></tr>
+<tr><td bgcolor="${C.cloud}" style="background:${C.cloud};padding:16px 32px;font-family:${FB};font-size:11.5px;line-height:1.6;color:${C.slate};">Sent by CIMS on behalf of DG3 Cruise Industry Managed Services to ${first}${endDot(first)} Your answers stay with CIMS: never sent to the cruise line, never part of your bonus.</td></tr>
 </table></td></tr></table></body></html>`;
   const lines = [];
   for (const s of SECTIONS) { lines.push("", s.title.toUpperCase()); for (const k of s.keys) lines.push(`${d.answers[k]}  ${statementFor(byKey[k], d.brand)}`); }
-  const text = [`Thank you, ${d.first || "there"}. Here is what you told us.`, "",
+  const text = [`Thank you, ${d.first || "there"}${endDot(d.first || "there")} Here is what you told us.`, "",
     `Your answers on ${d.ship || "your contract"} are with the CIMS team. Onboard Support has this copy too: reply any time.`, "",
     FIX_QUESTION, d.fix ? `"${d.fix}"` : "(left blank)", ...lines, "", "Rita Berenyi, Manager, People & Culture, Rita.Berenyi@dg3.com"].join("\n");
   return { subject, html, text };

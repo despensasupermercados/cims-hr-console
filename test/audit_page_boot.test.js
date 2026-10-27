@@ -215,7 +215,7 @@ test("Machines: one list per machine, every row working until tapped; the Patter
   assert.match(main, /Everything starts as working\. Tap only what is wrong/);
   assert.match(main, /data-a="labeled"[^>]*aria-pressed="false"><span class="tk c">[\s\S]*?<b>All hardware labeled<\/b>/);
   assert.match(main, /data-a="chk" data-k="test" data-s="AC58011020823"[^>]*><span class="tk c">[\s\S]*?<b>Test pattern prints clean<\/b>/);
-  assert.match(main, /data-a="p43"[^>]*><span class="tk o"><\/span><span class="tl"><b>Lines along the feed in cyan<\/b><span class="xs">.*Print one and look; Rolando confirms\.<\/span><\/span><span class="pill-s m">Not seen<\/span>/);
+  assert.match(main, /data-a="p43"[^>]*><span class="tk o"><\/span><span class="tl"><b>Lines along the feed in cyan<\/b><span class="xs">.*Print one and look\.<\/span><\/span><span class="pill-s m">Not seen<\/span>/);
   assert.match(main, /data-a="down"[^>]*data-s="S2"[^>]*><span class="tk c">[\s\S]*?<b>Reported down by John<\/b><span class="xs">&#8220;Paper feed error&#8221;<\/span><\/span><span class="pill-s m">Running now<\/span>/);
   assert.doesNotMatch(main, />Past life</, "past rated life is information, never a check");
   assert.equal((main.match(/class="pill-s ok">Working</g) || []).length, 2, "both machines read Working until something is tapped");

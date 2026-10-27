@@ -16,6 +16,7 @@ import { linkEmail, CONFIRMS, TEMPLATE_ID as LINK_TEMPLATE } from "./emails/hr.s
 import { shipFullName, portName, firstWord } from "./emails/hr.signoff.instructions.v2.js";
 import { shipCode } from "./ship_codes.js";
 import { mdShort } from "./span_md.js";
+import { contractKey } from "./signoff_context.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it. This page's inline
 // <script> was NOT covered by scripts/verify_client_scripts.mjs while it lived inside the
@@ -75,7 +76,7 @@ export const ACK_HTML = String.raw`<!DOCTYPE html>
   function bad(msg){ text('h1', ''); $('h1').innerHTML = 'This link does not open.'; text('lead', msg || 'Reply to the email it came in, and Rita sends you a new one.'); $('card').hidden = true; }
   var first = '';
   function done(at){
-    $('h1').innerHTML = ''; $('h1').appendChild(document.createTextNode('Thank you' + (first ? ', ' + first : '') + '.'));
+    $('h1').innerHTML = ''; $('h1').appendChild(document.createTextNode('Thank you' + (first ? ', ' + first : '') + (first && first.slice(-1) === '.' ? '' : '.')));
     $('h1').appendChild(document.createElement('br')); var s = document.createElement('span'); s.textContent = 'Your sign-off is confirmed.'; $('h1').appendChild(s);
     text('lead', 'Rita has it. Safe travels home.'); text('tag', 'CONFIRMED'); text('says', 'You confirmed');
     $('act').hidden = true; $('done').hidden = false; text('stamp', stampOf(at || new Date().toISOString())); window.scrollTo(0, 0);
@@ -206,6 +207,8 @@ export function installAck(deps) {
     if (!r) return json({ error: "signoff_not_found" }, 404);
     // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
     // acknowledged row (ack_at, ip, user agent) and revoke the link they had answered. Resend only with force.
+    // One row per contract, keyed by the sign-off date as the daily run keys it (signoff_context.contractKey, 27 Oct 2026).
+    r.seq = contractKey(r);
     var prev = await env.DB.prepare("SELECT status FROM ack_request WHERE sc=? AND seq=?").bind(r.sc, r.seq).first();
     if (prev && prev.status === "acknowledged" && !b.force) return json({ ok: false, error: "already_acknowledged" }, 409);
     var token = await signToken({ p: "ack", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + ACK_TTL }, env.SESSION_SECRET);
@@ -222,7 +225,13 @@ export function installAck(deps) {
     var emailed = false;
     if (b.send && r.email) {
       try { await sendAckRequest(env, { to: r.email, pass: pass, link: link, ack_id: ackId }); emailed = true; }
-      catch (e) { await logActivity(env, session && session.email, "ack_request_send_failed", r.sc + " #" + r.seq); }
+      catch (e) {
+        // A mail that did not go leaves no row (27 Oct 2026 review): the daily run skipped a pending row as "manual send
+        // on file" for ever, and the page said the crew had no email on file.
+        await env.DB.prepare("DELETE FROM ack_request WHERE id=?").bind(ackId).run().catch(function () {});
+        await logActivity(env, session && session.email, "ack_request_send_failed", r.sc + " #" + r.seq);
+        return json({ ok: false, error: "not_sent", detail: String((e && e.message) || e).slice(0, 120), crew_name: r.crew_name }, 502);
+      }
     }
     await logActivity(env, session && session.email, "ack_request", r.sc + " #" + r.seq);
     return json({ ok: true, link: link, crew_name: r.crew_name, emailed: emailed, hasEmail: !!r.email });
@@ -322,7 +331,10 @@ export function installAck(deps) {
     await env.DB.prepare("INSERT INTO ack_request (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at,pass_json) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?,?)").bind(ackId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, pass.port || r.port, r.sign_off_date, "auto-timing", now, JSON.stringify(pass)).run();
     var link = origin + "/ack?t=" + token;
     try { await sendAckRequest(env, { to: r.email, pass: pass, link: link, ack_id: ackId }); return { emailed: true, crew_name: r.crew_name, to: r.email }; }
-    catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+    catch (e) {
+      await env.DB.prepare("DELETE FROM ack_request WHERE id=?").bind(ackId).run().catch(function () {});   // retried next morning
+      return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email };
+    }
   }
   ackHandle.sendSignoffLinkFor = sendSignoffLinkFor;
 

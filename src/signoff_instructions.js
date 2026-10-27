@@ -19,6 +19,7 @@ import { memoDdl } from "./ensure_memo.js";
 import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
 import { relieverEmail, TEMPLATE_ID as RELIEVER_TEMPLATE } from "./emails/hr.signoff.reliever.v1.js";
 import { shipMailbox } from "./audit.js";
+import { contractKey } from "./signoff_context.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
 // ACK_HTML in signoff_ack.js. /instr is a PUBLIC seafarer page and its inline <script> was
@@ -114,7 +115,7 @@ export function installInstr(deps) {
     if (!deps.boardLegs) return null;
     var legs = (await deps.boardLegs(env).catch(function () { return null; })) || [];
     var cur = legs.filter(function (l) { return l && l.ours && l.sc === sc && l.is_current && l.off; }).sort(function (a, b) { return a.on < b.on ? 1 : -1; })[0];
-    return cur ? { sc: sc, seq: seq, ship: cur.ship, on: cur.on || null, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true } : null;
+    return cur ? { sc: sc, seq: seq, ship: cur.ship, on: cur.on || null, proj_off: cur.off, act_off: null, port: cur.disembark || null, fromBoard: true, visit: !!cur.visit } : null;
   }
   async function resolveInstr(env, sc, seq, ovr) {
     var leg = ovr || await env.DB.prepare("SELECT sc, seq, ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
@@ -132,7 +133,8 @@ export function installInstr(deps) {
     var name = [c.first_name, c.middle_name, c.last_name].filter(Boolean).join(" ").trim();
     // The pass prints the name as the crew would say it (first word of the first name + the last name) and TDG's position.
     var passName = [firstWord(c.first_name), c.last_name].filter(Boolean).join(" ").trim();
-    return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, pass_name: passName || name, position: c.rank_override || c.rank_observed || null, first_name: firstWord(c.first_name) || null, email: c.email || null, phone: c.phone || null, vessel: vessel, port: port, sign_on_date: (ovr && ovr.on) || null, sign_off_date: sign_off };
+    return { sc: sc, seq: seq, crew_id: base ? base.id : null, crew_name: name, pass_name: passName || name, position: c.rank_override || c.rank_observed || null, first_name: firstWord(c.first_name) || null, email: c.email || null, phone: c.phone || null, vessel: vessel, port: port, sign_on_date: (ovr && ovr.on) || null, sign_off_date: sign_off,
+      visit: !!(ovr && (ovr.visit || (ovr.ctx && ovr.ctx.visit))) };   // the seat is a training visit (the board's leg, or the daily run's context)
   }
 
   // POST /api/instructions/request  (session-gated) — issue the instructions email
@@ -143,11 +145,18 @@ export function installInstr(deps) {
     var r = await resolveInstr(env, String(b.sc), parseInt(b.seq), (await seatLeg(env, String(b.sc), parseInt(b.seq))) || undefined);
     if (!r) return json({ error: "signoff_not_found" }, 404);
     var ctx = await contextFor(env, r.sc);
-    if (ctx && ctx.instruct === false) return json({ ok: false, error: "not_instructed" }, 409);   // a training visit (visits.js)
+    // a training visit (visits.js): the board's seat context says so, or the schedule's leg itself does — a trainer's trip
+    // only Rita's card holds is no seat on the board, so it has no context (27 Oct 2026 review)
+    if ((ctx && ctx.instruct === false) || r.visit) return json({ ok: false, error: "not_instructed" }, 409);
     var past = passedSignOff(ctx, r);
     if (b.send && past) return json({ ok: false, error: "signoff_passed", sign_off: past }, 409);
     // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
     // acknowledged row (ack_at, ip, user agent) and revoke the link they had answered. Resend only with force.
+    // ONE ROW PER CONTRACT, whichever path sent it (27 Oct 2026 review): the row is keyed by the sign-off date, as the daily
+    // run keys it (auto_send.js). It was keyed by the page's Counter number, which is the same for every contract TDG's
+    // file dates (the Counter is history, §10d), so a crew's next contract read "already_acknowledged" and a manual send
+    // after the daily one made a second row and a second live link.
+    r.seq = contractKey(r);
     var prev = await env.DB.prepare("SELECT status FROM instr_ack WHERE sc=? AND seq=?").bind(r.sc, r.seq).first();
     if (prev && prev.status === "acknowledged" && !b.force) return json({ ok: false, error: "already_acknowledged" }, 409);
     var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
@@ -161,7 +170,13 @@ export function installInstr(deps) {
     var emailed = false, rp = null, sentTo = null;
     if (b.send && r.email) {
       try { sentTo = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
-      catch (e) { await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq); }
+      catch (e) {
+        // A mail that did not go leaves NO row (27 Oct 2026 review): the pending row made the daily run skip the seat as
+        // "manual send on file" for ever, and every screen read the instructions as sent.
+        await env.DB.prepare("DELETE FROM instr_ack WHERE id=?").bind(insId).run().catch(function () {});
+        await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq);
+        return json({ ok: false, error: "not_sent", detail: String((e && e.message) || e).slice(0, 120), crew_name: r.crew_name }, 502);
+      }
       if (emailed) rp = await sendRelieverPass(env, r, ctx);
     }
     await logActivity(env, session && session.email, "instr_request", r.sc + " #" + r.seq);
@@ -357,7 +372,7 @@ export function installInstr(deps) {
     if (!r) return { emailed: false, error: "signoff_not_found" };
     if (!r.email) return { emailed: false, hasEmail: false, crew_name: r.crew_name };
     var ctx = (ovr && ovr.ctx) || await contextFor(env, r.sc);
-    if (ctx && ctx.instruct === false) return { emailed: false, error: "not_instructed", crew_name: r.crew_name, to: r.email };   // a training visit
+    if ((ctx && ctx.instruct === false) || r.visit) return { emailed: false, error: "not_instructed", crew_name: r.crew_name, to: r.email };   // a training visit
     if (passedSignOff(ctx, r)) return { emailed: false, error: "signoff_passed", crew_name: r.crew_name, to: r.email };
     var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
     var th = await sha256hex(token);
@@ -367,7 +382,12 @@ export function installInstr(deps) {
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
     var link = origin + "/instr?t=" + token;
     var sent;
-    try { sent = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); } catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+    try { sent = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); }
+    catch (e) {
+      // No row for a mail that did not go: the next morning's run sends it (manualExists would skip a pending row for ever).
+      await env.DB.prepare("DELETE FROM instr_ack WHERE id=?").bind(insId).run().catch(function () {});
+      return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email };
+    }
     try { var rp = await sendRelieverPass(env, r, ctx); return { emailed: true, crew_name: r.crew_name, to: r.email, cc: sent && sent.cc, reliever: rp }; }
     catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
   }

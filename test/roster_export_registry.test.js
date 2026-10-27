@@ -214,3 +214,12 @@ test('route: a missing registry_snapshot or vessel table degrades to today\'s an
   assert.equal(res.status, 200);
   assert.equal((await res.json()).crew[0].ship, null);
 });
+
+// 27 Oct 2026 review: an On board row whose debark is BEFORE its own embark (TDG wrote one such row — Ed Del Rosario,
+// Millennium, 16 Oct 2026, then Inactive) exported a contract that ends before it starts. No sign-off, as the schedule reads it.
+test('an On board row whose debark is before its embark exports no sign-off', () => {
+  const p = placeFromRegistry(blank, { status: 'On board', vessel: 'MV RADIANCE OF THE SEAS', embarked_at: '2026-02-22', debarked_at: '2025-10-24' }, VIDX, TODAY);
+  assert.deepEqual(p, { ship: 'Radiance', brand: 'Royal Caribbean', sign_on: '2026-02-22', sign_off: null });
+  const ok = placeFromRegistry(blank, { status: 'On board', vessel: 'MV RADIANCE OF THE SEAS', embarked_at: '2026-02-22', debarked_at: '2026-10-02' }, VIDX, TODAY);
+  assert.equal(ok.sign_off, '2026-10-02', 'a real debark still dates it');
+});

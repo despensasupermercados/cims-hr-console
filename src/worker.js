@@ -13,7 +13,7 @@ import { mapRows, diffCrew, storableStatus } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
-import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
+import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO, monthNum, TRAVEL_SHEET_RE } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName, clientFromBill } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, sgaPeriodFromName, SGA_COL_KEYS } from "./sga.js";
 import { archiveKey, sourceRecord, safeName, SOURCE_COLS } from "./sga_archive.js";
@@ -69,9 +69,9 @@ import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
 import { gatherAuto, listAudits } from "./score_auto.js";
-import { apiRosterExport } from './roster_export.js';
+import { apiRosterExport, secretEquals } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
-import { installAudit } from "./audit_routes.js";
+import { installAudit, crossSite } from "./audit_routes.js";
 import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { AUDIT_NAME, auditIconFor, markSvg } from "./audit_brand.js";
@@ -308,6 +308,10 @@ export default {
       if (p === '/api/roster/export') return apiRosterExport(request, env);
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
+        // The session cookie is Domain=cims.work, so it reaches every *.cims.work app: a POST whose Origin is another host is
+        // refused, as the audit module already does for its own routes (27 Oct 2026 review). The console's pages, the relief
+        // iframe and the hub post to their own host; a write riding on the cookie from a sibling host is not theirs.
+        if (request.method === "POST" && crossSite(request, url)) return json({ error: "cross_site" }, 403);
         if (p === "/api/me")        return json({ email: session.email });
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/ops")       return apiOps(env);
@@ -815,7 +819,7 @@ async function mariaExecTool(env, name, input) {
     if (!id) return { error: "no crew matched; provide a name or agency_id" };
     const intel = await J(await apiIntelCrew(env, new URL(base + "/api/intel/crew?id=" + encodeURIComponent(id))));
     const notes = await J(await apiCrewNotes({ method: "GET" }, env, null, new URL(base + "/api/crew/notes?id=" + encodeURIComponent(id))));
-    return { agency_id: id, field_intel: intel.intel || [], manual_notes: notes.notes || [] };
+    return { agency_id: id, field_intel: intel.intel || [], manual_notes: (notes.notes || []).filter((n) => !n.archived_at) }; // archived notes are the Notes window's alone (§10g)
   }
   if (name === "crew_contract_history") {
     const id = await resolveCrewId(input);
@@ -1018,7 +1022,7 @@ async function authDev(request, env, url) {
   if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
   const b = await request.json().catch(() => ({}));
   const key = b.key, email = b.email;
-  if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
+  if (!env.BOOTSTRAP_KEY || !(await secretEquals(String(key || ""), env.BOOTSTRAP_KEY))) return new Response("forbidden", { status: 403 }); // constant-time, like the roster key
   await ensureUsers(env).catch(() => {});
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
@@ -1488,17 +1492,22 @@ async function ensureTravelImpl(env) {
   // 1494ms before, 1636ms after). The CREATE is a no-op on a live table, so it no longer blocks the read:
   // both leave together and the count comes back in the same round trip. If the table really is missing or
   // legacy, the count simply fails and the migrate-once path below runs, as before.
-  let st = null;
+  let st = null, countErr = null;
   try {
     const r = await Promise.all([
       env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, ship TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run(),
-      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch(() => null),
+      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch((e) => { countErr = e; return null; }),
       // `ship` (15 Oct 2026, migrations/0026): the hull the workbook row sits under. Rides in the same wave; a table that
       // already carries it (or does not exist yet — the CREATE above has it) answers with an error we ignore.
       addColumn(env, "ALTER TABLE travel_expense ADD COLUMN ship TEXT"),
     ]);
     st = r[1];
-  } catch (e) { st = null; }
+  } catch (e) { st = null; countErr = countErr || e; }
+  // A count that failed because the table is LEGACY (no `kind` column) or not there yet (the CREATE had not landed) is the
+  // migrate-once path. A count that failed for any OTHER reason (D1 unavailable for a moment) is not: until 27 Oct 2026
+  // `!st` alone re-seeded 2025 over a populated table on such an error — the 25 Jun 2026 nine-seeds class again, and the
+  // rows re-uploaded since 15 Oct (with their `ship`) would have become the bundled seed (no ship, "Not placed").
+  const legacy = !st && /no such (column|table)/i.test(String((countErr && countErr.message) || countErr || ""));
   if (!st) {
     await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'");
     await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0");
@@ -1507,7 +1516,7 @@ async function ensureTravelImpl(env) {
   // The bundled 2025 history seeds an EMPTY table, or completes the one-time migration of a legacy (pre-`kind`) table.
   // Until 15 Oct 2026 "no shoreside rows" also re-seeded 2025 on every cold start (nine seeds on 25 Jun 2026); a 2026
   // workbook without its CIMS sheet would have started that again. A populated, current table is never touched.
-  if ((total === 0 || !st) && TRAVEL_2025.length) {
+  if ((total === 0 || legacy) && TRAVEL_2025.length) {
     await env.DB.prepare("DELETE FROM travel_expense WHERE year=2025").run();
     await insertTravel(env, TRAVEL_2025, 2025);
     await logData(env, "travel_expense (2025 history incl. shoreside)", TRAVEL_2025.length, "seeded");
@@ -1564,12 +1573,22 @@ async function apiTravelImport(request, env, session) {
   const recs = parseTravelSheets(b.sheets || {}, year);
   if (b.dryRun) {
     const s = travelSummarize(recs);
-    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply
-    const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
-    const unmatched = unmatchedTravel(annotateTravel(recs, crew));
-    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched });
+    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply; and the months on file
+    // this workbook has NO sheet for (Apply replaces the year whole, so those months would go — said before the click)
+    const [crewRes, missing] = await Promise.all([env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(), travelMonthsMissing(env, b.sheets, year)]);
+    const unmatched = unmatchedTravel(annotateTravel(recs, crewRes.results));
+    const months = [...new Set(Object.keys(b.sheets || {}).map((n) => monthNum(n)).filter(Boolean))].sort((a, c) => a - c);
+    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched, months, missing });
   }
   return json(await applyTravelYear(env, recs, year, (session && session.email) || "?", "upload"));
+}
+// The months of `year` that hold crew rows on file and that `sheets` carries no month sheet for (the CIMS sheet is every
+// month's shoreside; a month sheet present but empty still carries its month). Replacing the year from such a workbook
+// would silently drop those months — the Upload page says so, the inbox holds the file (27 Oct 2026).
+async function travelMonthsMissing(env, sheets, year) {
+  const have = new Set(Object.keys(sheets || {}).map((n) => monthNum(n)).filter(Boolean));
+  const rows = (await env.DB.prepare("SELECT DISTINCT month FROM travel_expense WHERE year=? AND kind='crew'").bind(+year).all()).results;
+  return rows.map((r) => r.month).filter((m) => m && !have.has(m)).sort((a, b) => a - b);
 }
 // The ONE path that replaces a travel year — the Upload page and the SharePoint sync both come here (§10j).
 async function applyTravelYear(env, recs, year, by, source) {
@@ -1661,10 +1680,12 @@ async function applySgaWorkbook(env, b, st, by, source) {
   const trMonths = st.training.filter((t) => !t.summary_only);
   const fileId = "sga_" + st.period.year + "_" + String(st.period.month).padStart(2, "0") + "_" + crypto.randomUUID().slice(0, 8);
   const now = new Date().toISOString();
-  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines
-  const stmts = st.summaryOnly ? [] : [
-    env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=?").bind(st.period.year, st.period.month),
-  ];
+  // THE ORDER OF THE WRITES (27 Oct 2026): the new lines go in first under their own file_id; the LAST batch removes the
+  // month's older lines and writes the sga_file row that makes the new ones the month's. Until then the month's lines were
+  // deleted in the FIRST batch and inserted over the next ones (the writes go in batches of 100): a load that died between
+  // two batches left the month with no lines and no file row to say so. A load that dies now leaves the old month whole,
+  // plus orphan lines no sga_file names — /api/sga serves the latest FILE's lines only, so they are never shown.
+  const stmts = [], tail = [];
   const cols = ["id", "file_id", "year", "month", "ref", "ship_code", "seq", "sga_no", "crew_name", "vessel", "brand", "id_number", "nationality", ...SGA_COL_KEYS, "amount", "cols_sum"];
   const ins = env.DB.prepare("INSERT INTO sga_line (" + cols.join(",") + ") VALUES (" + cols.map(() => "?").join(",") + ")");
   st.lines.forEach((l, i) => {
@@ -1691,7 +1712,7 @@ async function applySgaWorkbook(env, b, st, by, source) {
       if (!(!t.summary_only && e.summary_only) && eP > P) continue;
     }
     trWritten++;
-    stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
+    tail.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
   }
   // The monthly summary rows, the same per-month rule as training: the NEWER bill's figure stands, the same period replaces.
   const existingSum = (await env.DB.prepare("SELECT s.year, s.month, f.year fy, f.month fm FROM sga_summary s LEFT JOIN sga_file f ON f.id = s.file_id").all().catch(() => ({ results: [] }))).results;
@@ -1702,12 +1723,19 @@ async function applySgaWorkbook(env, b, st, by, source) {
     const e = existSum.get(t.year + "-" + t.month);
     if (e && e.fy && e.fm && e.fy * 12 + e.fm > P) continue;
     smWritten++;
-    stmts.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
+    tail.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
   }
+  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines; otherwise the month's OLDER lines go here, in
+  // the same batch as the file row that makes the new ones current
+  if (!st.summaryOnly) tail.push(env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=? AND file_id<>?").bind(st.period.year, st.period.month, fileId));
   // rows = 0 marks a summary-only load: /api/sga never lets it hide a month's lines (the latest file WITH rows serves them)
-  stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+  tail.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summaryOnly ? null : st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+  // the tail's LAST 100 statements — the DELETE and the file row among them — are ONE batch
+  const cut = Math.max(0, tail.length - 100);
+  for (let i = 0; i < cut; i += 100) await env.DB.batch(tail.slice(i, Math.min(i + 100, cut)));
+  await env.DB.batch(tail.slice(cut));
   await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length,
     (st.summaryOnly ? "SUMMARY ONLY (no manning sheet): " : (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", ") + "summary " + smWritten + " months, training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : "") + (st.summaryAgrees === false ? " — the summary sheet DISAGREES with the manning sheet" : ""));
   return { ok: true, period: st.period, applied: st.lines.length, summary_only: st.summaryOnly, summary_written: smWritten, summary_agrees: st.summaryAgrees, training: trMonths.length, training_written: trWritten, total: st.summaryOnly ? null : st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
@@ -1738,7 +1766,17 @@ function syncDeps(env) {
       if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
       return applySgaWorkbook(env, b, st, meta.by, meta.source);
     },
-    applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
+    applyTravel: async (sheets, year, meta) => {
+      // A WORKBOOK THAT LOST A MONTH IS HELD (27 Oct 2026): the year is replaced whole, so a file that arrives by itself (the
+      // inbox: the mail intake, the agent's rows) with no sheet for a month the year on file already holds — an older copy
+      // sent again, a sheet renamed past what the parser reads — would wipe that month. Nothing loads; the inbox rows say
+      // `months_missing`, sp_sync `held`, the activity log names it. Rita's own Upload shows the same months in its dry-run.
+      if (meta && meta.holdUnreconciled) {
+        const missing = await travelMonthsMissing(env, sheets, year);
+        if (missing.length) return { held: "months_missing", year: +year, missing };
+      }
+      return applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source);
+    },
   };
 }
 async function maybeSyncSharePoint(env) {
@@ -1862,7 +1900,14 @@ async function archiveSourceFile(env, bytes, meta) {
   const prev = await env.DB.prepare("SELECT r2_key, bucket FROM sga_source_file WHERE hash=?").bind(hash).first().catch(() => null);
   if (!kept && prev && prev.r2_key) { rec.r2_key = prev.r2_key; rec.bucket = prev.bucket; kept = true; error = null; }
   if (!kept) rec.note = rec.note || ("Bytes not kept" + (error ? ": " + error : ""));
-  await env.DB.prepare("INSERT OR REPLACE INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ")").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
+  // The same bytes again refresh who sent them and when (INSERT OR REPLACE did that), but NEVER lose a value already known
+  // (27 Oct 2026): the kept object (`r2_key` / `bucket`), the inbox link (`file_key` — Rita's Upload sends none, and it
+  // wiped the mail's) and the file's month; the note clears once the bytes are kept by either row.
+  await env.DB.prepare("INSERT INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ") ON CONFLICT(hash) DO UPDATE SET " +
+    "name=excluded.name, kind=COALESCE(excluded.kind, sga_source_file.kind), year=COALESCE(excluded.year, sga_source_file.year), month=COALESCE(excluded.month, sga_source_file.month), " +
+    "bytes=COALESCE(excluded.bytes, sga_source_file.bytes), r2_key=COALESCE(sga_source_file.r2_key, excluded.r2_key), bucket=COALESCE(sga_source_file.bucket, excluded.bucket), " +
+    "source=excluded.source, by=excluded.by, at=excluded.at, file_key=COALESCE(sga_source_file.file_key, excluded.file_key), " +
+    "note=CASE WHEN COALESCE(sga_source_file.r2_key, excluded.r2_key) IS NULL THEN excluded.note ELSE NULL END").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
   return { hash, kept, r2_key: rec.r2_key, error };
 }
 async function intakeMailToInbox(env, message, ctx) {
@@ -1870,13 +1915,21 @@ async function intakeMailToInbox(env, message, ctx) {
   const raw = await new Response(message.raw).arrayBuffer();
   const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
   const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now() });
-  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again
-  const keys = r.files.filter((f) => f.inbox && f.inbox.length).map((f) => f.inbox[0].file_key);
-  const done = new Set(keys.length ? (await env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all()).results.map((x) => x.file_key) : []);
+  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again —
+  // through the inbox, or (27 Oct 2026) on Upload data: the page stamps sga_file.file_hash with the file's SHA-256, so a bill
+  // Rita loaded by hand and Finance then emails is the same file, not a month to replace with itself
+  const queued = r.files.filter((f) => f.inbox && f.inbox.length);
+  const keys = queued.map((f) => f.inbox[0].file_key), hashes = queued.map((f) => f.hash);
+  const ids = [...new Set(keys.concat(hashes))];
+  const [inboxDone, fileDone] = ids.length ? await Promise.all([
+    env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all(),
+    env.DB.prepare("SELECT DISTINCT file_hash FROM sga_file WHERE file_hash IN (" + ids.map(() => "?").join(",") + ")").bind(...ids).all().catch(() => ({ results: [] })),
+  ]) : [{ results: [] }, { results: [] }];
+  const done = new Set(inboxDone.results.map((x) => x.file_key).concat(fileDone.results.map((x) => x.file_hash)));
   const ins = env.DB.prepare("INSERT OR REPLACE INTO sp_inbox (" + INBOX_COLS.join(",") + ") VALUES (" + INBOX_COLS.map(() => "?").join(",") + ")");
   const stmts = [];
   for (const f of r.files) {
-    if (f.inbox && f.inbox.length && done.has(f.inbox[0].file_key)) { f.status = "already_loaded"; continue; }
+    if (f.inbox && f.inbox.length && (done.has(f.inbox[0].file_key) || done.has(f.hash))) { f.status = "already_loaded"; continue; }
     for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
@@ -1887,11 +1940,11 @@ async function intakeMailToInbox(env, message, ctx) {
     f.archived = a.kept; if (a.error) f.archive_error = a.error;
   }
   const st = new Set(r.files.map((f) => f.status));
-  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : "no_workbook";
+  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : st.has("unreadable") ? "unreadable" : "no_workbook";
   const receipt = r.files.map(({ inbox, bytes, ...f }) => f);
   await env.DB.prepare("INSERT INTO mail_intake (id, from_addr, to_addr, subject, message_id, allowed, files_json, ignored_json, outcome, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(receipt), JSON.stringify(r.ignored), outcome, r.at).run();
-  await logData(env, "mail intake (" + r.from + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
+  await logData(env, "mail intake (" + r.from + (r.envelope ? ", envelope " + r.envelope : "") + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.error ? " (" + f.error + ")" : "") + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
   if (outcome === "queued") { const run = applyInbox(env).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
   return { outcome, files: receipt, ignored: r.ignored, from: r.from };
 }
@@ -1933,7 +1986,7 @@ async function apiSga(env) {
     env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, source, by, at, file_key, note FROM sga_source_file ORDER BY at DESC").all(),
     // bills the inbox HELD (17 Oct 2026): their lines do not add up to TDG's grand total; Rita loads them by hand
-    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' GROUP BY file_key").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' AND kind='sga' GROUP BY file_key").all().catch(() => ({ results: [] })),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -2252,7 +2305,10 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT * FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
     boardLegs(env), // the ONE schedule (§11)
     env.DB.prepare("SELECT * FROM contract_edit WHERE sc=?").bind(id).all().catch(none),
-    env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    // TDG's count + the row's debark and the visit mark (CC_VISIT_*), as every other grade reader reads it (27 Oct 2026 review:
+    // the profile handed completedSince the bare snapshot row, so a trainer's debark added +1 here and nowhere else)
+    env.DB.prepare("SELECT c.*, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on" + CC_VISIT_COLS + " FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN + " WHERE c.sc=?").bind(id).first()
+      .catch(() => env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT id, ts, text, created_by, archived_at, archived_by FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT * FROM crew_ready WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(id).all().catch(none),
@@ -2292,7 +2348,7 @@ async function apiCrewOne(env, url, session) {
   const ct = ctRes.results;
   // The grade the console derives from TDG's count (+ a contract TDG ended since the as-of date, §10c) — set
   // beside TDG's own position so a disagreement is a row to check, never silently one or the other.
-  const added = ccRow ? completedSince(ccRow.as_of, rsRow, today) : 0;
+  const added = ccRow ? completedSince(ccRow.as_of, ccRow.tdg_on !== undefined ? ccRowOf(ccRow) : rsRow, today) : 0;
   const grade = ccRow && ccRow.completed != null ? psRank(Number(ccRow.completed) + added, true) : null;
   const profile = buildCrewProfile({
     today, crew: row, override: ov, snap: rsRow, count: ccRow, countAdded: added, grade,
@@ -2344,6 +2400,9 @@ async function apiCrewAdd(request, env, session, ctx) {
   const b = await request.json().catch(() => ({}));
   const id = String(b.agency_id || "").trim();
   if (!id || !b.first_name || !b.last_name) return json({ error: "missing" }, 400);
+  // An agency id is TDG's key (SC-0040010), never free text (27 Oct 2026 review): the page embeds it in onclick handlers and
+  // data attributes on every tab, so one crafted id typed here would run in every other user's session.
+  if (!/^[A-Za-z]{1,4}-?[A-Za-z0-9]{3,12}$/.test(id)) return json({ error: "bad_agency_id" }, 400);
   const [ex] = await Promise.all([
     env.DB.prepare("SELECT agency_id FROM crew WHERE agency_id=?").bind(id).first(),
     ensureCrewExtras(env),
@@ -5452,7 +5511,7 @@ async function start(){
   var f='';
   if(d.role==='ray'){
     f+='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+sel('order',['No','Yes'],a.order||'No')+'</div>'
-     +'<div class=fg><label>If yes — cause</label>'+sel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause||'N/A')+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
+     +'<div class=fg><label>If yes — cause</label>'+sel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause||'N/A')+'<div class=hint>Shown on the Score Card as evidence. The rush gate is set only by a vessel-side miss in the Parts Portal.</div></div>'
      +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+fbEsc(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
      +'<div class=fg><label>Orders placed on time (par respected)?</label>'+sel('ontime',['Always','Mostly','Often late'],a.ontime||'Always')+'</div>'
      +'<div class=fg><label>Order accuracy</label>'+sel('acc',['Accurate','Minor errors','Frequent errors'],a.acc||'Accurate')+'</div>'
@@ -6184,9 +6243,9 @@ function parseTravelFile(f){
     rd.onload=function(e){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
-        var want=['JAN','FEB','MAR','APRIL','MAY','JUNE','JULY','AUG','SEPT','OCT','NOV','DEC','CIMS'];
+        var want=new RegExp('${TRAVEL_SHEET_RE.source}','i'); // the server's TRAVEL_SHEET_RE: every spelling the parser reads
         var sheets={};
-        wb.SheetNames.forEach(function(sn){ if(want.indexOf(sn.toUpperCase())>=0){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        wb.SheetNames.forEach(function(sn){ if(want.test(sn.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
         TRAVELUP={sheets:sheets,year:+ym};
         previewTravel();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
@@ -6201,6 +6260,7 @@ async function previewTravel(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">Preview '+r.year+'</b> — '+r.records+' line items · '+r.crew+' crew · $'+Number(r.total).toLocaleString()
     +'<div class=csub style="margin-top:4px">Sign-on $'+Number(r.byLeg.on||0).toLocaleString()+' · Sign-off $'+Number(r.byLeg.off||0).toLocaleString()+' · Transfer $'+Number(r.byLeg.transfer||0).toLocaleString()+'</div></div>';
   h+='<div class=csub style="margin-top:6px;color:var(--amber)">Applying replaces all '+r.year+' travel records (2025 history is untouched).</div>';
+  if(r.missing&&r.missing.length){var MN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];h+='<div class=csub style="margin-top:6px;color:var(--red)"><b>This workbook has no sheet for '+r.missing.map(function(m){return MN[m]||m;}).join(', ')+'</b>, which '+r.year+' on file carries. Apply removes those months — check the workbook before you apply.</div>';}
   if(r.records>0)h+='<button class="btn" style="margin-top:10px" onclick="applyTravel()">Apply '+r.year+' ('+r.records+' items)</button>';
   else h+='<div class=csub style="margin-top:8px">No travel line items found in that workbook.</div>';
   $('#imp').innerHTML=h;
@@ -6335,9 +6395,10 @@ function impCard(inner){return '<div class=icard>'+inner+'</div>';}
 // a row keyed on the cruise-line id (matched, not added) and a new row with no status word it can read (not added).
 // Until now only the unused /api/crew/import page drew one of them: on Uploads they went nowhere (§6 flag, never silent).
 function impFlagged(rv){
-  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[];
-  if(!(dup.length||km.length||rk.length||ns.length))return '';
+  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[],col=g.collisions||[];
+  if(!(dup.length||km.length||rk.length||ns.length||col.length))return '';
   var h='<div class=isec><h3>&#9888; In the file, nothing changed</h3><div class=d>Listed so you can ask TDG to correct the file. No choice here: Apply leaves each one as it says.</div>';
+  col.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>Two rows of the file resolve to this crew ('+impEsc((it.incoming_ids||[]).join(', '))+'). Neither is applied: one seafarer, one row.</div>');});
   dup.forEach(function(id){h+=impCard('<div class=iwho>'+impWho(id)+'</div><div class=itxt>The file lists this crew more than once. The last row stands.</div>');});
   km.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Cruise-line id",it.roster,it.file,impTag("kept as on the roster","amber")));});
   rk.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>The file keyed this crew on the cruise-line id '+impEsc(it.ship_crew_id||it.incoming_id||'')+'. Matched to the crew you hold, nothing added.</div>');});
@@ -7321,7 +7382,7 @@ async function deployRestore(el){
     if(r&&r.ok){ renderRotation(); } else { el.disabled=false; alert('Could not restore: '+((r&&r.error)||'error')); }
   }catch(_){ el.disabled=false; alert('Network error'); }
 }
-function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 // ONE card renderer, two states (Miguel, 14 Sep 2026):
 //   green  = what the TDG Contract Counter says. Click to edit; never draggable; it stays green.
 //   yellow = what Rita planned (an open assignment). Draggable between ships, removable, and from
@@ -7702,7 +7763,7 @@ function histCard(h){
     h.offSource==='tdg'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' per the TDG file'):'sign-off per the TDG file')+'</div>'):
     h.offSource==='card'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' (your card)'):'relieved per your card')+'</div>'):
     h.offSource==='rita'?'<div class=hdur>sign-off recorded in the console</div>':'';
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+escHtml(h.sc)+'" onclick="openCrew(\\''+escHtml(h.sc)+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
   return '<div class="hcard former"><div class=hnm><span>'+escHtml(h.name)+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
@@ -7837,8 +7898,22 @@ async function saveContract(id,seq){
     closeRotModal();renderRotation();
   }catch(e){g('cmtmsg').textContent='Failed to save.';}
 }
-async function sendSignoffInstructions(id,seq){try{var r=await (await fetch('/api/instructions/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error==='not_instructed'?'Not sent: this trip is a training visit. Training visits get no sign-off instructions.':r.error==='signoff_passed'?('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.'):r.error?('Error: '+r.error):(r.emailed?('Instructions emailed to the crew member.'+(r.cc&&r.cc.length?' Copy: '+r.cc.join(', ')+'.':'')):('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send instructions.');}}
-async function sendSignoffLink(id,seq){try{var r=await (await fetch('/api/ack/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error==='training_visit'?'Not sent: this trip is a training visit. Training visits get no sign-off link.':r.error==='signoff_passed'?('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.'):r.error?('Error: '+r.error):(r.emailed?'Sign-off request emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send.');}}
+// One click, one email (27 Oct 2026 review): a second press while the first is on its way does nothing; a mail the mailer did
+// not take says so (it used to read "no crew email on file"); a contract the crew already confirmed asks before re-sending.
+var _sfBusy={};
+async function sfSend(kind,id,seq,force){var k=kind+'|'+id;if(_sfBusy[k])return;_sfBusy[k]=1;try{
+  var url=kind==='instr'?'/api/instructions/request':'/api/ack/request';
+  var r=await (await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true,force:!!force})})).json();
+  if(r.error==='already_acknowledged'){_sfBusy[k]=0;if(confirm('The crew member already confirmed '+(kind==='instr'?'these instructions':'this sign-off link')+' for this contract. Send it again? The earlier link will stop working.'))return await sfSend(kind,id,seq,true);return;}
+  if(r.error==='not_instructed'||r.error==='training_visit'){alert('Not sent: this trip is a training visit. Training visits get no '+(kind==='instr'?'sign-off instructions.':'sign-off link.'));return;}
+  if(r.error==='signoff_passed'){alert('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.');return;}
+  if(r.error==='not_sent'){alert('Not sent: the mail service did not take it'+(r.detail?' ('+r.detail+')':'')+'. Nothing was recorded, so you can try again.');return;}
+  if(r.error){alert('Error: '+r.error);return;}
+  if(r.emailed)alert(kind==='instr'?('Instructions emailed to the crew member.'+(r.cc&&r.cc.length?' Copy: '+r.cc.join(', ')+'.':'')):'Sign-off request emailed to the crew member.');
+  else alert('Not emailed (no crew email on file). Copy this link to send: '+r.link);
+}catch(e){alert(kind==='instr'?'Could not send instructions.':'Could not send.');}finally{_sfBusy[k]=0;}}
+async function sendSignoffInstructions(id,seq){return sfSend('instr',id,seq,false);}
+async function sendSignoffLink(id,seq){return sfSend('link',id,seq,false);}
 async function sendReviewInvite(id,seq){if(!confirm('Send a shipboard-management review invite for this contract now?'))return;try{var r=await (await fetch('/api/sbm/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq})})).json();if(r&&r.error){var m={sbm_disabled:'GSM review is OFF. Turn the GSM review switch ON first, then send the invite.',no_recipient_configured:'No shipboard-manager email is configured for this ship yet.',signoff_passed:'That sign-off date has already passed - the review link would be expired.',already_submitted:'A review for this contract was already submitted.',no_signoff_date:'No sign-off date on file for this contract.',send_failed:'The email could not be sent. Please try again.'}[r.error]||('Could not send: '+r.error);alert(m);return;}alert('Review invite emailed to '+(r.recipient||'the shipboard manager')+'.');}catch(e){alert('Could not send the review invite.');}}
 function closeRotModal(){var m=document.getElementById('rotmodal');if(m)m.remove();if(window.rotEscHandler){document.removeEventListener('keydown',window.rotEscHandler);window.rotEscHandler=null;}}
 function rmTag(label,field,on,id){return '<span class="rtag rtoggle'+(on?' on':'')+'" data-crew="'+id+'" data-f="'+field+'" data-v="'+(on?1:0)+'" onclick="rmToggle(this)">'+label+'</span>';}
@@ -8349,8 +8424,21 @@ function srvDraw(){
   var src=d.sources||{};
   h+='<div class=liveband>&#9679; LIVE DATA &mdash; '+(src.forms||0)+' answers imported from the Microsoft Forms survey &middot; '+(src.console||0)+' from the console &middot; '
    +(d.enabled?'asked 3 days after each sign-off since '+srvDay(d.since):'the daily invitation is off')+'</div>';
+  // The loop is drawn in every period, answers or none (27 Oct 2026 review): with no answer yet it is the only place that
+  // names who has no email and who was not asked on purpose (Send anyway).
+  function loopHtml(){
+    var L=d.loop||{},lmax=Math.max(1,L.signedOff||0,L.invited||0);
+    var bar=function(lab,n){n=n||0;return '<div class=frow><span class=fl>'+lab+'</span><span class=fbar><i style="width:'+Math.round(n/lmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+n+'</span></div>';};
+    return '<div class="rblk svlp"><h3>Are we hearing from everyone?</h3>'
+     +bar('Signed off',L.signedOff)+bar('Asked',L.invited)+bar('Opened',L.opened)+bar('Answered',L.answered)
+     +((d.waiting||[]).length?'<div class=csub style="margin-top:8px">Waiting: '+d.waiting.map(function(w){return srvWho(w.name,w.agency_id)+' ('+escHtml(w.ship||'')+', asked '+srvDay(w.invited_at)+(w.reminded_at?', reminded':'')+')';}).join(', ')+'.</div>':'')
+     +((L.noEmail||[]).length?'<div class=csub style="margin-top:8px;color:var(--red)">No email on file, never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+')';}).join(', ')+'. Add it in Edit crew.</div>':'')
+     +((L.skipped||[]).length?'<div class=csub style="margin-top:8px">Not asked, on purpose:</div>'+L.skipped.map(function(x){return '<div class=svskip>'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join(''):'')
+     +'<div class=csub style="margin-top:8px">Signed off counts the contracts the Keyman board shows ended in the period; the other three count the console&rsquo;s invitations.</div></div>';
+  }
   if(!d.n){
     h+='<div class=rblk><div class=csub style="padding:14px 4px">No answers in this period. Widen the range &mdash; the Forms history starts in 2024.</div></div>';
+    h+='<div class=rgrid2 style="margin-top:12px">'+loopHtml()+'</div>';
     $('#rptbody').innerHTML=h;srvBind();return;
   }
   // ---- KPI strip
@@ -8396,14 +8484,7 @@ function srvDraw(){
      +G.map(function(g){var ex=g.items[0];return '<tr><td><b>'+escHtml(g.label)+'</b>'+(ex?'<div class=csub style="margin-top:2px">&ldquo;'+escHtml(ex.clause)+'&rdquo;</div>':'')+'</td><td class=nw>'+(g.owner?escHtml(g.owner):'<span class=mu>not set</span>')+'</td><td class=r style="font-weight:800;color:'+(g.hot?'var(--red)':'var(--navy)')+'">'+g.n+'</td></tr>';}).join('')
      +'</tbody></table></div><div class=csub style="margin-top:8px">Grouped by keyword, no AI; one answer can ask about two themes.'+(d.thanks?' '+d.thanks+' wrote thanks or &ldquo;all good&rdquo;, not counted as a fix.':'')+' Every answer&rsquo;s own words are in the table below.</div>'
      :'<div class=csub>Nobody named something to fix in this period.</div>')+'</div>';
-  var L=d.loop,lmax=Math.max(1,L.signedOff,L.invited);
-  var bar=function(lab,n){return '<div class=frow><span class=fl>'+lab+'</span><span class=fbar><i style="width:'+Math.round(n/lmax*100)+'%;background:#1E6FD0"></i></span><span class=fn>'+n+'</span></div>';};
-  h+='<div class="rblk svlp"><h3>Are we hearing from everyone?</h3>'
-   +bar('Signed off',L.signedOff)+bar('Asked',L.invited)+bar('Opened',L.opened)+bar('Answered',L.answered)
-   +(d.waiting.length?'<div class=csub style="margin-top:8px">Waiting: '+d.waiting.map(function(w){return srvWho(w.name,w.agency_id)+' ('+escHtml(w.ship||'')+', asked '+srvDay(w.invited_at)+(w.reminded_at?', reminded':'')+')';}).join(', ')+'.</div>':'')
-   +(L.noEmail.length?'<div class=csub style="margin-top:8px;color:var(--red)">No email on file, never asked: '+L.noEmail.map(function(x){return srvWho(x.name,x.sc)+' ('+escHtml(x.ship||'')+')';}).join(', ')+'. Add it in Edit crew.</div>':'')
-   +((L.skipped||[]).length?'<div class=csub style="margin-top:8px">Not asked, on purpose:</div>'+L.skipped.map(function(x){return '<div class=svskip>'+srvWho(x.name,x.sc)+' <span class=mu>'+escHtml(x.ship||'')+' &middot; off '+srvDay(x.off)+' &middot; '+escHtml(x.label)+'</span><button class="btn ghost" style="margin-left:auto;padding:4px 10px;font-size:12px" data-svsend="'+escHtml(x.sc)+'" data-svon="'+escHtml(x.on||'')+'" data-svname="'+escHtml(x.name||'')+'">Send anyway</button></div>';}).join(''):'')
-   +'<div class=csub style="margin-top:8px">Signed off counts the contracts the Keyman board shows ended in the period; the other three count the console&rsquo;s invitations.</div></div>';
+  h+=loopHtml();
   h+='</div>';
   // ---- the latest answers (the Shipboard Feedback report's Latest reviews); all of them one tap away
   var LS=SRV_ALL?d.list:d.list.slice(0,10);
@@ -10148,7 +10229,7 @@ function swQuestions(){
   var role=_SW.role;var a=(_SW.rawAnswers&&_SW.rawAnswers[role])||{};var f='';
   if(role==='ray'){
     f='<div class=fg><label>Did any order fail / need a rush or emergency shipment?</label>'+swSel('order',['No','Yes'],a.order)+'</div>'
-     +'<div class=fg><label>If yes — cause</label>'+swSel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause)+'<div class=hint>Only "Crew ordering failure" arms the rush gate.</div></div>'
+     +'<div class=fg><label>If yes — cause</label>'+swSel('rushcause',['N/A','Crew ordering failure','Legitimate (machine / added sailing / port)'],a.rushcause)+'<div class=hint>Shown on the Score Card as evidence. The rush gate is set only by a vessel-side miss in the Parts Portal.</div></div>'
      +'<div class=fg><label>Rush cost (USD)</label><input id=rushcost type=number min=0 value="'+escHtml(a.rushcost||'')+'" placeholder="e.g. 3000"></div>'
      +'<div class=fg><label>Orders placed on time (par respected)?</label>'+swSel('ontime',['Always','Mostly','Often late'],a.ontime)+'</div>'
      +'<div class=fg><label>Order accuracy</label>'+swSel('acc',['Accurate','Minor errors','Frequent errors'],a.acc)+'</div>'

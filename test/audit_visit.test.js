@@ -190,7 +190,7 @@ test("A8: what the documents found, as items to confirm — amber, provisional, 
   const b = beforeVisit({ machines: [{ serial: "S1", label: "PROD 1", p43: { items: [{ head: "LINES ALONG THE FEED IN CYAN", part: "CYAN DRUM" }] }, life: [{ name: "Drum Unit/K (%)", pct: 140 }] }, { serial: "S2", label: "PROD 2", down: "paper jam" }],
     diff: [{ kind: "gap" }, { kind: "timing" }], extras: [{ id: "x" }] });
   assert.deepEqual(b.map((x) => x.t), ["PROD 1 · Pattern 43: Lines along the feed in cyan", "PROD 1 · 1 part past rated life", "PROD 2 reported down", "Count: 1 line differs · 1 not in OBP", "Count: 1 line one unit off, the day OBP moved it"]);
-  assert.match(b[0].s, /provisional, Rolando confirms/); assert.match(b[1].s, /Drum Unit\/K 140% · copy quality decides/);
+  assert.match(b[0].s, /a reading of the scan · see it on the machine/); assert.match(b[1].s, /Drum Unit\/K 140% · copy quality decides/);
   assert.ok(b.every((x) => x.tone !== "r"), "nothing is red before it is seen on the ship");
   assert.doesNotMatch(JSON.stringify(b), /replace/i);
   assert.deepEqual(beforeVisit({}), []);
@@ -428,10 +428,12 @@ test("History: every filed audit, newest first, with what the filing wrote; a TE
   d1v.ov.followup = { owner: "Ray", due: "2099-01-01", text: "Resend the SOPs folder" };
   assert.equal((await t.call("POST", "/api/audit/visit/photo?id=" + id1 + "&step=inventory&k=phonekey01", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]), undefined, { "content-type": "image/jpeg" })).status, 200);
   assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: d1v })).json()).ok, true);
-  // a grade filed on the 15 Oct screen (no steps): listed, and said so, never "nothing missing"
+  // a grade filed on the 15 Oct screen (no steps): listed, and said so, never "nothing missing". Written as that screen
+  // wrote it — the route refuses three ratings alone since 27 Oct 2026 (steps_required), the rows it left stay on History
   const id2 = await completeRequest(t, "SC-2");
-  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id2, inventory: 3, technical: 3, collaterals: 4, note: "Counts from the printer, not the shelf." })).json()).ok, true);
-  t.db.prepare("UPDATE audit_eval SET filed_at=? WHERE request_id=?").run(new Date(Date.now() + 60e3).toISOString(), id2);
+  const at2 = new Date(Date.now() + 60e3).toISOString(), by2 = "dexter.lawrence@dg3.com";
+  t.db.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES ('av_legacy', ?, 'Oasis', 'SC-2', ?, 'filed', ?, ?)").run(id2, by2, at2, at2);
+  t.db.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, note, filed_by, filed_at) VALUES ('av_legacy', ?, 'SC-2', 'Oasis', 3, 3, 4, NULL, 3, 'average', 'Counts from the printer, not the shelf.', ?, ?)").run(id2, by2, at2);
   const H = await (await t.call("GET", "/api/audit/history")).json();
   assert.deepEqual(H.audits.map((a) => a.id), [id2, id1], "newest first");
   const a1 = H.audits[1];
@@ -677,4 +679,76 @@ test("review: a machine list read before lifeRows was kept, listing a part past 
   assert.equal(v.machines[0].life.length, 1);
   assert.equal(v.machines[0].lifeRead, true);
   assert.equal(beforeVisit({ machines: v.machines }).some((b) => /part life not read/.test(b.t)), false);
+});
+
+/* ------------------------------------------- the 27 Oct 2026 review ------------------------------------------- */
+test("review 27 Oct: the documents-in email retried after a failure compares the count with the OBP kept for the audit", async () => {
+  const { db, DB } = d1();
+  let lines = OBP, fail = true;
+  const sent = [];
+  const env = { DB, TIMECARD_DB: TC, AUDIT_FILES: R2(), AUDIT_TO: "ray@dg3.com", AUDIT_LIVE: "true",
+    HON: { ...HON, ship: async () => ({ ok: true, ship: "Oasis", presses: [{ serial: "S1", model: "C4070", label: "PROD 1" }], obp: { asOf: lines === OBP ? "2026-10-13" : "2026-10-14", lines, intransit: [] } }) } };
+  const R = installAuditRequest({ json, htmlResponse: (b) => new Response(b), ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => BOARD,
+    sendViaMailer: async (e, m) => { if (m.templateId === "hr.audit.docsin.v1" && fail) return { ok: false, error: "mailer down" }; sent.push(m); return { ok: true }; } });
+  const call = async (method, path, body, session = { email: "dexter.lawrence@dg3.com" }, headers = {}) => {
+    const u = new URL("https://audit.cims.work" + path), raw = body instanceof Uint8Array;
+    return R.handle(u.pathname, new Request(u, { method, headers: Object.assign(raw ? {} : { "Content-Type": "application/json" }, headers), body: body === undefined ? undefined : raw ? body : JSON.stringify(body) }), env, u, session);
+  };
+  const id = await completeRequest({ call, sent });
+  assert.equal(db.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind='docsin'").get(id).ok, 0, "the first email did not go");
+  // OBP moves (Toner C consumed 5 -> 0), the mailer comes back, the sweep retries
+  lines = OBP.map((l) => (l.part_number === "B2" ? { ...l, on_hand: 0 } : l)); fail = false;
+  db.prepare("UPDATE audit_request SET complete_at=? WHERE id=?").run(new Date(Date.now() - 3600e3).toISOString(), id);
+  await R.sweep(env);
+  const mail = sent.find((m) => m.templateId === "hr.audit.docsin.v1");
+  assert.ok(mail, "the retry went");
+  const v = await (await call("GET", "/api/audit/visit?id=" + id)).json();
+  assert.equal(v.count.asOf, "2026-10-13", "the audit reads the OBP kept at the count");
+  assert.ok(v.count.diff.some((x) => x.part_no === "B2" && x.obp === 5), "Toner C: OBP 5 against a count of 0");
+  assert.match(mail.text, /B2 OBP 5 counted 0/, "the email compares with the same OBP (5 against a count of 0), never the newer read where it agrees");
+});
+
+test("review 27 Oct: a follow-up still open at a third audit reads '3rd time', and the email says who is aboard now", async () => {
+  const { followupEmail } = await import("../src/emails/hr.audit.followup.v1.js");
+  const m = followupEmail({ owner: "Ray", link: "https://audit.cims.work/#fu", due: [{ ship: "Pursuit", text: "Replace the head lamp", askedBy: "Dexter Lawrence", askedAt: "2026-08-01T10:00:00Z", due: "2026-11-02", crew: "Kevin Jugao", carried: 2 }], late: [] });
+  assert.match(m.html, /3rd time/); assert.doesNotMatch(m.html, /2nd time/); assert.match(m.text, /Pursuit \(3rd time\)/);
+  const t = setup();
+  const id = await completeRequest(t);
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  const d = cleanVisit(v); d.ov.followup = { owner: "Ray", due: "2099-11-15", text: "Resend the SOPs folder" };
+  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id, visit: d })).json()).ok, true);
+  t.db.prepare("UPDATE audit_followup SET due='2026-11-02'").run();
+  const at = new Date("2026-11-02T12:05:00Z");
+  const crew = BOARD.sections[0].crew;
+  try {
+    BOARD.sections[0].crew = [{ agency_id: "SC-9", name: "Leo Marco", current: true, aboard: true }];   // John Gorre has signed off
+    assert.equal(await t.R._internal.sendFollowups(t.env, at), 1);
+    let mail = t.sent.filter((x) => x.templateId === "hr.audit.followup.v1").pop();
+    assert.match(mail.html, /Leo&nbsp;Marco is aboard now/, "who is aboard now, from the board");
+    t.db.prepare("DELETE FROM audit_send_log WHERE kind LIKE 'followup:%'").run();
+    BOARD.sections[0].crew = crew;                                                                     // still aboard: nothing said
+    assert.equal(await t.R._internal.sendFollowups(t.env, at), 1);
+    mail = t.sent.filter((x) => x.templateId === "hr.audit.followup.v1").pop();
+    assert.doesNotMatch(mail.html, /is aboard now/);
+  } finally { BOARD.sections[0].crew = crew; }
+});
+
+test("review 27 Oct: the Pattern 43 reading says only what it measured", async () => {
+  const { p43Assess } = await import("../src/audit_read.js");
+  const line = (where, pages) => p43Assess({ state: "findings", legend: { items: [{ head: "LINES ALONG THE FEED IN CYAN", detail: "1 line", ink: "cyan", where, pages, part: "CYAN DRUM OR CHARGING POLE", check: { say: "an even line reads as the drum", src: "DG3 tech library" } }] } }).items[0].lines;
+  const said = (L, k) => (L.find((l) => l[0] === k) || [])[1] || "";
+  const one = line("cyan half tone · green", [7, 10]);
+  assert.match(said(one, "What it means"), /on the cyan page and on green, a colour mixed with cyan/);
+  assert.doesNotMatch(said(one, "What it means"), /every colour mixed/, "it showed on one mix, not every mix");
+  assert.match(said(one, "Check on board"), /follow the line along its length/);
+  const dots = p43Assess({ state: "findings", legend: { items: [{ head: "WHITE DOTS ON FULL TONE YELLOW", ink: "yellow", where: "yellow full tone", pages: [1], part: "YELLOW DEVELOPER", check: { say: "white spots on a single colour are traced to contaminated developer powder", src: "DG3 help center" } }] } }).items[0].lines;
+  assert.match(said(dots, "Check on board"), /look at the same place/); assert.doesNotMatch(said(dots, "Check on board"), /follow the line/, "dots are no line");
+  const shared = p43Assess({ state: "findings", legend: { items: [{ head: "WHITE DOTS ON MOST COLOURS", ink: "shared", where: "yellow full tone · magenta full tone · cyan full tone", pages: [1, 2, 3], part: "TRANSFER BELT", rule: 6, check: null }] } }).items[0].lines;
+  assert.match(said(shared, "What it means"), /most colours, so it is not one colour's unit/);
+  assert.doesNotMatch(said(shared, "What it means"), /shared unit|mixed with shared/);
+  // the auditor's app says the same
+  const W = readFileSync(new URL("../src/audit_ui.js", import.meta.url), "utf8");
+  const f = W.slice(W.indexOf("function p43Lines(i)"), W.indexOf("function p43More("));
+  assert.match(f, /ink === "shared"/); assert.match(f, /isLine \? "follow the line along its length" : "look at the same place"/);
+  assert.doesNotMatch(W + readFileSync(new URL("../src/audit_steps.js", import.meta.url), "utf8"), /Rolando confirms|waits for its render to be signed off/, "Miguel, 23 Oct 2026: nobody signs the reading off; the reminder is wired");
 });

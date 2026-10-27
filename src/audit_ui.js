@@ -28,7 +28,8 @@ self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== C).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", (e) => {
   const r = e.request, u = new URL(r.url);
-  if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/") || u.pathname.startsWith("/auth/") || u.pathname === "/login") return;
+  // the crew's own page (/audit/u/<token>) is never the app's offline shell, and never served the shell (27 Oct 2026)
+  if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/") || u.pathname.startsWith("/auth/") || u.pathname === "/login" || u.pathname.startsWith("/audit/u/")) return;
   if (r.mode === "navigate") {
     e.respondWith(fetch(r).then((res) => { if (res.ok && !res.redirected) { const cp = res.clone(); caches.open(C).then((c) => c.put("shell", cp)); } return res; }).catch(() => caches.open(C).then((c) => c.match("shell")).then((m) => m || new Response("Offline. Open the app again when the ship has signal.", { headers: { "Content-Type": "text/plain" } }))));
   }
@@ -846,7 +847,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         var items = (m.p43 && m.p43.items) || [];
         if (items.length) {
           var one = items.length === 1 ? items[0] : null;
-          var sub = (one ? esc([one.where, one.part ? "points to " + sentence(one.part) : ""].filter(Boolean).join(" · ")) + "<br>" : items.map(function (it) { return esc(sentence(it.head)); }).join("<br>") + "<br>") + "Pattern 43 showed it. Print one and look; Rolando confirms.";
+          var sub = (one ? esc([one.where, one.part ? "points to " + sentence(one.part) : ""].filter(Boolean).join(" · ")) + "<br>" : items.map(function (it) { return esc(sentence(it.head)); }).join("<br>") + "<br>") + "Pattern 43 showed it. Print one and look.";
           h += tapRow("p43", "x", one ? sentence(one.head) : items.length + " Pattern 43 marks", sub, a.p43 === "seen", ["Not seen", "Seen"], ser, true);
         }
         if (!m.down) h += (m.life || []).length
@@ -950,7 +951,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     h += '<div class="card clip">' + tapBtn({ act: "block", key: "x", label: "Recommend for Oasis / Icon class", sub: rb ? "" : "Tap to recommend", pressed: rb, tk: rb ? "c" : "o", word: rb ? "Recommended" : "Not now", pill: rb ? "ok" : "m" })
       + tapBtn({ act: "fu", key: "x", label: "Needs a follow-up", sub: f ? "Who owns it, by when" : "Tap to add one", pressed: !!f, tk: f ? "c" : "o", word: f ? "Follow-up" : "None", pill: f ? "ok" : "m" });
     if (f) {
-      var owners = AR.FOLLOW_OWNERS.concat([first(v.crew)]);
+      var owners = AR.FOLLOW_OWNERS.concat([v.crew]); // the crew by FULL name: a first name alone could read as one of the five (ownerEmail)
       h += '<div class="pad-m line-t sec tight"><span class="xs b">Who</span><div class="pills wrapit">' + owners.map(function (n) { return '<button type="button" class="pill' + (f.owner === n ? " on" : "") + '" data-a="fu-owner" data-k="' + esc(n) + '" aria-pressed="' + (f.owner === n) + '">' + esc(n) + "</button>"; }).join("") + "</div>" + whyMsg(probs, "fu_owner")
         + lbl("By", '<input class="fld" type="date" data-f="fu-due" value="' + esc(f.due || "") + '" min="' + esc(v.today) + '">') + whyMsg(probs, "fu_due")
         + lbl("What", box("fu-text", f.text, "What has to happen")) + whyMsg(probs, "fu_text") + "</div>";
@@ -1006,9 +1007,14 @@ export const AUDIT_HTML = String.raw`<!doctype html>
   function p43Lines(i) {
     var out = [], w = String(i.where || "").split(" · ").filter(Boolean), pg = i.pages || [], ink = String(i.ink || "").toLowerCase();
     if (w.length) out.push(["Where", w.map(function (x, k) { return sentence(x) + (pg.length === w.length ? " (page " + pg[k] + ")" : ""); }).join(" · ") + (pg.length && pg.length !== w.length ? " · pages " + pg.join(", ") : "")]);
-    if (ink && ink !== "black" && w.length > 1 && /half tone|full tone/i.test(w[0])) out.push(["What it means", "The same mark on the " + ink + " page and on the mixes that carry " + ink + ": one colour, " + ink + ". The transfer belt or the scanner would mark every colour."]);
+    /* said as far as the reading goes (27 Oct 2026 review): a mark on most colours (ink "shared", rule 6) is no single colour,
+       and only a line is followed along its length */
+    var mixes = w.filter(function (x) { return !/half tone|full tone/i.test(x); }).map(function (x) { return x.toLowerCase(); });
+    var isLine = /\bline/i.test(String(i.head || "") + " " + String(i.detail || "") + " " + String(i.mark || ""));
+    if (ink === "shared") out.push(["What it means", "The same mark in the same place on most colours: not one colour's unit. The transfer belt carries every colour, and a scanner can leave the same mark."]);
+    else if (ink && ink !== "black" && mixes.length && /half tone|full tone/i.test(w[0])) out.push(["What it means", "The same mark on the " + ink + " page and on " + mixes.join(", ") + ", mixed with " + ink + ": one colour, " + ink + ". The transfer belt or the scanner would mark every colour."]);
     if (i.part) out.push(["Points to", sentence(i.part) + (i.src ? " · " + i.src : "")]);
-    if (i.check) out.push(["To tell which on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and follow the line along its length: " : "") + i.check + "."]);
+    if (i.check) out.push(["To tell which on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and " + (isLine ? "follow the line along its length" : "look at the same place") + ": " : "") + i.check + "."]);
     return out;
   }
   function p43More(i) { var L = p43Lines(i); if (!L.length) return i.detail ? '<p class="txt">' + esc(i.detail) + "</p>" : ""; return L.map(function (l) { return '<p class="sm"><b>' + esc(l[0]) + "</b> · " + esc(l[1]) + "</p>"; }).join(""); }
@@ -1341,8 +1347,8 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     h += '<section class="sec"><div class="hstack"><span class="eyebrow">How a follow-up moves</span></div><div class="card how4">'
       + '<div class="how"><span class="n">1</span><b class="h4">Asked in the audit</b><span class="sm">The last step: what, the owner (' + esc(AR.FOLLOW_OWNERS.join(", ")) + ") and a date.</span></div>"
       + '<div class="how"><span class="n">2</span><b class="h4">Shows where it matters</b><span class="sm">This page, the ship&#8217;s briefing and the audit it came from.</span></div>'
-      + '<div class="how"><span class="n">3</span><b class="h4">Its date comes</b><span class="sm">Past the date it turns red here. A reminder email to the owner waits for its render to be signed off.</span></div>'
-      + '<div class="how"><span class="n">4</span><b class="h4">Closed once</b><span class="sm">Its owner marks it done here, or Dexter ticks Fixed at the next audit; still open there reads &#8220;2nd time&#8221;.</span></div></div></section>';
+      + '<div class="how"><span class="n">3</span><b class="h4">Its date comes</b><span class="sm">On its date its owner gets one reminder email (07:00 Miami); past the date it turns red here.</span></div>'
+      + '<div class="how"><span class="n">4</span><b class="h4">Closed once</b><span class="sm">Its owner marks it done here, or Dexter ticks Fixed at the next audit; still open there reads &#8220;2nd time&#8221;, then &#8220;3rd time&#8221;.</span></div></div></section>';
     $("main").innerHTML = h;
   }
   /* two taps: the first asks, the second closes (a follow-up closed by a stray thumb would never come back at the next visit) */
