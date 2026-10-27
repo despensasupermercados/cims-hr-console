@@ -83,7 +83,7 @@ test("a field report is flagged only with its own words as the quote", () => {
 test("PARTS_DB and HON_DB are read, never written", () => {
   const s = readFileSync(new URL("../src/score_auto.js", import.meta.url), "utf8");
   const hits = [...s.matchAll(/(PARTS_DB|HON_DB)\.prepare\(\s*["'`]([^"'`]*)/g)];
-  assert.equal(hits.length, 3, "the Parts Portal's misses, HON's handovers, OBP's clicks (20 Oct 2026)");
+  assert.equal(hits.length, 4, "the Parts Portal's misses, HON's handovers, OBP's clicks (20 Oct 2026), HON's inventory count (27 Oct 2026)");
   for (const m of hits) assert.match(m[2].trim(), /^SELECT\b/i);
   assert.doesNotMatch(s, /(PARTS_DB|HON_DB)\.(batch|exec)\(/);
 });

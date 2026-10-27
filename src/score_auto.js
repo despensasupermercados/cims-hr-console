@@ -7,6 +7,8 @@
 //                                  be in the report word for word (otherwise no flag), kept in score_intel_flag.
 //   HON_DB weekly_obp_clicks       — OBP's daily clicks per machine (Jerwin's clicks.csv, read by the weekly-orders app
 //                                  since 20 Oct 2026): the mono share of PRESS clicks on the card's ships over the contract.
+//   HON_DB stock_swap              — the inventory count at this crew's sign-off (27 Oct 2026): HON's verdict on the two
+//                                  blind counts, and Ray's or Rolando's override. bonus.js inventoryCount reads it.
 import { autoScore } from "./bonus.js";
 import { buildCrewIndex, matchTravelName } from "./travel_match.js";
 
@@ -44,6 +46,17 @@ export function pickHandover(rows, { ship, signOff, crewName, sc }) {
   const hit = (rows || []).filter((r) => keys.includes(shipKey(r.ship)) && day(r.signed_at) >= lo && day(r.signed_at) <= hi && sameCrew(r));
   hit.sort((a, b) => (a.signed_at < b.signed_at ? 1 : -1));
   return hit[0] ? { id: hit[0].id, signedAt: hit[0].signed_at } : null;
+}
+
+// THE INVENTORY COUNT THAT CLOSES THIS CONTRACT (HON stock_swap, 27 Oct 2026): on one of the card's ships, the latest
+// sign-off in the window. HON's findings carry the gap counts; nothing here judges, it only reads HON's verdict.
+export function pickCount(rows, keys) {
+  const hit = (rows || []).filter((r) => r && keys.includes(shipKey(r.ship))).sort((a, b) => String(b.out_sign_off).localeCompare(String(a.out_sign_off)))[0];
+  if (!hit) return null;
+  let f = {};
+  try { f = JSON.parse(hit.findings || "{}") || {}; } catch (e) { f = {}; }
+  return { state: hit.status === "judged" ? "judged" : "open", verdict: hit.verdict || null, override: hit.override || null,
+    by: hit.override_by || null, reason: hit.override_reason || null, gaps: Number(f.gaps) || 0, spareGaps: Number(f.spareGaps) || 0, ship: hit.ship };
 }
 
 export const FLAG_SYSTEM = [
@@ -196,7 +209,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   const fail = (k) => (e) => { failed[k] = String((e && e.message) || e).slice(0, 160); return none(); };
   // the console's own tables: a table a database does not have yet (staging, a test copy) is no data; anything else failed
   const own = (k) => (e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail(k)(e));
-  const [misses, hons, audits, intel, resp, roster, legs, clicks] = await Promise.all([
+  const [misses, hons, audits, intel, resp, roster, legs, clicks, swaps] = await Promise.all([
     env.PARTS_DB && on && keys.length ? env.PARTS_DB.prepare("SELECT order_ref, ship, submitted_at, grand_total, requester FROM orders WHERE order_type='missed' AND miss_reason='vessel' AND voided_at IS NULL AND submitted_at >= ? AND submitted_at <= ?").bind(on, off + "T23:59:59").all().catch(fail("parts")) : none(),
     env.HON_DB && offIn && keys.length ? env.HON_DB.prepare("SELECT id, ship, outgoing_name, outgoing_crew_id, signed_at FROM handover WHERE signed_at IS NOT NULL AND signed_at >= ? AND signed_at <= ?").bind(addDays(off, -30), addDays(off, 10) + " 23:59:59").all().catch(fail("hon")) : none(),
     // a TEST request's grade is a rehearsal: never a seafarer's score
@@ -208,6 +221,9 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     // presses only (is_mfd 0), per ship, the contract's days; a table not created yet is no data, any other error is said
     env.HON_DB && on && keys.length ? env.HON_DB.prepare("SELECT ship, " + (keys.length > 1 ? "day, " : "") + "SUM(color) AS c, SUM(mono) AS m, MIN(day) AS a, MAX(day) AS b FROM weekly_obp_clicks WHERE is_mfd = 0 AND ship IS NOT NULL AND day >= ? AND day <= ? GROUP BY ship" + (keys.length > 1 ? ", day" : "")).bind(on, off).all()
       .catch((e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail("clicks")(e))) : none(),
+    // the inventory count at THIS crew's sign-off: his SC id, the handover's own window; a table not created yet is no data
+    env.HON_DB && offIn && keys.length && sc ? env.HON_DB.prepare("SELECT ship, status, verdict, override, override_by, override_reason, findings, out_sign_off FROM stock_swap WHERE out_crew_id = ? AND status IN ('open','judged') AND out_sign_off >= ? AND out_sign_off <= ?").bind(sc, addDays(off, -30), addDays(off, 10)).all()
+      .catch((e) => (/no such table/i.test(String((e && e.message) || e)) ? none() : fail("count")(e))) : none(),
   ]);
   // The console's OWN tables (27 Oct 2026 review): a failed read of the audits, the field reports, the feedback answers or the
   // roster used to come back as an empty answer — full audit points, no field-report zero, Ray's answer gone (and the page
@@ -235,6 +251,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     if (o.mine) vm.push(row); else notMine.push({ ...row, others: o.others, unplaced: o.unplaced, rule: o.rule });
   }
   const handover = pickHandover(hons.results || [], { ship, signOff: offIn, crewName, sc });
+  const count = failed.count ? { state: "unread" } : pickCount(swaps.results || [], keys);
   // field reports: classify each once (cached by the report's text), at most 4 new per open
   const reports = (intel.results || []).filter((r) => r.summary);
   const flags = [];
@@ -274,7 +291,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
     else clickRows = clickRows.filter((r) => (win[shipKey(r.ship)] || []).some(([a, b]) => day(r.day) >= a && day(r.day) <= b));
   }
   const mono = monoShare(clickRows, keys);
-  const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: mono ? { pct: mono.pct } : null });
+  const res = autoScore({ signOn: on, signOff: offIn, today: now, answers, rayAt, misses: vm, handover, audits: aud, flags, mono: mono ? { pct: mono.pct } : null, count });
   const notes = [];
   for (const m of notMine) {
     const head = "Vessel-side miss " + m.ref + " · " + day(m.at) + " · " + (m.ship || "") + " · placed by " + m.by;
@@ -284,6 +301,7 @@ export async function gatherAuto(env, { sc, ship, signOn, signOff, crewName, tod
   for (const r of earlier) notes.push({ factor: r.role === "ray" ? "sOrder" : r.role === "rolando" ? "sHand" : null, text: (r.role === "ray" ? "Ray" : r.role === "rolando" ? "Rolando" : r.role) + "'s answer of " + day(r.submitted_at) + " is from before this contract (sign-on " + on + "): kept as earlier feedback, not used", source: "Windows" });
   if (failed.parts) notes.push({ factor: "sOrder", text: "The Parts Portal could not be read (" + failed.parts + "): vessel-side misses were NOT checked", source: "Parts Portal" });
   if (failed.hon) notes.push({ factor: "sHand", text: "HON could not be read (" + failed.hon + "): the handover was NOT checked", source: "HON" });
+  if (failed.count) notes.push({ factor: "sHand", text: "HON's inventory count could not be read (" + failed.count + ")", source: "HON inventory count" });
   if (failed.clicks) notes.push({ factor: "sMono", text: "OBP's clicks could not be read (" + failed.clicks + "): mono was NOT checked", source: "OBP clicks" });
   else if (mono) notes.push({ factor: "sMono", text: monoLine(mono, on), source: "OBP clicks" });
   if (!keys.length) notes.push({ factor: "sOrder", text: "No ship on the Score Card: the Parts Portal, HON and the audits were not checked", source: "Score Card" });

@@ -30,7 +30,9 @@ test("context: the running contract, the person handing over (never a visit, nev
   assert.equal(c.on, "18 Oct 2026");
   assert.equal(c.off, "18 May 2027");
   assert.equal(c.months, "7 months");
-  assert.deepEqual(c.prev, { sc: "SC-2", name: "Mark Joseph Dela Rosa", first: "Mark", since: "28 Feb 2026" });
+  assert.deepEqual(c.prev, { sc: "SC-2", name: "Mark Joseph Dela Rosa", first: "Mark", since: "28 Feb 2026", offIso: "2026-10-20" });
+  // The arrival count opens on the day the shelf becomes his: Mark signs off 20 Oct, two days after Archie joins.
+  assert.deepEqual([c.countDay, c.countWhen, c.countAfterPrev], ["20 Oct 2026", "ahead", true]);
   assert.equal(c.nextPay, "Wed 4 Nov");
   assert.equal(c.position, "Printer Specialist");
   assert.equal(predecessorOf(LEGS.filter((l) => l.sc !== "SC-2"), currentLeg(LEGS, "SC-1")), null, "no one within the window: nobody is named");
@@ -122,4 +124,20 @@ test("preview route: signed in only, no real link made (its hub button opens the
   assert.deepEqual([...png.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47], "a real PNG, no login");
   const R = readFileSync(new URL("../src/crew_hub_routes.js", import.meta.url), "utf8");
   assert.doesNotMatch(R, /MAILER|sendViaMailer/, "nothing in the hub module can send mail");
+});
+
+// THE ARRIVAL COUNT (Miguel, 27 Oct 2026; cims-hon stockCount.arrivalWindow): its own email, 9:00 ship time on the later of
+// his sign-on and the predecessor's sign-off, for 24 hours — never "sign it in your Digital Handover Notes".
+test("the arrival count: named by its day, in the tense of the day the welcome is read, never signed in the notes", () => {
+  const strip = (h) => h.replace(/<[^>]+>/g, " ").replace(/&rsquo;/g, "'").replace(/\s+/g, " ");
+  const ahead = welcomeEmail(welcomeContext({ crew: CREW, legs: LEGS, today: "2026-10-18", links: LINKS }));
+  assert.match(strip(ahead.html), /20 OCT Count the shelf Your arrival count opens at 9:00 ship time on 20 Oct 2026, the day Mark signs off, for 24 hours\. The link comes in its own email\. It is blind, and any gap you find goes against Mark\. It protects you\./);
+  assert.match(ahead.text, /20 OCT: count the shelf\. Your arrival count opens at 9:00 ship time on 20 Oct 2026, the day Mark signs off/);
+  assert.match(strip(ahead.html), /Read Mark's notes\. Your count comes in its own email\. No login\./);
+  const solo = LEGS.map((l) => (l.sc === "SC-2" ? { ...l, off: "2026-10-16" } : l));
+  const today = welcomeEmail(welcomeContext({ crew: CREW, legs: solo, today: "2026-10-18", links: LINKS }));
+  assert.match(strip(today.html), /TODAY Count the shelf Your arrival count opens at 9:00 ship time today, for 24 hours\./);
+  const late = welcomeEmail(welcomeContext({ crew: CREW, legs: solo, today: "2026-10-21", links: LINKS }));
+  assert.match(strip(late.html), /18 OCT Count the shelf Your arrival count opened at 9:00 ship time on 18 Oct 2026, for 24 hours\./);
+  for (const m of [ahead, today, late]) assert.doesNotMatch(m.html + m.text, /count the inventory|and sign it|Count the inventory/i);
 });
