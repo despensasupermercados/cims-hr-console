@@ -89,10 +89,27 @@ export function mapFeedbackToScore(answers) {
 //  - Order accuracy / Par: Ray's answers, all or nothing; a field report in the contract that names an accuracy or
 //    a par problem zeroes the factor until Ray answers after it ("allow Ray to rectify that").
 //  - Ship handover: contracts ending on or after HON_FROM need a signed HON handover (10, else 0); before, Rolando's
-//    answers as before.
+//    answers as before. AND THE INVENTORY COUNT (Miguel, 27 Oct 2026: "if discrepancies the bonus gate will default as
+//    wrong inventory .. so it shodul be 0"; the date: "1 Nov 2026"): HON's two blind counts at the crew change, judged by
+//    HON's own rules, Ray or Rolando may override. Wrong inventory = 0 even with a signed handover; a count not judged yet
+//    holds the factor at 0 until it is; a count HON could not read holds it at 0 and says so; no count on file for this
+//    sign-off (the flow did not reach it) leaves the handover alone, and says so.
 //  - Dexter's audit (the old "Communication" 10): 5 = 10, 4 = 8, 3 or below = 0; no audit in the contract = 10.
 //  - Mono (5): presses only, mono share of clicks over the contract under 20% = 5, else 0; no click data = 5.
 export const HON_FROM = "2026-11-01";
+// THE INVENTORY COUNT'S WORD ON THE HANDOVER FACTOR. An override (Ray or Rolando) wins over HON's verdict; nothing on
+// file is said as itself, never as "no gaps".
+export function inventoryCount(c) {
+  if (!c) return { zero: false, text: "No inventory count on file for this sign-off: the signed handover alone decides" };
+  if (c.state === "unread") return { zero: true, text: "HON's inventory count could not be read: the handover factor is held at 0. Check it on the record" };
+  if (c.state !== "judged") return { zero: true, text: "Inventory count not judged yet (both counts must close): the handover factor is held at 0 until HON judges it" };
+  const by = c.by ? " by " + c.by + (c.reason ? ": " + c.reason : "") : "";
+  const gaps = (c.gaps ? c.gaps + " gap" + (c.gaps === 1 ? "" : "s") : "") + (c.spareGaps ? ", " + c.spareGaps + " on a spare" : "");
+  if (c.override === "cleared") return { zero: false, text: "Inventory count: CLEARED" + by + (gaps ? " (HON found " + gaps + ")" : "") };
+  if (c.override === "upheld") return { zero: true, text: "Inventory count: wrong inventory, UPHELD" + by + (gaps ? " (" + gaps + ")" : "") };
+  if (c.verdict === "wrong") return { zero: true, text: "Inventory count: wrong inventory" + (gaps ? " (" + gaps + ")" : "") + ". Ray or Rolando can clear it on the record" };
+  return { zero: false, text: "Inventory count: no gaps" };
+}
 export const MONO_LIMIT = 20;
 export function auditPoints(score) {
   if (score == null) return FW.sComm;
@@ -106,6 +123,7 @@ const inSpan = (d, on, off) => { const x = day(d); return !!x && (!on || x >= on
 const instant = (v) => { const t = Date.parse(String(v || "").trim().replace(" ", "T")); return isNaN(t) ? null : t; };
 // in: { signOn, signOff, answers:{ray,rolando,dexter}, rayAt (ISO the answer was given), misses:[{ref,at,total}],
 //       handover:{signedAt,id}|null, audits:[{score,at (graded),requestedAt,id}], flags:[{at,accuracy,par,quote}], mono:{pct}|null,
+//       count: { state: "judged"|"open"|"unread", verdict: "clean"|"wrong", override, by, reason, gaps, spareGaps }|null,
 //       today (ISO day; default the clock) }
 // Without a sign-on nothing dated is counted (a blank start read every miss in the ship's history); a contract whose
 // sign-off is still ahead (or blank) is running, so its handover is not due yet and keeps the window's value.
@@ -133,6 +151,11 @@ export function autoScore(inp) {
   } else if (off && off >= HON_FROM) {
     sliders.sHand = x.handover ? FW.sHand : 0;
     evidence.push({ factor: "sHand", text: x.handover ? "HON handover signed " + day(x.handover.signedAt) : "No signed HON handover for this sign-off", source: "HON" });
+    if (x.handover) {
+      const c = inventoryCount(x.count);
+      if (c.zero) sliders.sHand = 0;
+      evidence.push({ factor: "sHand", text: c.text, source: "HON inventory count" });
+    }
   }
   // THE AUDIT BELONGS TO THE CONTRACT IT WAS REQUESTED IN (Miguel, 17 Oct 2026: "The one it was requested in"), whenever
   // Dexter grades it: a request sent in the last days of a contract and graded after the next one began scored the NEXT

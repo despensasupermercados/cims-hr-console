@@ -598,6 +598,13 @@ movable; the commit is a money user's click; committed outcomes are never touche
   Maintained score); a field report in the contract naming the problem = 0 until Ray answers after it (§10 exception).
 - **Handover (10):** contracts ending on/after **1 Nov 2026** need a signed HON handover for that ship (signed within 30 days
   before to 10 after the sign-off; HON's outgoing name must match when given) = 10, else 0; earlier contracts keep Rolando.
+  **AND THE INVENTORY COUNT** (Miguel, 27 Oct 2026: "if discrepancies the bonus gate will default as wrong inventory .. so
+  it shodul be 0"; date "1 Nov 2026"): HON replaced the scanned paper inventory with two blind counts at every crew change
+  and JUDGES them itself (cims-hon `src/lib/stockCount.js`); Ray or Rolando may override on the record. `score_auto.js`
+  reads cims-hon `stock_swap` by the crew's SC id in the handover's window (`pickCount`, SELECT only); `bonus.js`
+  `inventoryCount` decides: wrong inventory (or an override UPHELD) = 0 even with a signed handover; no gaps (or CLEARED) =
+  the handover's 10; a count not judged yet, or a failed read, holds the factor at 0 and says why; no count on file for the
+  sign-off (the flow did not reach it) leaves the handover alone and says so. `test/inventory_count_gate.test.js`.
 - **Dexter's audit (10) replaces "Communication (Rita)":** the audit score (Overall, else the average rounded down) — 5 = 10,
   4 = 8, 3 or below = 0; no audit in the contract (filed up to 30 days after the sign-off) = 10; several = the lowest.
 - **Mono (5):** presses only, under 20% of clicks over the contract = 5, else 0; no click data = 5. The data is OBP's clicks
