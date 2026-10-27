@@ -91,7 +91,7 @@ export async function fetchCurrentAssignments(env, today) {
   const { results } = await env.DB.prepare(
     `SELECT a.id, a.sign_on, a.planned_sign_off, a.on_port_seed, a.off_port_seed,
             COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
-            c.id AS crew_id, c.agency_id AS sc,
+            c.id AS crew_id, c.agency_id AS sc, c.first_name, c.last_name,
             TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
        FROM assignment a
        JOIN contract k ON k.id = a.contract_id
@@ -191,6 +191,7 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
     };
     if (a.on_port_seed) o.embark = a.on_port_seed;   // honest nulls: no homeport guess here
     if (a.off_port_seed) o.disembark = a.off_port_seed;
+    if (a.visit) o.visit = true;                      // a trainer's trip only Rita's card holds (markAssignmentVisits)
     out.push(o);
   }
   // Ended assignments -> NON-current history legs (off = the actual sign-off). Skipped when a leg already records
@@ -377,6 +378,38 @@ export async function fetchVesselBrands(env) {
 // PURE. rows: fetchRegistryRows · edits: fetchContractEdits · counter: fetchCounterKeys · open: the open
 // assignments (fetchOpenAssignments, with created_at/updated_at) · vessels: [{name, brand}] · today ·
 // visits: fetchContractVisits (Rita's per-trip marks) · trainers: fetchTrainers (the trainer tag) — visits.js.
+// PURE. The latest TDG file's word per crew, as legsFromRegistry reads it: the status, the hull's key and the file's date.
+export function fileWordBy(rows) {
+  const by = {};
+  for (const r of (rows || [])) {
+    if (!r || !r.sc) continue;
+    const status = r.status || normalizeStatus(r.raw_status) || null;
+    const ship = r.vessel ? (canonShipWith(r.vessel, SHIP_KEYS) || String(r.vessel).trim()) : null;
+    by[r.sc] = { status, key: ship ? normShip(ship) : null, at: dayOf(r.run_at) };
+  }
+  return by;
+}
+// PURE. The in-force cards the latest TDG file does not contradict (§11 "THE BOARD APPLIES THE FILE": a card the file
+// contradicts — ashore / elsewhere — is off the board). The same rule the reliever cards obey in legsFromRegistry: a file
+// dated AFTER the card's sign-on that does not have the crew On board (or Earmarked) that hull says the plan did not happen.
+// A file dated on the sign-on day says nothing yet; a crew the file does not carry keeps the card.
+export function dropContradictedCards(asg, rows, today) {
+  const by = fileWordBy(rows);
+  return (asg || []).filter((a) => {
+    if (!a || !a.sc || !a.ship || !dayOf(a.sign_on)) return true;
+    const w = by[a.sc];
+    if (!w || !w.at || !(w.at > dayOf(a.sign_on))) return true;
+    if (today && dayOf(a.sign_on) > today) return true;
+    return (w.status === "On board" || w.status === "Earmarked") && w.key === shipKey(a.ship);
+  });
+}
+// PURE. A card of a trainer or of the shoreside team is a training visit unless Rita marked that trip a full contract
+// (visits.js, §10i) — the same mark the file's row gets, so every reader of the schedule sees one rule.
+export function markAssignmentVisits(asg, visits, trainers) {
+  const vmap = visitMap(visits), tset = trainerSet(trainers);
+  return (asg || []).map((a) => (a && a.sc && !a.visit && isVisit(vmap, a.sc, dayOf(a.sign_on), { agency_id: a.sc, first_name: a.first_name, last_name: a.last_name, trainer: tset.has(a.sc) }) ? { ...a, visit: true } : a));
+}
+
 export function legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers } = {}) {
   const vmap = visitMap(visits), tset = trainerSet(trainers);
   const brandOf = {};
@@ -442,6 +475,9 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
       // contradiction either (17 Oct 2026, Corpin on Grandeur: "turn green"): TDG has the plan, not the embark yet.
       const w = fileBy[a.sc];
       if (dayOf(a.sign_on) <= today && w && w.at && w.at > dayOf(a.sign_on) && !((w.status === "On board" || w.status === "Earmarked") && w.key === L.key)) continue;
+      // A TRAINER'S (or the shoreside team's) CARD is a visit like his file row (27 Oct 2026 review; §10i): it never dates
+      // the printer's sign-off and never names him the reliever — unless Rita marked that trip a full contract.
+      if (isVisit(vmap, a.sc, dayOf(a.sign_on), { agency_id: a.sc, first_name: a.first_name, last_name: a.last_name, trainer: tset.has(a.sc) })) continue;
       cards.push({ on: dayOf(a.sign_on), at: String(a.updated_at || a.created_at || ""), id: a.id || null, sc: a.sc, name: a.crew_name || null });
     }
     const card = cards.reduce((b, c) => (!b || c.on < b.on ? c : b), null);
@@ -552,7 +588,13 @@ async function boardLegsFromDbUncached(env, today) {
   const turnarounds = turnaroundsByShip(taRows);
   const registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers });
   const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry);
-  const out = mergeBoardLegs(registry.concat(history), asg, today, ended);
+  // THE SCHEDULE CARRIES WHAT THE BOARD SHOWS (27 Oct 2026 review). A card the latest TDG file contradicts — a file dated
+  // after its sign-on has the crew aboard another hull or ashore — is off the board (§11) but used to stay a CURRENT leg
+  // here, so the statement, the profile, the Score Card's contracts and whose-miss rule, the bench and the crew page's
+  // sign-off buttons all read a running contract the board had taken off (Gayda's Allure card beside her Jewel seat).
+  // And a trainer's card is a visit, as his file row is (§10i), never a seat the emails or the count read as a contract.
+  const cards = markAssignmentVisits(dropContradictedCards(asg, rows, today), visits, trainers);
+  const out = mergeBoardLegs(registry.concat(history), cards, today, ended);
   // The same map rides on the schedule (non-enumerable) so the board's other projections — the earmark bench's
   // one-tap dates — snap to the same days without a second read (§12).
   Object.defineProperty(out, "turnarounds", { value: turnarounds, enumerable: false });
@@ -576,7 +618,7 @@ export async function fetchOpenAssignments(env) {
             a.instructions_sent_at, a.signoff_link_sent_at, a.review_invite_sent_at,
             a.deployed_at, a.deploy_log_id, a.created_at, a.updated_at,
             COALESCE(v.name, a.vessel_name) AS ship, v.brand AS brand,
-            c.id AS crew_id, c.agency_id AS sc,
+            c.id AS crew_id, c.agency_id AS sc, c.first_name, c.last_name,
             COALESCE(NULLIF(o.rank_override,''), c.rank_override, c.rank_observed) AS rank,
             TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) AS crew_name
        FROM assignment a

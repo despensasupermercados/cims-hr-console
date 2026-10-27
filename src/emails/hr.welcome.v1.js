@@ -3,7 +3,7 @@
 // (data) => { subject, html, text }. Filled from the board's schedule (src/welcome_context.js). Never a placeholder: a link
 // not given is no button; no predecessor on record is no "You take over from"; the sign-off says where its date comes
 // from (§10d). Canonical letterhead (cims-mast.js). Pinned by test/welcome_email.test.js.
-import { MANAGER } from "./hr.signoff.instructions.v2.js";
+import { MANAGER, endDot } from "./hr.signoff.instructions.v2.js";
 import { mastRows } from "../cims-mast.js";
 const C = { navy: "#1B3A5C", deep: "#142D48", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB",
   body: "#374151", grey: "#9CA3AF", sub: "#95A0AD", gtint: "#EAF4E6", amber: "#B7791F", atint: "#F6EEE1" };
@@ -121,7 +121,7 @@ export function welcomeEmail(d) {
    @media only screen and (max-width:600px){.frame{padding:0!important}.px{padding-left:20px!important;padding-right:20px!important}.h1{font-size:28px!important;line-height:32px!important}.passpad{padding:10px!important}.code{font-size:30px!important;line-height:36px!important}.pf .pv{font-size:15px!important}.pn,.pe{display:block!important;width:100%!important;text-align:left!important;padding:0!important}.pe{padding-top:2px!important}.hubpad{padding:18px 16px!important}.hubh{font-size:21px!important;line-height:27px!important}.ht{padding:10px 11px!important}.hv{font-size:15px!important;line-height:20px!important}}
   </style></head>
   <body style="margin:0;padding:0;background:${C.cloud};-webkit-text-size-adjust:100%;">
-  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${C.cloud};">Welcome aboard ${D.ship}, ${D.first}. Your first 15 days, who to message, and what to read.</div>
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:${C.cloud};">Welcome aboard ${D.ship}, ${D.first}${endDot(D.first)} Your first 15 days, who to message, and what to read.</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.cloud}" style="background:${C.cloud};"><tr><td class="frame" align="center" style="padding:24px 12px;">
   <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="width:100%;max-width:600px;background:#FFFFFF;">
   ${mastRows()}
@@ -129,7 +129,7 @@ export function welcomeEmail(d) {
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.gink};">WELCOME ABOARD</td>
     <td align="right" style="font-family:${FB};font-size:13px;color:${C.slate};">${D.today}</td></tr></table>
-   <div class="h1" style="font-family:${FH};font-size:34px;font-weight:600;letter-spacing:-0.6px;line-height:38px;color:${C.navy};padding-top:14px;">Welcome aboard, ${D.first}.<br><span style="color:${C.grey};">${D.shipShort} is yours ${esc(d.yours || "from today")}.</span></div>
+   <div class="h1" style="font-family:${FH};font-size:34px;font-weight:600;letter-spacing:-0.6px;line-height:38px;color:${C.navy};padding-top:14px;">Welcome aboard, ${D.first}${endDot(D.first)}<br><span style="color:${C.grey};">${D.shipShort} is yours ${esc(d.yours || "from today")}.</span></div>
    <div style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};padding-top:14px;">We are glad you are here. Everything for your first weeks is on this one page, and the Onboard Support Team is one message away.</div>
   </td></tr>
   ${pass}
@@ -181,7 +181,7 @@ export function welcomeEmail(d) {
   </td></tr>
   
   <tr><td class="px" style="padding:26px 32px 28px 32px;">
-   <div style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};padding-bottom:12px;">Once again, welcome aboard. Have a great contract, ${D.first}.</div>
+   <div style="font-family:${FB};font-size:15px;line-height:24px;color:${C.body};padding-bottom:12px;">Once again, welcome aboard. Have a great contract, ${D.first}${endDot(D.first)}</div>
    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-left:3px solid ${C.green};padding:2px 0 2px 14px;">
     <div style="font-family:${FH};font-size:15px;font-weight:600;color:${C.navy};line-height:20px;">Rita Berenyi</div>
     <div style="font-family:${FB};font-size:13px;color:${C.body};line-height:20px;">Manager, People &amp; Culture</div>
@@ -192,7 +192,7 @@ export function welcomeEmail(d) {
   </table></td></tr></table></body></html>`;
   
   const text = [
-    `Welcome aboard, ${d.first}. ${d.shipShort || d.ship} is yours ${d.yours || "from today"}.`, "",
+    `Welcome aboard, ${d.first}${endDot(d.first)} ${d.shipShort || d.ship} is yours ${d.yours || "from today"}.`, "",
     `Ship: ${d.ship}${d.port ? " (joined in " + d.port + ")" : ""}`, `Signed on: ${d.on}`, `Sign-off: ${d.off} (${d.offSource === "tdg" ? "confirmed by TDG" : "TDG confirms it later"})`,
     ...(d.prev && d.prev.name ? [`You take over from: ${d.prev.name}`] : []), "",
     `Today: open the Digital Handover Notes (${HON_URL}), count the inventory and sign it.`,

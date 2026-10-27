@@ -72,6 +72,9 @@ export function portName(p) {
 }
 // The first word of the first name (TDG's "Kevin Leif" -> "Kevin"; "A.J. Lorenzo" -> "A.J.").
 export const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
+// The full stop after a greeting: none when the name already ends in one ("Two weeks to go, A.J." — A.J. Lorenzo Baleña;
+// 27 Oct 2026 review: six templates and two pages printed "A.J..").
+export const endDot = (name) => (/\.$/.test(String(name || "")) ? "" : ".");
 
 // The reliever's mobile as TDG keeps it ("09171234567", "+63 917 123 4567", "639171234567"): a Philippine mobile reads
 // +63 917 123 4567 with a tel: and a WhatsApp link; anything else is printed as written, with a tel: link only.
@@ -193,7 +196,7 @@ export function instructionsEmail(d) {
       ? `You may or may not meet ${relFirst} aboard, so your notes must carry everything.` + (contact ? ` A short message before you leave helps: introduce yourself, and say anything that cannot wait for the notes.` : "")
       : `You may not meet your reliever aboard, so your notes must carry everything.`;
 
-  const headA = go ? `${go[0]}, ${name}.` : `Your sign-off is coming up, ${name}.`;
+  const headA = go ? `${go[0]}, ${name}${endDot(name)}` : `Your sign-off is coming up, ${name}${endDot(name)}`;
   const head = off ? `You sign off ${shortDate(off)}${port ? " in " + esc(port) : ""}.` : `Your sign-off is coming up.`;
   const steps = [
     `Open your notes with the button on your pass, or go to <a href="${esc(link)}" style="color:${C.navy};font-weight:700;">hon.cims.work</a> on any device, and select <b>${esc(ship || "your ship")}</b>. No login.`,

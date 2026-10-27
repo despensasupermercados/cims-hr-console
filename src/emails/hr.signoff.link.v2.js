@@ -10,7 +10,7 @@
 import { mastRows } from "../cims-mast.js";
 import { mdShort } from "../span_md.js";
 import { shipCode } from "../ship_codes.js";
-import { shipFullName, portName, shortDate, longDate, toGo } from "./hr.signoff.instructions.v2.js";
+import { shipFullName, portName, shortDate, longDate, toGo, endDot } from "./hr.signoff.instructions.v2.js";
 
 export const TEMPLATE_ID = "hr.signoff.link.v2";
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB",
@@ -81,7 +81,7 @@ export function linkEmail(d) {
   </td></tr>
  </table></td></tr></table></td></tr>`;
 
-  const headA = go ? `${go[0]}, ${name}.` : `Your sign-off is coming up, ${name}.`;
+  const headA = go ? `${go[0]}, ${name}${endDot(name)}` : `Your sign-off is coming up, ${name}${endDot(name)}`;
   const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>Confirm your sign-off</title>
@@ -105,7 +105,7 @@ ${pass}
 <tr><td class="px" style="padding:20px 32px 24px 32px;font-family:${FB};font-size:12px;color:${C.slate};line-height:1.5;border-top:1px solid ${C.border};">CIMS &middot; Cruise Industry Managed Services &middot; sent 7 days before your sign-off. The link is yours alone; it opens the confirmation page, it confirms nothing by itself.</td></tr>
 </table></td></tr></table></body></html>`;
   const subject = (go ? go[0] + " · " : "") + "Confirm your sign-off" + (ship ? " · " + ship : "") + (off ? " · " + shortDate(off) : "");
-  const text = [`${go ? go[0] + ", " : ""}${d.firstName || ""}. Confirm your sign-off.`,
+  const text = [`${go ? go[0] + ", " : ""}${d.firstName || ""}${endDot(d.firstName)} Confirm your sign-off.`,
     `${ship}${off ? ": sign-off " + longDate(off) : ""}${port ? ", " + port : ""}.${on && off ? " " + mdShort(on, off) + " aboard." : ""}`,
     "When you confirm, you say:\n" + items.map((t) => "- " + t).join("\n"),
     "Confirm my sign-off: " + link + "\n(Opens one page with one button. Nothing is recorded until you tap it there.)",

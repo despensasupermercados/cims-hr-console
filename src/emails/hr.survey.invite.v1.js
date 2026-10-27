@@ -4,6 +4,7 @@
 // letterhead (cims-mast.js), tables and solid colours only (CIMS email standard §2). Pinned by test/crew_survey.test.js.
 import { mastRows } from "../cims-mast.js";
 import { QUESTIONS } from "../crew_survey.js";
+import { endDot } from "./hr.signoff.instructions.v2.js";
 
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB", body: "#374151", grey: "#9CA3AF", line: "#F0F1F3", pass: "#C9D4E0", lime: "#8FD27A" };
 const FB = "'DM Sans',Helvetica,Arial,sans-serif", FH = "'Outfit',Helvetica,Arial,sans-serif";
@@ -18,11 +19,11 @@ export function surveyInviteEmail(d) {
   const first = esc(d.first || "there"), shipShort = esc(d.shipShort || d.ship || "your ship"), ship = esc(d.ship || "");
   const head = d.reminder
     ? `Still a minute, ${first}?<br><span style="color:${C.grey};">How did ${shipShort} go?</span>`
-    : `Welcome home, ${first}.<br><span style="color:${C.grey};">How did ${shipShort} go?</span>`;
+    : `Welcome home, ${first}${endDot(first)}<br><span style="color:${C.grey};">How did ${shipShort} go?</span>`;
   const lead = d.reminder
     ? `Your survey is still open until ${esc(d.expires)}. Three minutes, and every answer is read by the CIMS team. If something got in your way on ${shipShort}, this is where we hear it.`
     : `You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and every answer is read by the CIMS team.`;
-  const subject = d.reminder ? `Still a minute, ${d.first || "there"}? Your survey on ${d.shipShort || d.ship || "your contract"}` : `Welcome home, ${d.first || "there"}. How did ${d.shipShort || d.ship || "your contract"} go?`;
+  const subject = d.reminder ? `Still a minute, ${d.first || "there"}? Your survey on ${d.shipShort || d.ship || "your contract"}` : `Welcome home, ${d.first || "there"}${endDot(d.first || "there")} How did ${d.shipShort || d.ship || "your contract"} go?`;
   const pre = d.reminder ? "Your end-of-contract survey is still open. Three minutes." : "Three minutes, " + QUESTIONS.length + " taps, one line in your words. Every answer is read.";
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(subject)}</title>
 <style>@media (max-width:480px){.hl{font-size:30px !important}.px{padding-left:20px !important;padding-right:20px !important}}</style></head>
@@ -67,14 +68,14 @@ ${mastRows()}
   ${row("You get a copy.", "The moment you send, your answers land in this inbox.", true)}
  </table></td></tr>
 <tr><td class="px" style="padding:24px 32px 28px;">
- <div style="font-family:${FB};font-size:15px;line-height:1.6;color:${C.body};">Thank you for this contract, ${first}. Enjoy your time home.</div>
+ <div style="font-family:${FB};font-size:15px;line-height:1.6;color:${C.body};">Thank you for this contract, ${first}${endDot(first)} Enjoy your time home.</div>
  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;"><tr>
   <td width="3" bgcolor="${C.green}" style="background:${C.green};width:3px;">&nbsp;</td>
   <td style="padding:2px 0 2px 12px;font-family:${FB};font-size:13px;line-height:1.6;color:${C.slate};"><b style="color:${C.navy};font-size:14px;">Rita Berenyi</b><br>Manager, People &amp; Culture<br>Rita.Berenyi@dg3.com · DG3 Diversified Global Graphics Group</td></tr></table></td></tr>
-<tr><td bgcolor="${C.cloud}" style="background:${C.cloud};padding:16px 32px;font-family:${FB};font-size:11.5px;line-height:1.6;color:${C.slate};">Sent by CIMS on behalf of DG3 Cruise Industry Managed Services to ${first}. Intended only for the named recipient. If it reached you by mistake, delete it and do not share it.</td></tr>
+<tr><td bgcolor="${C.cloud}" style="background:${C.cloud};padding:16px 32px;font-family:${FB};font-size:11.5px;line-height:1.6;color:${C.slate};">Sent by CIMS on behalf of DG3 Cruise Industry Managed Services to ${first}${endDot(first)} Intended only for the named recipient. If it reached you by mistake, delete it and do not share it.</td></tr>
 </table></td></tr></table></body></html>`;
   const text = [
-    d.reminder ? `Still a minute, ${d.first || "there"}? How did ${d.shipShort || d.ship || "your contract"} go?` : `Welcome home, ${d.first || "there"}. How did ${d.shipShort || d.ship || "your contract"} go?`,
+    d.reminder ? `Still a minute, ${d.first || "there"}? How did ${d.shipShort || d.ship || "your contract"} go?` : `Welcome home, ${d.first || "there"}${endDot(d.first || "there")} How did ${d.shipShort || d.ship || "your contract"} go?`,
     "",
     d.reminder ? `Your survey is still open until ${d.expires}. Three minutes, and every answer is read by the CIMS team.` : "You know what worked and what got in your way better than anyone. Tell us straight: three minutes, and every answer is read by the CIMS team.",
     "",
