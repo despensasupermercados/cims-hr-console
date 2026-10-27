@@ -3791,6 +3791,8 @@ async function commitEvidence(env, cr, b, ships) {
     const name = await env.DB.prepare("SELECT first_name, last_name FROM crew WHERE agency_id=?").bind(cr.agency_id).first().catch(() => null);
     const a = await gatherAuto(env, { sc: cr.agency_id, ship: ships.join(", "), signOn: b.spanStart, signOff: b.spanEnd,
       crewName: name ? [name.first_name, name.last_name].filter(Boolean).join(" ") : "" }, { ensure: ensureScoreFlag, engine: "none", boardLegs: () => boardLegs(env) });
+    // a read of the console's own tables that failed is kept as that, never as a clean picture (27 Oct 2026)
+    if (!a || a.ok === false) return JSON.stringify({ at: new Date().toISOString(), inputs: { ships, on: b.spanStart, off: b.spanEnd }, error: (a && a.error) || "read_failed", failed: (a && a.failed) || null });
     return JSON.stringify({ at: new Date().toISOString(), inputs: { ships, on: b.spanStart, off: b.spanEnd }, suggested: { sliders: a.sliders, gates: a.gates },
       evidence: (a.evidence || []).slice(0, 80).map((x) => ({ factor: x.factor || null, text: String(x.text || "").slice(0, 600), source: x.source || null })),
       audits: (a.audits || []).map((x) => ({ id: x.id, ship: x.ship, score: x.score, at: x.at })), unread: a.unread || 0, sources: a.sources || null });
@@ -3818,13 +3820,16 @@ async function apiBonusCommit(request, env, session) {
   const r = computeBonus({ count, sliders: b.sliders, evalScore: b.evalScore, gates: b.gates });
   if ((r.gate === "rush" || r.gate === "audit") && !(b.gateNote && b.gateNote.trim())) return json({ error: "gate_note_required" }, 400);
   if (!b.spanStart || !b.spanEnd) return json({ error: "span_required" }, 400);
+  // ISO days only (27 Oct 2026 review): "2026-7-1" slipped past the string compare below and commitBlock, which steps aside for
+  // a non-ISO span, so every refusal (not_ended, held, older_first, already_scored) and the unique index compared other text.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.spanStart)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.spanEnd))) return json({ error: "span_invalid" }, 400);
   if (b.spanEnd < b.spanStart) return json({ error: "span_invalid" }, 400);
   // Idempotency / double-submit guard: an outcome already exists for this crew + exact span.
   // A retried or double-clicked commit must NOT append a second outcome (double pay + double
   // count). Return the existing outcome so the UI shows success without re-recording.
-  const dup = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
+  const dup = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json, policy_version, committed_at FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
   if (dup) {
-    return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"),
+    return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"), policy: dup.policy_version, committed_at: dup.committed_at,
       result: { score: dup.score_pct, gate: dup.gate, pay: dup.pay_usd, count: dup.count_before, nextCount: dup.count_after, rung: ladderValue(dup.count_after) } });
   }
   // AFTER THE SIGN-OFF, OLDEST FIRST, AND TDG ENDS IT (Miguel, 17 Oct 2026, answers to the logic review). The server is the
@@ -3863,8 +3868,8 @@ async function apiBonusCommit(request, env, session) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
     // SELECT trips ux_bonus_outcome_span (migrations/0033, primary outcomes only) and the whole batch rolls back. Return
     // the already-recorded outcome as a duplicate instead of double-paying / double-counting.
-    const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
-    if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
+    const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json, policy_version, committed_at FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
+    if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"), policy: ex.policy_version, committed_at: ex.committed_at,
       result: { score: ex.score_pct, gate: ex.gate, pay: ex.pay_usd, count: ex.count_before, nextCount: ex.count_after, rung: ladderValue(ex.count_after) } });
     throw e;
   }
@@ -10285,11 +10290,13 @@ function scBlockMsg(e){
   if(e.error==='visit')return 'These dates are a training visit, not a contract. Visits are not scored.';
   if(e.error==='older_first')return 'An older contract has no outcome yet'+(sh?': '+sh:'')+', '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. Score that one first.';
   if(e.error==='already_scored')return 'A bonus is already recorded for '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+', which overlaps these dates. One outcome per contract.';
+  if(e.error==='transfer_partial')return 'These dates cover part of one contract'+(sh?' ('+sh+')':'')+': '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. A transfer is one contract — score the whole of it.';
+  if(e.error==='span_invalid')return 'The dates must be calendar days (YYYY-MM-DD), sign-off after sign-on.';
   return '';
 }
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
-  _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,notes:[]}; _PF={sliders:{},rush:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
+  _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,audit:false,notes:[]}; _PF={sliders:{},rush:false,audit:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
   var _hasHist=!!(d.outcomes&&d.outcomes.length);
   var _blockCommit=(!d.baseline_set&&!_hasHist);
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
@@ -10345,7 +10352,7 @@ async function applyFeedback(id,on){
   var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+(x.why==='before_sign_on'?', before this contract (sign-on '+fmtDateS(String(on||'').slice(0,10))+')':', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10))));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
   document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'<span id=dexChip></span></div><div id=fbLink></div>'+ev+'<div id=autoPanel></div></div>';
   var pf=d.prefill||{};
-  _PF={sliders:Object.assign({},pf.sliders||{}),rush:!!(pf.gates&&pf.gates.rush)};
+  _PF={sliders:Object.assign({},pf.sliders||{}),rush:!!(pf.gates&&pf.gates.rush),audit:!!(pf.gates&&pf.gates.audit)};
   if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}
   if(pf.sliders)for(var k in pf.sliders){var e=$('#'+k);if(e&&!_TOUCHED[k])e.value=pf.sliders[k];}
   if(pf.gateNote&&pf.gateNote.length){var gn=$('#gateNote');if(gn&&!gn.value)gn.value=pf.gateNote.join(' · ');}
@@ -10358,15 +10365,15 @@ async function applyFeedback(id,on){
 // What the automatic read set is remembered (_AUTO), so a re-read after a date or ship change takes back only its own
 // values: a slider or gate the user moved (_TOUCHED) is never overwritten, a rush gate the read armed is cleared when the
 // miss no longer falls in the contract, and the gate note keeps the user's words and swaps only the read's lines.
-var _AUTO_N=0,_TOUCHED={},_AUTO={sliders:{},rush:false,notes:[]},_PF={sliders:{},rush:false};
-document.addEventListener('input',function(e){var t=e.target;if(t&&e.isTrusted&&/^(s(Order|Acc|Par|Hand|Comm|Mono)|gateNote)$/.test(t.id||''))_TOUCHED[t.id]=1;},true);
+var _AUTO_N=0,_TOUCHED={},_AUTO={sliders:{},rush:false,audit:false,notes:[]},_PF={sliders:{},rush:false,audit:false};
+document.addEventListener('input',function(e){var t=e.target;if(t&&e.isTrusted&&/^(s(Order|Acc|Par|Hand|Comm|Mono|Eval)|gateNote)$/.test(t.id||''))_TOUCHED[t.id]=1;},true);
 async function applyAuto(){
   if(!_SC||!_SC.crew||!$('#autoPanel'))return;
   var n=++_AUTO_N,on=$('#spanStart').value,off=$('#spanEnd').value,ship=(($('#ships')&&$('#ships').value)||'').trim(),sc0=_SC.crew.agency_id;
   $('#autoPanel').innerHTML='<div class=hint style="margin-top:8px">Reading the Parts Portal, HON, audits and field reports…</div>';
   var a=null;try{a=await (await fetch('/api/score/auto?sc='+encodeURIComponent(_SC.crew.agency_id)+'&ship='+encodeURIComponent(ship)+'&on='+encodeURIComponent(on)+'&off='+encodeURIComponent(off))).json();}catch(e){}
   if(n!==_AUTO_N||!$('#autoPanel')||!_SC||!_SC.crew||_SC.crew.agency_id!==sc0)return;
-  if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">Could not read the automatic inputs. Score from the evidence by hand.</div>';return;}
+  if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">'+(a&&a.text?escHtml(a.text):'Could not read the automatic inputs. Score from the evidence by hand.')+'</div>';return;}
   var S2=a.sliders||{},prev=_AUTO.sliders,k;
   for(k in prev){if(!(k in S2)&&!_TOUCHED[k]){var e0=$('#'+k);if(e0)e0.value=(_PF.sliders[k]!=null?_PF.sliders[k]:0);}}
   for(k in _PF.sliders){if(!(k in S2)&&!_TOUCHED[k]){var e2=$('#'+k);if(e2)e2.value=0;}} // a Windows value the read did not confirm (an answer from before this sign-on) goes back to 0
@@ -10374,6 +10381,9 @@ async function applyAuto(){
   _AUTO.sliders=Object.assign({},S2);
   var gr=$('#gRush'),want=!!(a.gates&&a.gates.rush);
   if(gr&&!_TOUCHED.gRush){if(want){gr.checked=true;_AUTO.rush=true;}else if(gr.checked&&(_AUTO.rush||_PF.rush)){gr.checked=false;_AUTO.rush=false;_PF.rush=false;}} // the read's gates already carry the Windows' rush when the answer is this contract's
+  // the audit gate the same way (27 Oct 2026): Ray's "failed audit" answer from before this sign-on is kept, not used — the tick it set stays only while the read still carries it
+  var ga=$('#gAudit'),wantA=!!(a.gates&&a.gates.audit);
+  if(ga&&!_TOUCHED.gAudit){if(wantA){ga.checked=true;_AUTO.audit=true;}else if(ga.checked&&(_AUTO.audit||_PF.audit)){ga.checked=false;_AUTO.audit=false;_PF.audit=false;}}
   var gn=$('#gateNote');
   if(gn&&!_TOUCHED.gateNote){
     // the read's own lines go by their exact text (a line carries " · " itself), the user's words stay
@@ -10423,7 +10433,7 @@ async function applySeval(sc){
   if(_SEVAL.sc!==sc||($('#spanEnd')&&$('#spanEnd').value!==off))return; // the card moved to another crew or span while this answer was in flight (16 Oct 2026)
   if(!d||d.error)return;
   _SEVAL.value=d.value;_SEVAL.source=d.source;
-  if(d.value){var s=$('#sEval');if(s)s.value=String(d.value);recalcScore();}
+  if(d.value){var s=$('#sEval');if(s&&!_TOUCHED.sEval)s.value=String(d.value);recalcScore();} // a value the user picked by hand stays through a date change (27 Oct 2026)
   if(!badge)return;
   var link=d.reviewCount?(' · <a href="#" onclick="viewSeval();return false" style="color:var(--navy,#1B3A5C)">view review</a>'):'';
   if(d.source==='auto'){badge.innerHTML='<span style="color:var(--green,#5FB946);font-weight:700">● from shipboard review</span>'+(d.reviewCount>1?(' · avg of '+d.reviewCount+' reviews'):'')+link;}
@@ -10434,7 +10444,8 @@ async function viewSeval(){
   var off=$('#spanEnd')?$('#spanEnd').value:'';var sc=_SEVAL.sc;if(!sc)return;
   var box=$('#sevalReview');if(!box)return;box.innerHTML='<div class=hint>Loading review…</div>';
   var d;try{d=await (await fetch('/api/sbm/crew?id='+encodeURIComponent(sc))).json();}catch(e){box.innerHTML='<div class=hint>Could not load the review.</div>';return;}
-  var cards=(d&&d.cards)||[];var c=null;for(var i=0;i<cards.length;i++){if(String(cards[i].contract_signoff)===String(off)){c=cards[i];break;}}
+  // the review of THIS contract: the exact sign-off, else the nearest within 21 days (the T-7 invite was keyed on the board's sign-off that day; TDG's debark can differ — 27 Oct 2026)
+  var cards=(d&&d.cards)||[];var c=null,best=1e9;for(var i=0;i<cards.length;i++){var dd=Math.abs((Date.parse(String(cards[i].contract_signoff).slice(0,10)+'T00:00:00Z')-Date.parse(String(off).slice(0,10)+'T00:00:00Z'))/864e5);if(String(cards[i].contract_signoff)===String(off)){c=cards[i];break;}if(dd<=21&&dd<best){best=dd;c=cards[i];}}
   if(!c){box.innerHTML='<div class=hint>No shipboard review on file for this contract.</div>';return;}
   var qs=[['Business sense',c.q_business],['Guests first',c.q_guests],['Helps us grow',c.q_grow],['Integrity',c.q_integrity],['Teamwork',c.q_teams],['Energy',c.q_energy],['Final thoughts',c.q_final]];
   var h='<div class=hint style="border-left:3px solid var(--green,#5FB946);padding-left:8px;margin-top:4px"><b>Shipboard review</b> — '+(c.ship||'')+' · rating '+c.rating+'/5';
@@ -10461,7 +10472,7 @@ async function commitBonus(){
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
   if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||scBlockMsg(res)||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
-  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>'+(res.duplicate?'Already recorded'+(res.committed_at?' on '+fmtDateS(String(res.committed_at).slice(0,10)):'')+' under policy v'+(res.policy||'?')+' — nothing was written again.':'Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said.')+' The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
 // Backdrop close, guarded against the "ghost click" on touch devices: tapping a Score/row button
 // fires a delayed synthetic click (~300ms) that lands on the freshly-mounted overlay and used to
