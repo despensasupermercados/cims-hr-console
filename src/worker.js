@@ -6357,6 +6357,7 @@ function parseVesselFile(f){
 }
 var NOCHG='margin-top:8px;padding:10px 12px;border-radius:8px;background:#F2F8EF;border-left:3px solid var(--green);color:var(--navy);font-weight:600';
 var BADBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FDF3F1;border-left:3px solid var(--red);color:var(--navy)';
+var INFOBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FBF4E6;border-left:3px solid var(--amber);color:var(--navy)';
 var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last name',status:'status',rank_observed:'rank',vessel_observed:'vessel',dob:'date of birth',province:'province',phone:'phone',email:'email',med_exp:'medical expiry',sirb_exp:'seaman-book expiry',pp_exp:'passport expiry',sch_exp:'Schengen expiry',usv_exp:'US-visa expiry',emergency_name:'emergency contact',emergency_relation:'emergency relationship',emergency_phone:'emergency phone'};
 // ===== Inline branded crew importer for the console Data tab (served form) =====
 // Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
@@ -6372,7 +6373,12 @@ async function cimsStage(){
   (IMPROWS||[]).forEach(function(row){var id="",fn="",ln="";for(var k in row){var nk=k.toLowerCase();if(nk.indexOf("crew id")>=0||nk.indexOf("crewid")>=0)id=String(row[k]).trim();else if(nk.indexOf("first")>=0)fn=String(row[k]).trim();else if(nk.indexOf("last")>=0||nk.indexOf("surname")>=0)ln=String(row[k]).trim();}if(id)NMAP[id]=(fn+" "+ln).trim()||id;});
   $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
   var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
-  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?(res.snapshot_saved?("This exact file was already imported. The Keyman board now reads it directly: "+res.snapshot_saved+" rows kept."):"This exact file was already imported &mdash; nothing to do."):"Stage failed: "+impEsc(res.error))+'</div>';return;}
+  if(!res.ok){
+    // a file already imported is not a failure (27 Oct 2026: Rita re-dropped Saturday's file and read the red box as one):
+    // an amber note that names when and who, and what would change the board — a NEWER export from TDG
+    if(res.error==="already_processed"){var at=res.imported_at?(' on '+fmtDateS(res.imported_at)+' at '+String(res.imported_at).slice(11,16)+' UTC'):'';var by=res.imported_by?(' by '+impEsc(res.imported_by)):'';
+      $("#imp").innerHTML='<div style="'+INFOBOX+'"><b>This exact file was already imported'+at+by+'.</b> The console already holds everything in it &mdash; nothing to do. The board changes with a newer export from TDG.'+(res.snapshot_saved?(' The Keyman board now reads it directly: '+res.snapshot_saved+' rows kept.'):'')+'</div>';return;}
+    $("#imp").innerHTML='<div style="'+BADBOX+'">Stage failed: '+impEsc(res.error)+'</div>';return;}
   STAGE=res;DEC={};EDITS={};cimsRender();
 }
 function impSeg(key,def,a,b,la,lb,soft){var cur=DEC[key]||def;return '<span class="iseg'+(soft?" soft":"")+'"><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
