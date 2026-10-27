@@ -200,7 +200,10 @@ export function installAutoSend(deps) {
     var subj = "CIMS auto-timing " + (meta.dry ? "(dry run) " : "") + meta.date + " — " + n + " sent" + (a ? ", " + a + " need email" : "");
     var envelope = { to: DIGEST_TO, subject: subj, html: digestHtml(sent, alerts, seeded, meta), templateId: "hr.autosend.digest.v1", critical: false };
     if (DIGEST_CC && DIGEST_CC.length) envelope.cc = DIGEST_CC;
-    try { await sendViaMailer(env, envelope); } catch (e) { await logRun(env, "digest_failed", meta.dry, sent.length, alerts.length); }
+    // sendViaMailer answers { ok:false } rather than throwing (§11e): a digest that did not go is recorded as such.
+    var out = null;
+    try { out = await sendViaMailer(env, envelope); } catch (e) { out = null; }
+    if (!out || out.ok !== true) await logRun(env, "digest_failed", meta.dry, sent.length, alerts.length);
   }
 
   async function runAutoSend(env, event) {

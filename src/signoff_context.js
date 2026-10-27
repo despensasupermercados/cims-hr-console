@@ -45,13 +45,24 @@ export function relieverInTdg(x) {
   return !!(x.file && x.file.status === "Earmarked" && x.file.ship && x.file.ship === x.ship);
 }
 
+// ONE KEY PER CONTRACT for the instructions and sign-off-link rows (instr_ack / ack_request, UNIQUE sc + seq): the sign-off
+// date as YYYYMMDD, the key the daily run has always used (auto_send.js). The page's Counter number is the same for every
+// contract TDG's file dates (the Counter is history, §10d), so it never told two contracts apart (27 Oct 2026 review).
+export function contractKey(r) {
+  const d = iso(r && r.sign_off_date);
+  return d ? Number(d.replace(/-/g, "")) : (r ? r.seq : null);
+}
+
 export function seatContexts(sections) {
   const out = {};
   for (const s of sections || []) {
     const all = [].concat(s.crew || [], s.projections || []).filter((c) => c && c.agency_id && !c.visit);
     // Candidates: every dated card or seat on the ship, and TDG's undated Earmarked rows (on: null) as the last resort.
     const cands = all.filter((x) => x.tdgEarmark || iso(x.signOn)).map((x) => ({ sc: x.agency_id, on: x.tdgEarmark ? null : iso(x.signOn), x }));
-    const seats = [].concat(s.crew || [], s.visits || []).filter((c) => c && c.agency_id && c.current && iso(c.signOff));
+    // A seat is a contract running on this hull: TDG's On board seat, or TDG's Earmarked word for the hull his contract is
+    // still running on (`earmarkedHere`, §11f, Purnama on Xcel) — the board seats him, so he is instructed like any seat
+    // (27 Oct 2026 review: he was left out, and a manual send then read him as Royal Caribbean with no reliever).
+    const seats = [].concat(s.crew || [], s.visits || []).filter((c) => c && c.agency_id && (c.current || c.earmarkedHere) && iso(c.signOff));
     // One rule with the board (reliever.js): the seat that leaves first takes the first reliever; a visit takes none.
     const prn = seats.filter((c) => !c.visit);
     const hits = assignRelievers(prn.map((c) => ({ sc: c.agency_id, on: iso(c.signOn), off: iso(c.signOff), azamara: s.brand === "Azamara", cands })));

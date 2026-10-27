@@ -298,7 +298,8 @@ ${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgrS
     : "Your reliever: " + rel.name + (overlap ? `, aboard with you for ${mdWords(overlap.from, off)} from ${shortDate(overlap.from)}.` : relOn ? `, joining on ${shortDate(relOn)} ${relOn.slice(0, 4)}.` : ".");
   const text = [
     `Hi ${d.firstName || ""},`, "",
-    (go ? go[0] + ". " : "") + head.replace(/&[a-z]+;/g, " "),
+    // the plain text carries the port as written, never its HTML escape ("St. George&#39;s", 27 Oct 2026 review)
+    (go ? go[0] + ". " : "") + (off ? `You sign off ${shortDate(off)}${port ? " in " + port : ""}.` : `Your sign-off is coming up.`),
     "Before you leave, complete your Digital Handover Notes. They are mandatory.",
     "", `Open your Digital Handover Notes: ${link}`,
     `Select ${ship || "your ship"}, complete all eleven sections, sign your count, submit before you leave, and print a short copy for your reliever and your ${mgr}.`,
