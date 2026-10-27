@@ -51,7 +51,7 @@ import { createProjection, defaultProjectionDates } from "./projection.js";
 import { benchPool, rankBench, BENCH_TOP } from "./earmark_bench.js";
 import { installKeymanDeploy, docBadge, contractDocBadge, documentLines } from "./keyman_deploy.js";
 import { attachNextAssignments } from "./next_assignment.js";
-import { classifyWindow, defaultScoreLeg, commitBlock } from "./scorequeue.js";
+import { classifyWindow, defaultScoreLeg, commitBlock, scoreContracts } from "./scorequeue.js";
 import { buildRoster, matchCrew } from "./crewmatch.js";
 import { pickEngine, intelSystemPrompt, intelUserPrompt, parseIntelResponse, INTEL_MODEL_CLAUDE, INTEL_MODEL_WORKERSAI } from "./intelai.js";
 import { buildSeafarerMovementEmail, shapeMovements, monthsLabel } from "./seafarer_movements.js";
@@ -4075,17 +4075,22 @@ async function apiScoreQueue(env, url, state) {
   // contracts only (no future dates), so it can never populate "signing off next 14 days". Until
   // 2026-09-04 this loop read the frozen SHIP_HISTORY constant — a July snapshot (§11: one schedule).
   // "Signed off recently" includes contracts ENDED via the relief board (boardLegs' trailing arm).
-  const recBy = {}, upBy = {};
-  for (const h of HIST) {
-    if (!h.ours || !h.sc || !h.off || !byId[h.sc]) continue;
-    const w = classifyWindow(h.off, today, days);
+  // THE CONTRACTS THE SCORE CARD SCORES (scorequeue.scoreContracts, Miguel 17 Oct 2026): a training visit is no contract and a
+  // transfer is ONE (27 Oct 2026 review: the queue walked raw legs, so Ohji's Onward visit and Tuazon's Explorer leg read
+  // "signed off, needs scoring" while the commit refuses both — visit, still_aboard).
+  const recBy = {}, upBy = {}, legsBy = {};
+  for (const h of HIST) if (h && h.ours && h.sc && byId[h.sc]) (legsBy[h.sc] = legsBy[h.sc] || []).push(h);
+  for (const sc of Object.keys(legsBy)) for (const k of scoreContracts(legsBy[sc], sc)) {
+    if (!k.off) continue;
+    const w = classifyWindow(k.off, today, days);
     if (!w) continue;
     // A contract still CURRENT past its sign-off is overdue or held by TDG's On board (§10d) — not signed off.
-    if (w === "recent" && h.is_current) continue;
-    if (w === "recent") { const cur = recBy[h.sc]; if (!cur || h.off > cur.off) recBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
-    else { const cur = upBy[h.sc]; if (!cur || h.off < cur.off) upBy[h.sc] = { on: h.on || null, off: h.off, ship: h.ship }; }
+    if (w === "recent" && k.current) continue;
+    const row = { on: k.on || null, off: k.off, ships: k.ships };
+    if (w === "recent") { const cur = recBy[sc]; if (!cur || k.off > cur.off) recBy[sc] = row; }
+    else { const cur = upBy[sc]; if (!cur || k.off < cur.off) upBy[sc] = row; }
   }
-  const mk = (sc, dep) => { const c = byId[sc]; const f = {}; for (const r of fbRoles(c.id)) f[r.role] = r.status; return { agency_id: sc, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || sc, vessel: c.vessel_observed || null, ship: shipOf(dep.ship), signOn: dep.on, signOff: dep.off, status: statusOf(c), feedback: f }; };
+  const mk = (sc, dep) => { const c = byId[sc]; const f = {}; for (const r of fbRoles(c.id)) f[r.role] = r.status; return { agency_id: sc, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || sc, vessel: c.vessel_observed || null, ship: (dep.ships || []).map(shipOf).filter(Boolean).join(", ") || null, signOn: dep.on, signOff: dep.off, status: statusOf(c), feedback: f }; };
   const recent = Object.keys(recBy).map(sc => mk(sc, recBy[sc])).sort((a, b) => (a.signOff < b.signOff ? 1 : -1));    // most recently off first
   const upcoming = Object.keys(upBy).map(sc => mk(sc, upBy[sc])).sort((a, b) => (a.signOff < b.signOff ? -1 : 1));    // soonest off first
   return json({ today, days, recent, upcoming });
