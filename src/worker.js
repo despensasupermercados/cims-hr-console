@@ -69,9 +69,9 @@ import { installAutoSend } from "./auto_send.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
 import { gatherAuto, listAudits } from "./score_auto.js";
-import { apiRosterExport } from './roster_export.js';
+import { apiRosterExport, secretEquals } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
-import { installAudit } from "./audit_routes.js";
+import { installAudit, crossSite } from "./audit_routes.js";
 import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { AUDIT_NAME, auditIconFor, markSvg } from "./audit_brand.js";
@@ -308,6 +308,10 @@ export default {
       if (p === '/api/roster/export') return apiRosterExport(request, env);
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
+        // The session cookie is Domain=cims.work, so it reaches every *.cims.work app: a POST whose Origin is another host is
+        // refused, as the audit module already does for its own routes (27 Oct 2026 review). The console's pages, the relief
+        // iframe and the hub post to their own host; a write riding on the cookie from a sibling host is not theirs.
+        if (request.method === "POST" && crossSite(request, url)) return json({ error: "cross_site" }, 403);
         if (p === "/api/me")        return json({ email: session.email });
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/ops")       return apiOps(env);
@@ -815,7 +819,7 @@ async function mariaExecTool(env, name, input) {
     if (!id) return { error: "no crew matched; provide a name or agency_id" };
     const intel = await J(await apiIntelCrew(env, new URL(base + "/api/intel/crew?id=" + encodeURIComponent(id))));
     const notes = await J(await apiCrewNotes({ method: "GET" }, env, null, new URL(base + "/api/crew/notes?id=" + encodeURIComponent(id))));
-    return { agency_id: id, field_intel: intel.intel || [], manual_notes: notes.notes || [] };
+    return { agency_id: id, field_intel: intel.intel || [], manual_notes: (notes.notes || []).filter((n) => !n.archived_at) }; // archived notes are the Notes window's alone (§10g)
   }
   if (name === "crew_contract_history") {
     const id = await resolveCrewId(input);
@@ -1018,7 +1022,7 @@ async function authDev(request, env, url) {
   if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
   const b = await request.json().catch(() => ({}));
   const key = b.key, email = b.email;
-  if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
+  if (!env.BOOTSTRAP_KEY || !(await secretEquals(String(key || ""), env.BOOTSTRAP_KEY))) return new Response("forbidden", { status: 403 }); // constant-time, like the roster key
   await ensureUsers(env).catch(() => {});
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
@@ -2252,7 +2256,10 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT * FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
     boardLegs(env), // the ONE schedule (§11)
     env.DB.prepare("SELECT * FROM contract_edit WHERE sc=?").bind(id).all().catch(none),
-    env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    // TDG's count + the row's debark and the visit mark (CC_VISIT_*), as every other grade reader reads it (27 Oct 2026 review:
+    // the profile handed completedSince the bare snapshot row, so a trainer's debark added +1 here and nowhere else)
+    env.DB.prepare("SELECT c.*, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on" + CC_VISIT_COLS + " FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN + " WHERE c.sc=?").bind(id).first()
+      .catch(() => env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT id, ts, text, created_by, archived_at, archived_by FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT * FROM crew_ready WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(id).all().catch(none),
@@ -2292,7 +2299,7 @@ async function apiCrewOne(env, url, session) {
   const ct = ctRes.results;
   // The grade the console derives from TDG's count (+ a contract TDG ended since the as-of date, §10c) — set
   // beside TDG's own position so a disagreement is a row to check, never silently one or the other.
-  const added = ccRow ? completedSince(ccRow.as_of, rsRow, today) : 0;
+  const added = ccRow ? completedSince(ccRow.as_of, ccRow.tdg_on !== undefined ? ccRowOf(ccRow) : rsRow, today) : 0;
   const grade = ccRow && ccRow.completed != null ? psRank(Number(ccRow.completed) + added, true) : null;
   const profile = buildCrewProfile({
     today, crew: row, override: ov, snap: rsRow, count: ccRow, countAdded: added, grade,
@@ -2344,6 +2351,9 @@ async function apiCrewAdd(request, env, session, ctx) {
   const b = await request.json().catch(() => ({}));
   const id = String(b.agency_id || "").trim();
   if (!id || !b.first_name || !b.last_name) return json({ error: "missing" }, 400);
+  // An agency id is TDG's key (SC-0040010), never free text (27 Oct 2026 review): the page embeds it in onclick handlers and
+  // data attributes on every tab, so one crafted id typed here would run in every other user's session.
+  if (!/^[A-Za-z]{1,4}-?[A-Za-z0-9]{3,12}$/.test(id)) return json({ error: "bad_agency_id" }, 400);
   const [ex] = await Promise.all([
     env.DB.prepare("SELECT agency_id FROM crew WHERE agency_id=?").bind(id).first(),
     ensureCrewExtras(env),
@@ -6330,9 +6340,10 @@ function impCard(inner){return '<div class=icard>'+inner+'</div>';}
 // a row keyed on the cruise-line id (matched, not added) and a new row with no status word it can read (not added).
 // Until now only the unused /api/crew/import page drew one of them: on Uploads they went nowhere (§6 flag, never silent).
 function impFlagged(rv){
-  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[];
-  if(!(dup.length||km.length||rk.length||ns.length))return '';
+  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[],col=g.collisions||[];
+  if(!(dup.length||km.length||rk.length||ns.length||col.length))return '';
   var h='<div class=isec><h3>&#9888; In the file, nothing changed</h3><div class=d>Listed so you can ask TDG to correct the file. No choice here: Apply leaves each one as it says.</div>';
+  col.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>Two rows of the file resolve to this crew ('+impEsc((it.incoming_ids||[]).join(', '))+'). Neither is applied: one seafarer, one row.</div>');});
   dup.forEach(function(id){h+=impCard('<div class=iwho>'+impWho(id)+'</div><div class=itxt>The file lists this crew more than once. The last row stands.</div>');});
   km.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Cruise-line id",it.roster,it.file,impTag("kept as on the roster","amber")));});
   rk.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>The file keyed this crew on the cruise-line id '+impEsc(it.ship_crew_id||it.incoming_id||'')+'. Matched to the crew you hold, nothing added.</div>');});
@@ -7316,7 +7327,7 @@ async function deployRestore(el){
     if(r&&r.ok){ renderRotation(); } else { el.disabled=false; alert('Could not restore: '+((r&&r.error)||'error')); }
   }catch(_){ el.disabled=false; alert('Network error'); }
 }
-function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 // ONE card renderer, two states (Miguel, 14 Sep 2026):
 //   green  = what the TDG Contract Counter says. Click to edit; never draggable; it stays green.
 //   yellow = what Rita planned (an open assignment). Draggable between ships, removable, and from
@@ -7697,7 +7708,7 @@ function histCard(h){
     h.offSource==='tdg'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' per the TDG file'):'sign-off per the TDG file')+'</div>'):
     h.offSource==='card'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' (your card)'):'relieved per your card')+'</div>'):
     h.offSource==='rita'?'<div class=hdur>sign-off recorded in the console</div>':'';
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+escHtml(h.sc)+'" onclick="openCrew(\\''+escHtml(h.sc)+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
   return '<div class="hcard former"><div class=hnm><span>'+escHtml(h.name)+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}

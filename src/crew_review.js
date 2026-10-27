@@ -124,8 +124,10 @@ export function classifyField(field, oldVal, newVal, liveOvr) {
 export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, overrideByAgency = {}) {
   const groups = {
     ship_flag: [], override_conflict: [], override_absorbed: [], critical: [], cert: [], minor: [],
-    new: [], departed: [], needs_status: [], rekeyed: [],
+    new: [], departed: [], needs_status: [], rekeyed: [], collisions: [],
   };
+  // Two rows of the file resolving to one crew (diffCrew, §11b): listed, neither applied — a flag for a human, like rekeyed.
+  for (const col of diff.collisions || []) groups.collisions.push(col);
 
   // D7 — rows the file keyed on the cruise-line id that diffCrew matched to a crew we already
   // hold. Without this they would have been INSERTed as duplicate seafarers (see the Ida
@@ -173,14 +175,17 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
     for (const col of reconcilableOverrideFields(ov)) {
       const field = importField(col); // the file's name for this field
       if (field === "vessel_observed" || seen.has(id + ":" + field)) continue;
-      const nv = inc[field];
-      if (nv == null || nv === "") continue;
+      let nv = inc[field];
+      // A BLANK cell the file carries over a manual entry whose base is already empty (27 Oct 2026 review): the first
+      // pass only sees it when the BASE holds a value, so the same file cleared one card's phone and left another's —
+      // TDG removed the value either way (§11 "an EMPTY cell in a column the file carries clears the card").
+      if (nv == null || nv === "") { if (!(inc._blank && inc._blank.includes(field))) continue; nv = null; }
       const c = classifyField(field, ex[field] ?? null, nv, new Set([col]));
       const item = { agency_id: id, field, override_field: col, old: ov[col], base: ex[field] ?? null, new: nv, override_value: ov[col], ...c };
       seen.add(id + ":" + field);
       // Equal to the file (digits for a phone, case-blind for an email): absorbed — cleared on Apply, so the
       // card is the TDG row and the next file is not outranked by a copy of this one.
-      (sameValue(field, nv, ov[col]) ? groups.override_absorbed : groups[TIER.OVERRIDE]).push(item);
+      (nv != null && sameValue(field, nv, ov[col]) ? groups.override_absorbed : groups[TIER.OVERRIDE]).push(item);
     }
   }
 
@@ -198,6 +203,7 @@ export function buildReview(diff, existingByAgency = {}, incomingByAgency = {}, 
   const present = new Set(Object.keys(incomingByAgency));
   for (const ch of diff.change || []) present.add(String(ch.agency_id));
   for (const rk of diff.rekeyed || []) present.add(String(rk.agency_id));
+  for (const col of diff.collisions || []) present.add(String(col.agency_id)); // in the file twice is not "left the fleet"
   for (const id of Object.keys(existingByAgency)) {
     if (!present.has(String(id))) groups.departed.push({ agency_id: id, last: existingByAgency[id] });
   }

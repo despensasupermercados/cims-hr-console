@@ -246,7 +246,7 @@ test("expired documents are a warning on BOTH states, never a block", () => {
   for (const card of [{ ...GREEN, docs }, { ...YELLOW, docs }]) {
     const h = ctx.rotCard(card);
     assert.match(h, /class="rtag bad" title="Passport expired Jan 1, 2026">PASSPORT</);
-    assert.match(h, /class="rtag bad" title="Seaman's Book expired Feb 1, 2026">SEAMAN'S BOOK</);
+    assert.match(h, /class="rtag bad" title="Seaman&#39;s Book expired Feb 1, 2026">SEAMAN&#39;S BOOK</); // escHtml escapes the apostrophe (27 Oct 2026): the browser shows "Seaman's Book"
     assert.doesNotMatch(h, /2 EXPIRED/, "named, never counted");
   }
   const soon = ctx.rotCard({ ...YELLOW, docs: { worst: "expiring", label: "1 EXPIRING", title: "Within 90 days: US C1/D Visa", expiring: 1, items: [], expiringItems: [{ doc: "US C1/D Visa", exp: "2026-12-13", days: 66, required: true }], rest: null } });

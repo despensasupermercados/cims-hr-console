@@ -128,7 +128,7 @@ export const ROSTER_SQL = `
  * 32 bytes first also stops length from leaking, and the XOR accumulation below
  * always walks all 32 bytes.
  */
-async function secretEquals(a, b) {
+export async function secretEquals(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
   const enc = new TextEncoder();
   const [da, db] = await Promise.all([
