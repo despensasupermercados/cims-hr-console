@@ -320,7 +320,7 @@ test("everything off: nothing runs", async () => {
   assert.equal(h.calls.instr.length + h.calls.link.length, 0);
 });
 
-test("the worker feeds the board's context to both senders and keeps two switches in the rail", () => {
+test("the worker feeds the board's context to both senders and keeps the per-kind switches in the rail", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
   assert.equal((W.match(/installInstr\(\{/g) || []).length, 1, "installed once at module level (16 Oct 2026)");
   assert.match(W, /installInstr\(\{[^\n]*instrContext: instrSeatContext, sendViaMailer, boardLegs,\n\s*contacts: /, "with the board's context and the ship contacts (26 Oct 2026)");
@@ -328,7 +328,10 @@ test("the worker feeds the board's context to both senders and keeps two switche
   assert.match(W, /return Object\.values\(seatContexts\(sections\)\)\.map/);
   assert.match(W, /id="autoToggle" onclick="autoToggleClick\(&#39;instructions&#39;\)"/);
   assert.match(W, /id="linkToggle" onclick="autoToggleClick\(&#39;signoff&#39;\)"/);
-  assert.match(W, /if \(b\.kind === "instructions" \|\| b\.kind === "signoff"\) \{/);
+  // 27 Oct 2026: the staff-house pass joined the rail as the third kind (T-3) — the switch route takes all three.
+  assert.match(W, /if \(b\.kind === "instructions" \|\| b\.kind === "signoff" \|\| b\.kind === "house"\) \{/);
+  assert.match(W, /id="houseToggle" onclick="autoToggleClick\(&#39;house&#39;\)"/);
+  assert.match(W, /sendHousePassFor: _house\.sendHousePassFor/, "the house sender is wired into installAutoSend");
 });
 
 // ---- 16 Oct 2026 bug hunt: the port is never the home-port SEED; a colleague aboard is not the reliever ----------------

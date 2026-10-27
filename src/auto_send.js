@@ -1,5 +1,5 @@
 // ============================================================================
-// CIMS — Auto-timing (T-14 instructions, T-7 sign-off link) + daily digest
+// CIMS — Auto-timing (T-14 instructions, T-7 sign-off link, T-3 staff-house pass) + daily digest
 // ============================================================================
 // Plugs into the existing hourly scheduled() handler. Gates itself to run ONCE
 // per day at 08:00 Europe/Budapest (timezone-aware, so DST is automatic).
@@ -32,7 +32,7 @@
 // ============================================================================
 
 export function installAutoSend(deps) {
-  const { sendInstructionsFor, sendSignoffLinkFor, sendViaMailer, BOARD_LEGS, ORIGIN, DIGEST_TO, DIGEST_CC } = deps;
+  const { sendInstructionsFor, sendSignoffLinkFor, sendHousePassFor, sendViaMailer, BOARD_LEGS, ORIGIN, DIGEST_TO, DIGEST_CC } = deps;
 
   const GATE_TZ = "Europe/Budapest";
   const GATE_HOUR = "08";
@@ -99,6 +99,9 @@ export function installAutoSend(deps) {
   // acknowledgement. Returns the row nearest the asked sign-off within 21 days (its sign_off_date says which date the
   // pass the crew holds was written for), else null.
   async function manualOnFile(env, sc, off, kind) {
+    // Only the two emails with a manual button have a request table. The staff-house pass (kind "house") has none: a
+    // T-7 link on file for the seat must not read as "a house pass already went".
+    if (kind !== "instructions" && kind !== "signoff") return null;
     var tbl = kind === "instructions" ? "instr_ack" : "ack_request";
     try {
       var r = await env.DB.prepare("SELECT sign_off_date FROM " + tbl + " WHERE sc=? AND sign_off_date IS NOT NULL AND abs(julianday(sign_off_date) - julianday(?)) <= 21 ORDER BY abs(julianday(sign_off_date) - julianday(?)) LIMIT 1").bind(sc, off, off).first();
@@ -184,7 +187,7 @@ export function installAutoSend(deps) {
   }
 
   function digestHtml(sent, alerts, seeded, meta) {
-    var L = { instructions: "Instructions (T-14)", signoff: "Sign-off link (T-7)" };
+    var L = { instructions: "Instructions (T-14)", signoff: "Sign-off link (T-7)", house: "Staff house pass (T-3)" };
     var head = '<tr>' + ["Type", "Crew", "Vessel", "Sign-off", "Recipient", "Status"].map(function (h) {
       return '<td style="padding:9px 12px;border-bottom:1px solid #EEF1F5;font-family:Arial,Helvetica,sans-serif;font-size:12px;font-weight:bold;color:#6B7C93;">' + h + '</td>';
     }).join("") + '</tr>';
@@ -196,7 +199,7 @@ export function installAutoSend(deps) {
       : "") + (moved
       ? '<div style="background:#FCEBEC;border:1px solid #F1B9BE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8A1C24;"><strong>&#9888; ' + moved + ' sign-off pass' + (moved === 1 ? '' : 'es') + ' to re-send</strong> — the sign-off moved after the pass went, so the crew holds the old date. Re-send from the crew page; nothing is re-sent by itself. They will keep appearing here until re-sent.</div>'
       : "");
-    var body = (sent.length ? tbl(sent) : '<p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16293D;">Nothing qualified today (no crew reached T-14 or T-7).</p>') +
+    var body = (sent.length ? tbl(sent) : '<p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16293D;">Nothing qualified today (no crew reached T-14, T-7 or T-3).</p>') +
       (alerts.length ? '<div style="height:14px"></div>' + tbl(alerts) : "") +
       (seeded && seeded.length ? '<div style="height:14px"></div>' + tbl(seeded) : "");
     return '<div style="margin:0;padding:0;background:#E9EDF3;">' +
@@ -208,7 +211,7 @@ export function installAutoSend(deps) {
       '<tr><td style="background:#fff;border:1px solid #E4E9F0;border-radius:16px;padding:24px 26px;">' +
       '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#6B7C93;margin-bottom:14px;">' +
       (meta.dry ? '<strong style="color:#B4232A;">DRY RUN</strong> &middot; nothing was sent to seafarers. ' : '') +
-      'Run ' + esc(meta.date) + ' &middot; instructions window &le; ' + esc(meta.t14) + ' &middot; sign-off window &le; ' + esc(meta.t7) + '</div>' +
+      'Run ' + esc(meta.date) + ' &middot; instructions window &le; ' + esc(meta.t14) + ' &middot; sign-off window &le; ' + esc(meta.t7) + (meta.t3 ? ' &middot; staff-house window &le; ' + esc(meta.t3) : '') + '</div>' +
       alertBanner + body +
       '<p style="margin:16px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6B7C93;">Automated &middot; DG3 CIMS Crew Operations.</p>' +
       '</td></tr></table></td></tr></table></div>';
@@ -234,13 +237,24 @@ export function installAutoSend(deps) {
     // also has its own — 'auto_send_instr_enabled' (T-14 instructions) and 'auto_send_link_enabled' (T-7 sign-off link),
     // each with the day it was switched on ('..._since'). Miguel turned on the instructions alone: "shoot this email 2
     // week prior the seafarer sign off" — the T-7 link email has not been reviewed in its new form.
+    var today = todayStr(), t14 = plus(14), t7 = plus(7), t3 = plus(3);
     var both = (await setting(env, "auto_send_enabled")) === "true";
     var instrOn = both || (await setting(env, "auto_send_instr_enabled")) === "true";
     var linkOn = both || (await setting(env, "auto_send_link_enabled")) === "true";
-    if (!instrOn && !linkOn) { await logRun(env, "disabled", null, null, null); return { skipped: "disabled" }; }
+    // The staff-house pass (27 Oct 2026, Miguel: "send it 3 days before the crew sign off .. build it and push it"): ON
+    // from its first run, with 'since' = that day, so nobody already inside T-3 is emailed by the switch-on — the same
+    // rule a hand flip applies. A row once written is never touched here again; the Automation toggle owns it after.
+    if (sendHousePassFor && (await setting(env, "auto_send_house_enabled")) == null) {
+      try {
+        await env.DB.prepare("INSERT OR IGNORE INTO app_setting (k,v) VALUES ('auto_send_house_enabled','true')").run();
+        await env.DB.prepare("INSERT OR IGNORE INTO app_setting (k,v) VALUES ('auto_send_house_since',?)").bind(today).run();
+      } catch (e) {}
+    }
+    var houseOn = !!sendHousePassFor && (await setting(env, "auto_send_house_enabled")) === "true";
+    if (!instrOn && !linkOn && !houseOn) { await logRun(env, "disabled", null, null, null); return { skipped: "disabled" }; }
     var instrSince = both ? null : isoDay(await setting(env, "auto_send_instr_since"));
     var linkSince = both ? null : isoDay(await setting(env, "auto_send_link_since"));
-    var today = todayStr(), t14 = plus(14), t7 = plus(7);
+    var houseSince = isoDay(await setting(env, "auto_send_house_since"));
     var sent = [], alerts = [];
     // GUARDED 2026-09-10. This was the ONE task in the Worker's scheduled() handler that could
     // reject: every other cron (intel sweep, movements, backup, doc radar, sbm sweep, leg
@@ -252,8 +266,9 @@ export function installAutoSend(deps) {
     try {
       if (instrOn) await processKind(env, today, t14, "instructions", sendInstructionsFor, DRY, sent, alerts, instrSince, 14);
       if (linkOn) await processKind(env, today, t7, "signoff", sendSignoffLinkFor, DRY, sent, alerts, linkSince, 7);
+      if (houseOn) await processKind(env, today, t3, "house", sendHousePassFor, DRY, sent, alerts, houseSince, 3);
       var seeded = await recentSeeded(env);
-      await sendDigest(env, sent, alerts, seeded, { dry: DRY, date: today, t14: t14, t7: t7 });
+      await sendDigest(env, sent, alerts, seeded, { dry: DRY, date: today, t14: t14, t7: t7, t3: t3 });
       await logRun(env, "ran", DRY, sent.length, alerts.length);
       return { ran: true, dry: DRY, sent: sent.length, alerts: alerts.length };
     } catch (e) {
@@ -265,7 +280,7 @@ export function installAutoSend(deps) {
         await sendDigest(env, sent, alerts.concat([{ kind: "signoff", sc: "—", seq: 0, off: today,
           ship: null, name: "AUTO-TIMING RUN FAILED", to: null, emailed: false,
           error: String((e && e.message) || e).slice(0, 160) }]), [],
-          { dry: DRY, date: today, t14: t14, t7: t7 });
+          { dry: DRY, date: today, t14: t14, t7: t7, t3: t3 });
       } catch (e2) { console.error("auto_send_run_digest", (e2 && e2.message) || e2); }
       return { ran: false, failed: true, error: String((e && e.message) || e).slice(0, 160) };
     }
