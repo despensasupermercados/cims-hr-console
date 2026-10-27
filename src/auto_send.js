@@ -94,13 +94,18 @@ export function installAutoSend(deps) {
       .bind(sc, seq, kind, new Date().toISOString(), note || null).run();
   }
 
-  // A manual send (crew-page button) already created a request row for this leg.
-  // Never re-send on top of it: re-sending would DELETE + re-insert the row,
-  // invalidating the emailed link and wiping any acknowledgement.
-  async function manualExists(env, sc, off, kind) {
+  // A send already created a request row for this leg (the crew-page button, or an earlier run). Never re-send on top
+  // of it by itself: re-sending would DELETE + re-insert the row, invalidating the emailed link and wiping any
+  // acknowledgement. Returns the row nearest the asked sign-off within 21 days (its sign_off_date says which date the
+  // pass the crew holds was written for), else null.
+  async function manualOnFile(env, sc, off, kind) {
     var tbl = kind === "instructions" ? "instr_ack" : "ack_request";
-    try { return !!(await env.DB.prepare("SELECT 1 FROM " + tbl + " WHERE sc=? AND sign_off_date IS NOT NULL AND abs(julianday(sign_off_date) - julianday(?)) <= 21").bind(sc, off).first()); } catch (e) { return false; }
+    try {
+      var r = await env.DB.prepare("SELECT sign_off_date FROM " + tbl + " WHERE sc=? AND sign_off_date IS NOT NULL AND abs(julianday(sign_off_date) - julianday(?)) <= 21 ORDER BY abs(julianday(sign_off_date) - julianday(?)) LIMIT 1").bind(sc, off, off).first();
+      return r && r.sign_off_date ? { sign_off_date: String(r.sign_off_date).slice(0, 10) } : null;
+    } catch (e) { return null; }
   }
+  async function manualExists(env, sc, off, kind) { return !!(await manualOnFile(env, sc, off, kind)); }
 
   // Legs seeded at enable in the last 36h - listed once in the next digest for transparency.
   async function recentSeeded(env) {
@@ -127,8 +132,17 @@ export function installAutoSend(deps) {
           alerts.push({ kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: leg.name || null, to: leg.email || null, emailed: false, error: "before_switch_on" });
         continue;
       }
-      if (await manualExists(env, leg.sc, leg.off, kind)) {                 // manual send on file - skip, do not wipe its ack
+      var onFile = await manualOnFile(env, leg.sc, leg.off, kind);
+      if (onFile && onFile.sign_off_date === leg.off) {                       // a send on file for THIS date - skip, do not wipe its ack
         if (!DRY) await markSent(env, leg.sc, leg.seq, kind, "manual-preexisting");
+        continue;
+      }
+      if (onFile) {
+        // The pass the crew holds was written for ANOTHER sign-off: Rita moved the date after it went (27 Oct 2026: Paqueo's
+        // pass said 6 Nov, the sign-off became 13 Nov; Batadlan's said 30 Oct). Nothing goes by itself — the re-send is
+        // Rita's click on the crew page (it wipes the acknowledgement) — and nothing is marked, so this line comes back
+        // every morning until the pass on file carries the board's date.
+        alerts.push({ kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: leg.name || null, to: leg.email || null, emailed: false, error: "date_moved", prev: onFile.sign_off_date });
         continue;
       }
       var rec = { kind: kind, sc: leg.sc, seq: leg.seq, off: leg.off, ship: leg.ship, name: leg.name || null, to: leg.email || null, emailed: false, error: null };
@@ -154,8 +168,10 @@ export function installAutoSend(deps) {
   }
 
   function rowHtml(r, kind_label, DRY) {
-    var status = r.error === "no_email" ? "NO EMAIL — add address" : r.error === "before_switch_on" ? "inside the window at switch-on — not auto-emailed, send by hand if needed" : (r.error === "seeded" ? "seeded — not auto-emailed" : (DRY ? "would send" : (r.emailed ? "sent" : ("not sent — " + esc(r.error || "error")))));
-    var color = r.error === "no_email" ? "#B4232A" : (r.error === "seeded" || r.error === "before_switch_on") ? "#6B7C93" : (DRY ? "#6B7C93" : (r.emailed ? "#3E8E2A" : "#B4232A"));
+    var status = r.error === "no_email" ? "NO EMAIL — add address"
+      : r.error === "date_moved" ? "SIGN-OFF MOVED — the pass the crew holds says " + esc(r.prev || "another date") + "; re-send it from the crew page"
+      : r.error === "before_switch_on" ? "inside the window at switch-on — not auto-emailed, send by hand if needed" : (r.error === "seeded" ? "seeded — not auto-emailed" : (DRY ? "would send" : (r.emailed ? "sent" : ("not sent — " + esc(r.error || "error")))));
+    var color = (r.error === "no_email" || r.error === "date_moved") ? "#B4232A" : (r.error === "seeded" || r.error === "before_switch_on") ? "#6B7C93" : (DRY ? "#6B7C93" : (r.emailed ? "#3E8E2A" : "#B4232A"));
     var cell = 'padding:9px 12px;border-bottom:1px solid #EEF1F5;font-family:Arial,Helvetica,sans-serif;font-size:13px;';
     return '<tr>' +
       '<td style="' + cell + 'color:#16293D;">' + kind_label[r.kind] + '</td>' +
@@ -174,9 +190,12 @@ export function installAutoSend(deps) {
     }).join("") + '</tr>';
     var tbl = function (rows) { return '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E4E9F0;border-radius:10px;border-collapse:separate;">' + head + rows.map(function (r) { return rowHtml(r, L, meta.dry); }).join("") + '</table>'; };
     var noEmail = alerts.filter(function (r) { return r.error === "no_email"; }).length;
-    var alertBanner = noEmail
+    var moved = alerts.filter(function (r) { return r.error === "date_moved"; }).length;
+    var alertBanner = (noEmail
       ? '<div style="background:#FCEBEC;border:1px solid #F1B9BE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8A1C24;"><strong>&#9888; ' + noEmail + ' crew need an email on file</strong> — they qualified but have no address, so nothing was sent. They will keep appearing here until fixed.</div>'
-      : "";
+      : "") + (moved
+      ? '<div style="background:#FCEBEC;border:1px solid #F1B9BE;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#8A1C24;"><strong>&#9888; ' + moved + ' sign-off pass' + (moved === 1 ? '' : 'es') + ' to re-send</strong> — the sign-off moved after the pass went, so the crew holds the old date. Re-send from the crew page; nothing is re-sent by itself. They will keep appearing here until re-sent.</div>'
+      : "");
     var body = (sent.length ? tbl(sent) : '<p style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#16293D;">Nothing qualified today (no crew reached T-14 or T-7).</p>') +
       (alerts.length ? '<div style="height:14px"></div>' + tbl(alerts) : "") +
       (seeded && seeded.length ? '<div style="height:14px"></div>' + tbl(seeded) : "");
@@ -196,8 +215,8 @@ export function installAutoSend(deps) {
   }
 
   async function sendDigest(env, sent, alerts, seeded, meta) {
-    var n = sent.length, a = alerts.filter(function (r) { return r.error === "no_email"; }).length;
-    var subj = "CIMS auto-timing " + (meta.dry ? "(dry run) " : "") + meta.date + " — " + n + " sent" + (a ? ", " + a + " need email" : "");
+    var n = sent.length, a = alerts.filter(function (r) { return r.error === "no_email"; }).length, m = alerts.filter(function (r) { return r.error === "date_moved"; }).length;
+    var subj = "CIMS auto-timing " + (meta.dry ? "(dry run) " : "") + meta.date + " — " + n + " sent" + (a ? ", " + a + " need email" : "") + (m ? ", " + m + " to re-send" : "");
     var envelope = { to: DIGEST_TO, subject: subj, html: digestHtml(sent, alerts, seeded, meta), templateId: "hr.autosend.digest.v1", critical: false };
     if (DIGEST_CC && DIGEST_CC.length) envelope.cc = DIGEST_CC;
     try { await sendViaMailer(env, envelope); } catch (e) { await logRun(env, "digest_failed", meta.dry, sent.length, alerts.length); }
