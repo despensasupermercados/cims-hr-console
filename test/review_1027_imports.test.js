@@ -66,3 +66,15 @@ test("the profile's grade reads the count row like every other reader (the visit
   assert.match(W, /completedSince\(ccRow\.as_of, ccRow\.tdg_on !== undefined \? ccRowOf\(ccRow\) : rsRow, today\)/);
   assert.match(W, /manual_notes: \(notes\.notes \|\| \[\]\)\.filter\(\(n\) => !n\.archived_at\)/);
 });
+
+test("the Upload page says WHEN and BY WHOM an already-imported file was imported, in an amber note, never the red failure box (27 Oct 2026)", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
+  const R = readFileSync(new URL("../src/crew_import_routes.js", import.meta.url), "utf-8");
+  assert.match(R, /SELECT run_at, run_by FROM import_run WHERE file_hash=\? ORDER BY run_at DESC LIMIT 1/, "the stage reads the import's date and author");
+  assert.match(R, /imported_at: dup\.run_at \|\| null, imported_by: dup\.run_by \|\| null/, "and answers them");
+  assert.match(W, /res\.error==="already_processed"\)\{var at=res\.imported_at\?\(' on '\+fmtDateS\(res\.imported_at\)/, "the page prints the date");
+  assert.match(W, /This exact file was already imported'\+at\+by\+'\.<\/b> The console already holds everything in it/, "and says the console holds it");
+  assert.match(W, /INFOBOX\+'"><b>This exact file was already imported/, "an amber note, not BADBOX");
+  assert.match(W, /The board changes with a newer export from TDG\./);
+});
+

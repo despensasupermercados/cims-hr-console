@@ -51,6 +51,7 @@ test("stage rejects an already-imported file hash", async () => {
   const body = await res.json();
   assert.equal(body.ok, false);
   assert.equal(body.error, "already_processed");
+  assert.equal(body.imported_at, null, "a fake run with no run_at: the field is there, null");
 });
 
 // Miguel, 6 Oct 2026: "data about the crew .. new data ?? goes stat right to the crew card". The file's ship
@@ -401,7 +402,7 @@ function redropDB({ runs, held = 0, existing = EXISTING }) {
   const batched = [];
   const latest = [...runs].sort((a, b) => (a.run_at < b.run_at ? 1 : -1))[0];
   const route = (sql, args) => {
-    if (/SELECT 1 AS x FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.some(r => r.file_hash === args[0]) ? { x: 1 } : null };
+    if (/SELECT run_at, run_by FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.find(r => r.file_hash === args[0]) || null };
     if (/SELECT id, run_at(, rows_seen)? FROM import_run WHERE file_hash/i.test(sql)) return { __first: runs.find(r => r.file_hash === args[0]) || null };
     if (/SELECT id FROM import_run ORDER BY run_at DESC/i.test(sql)) return { __first: latest ? { id: latest.id } : null };
     if (/COUNT\(\*\) AS n FROM registry_snapshot WHERE import_run_id/i.test(sql)) return { __first: { n: held } };
@@ -444,7 +445,8 @@ test("re-drop: an OLDER file, a file already copied, or no guard (tests, tools) 
   ]) {
     const env = { DB: db };
     const body = await (await apiCrewImportStage(req({ rows: ROWS, file_hash: hash }), env, deps)).json();
-    assert.deepEqual(body, { ok: false, error: "already_processed" });
+    // the answer names the import (27 Oct 2026): when, and who (none recorded on these runs); never a snapshot_saved here
+    assert.deepEqual(body, { ok: false, error: "already_processed", imported_at: RUNS.find(r => r.file_hash === hash).run_at, imported_by: null });
     assert.equal(env.DB._batched.length, 0);
   }
 });
