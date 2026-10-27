@@ -18,7 +18,9 @@
 // " 1,169.60 ", "$5,028.73", " -   ", "(138.46)"). Nothing here is money in the §1 sense (the bonus); it is a reference
 // read (§10b) and never an invoice source.
 
-const num = (v) => {
+// Exported (27 Oct 2026) so Rita's workbook is read with the same rules: travel.js had its own reader that turned an
+// accounting negative "(138.46)" into +138.46 — a refund typed in brackets became a charge.
+export const num = (v) => {
   if (v == null || v === "") return 0;
   if (typeof v === "number") return isFinite(v) ? Math.round(v * 100) / 100 : 0;
   const s = String(v).trim();
@@ -36,20 +38,34 @@ const up = (v) => txt(v).toUpperCase();
 // The MONTH of a bill comes from the file's name ("DG3 SGA EXCEL FEBRUARY 2026.xlsx", "MARCH'26") or its month folder —
 // sgaPeriodOf — never from the ref.
 export const REF_RE = /^([A-Z]{2,4})-(\d{4})-(\d{2})-(\d+[A-Z]?)-(\d{2})$/;
-const MONTH_WORDS = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, SEPT: 9, OCT: 10, NOV: 11, DEC: 12 };
-const monthWord = (w) => { const u = String(w || "").toUpperCase(); for (const [k, n] of Object.entries(MONTH_WORDS)) if (u === k || (u.length >= 3 && k.length === 3 && u.startsWith(k) && /^[A-Z]+$/.test(u))) return n; return null; };
+const MONTH_WORDS = { JAN: 1, JANUARY: 1, FEB: 2, FEBRUARY: 2, MAR: 3, MARCH: 3, APR: 4, APRIL: 4, MAY: 5, JUN: 6, JUNE: 6, JUL: 7, JULY: 7, AUG: 8, AUGUST: 8,
+  SEP: 9, SEPT: 9, SEPTEMBER: 9, OCT: 10, OCTOBER: 10, NOV: 11, NOVEMBER: 11, DEC: 12, DECEMBER: 12 };
+// A month is one of TDG's spellings, whole — never "any word that starts with MAR" (27 Oct 2026: the prefix rule read
+// MARTINEZ 2026 as March and NOVO 2026 as November; a word the list lacks is no period, and a file with no period is refused).
+export const monthWord = (w) => MONTH_WORDS[String(w || "").toUpperCase()] || null;
 // "DG3 SGA EXCEL FEBRUARY 2026.xlsx" / "MARCH'26" / "MAY'2026" / "REVISED DG3 SGA EXCEL JULY'2026.xlsx" → { year, month, source: "name" }
 export function sgaPeriodFromName(name) {
-  // "NOVEMBER 2025", "JULY'2026", "MARCH'26", "AUG2025", "NOVEMBER_2025" (an upload that swapped spaces for underscores)
-  const m = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})\b/.exec(String(name || "").replace(/\.xlsx?$/i, ""));
-  if (!m) return null;
-  const month = monthWord(m[1]); if (!month) return null;
-  const year = m[2].length === 2 ? 2000 + +m[2] : +m[2];
-  return year >= 2020 && year <= 2099 ? { year, month, source: "name" } : null;
+  // "NOVEMBER 2025", "JULY'2026", "MARCH'26", "AUG2025", "NOVEMBER_2025" (an upload that swapped spaces for underscores).
+  // The month AFTER "SGA EXCEL" is the bill's (27 Oct 2026: "FW SGA EXCEL AUGUST 2026 sent SEP 3 2026" is August); with no
+  // such marker the first month word followed by a year is read, as before.
+  const base = String(name || "").replace(/\.xlsx?$/i, "");
+  const tail = /sga\s*excel/i.test(base) ? base.slice(base.search(/sga\s*excel/i)) : base;
+  const re = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})\b/g;
+  for (const src of tail === base ? [base] : [tail, base]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(src))) {
+      const month = monthWord(m[1]); if (!month) continue;
+      const year = m[2].length === 2 ? 2000 + +m[2] : +m[2];
+      if (year >= 2020 && year <= 2099) return { year, month, source: "name" };
+    }
+  }
+  return null;
 }
 // ".../SGA/2026/02 February 2026" → { year: 2026, month: 2, source: "path" }
 export function sgaPeriodFromPath(path) {
-  const m = /(?:^|\/)(20\d{2})\/(0[1-9]|1[0-2])\b[^/]*\/?$/.exec(String(path || "").trim());
+  // the folder may be followed by the file itself (".../2026/02 February 2026/DG3 SGA EXCEL.xlsx" — the sync's `path`)
+  const m = /(?:^|\/)(20\d{2})\/(0[1-9]|1[0-2])\b[^/]*(?:\/[^/]*\.(?:xlsx?|pdf))?\/?$/i.exec(String(path || "").trim());
   return m ? { year: +m[1], month: +m[2], source: "path" } : null;
 }
 export function sgaPeriodOf(name, path) { return sgaPeriodFromName(name) || sgaPeriodFromPath(path) || null; }
