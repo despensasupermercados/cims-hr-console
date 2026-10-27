@@ -171,7 +171,7 @@ const RB=(()=>{
  async function fetchPorts(ship){try{const r=await fetch("/api/relief/ports?ship="+encodeURIComponent(ship));const j=await r.json();PORTS=(j&&j.ports)||[];}catch(e){PORTS=[];}}
  function taPorts(){return (PORTS||[]).filter(p=>Number(p.is_turnaround)===1&&Number(p.is_sea)!==1&&p.port_name).slice().sort((a,b)=>a.berth_date<b.berth_date?-1:a.berth_date>b.berth_date?1:0);}
  // Names and ports from TDG files and manual entry are text, never markup (8 Oct 2026).
- function rEsc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+ function rEsc(v){return String(v==null?"":v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
  // Month-end clamped (16 Oct 2026): setUTCMonth overflowed, so a printer off Jul 31 gave the earmark a SAVED sign-off of
  // Mar 3 where the server (addMonthsISO / plusMonths) says Feb 28 — 1–3 days off on every 29th–31st into a shorter month.
  function addMonths(d,n){if(!d)return"";const p=String(d).slice(0,10).split("-");const y=+p[0],m0=+p[1]-1+n,dd=+p[2];const t=new Date(Date.UTC(y,m0,1));const last=new Date(Date.UTC(t.getUTCFullYear(),t.getUTCMonth()+1,0)).getUTCDate();t.setUTCDate(Math.min(dd,last));return t.toISOString().slice(0,10);}

@@ -27,12 +27,21 @@ export function pickEmergency(row) {
   };
 }
 
+// The header a pattern names: the EXACT header first, then the first header that contains it (27 Oct 2026 review: a
+// substring alone, first column wins, read SHIP CREW ID as the crew id and CIVIL STATUS as the status whenever TDG put
+// that column first — the order of TDG's columns was the only thing keeping every row on the right crew). `exclude`
+// drops headers that must never answer a pattern (the cruise-line id columns for the agency id).
+const NEVER_ID = /shipcrewid|kmid|keymanid|cruiselineid|royalid|idnumber/;
+function headerFor(keys, p, exclude) {
+  const np = norm(p);
+  const ok = exclude ? keys.filter((h) => !exclude.test(norm(h))) : keys;
+  return ok.find((h) => norm(h) === np) ?? ok.find((h) => norm(h).includes(np)) ?? null;
+}
 // Find the value in a raw row whose header matches any of the given normalized substrings.
-function pick(row, patterns) {
+function pick(row, patterns, exclude) {
   const keys = Object.keys(row || {}).filter((h) => !isEmergHeader(h));
   for (const p of patterns) {
-    const np = norm(p);
-    const k = keys.find(h => norm(h).includes(np));
+    const k = headerFor(keys, p, exclude);
     // "-" is TDG's blank in EVERY cell (16 Oct 2026): it was read so for dates only, so a "-" became the crew's province,
     // phone, passport number or SHIP ("-" as a hull → an unknown_ship row) and never cleared anything.
     if (k != null) { const v = row[k]; return v == null ? "" : String(dash(v) == null ? "" : dash(v)).trim(); }
@@ -46,8 +55,7 @@ function pick(row, patterns) {
 function blankCell(row, patterns) {
   const keys = Object.keys(row || {}).filter((h) => !isEmergHeader(h));
   for (const p of patterns) {
-    const np = norm(p);
-    const k = keys.find(h => norm(h).includes(np));
+    const k = headerFor(keys, p, NEVER_ID);   // CLEARABLE never names an id column: a blank SHIP CREW ID cell is not a blank ship
     if (k != null) { const v = row[k]; return v == null || String(v).trim() === "" || String(v).trim() === "-"; } // "-" = TDG's blank
   }
   return false;
@@ -180,7 +188,7 @@ export function storableStatus(s) {
 // Map one raw row to crew fields plus the date cells no reading could make a real date.
 // Returns null if no agency_id found. mapRow() below is the row-only view.
 export function mapRowFull(row) {
-  const agency_id = pick(row, ["crew id", "crewid", "agency id", "agencyid", "crew no", "crewno"]);
+  const agency_id = pick(row, ["crew id", "crewid", "agency id", "agencyid", "crew no", "crewno"], NEVER_ID);
   if (!agency_id) return null;
   // Every date cell: a lone "-" is TDG's blank (seen on the 7 Oct 2026 file in a passport expiry), not a typo to report.
   const raw = {
@@ -212,13 +220,13 @@ export function mapRowFull(row) {
     first_name: pick(row, ["first name", "firstname", "given"]) || null,
     middle_name: pick(row, ["middle"]) || null,
     last_name: pick(row, ["last name", "lastname", "surname"]) || null,
-    status: normalizeStatus(pick(row, ["status"])),
+    status: normalizeStatus(pick(row, ["crew status", "status"], NEVER_ID)),
     // The file's OWN status word (5 Oct 2026). normalizeStatus reads four words; anything else used to
     // become null and vanish ("blank in source = don't clobber"), leaving crew.status at an older value
     // with no trace. Kept for the board's copy of the file only — not in TRACK, never written to crew.
-    status_raw: pick(row, ["status"]) || null,
+    status_raw: pick(row, ["crew status", "status"], NEVER_ID) || null,
     rank_observed: pick(row, ["rank", "position", "rating"]) || null,
-    vessel_observed: pick(row, ["vessel", "ship"]) || null,
+    vessel_observed: pick(row, ["vessel", "ship"], NEVER_ID) || null,   // never the SHIP CREW ID column
     dob: date("dob"),
     province: pick(row, ["province"]) || null,
     phone: pick(row, ["mobile", "phone", "cell", "contact no"]) || null,
@@ -280,15 +288,20 @@ const TRACK = ["first_name", "middle_name", "last_name", "status", "rank_observe
 // pass maps whose row objects do not always repeat agency_id inside them (the map KEY is the
 // id). Reading it off the row instead silently matched nothing for those callers.
 function indexEntries(pairs) {
-  const byAgency = {}, byShipCrewId = {};
+  const byAgency = {}, byShipCrewId = {}, kmSeen = new Set(), kmClash = new Set();
   for (const [id, row] of pairs) {
     if (row == null || id == null) continue;
     const e = { agency_id: String(id), row };
     byAgency[e.agency_id] = e;
     const km = normKm(row.ship_crew_id);
-    if (km && !byShipCrewId[km]) byShipCrewId[km] = e;   // first wins; a collision is data damage, not a merge rule
+    if (!km) continue;
+    // A cruise-line id two roster rows share resolves NOBODY (§11e, the rule the Counter and count imports already follow;
+    // 27 Oct 2026 review): "first wins" handed a file row to whichever row came first — a hidden duplicate included.
+    if (kmSeen.has(km)) { delete byShipCrewId[km]; kmClash.add(km); continue; }
+    kmSeen.add(km);
+    if (!kmClash.has(km)) byShipCrewId[km] = e;
   }
-  return { byAgency, byShipCrewId };
+  return { byAgency, byShipCrewId, kmClash };
 }
 export function buildIdentityIndex(existingRows) {
   return indexEntries((existingRows || []).filter(r => r != null).map(r => [r.agency_id, r]));
@@ -322,10 +335,19 @@ export function resolveExisting(m, index) {
 // agency_id (it is the roster's stable key) — always a flag for a human (D7, CLAUDE.md §6).
 export function diffCrew(incoming, existing) {
   const idx = asIndex(existing);
-  const add = [], change = [], needsStatus = [], rekeyed = [];
+  const add = [], change = [], needsStatus = [], rekeyed = [], collisions = [];
   let unchanged = 0;
-  for (const m of incoming || []) {
-    const { row: ex, agency_id: exId, via } = resolveExisting(m, idx);
+  // TWO FILE ROWS RESOLVING TO ONE CREW ARE A COLLISION (§11b, the rule the Counter and count imports follow; 27 Oct 2026
+  // review): neither is applied, both are listed — the second row's values used to overwrite the first's on the crew
+  // (Purnama: "SC-0040010 … On board" and "349195, Ida … On Vacation" in one file became one card with the wrong word).
+  const resolved = (incoming || []).map((m) => ({ m, r: resolveExisting(m, idx) }));
+  const hits = {};
+  for (const { m, r } of resolved) if (r.row) (hits[r.agency_id] = hits[r.agency_id] || []).push(m.agency_id);
+  const clash = new Set();
+  for (const [exId, ids] of Object.entries(hits)) if (ids.length > 1) { collisions.push({ agency_id: exId, incoming_ids: ids }); ids.forEach((i) => clash.add(i)); }
+  for (const { m, r } of resolved) {
+    if (clash.has(m.agency_id)) continue;
+    const { row: ex, agency_id: exId, via } = r;
     if (!ex) {
       if (!m.status) { needsStatus.push(m.agency_id); continue; }
       add.push(m.agency_id);
@@ -352,5 +374,5 @@ export function diffCrew(incoming, existing) {
       change.push(entry);
     } else unchanged++;
   }
-  return { add, change, unchanged, needsStatus, rekeyed, total: (incoming || []).length };
+  return { add, change, unchanged, needsStatus, rekeyed, collisions, total: (incoming || []).length };
 }
