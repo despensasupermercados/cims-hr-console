@@ -52,7 +52,9 @@ export const SCALE = ["No", "Not really", "Partly", "Mostly", "Yes"];
 export const SUPERVISOR = { Royal: "GSM", Celebrity: "DCM", Azamara: "BOM", NCL: "shipboard manager" };
 export const statementFor = (q, brand) => q.text.replace("{M}", SUPERVISOR[brand] ? " (" + SUPERVISOR[brand] + ")" : "");
 
-export const SURVEY_CATCHUP_DAYS = 14;   // TDG's file can confirm a debark a week or more after the day
+export const SURVEY_CATCHUP_DAYS = 30;   // TDG's file confirms a debark late: measured on the 22-25 Oct 2026 files, 5, 16 and
+                                         // 22 days after the day (Dela Rosa, Belhida, Calayag). At 14 two of the three would
+                                         // never have been asked (27 Oct 2026 review). Never before the switch went on.
 export const SURVEY_DELAY_DAYS = 3;      // Miguel, 23 Oct 2026 ("ok go ahead"): 3 days after the sign-off, so Rita can record
                                          // why a contract ended (Performance / Medical / Compassionate are not asked) first
 export const SURVEY_REMIND_DAYS = 5;     // Miguel, 23 Oct 2026: "1. yes" — one reminder
