@@ -1025,6 +1025,20 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   window is never auto-emailed, only listed in the digest ("inside the window at switch-on — send by hand"). The old
   one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was approved in the pass style on 23 Oct
   2026; its switch stays off until Miguel turns it on.
+- **THE STAFF-HOUSE PASS, T-3** (Miguel, 27 Oct 2026: "we will send an email .. with a link where people can book a room in
+  manila .. make it look like hotel pass .. the mail goes to the personal email and cc rita and I and Mary joy"; "send it
+  3 days before the crew sign off .. build it and push it"; render approved the same day, headline "Time to rest, <first
+  name>. Manila has a bed for you." after he refused "the ship is done with you"). The third kind on the rail: `house`,
+  window T-3, `src/house_pass.js` (`installHousePass`, the senders' contract), template `house.signoff.keycard.v1` (a local
+  copy of CIMS_Housing `signoffKeyCardV1`; the house's gallery is the reference render), ONE button to
+  https://house.cims.work/book. TO the personal address (Rita's override first, like every sender), CC Rita, Miguel and
+  Maryjoy, reply-to Rita, idempotency key `house.signoff:<sc>:<seq>`. The days-out is computed from the run day, so a
+  self-healed late send says "tomorrow", not "three days". **Switch `auto_send_house_enabled` is seeded ON by the first run
+  after deploy, with `auto_send_house_since` = that day** (Miguel asked for it live; a seat already inside T-3 at switch-on is
+  listed in the digest, never emailed by the switch) — a one-time seed, the Automation toggle ("Staff house pass") owns the
+  row after. No request table for this kind: a T-7 link on file never reads as "a pass already went" (`manualOnFile`).
+  A training visit, a redacted crew, no sign-off date: nothing goes. No ID, no email, no phone in the email. Pinned by
+  `test/house_pass.test.js`.
 - **A TRAINING VISIT IS A TRIP, NOT A CONTRACT; THE TRAINERS ARE TAGGED** (Miguel, 17 Oct 2026: Jonathan "sometimes he goes
   to the ship to teach as crew and then home [to] support .. same as Ohji"; then "perhaps you can tag the 3 guys as trainers"
   — of the options, "Trainer tag"). Jonathan Placer Alonzo sailed a full contract (Rhapsody, Dec 2025 – Sep 2026) and is now

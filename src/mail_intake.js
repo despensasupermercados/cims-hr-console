@@ -81,14 +81,22 @@ export async function sha256Hex(buf) {
 export async function intakeMail(env, rawMessage, meta, deps) {
   const mail = await deps.parse(rawMessage);
   const from = bareAddress((mail.from && mail.from.address) || meta.from);
-  const allowed = senderAllowed(from, env);
+  // THE GATE READS BOTH SENDERS (27 Oct 2026): the header From is what a mail client shows and anyone can type it; the
+  // envelope sender (`meta.from`, Email Routing's) is who actually handed the mail over. When the two differ, both must be
+  // on SGA_MAIL_SENDERS — a workbook under a dg3.com header from an unlisted envelope is held, and the receipt names both.
+  const envelope = bareAddress(meta && meta.from);
+  const allowed = senderAllowed(from, env) && (!envelope || envelope === from || senderAllowed(envelope, env));
   const { take, ignored } = pickAttachments(mail.attachments || []);
   const files = [];
   const at = new Date(deps.now || Date.now()).toISOString();
   for (const t of take) {
     const buf = t.att.content;
     const hash = await sha256Hex(buf);
-    const sheets = deps.sheetsOf(deps.XLSX, buf, t.kind === "sga" ? deps.wantSga : deps.wantTravel);
+    // a workbook SheetJS cannot open (corrupt, password-protected, not really an .xlsx) is receipted as `unreadable` and its
+    // bytes still archived — it used to throw out of the whole intake: no receipt, no original kept, the other files lost
+    let sheets;
+    try { sheets = deps.sheetsOf(deps.XLSX, buf, t.kind === "sga" ? deps.wantSga : deps.wantTravel); }
+    catch (e) { files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status: "unreadable", error: String((e && e.message) || e).slice(0, 200), parts: 0, rows: 0, bytes: buf }); continue; }
     // `bytes` rides on the entry for the archive (src/sga_archive.js) and is never written to the receipt
     if (!Object.keys(sheets).length) { files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status: "no_sheets", parts: 0, rows: 0, bytes: buf }); continue; }
     const key = inboxFileKey("mail:" + hash.slice(0, 16), hash.slice(0, 16));
@@ -97,5 +105,5 @@ export async function intakeMail(env, rawMessage, meta, deps) {
     files.push({ name: t.att.filename, kind: t.kind, year: t.year, month: t.month, hash, status, parts: parts.length, rows: Object.values(sheets).reduce((a, r) => a + r.length, 0), bytes: buf,
       inbox: parts.map((p, i) => ({ id: "inb_mail_" + hash.slice(0, 24) + "_" + String(i).padStart(2, "0"), file_key: key, kind: t.kind, year: t.year, month: t.month, item_id: "mail:" + hash.slice(0, 16), name: t.att.filename, path: "email:" + from, modified: hash.slice(0, 16), sheet: p.sheet, part: p.part, parts: p.parts, file_parts: p.file_parts, rows_json: p.rows_json, written_by: "email:" + from, at, status })) });
   }
-  return { from, allowed, subject: mail.subject || meta.subject || null, messageId: mail.messageId || null, files, ignored, at };
+  return { from, envelope: envelope && envelope !== from ? envelope : null, allowed, subject: mail.subject || meta.subject || null, messageId: mail.messageId || null, files, ignored, at };
 }

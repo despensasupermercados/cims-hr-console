@@ -20,6 +20,7 @@
 
 // "## Sheet: SUMMARY MANNING — 107 rows × 37 columns (A1:AK107)"   name may carry " [hidden]" and trailing spaces
 import { isManningSheet, isSummarySheet } from "./sga.js";
+import { monthNum } from "./travel.js";
 
 const SHEET_RE = /^## Sheet: (.+?)\s*(\[hidden\])?\s*—\s*(\d+) rows? × (\d+) columns? \(([A-Z]+)(\d+):([A-Z]+)(\d+)\)/;
 const EMPTY_RE = /^\[(\d+) empty rows?\]/;
@@ -72,12 +73,11 @@ export function sgaFromDump(parsed) {
     trainingCut: !tr && parsed.cut && /trainrel/i.test(parsed.cut) ? parsed.cut : null };
 }
 
-const MONTH_SHEETS = ["JAN", "FEB", "MAR", "APRIL", "MAY", "JUNE", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC"];
 // Rita's workbook: a travel year is REPLACED whole by applyTravelYear, so the dump must carry every month sheet the book
 // has, and the CIMS sheet when the book has one. Anything cut or missing → nothing from this file (never nine months as
 // the year). `month` of the cut sheet is reported so the run can say "cut inside OCT".
 export function travelFromDump(parsed) {
-  const isMonth = (n) => MONTH_SHEETS.includes(String(n).trim().toUpperCase());
+  const isMonth = (n) => !!monthNum(n);   // every spelling travel.js reads (27 Oct 2026: a "SEP" sheet was "missing")
   const isCims = (n) => String(n).trim().toUpperCase() === "CIMS";
   const want = (n) => isMonth(n) || isCims(n);
   if (parsed.cut && want(parsed.cut)) return { ok: false, reason: "sheet_cut", detail: "the reader stopped inside " + parsed.cut.trim(), sheets: {} };

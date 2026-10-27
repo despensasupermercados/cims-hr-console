@@ -28,7 +28,8 @@ self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== C).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener("fetch", (e) => {
   const r = e.request, u = new URL(r.url);
-  if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/") || u.pathname.startsWith("/auth/") || u.pathname === "/login") return;
+  // the crew's own page (/audit/u/<token>) is never the app's offline shell, and never served the shell (27 Oct 2026)
+  if (r.method !== "GET" || u.origin !== location.origin || u.pathname.startsWith("/api/") || u.pathname.startsWith("/auth/") || u.pathname === "/login" || u.pathname.startsWith("/audit/u/")) return;
   if (r.mode === "navigate") {
     e.respondWith(fetch(r).then((res) => { if (res.ok && !res.redirected) { const cp = res.clone(); caches.open(C).then((c) => c.put("shell", cp)); } return res; }).catch(() => caches.open(C).then((c) => c.match("shell")).then((m) => m || new Response("Offline. Open the app again when the ship has signal.", { headers: { "Content-Type": "text/plain" } }))));
   }
@@ -950,7 +951,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     h += '<div class="card clip">' + tapBtn({ act: "block", key: "x", label: "Recommend for Oasis / Icon class", sub: rb ? "" : "Tap to recommend", pressed: rb, tk: rb ? "c" : "o", word: rb ? "Recommended" : "Not now", pill: rb ? "ok" : "m" })
       + tapBtn({ act: "fu", key: "x", label: "Needs a follow-up", sub: f ? "Who owns it, by when" : "Tap to add one", pressed: !!f, tk: f ? "c" : "o", word: f ? "Follow-up" : "None", pill: f ? "ok" : "m" });
     if (f) {
-      var owners = AR.FOLLOW_OWNERS.concat([first(v.crew)]);
+      var owners = AR.FOLLOW_OWNERS.concat([v.crew]); // the crew by FULL name: a first name alone could read as one of the five (ownerEmail)
       h += '<div class="pad-m line-t sec tight"><span class="xs b">Who</span><div class="pills wrapit">' + owners.map(function (n) { return '<button type="button" class="pill' + (f.owner === n ? " on" : "") + '" data-a="fu-owner" data-k="' + esc(n) + '" aria-pressed="' + (f.owner === n) + '">' + esc(n) + "</button>"; }).join("") + "</div>" + whyMsg(probs, "fu_owner")
         + lbl("By", '<input class="fld" type="date" data-f="fu-due" value="' + esc(f.due || "") + '" min="' + esc(v.today) + '">') + whyMsg(probs, "fu_due")
         + lbl("What", box("fu-text", f.text, "What has to happen")) + whyMsg(probs, "fu_text") + "</div>";

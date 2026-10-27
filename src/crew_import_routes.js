@@ -152,10 +152,13 @@ export async function apiCrewImportStage(request, env, deps) {
   for (const m of mappedAll) { if (m.agency_id in lastRow) duplicateIds.push(m.agency_id); lastRow[m.agency_id] = m; }
   const mapped = Object.values(lastRow);
   if (file_hash) {
-    const dup = await env.DB.prepare("SELECT 1 AS x FROM import_run WHERE file_hash=?").bind(file_hash).first();
+    // WHEN and BY WHOM (27 Oct 2026): Rita re-dropped the very file she had applied two days before and read "already
+    // imported" as a failed upload; the answer now names the import so the page can say the console already holds it.
+    const dup = await env.DB.prepare("SELECT run_at, run_by FROM import_run WHERE file_hash=? ORDER BY run_at DESC LIMIT 1").bind(file_hash).first();
     if (dup) {
       const kept = await keepCopyOfAppliedFile(env, deps, mapped, file_hash, rows.length);
-      return J(kept ? { ok: false, error: "already_processed", snapshot_saved: kept } : { ok: false, error: "already_processed" });
+      const when = { imported_at: dup.run_at || null, imported_by: dup.run_by || null };
+      return J(kept ? { ok: false, error: "already_processed", snapshot_saved: kept, ...when } : { ok: false, error: "already_processed", ...when });
     }
   }
   const incomingByAgency = Object.fromEntries(mapped.map(m => [m.agency_id, m]));

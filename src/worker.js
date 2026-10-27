@@ -13,7 +13,7 @@ import { mapRows, diffCrew, storableStatus } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
-import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
+import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO, monthNum, TRAVEL_SHEET_RE } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName, clientFromBill } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, sgaPeriodFromName, SGA_COL_KEYS } from "./sga.js";
 import { archiveKey, sourceRecord, safeName, SOURCE_COLS } from "./sga_archive.js";
@@ -66,12 +66,13 @@ import { installInstr } from "./signoff_instructions.js";
 import { seatContexts } from "./signoff_context.js";
 import { isShoreCrew, trainerSet } from "./visits.js";
 import { installAutoSend } from "./auto_send.js";
+import { installHousePass } from "./house_pass.js";
 import { installSbm } from "./sbm.js";
 import { installSeval } from "./seval.js";
 import { gatherAuto, listAudits } from "./score_auto.js";
-import { apiRosterExport } from './roster_export.js';
+import { apiRosterExport, secretEquals } from './roster_export.js';
 import { guardMailer } from "./mail_guard.js";
-import { installAudit } from "./audit_routes.js";
+import { installAudit, crossSite } from "./audit_routes.js";
 import { installRushOrders } from "./rush_orders.js";
 import { isAuditHost } from "./audit.js";
 import { AUDIT_NAME, auditIconFor, markSvg } from "./audit_brand.js";
@@ -91,7 +92,9 @@ const _autoAck = installAck({ json, htmlResponse, signToken, verifyToken, sha256
 // updated_at as "Rita's newer action", and the stamp flipped an outgoing crew's typed sign-off to the card's sign-on.
 const markDeployed = async (env, id, logId, at) => { const r = await env.DB.prepare("UPDATE assignment SET deployed_at=?, deploy_log_id=? WHERE id=? AND actual_sign_off IS NULL").bind(at, logId, id).run(); return { ok: !r || !r.meta || r.meta.changes == null || r.meta.changes > 0 }; };
 const _kmDeploy = installKeymanDeploy({ json, logActivity, sendViaMailer, removeReliefAssignment, saveReliefAssignment, markDeployed, resolveCity, groupPortDays, TODAY: () => TODAY() });  // TODAY is a const below: call it lazily, never read it at module init
-const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
+// The staff-house pass, T-3 (Miguel, 27 Oct 2026): src/house_pass.js, the third kind on the rail.
+const _house = installHousePass({ sendViaMailer });
+const _runAutoSend = installAutoSend({ sendInstructionsFor: _autoInstr.sendInstructionsFor, sendSignoffLinkFor: _autoAck.sendSignoffLinkFor, sendHousePassFor: _house.sendHousePassFor, sendViaMailer, BOARD_LEGS: autoSendBoardLegs, ORIGIN: "https://cims.work", DIGEST_TO: ["Miguel.Sanmartin@dg3.com"], DIGEST_CC: ["Rita.Berenyi@dg3.com"] });
 // Shipboard Management Review (Phase A): survey page, submit, T-7/T-4 sweep,
 // crew cards. Same install pattern as auto-send. NO money code here -- the
 // Score Card / sEval integration is a separate human-approved Phase B PR.
@@ -171,14 +174,15 @@ async function apiAutoSend(request, env, session) {
   const setS = (k, v) => env.DB.prepare("INSERT INTO app_setting (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").bind(k, v).run();
   const state = async () => { const both = (await getS("auto_send_enabled")) === "true";
     return { enabled: both, instructions: both || (await getS("auto_send_instr_enabled")) === "true", signoff: both || (await getS("auto_send_link_enabled")) === "true",
-      instructions_since: await getS("auto_send_instr_since"), signoff_since: await getS("auto_send_link_since") }; };
+      house: (await getS("auto_send_house_enabled")) === "true",
+      instructions_since: await getS("auto_send_instr_since"), signoff_since: await getS("auto_send_link_since"), house_since: await getS("auto_send_house_since") }; };
   if (request.method === "POST") {
     if (!session) return json({ error: "unauthorized" }, 401);
     const b = await request.json().catch(function () { return {}; });
     // One switch per email (16 Oct 2026: Miguel turned on the T-14 instructions alone). Switching a kind ON stamps the day:
     // the run never emails a seat that was already inside the window (auto_send.js processKind).
-    if (b.kind === "instructions" || b.kind === "signoff") {
-      const K = b.kind === "instructions" ? "auto_send_instr" : "auto_send_link";
+    if (b.kind === "instructions" || b.kind === "signoff" || b.kind === "house") {
+      const K = b.kind === "instructions" ? "auto_send_instr" : b.kind === "signoff" ? "auto_send_link" : "auto_send_house";
       const today = new Date().toISOString().slice(0, 10);
       if ((await getS("auto_send_enabled")) === "true") {      // the old one-for-both switch hands its state to the two
         for (const k of ["auto_send_instr", "auto_send_link"]) { await setS(k + "_enabled", "true"); await setS(k + "_since", today); }
@@ -308,6 +312,10 @@ export default {
       if (p === '/api/roster/export') return apiRosterExport(request, env);
       if (p.startsWith("/api/")) {
         if (!session) return json({ error: "unauthorized" }, 401);
+        // The session cookie is Domain=cims.work, so it reaches every *.cims.work app: a POST whose Origin is another host is
+        // refused, as the audit module already does for its own routes (27 Oct 2026 review). The console's pages, the relief
+        // iframe and the hub post to their own host; a write riding on the cookie from a sibling host is not theirs.
+        if (request.method === "POST" && crossSite(request, url)) return json({ error: "cross_site" }, 403);
         if (p === "/api/me")        return json({ email: session.email });
         if (p === "/api/dashboard") return apiDashboard(env);
         if (p === "/api/ops")       return apiOps(env);
@@ -815,7 +823,7 @@ async function mariaExecTool(env, name, input) {
     if (!id) return { error: "no crew matched; provide a name or agency_id" };
     const intel = await J(await apiIntelCrew(env, new URL(base + "/api/intel/crew?id=" + encodeURIComponent(id))));
     const notes = await J(await apiCrewNotes({ method: "GET" }, env, null, new URL(base + "/api/crew/notes?id=" + encodeURIComponent(id))));
-    return { agency_id: id, field_intel: intel.intel || [], manual_notes: notes.notes || [] };
+    return { agency_id: id, field_intel: intel.intel || [], manual_notes: (notes.notes || []).filter((n) => !n.archived_at) }; // archived notes are the Notes window's alone (§10g)
   }
   if (name === "crew_contract_history") {
     const id = await resolveCrewId(input);
@@ -1018,7 +1026,7 @@ async function authDev(request, env, url) {
   if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
   const b = await request.json().catch(() => ({}));
   const key = b.key, email = b.email;
-  if (!env.BOOTSTRAP_KEY || key !== env.BOOTSTRAP_KEY) return new Response("forbidden", { status: 403 });
+  if (!env.BOOTSTRAP_KEY || !(await secretEquals(String(key || ""), env.BOOTSTRAP_KEY))) return new Response("forbidden", { status: 403 }); // constant-time, like the roster key
   await ensureUsers(env).catch(() => {});
   if (!await isAllowed(env, email)) return new Response("not an allowlisted user", { status: 403 });
   const sess = await signToken({ email, p: "session", exp: Math.floor(Date.now() / 1000) + SESSION_TTL }, env.SESSION_SECRET);
@@ -1488,17 +1496,22 @@ async function ensureTravelImpl(env) {
   // 1494ms before, 1636ms after). The CREATE is a no-op on a live table, so it no longer blocks the read:
   // both leave together and the count comes back in the same round trip. If the table really is missing or
   // legacy, the count simply fails and the migrate-once path below runs, as before.
-  let st = null;
+  let st = null, countErr = null;
   try {
     const r = await Promise.all([
       env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, ship TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run(),
-      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch(() => null),
+      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch((e) => { countErr = e; return null; }),
       // `ship` (15 Oct 2026, migrations/0026): the hull the workbook row sits under. Rides in the same wave; a table that
       // already carries it (or does not exist yet — the CREATE above has it) answers with an error we ignore.
       addColumn(env, "ALTER TABLE travel_expense ADD COLUMN ship TEXT"),
     ]);
     st = r[1];
-  } catch (e) { st = null; }
+  } catch (e) { st = null; countErr = countErr || e; }
+  // A count that failed because the table is LEGACY (no `kind` column) or not there yet (the CREATE had not landed) is the
+  // migrate-once path. A count that failed for any OTHER reason (D1 unavailable for a moment) is not: until 27 Oct 2026
+  // `!st` alone re-seeded 2025 over a populated table on such an error — the 25 Jun 2026 nine-seeds class again, and the
+  // rows re-uploaded since 15 Oct (with their `ship`) would have become the bundled seed (no ship, "Not placed").
+  const legacy = !st && /no such (column|table)/i.test(String((countErr && countErr.message) || countErr || ""));
   if (!st) {
     await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'");
     await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0");
@@ -1507,7 +1520,7 @@ async function ensureTravelImpl(env) {
   // The bundled 2025 history seeds an EMPTY table, or completes the one-time migration of a legacy (pre-`kind`) table.
   // Until 15 Oct 2026 "no shoreside rows" also re-seeded 2025 on every cold start (nine seeds on 25 Jun 2026); a 2026
   // workbook without its CIMS sheet would have started that again. A populated, current table is never touched.
-  if ((total === 0 || !st) && TRAVEL_2025.length) {
+  if ((total === 0 || legacy) && TRAVEL_2025.length) {
     await env.DB.prepare("DELETE FROM travel_expense WHERE year=2025").run();
     await insertTravel(env, TRAVEL_2025, 2025);
     await logData(env, "travel_expense (2025 history incl. shoreside)", TRAVEL_2025.length, "seeded");
@@ -1564,12 +1577,22 @@ async function apiTravelImport(request, env, session) {
   const recs = parseTravelSheets(b.sheets || {}, year);
   if (b.dryRun) {
     const s = travelSummarize(recs);
-    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply
-    const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
-    const unmatched = unmatchedTravel(annotateTravel(recs, crew));
-    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched });
+    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply; and the months on file
+    // this workbook has NO sheet for (Apply replaces the year whole, so those months would go — said before the click)
+    const [crewRes, missing] = await Promise.all([env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(), travelMonthsMissing(env, b.sheets, year)]);
+    const unmatched = unmatchedTravel(annotateTravel(recs, crewRes.results));
+    const months = [...new Set(Object.keys(b.sheets || {}).map((n) => monthNum(n)).filter(Boolean))].sort((a, c) => a - c);
+    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched, months, missing });
   }
   return json(await applyTravelYear(env, recs, year, (session && session.email) || "?", "upload"));
+}
+// The months of `year` that hold crew rows on file and that `sheets` carries no month sheet for (the CIMS sheet is every
+// month's shoreside; a month sheet present but empty still carries its month). Replacing the year from such a workbook
+// would silently drop those months — the Upload page says so, the inbox holds the file (27 Oct 2026).
+async function travelMonthsMissing(env, sheets, year) {
+  const have = new Set(Object.keys(sheets || {}).map((n) => monthNum(n)).filter(Boolean));
+  const rows = (await env.DB.prepare("SELECT DISTINCT month FROM travel_expense WHERE year=? AND kind='crew'").bind(+year).all()).results;
+  return rows.map((r) => r.month).filter((m) => m && !have.has(m)).sort((a, b) => a - b);
 }
 // The ONE path that replaces a travel year — the Upload page and the SharePoint sync both come here (§10j).
 async function applyTravelYear(env, recs, year, by, source) {
@@ -1661,10 +1684,12 @@ async function applySgaWorkbook(env, b, st, by, source) {
   const trMonths = st.training.filter((t) => !t.summary_only);
   const fileId = "sga_" + st.period.year + "_" + String(st.period.month).padStart(2, "0") + "_" + crypto.randomUUID().slice(0, 8);
   const now = new Date().toISOString();
-  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines
-  const stmts = st.summaryOnly ? [] : [
-    env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=?").bind(st.period.year, st.period.month),
-  ];
+  // THE ORDER OF THE WRITES (27 Oct 2026): the new lines go in first under their own file_id; the LAST batch removes the
+  // month's older lines and writes the sga_file row that makes the new ones the month's. Until then the month's lines were
+  // deleted in the FIRST batch and inserted over the next ones (the writes go in batches of 100): a load that died between
+  // two batches left the month with no lines and no file row to say so. A load that dies now leaves the old month whole,
+  // plus orphan lines no sga_file names — /api/sga serves the latest FILE's lines only, so they are never shown.
+  const stmts = [], tail = [];
   const cols = ["id", "file_id", "year", "month", "ref", "ship_code", "seq", "sga_no", "crew_name", "vessel", "brand", "id_number", "nationality", ...SGA_COL_KEYS, "amount", "cols_sum"];
   const ins = env.DB.prepare("INSERT INTO sga_line (" + cols.join(",") + ") VALUES (" + cols.map(() => "?").join(",") + ")");
   st.lines.forEach((l, i) => {
@@ -1691,7 +1716,7 @@ async function applySgaWorkbook(env, b, st, by, source) {
       if (!(!t.summary_only && e.summary_only) && eP > P) continue;
     }
     trWritten++;
-    stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
+    tail.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
   }
   // The monthly summary rows, the same per-month rule as training: the NEWER bill's figure stands, the same period replaces.
   const existingSum = (await env.DB.prepare("SELECT s.year, s.month, f.year fy, f.month fm FROM sga_summary s LEFT JOIN sga_file f ON f.id = s.file_id").all().catch(() => ({ results: [] }))).results;
@@ -1702,12 +1727,19 @@ async function applySgaWorkbook(env, b, st, by, source) {
     const e = existSum.get(t.year + "-" + t.month);
     if (e && e.fy && e.fm && e.fy * 12 + e.fm > P) continue;
     smWritten++;
-    stmts.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
+    tail.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
   }
+  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines; otherwise the month's OLDER lines go here, in
+  // the same batch as the file row that makes the new ones current
+  if (!st.summaryOnly) tail.push(env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=? AND file_id<>?").bind(st.period.year, st.period.month, fileId));
   // rows = 0 marks a summary-only load: /api/sga never lets it hide a month's lines (the latest file WITH rows serves them)
-  stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+  tail.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summaryOnly ? null : st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+  // the tail's LAST 100 statements — the DELETE and the file row among them — are ONE batch
+  const cut = Math.max(0, tail.length - 100);
+  for (let i = 0; i < cut; i += 100) await env.DB.batch(tail.slice(i, Math.min(i + 100, cut)));
+  await env.DB.batch(tail.slice(cut));
   await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length,
     (st.summaryOnly ? "SUMMARY ONLY (no manning sheet): " : (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", ") + "summary " + smWritten + " months, training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : "") + (st.summaryAgrees === false ? " — the summary sheet DISAGREES with the manning sheet" : ""));
   return { ok: true, period: st.period, applied: st.lines.length, summary_only: st.summaryOnly, summary_written: smWritten, summary_agrees: st.summaryAgrees, training: trMonths.length, training_written: trWritten, total: st.summaryOnly ? null : st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
@@ -1738,7 +1770,17 @@ function syncDeps(env) {
       if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
       return applySgaWorkbook(env, b, st, meta.by, meta.source);
     },
-    applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
+    applyTravel: async (sheets, year, meta) => {
+      // A WORKBOOK THAT LOST A MONTH IS HELD (27 Oct 2026): the year is replaced whole, so a file that arrives by itself (the
+      // inbox: the mail intake, the agent's rows) with no sheet for a month the year on file already holds — an older copy
+      // sent again, a sheet renamed past what the parser reads — would wipe that month. Nothing loads; the inbox rows say
+      // `months_missing`, sp_sync `held`, the activity log names it. Rita's own Upload shows the same months in its dry-run.
+      if (meta && meta.holdUnreconciled) {
+        const missing = await travelMonthsMissing(env, sheets, year);
+        if (missing.length) return { held: "months_missing", year: +year, missing };
+      }
+      return applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source);
+    },
   };
 }
 async function maybeSyncSharePoint(env) {
@@ -1862,7 +1904,14 @@ async function archiveSourceFile(env, bytes, meta) {
   const prev = await env.DB.prepare("SELECT r2_key, bucket FROM sga_source_file WHERE hash=?").bind(hash).first().catch(() => null);
   if (!kept && prev && prev.r2_key) { rec.r2_key = prev.r2_key; rec.bucket = prev.bucket; kept = true; error = null; }
   if (!kept) rec.note = rec.note || ("Bytes not kept" + (error ? ": " + error : ""));
-  await env.DB.prepare("INSERT OR REPLACE INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ")").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
+  // The same bytes again refresh who sent them and when (INSERT OR REPLACE did that), but NEVER lose a value already known
+  // (27 Oct 2026): the kept object (`r2_key` / `bucket`), the inbox link (`file_key` — Rita's Upload sends none, and it
+  // wiped the mail's) and the file's month; the note clears once the bytes are kept by either row.
+  await env.DB.prepare("INSERT INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ") ON CONFLICT(hash) DO UPDATE SET " +
+    "name=excluded.name, kind=COALESCE(excluded.kind, sga_source_file.kind), year=COALESCE(excluded.year, sga_source_file.year), month=COALESCE(excluded.month, sga_source_file.month), " +
+    "bytes=COALESCE(excluded.bytes, sga_source_file.bytes), r2_key=COALESCE(sga_source_file.r2_key, excluded.r2_key), bucket=COALESCE(sga_source_file.bucket, excluded.bucket), " +
+    "source=excluded.source, by=excluded.by, at=excluded.at, file_key=COALESCE(sga_source_file.file_key, excluded.file_key), " +
+    "note=CASE WHEN COALESCE(sga_source_file.r2_key, excluded.r2_key) IS NULL THEN excluded.note ELSE NULL END").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
   return { hash, kept, r2_key: rec.r2_key, error };
 }
 async function intakeMailToInbox(env, message, ctx) {
@@ -1870,13 +1919,21 @@ async function intakeMailToInbox(env, message, ctx) {
   const raw = await new Response(message.raw).arrayBuffer();
   const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
   const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now() });
-  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again
-  const keys = r.files.filter((f) => f.inbox && f.inbox.length).map((f) => f.inbox[0].file_key);
-  const done = new Set(keys.length ? (await env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all()).results.map((x) => x.file_key) : []);
+  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again —
+  // through the inbox, or (27 Oct 2026) on Upload data: the page stamps sga_file.file_hash with the file's SHA-256, so a bill
+  // Rita loaded by hand and Finance then emails is the same file, not a month to replace with itself
+  const queued = r.files.filter((f) => f.inbox && f.inbox.length);
+  const keys = queued.map((f) => f.inbox[0].file_key), hashes = queued.map((f) => f.hash);
+  const ids = [...new Set(keys.concat(hashes))];
+  const [inboxDone, fileDone] = ids.length ? await Promise.all([
+    env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all(),
+    env.DB.prepare("SELECT DISTINCT file_hash FROM sga_file WHERE file_hash IN (" + ids.map(() => "?").join(",") + ")").bind(...ids).all().catch(() => ({ results: [] })),
+  ]) : [{ results: [] }, { results: [] }];
+  const done = new Set(inboxDone.results.map((x) => x.file_key).concat(fileDone.results.map((x) => x.file_hash)));
   const ins = env.DB.prepare("INSERT OR REPLACE INTO sp_inbox (" + INBOX_COLS.join(",") + ") VALUES (" + INBOX_COLS.map(() => "?").join(",") + ")");
   const stmts = [];
   for (const f of r.files) {
-    if (f.inbox && f.inbox.length && done.has(f.inbox[0].file_key)) { f.status = "already_loaded"; continue; }
+    if (f.inbox && f.inbox.length && (done.has(f.inbox[0].file_key) || done.has(f.hash))) { f.status = "already_loaded"; continue; }
     for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
@@ -1887,11 +1944,11 @@ async function intakeMailToInbox(env, message, ctx) {
     f.archived = a.kept; if (a.error) f.archive_error = a.error;
   }
   const st = new Set(r.files.map((f) => f.status));
-  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : "no_workbook";
+  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : st.has("unreadable") ? "unreadable" : "no_workbook";
   const receipt = r.files.map(({ inbox, bytes, ...f }) => f);
   await env.DB.prepare("INSERT INTO mail_intake (id, from_addr, to_addr, subject, message_id, allowed, files_json, ignored_json, outcome, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(receipt), JSON.stringify(r.ignored), outcome, r.at).run();
-  await logData(env, "mail intake (" + r.from + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
+  await logData(env, "mail intake (" + r.from + (r.envelope ? ", envelope " + r.envelope : "") + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.error ? " (" + f.error + ")" : "") + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
   if (outcome === "queued") { const run = applyInbox(env).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
   return { outcome, files: receipt, ignored: r.ignored, from: r.from };
 }
@@ -1933,7 +1990,7 @@ async function apiSga(env) {
     env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, source, by, at, file_key, note FROM sga_source_file ORDER BY at DESC").all(),
     // bills the inbox HELD (17 Oct 2026): their lines do not add up to TDG's grand total; Rita loads them by hand
-    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' GROUP BY file_key").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' AND kind='sga' GROUP BY file_key").all().catch(() => ({ results: [] })),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -2252,7 +2309,10 @@ async function apiCrewOne(env, url, session) {
     env.DB.prepare("SELECT * FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the kept TDG file
     boardLegs(env), // the ONE schedule (§11)
     env.DB.prepare("SELECT * FROM contract_edit WHERE sc=?").bind(id).all().catch(none),
-    env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first().catch(() => null),
+    // TDG's count + the row's debark and the visit mark (CC_VISIT_*), as every other grade reader reads it (27 Oct 2026 review:
+    // the profile handed completedSince the bare snapshot row, so a trainer's debark added +1 here and nowhere else)
+    env.DB.prepare("SELECT c.*, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on" + CC_VISIT_COLS + " FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN + " WHERE c.sc=?").bind(id).first()
+      .catch(() => env.DB.prepare("SELECT * FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT id, ts, text, created_by, archived_at, archived_by FROM crew_note_log WHERE agency_id=? ORDER BY ts DESC").bind(id).all().catch(none),
     env.DB.prepare("SELECT * FROM crew_ready WHERE agency_id=?").bind(id).first().catch(() => null),
     env.DB.prepare("SELECT id, reporter, summary, confidence, source, ts, contract_no FROM crew_intel WHERE agency_id=? AND status='filed' ORDER BY ts DESC").bind(id).all().catch(none),
@@ -2292,7 +2352,7 @@ async function apiCrewOne(env, url, session) {
   const ct = ctRes.results;
   // The grade the console derives from TDG's count (+ a contract TDG ended since the as-of date, §10c) — set
   // beside TDG's own position so a disagreement is a row to check, never silently one or the other.
-  const added = ccRow ? completedSince(ccRow.as_of, rsRow, today) : 0;
+  const added = ccRow ? completedSince(ccRow.as_of, ccRow.tdg_on !== undefined ? ccRowOf(ccRow) : rsRow, today) : 0;
   const grade = ccRow && ccRow.completed != null ? psRank(Number(ccRow.completed) + added, true) : null;
   const profile = buildCrewProfile({
     today, crew: row, override: ov, snap: rsRow, count: ccRow, countAdded: added, grade,
@@ -2344,6 +2404,9 @@ async function apiCrewAdd(request, env, session, ctx) {
   const b = await request.json().catch(() => ({}));
   const id = String(b.agency_id || "").trim();
   if (!id || !b.first_name || !b.last_name) return json({ error: "missing" }, 400);
+  // An agency id is TDG's key (SC-0040010), never free text (27 Oct 2026 review): the page embeds it in onclick handlers and
+  // data attributes on every tab, so one crafted id typed here would run in every other user's session.
+  if (!/^[A-Za-z]{1,4}-?[A-Za-z0-9]{3,12}$/.test(id)) return json({ error: "bad_agency_id" }, 400);
   const [ex] = await Promise.all([
     env.DB.prepare("SELECT agency_id FROM crew WHERE agency_id=?").bind(id).first(),
     ensureCrewExtras(env),
@@ -3732,6 +3795,8 @@ async function commitEvidence(env, cr, b, ships) {
     const name = await env.DB.prepare("SELECT first_name, last_name FROM crew WHERE agency_id=?").bind(cr.agency_id).first().catch(() => null);
     const a = await gatherAuto(env, { sc: cr.agency_id, ship: ships.join(", "), signOn: b.spanStart, signOff: b.spanEnd,
       crewName: name ? [name.first_name, name.last_name].filter(Boolean).join(" ") : "" }, { ensure: ensureScoreFlag, engine: "none", boardLegs: () => boardLegs(env) });
+    // a read of the console's own tables that failed is kept as that, never as a clean picture (27 Oct 2026)
+    if (!a || a.ok === false) return JSON.stringify({ at: new Date().toISOString(), inputs: { ships, on: b.spanStart, off: b.spanEnd }, error: (a && a.error) || "read_failed", failed: (a && a.failed) || null });
     return JSON.stringify({ at: new Date().toISOString(), inputs: { ships, on: b.spanStart, off: b.spanEnd }, suggested: { sliders: a.sliders, gates: a.gates },
       evidence: (a.evidence || []).slice(0, 80).map((x) => ({ factor: x.factor || null, text: String(x.text || "").slice(0, 600), source: x.source || null })),
       audits: (a.audits || []).map((x) => ({ id: x.id, ship: x.ship, score: x.score, at: x.at })), unread: a.unread || 0, sources: a.sources || null });
@@ -3759,13 +3824,16 @@ async function apiBonusCommit(request, env, session) {
   const r = computeBonus({ count, sliders: b.sliders, evalScore: b.evalScore, gates: b.gates });
   if ((r.gate === "rush" || r.gate === "audit") && !(b.gateNote && b.gateNote.trim())) return json({ error: "gate_note_required" }, 400);
   if (!b.spanStart || !b.spanEnd) return json({ error: "span_required" }, 400);
+  // ISO days only (27 Oct 2026 review): "2026-7-1" slipped past the string compare below and commitBlock, which steps aside for
+  // a non-ISO span, so every refusal (not_ended, held, older_first, already_scored) and the unique index compared other text.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.spanStart)) || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.spanEnd))) return json({ error: "span_invalid" }, 400);
   if (b.spanEnd < b.spanStart) return json({ error: "span_invalid" }, 400);
   // Idempotency / double-submit guard: an outcome already exists for this crew + exact span.
   // A retried or double-clicked commit must NOT append a second outcome (double pay + double
   // count). Return the existing outcome so the UI shows success without re-recording.
-  const dup = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
+  const dup = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json, policy_version, committed_at FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
   if (dup) {
-    return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"),
+    return json({ ok: true, duplicate: true, group: dup.contract_group_id, ships: JSON.parse(dup.ships_json || "[]"), policy: dup.policy_version, committed_at: dup.committed_at,
       result: { score: dup.score_pct, gate: dup.gate, pay: dup.pay_usd, count: dup.count_before, nextCount: dup.count_after, rung: ladderValue(dup.count_after) } });
   }
   // AFTER THE SIGN-OFF, OLDEST FIRST, AND TDG ENDS IT (Miguel, 17 Oct 2026, answers to the logic review). The server is the
@@ -3804,8 +3872,8 @@ async function apiBonusCommit(request, env, session) {
     // Structural backstop to the read-then-write pre-check above: a racing double-commit that beat the
     // SELECT trips ux_bonus_outcome_span (migrations/0033, primary outcomes only) and the whole batch rolls back. Return
     // the already-recorded outcome as a duplicate instead of double-paying / double-counting.
-    const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
-    if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"),
+    const ex = await env.DB.prepare("SELECT contract_group_id, score_pct, gate, pay_usd, count_before, count_after, ships_json, policy_version, committed_at FROM bonus_outcome WHERE crew_id=? AND span_start=? AND span_end=?").bind(cr.id, b.spanStart, b.spanEnd).first();
+    if (ex) return json({ ok: true, duplicate: true, group: ex.contract_group_id, ships: JSON.parse(ex.ships_json || "[]"), policy: ex.policy_version, committed_at: ex.committed_at,
       result: { score: ex.score_pct, gate: ex.gate, pay: ex.pay_usd, count: ex.count_before, nextCount: ex.count_after, rung: ladderValue(ex.count_after) } });
     throw e;
   }
@@ -6184,9 +6252,9 @@ function parseTravelFile(f){
     rd.onload=function(e){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
-        var want=['JAN','FEB','MAR','APRIL','MAY','JUNE','JULY','AUG','SEPT','OCT','NOV','DEC','CIMS'];
+        var want=new RegExp('${TRAVEL_SHEET_RE.source}','i'); // the server's TRAVEL_SHEET_RE: every spelling the parser reads
         var sheets={};
-        wb.SheetNames.forEach(function(sn){ if(want.indexOf(sn.toUpperCase())>=0){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        wb.SheetNames.forEach(function(sn){ if(want.test(sn.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
         TRAVELUP={sheets:sheets,year:+ym};
         previewTravel();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
@@ -6201,6 +6269,7 @@ async function previewTravel(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">Preview '+r.year+'</b> — '+r.records+' line items · '+r.crew+' crew · $'+Number(r.total).toLocaleString()
     +'<div class=csub style="margin-top:4px">Sign-on $'+Number(r.byLeg.on||0).toLocaleString()+' · Sign-off $'+Number(r.byLeg.off||0).toLocaleString()+' · Transfer $'+Number(r.byLeg.transfer||0).toLocaleString()+'</div></div>';
   h+='<div class=csub style="margin-top:6px;color:var(--amber)">Applying replaces all '+r.year+' travel records (2025 history is untouched).</div>';
+  if(r.missing&&r.missing.length){var MN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];h+='<div class=csub style="margin-top:6px;color:var(--red)"><b>This workbook has no sheet for '+r.missing.map(function(m){return MN[m]||m;}).join(', ')+'</b>, which '+r.year+' on file carries. Apply removes those months — check the workbook before you apply.</div>';}
   if(r.records>0)h+='<button class="btn" style="margin-top:10px" onclick="applyTravel()">Apply '+r.year+' ('+r.records+' items)</button>';
   else h+='<div class=csub style="margin-top:8px">No travel line items found in that workbook.</div>';
   $('#imp').innerHTML=h;
@@ -6297,6 +6366,7 @@ function parseVesselFile(f){
 }
 var NOCHG='margin-top:8px;padding:10px 12px;border-radius:8px;background:#F2F8EF;border-left:3px solid var(--green);color:var(--navy);font-weight:600';
 var BADBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FDF3F1;border-left:3px solid var(--red);color:var(--navy)';
+var INFOBOX='margin-top:8px;padding:10px 12px;border-radius:8px;background:#FBF4E6;border-left:3px solid var(--amber);color:var(--navy)';
 var IMP_FLAB={first_name:'first name',middle_name:'middle name',last_name:'last name',status:'status',rank_observed:'rank',vessel_observed:'vessel',dob:'date of birth',province:'province',phone:'phone',email:'email',med_exp:'medical expiry',sirb_exp:'seaman-book expiry',pp_exp:'passport expiry',sch_exp:'Schengen expiry',usv_exp:'US-visa expiry',emergency_name:'emergency contact',emergency_relation:'emergency relationship',emergency_phone:'emergency phone'};
 // ===== Inline branded crew importer for the console Data tab (served form) =====
 // Replaces the old previewImport()/applyImport() (which hit the retired direct-write endpoint).
@@ -6312,7 +6382,12 @@ async function cimsStage(){
   (IMPROWS||[]).forEach(function(row){var id="",fn="",ln="";for(var k in row){var nk=k.toLowerCase();if(nk.indexOf("crew id")>=0||nk.indexOf("crewid")>=0)id=String(row[k]).trim();else if(nk.indexOf("first")>=0)fn=String(row[k]).trim();else if(nk.indexOf("last")>=0||nk.indexOf("surname")>=0)ln=String(row[k]).trim();}if(id)NMAP[id]=(fn+" "+ln).trim()||id;});
   $("#imp").innerHTML='<div class=csub>Reading '+impEsc(IMPNAME)+' &hellip;</div>';
   var res;try{res=await (await fetch("/api/crew/import/stage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:IMPROWS,file_hash:IMPHASH,filename:IMPNAME})})).json();}catch(e){res={ok:false,error:"network"};}
-  if(!res.ok){$("#imp").innerHTML='<div style="'+BADBOX+'">'+(res.error==="already_processed"?(res.snapshot_saved?("This exact file was already imported. The Keyman board now reads it directly: "+res.snapshot_saved+" rows kept."):"This exact file was already imported &mdash; nothing to do."):"Stage failed: "+impEsc(res.error))+'</div>';return;}
+  if(!res.ok){
+    // a file already imported is not a failure (27 Oct 2026: Rita re-dropped Saturday's file and read the red box as one):
+    // an amber note that names when and who, and what would change the board — a NEWER export from TDG
+    if(res.error==="already_processed"){var at=res.imported_at?(' on '+fmtDateS(res.imported_at)+' at '+String(res.imported_at).slice(11,16)+' UTC'):'';var by=res.imported_by?(' by '+impEsc(res.imported_by)):'';
+      $("#imp").innerHTML='<div style="'+INFOBOX+'"><b>This exact file was already imported'+at+by+'.</b> The console already holds everything in it &mdash; nothing to do. The board changes with a newer export from TDG.'+(res.snapshot_saved?(' The Keyman board now reads it directly: '+res.snapshot_saved+' rows kept.'):'')+'</div>';return;}
+    $("#imp").innerHTML='<div style="'+BADBOX+'">Stage failed: '+impEsc(res.error)+'</div>';return;}
   STAGE=res;DEC={};EDITS={};cimsRender();
 }
 function impSeg(key,def,a,b,la,lb,soft){var cur=DEC[key]||def;return '<span class="iseg'+(soft?" soft":"")+'"><button class="impb'+(cur===a?" on":"")+'" data-k="'+key+'" data-v="'+a+'">'+la+'</button><button class="impb'+(cur===b?" on":"")+'" data-k="'+key+'" data-v="'+b+'">'+lb+'</button></span>';}
@@ -6335,9 +6410,10 @@ function impCard(inner){return '<div class=icard>'+inner+'</div>';}
 // a row keyed on the cruise-line id (matched, not added) and a new row with no status word it can read (not added).
 // Until now only the unused /api/crew/import page drew one of them: on Uploads they went nowhere (§6 flag, never silent).
 function impFlagged(rv){
-  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[];
-  if(!(dup.length||km.length||rk.length||ns.length))return '';
+  rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[],col=g.collisions||[];
+  if(!(dup.length||km.length||rk.length||ns.length||col.length))return '';
   var h='<div class=isec><h3>&#9888; In the file, nothing changed</h3><div class=d>Listed so you can ask TDG to correct the file. No choice here: Apply leaves each one as it says.</div>';
+  col.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>Two rows of the file resolve to this crew ('+impEsc((it.incoming_ids||[]).join(', '))+'). Neither is applied: one seafarer, one row.</div>');});
   dup.forEach(function(id){h+=impCard('<div class=iwho>'+impWho(id)+'</div><div class=itxt>The file lists this crew more than once. The last row stands.</div>');});
   km.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Cruise-line id",it.roster,it.file,impTag("kept as on the roster","amber")));});
   rk.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>The file keyed this crew on the cruise-line id '+impEsc(it.ship_crew_id||it.incoming_id||'')+'. Matched to the crew you hold, nothing added.</div>');});
@@ -7321,7 +7397,7 @@ async function deployRestore(el){
     if(r&&r.ok){ renderRotation(); } else { el.disabled=false; alert('Could not restore: '+((r&&r.error)||'error')); }
   }catch(_){ el.disabled=false; alert('Network error'); }
 }
-function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escHtml(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 // ONE card renderer, two states (Miguel, 14 Sep 2026):
 //   green  = what the TDG Contract Counter says. Click to edit; never draggable; it stays green.
 //   yellow = what Rita planned (an open assignment). Draggable between ships, removable, and from
@@ -7702,7 +7778,7 @@ function histCard(h){
     h.offSource==='tdg'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' per the TDG file'):'sign-off per the TDG file')+'</div>'):
     h.offSource==='card'?('<div class=hdur>'+(h.reliever&&h.reliever.name?('relieved by '+escHtml(h.reliever.name)+' (your card)'):'relieved per your card')+'</div>'):
     h.offSource==='rita'?'<div class=hdur>sign-off recorded in the console</div>':'';
-  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+h.sc+'" onclick="openCrew(\\''+h.sc+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
+  if(h.ours&&h.sc)return '<div class="hcard ours" data-crew="'+escHtml(h.sc)+'" onclick="openCrew(\\''+escHtml(h.sc)+'\\')"><div class=hnm><span>'+escHtml(h.name)+'</span></div><div class=hspan>'+span+'</div>'+durHtml+byFile+'</div>';
   return '<div class="hcard former"><div class=hnm><span>'+escHtml(h.name)+'</span><span class="htag former">former</span></div><div class=hspan>'+span+'</div>'+durHtml+'</div>';
 }
 function rotExpand(open){if(!ROT)return;(ROT.sections||[]).forEach(function(s){ROT_CLOSED[s.ship]=!open;});drawRotation();}
@@ -7862,11 +7938,11 @@ async function saveNote(id){
   try{var r=await (await fetch('/api/rotation/note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({agency_id:id,note:t})})).json();document.getElementById('cmtmsg').textContent=r.ok?'Saved ✓':'Failed';}catch(e){document.getElementById('cmtmsg').textContent='Failed';}
 }
 // Two switches since 16 Oct 2026, one per email: the T-14 sign-off instructions and the T-7 sign-off link (/api/autosend kind).
-async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}try{var v=await (await fetch('/api/survey/auto')).json();window.AUTO_SURV=!!v.enabled;applyChromeToggles();}catch(e){}}
+async function loadAutoToggle(){try{var r=await (await fetch('/api/autosend')).json();window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;window.AUTO_HOUSE=!!r.house;applyChromeToggles();}catch(e){}try{var w=await (await fetch('/api/hub/welcome/auto')).json();window.AUTO_WEL=!!w.enabled;applyChromeToggles();}catch(e){}try{var v=await (await fetch('/api/survey/auto')).json();window.AUTO_SURV=!!v.enabled;applyChromeToggles();}catch(e){}}
 async function survToggleClick(){var c=document.getElementById('survToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the crew survey ON? 3 days after a contract ends (07:00 Miami time), the seafarer gets the end-of-contract survey, CC Rita and Miguel, and one reminder after 5 days. Contracts that ended before today are not asked.'))return;try{var r=await (await fetch('/api/survey/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_SURV=!!r.enabled;applyChromeToggles();alert('The crew survey is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 // The welcome-aboard email (19 Oct 2026): its own switch. On = the sign-on morning, the ship's mailbox + the personal address, CC Rita; a contract that started before the switch went on is never emailed.
 async function welToggleClick(){var c=document.getElementById('welToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn the welcome email ON? On the sign-on day at 07:00 Miami time, the welcome-aboard email goes to the ship\\'s mailbox and the personal address, CC Rita. Crew who signed on before today are not emailed.'))return;try{var r=await (await fetch('/api/hub/welcome/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);return;}window.AUTO_WEL=!!r.enabled;applyChromeToggles();alert('The welcome email is now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
-async function autoToggleClick(kind){var link=kind==='signoff';var c=document.getElementById(link?'linkToggleCb':'autoToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm(link?'Turn the T-7 sign-off link ON? Every crew 7 days before their sign-off gets the sign-off link email. Crew already inside the 7 days are not emailed.':'Turn the sign-off instructions ON? Every crew 14 days before their sign-off gets the instructions email, CC onboardsupport@dg3.com. Crew already inside the 14 days are not emailed.'))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:link?'signoff':'instructions',enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;applyChromeToggles();alert((link?'The T-7 sign-off link':'The sign-off instructions')+' email is now '+((link?r.signoff:r.instructions)?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
+async function autoToggleClick(kind){var M={instructions:{cb:'autoToggleCb',label:'The sign-off instructions',ask:'Turn the sign-off instructions ON? Every crew 14 days before their sign-off gets the instructions email, CC onboardsupport@dg3.com. Crew already inside the 14 days are not emailed.'},signoff:{cb:'linkToggleCb',label:'The T-7 sign-off link',ask:'Turn the T-7 sign-off link ON? Every crew 7 days before their sign-off gets the sign-off link email. Crew already inside the 7 days are not emailed.'},house:{cb:'houseToggleCb',label:'The staff-house pass (T-3)',ask:'Turn the staff-house pass ON? Every crew 3 days before their sign-off gets the Manila staff-house pass at their personal email, CC Rita, Miguel and Maryjoy. Crew already inside the 3 days are not emailed.'}};var m=M[kind]||M.instructions;var c=document.getElementById(m.cb);var on=!!(c&&c.checked);if(!on&&!confirm(m.ask))return;try{var r=await (await fetch('/api/autosend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:kind,enabled:!on})})).json();if(r&&r.error){alert('Could not change the setting: '+r.error);loadAutoToggle();return;}window.AUTO_INSTR=!!r.instructions;window.AUTO_LINK=!!r.signoff;window.AUTO_HOUSE=!!r.house;applyChromeToggles();alert(m.label+' email is now '+(r[kind]?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
 function ensureSbmToggle(){var a=document.getElementById('linkToggle')||document.getElementById('autoToggle');if(!a)return null;var b=document.getElementById('sbmToggle');if(!b){b=document.createElement('span');b.id='sbmToggle';b.style.cssText='display:inline-flex;align-items:center;gap:7px;margin-left:12px;font-size:13px;font-weight:600;cursor:pointer';b.setAttribute('onclick','sbmToggleClick()');b.innerHTML='GSM review <input type=checkbox id=sbmToggleCb style="pointer-events:none">';a.insertAdjacentElement('afterend',b);}return b;}
 async function loadSbmToggle(){try{var r=await (await fetch('/api/sbmtoggle')).json();window.SBM_ON=!!r.enabled;ensureSbmToggle();var c=document.getElementById('sbmToggleCb');if(c)c.checked=!!r.enabled;}catch(e){}}
 async function sbmToggleClick(){var c=document.getElementById('sbmToggleCb');var on=!!(c&&c.checked);if(!on&&!confirm('Turn GSM review automation ON? This arms automated T-7 review invitations (and T-4 reminders) to shipboard managers.'))return;try{var r=await (await fetch('/api/sbmtoggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:!on})})).json();if(r&&r.error){if(r.error==='money_users_only')alert('Only Miguel or Rita can change this.');else alert('Could not change the setting: '+r.error);loadSbmToggle();return;}window.SBM_ON=!!r.enabled;if(c)c.checked=!!r.enabled;alert('Shipboard reviews are now '+(r.enabled?'ON':'OFF'));}catch(e){alert('Could not change the setting.');}}
@@ -7929,7 +8005,7 @@ async function renderRotation(){
     +'<div><label class=crlbl for=rfind style="display:block;margin-bottom:6px">Search</label><input id=rfind type=search placeholder="Ship, city or name" value="'+escHtml(ROT_FIND||'')+'" oninput="ROT_FIND=this.value;clearTimeout(window._rfT);window._rfT=setTimeout(drawRotation,160)"></div>'
     +'<div id=rotbrands></div><div id=rotships></div><div id=rotyears></div>'
     +'<div><div class=crlbl style="padding:0 8px 8px">Months</div><div id=rotchips class=rmgrid></div></div>'
-    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span><span id="survToggle" onclick="survToggleClick()" title="3 days after a contract ends, 07:00 Miami time: the end-of-contract crew survey to the seafarer, CC Rita and Miguel; one reminder after 5 days" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew survey <input type=checkbox id="survToggleCb" style="pointer-events:none"></span></div></div>'
+    +'<div><div class=crlbl style="padding:0 8px 10px">Automation</div><div class=rauto><span id="welToggle" onclick="welToggleClick()" title="Sign-on day, 07:00 Miami time: the welcome-aboard email to the ship and the personal address" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Welcome email <input type=checkbox id="welToggleCb" style="pointer-events:none"></span><span id="autoToggle" onclick="autoToggleClick(&#39;instructions&#39;)" title="T-14: the sign-off instructions email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off instructions <input type=checkbox id="autoToggleCb" style="pointer-events:none"></span><span id="linkToggle" onclick="autoToggleClick(&#39;signoff&#39;)" title="T-7: the sign-off link email" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Sign-off link <input type=checkbox id="linkToggleCb" style="pointer-events:none"></span><span id="survToggle" onclick="survToggleClick()" title="3 days after a contract ends, 07:00 Miami time: the end-of-contract crew survey to the seafarer, CC Rita and Miguel; one reminder after 5 days" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Crew survey <input type=checkbox id="survToggleCb" style="pointer-events:none"></span><span id="houseToggle" onclick="autoToggleClick(&#39;house&#39;)" title="T-3: the Manila staff-house pass — a bed at house.cims.work, to the personal email, CC Rita, Miguel and Maryjoy" style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;cursor:pointer">Staff house pass <input type=checkbox id="houseToggleCb" style="pointer-events:none"></span></div></div>'
     +'<button class="btn ghost" onclick="clearRotFilters()">Clear filters</button>'
     +'<div id=rotcount class=crtotal></div>'
     +'</aside>'
@@ -7953,7 +8029,7 @@ async function renderRotation(){
 }
 // 13 Oct 2026: every re-render rebuilt the rail with Crew auto-timing unchecked and no GSM review switch, while the
 // emails stayed armed on the server. The last known values are kept and painted back.
-function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var sv=document.getElementById('survToggleCb');if(sv&&window.AUTO_SURV!=null)sv.checked=!!window.AUTO_SURV;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
+function applyChromeToggles(){var w=document.getElementById('welToggleCb');if(w&&window.AUTO_WEL!=null)w.checked=!!window.AUTO_WEL;var sv=document.getElementById('survToggleCb');if(sv&&window.AUTO_SURV!=null)sv.checked=!!window.AUTO_SURV;var c=document.getElementById('autoToggleCb');if(c&&window.AUTO_INSTR!=null)c.checked=!!window.AUTO_INSTR;var l=document.getElementById('linkToggleCb');if(l&&window.AUTO_LINK!=null)l.checked=!!window.AUTO_LINK;var hs=document.getElementById('houseToggleCb');if(hs&&window.AUTO_HOUSE!=null)hs.checked=!!window.AUTO_HOUSE;if(window.SBM_ON!=null){ensureSbmToggle();var b=document.getElementById('sbmToggleCb');if(b)b.checked=!!window.SBM_ON;}}
 // The Keyman rail (6 Oct 2026): cruise line first, then its ships, then year; months and automation below.
 var ROT_LINE={Royal:'Royal Caribbean',Celebrity:'Celebrity',Azamara:'Azamara',NCL:'Norwegian'};
 function rotRail(shown,total){
@@ -10229,11 +10305,13 @@ function scBlockMsg(e){
   if(e.error==='visit')return 'These dates are a training visit, not a contract. Visits are not scored.';
   if(e.error==='older_first')return 'An older contract has no outcome yet'+(sh?': '+sh:'')+', '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. Score that one first.';
   if(e.error==='already_scored')return 'A bonus is already recorded for '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+', which overlaps these dates. One outcome per contract.';
+  if(e.error==='transfer_partial')return 'These dates cover part of one contract'+(sh?' ('+sh+')':'')+': '+fmtDateS(e.on)+' to '+fmtDateS(e.off)+'. A transfer is one contract — score the whole of it.';
+  if(e.error==='span_invalid')return 'The dates must be calendar days (YYYY-MM-DD), sign-off after sign-on.';
   return '';
 }
 async function openScore(id){
   var d=await (await fetch('/api/bonus/crew?id='+encodeURIComponent(id))).json();
-  _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,notes:[]}; _PF={sliders:{},rush:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
+  _SC=d; _TOUCHED={}; _AUTO={sliders:{},rush:false,audit:false,notes:[]}; _PF={sliders:{},rush:false,audit:false}; var cr=d.crew; var name=[cr.first_name,cr.middle_name,cr.last_name].filter(Boolean).join(' ');
   var _hasHist=!!(d.outcomes&&d.outcomes.length);
   var _blockCommit=(!d.baseline_set&&!_hasHist);
   var warn=d.baseline_set?'':'<div class=warn>⚠ Starting count not yet confirmed for this crew'+(_blockCommit?' — committing is blocked until the baseline is reconciled against the Contract Counter.':' (event-sourced from prior outcomes).')+'</div>';
@@ -10289,7 +10367,7 @@ async function applyFeedback(id,on){
   var _pv=(d.previous||[]);if(_pv.length)ev+='<div class=hint style="margin-top:8px"><b style="color:var(--navy)">Earlier feedback kept</b> &middot; not used for this contract<br>'+_pv.slice(0,6).map(function(x){return escHtml((FBLABEL[x.role]||x.role)+' — answered '+fmtDateS(String(x.submitted_at||'').slice(0,10))+(x.why==='before_sign_on'?', before this contract (sign-on '+fmtDateS(String(on||'').slice(0,10))+')':', replaced '+fmtDateS(String(x.superseded_at||'').slice(0,10))));}).join('<br>')+(_pv.length>6?'<br>+ '+(_pv.length-6)+' more':'')+'</div>';
   document.getElementById('fbPanel').innerHTML='<div class=fg style="margin-top:8px"><label>Contributor feedback windows</label><div style="display:flex;gap:6px;flex-wrap:wrap">'+btns+'<span id=dexChip></span></div><div id=fbLink></div>'+ev+'<div id=autoPanel></div></div>';
   var pf=d.prefill||{};
-  _PF={sliders:Object.assign({},pf.sliders||{}),rush:!!(pf.gates&&pf.gates.rush)};
+  _PF={sliders:Object.assign({},pf.sliders||{}),rush:!!(pf.gates&&pf.gates.rush),audit:!!(pf.gates&&pf.gates.audit)};
   if(pf.gates){if(pf.gates.rush)$('#gRush').checked=true;if(pf.gates.audit)$('#gAudit').checked=true;}
   if(pf.sliders)for(var k in pf.sliders){var e=$('#'+k);if(e&&!_TOUCHED[k])e.value=pf.sliders[k];}
   if(pf.gateNote&&pf.gateNote.length){var gn=$('#gateNote');if(gn&&!gn.value)gn.value=pf.gateNote.join(' · ');}
@@ -10302,15 +10380,15 @@ async function applyFeedback(id,on){
 // What the automatic read set is remembered (_AUTO), so a re-read after a date or ship change takes back only its own
 // values: a slider or gate the user moved (_TOUCHED) is never overwritten, a rush gate the read armed is cleared when the
 // miss no longer falls in the contract, and the gate note keeps the user's words and swaps only the read's lines.
-var _AUTO_N=0,_TOUCHED={},_AUTO={sliders:{},rush:false,notes:[]},_PF={sliders:{},rush:false};
-document.addEventListener('input',function(e){var t=e.target;if(t&&e.isTrusted&&/^(s(Order|Acc|Par|Hand|Comm|Mono)|gateNote)$/.test(t.id||''))_TOUCHED[t.id]=1;},true);
+var _AUTO_N=0,_TOUCHED={},_AUTO={sliders:{},rush:false,audit:false,notes:[]},_PF={sliders:{},rush:false,audit:false};
+document.addEventListener('input',function(e){var t=e.target;if(t&&e.isTrusted&&/^(s(Order|Acc|Par|Hand|Comm|Mono|Eval)|gateNote)$/.test(t.id||''))_TOUCHED[t.id]=1;},true);
 async function applyAuto(){
   if(!_SC||!_SC.crew||!$('#autoPanel'))return;
   var n=++_AUTO_N,on=$('#spanStart').value,off=$('#spanEnd').value,ship=(($('#ships')&&$('#ships').value)||'').trim(),sc0=_SC.crew.agency_id;
   $('#autoPanel').innerHTML='<div class=hint style="margin-top:8px">Reading the Parts Portal, HON, audits and field reports…</div>';
   var a=null;try{a=await (await fetch('/api/score/auto?sc='+encodeURIComponent(_SC.crew.agency_id)+'&ship='+encodeURIComponent(ship)+'&on='+encodeURIComponent(on)+'&off='+encodeURIComponent(off))).json();}catch(e){}
   if(n!==_AUTO_N||!$('#autoPanel')||!_SC||!_SC.crew||_SC.crew.agency_id!==sc0)return;
-  if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">Could not read the automatic inputs. Score from the evidence by hand.</div>';return;}
+  if(!a||!a.ok){$('#autoPanel').innerHTML='<div class=hint style="margin-top:8px;color:var(--red)">'+(a&&a.text?escHtml(a.text):'Could not read the automatic inputs. Score from the evidence by hand.')+'</div>';return;}
   var S2=a.sliders||{},prev=_AUTO.sliders,k;
   for(k in prev){if(!(k in S2)&&!_TOUCHED[k]){var e0=$('#'+k);if(e0)e0.value=(_PF.sliders[k]!=null?_PF.sliders[k]:0);}}
   for(k in _PF.sliders){if(!(k in S2)&&!_TOUCHED[k]){var e2=$('#'+k);if(e2)e2.value=0;}} // a Windows value the read did not confirm (an answer from before this sign-on) goes back to 0
@@ -10318,6 +10396,9 @@ async function applyAuto(){
   _AUTO.sliders=Object.assign({},S2);
   var gr=$('#gRush'),want=!!(a.gates&&a.gates.rush);
   if(gr&&!_TOUCHED.gRush){if(want){gr.checked=true;_AUTO.rush=true;}else if(gr.checked&&(_AUTO.rush||_PF.rush)){gr.checked=false;_AUTO.rush=false;_PF.rush=false;}} // the read's gates already carry the Windows' rush when the answer is this contract's
+  // the audit gate the same way (27 Oct 2026): Ray's "failed audit" answer from before this sign-on is kept, not used — the tick it set stays only while the read still carries it
+  var ga=$('#gAudit'),wantA=!!(a.gates&&a.gates.audit);
+  if(ga&&!_TOUCHED.gAudit){if(wantA){ga.checked=true;_AUTO.audit=true;}else if(ga.checked&&(_AUTO.audit||_PF.audit)){ga.checked=false;_AUTO.audit=false;_PF.audit=false;}}
   var gn=$('#gateNote');
   if(gn&&!_TOUCHED.gateNote){
     // the read's own lines go by their exact text (a line carries " · " itself), the user's words stay
@@ -10367,7 +10448,7 @@ async function applySeval(sc){
   if(_SEVAL.sc!==sc||($('#spanEnd')&&$('#spanEnd').value!==off))return; // the card moved to another crew or span while this answer was in flight (16 Oct 2026)
   if(!d||d.error)return;
   _SEVAL.value=d.value;_SEVAL.source=d.source;
-  if(d.value){var s=$('#sEval');if(s)s.value=String(d.value);recalcScore();}
+  if(d.value){var s=$('#sEval');if(s&&!_TOUCHED.sEval)s.value=String(d.value);recalcScore();} // a value the user picked by hand stays through a date change (27 Oct 2026)
   if(!badge)return;
   var link=d.reviewCount?(' · <a href="#" onclick="viewSeval();return false" style="color:var(--navy,#1B3A5C)">view review</a>'):'';
   if(d.source==='auto'){badge.innerHTML='<span style="color:var(--green,#5FB946);font-weight:700">● from shipboard review</span>'+(d.reviewCount>1?(' · avg of '+d.reviewCount+' reviews'):'')+link;}
@@ -10378,7 +10459,8 @@ async function viewSeval(){
   var off=$('#spanEnd')?$('#spanEnd').value:'';var sc=_SEVAL.sc;if(!sc)return;
   var box=$('#sevalReview');if(!box)return;box.innerHTML='<div class=hint>Loading review…</div>';
   var d;try{d=await (await fetch('/api/sbm/crew?id='+encodeURIComponent(sc))).json();}catch(e){box.innerHTML='<div class=hint>Could not load the review.</div>';return;}
-  var cards=(d&&d.cards)||[];var c=null;for(var i=0;i<cards.length;i++){if(String(cards[i].contract_signoff)===String(off)){c=cards[i];break;}}
+  // the review of THIS contract: the exact sign-off, else the nearest within 21 days (the T-7 invite was keyed on the board's sign-off that day; TDG's debark can differ — 27 Oct 2026)
+  var cards=(d&&d.cards)||[];var c=null,best=1e9;for(var i=0;i<cards.length;i++){var dd=Math.abs((Date.parse(String(cards[i].contract_signoff).slice(0,10)+'T00:00:00Z')-Date.parse(String(off).slice(0,10)+'T00:00:00Z'))/864e5);if(String(cards[i].contract_signoff)===String(off)){c=cards[i];break;}if(dd<=21&&dd<best){best=dd;c=cards[i];}}
   if(!c){box.innerHTML='<div class=hint>No shipboard review on file for this contract.</div>';return;}
   var qs=[['Business sense',c.q_business],['Guests first',c.q_guests],['Helps us grow',c.q_grow],['Integrity',c.q_integrity],['Teamwork',c.q_teams],['Energy',c.q_energy],['Final thoughts',c.q_final]];
   var h='<div class=hint style="border-left:3px solid var(--green,#5FB946);padding-left:8px;margin-top:4px"><b>Shipboard review</b> — '+(c.ship||'')+' · rating '+c.rating+'/5';
@@ -10405,7 +10487,7 @@ async function commitBonus(){
   var res=await (await fetch('/api/bonus/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
   if(res.error){btn.disabled=false;btn.textContent='Commit';var msgs={gate_note_required:'A reset gate needs a written reason & evidence.',span_required:'Enter sign-on and sign-off dates.',span_invalid:'Sign-off must be after sign-on.',not_authorised:'Only the GM or Head of HR can commit a bonus payout.',baseline_pending:'Starting count not confirmed for this crew. Reconcile the baseline against the Contract Counter before committing a payout.',eval_required:'Set the supervisor evaluation (1–5) before committing.'};alert(msgs[res.error]||scBlockMsg(res)||('Error: '+res.error));return;}
   var r=res.result;MODAL_T=Date.now();
-  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said. The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
+  $('#modalRoot').innerHTML='<div class=ov onclick="ovc(event)"><div class=modal><div class=mh>Bonus committed<button onclick="mClose()">×</button></div><div class=mb><div class=hint>Contract '+res.group+' · '+res.ships.join(' → ')+'</div><div class="bigpay '+(r.pay===0?'zero':'')+'">$'+r.pay.toLocaleString()+'</div><div class=scorebox><div class=scorerow><span>Scorecard</span><b>'+r.score+'%</b></div><div class=scorerow><span>Count</span><b>'+r.count+' → '+r.nextCount+'</b></div>'+(r.gate?'<div class=gateflag>GATE: '+gateLabel(r.gate)+'</div>':'')+'</div><div class=hint>'+(res.duplicate?'Already recorded'+(res.committed_at?' on '+fmtDateS(String(res.committed_at).slice(0,10)):'')+' under policy v'+(res.policy||'?')+' — nothing was written again.':'Recorded as an immutable outcome under policy v'+(res.policy||1)+', with what the systems said.')+' The crew\\'s count is now '+r.nextCount+'.</div><div class=mf><button class="btn green" onclick="mClose();show(\\'contracts\\')">Done</button></div></div></div></div>';
 }
 // Backdrop close, guarded against the "ghost click" on touch devices: tapping a Score/row button
 // fires a delayed synthetic click (~300ms) that lands on the freshly-mounted overlay and used to

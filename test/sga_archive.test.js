@@ -41,7 +41,7 @@ test("the Worker keeps every original: the table in ensureSga's wave, the intake
   assert.match(W, /async function archiveSourceFile\(env, bytes, meta\)/);
   assert.match(W, /env\.EXPORTS\.put\(key, bytes, \{ httpMetadata/, "the bytes go to the EXPORTS bucket");
   assert.match(W, /archiveSourceFile\(env, f\.bytes, \{ hash: f\.hash[\s\S]*source: "email"/, "the mail intake archives what it took");
-  assert.match(W, /done\.has\(f\.inbox\[0\]\.file_key\)\) \{ f\.status = "already_loaded"; continue; \}/, "a file already loaded is never queued again");
+  assert.match(W, /\(done\.has\(f\.inbox\[0\]\.file_key\) \|\| done\.has\(f\.hash\)\)\) \{ f\.status = "already_loaded"; continue; \}/, "a file already loaded (through the inbox, or on Upload data by its SHA-256) is never queued again");
   assert.match(W, /if \(p === "\/api\/sga\/archive" && request\.method === "POST"\) return apiSgaArchive\(request, env, session\);/);
   assert.match(W, /if \(p === "\/api\/sga\/file"\)\s+return apiSgaFile\(request, env\);/);
   assert.match(W, /fetch\('\/api\/sga\/archive',\{method:'POST'[^}]*'X-File-Name'/, "the Upload page sends the raw workbook after Apply");

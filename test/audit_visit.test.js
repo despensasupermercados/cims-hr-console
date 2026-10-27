@@ -428,10 +428,12 @@ test("History: every filed audit, newest first, with what the filing wrote; a TE
   d1v.ov.followup = { owner: "Ray", due: "2099-01-01", text: "Resend the SOPs folder" };
   assert.equal((await t.call("POST", "/api/audit/visit/photo?id=" + id1 + "&step=inventory&k=phonekey01", new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1]), undefined, { "content-type": "image/jpeg" })).status, 200);
   assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id1, visit: d1v })).json()).ok, true);
-  // a grade filed on the 15 Oct screen (no steps): listed, and said so, never "nothing missing"
+  // a grade filed on the 15 Oct screen (no steps): listed, and said so, never "nothing missing". Written as that screen
+  // wrote it — the route refuses three ratings alone since 27 Oct 2026 (steps_required), the rows it left stay on History
   const id2 = await completeRequest(t, "SC-2");
-  assert.equal((await (await t.call("POST", "/api/audit/request/grade", { id: id2, inventory: 3, technical: 3, collaterals: 4, note: "Counts from the printer, not the shelf." })).json()).ok, true);
-  t.db.prepare("UPDATE audit_eval SET filed_at=? WHERE request_id=?").run(new Date(Date.now() + 60e3).toISOString(), id2);
+  const at2 = new Date(Date.now() + 60e3).toISOString(), by2 = "dexter.lawrence@dg3.com";
+  t.db.prepare("INSERT INTO audit_visit (id, request_id, ship, agency_id, auditor, status, opened_at, filed_at) VALUES ('av_legacy', ?, 'Oasis', 'SC-2', ?, 'filed', ?, ?)").run(id2, by2, at2, at2);
+  t.db.prepare("INSERT INTO audit_eval (visit_id, request_id, agency_id, ship, r_inventory, r_technical, r_collaterals, r_overall, score, score_from, note, filed_by, filed_at) VALUES ('av_legacy', ?, 'SC-2', 'Oasis', 3, 3, 4, NULL, 3, 'average', 'Counts from the printer, not the shelf.', ?, ?)").run(id2, by2, at2);
   const H = await (await t.call("GET", "/api/audit/history")).json();
   assert.deepEqual(H.audits.map((a) => a.id), [id2, id1], "newest first");
   const a1 = H.audits[1];

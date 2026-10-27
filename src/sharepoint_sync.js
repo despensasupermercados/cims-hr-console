@@ -11,6 +11,7 @@
 // Graph and a real SheetJS workbook: { fetch, now, db, parseWorkbook, applySga, applyTravel, log }.
 
 import { isManningSheet, isSummarySheet } from "./sga.js";
+import { isTravelSheet } from "./travel.js";
 
 export const GRAPH = "https://graph.microsoft.com/v1.0";
 
@@ -112,7 +113,7 @@ export function sheetsOf(XLSX, buf, want) {
   return out;
 }
 export const WANT_SGA = (n) => isManningSheet(n) || /trainrel/i.test(n) || /^training$/i.test(n.trim()) || isSummarySheet(n);
-export const WANT_TRAVEL = (n) => ["JAN", "FEB", "MAR", "APRIL", "MAY", "JUNE", "JULY", "AUG", "SEPT", "OCT", "NOV", "DEC", "CIMS"].includes(n.trim().toUpperCase());
+export const WANT_TRAVEL = (n) => isTravelSheet(n);   // ONE definition (travel.js): every spelling the parser reads
 
 // One run. deps: { fetch, now (ms), today (ISO), db, XLSX, applySga(sheets, meta) → result, applyTravel(sheets, year, meta) → result, log(fn) }.
 // Returns the report the Data page shows: { ran, reason?, planned, loaded: [...], skipped: n, errors: [...] }.

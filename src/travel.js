@@ -4,7 +4,17 @@
 // Year is taken from the caller (the filename) — NOT from the cells, because the 2025 file's
 // Jan–Mar sheets carry stray 2024 dates.
 
-const MONTHS = { JAN:1, FEB:2, MAR:3, APRIL:4, APR:4, MAY:5, JUNE:6, JUN:6, JULY:7, JUL:7, AUG:8, SEPT:9, SEP:9, OCT:10, NOV:11, DEC:12 };
+import { num } from "./sga.js";
+
+// Rita's sheet names as she has typed them (JAN … APRIL … SEPT …) plus the other spellings a month has: a sheet renamed
+// "SEP" or "September" is the same month, never a month silently dropped from the year (27 Oct 2026 — the Upload page,
+// the mail intake and the SharePoint sync each kept their own list of thirteen names; this is the ONE definition).
+const MONTHS = { JAN:1, JANUARY:1, FEB:2, FEBRUARY:2, MAR:3, MARCH:3, APRIL:4, APR:4, MAY:5, JUNE:6, JUN:6, JULY:7, JUL:7, AUG:8, AUGUST:8,
+  SEPT:9, SEP:9, SEPTEMBER:9, OCT:10, OCTOBER:10, NOV:11, NOVEMBER:11, DEC:12, DECEMBER:12 };
+// The sheets of Rita's workbook the console reads: a month sheet, or CIMS (the shoreside team). Every reader of the
+// workbook — the Upload page's filter (TRAVEL_SHEET_RE, serialized into the page), WANT_TRAVEL, the inbox — asks this.
+export const TRAVEL_SHEET_RE = new RegExp("^(" + Object.keys(MONTHS).join("|") + "|CIMS)$", "i");
+export const isTravelSheet = (name) => TRAVEL_SHEET_RE.test(String(name || "").trim());
 const CATS = ["air", "hotel", "medical", "visa", "food", "transport"];
 
 // The crew travel budget per month — ONE place (15 Oct 2026; it was typed on the server and again on the page).
@@ -25,11 +35,6 @@ export function closedMonths(today, year) {
 
 export function monthNum(name) { return MONTHS[String(name || "").toUpperCase().trim()] || null; }
 
-function num(v) {
-  if (v == null || v === "") return 0;
-  const n = Number(String(v).replace(/[^0-9.\-]/g, ""));
-  return isFinite(n) ? Math.round(n * 100) / 100 : 0;
-}
 function legOf(headerCell) {
   const h = String(headerCell || "").toUpperCase();
   if (h.includes("TRANSFER")) return "transfer";
