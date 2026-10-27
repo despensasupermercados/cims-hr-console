@@ -324,8 +324,9 @@ export function makeRules() {
   const ordinal = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? "st" : n % 10 === 2 && n % 100 !== 12 ? "nd" : n % 10 === 3 && n % 100 !== 13 ? "rd" : "th");
 
   /* --------------------------------- A8 · before the visit --------------------------------- */
-  // The findings of the documents, as items the steps will ask Dexter to confirm. Pattern 43 is provisional until Rolando
-  // confirms it (design v5); a part past rated life is information, never a replacement by itself. Amber, never red:
+  // The findings of the documents, as items the steps will ask Dexter to confirm. Pattern 43 is a reading of the scan until
+  // Dexter sees it on the machine (Miguel, 23 Oct 2026: nobody signs it off — the crew is told the reading, R1); a part past
+  // rated life is information, never a replacement by itself. Amber, never red:
   // nothing here has been seen on the ship yet.
   function beforeVisit({ machines = [], diff = [], extras = [] } = {}) {
     const out = [];
@@ -333,7 +334,7 @@ export function makeRules() {
       const name = m.label || m.serial;
       if (m.down) { out.push({ tone: "a", step: "machines", t: name + " reported down", s: "“" + m.down + "” · verify on board" }); continue; }
       const items = (m.p43 && m.p43.items) || [];
-      if (items.length) out.push({ tone: "a", step: "machines", t: name + " · Pattern 43: " + items.map((i) => sentence(i.head)).join("; "), s: (items[0].part ? "Points to " + sentence(items[0].part) + " · " : "") + "provisional, Rolando confirms · see it on the machine" });
+      if (items.length) out.push({ tone: "a", step: "machines", t: name + " · Pattern 43: " + items.map((i) => sentence(i.head)).join("; "), s: (items[0].part ? "Points to " + sentence(items[0].part) + " · " : "") + "a reading of the scan · see it on the machine" });
       const life = m.life || [];
       if (life.length) out.push({ tone: "a", step: "machines", t: name + " · " + life.length + (life.length === 1 ? " part" : " parts") + " past rated life", s: life.map((x) => partName(x.name) + " " + x.pct + "%").join(" · ") + " · copy quality decides" });
       else if (m.lifeRead === false) out.push({ tone: "a", step: "machines", t: name + " · part life not read", s: "The management list on file has no parts-life page · ask for the whole Machine Management List" });

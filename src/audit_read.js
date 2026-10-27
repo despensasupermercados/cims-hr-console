@@ -25,6 +25,7 @@ export function p43ReadState(res) {
 // p43Lines); nothing is guessed and nothing says "replace" (copy quality decides). auditor = the first name who sees the
 // same reading before the visit. summary = the stored read's summary ({ state, legend }); null when it says nothing.
 const sentenceCase = (t) => { t = String(t || "").trim().toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1); };
+const listWords = (a) => (a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]);
 export function p43Assess(summary, auditor) {
   if (!summary || (summary.state !== "clean" && summary.state !== "findings")) return null;
   const items = ((summary.legend && summary.legend.items) || []);
@@ -33,10 +34,16 @@ export function p43Assess(summary, auditor) {
     const w = String(i.where || "").split(" · ").filter(Boolean), pg = Array.isArray(i.pages) ? i.pages : [], ink = String(i.ink || "").toLowerCase();
     const lines = [];
     if (w.length) lines.push(["Where", w.map((x, k) => sentenceCase(x) + (pg.length === w.length ? " (page " + pg[k] + ")" : "")).join(" · ") + (pg.length && pg.length !== w.length ? " · pages " + pg.join(", ") : "")]);
-    if (ink && ink !== "black" && w.length > 1 && /half tone|full tone/i.test(w[0])) lines.push(["What it means", "The same mark shows on the " + ink + " page and on every colour mixed with " + ink + ", so it comes from the " + ink + " unit alone. The transfer belt or the scanner would mark every colour."]);
+    // What it means, said only as far as the reading goes (27 Oct 2026 review): it named "every colour mixed with cyan" when the
+    // mark showed on one mix, and read a mark shared by most colours (ink "shared", rule 6) as "the shared unit alone".
+    const mixes = w.filter((x) => !/half tone|full tone/i.test(x)).map((x) => x.toLowerCase());
+    if (ink === "shared") lines.push(["What it means", "The same mark shows in the same place on most colours, so it is not one colour's unit. The transfer belt carries every colour, and a scanner can leave the same mark."]);
+    else if (ink && ink !== "black" && mixes.length && /half tone|full tone/i.test(w[0])) lines.push(["What it means", "The same mark shows on the " + ink + " page and on " + listWords(mixes) + (mixes.length === 1 ? ", a colour" : ", colours") + " mixed with " + ink + ", so it comes from the " + ink + " unit alone. The transfer belt or the scanner would mark every colour."]);
     if (i.part) lines.push(["Points to", "The " + String(i.part).toLowerCase() + (i.check && i.check.src ? " (" + i.check.src + ")" : "") + "."]);
     const chk = i.check && i.check.say ? i.check.say : (typeof i.check === "string" ? i.check : "");
-    if (chk) lines.push(["Check on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and follow the line along its length: " : "") + chk + "."]);
+    // "follow the line along its length" only for a line; dots and bands are looked at in the same place
+    const isLine = /\bline/i.test(String(i.head || "") + " " + String(i.detail || "") + " " + String(i.mark || ""));
+    if (chk) lines.push(["Check on board", (pg.length ? "Print page " + pg[0] + " of Pattern 43 again and " + (isLine ? "follow the line along its length" : "look at the same place") + ": " : "") + chk + "."]);
     return { title: sentenceCase(i.head || i.mark || "A mark") + (i.detail ? " · " + i.detail : ""), lines };
   });
   return { state: "findings", head: out.length + (out.length === 1 ? " mark" : " marks") + " on this press.", items: out,
