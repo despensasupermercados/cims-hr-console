@@ -19,6 +19,7 @@ import { memoDdl } from "./ensure_memo.js";
 import { instructionsEmail, TEMPLATE_ID as INSTR_TEMPLATE, firstWord } from "./emails/hr.signoff.instructions.v2.js";
 import { relieverEmail, TEMPLATE_ID as RELIEVER_TEMPLATE } from "./emails/hr.signoff.reliever.v1.js";
 import { shipMailbox } from "./audit.js";
+import { contractKey } from "./signoff_context.js";
 
 // Hoisted to module scope 2026-09-10 so the DEPLOY GATE can reach it — same reason as
 // ACK_HTML in signoff_ack.js. /instr is a PUBLIC seafarer page and its inline <script> was
@@ -148,6 +149,11 @@ export function installInstr(deps) {
     if (b.send && past) return json({ ok: false, error: "signoff_passed", sign_off: past }, 409);
     // Never wipe an acknowledgement the seafarer already gave (8 Oct 2026): a second press used to DELETE the
     // acknowledged row (ack_at, ip, user agent) and revoke the link they had answered. Resend only with force.
+    // ONE ROW PER CONTRACT, whichever path sent it (27 Oct 2026 review): the row is keyed by the sign-off date, as the daily
+    // run keys it (auto_send.js). It was keyed by the page's Counter number, which is the same for every contract TDG's
+    // file dates (the Counter is history, §10d), so a crew's next contract read "already_acknowledged" and a manual send
+    // after the daily one made a second row and a second live link.
+    r.seq = contractKey(r);
     var prev = await env.DB.prepare("SELECT status FROM instr_ack WHERE sc=? AND seq=?").bind(r.sc, r.seq).first();
     if (prev && prev.status === "acknowledged" && !b.force) return json({ ok: false, error: "already_acknowledged" }, 409);
     var token = await signToken({ p: "instr", sc: r.sc, seq: r.seq, exp: Math.floor(Date.now() / 1000) + INSTR_TTL }, env.SESSION_SECRET);
@@ -161,7 +167,13 @@ export function installInstr(deps) {
     var emailed = false, rp = null, sentTo = null;
     if (b.send && r.email) {
       try { sentTo = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); emailed = true; }
-      catch (e) { await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq); }
+      catch (e) {
+        // A mail that did not go leaves NO row (27 Oct 2026 review): the pending row made the daily run skip the seat as
+        // "manual send on file" for ever, and every screen read the instructions as sent.
+        await env.DB.prepare("DELETE FROM instr_ack WHERE id=?").bind(insId).run().catch(function () {});
+        await logActivity(env, session && session.email, "instr_send_failed", r.sc + " #" + r.seq);
+        return json({ ok: false, error: "not_sent", detail: String((e && e.message) || e).slice(0, 120), crew_name: r.crew_name }, 502);
+      }
       if (emailed) rp = await sendRelieverPass(env, r, ctx);
     }
     await logActivity(env, session && session.email, "instr_request", r.sc + " #" + r.seq);
@@ -367,7 +379,12 @@ export function installInstr(deps) {
     await env.DB.prepare("INSERT INTO instr_ack (id,sc,seq,crew_id,token_hash,status,crew_name,vessel,port,sign_off_date,requested_by,requested_at) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)").bind(insId, r.sc, r.seq, r.crew_id, th, r.crew_name, r.vessel, r.port, r.sign_off_date, "auto-timing", now).run();
     var link = origin + "/instr?t=" + token;
     var sent;
-    try { sent = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); } catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
+    try { sent = await sendInstructions(env, { to: r.email, r: r, ctx: ctx, link: link, instr_id: insId }); }
+    catch (e) {
+      // No row for a mail that did not go: the next morning's run sends it (manualExists would skip a pending row for ever).
+      await env.DB.prepare("DELETE FROM instr_ack WHERE id=?").bind(insId).run().catch(function () {});
+      return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email };
+    }
     try { var rp = await sendRelieverPass(env, r, ctx); return { emailed: true, crew_name: r.crew_name, to: r.email, cc: sent && sent.cc, reliever: rp }; }
     catch (e) { return { emailed: false, error: String(e).slice(0, 120), crew_name: r.crew_name, to: r.email }; }
   }

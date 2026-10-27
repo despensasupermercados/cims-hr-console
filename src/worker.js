@@ -7832,8 +7832,22 @@ async function saveContract(id,seq){
     closeRotModal();renderRotation();
   }catch(e){g('cmtmsg').textContent='Failed to save.';}
 }
-async function sendSignoffInstructions(id,seq){try{var r=await (await fetch('/api/instructions/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error==='not_instructed'?'Not sent: this trip is a training visit. Training visits get no sign-off instructions.':r.error==='signoff_passed'?('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.'):r.error?('Error: '+r.error):(r.emailed?('Instructions emailed to the crew member.'+(r.cc&&r.cc.length?' Copy: '+r.cc.join(', ')+'.':'')):('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send instructions.');}}
-async function sendSignoffLink(id,seq){try{var r=await (await fetch('/api/ack/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true})})).json();alert(r.error==='training_visit'?'Not sent: this trip is a training visit. Training visits get no sign-off link.':r.error==='signoff_passed'?('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.'):r.error?('Error: '+r.error):(r.emailed?'Sign-off request emailed to the crew member.':('Not emailed (no crew email on file). Copy this link to send: '+r.link)));}catch(e){alert('Could not send.');}}
+// One click, one email (27 Oct 2026 review): a second press while the first is on its way does nothing; a mail the mailer did
+// not take says so (it used to read "no crew email on file"); a contract the crew already confirmed asks before re-sending.
+var _sfBusy={};
+async function sfSend(kind,id,seq,force){var k=kind+'|'+id;if(_sfBusy[k])return;_sfBusy[k]=1;try{
+  var url=kind==='instr'?'/api/instructions/request':'/api/ack/request';
+  var r=await (await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq,send:true,force:!!force})})).json();
+  if(r.error==='already_acknowledged'){_sfBusy[k]=0;if(confirm('The crew member already confirmed '+(kind==='instr'?'these instructions':'this sign-off link')+' for this contract. Send it again? The earlier link will stop working.'))return await sfSend(kind,id,seq,true);return;}
+  if(r.error==='not_instructed'||r.error==='training_visit'){alert('Not sent: this trip is a training visit. Training visits get no '+(kind==='instr'?'sign-off instructions.':'sign-off link.'));return;}
+  if(r.error==='signoff_passed'){alert('Not sent: the sign-off on the board for this contract ('+r.sign_off+') has already passed. Correct the date on the Keyman card first.');return;}
+  if(r.error==='not_sent'){alert('Not sent: the mail service did not take it'+(r.detail?' ('+r.detail+')':'')+'. Nothing was recorded, so you can try again.');return;}
+  if(r.error){alert('Error: '+r.error);return;}
+  if(r.emailed)alert(kind==='instr'?('Instructions emailed to the crew member.'+(r.cc&&r.cc.length?' Copy: '+r.cc.join(', ')+'.':'')):'Sign-off request emailed to the crew member.');
+  else alert('Not emailed (no crew email on file). Copy this link to send: '+r.link);
+}catch(e){alert(kind==='instr'?'Could not send instructions.':'Could not send.');}finally{_sfBusy[k]=0;}}
+async function sendSignoffInstructions(id,seq){return sfSend('instr',id,seq,false);}
+async function sendSignoffLink(id,seq){return sfSend('link',id,seq,false);}
 async function sendReviewInvite(id,seq){if(!confirm('Send a shipboard-management review invite for this contract now?'))return;try{var r=await (await fetch('/api/sbm/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sc:id,seq:seq})})).json();if(r&&r.error){var m={sbm_disabled:'GSM review is OFF. Turn the GSM review switch ON first, then send the invite.',no_recipient_configured:'No shipboard-manager email is configured for this ship yet.',signoff_passed:'That sign-off date has already passed - the review link would be expired.',already_submitted:'A review for this contract was already submitted.',no_signoff_date:'No sign-off date on file for this contract.',send_failed:'The email could not be sent. Please try again.'}[r.error]||('Could not send: '+r.error);alert(m);return;}alert('Review invite emailed to '+(r.recipient||'the shipboard manager')+'.');}catch(e){alert('Could not send the review invite.');}}
 function closeRotModal(){var m=document.getElementById('rotmodal');if(m)m.remove();if(window.rotEscHandler){document.removeEventListener('keydown',window.rotEscHandler);window.rotEscHandler=null;}}
 function rmTag(label,field,on,id){return '<span class="rtag rtoggle'+(on?' on':'')+'" data-crew="'+id+'" data-f="'+field+'" data-v="'+(on?1:0)+'" onclick="rmToggle(this)">'+label+'</span>';}
