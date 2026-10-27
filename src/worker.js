@@ -13,7 +13,7 @@ import { mapRows, diffCrew, storableStatus } from "./crewimport.js";
 import { ICO_B64, PNG180_B64, PNG512_B64 } from "./icons.js";
 import { composeStatement } from "./statement.js";
 import { crewDeployment } from "./deploy.js";
-import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO } from "./travel.js";
+import { parseTravelSheets, summarize as travelSummarize, closedMonths, TRAVEL_BUDGET_MO, monthNum, TRAVEL_SHEET_RE } from "./travel.js";
 import { annotateTravel, unmatchedTravel, travelRowsFor, buildCrewIndex, matchTravelName, clientFromBill } from "./travel_match.js";
 import { pickSgaSheets, parseSgaManning, parseSgaTraining, parseSgaSummary, summarizeSga, sgaPeriodOf, sgaPeriodFromName, SGA_COL_KEYS } from "./sga.js";
 import { archiveKey, sourceRecord, safeName, SOURCE_COLS } from "./sga_archive.js";
@@ -1492,17 +1492,22 @@ async function ensureTravelImpl(env) {
   // 1494ms before, 1636ms after). The CREATE is a no-op on a live table, so it no longer blocks the read:
   // both leave together and the count comes back in the same round trip. If the table really is missing or
   // legacy, the count simply fails and the migrate-once path below runs, as before.
-  let st = null;
+  let st = null, countErr = null;
   try {
     const r = await Promise.all([
       env.DB.prepare("CREATE TABLE IF NOT EXISTS travel_expense (id TEXT PRIMARY KEY, year INTEGER, month INTEGER, leg TEXT, kind TEXT DEFAULT 'crew', crew_name TEXT, ship TEXT, air REAL, hotel REAL, medical REAL, visa REAL, food REAL, transport REAL, other REAL DEFAULT 0, total REAL)").run(),
-      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch(() => null),
+      env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN kind='shoreside' THEN 1 ELSE 0 END) shore FROM travel_expense").first().catch((e) => { countErr = e; return null; }),
       // `ship` (15 Oct 2026, migrations/0026): the hull the workbook row sits under. Rides in the same wave; a table that
       // already carries it (or does not exist yet — the CREATE above has it) answers with an error we ignore.
       addColumn(env, "ALTER TABLE travel_expense ADD COLUMN ship TEXT"),
     ]);
     st = r[1];
-  } catch (e) { st = null; }
+  } catch (e) { st = null; countErr = countErr || e; }
+  // A count that failed because the table is LEGACY (no `kind` column) or not there yet (the CREATE had not landed) is the
+  // migrate-once path. A count that failed for any OTHER reason (D1 unavailable for a moment) is not: until 27 Oct 2026
+  // `!st` alone re-seeded 2025 over a populated table on such an error — the 25 Jun 2026 nine-seeds class again, and the
+  // rows re-uploaded since 15 Oct (with their `ship`) would have become the bundled seed (no ship, "Not placed").
+  const legacy = !st && /no such (column|table)/i.test(String((countErr && countErr.message) || countErr || ""));
   if (!st) {
     await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN kind TEXT DEFAULT 'crew'");
     await addColumn(env, "ALTER TABLE travel_expense ADD COLUMN other REAL DEFAULT 0");
@@ -1511,7 +1516,7 @@ async function ensureTravelImpl(env) {
   // The bundled 2025 history seeds an EMPTY table, or completes the one-time migration of a legacy (pre-`kind`) table.
   // Until 15 Oct 2026 "no shoreside rows" also re-seeded 2025 on every cold start (nine seeds on 25 Jun 2026); a 2026
   // workbook without its CIMS sheet would have started that again. A populated, current table is never touched.
-  if ((total === 0 || !st) && TRAVEL_2025.length) {
+  if ((total === 0 || legacy) && TRAVEL_2025.length) {
     await env.DB.prepare("DELETE FROM travel_expense WHERE year=2025").run();
     await insertTravel(env, TRAVEL_2025, 2025);
     await logData(env, "travel_expense (2025 history incl. shoreside)", TRAVEL_2025.length, "seeded");
@@ -1568,12 +1573,22 @@ async function apiTravelImport(request, env, session) {
   const recs = parseTravelSheets(b.sheets || {}, year);
   if (b.dryRun) {
     const s = travelSummarize(recs);
-    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply
-    const crew = (await env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all()).results;
-    const unmatched = unmatchedTravel(annotateTravel(recs, crew));
-    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched });
+    // the names this workbook carries that the roster cannot place — Rita sees them BEFORE Apply; and the months on file
+    // this workbook has NO sheet for (Apply replaces the year whole, so those months would go — said before the click)
+    const [crewRes, missing] = await Promise.all([env.DB.prepare("SELECT agency_id, first_name, last_name FROM crew").all(), travelMonthsMissing(env, b.sheets, year)]);
+    const unmatched = unmatchedTravel(annotateTravel(recs, crewRes.results));
+    const months = [...new Set(Object.keys(b.sheets || {}).map((n) => monthNum(n)).filter(Boolean))].sort((a, c) => a - c);
+    return json({ dryRun: true, year, records: recs.length, total: s.total, crew: s.crew, byLeg: s.byLeg, byKind: s.byKind, unmatched, months, missing });
   }
   return json(await applyTravelYear(env, recs, year, (session && session.email) || "?", "upload"));
+}
+// The months of `year` that hold crew rows on file and that `sheets` carries no month sheet for (the CIMS sheet is every
+// month's shoreside; a month sheet present but empty still carries its month). Replacing the year from such a workbook
+// would silently drop those months — the Upload page says so, the inbox holds the file (27 Oct 2026).
+async function travelMonthsMissing(env, sheets, year) {
+  const have = new Set(Object.keys(sheets || {}).map((n) => monthNum(n)).filter(Boolean));
+  const rows = (await env.DB.prepare("SELECT DISTINCT month FROM travel_expense WHERE year=? AND kind='crew'").bind(+year).all()).results;
+  return rows.map((r) => r.month).filter((m) => m && !have.has(m)).sort((a, b) => a - b);
 }
 // The ONE path that replaces a travel year — the Upload page and the SharePoint sync both come here (§10j).
 async function applyTravelYear(env, recs, year, by, source) {
@@ -1665,10 +1680,12 @@ async function applySgaWorkbook(env, b, st, by, source) {
   const trMonths = st.training.filter((t) => !t.summary_only);
   const fileId = "sga_" + st.period.year + "_" + String(st.period.month).padStart(2, "0") + "_" + crypto.randomUUID().slice(0, 8);
   const now = new Date().toISOString();
-  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines
-  const stmts = st.summaryOnly ? [] : [
-    env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=?").bind(st.period.year, st.period.month),
-  ];
+  // THE ORDER OF THE WRITES (27 Oct 2026): the new lines go in first under their own file_id; the LAST batch removes the
+  // month's older lines and writes the sga_file row that makes the new ones the month's. Until then the month's lines were
+  // deleted in the FIRST batch and inserted over the next ones (the writes go in batches of 100): a load that died between
+  // two batches left the month with no lines and no file row to say so. A load that dies now leaves the old month whole,
+  // plus orphan lines no sga_file names — /api/sga serves the latest FILE's lines only, so they are never shown.
+  const stmts = [], tail = [];
   const cols = ["id", "file_id", "year", "month", "ref", "ship_code", "seq", "sga_no", "crew_name", "vessel", "brand", "id_number", "nationality", ...SGA_COL_KEYS, "amount", "cols_sum"];
   const ins = env.DB.prepare("INSERT INTO sga_line (" + cols.join(",") + ") VALUES (" + cols.map(() => "?").join(",") + ")");
   st.lines.forEach((l, i) => {
@@ -1695,7 +1712,7 @@ async function applySgaWorkbook(env, b, st, by, source) {
       if (!(!t.summary_only && e.summary_only) && eP > P) continue;
     }
     trWritten++;
-    stmts.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
+    tail.push(tins.bind("tc_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, t.rental || 0, t.utilities || 0, t.hotel || 0, t.air || 0, t.other || 0, t.bank_charge || 0, t.total || 0, t.summary_only ? 1 : 0));
   }
   // The monthly summary rows, the same per-month rule as training: the NEWER bill's figure stands, the same period replaces.
   const existingSum = (await env.DB.prepare("SELECT s.year, s.month, f.year fy, f.month fm FROM sga_summary s LEFT JOIN sga_file f ON f.id = s.file_id").all().catch(() => ({ results: [] }))).results;
@@ -1706,12 +1723,19 @@ async function applySgaWorkbook(env, b, st, by, source) {
     const e = existSum.get(t.year + "-" + t.month);
     if (e && e.fy && e.fm && e.fy * 12 + e.fm > P) continue;
     smWritten++;
-    stmts.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
+    tail.push(sins.bind("ss_" + t.year + "_" + String(t.month).padStart(2, "0"), fileId, t.year, t.month, ...SGA_COL_KEYS.map((k) => t[k] || 0), t.training || 0, t.settlement || 0, t.total, t.crew_total));
   }
+  // a SUMMARY-ONLY file (no manning sheet) never touches the month's lines; otherwise the month's OLDER lines go here, in
+  // the same batch as the file row that makes the new ones current
+  if (!st.summaryOnly) tail.push(env.DB.prepare("DELETE FROM sga_line WHERE year=? AND month=? AND file_id<>?").bind(st.period.year, st.period.month, fileId));
   // rows = 0 marks a summary-only load: /api/sga never lets it hide a month's lines (the latest file WITH rows serves them)
-  stmts.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+  tail.push(env.DB.prepare("INSERT INTO sga_file (id, year, month, sga_no, sga_date, file_name, file_hash, rows, total, grand_total, training_months, loaded_by, loaded_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .bind(fileId, st.period.year, st.period.month, st.meta.sgaNo || null, st.meta.date || null, b.name || null, b.hash || null, st.lines.length, st.summaryOnly ? null : st.summary.total, st.grand_total, trMonths.length, by, now, source || "upload"));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+  // the tail's LAST 100 statements — the DELETE and the file row among them — are ONE batch
+  const cut = Math.max(0, tail.length - 100);
+  for (let i = 0; i < cut; i += 100) await env.DB.batch(tail.slice(i, Math.min(i + 100, cut)));
+  await env.DB.batch(tail.slice(cut));
   await logData(env, "sga (" + st.period.year + "-" + String(st.period.month).padStart(2, "0") + ", SGA " + (st.meta.sgaNo || "?") + ", by " + by + (source && source !== "upload" ? ", " + source : "") + ")", st.lines.length,
     (st.summaryOnly ? "SUMMARY ONLY (no manning sheet): " : (st.prior ? "replaced " : "loaded ") + st.lines.length + " lines, $" + st.summary.total + ", ") + "summary " + smWritten + " months, training " + trMonths.length + " months" + (st.reconciles === false ? " — DOES NOT reconcile with TDG's grand total" : "") + (st.summaryAgrees === false ? " — the summary sheet DISAGREES with the manning sheet" : ""));
   return { ok: true, period: st.period, applied: st.lines.length, summary_only: st.summaryOnly, summary_written: smWritten, summary_agrees: st.summaryAgrees, training: trMonths.length, training_written: trWritten, total: st.summaryOnly ? null : st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles, replaced: !!st.prior, unmatched: st.unmatched.length, file_id: fileId };
@@ -1742,7 +1766,17 @@ function syncDeps(env) {
       if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
       return applySgaWorkbook(env, b, st, meta.by, meta.source);
     },
-    applyTravel: async (sheets, year, meta) => applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source),
+    applyTravel: async (sheets, year, meta) => {
+      // A WORKBOOK THAT LOST A MONTH IS HELD (27 Oct 2026): the year is replaced whole, so a file that arrives by itself (the
+      // inbox: the mail intake, the agent's rows) with no sheet for a month the year on file already holds — an older copy
+      // sent again, a sheet renamed past what the parser reads — would wipe that month. Nothing loads; the inbox rows say
+      // `months_missing`, sp_sync `held`, the activity log names it. Rita's own Upload shows the same months in its dry-run.
+      if (meta && meta.holdUnreconciled) {
+        const missing = await travelMonthsMissing(env, sheets, year);
+        if (missing.length) return { held: "months_missing", year: +year, missing };
+      }
+      return applyTravelYear(env, parseTravelSheets(sheets, year), year, meta.by, meta.source);
+    },
   };
 }
 async function maybeSyncSharePoint(env) {
@@ -1866,7 +1900,14 @@ async function archiveSourceFile(env, bytes, meta) {
   const prev = await env.DB.prepare("SELECT r2_key, bucket FROM sga_source_file WHERE hash=?").bind(hash).first().catch(() => null);
   if (!kept && prev && prev.r2_key) { rec.r2_key = prev.r2_key; rec.bucket = prev.bucket; kept = true; error = null; }
   if (!kept) rec.note = rec.note || ("Bytes not kept" + (error ? ": " + error : ""));
-  await env.DB.prepare("INSERT OR REPLACE INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ")").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
+  // The same bytes again refresh who sent them and when (INSERT OR REPLACE did that), but NEVER lose a value already known
+  // (27 Oct 2026): the kept object (`r2_key` / `bucket`), the inbox link (`file_key` — Rita's Upload sends none, and it
+  // wiped the mail's) and the file's month; the note clears once the bytes are kept by either row.
+  await env.DB.prepare("INSERT INTO sga_source_file (" + SOURCE_COLS.join(",") + ") VALUES (" + SOURCE_COLS.map(() => "?").join(",") + ") ON CONFLICT(hash) DO UPDATE SET " +
+    "name=excluded.name, kind=COALESCE(excluded.kind, sga_source_file.kind), year=COALESCE(excluded.year, sga_source_file.year), month=COALESCE(excluded.month, sga_source_file.month), " +
+    "bytes=COALESCE(excluded.bytes, sga_source_file.bytes), r2_key=COALESCE(sga_source_file.r2_key, excluded.r2_key), bucket=COALESCE(sga_source_file.bucket, excluded.bucket), " +
+    "source=excluded.source, by=excluded.by, at=excluded.at, file_key=COALESCE(sga_source_file.file_key, excluded.file_key), " +
+    "note=CASE WHEN COALESCE(sga_source_file.r2_key, excluded.r2_key) IS NULL THEN excluded.note ELSE NULL END").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
   return { hash, kept, r2_key: rec.r2_key, error };
 }
 async function intakeMailToInbox(env, message, ctx) {
@@ -1874,13 +1915,21 @@ async function intakeMailToInbox(env, message, ctx) {
   const raw = await new Response(message.raw).arrayBuffer();
   const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
   const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now() });
-  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again
-  const keys = r.files.filter((f) => f.inbox && f.inbox.length).map((f) => f.inbox[0].file_key);
-  const done = new Set(keys.length ? (await env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all()).results.map((x) => x.file_key) : []);
+  // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again —
+  // through the inbox, or (27 Oct 2026) on Upload data: the page stamps sga_file.file_hash with the file's SHA-256, so a bill
+  // Rita loaded by hand and Finance then emails is the same file, not a month to replace with itself
+  const queued = r.files.filter((f) => f.inbox && f.inbox.length);
+  const keys = queued.map((f) => f.inbox[0].file_key), hashes = queued.map((f) => f.hash);
+  const ids = [...new Set(keys.concat(hashes))];
+  const [inboxDone, fileDone] = ids.length ? await Promise.all([
+    env.DB.prepare("SELECT DISTINCT file_key FROM sp_inbox WHERE status='ok' AND file_key IN (" + keys.map(() => "?").join(",") + ")").bind(...keys).all(),
+    env.DB.prepare("SELECT DISTINCT file_hash FROM sga_file WHERE file_hash IN (" + ids.map(() => "?").join(",") + ")").bind(...ids).all().catch(() => ({ results: [] })),
+  ]) : [{ results: [] }, { results: [] }];
+  const done = new Set(inboxDone.results.map((x) => x.file_key).concat(fileDone.results.map((x) => x.file_hash)));
   const ins = env.DB.prepare("INSERT OR REPLACE INTO sp_inbox (" + INBOX_COLS.join(",") + ") VALUES (" + INBOX_COLS.map(() => "?").join(",") + ")");
   const stmts = [];
   for (const f of r.files) {
-    if (f.inbox && f.inbox.length && done.has(f.inbox[0].file_key)) { f.status = "already_loaded"; continue; }
+    if (f.inbox && f.inbox.length && (done.has(f.inbox[0].file_key) || done.has(f.hash))) { f.status = "already_loaded"; continue; }
     for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
@@ -1891,11 +1940,11 @@ async function intakeMailToInbox(env, message, ctx) {
     f.archived = a.kept; if (a.error) f.archive_error = a.error;
   }
   const st = new Set(r.files.map((f) => f.status));
-  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : "no_workbook";
+  const outcome = !r.files.length ? "no_workbook" : st.has("pending") ? "queued" : st.has("held") ? "held" : st.has("already_loaded") ? "already_loaded" : st.has("unreadable") ? "unreadable" : "no_workbook";
   const receipt = r.files.map(({ inbox, bytes, ...f }) => f);
   await env.DB.prepare("INSERT INTO mail_intake (id, from_addr, to_addr, subject, message_id, allowed, files_json, ignored_json, outcome, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(receipt), JSON.stringify(r.ignored), outcome, r.at).run();
-  await logData(env, "mail intake (" + r.from + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
+  await logData(env, "mail intake (" + r.from + (r.envelope ? ", envelope " + r.envelope : "") + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.error ? " (" + f.error + ")" : "") + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
   if (outcome === "queued") { const run = applyInbox(env).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
   return { outcome, files: receipt, ignored: r.ignored, from: r.from };
 }
@@ -1937,7 +1986,7 @@ async function apiSga(env) {
     env.DB.prepare("SELECT * FROM sga_summary ORDER BY year DESC, month").all(),
     env.DB.prepare("SELECT hash, name, kind, year, month, bytes, r2_key, source, by, at, file_key, note FROM sga_source_file ORDER BY at DESC").all(),
     // bills the inbox HELD (17 Oct 2026): their lines do not add up to TDG's grand total; Rita loads them by hand
-    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' GROUP BY file_key").all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT file_key, MAX(name) AS name, MAX(detail) AS detail, MAX(applied_at) AS held_at FROM sp_inbox WHERE status='unreconciled' AND kind='sga' GROUP BY file_key").all().catch(() => ({ results: [] })),
   ]);
   const ix = buildCrewIndex(crewRes.results);
   const memo = new Map();
@@ -6189,9 +6238,9 @@ function parseTravelFile(f){
     rd.onload=function(e){
       try{
         var wb=XLSX.read(e.target.result,{type:'array',raw:true});
-        var want=['JAN','FEB','MAR','APRIL','MAY','JUNE','JULY','AUG','SEPT','OCT','NOV','DEC','CIMS'];
+        var want=new RegExp('${TRAVEL_SHEET_RE.source}','i'); // the server's TRAVEL_SHEET_RE: every spelling the parser reads
         var sheets={};
-        wb.SheetNames.forEach(function(sn){ if(want.indexOf(sn.toUpperCase())>=0){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
+        wb.SheetNames.forEach(function(sn){ if(want.test(sn.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
         TRAVELUP={sheets:sheets,year:+ym};
         previewTravel();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
@@ -6206,6 +6255,7 @@ async function previewTravel(){
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">Preview '+r.year+'</b> — '+r.records+' line items · '+r.crew+' crew · $'+Number(r.total).toLocaleString()
     +'<div class=csub style="margin-top:4px">Sign-on $'+Number(r.byLeg.on||0).toLocaleString()+' · Sign-off $'+Number(r.byLeg.off||0).toLocaleString()+' · Transfer $'+Number(r.byLeg.transfer||0).toLocaleString()+'</div></div>';
   h+='<div class=csub style="margin-top:6px;color:var(--amber)">Applying replaces all '+r.year+' travel records (2025 history is untouched).</div>';
+  if(r.missing&&r.missing.length){var MN=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];h+='<div class=csub style="margin-top:6px;color:var(--red)"><b>This workbook has no sheet for '+r.missing.map(function(m){return MN[m]||m;}).join(', ')+'</b>, which '+r.year+' on file carries. Apply removes those months — check the workbook before you apply.</div>';}
   if(r.records>0)h+='<button class="btn" style="margin-top:10px" onclick="applyTravel()">Apply '+r.year+' ('+r.records+' items)</button>';
   else h+='<div class=csub style="margin-top:8px">No travel line items found in that workbook.</div>';
   $('#imp').innerHTML=h;

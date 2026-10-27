@@ -19,6 +19,8 @@
 //
 // Nothing here is money (§1). The bridge serves the Travel tab and the profile's travel section only.
 
+import { AZAMARA_SHORT } from "./shipname.js";
+
 const CELEBRITY = new Set(["apex", "ascent", "beyond", "constellation", "eclipse", "edge", "equinox", "infinity", "millennium",
   "reflection", "silhouette", "solstice", "summit", "xcel"]);
 
@@ -123,7 +125,8 @@ export function travelClientOf(ship, raw) {
   if (raw && cleanTravelName(raw).ncl) return "ncl";
   const s = fold(ship).trim();
   if (!s) return null;
-  if (s.startsWith("azamara")) return "azamara";
+  // a bare "Quest" / "Pursuit" / "Journey" / "Onward" is Azamara's (27 Oct 2026: it read Royal — no Royal hull carries the name)
+  if (s.startsWith("azamara") || AZAMARA_SHORT.includes(s.split(/\s+/)[0])) return "azamara";
   if (/\bncl\b|norwegian|\bgetaway\b/.test(s)) return "ncl";
   if (CELEBRITY.has(s.replace(/^celebrity\s+/, ""))) return "celebrity";
   return "royal";
