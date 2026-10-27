@@ -20,7 +20,7 @@ function boot() {
   const html = auditUploadHtml({ token: "tok", ship: "Pursuit", crew: "Kevin Jugao" });
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   const els = new Map(), $ = (id) => { if (!els.has(id)) els.set(id, el(id)); return els.get(id); };
-  const on = {}, calls = [], timers = [], errors = [];
+  const on = {}, calls = [], timers = [], errors = [], reloads = [];
   const fetch = (url, init) => new Promise((resolve) => {
     const p = String(url).split("?")[0], body = init && init.body ? JSON.parse(init.body) : null;
     const reply = (o, status = 200) => resolve({ ok: status < 400, status, json: () => Promise.resolve(o) });
@@ -30,7 +30,7 @@ function boot() {
   const window = { addEventListener() {}, location: { hash: "" } };
   const document = { getElementById: $, querySelector: () => null, querySelectorAll: () => [], activeElement: null, visibilityState: "visible",
     addEventListener: (k, f) => { on[k] = f; } };
-  const ctx = vm.createContext({ window, document, fetch, console: { log() {}, error: (e) => errors.push(e) }, JSON, Object, Array, String, Number, Math, Date, Promise, isNaN, encodeURIComponent,
+  const ctx = vm.createContext({ window, document, fetch, location: { reload: () => reloads.push(1) }, console: { log() {}, error: (e) => errors.push(e) }, JSON, Object, Array, String, Number, Math, Date, Promise, isNaN, encodeURIComponent,
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: (i) => { if (timers[i - 1]) timers[i - 1].fn = null; } });
   window.__T = "tok";
   for (const s of scripts) vm.runInContext(s, ctx);
@@ -39,7 +39,7 @@ function boot() {
   const type = (part, v) => { const t = el("in", { "data-part": part }); t.value = v; on.input({ target: t }); };
   const send = () => { const b = el("submit"); b.id = "submit"; on.click({ target: { closest: () => b } }); return b; };
   const pending = (p) => calls.filter((c) => c.p === p);
-  return { calls, pending, fire, type, send, tick, errors };
+  return { calls, pending, fire, type, send, tick, errors, timers, reloads };
 }
 
 test("Send waits for the count already on its way, and goes once it landed", async () => {
@@ -64,4 +64,31 @@ test("a count the server did not save holds Send, and says so; the button comes 
   for (let i = 0; i < 6; i++) await P.tick();
   assert.equal(P.pending("/api/audit/u/submit").length, 0, "nothing sent with a number missing");
   assert.equal(b.disabled, false);
+});
+
+// 27 Oct 2026 review: a count sent to a request that is closed (the crew sent it, the link expired or was cancelled) was put
+// back in the queue and retried every 5 seconds for as long as the page stayed open.
+for (const [status, body, want] of [[410, { ok: false, error: "expired" }, "reload"], [404, { ok: false, error: "unknown" }, "reload"], [409, { ok: false, error: "closed", say: "Everything is in. Thank you." }, "redraw"]]) {
+  test("a count the server refuses because the request is closed (" + status + ") is never retried", async () => {
+    const P = boot(); await P.tick(); await P.tick();
+    P.type("P1", "12");
+    P.fire(800); await P.tick();
+    const c = P.pending("/api/audit/u/count");
+    assert.equal(c.length, 1);
+    const states = P.pending("/api/audit/u/state").length;
+    c[0].reply(body, status);
+    for (let i = 0; i < 6; i++) await P.tick();
+    assert.equal(P.timers.filter((t) => t.fn && t.ms === 5000).length, 0, "no retry queued");
+    if (want === "reload") assert.equal(P.reloads.length, 1, "the page reloads into the server's own closed page");
+    else assert.equal(P.pending("/api/audit/u/state").length, states + 1, "the page redraws what the server says");
+  });
+}
+test("a count that did not reach the server is still retried", async () => {
+  const P = boot(); await P.tick(); await P.tick();
+  P.type("P1", "12");
+  P.fire(800); await P.tick();
+  P.pending("/api/audit/u/count")[0].reply({ ok: false, say: "No connection. Your numbers on this page are kept; try again." });
+  for (let i = 0; i < 6; i++) await P.tick();
+  assert.equal(P.timers.filter((t) => t.fn && t.ms === 5000).length, 1);
+  assert.equal(P.reloads.length, 0);
 });

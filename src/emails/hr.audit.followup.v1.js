@@ -6,6 +6,7 @@
 // with three items due on one day gets one email, not three. To the owner only, never to the crew.
 // WIRED 23 Oct 2026 (Miguel signed off the render): the hourly sweep sends it (audit_request.js sendFollowups), 07:00 Miami.
 import { frame, row, card, blk, esc, fmtDate, pill, T, FH, FB } from "./audit_kit.js";
+import { ordinal } from "../audit_steps.js";
 
 export const TEMPLATE_ID = "hr.audit.followup.v1";
 const first = (n) => String(n || "").trim().split(/\s+/)[0] || "";
@@ -21,7 +22,7 @@ const uniq = (a) => a.filter((x, i) => x && a.indexOf(x) === i);
 function itemBlock(f, late, noTitle) {
   // the ship as a white chip: the neutral pill is the card's own grey and vanished into it
   const shipChip = `<span style="display:inline-block;font-family:${FB};font-size:12px;font-weight:700;padding:6px 11px;border-radius:999px;background:#FFFFFF;color:${T.navy};white-space:nowrap;">${esc(f.ship)}</span>`;
-  const chips = shipChip + (f.carried ? "&nbsp;" + pill("2nd time", "amber") : "") + (late && f.due ? "&nbsp;" + pill("Past " + fmtDate(f.due).replace(/, \d{4}$/, ""), "red") : "");
+  const chips = shipChip + (f.carried ? "&nbsp;" + pill(ordinal(f.carried + 1) + " time", "amber") : "") + (late && f.due ? "&nbsp;" + pill("Past " + fmtDate(f.due).replace(/, \d{4}$/, ""), "red") : "");
   const asked = "Asked by " + esc(f.askedBy || "Dexter") + " at the audit on " + esc(fmtDate(f.askedAt)) + (f.crew ? " · " + nb(f.crew) + " was aboard" : "");
   const now = f.aboardNow && f.aboardNow !== f.crew ? " · " + nb(f.aboardNow) + " is aboard now" : "";
   return blk("padding-bottom:8px;", chips) +
@@ -50,7 +51,7 @@ export function followupEmail({ owner, due = [], late = [], link, test = false }
   ].join("");
   const footer = "Printshop Ops Audit · audit.cims.work · sent to the owner on a follow-up's date, never to the crew · it stops once the follow-up is marked done, or ticked Fixed at the next audit.";
   const html = frame({ preheader: head + " " + head2 + (late.length ? " " + late.length + " still open past their date." : ""), eyebrow: "Follow-up", date: one ? one.ship : ships.length + (ships.length === 1 ? " ship" : " ships"), head, head2, lead, rows, footer });
-  const line = (f, l) => "- " + f.ship + (f.carried ? " (2nd time)" : "") + (l && f.due ? " · past " + fmtDate(f.due) : "") + ": " + sentence(f.text) + " Asked by " + (f.askedBy || "Dexter") + " at the audit on " + fmtDate(f.askedAt) + (f.crew ? ", " + f.crew + " aboard" : "") + ".";
+  const line = (f, l) => "- " + f.ship + (f.carried ? " (" + ordinal(f.carried + 1) + " time)" : "") + (l && f.due ? " · past " + fmtDate(f.due) : "") + ": " + sentence(f.text) + " Asked by " + (f.askedBy || "Dexter") + " at the audit on " + fmtDate(f.askedAt) + (f.crew ? ", " + f.crew + " aboard" : "") + ".";
   const text = [head + " " + head2, fn + ", " + (one ? "this was asked of you at a printshop audit. When it is done, mark it" : "these were asked of you at printshop audits. Mark each one once it is done") + " on the Follow-ups page, with a line on what was done.",
     "Due today:\n" + due.map((f) => line(f, false)).join("\n"),
     late.length ? "Still open past their date:\n" + late.map((f) => line(f, true)).join("\n") : "",

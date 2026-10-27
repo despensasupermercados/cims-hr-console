@@ -436,8 +436,8 @@ export function installAuditRequest(deps) {
   async function sendFollowups(env, at = new Date()) {
     const lh = localDayHour(at);
     if (lh.hour < FOLLOWUP_HOUR) return 0;
-    const rows = (await env.DB.prepare("SELECT f.id, f.ship, f.owner, f.due, f.text, f.status, f.carried, f.crew_name, f.created_by, f.created_at FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE f.status = 'open' AND f.due IS NOT NULL AND f.due <= ? AND COALESCE(r.test_mode, 0) = 0 ORDER BY f.due, f.created_at").bind(lh.day).all().catch(() => ({ results: [] }))).results || [];
-    let n = 0;
+    const rows = (await env.DB.prepare("SELECT f.id, f.ship, f.owner, f.due, f.text, f.status, f.carried, f.agency_id, f.crew_name, f.created_by, f.created_at FROM audit_followup f JOIN audit_request r ON r.id = f.request_id WHERE f.status = 'open' AND f.due IS NOT NULL AND f.due <= ? AND COALESCE(r.test_mode, 0) = 0 ORDER BY f.due, f.created_at").bind(lh.day).all().catch(() => ({ results: [] }))).results || [];
+    let n = 0, secs;
     for (const b of followupBatches(rows, lh.day)) {
       const key = "fu:" + (b.email || b.owner).toLowerCase(), kind = "followup:" + lh.day;
       const done = await env.DB.prepare("SELECT ok FROM audit_send_log WHERE request_id=? AND kind=?").bind(key, kind).first().catch(() => null);
@@ -447,7 +447,17 @@ export function installAuditRequest(deps) {
         await logActivity(env, null, "audit_followup_no_recipient", b.owner + " · " + b.due.length + " due " + lh.day);
         continue;
       }
-      const item = (f) => ({ ship: f.ship, text: f.text, askedBy: nameOf(f.created_by), askedAt: f.created_at, due: f.due, crew: f.crew_name, carried: f.carried || 0 });
+      // Who is aboard NOW, when it is no longer the crew the follow-up was asked about (the approved render's "X is aboard
+      // now", 27 Oct 2026 review: it was never filled). Read from the Keyman board once, only when an email goes; matched by
+      // agency id, never by the name's spelling. A board that cannot be read says nothing, never a guess.
+      if (secs === undefined) secs = rotationSections ? (((await rotationSections(env).catch(() => null)) || {}).sections || null) : null;
+      const nowAboard = (f) => {
+        const sec = secs && secs.find((x) => normShip(x.ship) === normShip(f.ship));
+        const on = sec ? aboardOf(sec) : [];
+        if (!on.length || on.some((c) => c.agency_id === f.agency_id)) return null;
+        return on.map((c) => c.name).filter(Boolean).join(" and ") || null;
+      };
+      const item = (f) => ({ ship: f.ship, text: f.text, askedBy: nameOf(f.created_by), askedAt: f.created_at, due: f.due, crew: f.crew_name, aboardNow: nowAboard(f), carried: f.carried || 0 });
       const mail = followupEmail({ owner: b.owner, due: b.due.map(item), late: b.late.map(item), link: AUDIT_ORIGIN + "/#fu" });
       const r = await sendLogged(env, key, kind, { templateId: FOLLOWUP_ID, to: [b.email], subject: mail.subject, html: mail.html, text: mail.text, critical: false });
       if (r.ok) n++;
@@ -641,15 +651,21 @@ export function installAuditRequest(deps) {
   }
 
   async function sendDocsIn(env, req, s) {
-    const snap = J(req.lines_json, { lines: [], intransit: [] });
-    const H = await hon(env, "ship", req.ship); // OBP the day the count is in; the request's snapshot if HON is away
-    const lines = (H && H.ok && H.obp && H.obp.lines) || snap.lines || [];
-    const intransit = (H && H.ok && H.obp && H.obp.intransit) || snap.intransit || [];
-    const asOf = (H && H.ok && H.obp && H.obp.asOf) || snap.asOf || null;
-    // the OBP this email compares the count with is kept, once: the audit's Inventory step reads the same lines (a retry
-    // of a failed email keeps the first)
-    await env.DB.prepare("INSERT OR IGNORE INTO audit_obp_at_count (request_id, as_of, lines_json, intransit_json, at) VALUES (?,?,?,?,?)")
-      .bind(req.id, asOf, JSON.stringify(lines), JSON.stringify(intransit), now()).run().catch((e) => console.error("audit_obp_at_count", (e && e.message) || e));
+    // The OBP this email compares the count with is kept, once, and the audit's Inventory step reads the same lines. A retry
+    // of a failed email compares with the KEPT copy (27 Oct 2026 review: it read OBP afresh, so the email and Dexter's
+    // Inventory step could disagree on the same count).
+    const kept = await env.DB.prepare("SELECT as_of, lines_json, intransit_json FROM audit_obp_at_count WHERE request_id=?").bind(req.id).first().catch(() => null);
+    let lines, intransit, asOf;
+    if (kept) { lines = J(kept.lines_json, []); intransit = J(kept.intransit_json, []); asOf = kept.as_of || null; }
+    else {
+      const snap = J(req.lines_json, { lines: [], intransit: [] });
+      const H = await hon(env, "ship", req.ship); // OBP the day the count is in; the request's snapshot if HON is away
+      lines = (H && H.ok && H.obp && H.obp.lines) || snap.lines || [];
+      intransit = (H && H.ok && H.obp && H.obp.intransit) || snap.intransit || [];
+      asOf = (H && H.ok && H.obp && H.obp.asOf) || snap.asOf || null;
+      await env.DB.prepare("INSERT OR IGNORE INTO audit_obp_at_count (request_id, as_of, lines_json, intransit_json, at) VALUES (?,?,?,?,?)")
+        .bind(req.id, asOf, JSON.stringify(lines), JSON.stringify(intransit), now()).run().catch((e) => console.error("audit_obp_at_count", (e && e.message) || e));
+    }
     const machines = machinesRead(s, lines, intransit);
     const diff = countDiff(lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const mail = docsInEmail({ ship: req.ship, crew: req.crew_name, auditor: nameOf(req.auditor), completeAt: req.complete_at, machines, count: { total: s.lines.length, diff, extras: s.extras }, obpAsOf: asOf, test: !!req.test_mode });

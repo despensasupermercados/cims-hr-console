@@ -95,7 +95,7 @@ const SCRIPT = String.raw`
   function q(p) { return p + (p.indexOf("?") < 0 ? "?" : "&") + "t=" + encodeURIComponent(T); }
   function api(p, body, keep) {
     return fetch(q(p), body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: !!keep })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok && !j.say) j.say = j.error || ("HTTP " + r.status); return j; }); })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) { j.status = r.status; if (!j.say) j.say = j.error || ("HTTP " + r.status); } return j; }); })
       .catch(function () { return { ok: false, say: "No connection. Your numbers on this page are kept; try again." }; });
   }
   function typing() { var a = document.activeElement; return !!(a && a.getAttribute && (a.getAttribute("data-part") || a.getAttribute("data-reason") || a.id === "xt" || a.id === "xn" || a.id === "find")); }
@@ -261,6 +261,10 @@ const SCRIPT = String.raw`
     if (!any) return Promise.resolve(true);
     return api("/api/audit/u/count", { counts: counts }, keep).then(function (j) {
       if (j && j.ok === false) {
+        // a request that is closed never takes a number: no retry (27 Oct 2026 review: it re-queued and retried every 5 s for
+        // ever). A link cancelled or expired reloads into the server's own page that says why; "everything is in" redraws.
+        if (j.status === 404 || j.status === 410) { location.reload(); return false; }
+        if (j.status === 409) return load().then(function () { return false; }, function () { return false; });
         // not saved: the numbers go back in the queue (a newer keystroke wins) and are tried again
         Object.keys(counts).forEach(function (p) { if (!("c:" + p in pend)) pend["c:" + p] = counts[p]; });
         toast(j.say || "Not saved"); clearTimeout(timer); timer = setTimeout(flush, 5000); return false;
