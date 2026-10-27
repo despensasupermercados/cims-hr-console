@@ -62,12 +62,13 @@ function fakeDB(state) {
       throw new Error("unexpected run(): " + S);
     };
     st.first = async () => {
-      if (S.startsWith("SELECT agency_id, crew_id, contract_signoff, value, source")) { const [sc, off] = st.args; return find(sc, off) || null; }
       if (S.startsWith("SELECT 1 FROM bonus_outcome")) { const [cid, off] = st.args; return state.outcomes.find(o => o.crew_id === cid && o.span_end === off) ? { 1: 1 } : null; }
       throw new Error("unexpected first(): " + S);
     };
     st.all = async () => {
-      if (S.includes("FROM sbm_review_response")) { const [sc, off] = st.args; return { results: state.responses.filter(r => r.agency_id === sc && r.contract_signoff === off).map(r => ({ rating: r.rating })) }; }
+      // the module reads every row of the crew and picks the contract's itself (27 Oct 2026: the nearest sign-off within 21 days)
+      if (S.startsWith("SELECT agency_id, crew_id, contract_signoff, value, source")) { const [sc] = st.args; return { results: state.stateRows.filter(r => r.agency_id === sc) }; }
+      if (S.includes("FROM sbm_review_response")) { const [sc] = st.args; return { results: state.responses.filter(r => r.agency_id === sc).map(r => ({ rating: r.rating, off: r.contract_signoff })) }; }
       throw new Error("unexpected all(): " + S);
     };
     return st;
