@@ -247,3 +247,16 @@ test("rail: a training visit never gets a house pass", async () => {
   await h.run(h.env, h.event);
   assert.deepEqual(h.house, []);
 });
+
+test("the pass renders on a phone: a real document with the viewport meta, and facts that stack with no CSS (28 Oct 2026)", () => {
+  const { html } = houseKeyCardEmail({ name: "Maria Santos", first_name: "Maria", ship: "Azamara Pursuit", signoff_date: "2026-10-31", today: "2026-10-28" });
+  assert.match(html, /^<!DOCTYPE html/);
+  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
+  assert.match(html, /-webkit-text-size-adjust:100%/, "iOS Mail keeps the sizes as written");
+  assert.doesNotMatch(html, /<style/i, "still no style block: every width works with no CSS");
+  // the four facts and the two dates are inline blocks of at most 240px: two across on a desktop, stacked on a phone
+  assert.equal((html.match(/display:inline-block;width:100%;max-width:240px/g) || []).length, 6);
+  assert.match(html, /<!--\[if mso\]>/, "Outlook desktop gets a ghost table for its two columns");
+  assert.doesNotMatch(html, /width="40%" align="right"/, "the 60\/40 right-aligned split that broke on a phone is gone (the mast's own 60\/40 rule stays)");
+});
+
