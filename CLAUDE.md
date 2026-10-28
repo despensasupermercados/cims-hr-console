@@ -598,6 +598,13 @@ movable; the commit is a money user's click; committed outcomes are never touche
   Maintained score); a field report in the contract naming the problem = 0 until Ray answers after it (§10 exception).
 - **Handover (10):** contracts ending on/after **1 Nov 2026** need a signed HON handover for that ship (signed within 30 days
   before to 10 after the sign-off; HON's outgoing name must match when given) = 10, else 0; earlier contracts keep Rolando.
+  **AND THE INVENTORY COUNT** (Miguel, 27 Oct 2026: "if discrepancies the bonus gate will default as wrong inventory .. so
+  it shodul be 0"; date "1 Nov 2026"): HON replaced the scanned paper inventory with two blind counts at every crew change
+  and JUDGES them itself (cims-hon `src/lib/stockCount.js`); Ray or Rolando may override on the record. `score_auto.js`
+  reads cims-hon `stock_swap` by the crew's SC id in the handover's window (`pickCount`, SELECT only); `bonus.js`
+  `inventoryCount` decides: wrong inventory (or an override UPHELD) = 0 even with a signed handover; no gaps (or CLEARED) =
+  the handover's 10; a count not judged yet, or a failed read, holds the factor at 0 and says why; no count on file for the
+  sign-off (the flow did not reach it) leaves the handover alone and says so. `test/inventory_count_gate.test.js`.
 - **Dexter's audit (10) replaces "Communication (Rita)":** the audit score (Overall, else the average rounded down) — 5 = 10,
   4 = 8, 3 or below = 0; no audit in the contract (filed up to 30 days after the sign-off) = 10; several = the lowest.
 - **Mono (5):** presses only, under 20% of clicks over the contract = 5, else 0; no click data = 5. The data is OBP's clicks
@@ -979,7 +986,14 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
 - **Never promise the two specialists meet** (Azamara usually overlaps; Royal / Celebrity usually do not, except a new
   hire). Only when the reliever's sign-on is BEFORE this sign-off does the email say "you overlap aboard for N days";
   otherwise "you may or may not meet <first name> aboard". No reliever: "not named yet", never a guess.
-- The final count is signed in the handover notes; Ray Guerra and Jonathan Placer Alonzo receive it.
+- **The final count is its own blind count, not a section of the notes** (Miguel, 27 Oct 2026: the paper inventory sent to
+  Rolando is replaced by two blind counts in cims-hon, `src/lib/stockCount.js`). It opens at 9:00 ship time two days
+  before the sign-off (`FINAL_OPENS_DAYS_BEFORE`, a twin of HON's: change both) and closes at the end of the sign-off day,
+  by HON's own email; it must agree with OBP and with the reliever's arrival count; any gap goes against the outgoing;
+  not counted, OBP's figure stands; Ray Guerra, Rolando Abellan, Ohji Miranda and Jonathan Placer Alonzo receive the
+  result. The reliever pass, the T-7 confirmation and the welcome email say the same (the arrival count: 9:00 ship time on
+  the later of his sign-on and the outgoing's sign-off, 24 hours, its own email). The bonus box adds "a gap in your final
+  count also sets it to 0" — true only once the Score Card reads the count (`inventoryCount`, #369).
 - **One call to action**: the pass's "Open my Digital Handover Notes" is the acknowledgment link (`/instr?t=`), which records
   the receipt (`instr_ack`, the onboardsupport confirmation, the profile's crew-change tick) and forwards to hon.cims.work.
   No "I have read" button.
@@ -1025,6 +1039,20 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   window is never auto-emailed, only listed in the digest ("inside the window at switch-on — send by hand"). The old
   one-for-both `auto_send_enabled` still means both. The T-7 sign-off link email was approved in the pass style on 23 Oct
   2026; its switch stays off until Miguel turns it on.
+- **THE STAFF-HOUSE PASS, T-3** (Miguel, 27 Oct 2026: "we will send an email .. with a link where people can book a room in
+  manila .. make it look like hotel pass .. the mail goes to the personal email and cc rita and I and Mary joy"; "send it
+  3 days before the crew sign off .. build it and push it"; render approved the same day, headline "Time to rest, <first
+  name>. Manila has a bed for you." after he refused "the ship is done with you"). The third kind on the rail: `house`,
+  window T-3, `src/house_pass.js` (`installHousePass`, the senders' contract), template `house.signoff.keycard.v1` (a local
+  copy of CIMS_Housing `signoffKeyCardV1`; the house's gallery is the reference render), ONE button to
+  https://house.cims.work/book. TO the personal address (Rita's override first, like every sender), CC Rita, Miguel and
+  Maryjoy, reply-to Rita, idempotency key `house.signoff:<sc>:<seq>`. The days-out is computed from the run day, so a
+  self-healed late send says "tomorrow", not "three days". **Switch `auto_send_house_enabled` is seeded ON by the first run
+  after deploy, with `auto_send_house_since` = that day** (Miguel asked for it live; a seat already inside T-3 at switch-on is
+  listed in the digest, never emailed by the switch) — a one-time seed, the Automation toggle ("Staff house pass") owns the
+  row after. No request table for this kind: a T-7 link on file never reads as "a pass already went" (`manualOnFile`).
+  A training visit, a redacted crew, no sign-off date: nothing goes. No ID, no email, no phone in the email. Pinned by
+  `test/house_pass.test.js`.
 - **A TRAINING VISIT IS A TRIP, NOT A CONTRACT; THE TRAINERS ARE TAGGED** (Miguel, 17 Oct 2026: Jonathan "sometimes he goes
   to the ship to teach as crew and then home [to] support .. same as Ohji"; then "perhaps you can tag the 3 guys as trainers"
   — of the options, "Trainer tag"). Jonathan Placer Alonzo sailed a full contract (Rhapsody, Dec 2025 – Sep 2026) and is now

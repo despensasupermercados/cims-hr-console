@@ -50,7 +50,13 @@ export function predecessorOf(legs, leg) {
     const g = Math.abs(day(l.off) - day(leg.on)) / 864e5;
     if (g <= RELIEF_WINDOW_DAYS && g < gap) { gap = g; best = l; }
   }
-  return best ? { sc: best.sc, name: best.name || null, first: firstWord(best.name), since: dmy(best.on) } : null;
+  return best ? { sc: best.sc, name: best.name || null, first: firstWord(best.name), since: dmy(best.on), offIso: iso(best.off) } : null;
+}
+
+function arrival(on, prevOff, today) {
+  const at = prevOff && prevOff > on ? prevOff : on;
+  const t = iso(today);
+  return { countDay: dmy(at), countWhen: !t || t === at ? "today" : t < at ? "ahead" : "past", countAfterPrev: at !== on };
 }
 
 export function welcomeContext({ crew, legs, today, links }) {
@@ -66,6 +72,9 @@ export function welcomeContext({ crew, legs, today, links }) {
     port: leg.embark || null, on: dmy(leg.on), off: dmy(leg.off), offSource: leg.offSource || "projected",
     months: p ? (p.d ? mdShort(leg.on, leg.off) : `${p.m} months`) : "",
     prev: prev && prev.name ? prev : null, today: dmy(today),
+    // THE ARRIVAL COUNT (cims-hon stockCount.arrivalWindow): 9:00 ship time on the day the shelf becomes his — his sign-on,
+    // or the predecessor's sign-off when he joins before it. Its own email carries the link; this only names the day.
+    ...arrival(leg.on, prev && prev.name ? prev.offIso : null, today),
     // "from today" only when read on the sign-on day; a catch-up send says "since", a preview before it "from".
     yours: !iso(today) || today === leg.on ? "from today" : today > leg.on ? `since ${dmy(leg.on)}` : `from ${dmy(leg.on)}`,
     nextPay: np ? `${WD[new Date(day(np.paid)).getUTCDay()]} ${+np.paid.slice(8, 10)} ${MON[+np.paid.slice(5, 7) - 1]}` : null,

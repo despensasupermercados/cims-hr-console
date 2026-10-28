@@ -6,7 +6,11 @@
 //   stays onboard: one for the reliever, one for the shipboard manager.
 // - The shipboard manager's title is the brand's own: Azamara BOM, Royal GSM, Celebrity DCM.
 // - Never promise that the two specialists meet: only when the reliever's sign-on is before this sign-off (an overlap).
-// - The final count is signed in the handover notes; Ray Guerra and Jonathan Placer Alonzo receive it.
+// - THE FINAL COUNT IS ITS OWN BLIND COUNT (Miguel, 27 Oct 2026, replacing the paper inventory sent to Rolando; cims-hon
+//   stockCount.js). It opens at 9:00 ship time two days before the sign-off and closes at the end of the sign-off day,
+//   by its own email from the Digital Handover Notes. It is compared with OBP and with the reliever's arrival count; any
+//   gap goes against the outgoing; not counted in time, OBP's figure stands. Ray Guerra, Rolando Abellan, Ohji Miranda and
+//   Jonathan Placer Alonzo receive the result. FINAL_OPENS_DAYS_BEFORE below is a twin of cims-hon's: change both.
 // - One call to action: the button goes through the acknowledgment link, which records the receipt and forwards to HON.
 // - Greeted by first name. Signed by Rita.
 // THE SIGN-OFF PASS (Miguel, 19 Oct 2026: "looks too computer .. make it more human sounding"; "people dont know what HON
@@ -29,6 +33,8 @@ export const TEMPLATE_ID = "hr.signoff.instructions.v2";
 export const HON_URL = "https://hon.cims.work";
 // Contracts ending on or after this day score the Ship handover factor from a submitted HON handover (Brain reczJqxZnOuzkv74X).
 export const HON_BONUS_FROM = "2026-11-01";
+// The final count opens this many days before the sign-off, at 9:00 ship time (cims-hon src/lib/stockCount.js, its twin).
+export const FINAL_OPENS_DAYS_BEFORE = 2;
 
 const C = { navy: "#1B3A5C", green: "#5FB946", gink: "#3E7F2E", slate: "#6B7280", cloud: "#F3F4F6", border: "#E5E7EB",
   body: "#374151", amber: "#B7791F", atint: "#F6EEE1", grey: "#9CA3AF", gtint: "#EAF4E6", deep: "#142D48", sub: "#95A0AD" };
@@ -163,6 +169,7 @@ export function instructionsEmail(d) {
   </tr></table><div style="font-family:${FH};font-size:22px;font-weight:600;color:${rel ? C.navy : C.grey};line-height:28px;padding-top:4px;">${rel ? esc(rel.name) : "Not named yet"}</div>
     <div style="font-family:${FB};font-size:13px;line-height:20px;color:${overlap ? C.gink : C.slate};padding-top:2px;">${relWhen}</div>${contact ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;">${contact}</table>` : ""}`;
   const reviewFrom = off ? addDays(off, -14) : null, reviewTo = off ? addDays(off, -7) : null;
+  const countFrom = off ? addDays(off, -FINAL_OPENS_DAYS_BEFORE) : null;
   const crewName = esc(d.crewName || d.firstName || "");
   const pass = `<tr><td class="px" style="padding:22px 32px 0 32px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${C.cloud}" style="background:${C.cloud};border-radius:20px;"><tr><td class="passpad" style="padding:14px;">
@@ -201,11 +208,11 @@ export function instructionsEmail(d) {
   const steps = [
     `Open your notes with the button on your pass, or go to <a href="${esc(link)}" style="color:${C.navy};font-weight:700;">hon.cims.work</a> on any device, and select <b>${esc(ship || "your ship")}</b>. No login.`,
     `Complete all eleven sections and save each one: machine status, recurring issues, open tickets, stock and orders, tools, risks and active projects.`,
-    `Count the inventory and tools and <b>sign your count</b>. ${RelFirst} records and signs their own count on joining; a signed count is never rewritten.`,
+    `<b>Your inventory count is separate.</b> It opens two days before you sign off, by its own email: step 6.`,
     `<b>Submit your notes</b> before you leave. They go to you, ${rel ? relFirst + " " : "your reliever "}and onboardsupport<wbr>@dg3.com, which reaches the whole CIMS team.`,
     `<b>Print a short copy</b>: leave one for ${relFirst} and give one to your ${mgrSay}.`,
   ];
-  const bonusBox = bonus ? `<tr><td style="padding:12px 0 0 40px;">${note(`<b style="color:${C.navy};">This handover now counts toward your bonus.</b> For contracts ending on or after 1 Nov 2026, the Ship handover factor (10 points) of your Score Card is your submitted Digital Handover Notes for this ship, signed in the 30 days before your sign-off and up to 10 days after it. No submitted notes, no points.`, C.green, C.gtint)}</td></tr>` : "";
+  const bonusBox = bonus ? `<tr><td style="padding:12px 0 0 40px;">${note(`<b style="color:${C.navy};">This handover now counts toward your bonus.</b> For contracts ending on or after 1 Nov 2026, the Ship handover factor (10 points) of your Score Card is your submitted Digital Handover Notes for this ship, signed in the 30 days before your sign-off and up to 10 days after it. No submitted notes, no points. A gap in your final count also sets it to 0.`, C.green, C.gtint)}</td></tr>` : "";
 
   const html = `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8">
@@ -275,15 +282,23 @@ ${step(5, "Pre-sign-off audit", p(`A member of the technical or inventory team w
 ].map(([k, v], i) => `<tr><td style="font-family:${FB};font-size:13px;line-height:20px;color:${C.body};padding:7px 0;${i ? `border-top:1px solid ${C.border};` : ""}"><b style="color:${C.navy};">${k}</b> &middot; ${v}</td></tr>`).join("")}</table>`)}
 
 ${phase("Your last day", off ? longDate(off) : "")}
-${step(6, "Final inventory count", p(`Count and submit it in your handover notes by <b>${off ? longDate(off) : "your last day"}</b>, even if your day runs late. Ray Guerra and Jonathan Placer Alonzo receive it.`) +
- p(`Your signed count closes your accountability for company property. ${RelFirst} records their own count beside yours.`, "padding-top:10px;"))}
+${step(6, "Final inventory count", p(off
+  ? `It opens at <b>9:00 ship time on ${longDate(countFrom).replace(/ \d{4}$/, "")}</b> and stays open to the end of <b>${longDate(off).replace(/ \d{4}$/, "")}</b>, your last day. The link comes in its own email that morning, to you and to the print shop's mailbox.`
+  : `It opens at 9:00 ship time two days before you sign off, and stays open to the end of your last day. The link comes in its own email that morning, to you and to the print shop's mailbox.`) +
+ `<div style="padding-top:8px;">${list([
+  `<b>It is blind.</b> You see OBP's figure only after you send.`,
+  `<b>It must agree with OBP.</b> If they differ, update OBP the same day: a difference OBP closes by the next day is not a gap.`,
+  `<b>And with ${relFirst}'s count.</b> Any gap ${relFirst} finds on joining goes against you.`,
+  `<b>Not counted in time?</b> OBP's figure stands as your count.`,
+ ])}</div>` +
+ p(`Ray Guerra, Rolando Abellan, Ohji Miranda and Jonathan Placer Alonzo receive the result. A gap also comes to your own email, with 72 hours to answer it in your words.`, "padding-top:4px;"))}
 ${step(7, "Machine part usage reports", p(`Pull the management list that shows your part usage reports. Contact the technical team for support if needed.`))}
 ${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgrSay}. Make sure it is completed before you leave.`))}
 
 <tr><td class="px" style="padding:28px 32px 0 32px;">
  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid ${C.border};border-radius:16px;"><tr><td style="padding:18px 20px;">
   <div style="font-family:${FB};font-size:12px;font-weight:700;letter-spacing:1.4px;color:${C.navy};padding-bottom:8px;">YOUR RESPONSIBILITY</div>
-  <div style="font-family:${FB};font-size:13px;line-height:21px;color:${C.body};">From receipt of this email, each step above is yours to complete, including the accuracy of every count and the condition of company property in your custody. Your submitted handover notes, with your signed final count, close your accountability.</div>
+  <div style="font-family:${FB};font-size:13px;line-height:21px;color:${C.body};">From receipt of this email, each step above is yours to complete, including the accuracy of every count and the condition of company property in your custody. Your submitted handover notes and a final count without gaps close your accountability.</div>
  </td></tr></table></td></tr>
 <tr><td class="px" style="padding:26px 32px 28px 32px;">
  <div style="font-family:${FB};font-size:14px;line-height:22px;color:${C.body};padding-bottom:10px;">Thank you.</div>
@@ -305,7 +320,9 @@ ${step(8, "Shipboard appraisal", p(`Rita sends the appraisal link to your ${mgrS
     (go ? go[0] + ". " : "") + (off ? `You sign off ${shortDate(off)}${port ? " in " + port : ""}.` : `Your sign-off is coming up.`),
     "Before you leave, complete your Digital Handover Notes. They are mandatory.",
     "", `Open your Digital Handover Notes: ${link}`,
-    `Select ${ship || "your ship"}, complete all eleven sections, sign your count, submit before you leave, and print a short copy for your reliever and your ${mgr}.`,
+    `Select ${ship || "your ship"}, complete all eleven sections, submit before you leave, and print a short copy for your reliever and your ${mgr}.`,
+    "", (off ? `Your final inventory count opens at 9:00 ship time on ${longDate(countFrom).replace(/ \d{4}$/, "")} and closes at the end of ${longDate(off).replace(/ \d{4}$/, "")}.` : `Your final inventory count opens at 9:00 ship time two days before you sign off.`)
+      + " The link comes in its own email. It is blind, it must agree with OBP and with your reliever's count, and any gap goes against you.",
     "", relLine,
     ...(ph ? [`Mobile: ${ph.shown}`] : []), ...(em ? [`Email: ${em}`] : []),
     (overlap ? "" : rel ? `You may or may not meet ${rel.first || firstWord(rel.name)} aboard, so your notes must carry everything.` : ""),

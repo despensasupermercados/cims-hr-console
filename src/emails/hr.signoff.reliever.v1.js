@@ -31,6 +31,11 @@ export function relieverEmail(d) {
   const of = esc(o.first || firstWord(o.name)) || "the outgoing printer";
   const overlap = off && on && on < off ? { from: on, days: dayN(off) - dayN(on) } : null;
   const ph = phoneOf(o.phone), em = emailOf(o.email);
+  // THE ARRIVAL COUNT (cims-hon stockCount.arrivalWindow): 9:00 ship time on the day the shelf becomes his, for 24 hours —
+  // the day he joins, or the outgoing's sign-off day when he joins before it. Unknown dates name no day.
+  const countDay = on && off ? (off > on ? off : on) : null;
+  const when = (who) => (countDay ? `on ${shortDate(countDay)}, ${countDay === on ? "the day you join" : "the day " + who + " signs off"}` : "on the day the shelf becomes yours");
+  const countWhen = when(of);
 
   const subject = "You take over from " + (o.first || firstWord(o.name)) + " on " + ship;
   // Phone first (Miguel, 23 Oct 2026, on the render: "the mobile version needs work"): a two-line headline at 375px, the
@@ -82,7 +87,7 @@ export function relieverEmail(d) {
     // HON emails the signed notes to the incoming crew (cims-hon mailer.js sendAssessmentEmail: outgoing, incoming, onboardsupport)
     // — the crew is told it arrives, not sent to look for it (Miguel, 26 Oct 2026); Rita is the fallback when it does not.
     `<b>Your copy of the Digital Handover Notes comes by email.</b> ${of} writes them before leaving; once they are signed, a copy reaches this email address. Not there by your sign-on? Reply to this email and Rita sends it.`,
-    `<b>Count and sign your own count when you join.</b> ${of} signs one count, you sign yours; a signed count is never rewritten.`,
+    `<b>Count the shelf when it becomes yours.</b> Your arrival count opens at 9:00 ship time ${countWhen}, for 24 hours; the link comes in its own email. It is blind, and any gap you find goes against ${of}.`,
   ];
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="format-detection" content="telephone=no,date=no,address=no,email=no"><title>${esc(subject)}</title>
 <style>a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important}@media only screen and (max-width:620px){.c{width:100%!important}.px{padding-left:16px!important;padding-right:16px!important}.hl{font-size:28px!important}.fr{padding:0!important}.pp{padding-left:16px!important;padding-right:16px!important}.pc{padding:8px!important}}</style></head>
@@ -109,7 +114,7 @@ ${steps.map((t, i) => li(i + 1, t)).join("")}
   const text = [`You take over from ${o.first || firstWord(o.name)}${d.firstName ? ", " + String(d.firstName).replace(/\.+$/, "") : ""}. ${ship}${off ? ", sign-off " + longDate(off) : ""}${port ? ", " + port : ""}.`,
     overlap ? `You are aboard together from ${longDate(overlap.from)} (${mdWords(overlap.from, off)}).` : `You may or may not meet aboard, so a short message before the sign-off helps.`,
     [o.name, ph ? (ph.wa ? "WhatsApp: " + ph.shown + " (" + ph.wa + ")" : "Mobile: " + ph.shown) : "", em ? "Email: " + em : ""].filter(Boolean).join("\n"),
-    "1. Say hello before the sign-off.\n2. Your copy of the Digital Handover Notes comes by email when " + (o.first || firstWord(o.name)) + " signs them. Not there by your sign-on? Reply and Rita sends it.\n3. Count and sign your own count when you join.",
+    "1. Say hello before the sign-off.\n2. Your copy of the Digital Handover Notes comes by email when " + (o.first || firstWord(o.name)) + " signs them. Not there by your sign-on? Reply and Rita sends it.\n3. Count the shelf: your arrival count opens at 9:00 ship time " + when(o.first || firstWord(o.name) || "the outgoing printer") + ", for 24 hours, by its own email.",
     "Welcome aboard " + ship + ". Any question before you join, reply to this email.",
     "Rita Berenyi\nManager, People & Culture\nM +36 70 270 3245\nE Rita.Berenyi@dg3.com\nDG3 Diversified Global Graphics Group"].join("\n\n");
   return { subject, html, text };

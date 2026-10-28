@@ -25,7 +25,9 @@ const dayN = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)
 // "I have read my summary", is what confirming means).
 export const CONFIRMS = (ship, port) => [
   port ? "My sign-off date and port above are right." : "My sign-off date above is right.",
-  "My Digital Handover Notes are submitted and my count is signed.",
+  // The final count is no longer in the notes: it opens two days before the sign-off, after this email (cims-hon
+  // stockCount.js), so a man confirming at T-7 cannot have counted yet.
+  "My Digital Handover Notes are submitted.",
   "Stock and par levels are left as required, and reported as they are.",
   "Every open machine issue is written down for my reliever.",
 ];
