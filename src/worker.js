@@ -6404,6 +6404,14 @@ function impCard(inner){return '<div class=icard>'+inner+'</div>';}
 // a crew id the file repeats (the last row stands), a cruise-line id that differs from the roster (never overwritten),
 // a row keyed on the cruise-line id (matched, not added) and a new row with no status word it can read (not added).
 // Until now only the unused /api/crew/import page drew one of them: on Uploads they went nowhere (§6 flag, never silent).
+// THE FILE DATES THE BOARD (night watch, 29 Oct 2026): a file whose crew On board carry no embark date, applied over a file
+// that dated them, empties every seat's dates (crew_import_routes.scheduleCheck). Said before Apply; never a block.
+function impSchedule(rv){
+  var s=(rv||{}).schedule;if(!s||!s.lost)return '';
+  return '<div style="'+BADBOX+'"><b>This file has no embark date for any of the '+s.onboard+' crew it has On board.</b> The file on the board dates '+s.kept_dated+'. '
+   +'The Keyman board, the sign-off emails, the staff-house pass and the welcome email read their dates from it: applying this file removes them. '
+   +'Ask Joy for an AdvancedQuery export that carries EMBARKEDDATE before you apply.</div>';
+}
 function impFlagged(rv){
   rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[],col=g.collisions||[];
   if(!(dup.length||km.length||rk.length||ns.length||col.length))return '';
@@ -6507,6 +6515,7 @@ function cimsRender(){
     g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+(f.vessel_observed?impEsc(f.vessel_observed):'&mdash;')+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
   if(g.departed.length){L+='<div class=isec><h3>&#128682; Absent from this file</h3><div class=d>Never auto-removed. Decide the status yourself.</div>';
     g.departed.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss",true));});L+='</div>';}
+  L+=impSchedule(STAGE.review);
   L+=impFlagged(STAGE.review);
   var ab=g.override_absorbed||[];
   if(ab.length){L+='<details class=iminor><summary><span class=c>'+ab.length+'</span> manual entries already match the file &#8212; absorbed (the file shows from now onward)</summary>'+ab.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}

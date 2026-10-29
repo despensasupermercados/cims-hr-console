@@ -1,11 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { apiCrewImportStage, apiCrewImportApply, handleCrewImport } from "../src/crew_import_routes.js";
+import { apiCrewImportStage, apiCrewImportApply, handleCrewImport, scheduleCheck } from "../src/crew_import_routes.js";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
 // --- fake D1 -------------------------------------------------------------
-function fakeDB({ existing = [], overrides = [], dup = false, openFlags = [] } = {}) {
+function fakeDB({ existing = [], overrides = [], dup = false, openFlags = [], snapshot = null } = {}) {
   const batched = [];
   function route(sql, args) {
+    if (snapshot && /FROM registry_snapshot/i.test(sql)) return { __all: { results: snapshot } };
     if (/FROM import_run WHERE file_hash/i.test(sql)) return { __first: dup ? { x: 1 } : null };
     if (/FROM sync_conflict WHERE field IN \('vessel_observed','presence'\) AND resolved=0/i.test(sql)) return { __all: { results: openFlags } };
     if (/FROM crew_override/i.test(sql)) return { __all: { results: overrides } };
@@ -587,4 +590,41 @@ test("re-drop: a file with a row the import skipped (no agency id) still fills t
   const other = { DB: redropDB({ runs: [{ ...runs[0], rows_seen: 5 }] }) };
   const b2 = await (await apiCrewImportStage(req({ rows, file_hash: "h-oct7" }), other, ensured)).json();
   assert.equal(b2.snapshot_saved, undefined, "a file that reads a different number of rows than the run it claims to be keeps nothing");
+});
+
+// NIGHT WATCH 29 Oct 2026: the 28 Oct 12:10 UTC AdvancedQuery (108 rows, 50 On board) carried no embark date at all; the
+// 27 Oct file dated every seat. Applied without a word, it emptied the Keyman board's dates (28 seats blank, 2 back on the
+// Counter's dates, 2 off the board) and with them the sign-off emails, the staff-house pass and the welcome.
+test("a file whose crew On board carry no embark date, over a file that dated them, is said on the review before Apply", async () => {
+  const kept = [{ agency_id: "SC-1", status: "On board", raw_status: "On board", vessel: "MV CELEBRITY APEX", embarked_at: "2026-10-07", debarked_at: null }];
+  const undated = [{ ...ROWS[0], "EMBARKEDDATE": "-", "DEBARKEDDATE": "-" }];
+  const env = { DB: fakeDB({ existing: EXISTING, snapshot: kept }) };
+  const out = await (await apiCrewImportStage(req({ rows: undated, file_hash: "h-undated" }), env)).json();
+  assert.equal(out.ok, true, "never a block: whether to apply stays Rita's");
+  assert.deepEqual(out.review.schedule, { onboard: 1, dated: 0, kept_dated: 1, lost: true });
+  const dated = [{ ...ROWS[0], "EMBARKEDDATE": "2026-10-07", "DEBARKEDDATE": "-" }];
+  const ok = await (await apiCrewImportStage(req({ rows: dated, file_hash: "h-dated" }), { DB: fakeDB({ existing: EXISTING, snapshot: kept }) })).json();
+  assert.equal(ok.review.schedule.lost, false);
+});
+
+test("scheduleCheck: only a file that dates nobody On board, over a board that was dated", () => {
+  const on = (embarked_at) => ({ agency_id: "x", status: "On board", embarked_at });
+  assert.equal(scheduleCheck([on(null), on(null)], [on("2026-10-07")]).lost, true);
+  assert.equal(scheduleCheck([on(null), on("2026-10-01")], [on("2026-10-07")]).lost, false, "a file that dates some seats is TDG's word, row by row");
+  assert.equal(scheduleCheck([on(null)], [on(null)]).lost, false, "a board never dated (before the 7 Oct file) loses nothing");
+  assert.equal(scheduleCheck([{ status: "On Vacation", embarked_at: null }], [on("2026-10-07")]).lost, false, "nobody On board: nothing to date");
+});
+
+test("the Uploads review draws the warning, in red, before the rows", () => {
+  const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const cut = (a) => { const i = W.indexOf(a); const j = W.indexOf("\n}\n", i); assert.ok(i > 0 && j > i, a); return W.slice(i, j + 2); };
+  const ctx = { BADBOX: "border-left:3px solid var(--red)" }; vm.createContext(ctx);
+  vm.runInContext(cut("function impSchedule(rv){"), ctx);
+  const h = ctx.impSchedule({ schedule: { onboard: 50, dated: 0, kept_dated: 49, lost: true } });
+  assert.match(h, /no embark date for any of the 50 crew it has On board/);
+  assert.match(h, /The file on the board dates 49/);
+  assert.match(h, /EMBARKEDDATE/);
+  assert.equal(ctx.impSchedule({ schedule: { onboard: 50, dated: 50, kept_dated: 49, lost: false } }), "");
+  assert.equal(ctx.impSchedule({}), "");
+  assert.match(W, /L\+=impSchedule\(STAGE\.review\);\n  L\+=impFlagged\(STAGE\.review\);/);
 });
