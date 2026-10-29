@@ -1488,6 +1488,10 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **The registry import survives its own file**: a repeated agency id (last row stands, reported), a row keyed
   on the cruise-line id (carried under the real agency id), presence flags deduped while open and closed on
   reappearance, an open ship flag closed when a later file agrees with the registry.
+  **A file that dates nobody On board is said before Apply** (night watch, 29 Oct 2026: the 28 Oct 12:10 UTC file, 108
+  rows, 50 On board, not one EMBARKEDDATE, emptied the board's dates — 28 seats blank, 2 back on the Counter's dates, 2
+  off the board): `scheduleCheck` on the stage (the kept file read with its `embarked_at`), a red line on the Uploads
+  review naming both counts and asking for an export with EMBARKEDDATE. Never a block. Pinned by `test/crew_import_routes.test.js`.
 - **A plan that starts after the file's current contract ends is the next contract**, not a conflict
   (`counter_sync.diffCounter`). Dashboard birthdays and tiles use the derived status and visible crew.
 
