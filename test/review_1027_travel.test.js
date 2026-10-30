@@ -18,7 +18,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted be
 
 const SRC = new URL("../src/worker.js", import.meta.url);
 const TMP = new URL(`../src/__rv1027t_${process.pid}__.mjs`, import.meta.url);
-writeFileSync(TMP, readFileSync(SRC, "utf-8") + "\nexport { ensureTravelImpl, TRAVEL_2025, applySgaWorkbook, sgaStage, syncDeps, apiTravelImport, intakeMailToInbox, applyInbox, archiveSourceFile, apiSga, APP_HTML };\n", "utf-8");
+writeFileSync(TMP, readFileSync(SRC, "utf-8") + "\nexport { ensureTravelImpl, TRAVEL_2025, applySgaWorkbook, sgaStage, syncDeps, apiTravelImport, intakeMailToInbox, applyInbox, archiveSourceFile, apiSga, apiSgaArchive, APP_HTML };\n", "utf-8");
 let W;
 try { W = await import(TMP.href); } finally { unlinkSync(TMP); }
 
@@ -266,4 +266,26 @@ test("the sender gate reads the envelope too: a dg3.com header From under an unl
   assert.equal(relay.allowed, false, "the header's domain is not listed — the envelope alone does not let it in");
   const listed = await intakeMail({ SGA_MAIL_SENDERS: "dg3.com, tdgcrew.com" }, mime("finance@tdgcrew.com", NAME, bytes), { from: "bounce@dg3.com" }, deps);
   assert.equal(listed.allowed, true, "both listed → allowed");
+});
+
+// Night watch, 30 Oct 2026: the Upload page routes a file to the travel parser by its SHEETS, not its name, and now posts a
+// travel workbook's original too (test/sga_archive.test.js). The archive read the kind from the name alone, so a travel
+// workbook not named "Travel Expenses" would be filed as a BILL (kind sga, year null, sga-archive/sga/undated/…). The page
+// says which workbook it read (X-File-Kind); without it the name decides, as before.
+test("the archive files the workbook as the kind the page read it as; without the header the name decides", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(SGA_DDL);
+  const env = envFor(d);
+  const post = (name, kind, bytes) => new Request("https://cims.work/api/sga/archive", { method: "POST", body: bytes,
+    headers: Object.assign({ "Content-Type": "application/octet-stream", "X-File-Name": encodeURIComponent(name) }, kind ? { "X-File-Kind": kind } : {}) });
+  const a = await J(await W.apiSgaArchive(post("Crew travel 2026 RCCL.xlsx", "travel", new Uint8Array([9, 8, 7]).buffer), env, { email: "rita@dg3.com" }));
+  assert.ok(a.kept);
+  let row = d.prepare("SELECT kind, year, month, r2_key FROM sga_source_file WHERE hash=?").get(a.hash);
+  assert.deepEqual({ kind: row.kind, year: row.year, month: row.month }, { kind: "travel", year: 2026, month: null }, "a travel workbook, under its year");
+  assert.match(row.r2_key, /^sga-archive\/travel\/2026\//);
+  // no header: the name decides (a "Travel Expenses" name is travel, anything else a bill)
+  const b = await J(await W.apiSgaArchive(post("UPDATED - Travel Expenses 2026.xlsx", null, new Uint8Array([1, 1]).buffer), env, { email: "rita@dg3.com" }));
+  assert.equal(d.prepare("SELECT kind FROM sga_source_file WHERE hash=?").get(b.hash).kind, "travel");
+  const c = await J(await W.apiSgaArchive(post("DG3 SGA EXCEL OCTOBER 2026.xlsx", "nonsense", new Uint8Array([2, 2]).buffer), env, { email: "rita@dg3.com" }));
+  row = d.prepare("SELECT kind, year, month FROM sga_source_file WHERE hash=?").get(c.hash);
+  assert.deepEqual({ ...row }, { kind: "sga", year: 2026, month: 10 }, "an unknown kind is ignored: the bill's month from its name");
 });
