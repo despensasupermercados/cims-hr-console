@@ -1673,6 +1673,18 @@ questions (his answers land in the sections they change). Pinned by `test/review
 - Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
   audit request ar_eb101ea1 on Kevin Jugao is LIVE (test_mode 0) — Miguel says when to void or cancel it; do not grade it.
 
+## 11g. OTHER APPS ASK THE BOARD WHO IS ABOARD — Miguel, 30 Oct 2026 ("why is the wrong crew in this ship??? review", then "go")
+HON's Reflection handover (30 Oct) named Michael Angelo Resposo as the man aboard: HON read the console's D1 itself, from
+Rita's cards and the Contract Counter (`keyman_contract3`), which since 7 Oct is history (§10d). The Counter still had him
+on Reflection 16 Jan – 17 Jul with no sign-off; TDG's file has Bernard Paqueo aboard since 17 Jul and Resposo on Apex since
+7 Oct. **Who is aboard, who leaves first and who relieves him is answered by the console, never re-derived by another app**:
+`SeatReader`, a NAMED entrypoint in worker.js (reachable only through a service binding that names it — cims-hon's
+`HR_SEATS` — never from the internet, no token), returns `shipSeats(rotationSections)` (`src/ship_seats.js`, pure): aboard =
+the audit's `aboardOf` (TDG's seat, held included; Earmarked-here; Rita's awaiting card; never a visit), outgoing = the
+contract ending first, incoming = the one reliever rule (`assignRelievers`). A rule changed on the board reaches HON the same
+day. Read only. Pinned by `test/ship_seats.test.js`. An app that still reads `keyman_contract3` or `assignment` to decide who
+is aboard is a defect.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

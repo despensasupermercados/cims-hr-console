@@ -64,6 +64,7 @@ import { mariaFriendlyError } from "./maria_errors.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { seatContexts } from "./signoff_context.js";
+import { shipSeats } from "./ship_seats.js";
 import { isShoreCrew, trainerSet } from "./visits.js";
 import { installAutoSend } from "./auto_send.js";
 import { installHousePass } from "./house_pass.js";
@@ -248,6 +249,23 @@ async function apiSbmToggle(request, env, session) {
 const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days (internal 2-user tool; reduces re-login friction)
 const LOGIN_TTL   = 60 * 15;           // 15m
 const COOKIE = "cims_sid";
+
+// THE SEAT READER (Miguel, 30 Oct 2026: HON's Reflection handover named the man the Contract Counter still had aboard,
+// not the man TDG's file has aboard; src/ship_seats.js). A NAMED entrypoint: reachable only through a service binding that
+// names it (cims-hon's HR_SEATS, entrypoint = "SeatReader"), never from the internet, so it needs no token — the same
+// posture as cims-hon's AuditReader the other way. Read only: the Keyman board's sections, nothing written.
+// Any path → { ok, ships: { <ship>: { ship, brand, aboard, outgoing, incoming } } }.
+export const SeatReader = {
+  async fetch(request, env) {
+    try {
+      env = Object.assign({}, env, { DB: batchingDb(env.DB) });
+      const { sections } = await rotationSections(env);
+      return new Response(JSON.stringify({ ok: true, ships: shipSeats(sections) }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e && e.message) || e) }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
+  },
+};
 
 export default {
   async fetch(request, env, ctx) {
