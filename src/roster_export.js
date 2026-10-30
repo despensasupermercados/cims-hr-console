@@ -264,13 +264,39 @@ export async function apiRosterExport(request, env) {
   // join. The rule is not re-implemented in SQL: this runs the board's OWN pair (editFor +
   // resolveLeg, the newer write wins) over the same current leg, so there is one definition of
   // precedence in the console and the export cannot drift from the card again.
-  const [{ results }, editRes, legRes, tdgRes, vesRes] = await Promise.all([
-    env.DB.prepare(ROSTER_SQL).all(),
-    env.DB.prepare('SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit').all().catch(() => ({ results: [] })),
-    env.DB.prepare('SELECT sc, seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sign_on IS NOT NULL').all().catch(() => ({ results: [] })),
-    env.DB.prepare("SELECT agency_id, status, vessel, embarked_at, debarked_at FROM registry_snapshot WHERE status = 'On board' OR debarked_at IS NOT NULL").all().catch(() => ({ results: [] })),
-    env.DB.prepare('SELECT id, name, brand FROM vessel').all().catch(() => ({ results: [] })),
-  ]);
+  //
+  // A FAILED READ FAILS THE EXPORT — 30 Oct 2026. These side reads carried
+  // `.catch(() => ({ results: [] }))`, and on 29 Oct 2026 one of them failed
+  // for a moment during cims-timecard's 10:00 UTC sync: every TDG-registry
+  // placement (and with another read, every resolved edit) silently vanished
+  // from ONE response, the route answered 200, and the timecard recorded a
+  // fleet of 29 owing crew against 48 TDG hulls as truth — eighteen crew and
+  // their ships out of the compliance denominator with every check green.
+  // The same silent-narrowing shape as 2 Sep and 8 Oct. A missing table was
+  // the original reason for the .catch, but every table here has existed in
+  // production for weeks, and "the table is missing" deserves the same loud
+  // answer as "the read failed": the caller records a FAILED sync, keeps
+  // yesterday's roster, and its stale-sync check escalates if it stands.
+  // One night of staleness beats a silently narrowed fleet.
+  const read = (label, sql) => env.DB.prepare(sql).all().then(
+    (r) => r,
+    (e) => { throw new Error(`${label} read failed — ${(e && e.message) || e}`); },
+  );
+  let results, editRes, legRes, tdgRes, vesRes;
+  try {
+    [{ results }, editRes, legRes, tdgRes, vesRes] = await Promise.all([
+      read('roster', ROSTER_SQL),
+      read('contract_edit', 'SELECT sc, seq, sign_on, sign_off, ship, on_key, updated_at FROM contract_edit'),
+      read('keyman_contract3', 'SELECT sc, seq, ship, sign_on, proj_off, act_off, imported_at FROM keyman_contract3 WHERE sign_on IS NOT NULL'),
+      read('registry_snapshot', "SELECT agency_id, status, vessel, embarked_at, debarked_at FROM registry_snapshot WHERE status = 'On board' OR debarked_at IS NOT NULL"),
+      read('vessel', 'SELECT id, name, brand FROM vessel'),
+    ]);
+  } catch (e) {
+    return new Response(JSON.stringify({
+      error: 'export_read_failed',
+      detail: String((e && e.message) || e),
+    }), { status: 503, headers: { 'content-type': 'application/json' } });
+  }
   const idx = indexEdits(editRes.results || []);
   // The current leg is the crew's highest seq — the same definition counter_legs.js uses for is_current.
   const currentLeg = {};

@@ -200,19 +200,29 @@ test('route: no field is added or dropped', async () => {
   assert.deepEqual(Object.keys(body.crew[0]).sort(), [...EXPORT_FIELDS].sort());
 });
 
-test('route: a missing registry_snapshot or vessel table degrades to today\'s answer, never a 500', async () => {
+/* REVERSED, 30 Oct 2026. This test used to pin the opposite: a failed
+ * registry/vessel read "degrades to today's answer, never a 500". That
+ * degrade is exactly what cut the fleet from 47 to 29 on 29 Oct 2026 — one
+ * transient D1 failure, a 200 with every TDG placement missing, and the
+ * timecard recorded the crippled roster as truth with every check green.
+ * A caller can retry a 503; it cannot un-believe a quietly wrong 200.
+ * See test/roster_export_reads.test.js for the full set. */
+test('route: a failed registry_snapshot or vessel read is a 503, never a quietly narrowed 200', async () => {
   const env = envWith({ crew: [row('SC-0042899', 'Valdesco')] });
   const base = env.DB.prepare;
   env.DB.prepare = (sql) => {
     const q = String(sql).trim();
-    if (q.includes('FROM registry_snapshot') || q.startsWith('SELECT id, name, brand FROM vessel')) {
+    if (q.startsWith('SELECT agency_id, status, vessel, embarked_at, debarked_at FROM registry_snapshot')
+      || q.startsWith('SELECT id, name, brand FROM vessel')) {
       return { all: async () => { throw new Error('no such table'); } };
     }
     return base(sql);
   };
   const res = await apiRosterExport(new Request('https://x/api/roster/export', { headers: { 'X-Roster-Key': 'k' } }), env);
-  assert.equal(res.status, 200);
-  assert.equal((await res.json()).crew[0].ship, null);
+  assert.equal(res.status, 503);
+  const body = await res.json();
+  assert.equal(body.error, 'export_read_failed');
+  assert.ok(!('crew' in body), 'no crew list leaves without every source answering');
 });
 
 // 27 Oct 2026 review: an On board row whose debark is BEFORE its own embark (TDG wrote one such row — Ed Del Rosario,
