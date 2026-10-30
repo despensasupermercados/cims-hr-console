@@ -889,7 +889,10 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   identity as the inbox (`file_key mail:<sha16>@<sha16>`) and `sga_file.file_hash`, so a bill on file, its inbox rows and its
   original are one thing. Two writers, both the Worker: the **mail intake** archives every attachment it took (held and
   already-loaded ones too — keeping costs nothing, loading is the gate), and the **Upload page** sends the raw file to
-  `POST /api/sga/archive` after a successful Apply (`keepSgaOriginal`, "Original kept" chip). `GET /api/sga/file?hash=` returns
+  `POST /api/sga/archive` after a successful Apply (`keepSgaOriginal`, "Original kept" chip) — the bill and, since 30 Oct 2026,
+  Rita's travel workbook too (`keepOriginal(TRAVELUP)`; only the bill's Apply posted its bytes, so a travel year dropped on Upload
+  data was loaded and its original lost). The page sends `X-File-Kind` (it routes a file by its sheets, not its name); without it
+  the name decides (`Travel Expenses` = travel). Pinned by `test/sga_archive.test.js`, `test/review_1027_travel.test.js`. `GET /api/sga/file?hash=` returns
   the original; `/api/sga` carries `sources`; the Travel tab's Bills on file table says "kept · download" / "not kept" / "no
   record" per bill. **A mail whose file is already loaded (same bytes → same key, status ok) is archived and receipted, never
   queued again** (`already_loaded`) — so re-sending a bill to sga@cims.work is the way to archive an original without

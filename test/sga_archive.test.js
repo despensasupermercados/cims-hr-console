@@ -51,3 +51,63 @@ test("the Worker keeps every original: the table in ensureSga's wave, the intake
   // the receipt never carries the bytes
   assert.match(W, /const receipt = r\.files\.map\(\(\{ inbox, bytes, \.\.\.f \}\) => f\);/);
 });
+
+// RITA'S TRAVEL WORKBOOK IS KEPT TOO (night watch, 30 Oct 2026). The archive was built for "every workbook the console loads
+// (TDG's bill, Rita's travel workbook)" and /api/sga/archive files a "Travel Expenses" name under travel/<year>/, but only the
+// bill's Apply posted its bytes: a travel workbook dropped on Upload data (Rita's 2026 year, 13 Oct 2026 — two days before the
+// archive existed; her next one is the first) was loaded and its original lost, while the same file emailed to sga@cims.work is
+// kept. The page's own script runs in a vm: drop the workbook, preview, Apply — the raw bytes must reach /api/sga/archive.
+test("a travel workbook applied on Upload data sends its original to /api/sga/archive, like the bill", async () => {
+  const vm = (await import("node:vm")).default;
+  const { writeFileSync, unlinkSync } = await import("node:fs");
+  const TMP = new URL(`../src/__arch_${process.pid}__.mjs`, import.meta.url);
+  writeFileSync(TMP, W + "\nexport { APP_HTML };\n", "utf-8");
+  let APP_HTML;
+  try { ({ APP_HTML } = await import(TMP.href)); } finally { unlinkSync(TMP); }
+  const els = {};
+  const mk = (id) => els[id] || (els[id] = { id, style: {}, value: "", innerHTML: "", textContent: "", classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } }, addEventListener() {}, appendChild() {}, setAttribute() {}, getAttribute() { return null; }, scrollIntoView() {}, focus() {} });
+  const calls = [];
+  const answers = {
+    "/api/travel/import": (b) => (b.dryRun ? { dryRun: true, year: 2026, records: 3, crew: 1, total: 100, byLeg: {}, byKind: {}, missing: [] } : { ok: true, year: 2026, applied: 3 }),
+    "/api/sga/archive": () => ({ ok: true, kept: true, hash: "h" }),
+  };
+  const ctx = {
+    document: { readyState: "complete", addEventListener() {}, removeEventListener() {}, getElementById: mk, querySelector: (s) => mk(s.replace(/^#/, "")), querySelectorAll() { return []; }, createElement: () => mk("x" + Math.random()), body: mk("body"), activeElement: null },
+    location: { href: "", search: "", pathname: "/", hash: "" }, navigator: { userAgent: "node" },
+    fetch: async (u, init) => {
+      const url = String(u).replace(/\?.*$/, ""); calls.push({ url, init: init || {} });
+      const a = answers[url]; let b = {}; try { b = JSON.parse((init && typeof init.body === "string" && init.body) || "{}"); } catch {}
+      if (!a) return new Promise(() => {});   // the boot's own reads (dashboard, prefetch) stay unanswered, as in travel_filters
+      return { ok: true, status: 200, json: async () => a(b) };
+    },
+    localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+    setTimeout, clearTimeout, setInterval, clearInterval, console, Date,
+    addEventListener() {}, removeEventListener() {}, alert() {}, confirm() { return true; }, requestAnimationFrame: (f) => f && f(), scrollTo() {},
+    history: { replaceState() {}, pushState() {} }, matchMedia() { return { matches: false, addEventListener() {} }; },
+    XLSX: { read: () => ({ SheetNames: ["JAN", "Summary"], Sheets: { JAN: {}, Summary: {} } }), utils: { sheet_to_json: () => [["CREW 1 / ON"], ["Crew"]] } },
+    FileReader: class { readAsArrayBuffer(f) { this.onload({ target: { result: f.__buf } }); } },
+  };
+  ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
+  vm.createContext(ctx);
+  for (const code of [...APP_HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1])) new vm.Script(code).runInContext(ctx);
+  vm.runInContext("loadSheetJS=function(cb){cb();};", ctx);
+  const buf = new Uint8Array([80, 75, 3, 4, 1, 2, 3]).buffer;   // the workbook's bytes, as FileReader hands them over
+  const name = "UPDATED - Travel Expenses 2026 RCCL & AZAMARA & CELEBRITY.xlsx";
+  ctx.__f = { name, __buf: buf };
+  vm.runInContext("parseTravelFile(__f)", ctx);
+  await new Promise((r) => setTimeout(r, 20));
+  await vm.runInContext("applyTravel()", ctx);
+  await new Promise((r) => setTimeout(r, 20));
+  const arch = calls.filter((c) => c.url === "/api/sga/archive");
+  assert.equal(arch.length, 1, "the travel workbook's original is posted once after a successful Apply (it was never posted)");
+  assert.equal(arch[0].init.method, "POST");
+  assert.equal(arch[0].init.body, buf, "the raw bytes as they were dropped");
+  assert.equal(arch[0].init.headers["X-File-Name"], encodeURIComponent(name), "the name the archive reads the year from");
+  assert.equal(arch[0].init.headers["X-File-Kind"], "travel", "the page read it as a travel workbook (it routes by the sheets, not the name)");
+  assert.match(mk("imp").innerHTML, /Original kept/, "the page says so, like the bill's Apply");
+  // a failed Apply keeps nothing
+  calls.length = 0; answers["/api/travel/import"] = (b) => (b.dryRun ? answers["/api/sga/archive"]() : { error: "year_required" });
+  await vm.runInContext("applyTravel()", ctx);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(calls.filter((c) => c.url === "/api/sga/archive").length, 0, "nothing is archived for an Apply that failed");
+});

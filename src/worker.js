@@ -1959,7 +1959,9 @@ async function apiSgaArchive(request, env, session) {
   const bytes = await request.arrayBuffer();
   if (!bytes.byteLength) return json({ error: "empty" }, 400);
   if (bytes.byteLength > 25 * 1024 * 1024) return json({ error: "too_large" }, 413);
-  const kind = /travel expenses/i.test(name) ? "travel" : "sga";
+  // the page says which workbook it read (it routes a file by its sheets, not its name); else the name decides, as before
+  const said = String(request.headers.get("x-file-kind") || "").toLowerCase();
+  const kind = said === "travel" || said === "sga" ? said : /travel expenses/i.test(name) ? "travel" : "sga";
   const per = kind === "sga" ? sgaPeriodFromName(name) : null;
   const a = await archiveSourceFile(env, bytes, { name, kind, year: per ? per.year : yearFromName(name), month: per ? per.month : null, source: "upload", by: (session && session.email) || "?" });
   return json({ ok: true, ...a });
@@ -6250,7 +6252,7 @@ function parseTravelFile(f){
         var want=new RegExp('${TRAVEL_SHEET_RE.source}','i'); // the server's TRAVEL_SHEET_RE: every spelling the parser reads
         var sheets={};
         wb.SheetNames.forEach(function(sn){ if(want.test(sn.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
-        TRAVELUP={sheets:sheets,year:+ym};
+        TRAVELUP={sheets:sheets,year:+ym,name:f.name,buf:e.target.result,kind:'travel'};   // the bytes too: the original is kept after Apply
         previewTravel();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };
@@ -6274,6 +6276,7 @@ async function applyTravel(){
   var r=await (await fetch('/api/travel/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:TRAVELUP.sheets,year:TRAVELUP.year})})).json();
   if(r.ok)$('#imp').innerHTML='<span class="cchip ok">Done</span> loaded '+r.applied+' travel items for '+r.year+'. <a href="#" onclick="show(\\'travel\\');return false">Open Travel</a>';
   else $('#imp').textContent='Import failed.';
+  if(r.ok)keepOriginal(TRAVELUP);
 }
 // TDG's SGA workbook (15 Oct 2026, CLAUDE.md §10j): the page sends only the two sheets the console reads — SUMMARY MANNING
 // (one row per crew per ship, every cost column) and the training summary (TRAINREL / TRAINING). Raw cell values: TDG's
@@ -6319,12 +6322,15 @@ async function applySga(){
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.detail?(': '+impEsc(r.detail)):'')+'.</div>';
   if(r.ok)keepSgaOriginal();
 }
-// the original workbook, kept as it arrived (15 Oct 2026, "I dont wanna lose this"): the raw bytes go to /api/sga/archive
-async function keepSgaOriginal(){
-  if(!SGAUP||!SGAUP.buf)return;
+// the original workbook, kept as it arrived (15 Oct 2026, "I dont wanna lose this"): the raw bytes go to /api/sga/archive —
+// TDG's bill and Rita's travel workbook alike (30 Oct 2026: the travel Apply never sent its bytes; the archive files a
+// "Travel Expenses" name under travel/<year>/, as it does for the same workbook emailed to sga@cims.work)
+async function keepSgaOriginal(){return keepOriginal(SGAUP);}
+async function keepOriginal(up){
+  if(!up||!up.buf)return;
   var el=$('#imp');
   try{
-    var a=await (await fetch('/api/sga/archive',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(SGAUP.name||'')},body:SGAUP.buf})).json();
+    var a=await (await fetch('/api/sga/archive',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(up.name||''),'X-File-Kind':up.kind||'sga'},body:up.buf})).json();
     if(el)el.innerHTML+=(a&&a.kept)?' <span class="cchip ok">Original kept</span>':' <span class="cchip warn">Original not kept'+(a&&a.error?(': '+impEsc(a.error)):'')+'</span>';
   }catch(e){ if(el)el.innerHTML+=' <span class="cchip warn">Original not kept</span>'; }
 }
