@@ -57,7 +57,11 @@ INSERT INTO vessel (id,name,brand) VALUES
 
 const YESTERYEAR = '2025-11-01';
 const PAST = '2026-07-25';
-const FUTURE = '2026-11-02';
+// ROSTER_SQL places an assignment "in force" against SQLite's OWN clock (`a2.sign_on <= date('now')`), so "the future" is
+// read from that clock: a fixed date is a fuse. FUTURE was '2026-11-02' (Alonzo's real Ovation start) and main went red
+// on that very day (night watch, 2 Nov 2026). scripts/clock_shift.mjs shifts JavaScript's Date, never SQLite's 'now', so the
+// nightly shifted runs could not see this one coming.
+const FUTURE = DatabaseSync ? new DatabaseSync(':memory:').prepare("SELECT date('now','+30 days') AS d").get().d : '2099-01-01';
 
 function db() {
   const d = new DatabaseSync(':memory:');
@@ -121,7 +125,7 @@ test('a CURRENT leg still wins over an assignment, field for field', () => {
 });
 
 test('a future assignment places nobody aboard', () => {
-  // Alonzo's real Ovation contract starts 2 Nov. He is not on Ovation today.
+  // An Ovation contract that starts a month from now (Alonzo's started 2 Nov 2026): he is not on Ovation today.
   const d = db();
   addCrew(d, 'future', 'Alonzo');
   addAssignment(d, 'future', 'a1', 'ves_ovation', 'Ovation', FUTURE);
