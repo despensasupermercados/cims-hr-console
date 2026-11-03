@@ -47,3 +47,16 @@ export function isVisit(map, sc, on, crew) {
 }
 // crew_trainer rows ({ sc }) -> Set of agency ids.
 export const trainerSet = (rows) => new Set((rows || []).map((r) => r && r.sc).filter(Boolean));
+// RITA'S CARD THAT IS A VISIT (night watch, 3 Nov 2026). The schedule decides it once (ship_leg_source.markAssignmentVisits:
+// a started card whose trip is a visit by the rule above); the board reads that answer, never a second rule. legs = the
+// board's ONE schedule (boardLegs) -> the assignment ids of the cards it marked a visit.
+export const visitCardIds = (legs) => new Set((legs || []).filter((l) => l && l.visit && l.assignment_id).map((l) => l.assignment_id));
+// Such a card drawn as the ship's training-visit line — the shape sec.visits carries. It keeps its card (assignment_id +
+// vessel_key): a tap opens the card's own panel, where Rita moves its dates or removes it, as the card did. a: an open card;
+// crew: { name, trainer }; vk: the board's vessel key for the card's ship.
+export function cardVisitLine(a, crew, vk) {
+  const c = crew || {};
+  return { agency_id: a.sc, assignment_id: a.id || null, vessel_key: vk || null, name: a.crew_name || c.name || a.sc, ship: a.ship || null,
+    seq: 1, onKey: day(a.sign_on), signOn: day(a.sign_on), signOff: day(a.planned_sign_off), visit: true, trainer: !!c.trainer,
+    shoreTeam: !c.trainer, state: "yellow", current: false };
+}

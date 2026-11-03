@@ -169,3 +169,42 @@ test("the board carries visits beside the seats, the page draws and opens them, 
   assert.match(SRC, /SELECT sc FROM crew_trainer/, "the board reads the trainer tag in its wave");
   assert.ok(existsSync(new URL("../migrations/0033_crew_trainer.sql", import.meta.url)));
 });
+
+// A TRAINER'S CARD THAT HAS STARTED IS A VISIT ON THE BOARD TOO (night watch, 3 Nov 2026). Jonathan Placer Alonzo (SC-0041465,
+// a trainer) has Rita's card on Spectrum, 3 → 11 Nov 2026 (as_c9633293…), no "full contract" mark; TDG's file has him
+// Earmarked Spectrum. The schedule marked the card's leg a visit (markAssignmentVisits, 27 Oct), but rotationSections built
+// Rita's cards on its own and drew it as a seat "awaiting the TDG file" the morning it started. aboardOf read it as aboard,
+// so the audit site listed two crew on Spectrum and the SeatReader told HON he was the outgoing printer (his 11 Nov ends
+// first): HON opened a final count for Spectrum, out_crew_id SC-0041465, out 2026-11-11, at 02:15 UTC on 3 Nov, while the
+// printer, Jeadrig Tuazon, is aboard to 19 Feb 2027. The board now reads the schedule's answer: the card is the ship's
+// training-visit line, never a seat or a plan.
+test("a trainer's started card is the ship's visit line: never a seat, never aboard, never HON's outgoing", async () => {
+  const { visitCardIds, cardVisitLine } = await import("../src/visits.js");
+  const { markAssignmentVisits } = await import("../src/ship_leg_source.js");
+  const { shipSeats } = await import("../src/ship_seats.js");
+  const { aboardOf } = await import("../src/audit.js");
+  // the schedule's card leg, as markAssignmentVisits leaves it for the trainer
+  const asg = [{ id: "as_c9633293-9176-40dc-930f-b231f5790b9b", sc: "SC-0041465", sign_on: "2026-11-03", planned_sign_off: "2026-11-11", ship: "Spectrum", first_name: "Jonathan", last_name: "Alonzo" }];
+  const marked = markAssignmentVisits(asg, [{ sc: "SC-0041465", on_key: "2026-10-16", kind: "visit" }], [{ sc: "SC-0041465" }]);
+  assert.equal(marked[0].visit, true, "the trainer's trip is a visit (no full-contract mark for 3 Nov)");
+  const legs = [{ sc: "SC-0041465", ship: "Spectrum", on: "2026-11-03", off: "2026-11-11", source: "assignment", assignment_id: marked[0].id, visit: true },
+    { sc: "SC-0045606", ship: "Spectrum", on: "2026-08-16", off: "2027-02-19", source: "registry", is_current: true }];
+  const ids = visitCardIds(legs);
+  assert.deepEqual([...ids], ["as_c9633293-9176-40dc-930f-b231f5790b9b"]);
+  const line = cardVisitLine({ id: marked[0].id, sc: "SC-0041465", crew_name: "Jonathan Alonzo", ship: "Spectrum", sign_on: "2026-11-03", planned_sign_off: "2026-11-11" }, { trainer: true }, "royal|spectrum");
+  assert.deepEqual({ sc: line.agency_id, visit: line.visit, trainer: line.trainer, on: line.signOn, off: line.signOff, aid: line.assignment_id, vk: line.vessel_key },
+    { sc: "SC-0041465", visit: true, trainer: true, on: "2026-11-03", off: "2026-11-11", aid: "as_c9633293-9176-40dc-930f-b231f5790b9b", vk: "royal|spectrum" }, "it keeps its card: a tap opens the card's panel, where Rita moves or removes it");
+  // the section the board now builds: Tuazon's seat, Alonzo on the visit line
+  const sec = { ship: "Spectrum", brand: "Royal", crew: [{ agency_id: "SC-0045606", name: "Jeadrig Tizar Tuazon", status: "On board", current: true, aboard: true, state: "green", signOn: "2026-08-16", signOff: "2027-02-19" }], visits: [line], projections: [] };
+  assert.deepEqual(aboardOf(sec).map((c) => c.agency_id), ["SC-0045606"], "the audit site lists the printer alone");
+  const seats = shipSeats([sec]);
+  assert.equal(seats.Spectrum.outgoing.sc, "SC-0045606", "HON is told the printer, not the trainer");
+  assert.ok(!seats.Spectrum.aboard.some((p) => p.sc === "SC-0041465"));
+  // the board itself reads the schedule's answer before it draws Rita's cards
+  const rs = SRC.slice(SRC.indexOf("async function rotationSections("), SRC.indexOf("async function rotationSections(") + 60000);
+  assert.match(rs, /const cardVisit = visitCardIds\(HIST\);/);
+  assert.match(rs, /if \(cardVisit\.has\(a\.id\)\) \{ \(visitByShip\[ship\] = visitByShip\[ship\] \|\| \[\]\)\.push\(cardVisitLine\(a, \{ name: cmap\[a\.sc\] && cmap\[a\.sc\]\.name, trainer: _trainers\.has\(a\.sc\) \}, vkOf\(ship\)\)\); continue; \}/);
+  // on the page the line opens the card's own panel (openRelief with its vessel key and card id), a file trip the trip window
+  assert.match(SRC, /var open=\(v\.assignment_id&&v\.vessel_key\)\?\(' data-vk="'\+escHtml\(v\.vessel_key\)\+'" data-aid="'\+escHtml\(v\.assignment_id\)\+'" onclick="openRelief\(this\)"/);
+  assert.match(rs, /const visits = \(promByShip\[ship\] \|\| \[\]\)\.filter\(\(c\) => c\.visit\)\.concat\(visitByShip\[ship\] \|\| \[\]\)/);
+});

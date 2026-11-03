@@ -1076,7 +1076,11 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   `CC_*_SQL` join reads the mark and the tag); **off the bench and the seats** (a "Training visit · trainer" line under the
   ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard); **off the crew's statement** (Miguel, 21 Oct
   2026: "left off the crew's statement, is a training visit"; `statementContracts` skips the leg, so its row and its days are
-  not printed — the PDF, its email and the internal crew file's statement pages). The profile's time at sea still counts its days. The
+  not printed — the PDF, its email and the internal crew file's statement pages). **Rita's card for a trainer, once started, is the
+  ship's visit line too** (night watch, 3 Nov 2026: Jonathan Alonzo's Spectrum card, 3 → 11 Nov, drew as a seat "awaiting the TDG
+  file", the audit site listed him aboard and the SeatReader made him HON's outgoing printer — HON opened a final count for him):
+  the board reads the schedule's answer (`visitCardIds(HIST)`, the cards `markAssignmentVisits` marked) and draws the card as
+  `sec.visits` (`cardVisitLine`), a tap opening the card's own panel; before its sign-on it stays a plan. The profile's time at sea still counts its days. The
   mark belongs to the trip that embarked that day: a later file that moves the embark makes it a new trip. (The same
   morning this was Jonathan's id alone, PR #284, then a per-trip tick, PR #285.) Checked on the 17 Oct 2026 production
   data before merging: Score Card inputs, statements and schedule legs identical for all 108 crew. Pinned by
