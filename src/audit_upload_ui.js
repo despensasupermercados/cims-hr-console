@@ -32,6 +32,8 @@ const PAGE_CSS = String.raw`
 .up.busy{border-style:solid;cursor:default}
 .up .fn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .up .prog{grid-column:1 / -1}
+.up.drop{border-style:solid;border-color:var(--green);background:var(--greenbg)}
+.offl.app div{flex-wrap:wrap;align-items:flex-start;line-height:1.45}.offl.app div>span{flex:1 1 220px;min-width:0}.offl.app .ic{flex:none;margin-top:2px}.offl.app .btn{margin-left:auto}
 .asx{border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;gap:8px;font-size:13.5px;line-height:1.45}
 .asx.m{border-color:var(--amberm,var(--line));background:var(--amberbg)}
 .asx .t{font-weight:700;color:var(--ink)}.asx .k{font-weight:700;color:var(--mut);font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;display:block}
@@ -67,7 +69,7 @@ const PAGE_CSS = String.raw`
 export function auditUploadHtml({ token, ship, crew }) {
   return HEAD(AUDIT_NAME + " · " + ship) + "<style>" + AUDIT_CSS + PAGE_CSS + `</style></head><body>
 <header class="appbar"><div class="appbar-in"><span class="brand">${markSvg(36)}<b>${esc(AUDIT_NAME)}</b></span><span class="chip duec" id="due"></span></div></header>
-<div id="testslot"></div>
+<div id="testslot"></div><div id="appslot"></div>
 <main class="wrap"><section class="crew-grid"><div class="sec main-col" id="main"><div class="sec"><span class="eyebrow">Before the audit</span><h1 class="h1">${esc(ship)}</h1><p class="lead">${esc(crew || "")}</p></div><div class="card clip"><div class="sk"></div><div class="sk"></div></div></div><aside class="sec side-col" id="side"></aside></section></main>
 <div id="dockslot"></div><div class="toast" id="toast"></div>
 <script>window.__T=${JSON.stringify(String(token))};window.__IC=${JSON.stringify(ICONS)};</script>
@@ -84,6 +86,17 @@ const SCRIPT = String.raw`
 (function () {
   "use strict";
   var T = window.__T, IC = window.__IC || {}, S = null, busy = {}, pend = {}, openDown = {}, timer = null, filter = "todo", picked = false, find = "", addOpen = false, faq = 0;
+  // A BROWSER THAT CANNOT CHOOSE A FILE (6 Nov 2026, Mark John Bornea, Independence: "he clicks the box to choose the file ..
+  // is not able to choose the file"). The box opens the picker in Chrome, Edge and Safari; a mail or chat app's own browser on
+  // Android shows the page and never opens one, and a locked desk can block file dialogs. So: the page says so at the top
+  // when it is inside an Android app (INAPP: the WebView's "; wv)" or Facebook / Instagram / Line / WeChat); a tap that opened
+  // nothing (no blur, no hidden page, no file, no cancel within PICK_MS) says so under that box; a file dropped on a box is
+  // sent for that box. iOS picks files in every browser and its sheet does not blur the page: no watch there.
+  var NAV = typeof navigator !== "undefined" ? navigator : {}, UA = String(NAV.userAgent || "");
+  var IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && NAV.maxTouchPoints > 1);
+  var MOBILE = IOS || /Android|Mobile/.test(UA);
+  var INAPP = /Android/.test(UA) && (/; wv\)/.test(UA) || /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger/.test(UA));
+  var PICK_MS = 6000, noPick = {}, watch = null;
   var $ = function (id) { return document.getElementById(id); };
   function ic(n, cls) { return (IC[n] || "").replace("<svg ", '<svg class="ic' + (cls ? " " + cls : "") + '" '); }
   function esc(v) { return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -136,6 +149,7 @@ const SCRIPT = String.raw`
     else { cls += " bad"; chip = '<span class="chip r">Send again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     var input = (S.status === "sent" && !m.down && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + (kind === "p43" ? "Pattern 43" : "Machine Management List") + " for " + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
     var fix = s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !b && s.say ? '<div class="fixl">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>" : "";
+    if (noPick[k] && input && !(s && s.read_state === "ok")) fix += '<div class="fixl">' + ic("f:warning-circle") + "<span>Nothing opened? This browser is not letting you choose a file. Open the link in Chrome" + (MOBILE ? "" : " or Edge, or drop the file on the box") + ". Still stuck: reply to the email with the file.</span></div>";
     return '<label class="' + cls + '">' + input + '<div style="min-width:0"><b>' + label + '</b><div class="xs">' + sub + "</div></div>" + chip + bar + "</label>" + fix + (kind === "p43" && !m.down && !b ? assess(s) : "");
   }
   /* what the scan shows, told to the crew the moment it is read (R1, Miguel 23 Oct 2026): built by the server from HON's
@@ -210,6 +224,7 @@ const SCRIPT = String.raw`
   function draw() {
     head();
     $("testslot").innerHTML = S.test ? '<div class="offl"><div>' + ic("f:warning-circle") + "Test mode. This page is real; the request went to the auditor only.</div></div>" : "";
+    $("appslot").innerHTML = INAPP && S.status === "sent" ? '<div class="offl app"><div>' + ic("f:warning-circle") + "<span>This page is open inside an app, and the app cannot choose a file. Tap &#8942; at the top, then Open in Chrome. Or copy the link and paste it in Chrome.</span>" + '<button type="button" class="btn pri s" id="copylink">Copy the link</button></div></div>' : "";
     var fn = esc(first(S.crew)), af = esc(first(S.auditor));
     var h = '<div class="sec"><span class="eyebrow">Before ' + af + "&#8217;s visit</span>";
     if (S.status !== "sent") {
@@ -229,6 +244,7 @@ const SCRIPT = String.raw`
 
   function send(file, serial, kind) {
     var k = serial + "|" + kind;
+    stopWatch(); delete noPick[k];
     if (file.size > 24 * 1024 * 1024) { toast("The file is " + Math.round(file.size / 1048576) + " MB; the limit is 24 MB. Scan at a lower resolution."); return; }
     busy[k] = { pct: 0 }; draw();
     var x = new XMLHttpRequest();
@@ -279,7 +295,35 @@ const SCRIPT = String.raw`
     head(); progress(); clearTimeout(timer); timer = setTimeout(flush, 800);
   }
 
-  document.addEventListener("change", function (e) { var t = e.target; if (t.type === "file" && t.files && t.files[0]) send(t.files[0], t.getAttribute("data-serial"), t.getAttribute("data-kind")); });
+  document.addEventListener("change", function (e) { var t = e.target; if (t.type === "file") stopWatch(); if (t.type === "file" && t.files && t.files[0]) send(t.files[0], t.getAttribute("data-serial"), t.getAttribute("data-kind")); });
+  // the picker opened if the page lost focus (a computer's dialog), was hidden (Android's picker) or heard "cancel" (closed empty)
+  function stopWatch() { if (!watch) return; clearTimeout(watch.t); watch = null; window.removeEventListener("blur", stopWatch); document.removeEventListener("visibilitychange", stopWatch); }
+  function watchPicker(t) {
+    if (IOS) return;
+    stopWatch();
+    var k = t.getAttribute("data-serial") + "|" + t.getAttribute("data-kind");
+    watch = { k: k, t: setTimeout(function () { var w = watch; stopWatch(); if (w) { noPick[w.k] = 1; draw(); } }, PICK_MS) };
+    window.addEventListener("blur", stopWatch); document.addEventListener("visibilitychange", stopWatch);
+  }
+  // "cancel" = a picker that opened and closed empty: it opened after all, so the line under the box goes
+  document.addEventListener("cancel", function (e) { var t = e.target; if (!t || t.type !== "file") return; stopWatch(); var k = t.getAttribute("data-serial") + "|" + t.getAttribute("data-kind"); if (noPick[k]) { delete noPick[k]; draw(); } });
+  // the second way in on a computer: drop the file on its box (the row of that press and that document)
+  function hasFiles(e) { var d = e.dataTransfer; return !!(d && d.types && Array.prototype.indexOf.call(d.types, "Files") >= 0); }
+  function boxOf(e) { var r = e.target && e.target.closest ? e.target.closest("label.up") : null; var i = r && r.querySelector("input[type=file]"); return i ? { row: r, input: i } : null; }
+  document.addEventListener("dragover", function (e) { if (!hasFiles(e)) return; e.preventDefault(); var b = boxOf(e); if (b && b.row.classList && !b.row.classList.contains("drop")) b.row.classList.add("drop"); });
+  document.addEventListener("dragleave", function (e) { var b = boxOf(e); if (b && b.row.classList) b.row.classList.remove("drop"); });
+  document.addEventListener("drop", function (e) {
+    if (!hasFiles(e)) return; e.preventDefault();
+    var b = boxOf(e), f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!b || !f) { toast("Drop it on the box of the press it belongs to."); return; }
+    send(f, b.input.getAttribute("data-serial"), b.input.getAttribute("data-kind"));
+  });
+  function copyLink() {
+    var u = String(location.href || "");
+    var done = function () { toast("Link copied. Paste it in Chrome."); }, fail = function () { toast("Copy the address from the email, and paste it in Chrome."); };
+    if (NAV.clipboard && NAV.clipboard.writeText) { NAV.clipboard.writeText(u).then(done, fail); return; }
+    try { var ta = document.createElement("textarea"); ta.value = u; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); var ok = document.execCommand("copy"); document.body.removeChild(ta); if (ok) done(); else fail(); } catch (x) { fail(); }
+  }
   document.addEventListener("input", function (e) {
     var t = e.target;
     if (t.getAttribute && t.getAttribute("data-part")) { t.value = t.value.replace(/[^0-9]/g, "").slice(0, 5); setCount(t.getAttribute("data-part"), t.value); }
@@ -287,7 +331,9 @@ const SCRIPT = String.raw`
     if (t.id === "find") { find = t.value; var cr = $("crows"); if (cr) cr.innerHTML = rowsFor(); }
   });
   document.addEventListener("click", function (e) {
+    if (e.target && e.target.type === "file") { watchPicker(e.target); return; }
     var t = e.target.closest("button"); if (!t) return;
+    if (t.id === "copylink") { copyLink(); return; }
     if (t.hasAttribute("data-f")) { flush(); filter = t.getAttribute("data-f"); picked = true; draw(); return; }
     if (t.hasAttribute("data-faq")) { var i = Number(t.getAttribute("data-faq")); faq = faq === i ? -1 : i; $("side").innerHTML = side(); return; }
     if (t.id === "xopen") { addOpen = !addOpen; draw(); var xt = $("xt"); if (xt) xt.focus(); return; }

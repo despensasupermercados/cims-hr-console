@@ -1875,6 +1875,18 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   quality, not on a mark …" and that the auditor sees the same reading. Built in code from HON's measurement, the same lines
   Dexter's app shows (`p43Lines`) — no model writes it, nothing is guessed, never "replace". Pinned by
   `test/audit_request.test.js`.
+- **A BROWSER THAT CANNOT CHOOSE A FILE IS SAID, NEVER SILENT** (6 Nov 2026, Mark John Bornea, Independence; Miguel: "when he
+  clicks the box to chose the file.. is not able to chose the file", then "can we prevent this to happen again"). His request
+  received no file and no count; the page, rebuilt in Chromium with his real request, opens the chooser on a tap on a desktop, an
+  iPhone and an Android phone — so the box fails only where the BROWSER cannot pick a file: a mail or chat app's own browser on
+  Android, or a desk that blocks file dialogs (Darryl Ramos, Constellation, HON, 1 Oct 2026). The crew's page (`audit_upload_ui.js`)
+  now: (1) inside an Android app's browser (the WebView's "; wv)", Facebook / Instagram / Line / WeChat) says so at the top with
+  "Open in Chrome" and **Copy the link**; (2) a tap after which the page neither lost focus, nor was hidden, nor got a file or a
+  "cancel" within `PICK_MS` = 6 s says "Nothing opened?" under THAT box (Chrome / Edge, drop the file, or reply to the email with
+  it) — never on an iPhone, whose picker is a sheet that does not blur the page; a "cancel" or a file clears it; (3) a file DROPPED
+  on a box on a computer is sent for that press and document. **Every open of the page is logged** (`activity_log`
+  `audit_page_open`: the request id and the browser's own User-Agent, no crew id), so the next "the box does nothing" is read
+  from the log, never guessed. Pinned by `test/audit_file_picker.test.js`, `test/audit_request.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

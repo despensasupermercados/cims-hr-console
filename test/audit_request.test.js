@@ -37,9 +37,9 @@ const html = (b, status = 200) => new Response(b, { status, headers: { "Content-
 const BOARD = { sections: [{ ship: "Oasis", crew: [{ agency_id: "SC-1", current: true, aboard: true }] }, { ship: "Apex", crew: [] }] };
 function setup({ live = false, reads, board = BOARD } = {}) {
   const { db, DB } = d1();
-  const sent = [], ctl = { mail: true, failed: [] };
+  const sent = [], ctl = { mail: true, failed: [] }, logs = [];
   const env = { DB, TIMECARD_DB: TC, HON: fakeHon(reads), AUDIT_FILES: R2(), AUDIT_TO: "ray@dg3.com, rolando@dg3.com, miguel@dg3.com", AUDIT_REQUEST_CC: "rolando@dg3.com, ray@dg3.com", AUDIT_LIVE: live ? "true" : undefined };
-  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => board,
+  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async (...a) => { logs.push(a); }, rotationSections: async () => board,
     sendViaMailer: async (e, env2) => { if (!ctl.mail) { ctl.failed.push(env2 || e); return { ok: false, error: "mailer down" }; } sent.push(env2 || e); return { ok: true }; } });
   // sendViaMailer(env, envelope): keep the envelope
   R._sent = sent;
@@ -48,7 +48,7 @@ function setup({ live = false, reads, board = BOARD } = {}) {
     const req = new Request(u, { method, headers: Object.assign(body instanceof Uint8Array ? {} : { "Content-Type": "application/json" }, headers), body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body) });
     return R.handle(u.pathname, req, env, u, session);
   };
-  return { R, env, db, sent, call, ctl };
+  return { R, env, db, sent, call, ctl, logs };
 }
 async function makeRequest(t) {
   const r = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json();
@@ -101,6 +101,29 @@ test("the seafarer's state is BLIND: no on-hand quantity anywhere in what he rec
   assert.doesNotMatch(raw, /"5"|:5[,}]|:2[,}]/, "OBP's quantities never reach the crew");
   const pg = await t.call("GET", "/audit/u/" + token, undefined, null);
   assert.equal(pg.status, 200); assert.doesNotMatch(await pg.text(), /on_hand/);
+});
+
+// 6 Nov 2026 (Mark John Bornea, Independence: "he clicks the box .. is not able to choose the file"): nothing reached the
+// console and nothing said which browser he was in. Each open of the page is kept with the browser it came from, so the next
+// "the box does nothing" is read from the log, never guessed. The page's own reads (state, saves) are not logged.
+test("each open of the crew's page is logged with its browser; the page's own reads are not", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  t.logs.length = 0;
+  const ua = "Mozilla/5.0 (Linux; Android 13; SM-A536E Build/TP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/119.0 Mobile Safari/537.36";
+  const pg = await t.call("GET", "/audit/u/" + token, undefined, null, { "user-agent": ua });
+  assert.equal(pg.status, 200);
+  const open = t.logs.filter((l) => l[2] === "audit_page_open");
+  assert.equal(open.length, 1);
+  assert.equal(open[0][1], null, "nobody signed in: the crew's link");
+  assert.ok(open[0][3].startsWith(id + " "), "the request it was opened for");
+  assert.ok(open[0][3].includes("Android 13") && open[0][3].includes("; wv)"), "the browser, as it said itself");
+  assert.ok(!/SC-1/.test(open[0][3]), "no crew id: the line never lands in the profile's who-did-what as a person's action");
+  await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null, { "user-agent": ua });
+  assert.equal(t.logs.filter((l) => l[2] === "audit_page_open").length, 1, "the state read is not an open");
+  const bad = await t.call("GET", "/audit/u/" + "x".repeat(20), undefined, null, { "user-agent": ua });
+  assert.equal(bad.status, 404);
+  assert.equal(t.logs.filter((l) => l[2] === "audit_page_open").length, 1, "a link that is not one logs nothing");
 });
 
 test("the gate: reads by HON, the count, then complete once and ONE documents-in email", async () => {
