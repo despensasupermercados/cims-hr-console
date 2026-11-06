@@ -578,6 +578,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         h += items.length ? items.map(function (i) { return '<div class="finding"><div class="hstack"><span class="chip a">Pattern 43</span><b class="h4">' + esc(sentence(i.head)) + "</b></div>" + p43More(i) + "</div>"; }).join("")
           : '<div class="finding ok"><div class="hstack"><span class="chip g">Pattern 43</span><b class="h4">' + (m.p43 ? "No mark found" : "Not read") + "</b></div></div>";
         h += life.length ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">' + life.length + (life.length === 1 ? " part" : " parts") + ' past its rated life</b></div><p class="txt">' + life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%"; }).join(" · ") + "</p></div>"
+          : m.lifeUnverified ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">Part life not verified</b></div><p class="sm">The figures read from this list did not pass their checks, so none is shown.</p></div>'
           : (m.lifeRead === false ? '<div class="finding"><div class="hstack"><span class="chip a">Management list</span><b class="h4">Part life not read</b></div><p class="sm">The file on record has no parts-life page (Developing unit count, Special parts counter: pages 5 and 7 to 15 of the Machine Management List). Ask for the whole list.</p></div>'
           : '<div class="finding ok"><div class="hstack"><span class="chip g">Management list</span><b class="h4">' + (m.lifeRead ? "No part past its rated life" : "Not read") + "</b></div></div>");
         if (items.length || life.length) h += '<p class="txt"><b>Recommendation:</b> have this machine looked at. Parts are changed on copy quality, not on a count.</p>';
@@ -852,6 +853,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
         }
         if (!m.down) h += (m.life || []).length
           ? '<div class="info line-t"><span class="xs">Management list · ' + m.life.length + (m.life.length === 1 ? " part" : " parts") + ' past rated life · information</span><span class="sm">' + m.life.map(function (x) { return esc(AR.partName(x.name)) + " " + esc(x.pct) + "%" + (x.cover ? " (" + esc(x.cover) + ")" : " (not on the OBP list)"); }).join(" · ") + ". Copy quality decides, never the counter.</span></div>"
+          : m.lifeUnverified ? '<div class="info line-t"><span class="xs">Management list</span><span class="sm">Part life not verified: the figures read from this list did not pass their checks, so none is shown.</span></div>'
           : (m.lifeRead === false ? '<div class="info line-t"><span class="xs">Management list</span><span class="sm">Part life not read: the file on record has no parts-life page. Read the counters on the machine if you can.</span></div>'
           : '<div class="info line-t"><span class="xs">Management list</span><span class="sm">' + (m.lifeRead ? "No part past its rated life. Parts are changed on copy quality, not on a count." : "Not read.") + "</span></div>");
       }
