@@ -656,7 +656,19 @@ test("read version 5: a list whose two readings disagreed is the right document,
   assert.equal(mmlReadState({ ...V5_FAILED, lifeCheck: [] }).read_state, "wrong_doc");
 });
 
-test("a Management List read before version 5 is read again by the sweep, and only an ok answer replaces it", async () => {
+// HON's read version 6, the same evening: the life page read twice, two ways; the second side is named `second`
+const PAIR6 = (key, front, second, ok) => ({ key, front, second, ok });
+const V6_FAILED = { ...V5_FAILED, version: 6, lifeCheck: [PAIR6("developer/K", "237 (%)", "6,353,991", false), PAIR6("belt", "10 (%)", "10", true)] };
+test("read version 6: the second side is the life page's copied row, kept as evidence; a v5 pair still reads", () => {
+  const st = mmlReadState(V6_FAILED);
+  assert.equal(st.read_state, "ok");
+  assert.deepEqual(st.summary.check, [["developer/K", "237 (%)", "6,353,991", false], ["belt", "10 (%)", "10", true]]);
+  assert.deepEqual(mmlReadState(V5_FAILED).summary.check[0], ["drum/Y", "188 (%)", "183", false], "a v5 answer keeps its counter side");
+  // the crew is pointed at the page the reader reads
+  assert.match(mmlReadState({ ...V6_FAILED, lifeCheck: [] }).say, /Maintenance counter page/);
+});
+
+test("a Management List read before version 6 is read again by the sweep, and only an ok answer replaces it", async () => {
   const t = setup({ reads: { mml: { ...MARK_M1 } } });
   const { token } = await makeRequest(t);
   const ids = {};
@@ -671,24 +683,28 @@ test("a Management List read before version 5 is read again by the sweep, and on
   assert.equal((await t.R.sweep(t.env)).reread, 0);
   assert.equal(t.env.HON.calls.length - calls0, 1, "one try, then it waits for the next hour");
   assert.equal(row().read_version, 4);
-  // HON on version 5, the two readings disagreed: the read is replaced, the crew's state is unchanged, nothing shown
+  // HON on version 5 is older than the console asks for now: nothing replaced, it waits for the hour
   t.env.HON = fakeHon({ mml: V5_FAILED });
+  assert.equal((await t.R.sweep(t.env)).reread, 0);
+  assert.equal(row().read_version, 4);
+  // HON on version 6, the two readings disagreed: the read is replaced, the crew's state is unchanged, nothing shown
+  t.env.HON = fakeHon({ mml: V6_FAILED });
   assert.equal((await t.R.sweep(t.env)).reread, 1);
   const r = row();
-  assert.equal(r.read_state, "ok"); assert.equal(r.read_version, 5);
+  assert.equal(r.read_state, "ok"); assert.equal(r.read_version, 6);
   assert.equal(JSON.parse(r.read_json).summary.lifeChecks, 2);
-  assert.equal((await t.R.sweep(t.env)).reread, 0, "read once at version 5, never again");
+  assert.equal((await t.R.sweep(t.env)).reread, 0, "read once at version 6, never again");
   // an answer that is not ok never replaces a good read: it is noted and the row is not asked again
   const t2 = setup({ reads: { mml: { ...MARK_M1 } } });
   const q = await makeRequest(t2);
   const u2 = await (await upload(t2, q.token, "S1", "mgmt")).json();
   await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u2.id, {}, null);
-  t2.env.HON = fakeHon({ mml: { ok: true, version: 5, kind: "settings-list" } });
+  t2.env.HON = fakeHon({ mml: { ok: true, version: 6, kind: "settings-list" } });
   await t2.R.sweep(t2.env);
   const r2 = t2.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(u2.id);
   assert.equal(r2.read_state, "ok", "a good read is never downgraded by a re-read");
   assert.equal(JSON.parse(r2.read_json).reread.read_state, "wrong_doc");
-  assert.equal(r2.read_version, 5);
+  assert.equal(r2.read_version, 6);
   const mmlCalls = () => t2.env.HON.calls.filter((c) => c[0] === "mml").length;
   const before = mmlCalls();
   await t2.R.sweep(t2.env);
