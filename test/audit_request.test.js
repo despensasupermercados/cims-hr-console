@@ -10,7 +10,7 @@ import { applyOverride } from "../src/override.js";
 import { auditRequestEmail } from "../src/emails/hr.audit.request.v1.js";
 import { docsInEmail } from "../src/emails/hr.audit.docsin.v1.js";
 import { overdueEmail } from "../src/emails/hr.audit.overdue.v1.js";
-import { p43ReadState, mmlReadState, coverFor, p43Assess } from "../src/audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess, shownLife } from "../src/audit_read.js";
 
 function d1() {
   const db = new DatabaseSync(":memory:");
@@ -631,4 +631,66 @@ test("an unverified Management List read: the crew is told it is in, the team se
   for (const kind of ["p43", "mgmt"]) { const u = await (await upload(t2, q.token, "S1", kind)).json(); await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u.id, {}, null); }
   const v2 = await (await t2.call("GET", "/api/audit/visit?id=" + q.id)).json();
   assert.equal(v2.machines[0].life[0].pct, 140); assert.equal(v2.machines[0].lifeUnverified, false);
+});
+
+// HON's read version 5 (6 Nov 2026): each life figure is read twice, from the life blocks near the front of the list and
+// from the Special parts counter, and kept only where the two agree. A list whose figures were compared and did NOT agree
+// keeps no row — it is still the right document: "not verified", never "no parts-life page, send it again".
+const PAIR = (key, front, counter, ok) => ({ key, front, counter, ok });
+const V5_FAILED = { ok: true, version: 5, kind: "machine-list", lifeVerified: false, lifeChecked: false, lifeOver: [],
+  lifeCheck: [PAIR("drum/Y", "188 (%)", "183", false), PAIR("drum/M", "63 (%)", "63", true)], read: { ok: true, lifeItems: [] } };
+const V5_HELD = { ok: true, version: 5, kind: "machine-list", lifeVerified: false, lifeChecked: true, lifeOver: [],
+  lifeCheck: [PAIR("drum/Y", "188 (%)", "188", true)], read: { ok: true, lifeItems: [{ name: "Drum Unit/Y(%)", partNo: "ACE60Y1", pct: 188 }] } };
+test("read version 5: a list whose two readings disagreed is the right document, part life not verified", () => {
+  const st = mmlReadState(V5_FAILED);
+  assert.equal(st.read_state, "ok", "never 'no parts-life page was found'");
+  assert.equal(st.say, "Read. Thank you.");
+  assert.equal(st.summary.lifeChecks, 2); assert.equal(st.summary.lifeChecked, false);
+  assert.deepEqual(st.summary.check[0], ["drum/Y", "188 (%)", "183", false], "the evidence is kept beside the read");
+  const shown = shownLife(st.summary);
+  assert.equal(shown.lifeUnverified, true); assert.deepEqual(shown.lifeOver, []);
+  // a held read (both readings agreed, HON's switch still off) reads the same way here: no %, not verified
+  const held = mmlReadState(V5_HELD);
+  assert.equal(held.read_state, "ok"); assert.equal(held.summary.lifeChecked, true); assert.equal(shownLife(held.summary).lifeUnverified, true);
+  // nothing compared and nothing kept is still "no parts-life page"
+  assert.equal(mmlReadState({ ...V5_FAILED, lifeCheck: [] }).read_state, "wrong_doc");
+});
+
+test("a Management List read before version 5 is read again by the sweep, and only an ok answer replaces it", async () => {
+  const t = setup({ reads: { mml: { ...MARK_M1 } } });
+  const { token } = await makeRequest(t);
+  const ids = {};
+  for (const kind of ["p43", "mgmt"]) {
+    const u = await (await upload(t, token, "S1", kind)).json(); ids[kind] = u.id;
+    await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null);
+  }
+  const row = () => t.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(ids.mgmt);
+  assert.equal(row().read_version, 4);
+  // HON still answers version 4: nothing is replaced and the sweep stops asking for the hour
+  const calls0 = t.env.HON.calls.length;
+  assert.equal((await t.R.sweep(t.env)).reread, 0);
+  assert.equal(t.env.HON.calls.length - calls0, 1, "one try, then it waits for the next hour");
+  assert.equal(row().read_version, 4);
+  // HON on version 5, the two readings disagreed: the read is replaced, the crew's state is unchanged, nothing shown
+  t.env.HON = fakeHon({ mml: V5_FAILED });
+  assert.equal((await t.R.sweep(t.env)).reread, 1);
+  const r = row();
+  assert.equal(r.read_state, "ok"); assert.equal(r.read_version, 5);
+  assert.equal(JSON.parse(r.read_json).summary.lifeChecks, 2);
+  assert.equal((await t.R.sweep(t.env)).reread, 0, "read once at version 5, never again");
+  // an answer that is not ok never replaces a good read: it is noted and the row is not asked again
+  const t2 = setup({ reads: { mml: { ...MARK_M1 } } });
+  const q = await makeRequest(t2);
+  const u2 = await (await upload(t2, q.token, "S1", "mgmt")).json();
+  await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u2.id, {}, null);
+  t2.env.HON = fakeHon({ mml: { ok: true, version: 5, kind: "settings-list" } });
+  await t2.R.sweep(t2.env);
+  const r2 = t2.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(u2.id);
+  assert.equal(r2.read_state, "ok", "a good read is never downgraded by a re-read");
+  assert.equal(JSON.parse(r2.read_json).reread.read_state, "wrong_doc");
+  assert.equal(r2.read_version, 5);
+  const mmlCalls = () => t2.env.HON.calls.filter((c) => c[0] === "mml").length;
+  const before = mmlCalls();
+  await t2.R.sweep(t2.env);
+  assert.equal(mmlCalls(), before, "not asked again");
 });
