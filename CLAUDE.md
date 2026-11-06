@@ -1915,7 +1915,13 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   and is never "no part past its rated life" — it says **Part life not verified** (`lifeUnverified`; the email's tile reads "–
   part life not verified", a clean press reads "No marks"); the crew is told "Read. Thank you.", never a count of parts. Every read
   stored before 6 Nov 2026 is unverified. HON marks a read verified once its reader checks the figures against the document (the
-  rebuild, cims-hon). Pinned by `test/audit_request.test.js` (Mark's stored read, end to end).
+  rebuild, cims-hon). Pinned by `test/audit_request.test.js` (Mark's stored read, end to end). **HON's read version 5** (cims-hon, 6 Nov 2026) reads each life figure twice, from the list's life blocks and from its
+  Special parts counter, and keeps it only where the two agree; HON's `LIFE_LIVE` switch keeps every figure held until the
+  stored v5 reads match nine lists read by eye. Here: `mmlReadState` treats a list whose figures were compared and did not
+  agree (`lifeCheck` without rows) as the right document, "not verified", never "no parts-life page"; the summary keeps
+  `lifeChecks`, `lifeChecked` and each figure's two sides (`check`); the hourly sweep re-reads, newest first, two an hour,
+  every OK Management List read below `MGMT_READ_VERSION` = 5 (`rereadUpload`), stops for the hour while HON still answers
+  an older version, and never lets a re-read that is not "ok" replace a good read (it is noted on `read_json.reread`).
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

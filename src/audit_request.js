@@ -29,6 +29,11 @@ import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
 export const LINK_DAYS = 14;
 export const RESEND_MIN = 15;             // a request is not re-sent sooner than this              // the upload page stays open this long after the request
 const READ_SWEEP_MAX = 3;
+// HON's Management List read version 5 (6 Nov 2026) reads each life figure twice and keeps it only where the two places
+// on the list agree. A list read before it is read again by the hourly sweep, a few an hour, newest first; an answer
+// that is not "ok" never replaces the read the crew already has.
+export const MGMT_READ_VERSION = 5;
+const REREAD_MAX = 2;
 export const READ_TRIES = 3;              // a read that fails this many times is "send it again", never "Reading…" for ever
 export const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // the page shrinks a photo to ~300 KB; this only refuses the absurd
 export const AUTO_SUBMIT_HOURS = 6;       // everything in, nobody tapped Send: the sweep sends it after this long idle
@@ -125,7 +130,7 @@ export function installAuditRequest(deps) {
   }
   // A machine list's life pages were read when the read kept life rows, or listed a part past its rated life (a read filed
   // before lifeRows was kept still carries lifeOver: it read the pages; 23 Oct 2026 review).
-  const lifeWasRead = (s) => !!s && (s.lifeRows > 0 || (Array.isArray(s.lifeOver) && s.lifeOver.length > 0));
+  const lifeWasRead = (s) => !!s && (s.lifeRows > 0 || s.lifeChecks > 0 || (Array.isArray(s.lifeOver) && s.lifeOver.length > 0));
   // The newest live file per machine and kind, with what the crew is told about it.
   function slot(ups, serial, kind) {
     const u = ups.filter((x) => x.serial === serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
@@ -639,6 +644,26 @@ export function installAuditRequest(deps) {
     return { ok: true, read_state: st.read_state, say: st.say };
   }
 
+  // A Management List read by an older HON reader, read again. Only an "ok" answer replaces the stored read; any other
+  // answer from the current reader is noted and the row is not asked again (no hourly vision call on the same file).
+  async function rereadUpload(env, uploadId) {
+    const u = await env.DB.prepare("SELECT * FROM audit_upload WHERE id=?").bind(uploadId).first();
+    if (!u || u.kind !== "mgmt" || u.read_state !== "ok") return "skip";
+    const obj = env.AUDIT_FILES ? await env.AUDIT_FILES.get(u.r2_key) : null;
+    if (!obj) return "skip";
+    const res = await hon(env, "managementList", new Uint8Array(await obj.arrayBuffer()), u.content_type || "application/pdf");
+    if (!res || !(Number(res.version) >= MGMT_READ_VERSION)) return "older";
+    const st = mmlReadState(res);
+    if (st.read_state === "ok") {
+      await env.DB.prepare("UPDATE audit_upload SET read_json=?, read_at=?, read_version=? WHERE id=? AND read_state='ok'")
+        .bind(JSON.stringify({ say: st.say, summary: st.summary || null }), now(), res.version, u.id).run();
+      return "ok";
+    }
+    const kept = Object.assign({}, J(u.read_json, {}) || {}, { reread: { at: now(), version: res.version, read_state: st.read_state, say: st.say } });
+    await env.DB.prepare("UPDATE audit_upload SET read_json=?, read_version=? WHERE id=? AND read_state='ok'").bind(JSON.stringify(kept), res.version, u.id).run();
+    return "kept";
+  }
+
   // The gate. Complete (once — the UPDATE is the lock), then the documents-in email. Called when the crew taps Send
   // (submit) or by the sweep — never on the last keystroke: a "12" typed with a pause after the "1" filed 1 and the page
   // then refused the correction (16 Oct 2026 review).
@@ -785,6 +810,15 @@ export function installAuditRequest(deps) {
     for (const p of pend) {
       if (Date.now() - t0 > 240000) break;
       try { const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(p.request_id).first(); const r = await readUpload(env, req, p.id); if (r.ok) out.read++; } catch (e) { console.error("audit_sweep_read", p.id, (e && e.message) || e); }
+    }
+    out.reread = 0;
+    const stale = (await env.DB.prepare("SELECT u.id FROM audit_upload u JOIN audit_request r ON r.id=u.request_id WHERE u.kind='mgmt' AND u.superseded_at IS NULL AND u.read_state='ok' AND COALESCE(u.read_version, 0) < ? AND r.status IN ('sent','complete') ORDER BY u.at DESC LIMIT ?").bind(MGMT_READ_VERSION, REREAD_MAX).all().catch(() => ({ results: [] }))).results || [];
+    for (const p of stale) {
+      if (Date.now() - t0 > 240000) break;
+      let r;
+      try { r = await rereadUpload(env, p.id); } catch (e) { console.error("audit_sweep_reread", p.id, (e && e.message) || e); break; }
+      if (r === "older") break; // HON is not on read version 5 yet (or away): the next hour tries again
+      if (r === "ok") out.reread++;
     }
     // everything in and nobody tapped Send: sent after AUTO_SUBMIT_HOURS idle, or once the deadline has passed
     for (const req of open) {
@@ -966,5 +1000,5 @@ export function installAuditRequest(deps) {
     return null;
   }
 
-  return { handle, sweep, _internal: { crewState, stateOf, maybeComplete, readUpload, sendDocsIn, byToken, closedWhy, visitCtx, sendFiledMails, sendFollowups } };
+  return { handle, sweep, _internal: { crewState, stateOf, maybeComplete, readUpload, rereadUpload, sendDocsIn, byToken, closedWhy, visitCtx, sendFiledMails, sendFollowups } };
 }
