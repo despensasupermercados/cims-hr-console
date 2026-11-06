@@ -1884,7 +1884,10 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   "Open in Chrome" and **Copy the link**; (2) a tap after which the page neither lost focus, nor was hidden, nor got a file or a
   "cancel" within `PICK_MS` = 6 s says "Nothing opened?" under THAT box (Chrome / Edge, drop the file, or reply to the email with
   it) — never on an iPhone, whose picker is a sheet that does not blur the page; a "cancel" or a file clears it; (3) a file DROPPED
-  on a box on a computer is sent for that press and document. **Every open of the page is logged** (`activity_log`
+  on a box on a computer is sent for that press and document — and SAID (Miguel, the same afternoon, after seven opens from Firefox on
+  a Linux ship computer and still no file: "can u make it drag and drop thise rectangles .. besides clicking"): on a computer every
+  empty box reads "Drag here or click", every box lights up green the moment a file is dragged over the page (`body.dragfiles`, a
+  depth count), and the "Nothing opened?" line leads with dragging the file from the folder. **Every open of the page is logged** (`activity_log`
   `audit_page_open`: the request id and the browser's own User-Agent, no crew id), so the next "the box does nothing" is read
   from the log, never guessed. Pinned by `test/audit_file_picker.test.js`, `test/audit_request.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on

@@ -33,6 +33,7 @@ const PAGE_CSS = String.raw`
 .up .fn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .up .prog{grid-column:1 / -1}
 .up.drop{border-style:solid;border-color:var(--green);background:var(--greenbg)}
+body.dragfiles .up:not(.ok):not(.dn):not(.busy){border-color:var(--green);background:var(--greenbg)}
 .offl.app div{flex-wrap:wrap;align-items:flex-start;line-height:1.45}.offl.app div>span{flex:1 1 220px;min-width:0}.offl.app .ic{flex:none;margin-top:2px}.offl.app .btn{margin-left:auto}
 .asx{border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;gap:8px;font-size:13.5px;line-height:1.45}
 .asx.m{border-color:var(--amberm,var(--line));background:var(--amberbg)}
@@ -142,14 +143,14 @@ const SCRIPT = String.raw`
     var cls = "up", chip, sub, bar = "";
     if (m.down) { cls += " dn"; chip = '<span class="chip a">Reported down</span>'; sub = "Explained: " + esc(m.down); }
     else if (b) { cls += " busy"; chip = '<span class="chip n">' + (b.pct != null ? "Sending " + b.pct + "%" : esc(b.text)) + "</span>"; sub = b.pct != null ? "Keep this page open" : "HON is reading it"; if (b.pct != null) bar = '<div class="prog"><i style="width:' + b.pct + '%;background:var(--navy)"></i></div>'; }
-    else if (!s) { chip = '<span class="chip m">' + ic("cloud-arrow-up") + "Choose file</span>"; sub = kind === "p43" ? "12 pages, one PDF" : "Print it from the machine, then scan it"; }
+    else if (!s) { chip = '<span class="chip m">' + ic("cloud-arrow-up") + (MOBILE ? "Choose file" : "Drag here or click") + "</span>"; sub = kind === "p43" ? "12 pages, one PDF" : "Print it from the machine, then scan it"; }
     else if (s.read_state === "ok") { cls += " ok"; chip = '<span class="chip g">' + ic("b:check") + "Received</span>"; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     else if (s.read_state === "pending") { cls += " busy"; chip = '<span class="chip n">Reading</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     else if (s.read_state === "failed") { cls += " busy"; chip = '<span class="chip n">Trying again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     else { cls += " bad"; chip = '<span class="chip r">Send again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     var input = (S.status === "sent" && !m.down && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + (kind === "p43" ? "Pattern 43" : "Machine Management List") + " for " + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
     var fix = s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !b && s.say ? '<div class="fixl">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>" : "";
-    if (noPick[k] && input && !(s && s.read_state === "ok")) fix += '<div class="fixl">' + ic("f:warning-circle") + "<span>Nothing opened? This browser is not letting you choose a file. Open the link in Chrome" + (MOBILE ? "" : " or Edge, or drop the file on the box") + ". Still stuck: reply to the email with the file.</span></div>";
+    if (noPick[k] && input && !(s && s.read_state === "ok")) fix += '<div class="fixl">' + ic("f:warning-circle") + "<span>" + (MOBILE ? "Nothing opened? This browser is not letting you choose a file. Open the link in Chrome." : "Nothing opened? Drag the file from your folder onto this box instead. Or open the link in Chrome or Edge.") + " Still stuck: reply to the email with the file.</span></div>";
     return '<label class="' + cls + '">' + input + '<div style="min-width:0"><b>' + label + '</b><div class="xs">' + sub + "</div></div>" + chip + bar + "</label>" + fix + (kind === "p43" && !m.down && !b ? assess(s) : "");
   }
   /* what the scan shows, told to the crew the moment it is read (R1, Miguel 23 Oct 2026): built by the server from HON's
@@ -310,10 +311,15 @@ const SCRIPT = String.raw`
   // the second way in on a computer: drop the file on its box (the row of that press and that document)
   function hasFiles(e) { var d = e.dataTransfer; return !!(d && d.types && Array.prototype.indexOf.call(d.types, "Files") >= 0); }
   function boxOf(e) { var r = e.target && e.target.closest ? e.target.closest("label.up") : null; var i = r && r.querySelector("input[type=file]"); return i ? { row: r, input: i } : null; }
+  // Miguel, 6 Nov 2026 ("can u make it drag and drop thise rectangles .. besides clicking"): the moment a file is dragged over
+  // the page every empty box lights up (body.dragfiles); entering a child is not leaving the page, so it is counted.
+  var dragDepth = 0;
+  function dragOn(on) { var bd = document.body; if (bd && bd.classList) { if (on) bd.classList.add("dragfiles"); else bd.classList.remove("dragfiles"); } }
+  document.addEventListener("dragenter", function (e) { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; dragOn(true); });
   document.addEventListener("dragover", function (e) { if (!hasFiles(e)) return; e.preventDefault(); var b = boxOf(e); if (b && b.row.classList && !b.row.classList.contains("drop")) b.row.classList.add("drop"); });
-  document.addEventListener("dragleave", function (e) { var b = boxOf(e); if (b && b.row.classList) b.row.classList.remove("drop"); });
+  document.addEventListener("dragleave", function (e) { var b = boxOf(e); if (b && b.row.classList) b.row.classList.remove("drop"); if (hasFiles(e)) { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) dragOn(false); } });
   document.addEventListener("drop", function (e) {
-    if (!hasFiles(e)) return; e.preventDefault();
+    if (!hasFiles(e)) return; e.preventDefault(); dragDepth = 0; dragOn(false);
     var b = boxOf(e), f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (!b || !f) { toast("Drop it on the box of the press it belongs to."); return; }
     send(f, b.input.getAttribute("data-serial"), b.input.getAttribute("data-kind"));
