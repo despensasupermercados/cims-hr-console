@@ -28,7 +28,7 @@ function fakeHon(reads = {}) {
   return { calls,
     ship: async (s) => { calls.push(["ship", s]); return { ok: true, ship: "Oasis", presses: [{ serial: "S1", model: "C4070", label: "Machine # 1" }], obp: { asOf: "2026-10-13", lines: OBP, intransit: [{ part_number: "A1", qty: 1 }] } }; },
     pattern43: async () => { calls.push(["p43"]); return reads.p43 || { ok: true, version: 5, state: "clean", legend: { state: "clean", head: "NOTHING FOUND", items: [], line: "white dots, lines and uneven density, all 12 pages" } }; },
-    managementList: async () => { calls.push(["mml"]); return reads.mml || { ok: true, version: 4, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }], recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." }; },
+    managementList: async () => { calls.push(["mml"]); return reads.mml || { ok: true, version: 4, kind: "machine-list", lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }], recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." }; },
   };
 }
 const R2 = () => { const m = new Map(); return { m, put: async (k, b) => { m.set(k, new Uint8Array(b)); }, head: async (k) => (m.has(k) ? { size: m.get(k).length } : null), get: async (k) => (m.has(k) ? { arrayBuffer: async () => m.get(k).buffer } : null) }; };
@@ -518,10 +518,15 @@ test("a machine list with no life row is not 'no part past its rated life'", asy
   assert.equal(none.read_state, "wrong_doc");
   assert.match(none.say, /No parts-life page was found/);
   assert.equal(none.summary.lifeRows, 0);
-  const clean = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 40 }] } });
+  const clean = mmlReadState({ ok: true, kind: "machine-list", lifeVerified: true, lifeOver: [], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 40 }] } });
   assert.equal(clean.read_state, "ok"); assert.equal(clean.say, "Read. No part past its rated life."); assert.equal(clean.summary.lifeRows, 1);
-  const over = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
+  const over = mmlReadState({ ok: true, kind: "machine-list", lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
   assert.equal(over.say, "Read. 1 part past rated life, for the team.");
+  // 6 Nov 2026: a read HON did not verify tells the crew the file is in, never a count of parts or "no part past"
+  for (const r of [{ lifeOver: [] }, { lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }] }]) {
+    const u = mmlReadState({ ok: true, kind: "machine-list", ...r, read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
+    assert.equal(u.say, "Read. Thank you."); assert.equal(u.summary.lifeVerified, false);
+  }
 });
 
 // Miguel, 20 Oct 2026 ("ensure all is wired"): Kevin Jugao's stored management-list read still said "Read. No part past its
@@ -535,9 +540,14 @@ test("the request page never repeats an old read's 'No part past its rated life'
   const m = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
   assert.equal(m.mgmt.say, "Read, but no parts-life page was found: part life not read.");
   t.db.prepare("UPDATE audit_upload SET superseded_at='2026-10-16T13:00:00Z' WHERE id='u_old'").run();
-  ins("u_new", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeRows: 45, lifeOver: [], version: 4 } });
+  ins("u_new", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeRows: 45, lifeOver: [], lifeVerified: true, version: 4 } });
   const m2 = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
-  assert.equal(m2.mgmt.say, "Read. No part past its rated life.", "a read that carried life rows keeps its own words");
+  assert.equal(m2.mgmt.say, "Read. No part past its rated life.", "a verified read that carried life rows keeps its own words");
+  // 6 Nov 2026: the same read, not verified by HON (every read stored before that day), never repeats its own count
+  t.db.prepare("UPDATE audit_upload SET superseded_at='2026-10-16T14:00:00Z' WHERE id='u_new'").run();
+  ins("u_newer", { say: "Read. 19 parts past rated life, for the team.", summary: { kind: "machine-list", lifeRows: 63, lifeOver: [{ name: "Developing Unit/M(Distance %)", partNo: "AC57R702", pct: 5114, resets: 0 }], version: 4 } });
+  const m3 = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
+  assert.equal(m3.mgmt.say, "Read. Thank you.");
 });
 
 // R1 (Miguel, 23 Oct 2026: "is not that Rolando needs to approve .. is that you the AI tell the crew the assessment of it"):
@@ -573,4 +583,52 @@ test("R1: the crew's state carries the assessment on a read Pattern 43 only, and
   assert.equal(a.state, "findings"); assert.equal(a.items[0].title, "Lines along the feed in cyan · 1 line"); assert.match(a.after, /Dexter sees the same reading/);
   const pg = await (await t.call("GET", "/audit/u/" + token, undefined, null)).text();
   assert.match(pg, /function assess\(s\)/); assert.match(pg, /\.asx\{/);
+});
+
+// 6 Nov 2026, Independence (Mark John Bornea): the documents-in email told Ray, Rolando, Ohji, Jonathan, Miguel and Dexter
+// "72 parts past rated life" — six parts on one press at 6,387,753%, "times replaced" in the millions, "(Page)" counts read as
+// percentages. Miguel: "is it true these numbers percetages are so high ??", then "yes. all of it". HON's reader marks a read
+// it checked (lifeVerified); every other read shows no percentage and is never a clean press. The rows below are Mark's
+// Machine 1 read as stored in production (audit_upload au_fe494d42, 6 Nov 2026), a few of its 19.
+const MARK_M1 = { ok: true, version: 4, kind: "machine-list", read: { ok: true, lifeItems: new Array(63).fill({ name: "x (%)", pct: 1 }) },
+  lifeOver: [{ name: "Developing Unit/M(Distance %)", partNo: "AC57R702", pct: 5114, resets: 0 }, { name: "Developing Unit/Y(Distance %)", partNo: "AC57R702", pct: 1868, resets: 3246254 },
+    { name: "Drum/C(Page)", partNo: "AC57R732", pct: 857, resets: 1076861 }],
+  recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." };
+test("an unverified Management List read: the crew is told it is in, the team sees 'part life not verified', never a % or a clean press", async () => {
+  const t = setup({ reads: { mml: MARK_M1 } });
+  const { id, token } = await makeRequest(t);
+  for (const kind of ["p43", "mgmt"]) {
+    const u = await (await upload(t, token, "S1", kind)).json();
+    const r = await (await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null)).json();
+    assert.equal(r.read_state, "ok");
+    if (kind === "mgmt") assert.equal(r.say, "Read. Thank you.", "the crew is never told a count of parts from an unverified read");
+  }
+  const st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
+  assert.doesNotMatch(JSON.stringify(st), /past rated life|5114|1868/);
+  const before = t.sent.length;
+  await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "2", B2: "5" } }, null); // agrees with OBP: nothing else to look at
+  assert.equal((await (await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null)).json()).ok, true);
+  const mail = t.sent.slice(before).find((m) => m.templateId === "hr.audit.docsin.v1");
+  assert.ok(mail, "the documents-in email went");
+  const words = mail.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  assert.doesNotMatch(words, /5114|1868|857%|Developing Unit|Drum\/C/, "no figure from the unverified read");
+  assert.doesNotMatch(words, /past rated life/, "no count of parts past rated life");
+  assert.doesNotMatch(words, /no part past its rated life/i, "and never a clean press");
+  assert.match(words, /part life not verified/i);
+  assert.match(words, /did not pass their checks/);
+  assert.doesNotMatch(mail.subject, /to look at/, "an unverified read is nothing to look at: nothing was found");
+  assert.match(mail.text, /Management List part life not verified/);
+  // the visit and the items to confirm say the same
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  assert.deepEqual(v.machines[0].life, []); assert.equal(v.machines[0].lifeUnverified, true); assert.equal(v.machines[0].lifeRead, null);
+  const { beforeVisit } = await import("../src/audit_steps.js");
+  const items = beforeVisit({ machines: v.machines });
+  assert.ok(items.some((b) => /part life not verified/.test(b.t)));
+  assert.ok(!items.some((b) => /past rated life|part life not read/.test(b.t)));
+  // a read HON verified shows its rows, as before
+  const t2 = setup({ reads: { mml: { ...MARK_M1, lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }] } } });
+  const q = await makeRequest(t2);
+  for (const kind of ["p43", "mgmt"]) { const u = await (await upload(t2, q.token, "S1", kind)).json(); await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u.id, {}, null); }
+  const v2 = await (await t2.call("GET", "/api/audit/visit?id=" + q.id)).json();
+  assert.equal(v2.machines[0].life[0].pct, 140); assert.equal(v2.machines[0].lifeUnverified, false);
 });

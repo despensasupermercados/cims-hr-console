@@ -31,7 +31,7 @@ const OBP = [{ part_number: "A1", description: "Drum K", category: "Drum", on_ha
 const HON = {
   ship: async () => ({ ok: true, ship: "Oasis", presses: [{ serial: "S1", model: "C4070", label: "PROD 1" }], obp: { asOf: "2026-10-13", lines: OBP, intransit: [{ part_number: "A1", qty: 1 }] } }),
   pattern43: async () => ({ ok: true, version: 5, state: "findings", legend: { state: "findings", items: [{ head: "LINES ALONG THE FEED IN CYAN", where: "cyan half tone · green", part: "CYAN DRUM OR CHARGING POLE", check: { say: "an even line reads as the drum" } }] } }),
-  managementList: async () => ({ ok: true, version: 4, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140 }], recommendation: "Recommendation: have this machine looked at." }),
+  managementList: async () => ({ ok: true, version: 4, kind: "machine-list", lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140 }], recommendation: "Recommendation: have this machine looked at." }),
 };
 const R2 = () => { const m = new Map(); return { m, put: async (k, b) => { m.set(k, new Uint8Array(b)); }, head: async (k) => (m.has(k) ? { size: m.get(k).length } : null), get: async (k) => (m.has(k) ? { arrayBuffer: async () => m.get(k).buffer, body: null } : null) }; };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });

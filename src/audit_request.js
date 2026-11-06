@@ -15,7 +15,7 @@
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
 import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
-import { p43ReadState, mmlReadState, coverFor, p43Assess } from "./audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess, shownLife, lifeTrusted } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
@@ -132,14 +132,16 @@ export function installAuditRequest(deps) {
     // A machine list read with no life row never says "No part past its rated life" (Miguel, 20 Oct 2026: "u didnt read the
     // files correctly"): a read filed before lifeRows was kept, or one with none, says what is true. Nothing stored changes.
     const s = u && u.read && u.read.summary, noLife = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && !lifeWasRead(s));
-    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
+    // a read that is not verified never tells the crew a count of parts (6 Nov 2026: "Read. 53 parts past rated life")
+    const unverified = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && lifeWasRead(s) && !lifeTrusted(s));
+    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : unverified ? "Read. Thank you." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
   }
   // What the reads found per machine — ONE definition for the documents-in email and the audit's Machines step.
   function machinesRead(s, lines, intransit) {
     const downBy = {}; for (const d of s.down) downBy[d.serial] = d.reason;
     return s.machines.map((m) => {
       const read = (kind) => { const u = s.uploads.filter((x) => x.serial === m.serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0]; return u && u.read ? u.read.summary : null; };
-      const p43 = read("p43"), mml = read("mgmt");
+      const p43 = read("p43"), mml = shownLife(read("mgmt"));
       if (mml && mml.lifeOver) mml.lifeOver = mml.lifeOver.map((x) => Object.assign({}, x, { cover: coverFor(x.partNo, lines, intransit) }));
       return { serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43, mml };
     });
@@ -294,7 +296,9 @@ export function installAuditRequest(deps) {
       life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })),
       // "No part past its rated life" only from a read that carried life rows; a read filed before the count was kept
       // (lifeRows absent) or one with none is "part life not read", never a clean machine
-      lifeRead: m.mml ? lifeWasRead(m.mml) : null }));
+      lifeRead: m.mml ? (m.mml.lifeUnverified ? null : lifeWasRead(m.mml)) : null,
+      // figures were read but did not pass HON's checks: "part life not verified", never "no part past its rated life"
+      lifeUnverified: !!(m.mml && m.mml.lifeUnverified) }));
     const diff = countDiff(obp.lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const extras = s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted }));
     const parts = blindLines(obp.lines).map((l) => { const o = obp.lines.find((x) => String(x.part_number || x.part_no || "").trim() === l.part_no); return { part_no: l.part_no, description: l.description, obp: o && Number.isFinite(Number(o.on_hand)) ? Number(o.on_hand) : null, counted: s.counted[l.part_no] == null ? null : s.counted[l.part_no] }; });

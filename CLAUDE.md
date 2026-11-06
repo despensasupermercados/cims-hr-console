@@ -1904,6 +1904,18 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   the mailbox (RCCL for the ship mailboxes `*_printerspecialist@rccl.com`; DG3 IT if dg3.com runs it too) adds cims.work and its
   hosts as a permitted URL that is not rewritten or isolated — Miguel's ask to make. The same viewer would meet every cims.work link
   read in that mail — hon.cims.work's uploads behind the instructions email's button too (inferred, not yet seen in a log). Pinned by `test/audit_file_picker.test.js`.
+- **A PART-LIFE % IS SHOWN ONLY FROM A READ HON VERIFIED** (Miguel, 6 Nov 2026, over the Independence documents-in email's "72
+  parts past rated life": "is it true these numbers percetages are so high ??"; then "yes. all of it"). It was not: on Mark John
+  Bornea's Machine 2 six different parts read 6,387,753%, "times replaced" read in the millions on both presses, and "(Page)" rows
+  (page counts) were listed as percentages. HON's Management List reader is a model transcribing 52 scanned pages, and nothing
+  checked what it returned; 13 reads stored in cims-hon (16 Oct – 2 Nov 2026) show the same faults (Oasis 886,480%, one value
+  copied across unrelated parts on Liberty and Ascent, summarised names on Quantum and Ovation). `audit_read.shownLife` is the ONE
+  gate, applied where a stored read is loaded (`machinesRead`, so the documents-in email, the request screen, the visit, Before the
+  visit and the filed record all read the same answer): a machine-list read without HON's `lifeVerified: true` shows NO percentage
+  and is never "no part past its rated life" — it says **Part life not verified** (`lifeUnverified`; the email's tile reads "–
+  part life not verified", a clean press reads "No marks"); the crew is told "Read. Thank you.", never a count of parts. Every read
+  stored before 6 Nov 2026 is unverified. HON marks a read verified once its reader checks the figures against the document (the
+  rebuild, cims-hon). Pinned by `test/audit_request.test.js` (Mark's stored read, end to end).
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`
