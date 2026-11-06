@@ -43,7 +43,9 @@ function boot(ua) {
   XMLHttpRequest.prototype.setRequestHeader = function (k, v) { this.headers[k] = v; };
   XMLHttpRequest.prototype.send = function (f) { this.body = f; };
   const window = { addEventListener: add(won), removeEventListener: del(won), location: { hash: "", href: "https://audit.cims.work/audit/u/tok" } };
-  const document = { getElementById: $, querySelector: () => null, querySelectorAll: () => [], activeElement: null, visibilityState: "visible",
+  const bodyCls = new Set();
+  const body = { classList: { add: (c) => bodyCls.add(c), remove: (c) => bodyCls.delete(c), contains: (c) => bodyCls.has(c) } };
+  const document = { getElementById: $, querySelector: () => null, querySelectorAll: () => [], activeElement: null, visibilityState: "visible", body,
     addEventListener: add(on), removeEventListener: del(on) };
   const ctx = vm.createContext({ window, document, fetch, XMLHttpRequest, navigator: { userAgent: ua, maxTouchPoints: /iPhone|Android/.test(ua) ? 5 : 0 },
     location: window.location, console: { log() {}, error: (e) => errors.push(e) }, JSON, Object, Array, String, Number, Math, Date, Promise, isNaN, encodeURIComponent,
@@ -56,7 +58,7 @@ function boot(ua) {
   const fileInput = (serial, kind) => el("f", { type: "file", "data-serial": serial, "data-kind": kind });
   // a tap on the box lands on its file input (it covers the row)
   const tap = (serial, kind) => emit(on, "click", { target: Object.assign(fileInput(serial, kind), { closest: () => null }) });
-  return { $, on, won, emit, tap, fire, tick, xhr, errors, fileInput };
+  return { $, on, won, emit, tap, fire, tick, xhr, errors, fileInput, bodyCls };
 }
 const ready = async (P) => { await P.tick(); await P.tick(); await P.tick(); };
 
@@ -82,7 +84,7 @@ test("a tap that opens nothing is said under THAT box; a picker that opened says
   assert.match(main, /Nothing opened\?/);
   assert.equal((main.match(/Nothing opened\?/g) || []).length, 1, "only the box he tapped");
   assert.match(main, /reply to the email with the file/);
-  assert.match(main, /drop the file on the box/, "a computer is told it can drop the file");
+  assert.match(main, /Drag the file from your folder onto this box/, "a computer is told it can drop the file");
 
   const Q = boot(UA.desktop); await ready(Q);
   Q.tap("AC58011021400", "p43");
@@ -135,4 +137,46 @@ test("a file dropped beside the boxes is not sent anywhere, and the page says wh
   P.emit(P.on, "drop", { type: "drop", dataTransfer: { types: ["Files"], files: [file] }, target: { closest: () => null }, preventDefault() {} });
   assert.equal(P.xhr.length, 0);
   assert.match(P.$("toast").textContent, /Drop it on the box/);
+});
+
+// 6 Nov 2026, the same afternoon: Mark's page was opened seven times from Firefox on a Linux ship computer
+// (audit_page_open), and still no file. Miguel: "can u make it drag and drop thise rectangles .. besides clicking".
+// The drop worked since #378, but nothing on the page said so. On a computer every empty box now reads
+// "Drag here or click", and every box lights up the moment a file is dragged over the page.
+test("on a computer each empty box says it takes a dragged file; on a phone it says Choose file", async () => {
+  const P = boot(UA.desktop); await ready(P);
+  const main = P.$("main").innerHTML;
+  assert.equal((main.match(/Drag here or click/g) || []).length, 4, "two presses x two documents");
+  assert.doesNotMatch(main, />Choose file</);
+  const L = boot(UA.desktop.replace("Windows NT 10.0; Win64; x64", "X11; Linux x86_64").replace(/AppleWebKit.*$/, "Gecko/20100101 Firefox/140.0")); await ready(L);
+  assert.equal((L.$("main").innerHTML.match(/Drag here or click/g) || []).length, 4, "Firefox on Linux, the ship computer");
+  for (const ua of [UA.chromeAndroid, UA.iphoneApp]) {
+    const Q = boot(ua); await ready(Q);
+    assert.doesNotMatch(Q.$("main").innerHTML, /Drag here/, "a phone has nothing to drag from");
+    assert.match(Q.$("main").innerHTML, /Choose file/);
+  }
+});
+
+test("a file dragged over the page lights every box; leaving or dropping puts them back", async () => {
+  const P = boot(UA.desktop); await ready(P);
+  const files = (type) => ({ type, dataTransfer: { types: ["Files"], files: [] }, target: { closest: () => null }, preventDefault() {} });
+  P.emit(P.on, "dragenter", files("dragenter"));
+  assert.ok(P.bodyCls.has("dragfiles"), "every empty box shows where to drop");
+  P.emit(P.on, "dragenter", files("dragenter"));   // into a child: still over the page
+  P.emit(P.on, "dragleave", files("dragleave"));
+  assert.ok(P.bodyCls.has("dragfiles"), "leaving a child is not leaving the page");
+  P.emit(P.on, "dragleave", files("dragleave"));
+  assert.ok(!P.bodyCls.has("dragfiles"), "out of the window: back to normal");
+  P.emit(P.on, "dragenter", files("dragenter"));
+  P.emit(P.on, "drop", files("drop"));
+  assert.ok(!P.bodyCls.has("dragfiles"), "a drop puts them back");
+  P.emit(P.on, "dragenter", { type: "dragenter", dataTransfer: { types: ["text/plain"] }, target: { closest: () => null }, preventDefault() {} });
+  assert.ok(!P.bodyCls.has("dragfiles"), "dragging text is not a file");
+});
+
+test("on a computer, a tap that opened nothing says to drag the file first", async () => {
+  const P = boot(UA.desktop); await ready(P);
+  P.tap("AC58011021400", "p43");
+  P.fire(PICK_MS);
+  assert.match(P.$("main").innerHTML, /Nothing opened\? Drag the file from your folder onto this box/);
 });
