@@ -914,7 +914,11 @@ export function installAuditRequest(deps) {
       // WHICH BROWSER OPENED IT (6 Nov 2026, Mark John Bornea, Independence: "he clicks the box .. is not able to choose the
       // file" — nothing reached the console and nothing said where he was). One line per open, the browser as it names itself,
       // the request id and no crew id (it is no person's action on the profile). The page's own reads are not logged.
-      await logActivity(env, null, "audit_page_open", req.id + " " + String(request.headers.get("user-agent") || "no user agent").slice(0, 300));
+      // and the network it came from (Cloudflare's own read of the address: AS number and owner), so a protected viewer such
+      // as Mimecast's (6 Nov 2026) is named by its network, not only guessed from its browser.
+      const cf = request.cf || {};
+      const net = cf.asn ? " | AS" + cf.asn + " " + String(cf.asOrganization || "").slice(0, 80) : "";
+      await logActivity(env, null, "audit_page_open", req.id + " " + String(request.headers.get("user-agent") || "no user agent").slice(0, 300) + net);
       return htmlResponse(auditUploadHtml({ token: pm[1], ship: req.ship, crew: req.crew_name }));
     }
     if (p.startsWith("/api/audit/u/")) {
