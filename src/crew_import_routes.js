@@ -190,7 +190,7 @@ export async function apiCrewImportStage(request, env, deps) {
   // previous (8 Oct 2026): the LAST file's word per crew, read before this file replaces it — a crew it had On
   // board another ship whom this file no longer has aboard has signed off, and their earmark is ready for TDG.
   const [prevRows, shipRows] = await Promise.all([
-    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
+    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, embarked_at, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
     env.DB.prepare("SELECT name FROM vessel ORDER BY name").all().then((r) => (r && r.results) || []).catch(() => []),
   ]);
   const em = earmarkDiscrepancies({ projections, registry, today, shipOf: SHIP_OF, previous: prevRows });
@@ -201,6 +201,7 @@ export async function apiCrewImportStage(request, env, deps) {
   const dismissed = deps && deps.dismissed ? await deps.dismissed(env).catch(() => []) : [];
   review.tdg_earmarks = tdgEarmarksWithoutCard({ projections, registry, shipOf: SHIP_OF, exclude: em.items.filter((i) => i.kind === "other_person" && i.file && i.file.other).map((i) => i.file.other.sc + "|" + String(i.ship).trim().toLowerCase()).concat(dismissed || []) });
   review.registry = registry;
+  review.schedule = scheduleCheck(registry, prevRows);
   review.km_mismatch = kmMismatch;
   review.groups.unretire = unretireItems(registry, retiredByAgency);
   review.counts.unretire = review.groups.unretire.length;
@@ -208,6 +209,18 @@ export async function apiCrewImportStage(request, env, deps) {
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
   return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
+}
+
+// THE FILE DATES THE BOARD (§10d): sign-on = the file's EMBARKEDDATE. A file in which no crew On board carries one, while
+// the file on the board did, empties every seat's dates when applied — the board, the sign-off emails, the staff-house pass
+// and the welcome all read them (night watch, 29 Oct 2026: the 28 Oct 12:10 UTC upload, 108 rows, 50 On board, not one
+// embark date; the 27 Oct file had them: 28 seats lost their dates, 2 fell back to the Counter's, 2 left the board). Said
+// on the review before Apply, never a block: whether to apply stays Rita's.
+export function scheduleCheck(registry, previous) {
+  const onboard = (registry || []).filter((r) => r && r.status === "On board");
+  const dated = onboard.filter((r) => r.embarked_at).length;
+  const keptDated = (previous || []).filter((r) => r && r.status === "On board" && r.embarked_at).length;
+  return { onboard: onboard.length, dated, kept_dated: keptDated, lost: onboard.length > 0 && dated === 0 && keptDated > 0 };
 }
 
 // Rita's edit of one earmark in the review: { ship, sign_on, sign_off }, blanks falling back to the card. ISO
