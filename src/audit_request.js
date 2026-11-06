@@ -29,10 +29,12 @@ import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
 export const LINK_DAYS = 14;
 export const RESEND_MIN = 15;             // a request is not re-sent sooner than this              // the upload page stays open this long after the request
 const READ_SWEEP_MAX = 3;
-// HON's Management List read version 5 (6 Nov 2026) reads each life figure twice and keeps it only where the two places
-// on the list agree. A list read before it is read again by the hourly sweep, a few an hour, newest first; an answer
-// that is not "ok" never replaces the read the crew already has.
-export const MGMT_READ_VERSION = 5;
+// HON's Management List read version 6 (6 Nov 2026) reads the list's life page twice, two different ways, and keeps a
+// figure only where the two reads agree (version 5 compared the life page with the Special parts counter; Miguel, the
+// same evening: "from the management list.. is all u need .. for right now.. identfy those .. and read them"). A list
+// read before it is read again by the hourly sweep, a few an hour, newest first; an answer that is not "ok" never
+// replaces the read the crew already has.
+export const MGMT_READ_VERSION = 6;
 const REREAD_MAX = 2;
 export const READ_TRIES = 3;              // a read that fails this many times is "send it again", never "Reading…" for ever
 export const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // the page shrinks a photo to ~300 KB; this only refuses the absurd

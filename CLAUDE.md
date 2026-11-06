@@ -1920,8 +1920,12 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   stored v5 reads match nine lists read by eye. Here: `mmlReadState` treats a list whose figures were compared and did not
   agree (`lifeCheck` without rows) as the right document, "not verified", never "no parts-life page"; the summary keeps
   `lifeChecks`, `lifeChecked` and each figure's two sides (`check`); the hourly sweep re-reads, newest first, two an hour,
-  every OK Management List read below `MGMT_READ_VERSION` = 5 (`rereadUpload`), stops for the hour while HON still answers
-  an older version, and never lets a re-read that is not "ok" replace a good read (it is noted on `read_json.reread`).
+  every OK Management List read below `MGMT_READ_VERSION` (`rereadUpload`), stops for the hour while HON still answers
+  an older version, and never lets a re-read that is not "ok" replace a good read (it is noted on `read_json.reread`). **Read version 6, the same evening** (Miguel, sending three
+  life pages: "from the management list.. is all u need .. for right now.. identfy those .. and read them"): HON reads the
+  list's life page twice, two ways (its cells, and its value rows copied as text and parsed in code), and no longer reads
+  the Special parts counter; eighteen figures, the transfer belt included. `MGMT_READ_VERSION` = 6; a figure's second side
+  is `second` (v5's `counter` still reads); the "no parts-life page" words point at the Maintenance counter page, pp. 3–5.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

@@ -78,17 +78,19 @@ export function mmlReadState(res) {
     // "Developing unit count" (p5) and "Special parts counter" (p7–15); a file without them — part of the list, or a read
     // that missed them — answers nothing about part life. The crew can fix it: send the whole list.
     const rows = res.read && Array.isArray(res.read.lifeItems) ? res.read.lifeItems.length : null;
-    // READ VERSION 5 (HON, 6 Nov 2026): each figure is read twice, from the life blocks and from the Special parts
-    // counter, and kept only where the two agree. A list whose figures were compared and did not agree keeps NO row, but
-    // it is the right document: "not verified", never "no parts-life page" (the crew would be told to send it again).
+    // READ VERSION 5 / 6 (HON, 6 Nov 2026): each figure is read twice and kept only where the two reads agree (v6: the
+    // life page read two ways; v5: the life page against the Special parts counter). A list whose figures were compared
+    // and did not agree keeps NO row, but it is the right document: "not verified", never "no parts-life page" (the
+    // crew would be told to send it again).
     const checks = Array.isArray(res.lifeCheck) ? res.lifeCheck.length : 0;
-    if (rows === 0 && !checks) return { read_state: "wrong_doc", say: "No parts-life page was found in this file (Developing unit count and Special parts counter, pages 5 and 7 to 15 of the Machine Management List). Upload the whole list, every page, as one PDF.", summary: { kind: res.kind, lifeRows: 0, lifeOver: [], version: res.version || null } };
+    if (rows === 0 && !checks) return { read_state: "wrong_doc", say: "No parts-life page was found in this file (the Maintenance counter page: Developer, Drum, Transfer belt, Charging corona, Toner filter and Developing unit life, pages 3 to 5 of the Machine Management List). Upload the whole list, every page, as one PDF.", summary: { kind: res.kind, lifeRows: 0, lifeOver: [], version: res.version || null } };
     const n = (res.lifeOver || []).length, ok = res.lifeVerified === true;
     // the crew is told the file is in; a count of parts is said only from a verified read
     return { read_state: "ok", say: !ok ? "Read. Thank you." : "Read. " + (n ? n + " part" + (n === 1 ? "" : "s") + " past rated life, for the team." : "No part past its rated life."),
       summary: { kind: res.kind, lifeRows: rows, lifeChecks: checks, lifeChecked: res.lifeChecked === true,
-        // each figure's two sides as read (key, front block, counter row, agreed) — the evidence beside its read
-        check: checks ? res.lifeCheck.map((p) => [p.key, p.front, p.counter, p.ok]) : undefined,
+        // each figure's two sides as read (key, first read, second read, agreed) — the evidence beside its read; HON names
+        // the second side `second` from v6 (the life page's rows copied as text), `counter` in v5 (the counter row)
+        check: checks ? res.lifeCheck.map((p) => [p.key, p.front, p.second !== undefined ? p.second : p.counter, p.ok]) : undefined,
         lifeOver: res.lifeOver || [], lifeVerified: ok, recommendation: res.recommendation || null, version: res.version || null } };
   }
   if (res.kind === "settings-list") return { read_state: "wrong_doc", say: "This is the USER Management List (the settings). Print the MACHINE Management List, the long report with the life %, and upload that.", summary: { kind: res.kind } };
