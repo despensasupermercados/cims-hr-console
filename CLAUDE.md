@@ -1885,11 +1885,25 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   "cancel" within `PICK_MS` = 6 s says "Nothing opened?" under THAT box (Chrome / Edge, drop the file, or reply to the email with
   it) — never on an iPhone, whose picker is a sheet that does not blur the page; a "cancel" or a file clears it; (3) a file DROPPED
   on a box on a computer is sent for that press and document — and SAID (Miguel, the same afternoon, after seven opens from Firefox on
-  a Linux ship computer and still no file: "can u make it drag and drop thise rectangles .. besides clicking"): on a computer every
+  Linux and still no file: "can u make it drag and drop thise rectangles .. besides clicking"): on a computer every
   empty box reads "Drag here or click", every box lights up green the moment a file is dragged over the page (`body.dragfiles`, a
   depth count), and the "Nothing opened?" line leads with dragging the file from the folder. **Every open of the page is logged** (`activity_log`
   `audit_page_open`: the request id and the browser's own User-Agent, no crew id), so the next "the box does nothing" is read
-  from the log, never guessed. Pinned by `test/audit_file_picker.test.js`, `test/audit_request.test.js`.
+  from the log, never guessed; since the same evening the line also carries the network the open came from (` | AS<n> <owner>`,
+  Cloudflare's own read of the address). Pinned by `test/audit_file_picker.test.js`, `test/audit_request.test.js`.
+- **THE EMAIL'S LINK CAN OPEN IN MIMECAST'S PROTECTED VIEWER, AND THE VIEWER TAKES NO FILE** (6 Nov 2026, Miguel's screenshot of
+  Mark's link: "mimecast Browser Isolation", a 5-minute session; "the links open on a sub page under mine-cast .. figure it out
+  and ensure this comes off"). **Correction of the paragraph above: the "Firefox on Linux" opens were never the ship's computer.**
+  They are Mimecast Browser Isolation: the mail system Mimecast rewrites the email's link, and on a click it opens the page in a
+  browser running on Mimecast's side, drawn in a window that takes no file from the computer — so neither the box nor a drag can
+  work there, and #379's drag could not help Mark. The crew's page now treats a Linux desktop browser as that viewer (`VIEWER` in
+  `audit_upload_ui.js`; not Android, not a Chromebook — every Linux open of Mark's link lines up with the viewer; the ship and
+  office computers in the log run Windows or macOS): the top says **Open this page in Chrome or Edge**, why, the whole address to
+  select (`#addr`) with **Copy the address**, and "reply to the email with the files"; each box reads "Open in Chrome first", never
+  "Drag here", and its "Nothing opened?" line points to the top. **What turns it off is not in this code**: whoever runs Mimecast for
+  the mailbox (RCCL for the ship mailboxes `*_printerspecialist@rccl.com`; DG3 IT if dg3.com runs it too) adds cims.work and its
+  hosts as a permitted URL that is not rewritten or isolated — Miguel's ask to make. The same viewer would meet every cims.work link
+  read in that mail — hon.cims.work's uploads behind the instructions email's button too (inferred, not yet seen in a log). Pinned by `test/audit_file_picker.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

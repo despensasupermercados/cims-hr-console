@@ -34,7 +34,7 @@ const PAGE_CSS = String.raw`
 .up .prog{grid-column:1 / -1}
 .up.drop{border-style:solid;border-color:var(--green);background:var(--greenbg)}
 body.dragfiles .up:not(.ok):not(.dn):not(.busy){border-color:var(--green);background:var(--greenbg)}
-.offl.app div{flex-wrap:wrap;align-items:flex-start;line-height:1.45}.offl.app div>span{flex:1 1 220px;min-width:0}.offl.app .ic{flex:none;margin-top:2px}.offl.app .btn{margin-left:auto}
+.offl.app div{flex-wrap:wrap;align-items:flex-start;line-height:1.45}.offl.app div>span{flex:1 1 220px;min-width:0}.offl.app .ic{flex:none;margin-top:2px}.offl.app .btn{margin-left:auto}.offl.app .addr{flex:1 1 100%;min-width:0;font-family:var(--fm);font-size:13px;font-weight:600;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-all;user-select:all;-webkit-user-select:all}
 .asx{border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;gap:8px;font-size:13.5px;line-height:1.45}
 .asx.m{border-color:var(--amberm,var(--line));background:var(--amberbg)}
 .asx .t{font-weight:700;color:var(--ink)}.asx .k{font-weight:700;color:var(--mut);font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;display:block}
@@ -97,6 +97,13 @@ const SCRIPT = String.raw`
   var IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && NAV.maxTouchPoints > 1);
   var MOBILE = IOS || /Android|Mobile/.test(UA);
   var INAPP = /Android/.test(UA) && (/; wv\)/.test(UA) || /FBAN|FBAV|FB_IAB|Instagram|Line\/|MicroMessenger/.test(UA));
+  // MIMECAST'S PROTECTED VIEWER (6 Nov 2026, Miguel's screenshot of Mark's link: "the links open on a sub page under
+  // mimecast"). A link in a mail Mimecast scans can open inside Mimecast Browser Isolation: a browser that runs on Mimecast's
+  // side and is drawn in a window that takes no file from the computer (no chooser, no drop). That browser names itself
+  // Firefox on Linux (every Linux open of Mark's link, 6 Nov 2026, lines up with it); the ship and office computers in the
+  // open log run Windows or macOS. So a Linux desktop browser reads as the viewer: the page says so at the top, with the
+  // address to open in Chrome or Edge, and no box offers a drag that cannot work.
+  var VIEWER = !MOBILE && /X11; Linux|Linux x86_64/.test(UA) && !/Android|CrOS/.test(UA);
   var PICK_MS = 6000, noPick = {}, watch = null;
   var $ = function (id) { return document.getElementById(id); };
   function ic(n, cls) { return (IC[n] || "").replace("<svg ", '<svg class="ic' + (cls ? " " + cls : "") + '" '); }
@@ -143,14 +150,14 @@ const SCRIPT = String.raw`
     var cls = "up", chip, sub, bar = "";
     if (m.down) { cls += " dn"; chip = '<span class="chip a">Reported down</span>'; sub = "Explained: " + esc(m.down); }
     else if (b) { cls += " busy"; chip = '<span class="chip n">' + (b.pct != null ? "Sending " + b.pct + "%" : esc(b.text)) + "</span>"; sub = b.pct != null ? "Keep this page open" : "HON is reading it"; if (b.pct != null) bar = '<div class="prog"><i style="width:' + b.pct + '%;background:var(--navy)"></i></div>'; }
-    else if (!s) { chip = '<span class="chip m">' + ic("cloud-arrow-up") + (MOBILE ? "Choose file" : "Drag here or click") + "</span>"; sub = kind === "p43" ? "12 pages, one PDF" : "Print it from the machine, then scan it"; }
+    else if (!s) { chip = '<span class="chip m">' + ic("cloud-arrow-up") + (VIEWER ? "Open in Chrome first" : MOBILE ? "Choose file" : "Drag here or click") + "</span>"; sub = kind === "p43" ? "12 pages, one PDF" : "Print it from the machine, then scan it"; }
     else if (s.read_state === "ok") { cls += " ok"; chip = '<span class="chip g">' + ic("b:check") + "Received</span>"; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     else if (s.read_state === "pending") { cls += " busy"; chip = '<span class="chip n">Reading</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     else if (s.read_state === "failed") { cls += " busy"; chip = '<span class="chip n">Trying again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     else { cls += " bad"; chip = '<span class="chip r">Send again</span>'; sub = '<span class="fn" title="' + esc(s.filename || "") + '">' + esc(s.filename || "") + "</span>"; }
     var input = (S.status === "sent" && !m.down && !b && !(s && s.read_state === "pending")) ? '<input type="file" accept="application/pdf,image/*" aria-label="' + (kind === "p43" ? "Pattern 43" : "Machine Management List") + " for " + esc(m.label) + '" data-serial="' + esc(m.serial) + '" data-kind="' + kind + '">' : "";
     var fix = s && (s.read_state === "wrong_doc" || s.read_state === "unreadable") && !b && s.say ? '<div class="fixl">' + ic("f:warning-circle") + "<span>" + esc(s.say) + "</span></div>" : "";
-    if (noPick[k] && input && !(s && s.read_state === "ok")) fix += '<div class="fixl">' + ic("f:warning-circle") + "<span>" + (MOBILE ? "Nothing opened? This browser is not letting you choose a file. Open the link in Chrome." : "Nothing opened? Drag the file from your folder onto this box instead. Or open the link in Chrome or Edge.") + " Still stuck: reply to the email with the file.</span></div>";
+    if (noPick[k] && input && !(s && s.read_state === "ok")) fix += '<div class="fixl">' + ic("f:warning-circle") + "<span>" + (VIEWER ? "Nothing opened? Mimecast's viewer takes no file from this computer. Open the page in Chrome or Edge (the address is at the top)." : MOBILE ? "Nothing opened? This browser is not letting you choose a file. Open the link in Chrome." : "Nothing opened? Drag the file from your folder onto this box instead. Or open the link in Chrome or Edge.") + " Still stuck: reply to the email with the file.</span></div>";
     return '<label class="' + cls + '">' + input + '<div style="min-width:0"><b>' + label + '</b><div class="xs">' + sub + "</div></div>" + chip + bar + "</label>" + fix + (kind === "p43" && !m.down && !b ? assess(s) : "");
   }
   /* what the scan shows, told to the crew the moment it is read (R1, Miguel 23 Oct 2026): built by the server from HON's
@@ -225,7 +232,8 @@ const SCRIPT = String.raw`
   function draw() {
     head();
     $("testslot").innerHTML = S.test ? '<div class="offl"><div>' + ic("f:warning-circle") + "Test mode. This page is real; the request went to the auditor only.</div></div>" : "";
-    $("appslot").innerHTML = INAPP && S.status === "sent" ? '<div class="offl app"><div>' + ic("f:warning-circle") + "<span>This page is open inside an app, and the app cannot choose a file. Tap &#8942; at the top, then Open in Chrome. Or copy the link and paste it in Chrome.</span>" + '<button type="button" class="btn pri s" id="copylink">Copy the link</button></div></div>' : "";
+    $("appslot").innerHTML = S.status !== "sent" ? "" : INAPP ? '<div class="offl app"><div>' + ic("f:warning-circle") + "<span>This page is open inside an app, and the app cannot choose a file. Tap &#8942; at the top, then Open in Chrome. Or copy the link and paste it in Chrome.</span>" + '<button type="button" class="btn pri s" id="copylink">Copy the link</button></div></div>'
+      : VIEWER ? '<div class="offl app viewer"><div>' + ic("f:warning-circle") + "<span><b>Open this page in Chrome or Edge.</b> The email&#8217;s link opened it in Mimecast&#8217;s protected viewer, and the viewer takes no file from your computer. Copy the address (below, or from the bar at the top of this window), open Chrome or Edge, paste it and press Enter. Still stuck: reply to the email with the files.</span>" + '<button type="button" class="btn pri s" id="copylink">Copy the address</button><span class="addr" id="addr">' + esc(String(location.href || "").split("#")[0]) + "</span></div></div>" : "";
     var fn = esc(first(S.crew)), af = esc(first(S.auditor));
     var h = '<div class="sec"><span class="eyebrow">Before ' + af + "&#8217;s visit</span>";
     if (S.status !== "sent") {
@@ -326,7 +334,7 @@ const SCRIPT = String.raw`
   });
   function copyLink() {
     var u = String(location.href || "");
-    var done = function () { toast("Link copied. Paste it in Chrome."); }, fail = function () { toast("Copy the address from the email, and paste it in Chrome."); };
+    var done = function () { toast("Link copied. Paste it in Chrome."); }, fail = function () { toast(VIEWER ? "Select the address below, copy it, and paste it in Chrome." : "Copy the address from the email, and paste it in Chrome."); };
     if (NAV.clipboard && NAV.clipboard.writeText) { NAV.clipboard.writeText(u).then(done, fail); return; }
     try { var ta = document.createElement("textarea"); ta.value = u; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); var ok = document.execCommand("copy"); document.body.removeChild(ta); if (ok) done(); else fail(); } catch (x) { fail(); }
   }

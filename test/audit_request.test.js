@@ -124,6 +124,17 @@ test("each open of the crew's page is logged with its browser; the page's own re
   const bad = await t.call("GET", "/audit/u/" + "x".repeat(20), undefined, null, { "user-agent": ua });
   assert.equal(bad.status, 404);
   assert.equal(t.logs.filter((l) => l[2] === "audit_page_open").length, 1, "a link that is not one logs nothing");
+  assert.ok(!/ \| AS/.test(open[0][3]), "no network read, no network written");
+  // 6 Nov 2026 (Mimecast's protected viewer opened Mark's link): the network the open came from, as Cloudflare reads the
+  // address (AS number and owner), so a viewer is named by its network and not only guessed from its browser
+  const u = new URL("https://audit.cims.work/audit/u/" + token);
+  const req = new Request(u, { headers: { "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0" } });
+  Object.defineProperty(req, "cf", { value: { asn: 64512, asOrganization: "Example Isolation Network" } });
+  const pg2 = await t.R.handle(u.pathname, req, t.env, u, null);
+  assert.equal(pg2.status, 200);
+  const last = t.logs.filter((l) => l[2] === "audit_page_open").pop()[3];
+  assert.ok(last.startsWith(id + " Mozilla/5.0 (X11; Linux"), last);
+  assert.ok(last.endsWith(" | AS64512 Example Isolation Network"), last);
 });
 
 test("the gate: reads by HON, the count, then complete once and ONE documents-in email", async () => {

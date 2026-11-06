@@ -5,7 +5,8 @@
 // blocks file dialogs (Darryl Ramos, Constellation, HON, 1 Oct 2026). The page now (1) says so at the top when it opens
 // inside an Android app's browser, with the link to copy into Chrome; (2) says so under the box when a tap opened nothing;
 // (3) takes the file dropped on the box on a computer, the second way in. The crew page, booted in node:vm on a small fake
-// DOM, like test/audit_upload_send.test.js.
+// DOM, like test/audit_upload_send.test.js. Correction, the same evening: the "Firefox on Linux" opens of Mark's link were
+// Mimecast's protected viewer (Browser Isolation), not the ship's computer — the last tests below.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
@@ -17,6 +18,10 @@ const UA = {
   chromeAndroid: "Mozilla/5.0 (Linux; Android 13; SM-A536E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36",
   iphoneApp: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/440.0]",
   desktop: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0",
+  mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6.2 Safari/605.1.15",
+  // what Mimecast's protected viewer (Browser Isolation) calls itself: every Linux open of Mark's link on 6 Nov 2026
+  mimecast: "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+  chromebook: "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
 };
 const PICK_MS = 6000;
 
@@ -148,8 +153,11 @@ test("on a computer each empty box says it takes a dragged file; on a phone it s
   const main = P.$("main").innerHTML;
   assert.equal((main.match(/Drag here or click/g) || []).length, 4, "two presses x two documents");
   assert.doesNotMatch(main, />Choose file</);
-  const L = boot(UA.desktop.replace("Windows NT 10.0; Win64; x64", "X11; Linux x86_64").replace(/AppleWebKit.*$/, "Gecko/20100101 Firefox/140.0")); await ready(L);
-  assert.equal((L.$("main").innerHTML.match(/Drag here or click/g) || []).length, 4, "Firefox on Linux, the ship computer");
+  const L = boot(UA.mimecast); await ready(L);
+  assert.doesNotMatch(L.$("main").innerHTML, /Drag here/, "Mimecast's viewer takes no dragged file: never offered there");
+  assert.equal((L.$("main").innerHTML.match(/Open in Chrome first/g) || []).length, 4, "each box sends them to Chrome first");
+  const M = boot(UA.mac); await ready(M);
+  assert.equal((M.$("main").innerHTML.match(/Drag here or click/g) || []).length, 4, "a Mac is a computer like any other");
   for (const ua of [UA.chromeAndroid, UA.iphoneApp]) {
     const Q = boot(ua); await ready(Q);
     assert.doesNotMatch(Q.$("main").innerHTML, /Drag here/, "a phone has nothing to drag from");
@@ -179,4 +187,41 @@ test("on a computer, a tap that opened nothing says to drag the file first", asy
   P.tap("AC58011021400", "p43");
   P.fire(PICK_MS);
   assert.match(P.$("main").innerHTML, /Nothing opened\? Drag the file from your folder onto this box/);
+});
+
+// 6 Nov 2026, Miguel's screenshot of Mark's link: "the links open on a sub page under mimecast .. figure it out and ensure
+// this comes off". The email's link opened the page in Mimecast Browser Isolation: a browser on Mimecast's side (it calls
+// itself Firefox on Linux) drawn in a window that takes no file from the computer, so neither the box nor a drop could work.
+// The page says so at the top, gives the address to open in Chrome or Edge, and no box offers a drag that cannot work.
+test("inside Mimecast's protected viewer the page says so at the top, with the address to open in Chrome or Edge", async () => {
+  const V = boot(UA.mimecast); await ready(V);
+  const top = V.$("appslot").innerHTML;
+  assert.match(top, /Open this page in Chrome or Edge/);
+  assert.match(top, /Mimecast&#8217;s protected viewer/);
+  assert.match(top, /takes no file from your computer/);
+  assert.match(top, /<span class="addr" id="addr">https:\/\/audit\.cims\.work\/audit\/u\/tok<\/span>/, "the whole address, to select and copy");
+  assert.match(top, /id="copylink">Copy the address</);
+  assert.match(top, /reply to the email with the files/, "the way out that needs no browser at all");
+  // a tap that opens nothing says where to go, not "drag the file"
+  V.tap("AC58011021400", "p43"); V.fire(PICK_MS); await V.tick();
+  const box = V.$("main").innerHTML;
+  assert.match(box, /Mimecast's viewer takes no file from this computer/);
+  assert.doesNotMatch(box, /Drag the file from your folder/);
+  // the copy fails inside the viewer (no clipboard): it says to select the address on the page
+  let toast = "";
+  V.$("toast").textContent = "";
+  V.emit(V.on, "click", { target: { type: "button", closest: () => ({ id: "copylink", hasAttribute: () => false, getAttribute: () => null }) } });
+  await V.tick(); toast = V.$("toast").textContent;
+  assert.match(toast, /Select the address below/);
+  // nowhere else: Windows, a Mac, a Chromebook, Android, an iPhone
+  for (const ua of [UA.desktop, UA.mac, UA.chromebook, UA.chromeAndroid, UA.iphoneApp]) {
+    const Q = boot(ua); await ready(Q);
+    assert.doesNotMatch(Q.$("appslot").innerHTML, /protected viewer/, "no viewer note on " + ua.slice(13, 40));
+  }
+});
+
+test("once everything is in, the viewer note goes: nothing is left to send", async () => {
+  const keep = STATE.status; STATE.status = "complete";
+  try { const V = boot(UA.mimecast); await ready(V); assert.equal(V.$("appslot").innerHTML, ""); }
+  finally { STATE.status = keep; }
 });
