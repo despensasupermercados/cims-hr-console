@@ -351,7 +351,7 @@ export default {
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
-        if (session) { if (p === "/api/relief/board") await ensurePortDayIndexes(env); const rr = await handleRelief(request, url, env); if (rr) return rr; }
+        if (session) { if (p === "/api/relief/board") await ensurePortDayIndexes(env); const rr = await handleRelief(request, url, env, session); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc, dismissed: dismissedEarmarks, markTold: (env, id) => markDeployed(env, id, null, new Date().toISOString()) }); if (ci) return ci; }
         // "Update TG" (17 Aug 2026 per-ship digest to Joy) was removed on 8 Oct 2026 (Miguel: "remove it"): it never sent
         // (TG_NOTIFY unset), and the import review now tells Joy row by row (§10d). The tg_update_run table is left as is.
