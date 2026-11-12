@@ -6445,6 +6445,14 @@ function impFlagged(rv){
   ns.forEach(function(it){var f=it.fields||{};var nm=((f.first_name||'')+' '+(f.last_name||'')).trim();h+=impCard('<div class=iwho>'+impEsc(nm||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=itxt>A new row with no status word the console can read'+(f.status_raw||f.status?(' (&#8220;'+impEsc(f.status_raw||f.status)+'&#8221;)'):'')+'. Not added.</div>');});
   return h+'</div>';
 }
+// A file that moves a crew to their next ship before the embark (night watch, 12 Nov 2026: Paqueo, Reflection to Radiance,
+// embark 14 Nov, in the file of 10 Nov). Applying it leaves the ship they are on with nobody aboard. Warn, never block.
+function impEarly(rv){
+  var x=(rv&&rv.early_moves)||[];if(!x.length)return '';
+  var h='<div class=isec><h3>&#9888; Moved to the next ship before they sign off</h3><div class=d>The file has these crew On board their next ship from a date still ahead, and no longer on the ship they are on. Applying it takes them off that ship now: it reads nobody aboard, and the handover count there is cancelled. Ask Joy to keep them On board until they sign off, with the next ship as Earmarked. Apply stays your call.</div>';
+  x.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>On board <b>'+impEsc(it.to)+'</b> from '+impEsc(fmtDateS(it.embark))+' in this file; the board has them on <b>'+impEsc(it.from)+'</b> until then. Applying it takes them off '+impEsc(it.from)+' now.'+impTag("embark still ahead","red")+'</div>');});
+  return h+'</div>';
+}
 function impFld(f){return (typeof IMP_FLAB!=="undefined"&&IMP_FLAB[f])?IMP_FLAB[f]:f;}
 function cimsRender(){
   var g=STAGE.review.groups,c=STAGE.review.counts,L="";
@@ -6514,6 +6522,7 @@ function cimsRender(){
     +'<span class="chip2 navy">&#65291; <span class=n>'+c.new+'</span> new</span>'
     +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
   var EM=impEmSplit();
+  L+=impEarly(STAGE.review);
   if(EM.dis.length){L+='<div class=isec><h3>&#9873; Earmarks the TDG file disagrees with</h3><div class=d><b>Accept TDG</b>: the file wins (another ship moves your earmark there with your dates; another seafarer replaces yours; Inactive or not aboard removes it; a far embark absorbs it). <b>Keep mine</b>: your earmark stands and Joy gets one email, Rita in copy, so TDG is corrected. <b>Edit</b>: change the ship or dates here; Joy gets the corrected earmark.</div>';
     EM.dis.forEach(function(it){L+=impCard(impEmWho(it)+'<div class=itxt>'+impEsc(it.text||"")+'</div>'+impSegN("earmark:"+it.id,"accept",["accept","keep","edit"],["Accept TDG","Keep mine (email Joy)","Edit"])+impEmEdit(it));});L+='</div>';}
   if(EM.off.length){L+='<div class=isec><h3>&#9993; Signed off &mdash; earmark ready for TDG</h3><div class=d>These seafarers were aboard another ship, so TDG could not earmark them. The file now shows the sign-off. <b>Tell Joy</b> (default) emails her the earmark with every document, not valid first, Rita in copy.</div>';
