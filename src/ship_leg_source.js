@@ -236,15 +236,25 @@ export async function fetchRecordedSignoffs(env) {
     `SELECT k.sc, k.sign_on,
             CASE WHEN k.act_off IS NOT NULL THEN k.act_off
                  WHEN e.sign_off IS NOT NULL AND (k.imported_at IS NULL OR (e.updated_at IS NOT NULL AND e.updated_at > k.imported_at)) THEN e.sign_off
-                 END AS recorded_off
+                 END AS recorded_off,
+            CASE WHEN k.act_off IS NOT NULL THEN 'tdg' ELSE 'rita' END AS recorded_src,
+            CASE WHEN k.act_off IS NULL THEN e.updated_at END AS recorded_at
        FROM keyman_contract3 k
        LEFT JOIN contract_edit e ON e.sc = k.sc
                                  AND ((e.on_key IS NOT NULL AND substr(e.on_key,1,10) = substr(k.sign_on,1,10))
                                       OR (e.on_key IS NULL AND e.seq = k.seq))
       WHERE k.act_off IS NOT NULL OR e.sign_off IS NOT NULL`
   ).all();
-  const m = {};
-  for (const r of results || []) if (r.recorded_off) m[(r.sc || "") + "|" + (r.sign_on || "")] = r.recorded_off;
+  // WHOSE DATE IT IS rides beside the date (night watch, 15 Nov 2026): TDG's act_off is "tdg", Rita's typed sign-off is
+  // "rita" — the words a file-dated contract already carries (legsFromRegistry). Kept off the map's own keys (non-enumerable)
+  // so the date stays the value every reader and test compares.
+  const m = {}, src = {};
+  for (const r of results || []) if (r.recorded_off) {
+    const k = (r.sc || "") + "|" + (r.sign_on || "");
+    m[k] = r.recorded_off;
+    src[k] = { offSource: r.recorded_src || "rita", offAt: r.recorded_at ? String(r.recorded_at).slice(0, 10) : null };
+  }
+  Object.defineProperty(m, "sources", { value: src, enumerable: false });
   return m;
 }
 
@@ -263,7 +273,10 @@ export function applyRecordedSignoffs(legs, recMap, today) {
     const rec = recMap[(r.sc || "") + "|" + (r.on || "")];
     if (!rec) return r;
     const eff = legWithRecordedSignoff(r.off, r.is_current, rec, today);
-    return { ...r, off: eff.off, is_current: eff.is_current };
+    // A Counter contract closed by Rita's confirmed date read as a sign-off of no one's: the survey (tdg / rita / card only)
+    // never asked Guazon (Liberty, off 5 Nov 2026) once TDG's next file earmarked him elsewhere with no dates.
+    const why = recMap.sources && recMap.sources[(r.sc || "") + "|" + (r.on || "")];
+    return { ...r, off: eff.off, is_current: eff.is_current, ...(why && !r.offSource ? { offSource: why.offSource, offAt: r.offAt || why.offAt } : {}) };
   });
 }
 
