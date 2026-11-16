@@ -58,6 +58,9 @@ D1 production is `cims-hr-console`, id `f0ac8b6a-deac-4214-8f42-e22b202d7d7d`.
    2026: a rule merged the day before, "never instruct a passed sign-off", turned a fixture's 20 Nov sign-off into seven red tests
    due on 21 Nov — a fuse of five weeks, which a monthly run can miss). A failure is fixed by pinning that test's clock
    (`mock.timers.enable({ apis: ["Date"], now })`) or deriving the fixture from today, in a PR like any other bug.
+   **The shift moves JavaScript's clock, never SQLite's `date('now')`** (2 Nov 2026: `ROSTER_SQL` compares an assignment's
+   sign-on with `date('now')`; its test's fixed "future" date of 2 Nov turned main red on 2 Nov, and no shifted run could
+   see it). A fixture a query compares with SQLite's clock is read from that clock (`SELECT date('now','+30 days')`).
    - If it is red on an untouched main, that is the night's first finding.
    - Reproduce it, find the cause, and fix it in a PR. A dated fixture that expired is a real fix: run it on its day with `mock.timers`.
 2. **Deployed equals main.** Use `workers_get_worker_code` on `cims-hr-console`, then grep it for a marker from the newest merged PR on main: `AUDIT_VERSION` in `src/audit_routes.js`, or a function the PR added.

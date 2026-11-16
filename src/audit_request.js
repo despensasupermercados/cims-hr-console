@@ -15,7 +15,7 @@
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
 import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
-import { p43ReadState, mmlReadState, coverFor, p43Assess } from "./audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess, shownLife, lifeTrusted } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
@@ -29,6 +29,13 @@ import { formsFromRow, formsHistoryRow, FORMS_SOURCE } from "./audit_forms.js";
 export const LINK_DAYS = 14;
 export const RESEND_MIN = 15;             // a request is not re-sent sooner than this              // the upload page stays open this long after the request
 const READ_SWEEP_MAX = 3;
+// HON's Management List read version 6 (6 Nov 2026) reads the list's life page twice, two different ways, and keeps a
+// figure only where the two reads agree (version 5 compared the life page with the Special parts counter; Miguel, the
+// same evening: "from the management list.. is all u need .. for right now.. identfy those .. and read them"). A list
+// read before it is read again by the hourly sweep, a few an hour, newest first; an answer that is not "ok" never
+// replaces the read the crew already has.
+export const MGMT_READ_VERSION = 6;
+const REREAD_MAX = 2;
 export const READ_TRIES = 3;              // a read that fails this many times is "send it again", never "Reading…" for ever
 export const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // the page shrinks a photo to ~300 KB; this only refuses the absurd
 export const AUTO_SUBMIT_HOURS = 6;       // everything in, nobody tapped Send: the sweep sends it after this long idle
@@ -125,21 +132,23 @@ export function installAuditRequest(deps) {
   }
   // A machine list's life pages were read when the read kept life rows, or listed a part past its rated life (a read filed
   // before lifeRows was kept still carries lifeOver: it read the pages; 23 Oct 2026 review).
-  const lifeWasRead = (s) => !!s && (s.lifeRows > 0 || (Array.isArray(s.lifeOver) && s.lifeOver.length > 0));
+  const lifeWasRead = (s) => !!s && (s.lifeRows > 0 || s.lifeChecks > 0 || (Array.isArray(s.lifeOver) && s.lifeOver.length > 0));
   // The newest live file per machine and kind, with what the crew is told about it.
   function slot(ups, serial, kind) {
     const u = ups.filter((x) => x.serial === serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
     // A machine list read with no life row never says "No part past its rated life" (Miguel, 20 Oct 2026: "u didnt read the
     // files correctly"): a read filed before lifeRows was kept, or one with none, says what is true. Nothing stored changes.
     const s = u && u.read && u.read.summary, noLife = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && !lifeWasRead(s));
-    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
+    // a read that is not verified never tells the crew a count of parts (6 Nov 2026: "Read. 53 parts past rated life")
+    const unverified = !!(u && kind === "mgmt" && u.read_state === "ok" && s && s.kind === "machine-list" && lifeWasRead(s) && !lifeTrusted(s));
+    return u ? { id: u.id, filename: u.filename, at: u.at, read_state: u.read_state, say: noLife ? "Read, but no parts-life page was found: part life not read." : unverified ? "Read. Thank you." : (u.read && u.read.say) || (u.read_state === "pending" ? "Reading…" : "") } : null;
   }
   // What the reads found per machine — ONE definition for the documents-in email and the audit's Machines step.
   function machinesRead(s, lines, intransit) {
     const downBy = {}; for (const d of s.down) downBy[d.serial] = d.reason;
     return s.machines.map((m) => {
       const read = (kind) => { const u = s.uploads.filter((x) => x.serial === m.serial && x.kind === kind && !x.superseded_at).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0]; return u && u.read ? u.read.summary : null; };
-      const p43 = read("p43"), mml = read("mgmt");
+      const p43 = read("p43"), mml = shownLife(read("mgmt"));
       if (mml && mml.lifeOver) mml.lifeOver = mml.lifeOver.map((x) => Object.assign({}, x, { cover: coverFor(x.partNo, lines, intransit) }));
       return { serial: m.serial, label: m.label || m.serial, model: m.model || null, down: downBy[m.serial] || null, p43, mml };
     });
@@ -294,7 +303,9 @@ export function installAuditRequest(deps) {
       life: ((m.mml && m.mml.lifeOver) || []).map((x) => ({ name: x.name, partNo: x.partNo || null, pct: x.pct, cover: x.cover || null })),
       // "No part past its rated life" only from a read that carried life rows; a read filed before the count was kept
       // (lifeRows absent) or one with none is "part life not read", never a clean machine
-      lifeRead: m.mml ? lifeWasRead(m.mml) : null }));
+      lifeRead: m.mml ? (m.mml.lifeUnverified ? null : lifeWasRead(m.mml)) : null,
+      // figures were read but did not pass HON's checks: "part life not verified", never "no part past its rated life"
+      lifeUnverified: !!(m.mml && m.mml.lifeUnverified) }));
     const diff = countDiff(obp.lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const extras = s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted }));
     const parts = blindLines(obp.lines).map((l) => { const o = obp.lines.find((x) => String(x.part_number || x.part_no || "").trim() === l.part_no); return { part_no: l.part_no, description: l.description, obp: o && Number.isFinite(Number(o.on_hand)) ? Number(o.on_hand) : null, counted: s.counted[l.part_no] == null ? null : s.counted[l.part_no] }; });
@@ -635,6 +646,26 @@ export function installAuditRequest(deps) {
     return { ok: true, read_state: st.read_state, say: st.say };
   }
 
+  // A Management List read by an older HON reader, read again. Only an "ok" answer replaces the stored read; any other
+  // answer from the current reader is noted and the row is not asked again (no hourly vision call on the same file).
+  async function rereadUpload(env, uploadId) {
+    const u = await env.DB.prepare("SELECT * FROM audit_upload WHERE id=?").bind(uploadId).first();
+    if (!u || u.kind !== "mgmt" || u.read_state !== "ok") return "skip";
+    const obj = env.AUDIT_FILES ? await env.AUDIT_FILES.get(u.r2_key) : null;
+    if (!obj) return "skip";
+    const res = await hon(env, "managementList", new Uint8Array(await obj.arrayBuffer()), u.content_type || "application/pdf");
+    if (!res || !(Number(res.version) >= MGMT_READ_VERSION)) return "older";
+    const st = mmlReadState(res);
+    if (st.read_state === "ok") {
+      await env.DB.prepare("UPDATE audit_upload SET read_json=?, read_at=?, read_version=? WHERE id=? AND read_state='ok'")
+        .bind(JSON.stringify({ say: st.say, summary: st.summary || null }), now(), res.version, u.id).run();
+      return "ok";
+    }
+    const kept = Object.assign({}, J(u.read_json, {}) || {}, { reread: { at: now(), version: res.version, read_state: st.read_state, say: st.say } });
+    await env.DB.prepare("UPDATE audit_upload SET read_json=?, read_version=? WHERE id=? AND read_state='ok'").bind(JSON.stringify(kept), res.version, u.id).run();
+    return "kept";
+  }
+
   // The gate. Complete (once — the UPDATE is the lock), then the documents-in email. Called when the crew taps Send
   // (submit) or by the sweep — never on the last keystroke: a "12" typed with a pause after the "1" filed 1 and the page
   // then refused the correction (16 Oct 2026 review).
@@ -782,6 +813,15 @@ export function installAuditRequest(deps) {
       if (Date.now() - t0 > 240000) break;
       try { const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(p.request_id).first(); const r = await readUpload(env, req, p.id); if (r.ok) out.read++; } catch (e) { console.error("audit_sweep_read", p.id, (e && e.message) || e); }
     }
+    out.reread = 0;
+    const stale = (await env.DB.prepare("SELECT u.id FROM audit_upload u JOIN audit_request r ON r.id=u.request_id WHERE u.kind='mgmt' AND u.superseded_at IS NULL AND u.read_state='ok' AND COALESCE(u.read_version, 0) < ? AND r.status IN ('sent','complete') ORDER BY u.at DESC LIMIT ?").bind(MGMT_READ_VERSION, REREAD_MAX).all().catch(() => ({ results: [] }))).results || [];
+    for (const p of stale) {
+      if (Date.now() - t0 > 240000) break;
+      let r;
+      try { r = await rereadUpload(env, p.id); } catch (e) { console.error("audit_sweep_reread", p.id, (e && e.message) || e); break; }
+      if (r === "older") break; // HON is not on read version 5 yet (or away): the next hour tries again
+      if (r === "ok") out.reread++;
+    }
     // everything in and nobody tapped Send: sent after AUTO_SUBMIT_HOURS idle, or once the deadline has passed
     for (const req of open) {
       try {
@@ -911,6 +951,14 @@ export function installAuditRequest(deps) {
       const req = await byToken(env, pm[1]);
       const why = closedWhy(req);
       if (why) return htmlResponse(auditClosedHtml(why), why === "unknown" ? 404 : 410);
+      // WHICH BROWSER OPENED IT (6 Nov 2026, Mark John Bornea, Independence: "he clicks the box .. is not able to choose the
+      // file" — nothing reached the console and nothing said where he was). One line per open, the browser as it names itself,
+      // the request id and no crew id (it is no person's action on the profile). The page's own reads are not logged.
+      // and the network it came from (Cloudflare's own read of the address: AS number and owner), so a protected viewer such
+      // as Mimecast's (6 Nov 2026) is named by its network, not only guessed from its browser.
+      const cf = request.cf || {};
+      const net = cf.asn ? " | AS" + cf.asn + " " + String(cf.asOrganization || "").slice(0, 80) : "";
+      await logActivity(env, null, "audit_page_open", req.id + " " + String(request.headers.get("user-agent") || "no user agent").slice(0, 300) + net);
       return htmlResponse(auditUploadHtml({ token: pm[1], ship: req.ship, crew: req.crew_name }));
     }
     if (p.startsWith("/api/audit/u/")) {
@@ -954,5 +1002,5 @@ export function installAuditRequest(deps) {
     return null;
   }
 
-  return { handle, sweep, _internal: { crewState, stateOf, maybeComplete, readUpload, sendDocsIn, byToken, closedWhy, visitCtx, sendFiledMails, sendFollowups } };
+  return { handle, sweep, _internal: { crewState, stateOf, maybeComplete, readUpload, rereadUpload, sendDocsIn, byToken, closedWhy, visitCtx, sendFiledMails, sendFollowups } };
 }

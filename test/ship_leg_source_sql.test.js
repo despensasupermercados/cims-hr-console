@@ -175,3 +175,38 @@ test("a Counter row stamped after the edit reopens the leg; an unstamped row kee
   assert.equal(rec["SC-O|2026-04-01"], "2026-10-01", "unstamped row: Rita's recorded sign-off stands");
   assert.equal(rec["SC-A|2026-04-01"], "2026-09-30", "TDG's own act_off wins over everything");
 });
+
+// Night watch, 15 Nov 2026 (Edward Francis Guazon, Liberty). A Counter contract closed by the sign-off Rita typed and
+// confirmed (5 Nov) carried NO sign-off source, while the same date on a file-dated contract reads "rita". The 10 Nov
+// AdvancedQuery moved him from On board Liberty straight to Earmarked for Icon (one row per crew, no dates), so his
+// Liberty contract came back from the Counter as history with off = 5 Nov and offSource undefined — and the
+// end-of-contract survey, which asks only a contract ended by tdg / rita / card, never invited him (due 8 Nov).
+test("a Counter contract closed by Rita's recorded sign-off says so (offSource rita), and the crew survey asks it", async () => {
+  const d = db();
+  d.exec(`
+    INSERT INTO vessel (id,name,brand) VALUES ('ves_liberty','Liberty','Royal Caribbean'), ('ves_icon','Icon','Royal Caribbean');
+    INSERT INTO crew (id,agency_id,first_name,last_name,status) VALUES ('cg','SC-G','Edward','Guazon','Earmarked');
+    INSERT INTO registry_snapshot (agency_id,status,vessel,run_at,name,raw_status) VALUES
+      ('SC-G','Earmarked','MV ICON OF THE SEAS','2026-11-10T18:27:46.788Z','Edward Francis Guazon','Earmarked');
+    INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off) VALUES ('SC-G',NULL,'Liberty',NULL,1,'2026-02-09','2026-10-31');
+    INSERT INTO contract_edit (sc,seq,sign_on,sign_off,ship,off_conf,updated_at,on_key) VALUES
+      ('SC-G',1,'2026-02-09','2026-11-05','Liberty',1,'2026-10-10T09:51:29.231Z','2026-02-09');
+  `);
+  const today = "2026-11-15";
+  const legs = await boardLegsFromDb(envFor(d), today);
+  const g = legs.filter((l) => l.sc === "SC-G");
+  assert.equal(g.length, 1, "his Liberty contract is on the schedule once");
+  assert.equal(g[0].off, "2026-11-05", "Rita's recorded sign-off dates it");
+  assert.equal(g[0].is_current, false, "and it has passed: the contract ended");
+  assert.equal(g[0].offSource, "rita", "the sign-off is Rita's, as it reads on a file-dated contract");
+  const { surveyDue } = await import("../src/crew_survey.js");
+  const { endedLegs } = await import("../src/crew_survey_send.js");
+  assert.deepEqual(surveyDue(legs, today, "2026-10-23").map((l) => l.sc), ["SC-G"], "the survey asks it (3+ days after, within 30)");
+  // the report's loop counts every ended contract, the fixture's SC-3 too (Quest, closed by Rita's 1 Sep date, out of the window)
+  assert.deepEqual(endedLegs(legs).map((l) => l.sc).sort(), ["SC-3", "SC-G"]);
+  // TDG's own actual sign-off on the Counter stays TDG's
+  d.exec("UPDATE keyman_contract3 SET act_off='2026-11-04' WHERE sc='SC-G'");
+  const t = (await boardLegsFromDb(envFor(d), "2026-11-16")).find((l) => l.sc === "SC-G");
+  assert.equal(t.off, "2026-11-04");
+  assert.equal(t.offSource, "tdg");
+});

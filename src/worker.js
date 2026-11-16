@@ -65,7 +65,7 @@ import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { seatContexts } from "./signoff_context.js";
 import { shipSeats } from "./ship_seats.js";
-import { isShoreCrew, trainerSet } from "./visits.js";
+import { isShoreCrew, trainerSet, visitCardIds, cardVisitLine } from "./visits.js";
 import { installAutoSend } from "./auto_send.js";
 import { installHousePass } from "./house_pass.js";
 import { installSbm } from "./sbm.js";
@@ -2967,10 +2967,16 @@ async function rotationSections(env) {
   // TDG earmarking him for this very hull is TDG having the plan, not the embark yet (17 Oct 2026, Corpin on Grandeur:
   // "turn green") — the same as no word: aboard per the console, awaiting the file.
   const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked"); };
+  // A TRAINER'S CARD THAT HAS STARTED IS A VISIT (night watch, 3 Nov 2026; visits.js): the schedule already marked it
+  // (markAssignmentVisits); the board drew it as a seat "awaiting the TDG file", so the audit site listed Jonathan Alonzo
+  // aboard Spectrum and the SeatReader named him HON's outgoing printer. It is the ship's training-visit line instead.
+  const cardVisit = visitCardIds(HIST);
+  const visitByShip = {};
   const projByShip = {};
   for (const a of pendingProjections(canonAsg, drawn)) {
     const ship = a.ship;
     if (!ship) continue;
+    if (cardVisit.has(a.id)) { (visitByShip[ship] = visitByShip[ship] || []).push(cardVisitLine(a, { name: cmap[a.sc] && cmap[a.sc].name, trainer: _trainers.has(a.sc) }, vkOf(ship))); continue; }
     const kk = normShip(ship);
     const pdl = (_pdBy[(brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship] || []);
     const onC = resolveCity({ date: a.sign_on, seed: a.on_port_seed || shipHome[kk], override: a.override_on_city, portDays: pdl });
@@ -3048,7 +3054,7 @@ async function rotationSections(env) {
     // A yellow card the registry has CONFIRMED aboard is someone already onboard: it sorts with the greens.
     // TRAINING VISITS (17 Oct 2026, visits.js) are not seats: they leave the cards — and with them the timeline, the Gantt,
     // the dashboard and the instructions email — and ride on the section as `visits`, drawn as one line under the cards.
-    const visits = (promByShip[ship] || []).filter((c) => c.visit).sort((a, b) => String(a.signOn || "").localeCompare(String(b.signOn || "")));
+    const visits = (promByShip[ship] || []).filter((c) => c.visit).concat(visitByShip[ship] || []).sort((a, b) => String(a.signOn || "").localeCompare(String(b.signOn || "")));
     const crew = (promByShip[ship] || []).filter((c) => !c.visit).sort((a, b) =>
       (a.state === "yellow" && !a.confirmed && !a.awaiting ? 1 : 0) - (b.state === "yellow" && !b.confirmed && !b.awaiting ? 1 : 0)
       || (b.current ? 1 : 0) - (a.current ? 1 : 0)
@@ -7619,7 +7625,9 @@ function rotShip(sec){
   // TRAINING VISITS (Miguel, 17 Oct 2026; visits.js): a trainer aboard to teach is not a seat — one line under the cards,
   // never on the timeline or the Gantt. A tap opens the contract window, where Rita ticks or clears "Training visit".
   var visitRows=(sec.visits||[]).map(function(v){
-    return '<div class=visitrow onclick="cardClick(\\''+v.agency_id+'\\','+(v.seq||1)+')" title="Open the trip"><span class=vtag>Training visit</span><b>'+escHtml(v.name)+'</b>'
+    // Rita's card that is a visit (3 Nov 2026) opens its own panel, as the card did; a trip the file has opens the trip window
+    var open=(v.assignment_id&&v.vessel_key)?(' data-vk="'+escHtml(v.vessel_key)+'" data-aid="'+escHtml(v.assignment_id)+'" onclick="openRelief(this)" title="Open the card"'):(' onclick="cardClick(\\''+v.agency_id+'\\','+(v.seq||1)+')" title="Open the trip"');
+    return '<div class=visitrow'+open+'><span class=vtag>Training visit</span><b>'+escHtml(v.name)+'</b>'
       +' <span class=sentmeta>'+(v.signOn?('aboard since '+escHtml(fmtDateS(v.signOn))):'aboard')+(v.signOff?(' &middot; off '+escHtml(fmtDateS(v.signOff))):'')+(v.trainer?' &middot; trainer':(v.shoreTeam?' &middot; shoreside team':''))+'</span></div>';
   }).join('');
   // Sent to TDG and not yet back in a Contract Counter. The line clears itself when they return.

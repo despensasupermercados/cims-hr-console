@@ -10,7 +10,7 @@ import { applyOverride } from "../src/override.js";
 import { auditRequestEmail } from "../src/emails/hr.audit.request.v1.js";
 import { docsInEmail } from "../src/emails/hr.audit.docsin.v1.js";
 import { overdueEmail } from "../src/emails/hr.audit.overdue.v1.js";
-import { p43ReadState, mmlReadState, coverFor, p43Assess } from "../src/audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess, shownLife } from "../src/audit_read.js";
 
 function d1() {
   const db = new DatabaseSync(":memory:");
@@ -28,7 +28,7 @@ function fakeHon(reads = {}) {
   return { calls,
     ship: async (s) => { calls.push(["ship", s]); return { ok: true, ship: "Oasis", presses: [{ serial: "S1", model: "C4070", label: "Machine # 1" }], obp: { asOf: "2026-10-13", lines: OBP, intransit: [{ part_number: "A1", qty: 1 }] } }; },
     pattern43: async () => { calls.push(["p43"]); return reads.p43 || { ok: true, version: 5, state: "clean", legend: { state: "clean", head: "NOTHING FOUND", items: [], line: "white dots, lines and uneven density, all 12 pages" } }; },
-    managementList: async () => { calls.push(["mml"]); return reads.mml || { ok: true, version: 4, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }], recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." }; },
+    managementList: async () => { calls.push(["mml"]); return reads.mml || { ok: true, version: 4, kind: "machine-list", lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }], recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." }; },
   };
 }
 const R2 = () => { const m = new Map(); return { m, put: async (k, b) => { m.set(k, new Uint8Array(b)); }, head: async (k) => (m.has(k) ? { size: m.get(k).length } : null), get: async (k) => (m.has(k) ? { arrayBuffer: async () => m.get(k).buffer } : null) }; };
@@ -37,9 +37,9 @@ const html = (b, status = 200) => new Response(b, { status, headers: { "Content-
 const BOARD = { sections: [{ ship: "Oasis", crew: [{ agency_id: "SC-1", current: true, aboard: true }] }, { ship: "Apex", crew: [] }] };
 function setup({ live = false, reads, board = BOARD } = {}) {
   const { db, DB } = d1();
-  const sent = [], ctl = { mail: true, failed: [] };
+  const sent = [], ctl = { mail: true, failed: [] }, logs = [];
   const env = { DB, TIMECARD_DB: TC, HON: fakeHon(reads), AUDIT_FILES: R2(), AUDIT_TO: "ray@dg3.com, rolando@dg3.com, miguel@dg3.com", AUDIT_REQUEST_CC: "rolando@dg3.com, ray@dg3.com", AUDIT_LIVE: live ? "true" : undefined };
-  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async () => {}, rotationSections: async () => board,
+  const R = installAuditRequest({ json, htmlResponse: html, ensureAudit: ensureAuditTables, applyOverride, logActivity: async (...a) => { logs.push(a); }, rotationSections: async () => board,
     sendViaMailer: async (e, env2) => { if (!ctl.mail) { ctl.failed.push(env2 || e); return { ok: false, error: "mailer down" }; } sent.push(env2 || e); return { ok: true }; } });
   // sendViaMailer(env, envelope): keep the envelope
   R._sent = sent;
@@ -48,7 +48,7 @@ function setup({ live = false, reads, board = BOARD } = {}) {
     const req = new Request(u, { method, headers: Object.assign(body instanceof Uint8Array ? {} : { "Content-Type": "application/json" }, headers), body: body === undefined ? undefined : body instanceof Uint8Array ? body : JSON.stringify(body) });
     return R.handle(u.pathname, req, env, u, session);
   };
-  return { R, env, db, sent, call, ctl };
+  return { R, env, db, sent, call, ctl, logs };
 }
 async function makeRequest(t) {
   const r = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json();
@@ -101,6 +101,40 @@ test("the seafarer's state is BLIND: no on-hand quantity anywhere in what he rec
   assert.doesNotMatch(raw, /"5"|:5[,}]|:2[,}]/, "OBP's quantities never reach the crew");
   const pg = await t.call("GET", "/audit/u/" + token, undefined, null);
   assert.equal(pg.status, 200); assert.doesNotMatch(await pg.text(), /on_hand/);
+});
+
+// 6 Nov 2026 (Mark John Bornea, Independence: "he clicks the box .. is not able to choose the file"): nothing reached the
+// console and nothing said which browser he was in. Each open of the page is kept with the browser it came from, so the next
+// "the box does nothing" is read from the log, never guessed. The page's own reads (state, saves) are not logged.
+test("each open of the crew's page is logged with its browser; the page's own reads are not", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  t.logs.length = 0;
+  const ua = "Mozilla/5.0 (Linux; Android 13; SM-A536E Build/TP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/119.0 Mobile Safari/537.36";
+  const pg = await t.call("GET", "/audit/u/" + token, undefined, null, { "user-agent": ua });
+  assert.equal(pg.status, 200);
+  const open = t.logs.filter((l) => l[2] === "audit_page_open");
+  assert.equal(open.length, 1);
+  assert.equal(open[0][1], null, "nobody signed in: the crew's link");
+  assert.ok(open[0][3].startsWith(id + " "), "the request it was opened for");
+  assert.ok(open[0][3].includes("Android 13") && open[0][3].includes("; wv)"), "the browser, as it said itself");
+  assert.ok(!/SC-1/.test(open[0][3]), "no crew id: the line never lands in the profile's who-did-what as a person's action");
+  await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null, { "user-agent": ua });
+  assert.equal(t.logs.filter((l) => l[2] === "audit_page_open").length, 1, "the state read is not an open");
+  const bad = await t.call("GET", "/audit/u/" + "x".repeat(20), undefined, null, { "user-agent": ua });
+  assert.equal(bad.status, 404);
+  assert.equal(t.logs.filter((l) => l[2] === "audit_page_open").length, 1, "a link that is not one logs nothing");
+  assert.ok(!/ \| AS/.test(open[0][3]), "no network read, no network written");
+  // 6 Nov 2026 (Mimecast's protected viewer opened Mark's link): the network the open came from, as Cloudflare reads the
+  // address (AS number and owner), so a viewer is named by its network and not only guessed from its browser
+  const u = new URL("https://audit.cims.work/audit/u/" + token);
+  const req = new Request(u, { headers: { "user-agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0" } });
+  Object.defineProperty(req, "cf", { value: { asn: 64512, asOrganization: "Example Isolation Network" } });
+  const pg2 = await t.R.handle(u.pathname, req, t.env, u, null);
+  assert.equal(pg2.status, 200);
+  const last = t.logs.filter((l) => l[2] === "audit_page_open").pop()[3];
+  assert.ok(last.startsWith(id + " Mozilla/5.0 (X11; Linux"), last);
+  assert.ok(last.endsWith(" | AS64512 Example Isolation Network"), last);
 });
 
 test("the gate: reads by HON, the count, then complete once and ONE documents-in email", async () => {
@@ -484,10 +518,15 @@ test("a machine list with no life row is not 'no part past its rated life'", asy
   assert.equal(none.read_state, "wrong_doc");
   assert.match(none.say, /No parts-life page was found/);
   assert.equal(none.summary.lifeRows, 0);
-  const clean = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 40 }] } });
+  const clean = mmlReadState({ ok: true, kind: "machine-list", lifeVerified: true, lifeOver: [], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 40 }] } });
   assert.equal(clean.read_state, "ok"); assert.equal(clean.say, "Read. No part past its rated life."); assert.equal(clean.summary.lifeRows, 1);
-  const over = mmlReadState({ ok: true, kind: "machine-list", lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
+  const over = mmlReadState({ ok: true, kind: "machine-list", lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }], read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
   assert.equal(over.say, "Read. 1 part past rated life, for the team.");
+  // 6 Nov 2026: a read HON did not verify tells the crew the file is in, never a count of parts or "no part past"
+  for (const r of [{ lifeOver: [] }, { lifeOver: [{ name: "Drum Unit/K (%)", pct: 140 }] }]) {
+    const u = mmlReadState({ ok: true, kind: "machine-list", ...r, read: { ok: true, lifeItems: [{ name: "Drum Unit/K (%)", pct: 140 }] } });
+    assert.equal(u.say, "Read. Thank you."); assert.equal(u.summary.lifeVerified, false);
+  }
 });
 
 // Miguel, 20 Oct 2026 ("ensure all is wired"): Kevin Jugao's stored management-list read still said "Read. No part past its
@@ -501,9 +540,14 @@ test("the request page never repeats an old read's 'No part past its rated life'
   const m = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
   assert.equal(m.mgmt.say, "Read, but no parts-life page was found: part life not read.");
   t.db.prepare("UPDATE audit_upload SET superseded_at='2026-10-16T13:00:00Z' WHERE id='u_old'").run();
-  ins("u_new", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeRows: 45, lifeOver: [], version: 4 } });
+  ins("u_new", { say: "Read. No part past its rated life.", summary: { kind: "machine-list", lifeRows: 45, lifeOver: [], lifeVerified: true, version: 4 } });
   const m2 = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
-  assert.equal(m2.mgmt.say, "Read. No part past its rated life.", "a read that carried life rows keeps its own words");
+  assert.equal(m2.mgmt.say, "Read. No part past its rated life.", "a verified read that carried life rows keeps its own words");
+  // 6 Nov 2026: the same read, not verified by HON (every read stored before that day), never repeats its own count
+  t.db.prepare("UPDATE audit_upload SET superseded_at='2026-10-16T14:00:00Z' WHERE id='u_new'").run();
+  ins("u_newer", { say: "Read. 19 parts past rated life, for the team.", summary: { kind: "machine-list", lifeRows: 63, lifeOver: [{ name: "Developing Unit/M(Distance %)", partNo: "AC57R702", pct: 5114, resets: 0 }], version: 4 } });
+  const m3 = (await (await t.call("GET", "/api/audit/request?id=" + r.id)).json()).machines[0];
+  assert.equal(m3.mgmt.say, "Read. Thank you.");
 });
 
 // R1 (Miguel, 23 Oct 2026: "is not that Rolando needs to approve .. is that you the AI tell the crew the assessment of it"):
@@ -539,4 +583,130 @@ test("R1: the crew's state carries the assessment on a read Pattern 43 only, and
   assert.equal(a.state, "findings"); assert.equal(a.items[0].title, "Lines along the feed in cyan · 1 line"); assert.match(a.after, /Dexter sees the same reading/);
   const pg = await (await t.call("GET", "/audit/u/" + token, undefined, null)).text();
   assert.match(pg, /function assess\(s\)/); assert.match(pg, /\.asx\{/);
+});
+
+// 6 Nov 2026, Independence (Mark John Bornea): the documents-in email told Ray, Rolando, Ohji, Jonathan, Miguel and Dexter
+// "72 parts past rated life" — six parts on one press at 6,387,753%, "times replaced" in the millions, "(Page)" counts read as
+// percentages. Miguel: "is it true these numbers percetages are so high ??", then "yes. all of it". HON's reader marks a read
+// it checked (lifeVerified); every other read shows no percentage and is never a clean press. The rows below are Mark's
+// Machine 1 read as stored in production (audit_upload au_fe494d42, 6 Nov 2026), a few of its 19.
+const MARK_M1 = { ok: true, version: 4, kind: "machine-list", read: { ok: true, lifeItems: new Array(63).fill({ name: "x (%)", pct: 1 }) },
+  lifeOver: [{ name: "Developing Unit/M(Distance %)", partNo: "AC57R702", pct: 5114, resets: 0 }, { name: "Developing Unit/Y(Distance %)", partNo: "AC57R702", pct: 1868, resets: 3246254 },
+    { name: "Drum/C(Page)", partNo: "AC57R732", pct: 857, resets: 1076861 }],
+  recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." };
+test("an unverified Management List read: the crew is told it is in, the team sees 'part life not verified', never a % or a clean press", async () => {
+  const t = setup({ reads: { mml: MARK_M1 } });
+  const { id, token } = await makeRequest(t);
+  for (const kind of ["p43", "mgmt"]) {
+    const u = await (await upload(t, token, "S1", kind)).json();
+    const r = await (await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null)).json();
+    assert.equal(r.read_state, "ok");
+    if (kind === "mgmt") assert.equal(r.say, "Read. Thank you.", "the crew is never told a count of parts from an unverified read");
+  }
+  const st = await (await t.call("GET", "/api/audit/u/state?t=" + token, undefined, null)).json();
+  assert.doesNotMatch(JSON.stringify(st), /past rated life|5114|1868/);
+  const before = t.sent.length;
+  await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "2", B2: "5" } }, null); // agrees with OBP: nothing else to look at
+  assert.equal((await (await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null)).json()).ok, true);
+  const mail = t.sent.slice(before).find((m) => m.templateId === "hr.audit.docsin.v1");
+  assert.ok(mail, "the documents-in email went");
+  const words = mail.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  assert.doesNotMatch(words, /5114|1868|857%|Developing Unit|Drum\/C/, "no figure from the unverified read");
+  assert.doesNotMatch(words, /past rated life/, "no count of parts past rated life");
+  assert.doesNotMatch(words, /no part past its rated life/i, "and never a clean press");
+  assert.match(words, /part life not verified/i);
+  assert.match(words, /did not pass their checks/);
+  assert.doesNotMatch(mail.subject, /to look at/, "an unverified read is nothing to look at: nothing was found");
+  assert.match(mail.text, /Management List part life not verified/);
+  // the visit and the items to confirm say the same
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  assert.deepEqual(v.machines[0].life, []); assert.equal(v.machines[0].lifeUnverified, true); assert.equal(v.machines[0].lifeRead, null);
+  const { beforeVisit } = await import("../src/audit_steps.js");
+  const items = beforeVisit({ machines: v.machines });
+  assert.ok(items.some((b) => /part life not verified/.test(b.t)));
+  assert.ok(!items.some((b) => /past rated life|part life not read/.test(b.t)));
+  // a read HON verified shows its rows, as before
+  const t2 = setup({ reads: { mml: { ...MARK_M1, lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }] } } });
+  const q = await makeRequest(t2);
+  for (const kind of ["p43", "mgmt"]) { const u = await (await upload(t2, q.token, "S1", kind)).json(); await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u.id, {}, null); }
+  const v2 = await (await t2.call("GET", "/api/audit/visit?id=" + q.id)).json();
+  assert.equal(v2.machines[0].life[0].pct, 140); assert.equal(v2.machines[0].lifeUnverified, false);
+});
+
+// HON's read version 5 (6 Nov 2026): each life figure is read twice, from the life blocks near the front of the list and
+// from the Special parts counter, and kept only where the two agree. A list whose figures were compared and did NOT agree
+// keeps no row — it is still the right document: "not verified", never "no parts-life page, send it again".
+const PAIR = (key, front, counter, ok) => ({ key, front, counter, ok });
+const V5_FAILED = { ok: true, version: 5, kind: "machine-list", lifeVerified: false, lifeChecked: false, lifeOver: [],
+  lifeCheck: [PAIR("drum/Y", "188 (%)", "183", false), PAIR("drum/M", "63 (%)", "63", true)], read: { ok: true, lifeItems: [] } };
+const V5_HELD = { ok: true, version: 5, kind: "machine-list", lifeVerified: false, lifeChecked: true, lifeOver: [],
+  lifeCheck: [PAIR("drum/Y", "188 (%)", "188", true)], read: { ok: true, lifeItems: [{ name: "Drum Unit/Y(%)", partNo: "ACE60Y1", pct: 188 }] } };
+test("read version 5: a list whose two readings disagreed is the right document, part life not verified", () => {
+  const st = mmlReadState(V5_FAILED);
+  assert.equal(st.read_state, "ok", "never 'no parts-life page was found'");
+  assert.equal(st.say, "Read. Thank you.");
+  assert.equal(st.summary.lifeChecks, 2); assert.equal(st.summary.lifeChecked, false);
+  assert.deepEqual(st.summary.check[0], ["drum/Y", "188 (%)", "183", false], "the evidence is kept beside the read");
+  const shown = shownLife(st.summary);
+  assert.equal(shown.lifeUnverified, true); assert.deepEqual(shown.lifeOver, []);
+  // a held read (both readings agreed, HON's switch still off) reads the same way here: no %, not verified
+  const held = mmlReadState(V5_HELD);
+  assert.equal(held.read_state, "ok"); assert.equal(held.summary.lifeChecked, true); assert.equal(shownLife(held.summary).lifeUnverified, true);
+  // nothing compared and nothing kept is still "no parts-life page"
+  assert.equal(mmlReadState({ ...V5_FAILED, lifeCheck: [] }).read_state, "wrong_doc");
+});
+
+// HON's read version 6, the same evening: the life page read twice, two ways; the second side is named `second`
+const PAIR6 = (key, front, second, ok) => ({ key, front, second, ok });
+const V6_FAILED = { ...V5_FAILED, version: 6, lifeCheck: [PAIR6("developer/K", "237 (%)", "6,353,991", false), PAIR6("belt", "10 (%)", "10", true)] };
+test("read version 6: the second side is the life page's copied row, kept as evidence; a v5 pair still reads", () => {
+  const st = mmlReadState(V6_FAILED);
+  assert.equal(st.read_state, "ok");
+  assert.deepEqual(st.summary.check, [["developer/K", "237 (%)", "6,353,991", false], ["belt", "10 (%)", "10", true]]);
+  assert.deepEqual(mmlReadState(V5_FAILED).summary.check[0], ["drum/Y", "188 (%)", "183", false], "a v5 answer keeps its counter side");
+  // the crew is pointed at the page the reader reads
+  assert.match(mmlReadState({ ...V6_FAILED, lifeCheck: [] }).say, /Maintenance counter page/);
+});
+
+test("a Management List read before version 6 is read again by the sweep, and only an ok answer replaces it", async () => {
+  const t = setup({ reads: { mml: { ...MARK_M1 } } });
+  const { token } = await makeRequest(t);
+  const ids = {};
+  for (const kind of ["p43", "mgmt"]) {
+    const u = await (await upload(t, token, "S1", kind)).json(); ids[kind] = u.id;
+    await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null);
+  }
+  const row = () => t.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(ids.mgmt);
+  assert.equal(row().read_version, 4);
+  // HON still answers version 4: nothing is replaced and the sweep stops asking for the hour
+  const calls0 = t.env.HON.calls.length;
+  assert.equal((await t.R.sweep(t.env)).reread, 0);
+  assert.equal(t.env.HON.calls.length - calls0, 1, "one try, then it waits for the next hour");
+  assert.equal(row().read_version, 4);
+  // HON on version 5 is older than the console asks for now: nothing replaced, it waits for the hour
+  t.env.HON = fakeHon({ mml: V5_FAILED });
+  assert.equal((await t.R.sweep(t.env)).reread, 0);
+  assert.equal(row().read_version, 4);
+  // HON on version 6, the two readings disagreed: the read is replaced, the crew's state is unchanged, nothing shown
+  t.env.HON = fakeHon({ mml: V6_FAILED });
+  assert.equal((await t.R.sweep(t.env)).reread, 1);
+  const r = row();
+  assert.equal(r.read_state, "ok"); assert.equal(r.read_version, 6);
+  assert.equal(JSON.parse(r.read_json).summary.lifeChecks, 2);
+  assert.equal((await t.R.sweep(t.env)).reread, 0, "read once at version 6, never again");
+  // an answer that is not ok never replaces a good read: it is noted and the row is not asked again
+  const t2 = setup({ reads: { mml: { ...MARK_M1 } } });
+  const q = await makeRequest(t2);
+  const u2 = await (await upload(t2, q.token, "S1", "mgmt")).json();
+  await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u2.id, {}, null);
+  t2.env.HON = fakeHon({ mml: { ok: true, version: 6, kind: "settings-list" } });
+  await t2.R.sweep(t2.env);
+  const r2 = t2.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(u2.id);
+  assert.equal(r2.read_state, "ok", "a good read is never downgraded by a re-read");
+  assert.equal(JSON.parse(r2.read_json).reread.read_state, "wrong_doc");
+  assert.equal(r2.read_version, 6);
+  const mmlCalls = () => t2.env.HON.calls.filter((c) => c[0] === "mml").length;
+  const before = mmlCalls();
+  await t2.R.sweep(t2.env);
+  assert.equal(mmlCalls(), before, "not asked again");
 });

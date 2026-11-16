@@ -19,6 +19,9 @@ export function docsInEmail({ ship, crew, auditor, completeAt, machines = [], co
   const down = machines.filter((m) => m.down);
   const marked = live.filter((m) => m.p43 && m.p43.state === "findings");
   const past = live.reduce((n, m) => n + ((m.mml && m.mml.lifeOver) || []).length, 0);
+  // 6 Nov 2026 ("is it true these numbers percetages are so high ??"): a read HON did not verify shows no percentage and
+  // never reads as a clean press — its life says "not verified" (mml.lifeUnverified, audit_read.shownLife)
+  const unver = live.filter((m) => m.mml && m.mml.lifeUnverified);
   const gaps = (count.diff || []).filter((d) => d.kind === "gap");
   const timing = (count.diff || []).filter((d) => d.kind === "timing");
   const look = marked.length + live.filter((m) => ((m.mml && m.mml.lifeOver) || []).length).length + (gaps.length ? 1 : 0) + down.length;
@@ -68,6 +71,9 @@ ${blk(`padding-top:3px;font-family:${FM};font-size:12px;color:${T.slate};`, (m.m
 <td valign="top" style="padding:${i ? "10px" : "0"} 10px 0 0;${i ? "border-top:1px solid " + T.border + ";" : ""}font-family:${FB};font-size:14px;color:${T.navy};font-weight:700;line-height:1.3;">${esc(partName(x.name))}${x.partNo ? blk(`padding-top:2px;font-family:${FM};font-size:12px;font-weight:400;color:${T.slate};`, esc(x.partNo)) : ""}</td>
 <td valign="top" align="right" style="padding:${i ? "10px" : "0"} 0 ${i < lo.length - 1 ? "10px" : "0"};${i ? "border-top:1px solid " + T.border + ";" : ""}font-family:${FB};font-size:12px;color:${T.slate};"><div style="font-family:${FH};font-size:20px;font-weight:600;color:${T.amberInk};line-height:1.1;">${esc(x.pct)}%</div>${x.cover ? String(x.cover).split(" · ").map((c) => `<div style="white-space:nowrap;">${esc(c)}</div>`).join("") : "not on the OBP list"}</td></tr>`).join("") + `</table>`);
       h += blk(`padding-top:8px;font-family:${FB};font-size:13px;color:${T.slate};`, "Pattern 43: " + (p.state === "clean" ? "copy reads clean" : items.length ? "copy shows marks above" : "copy not judged") + ".");
+    } else if (m.mml && m.mml.lifeUnverified) {
+      h += H("Management List", "Part life not verified");
+      h += blk(`padding-top:4px;font-family:${FB};font-size:13px;color:${T.slate};line-height:1.45;`, "The figures read from this list did not pass their checks, so none is shown.");
     } else if (m.mml && m.mml.kind === "machine-list") {
       h += H("Management List", "No part past rated life");
     }
@@ -76,7 +82,9 @@ ${blk(`padding-top:3px;font-family:${FM};font-size:12px;color:${T.slate};`, (m.m
     h += blk(`padding-top:14px;font-family:${FB};font-size:14px;color:${T.body};line-height:1.5;`, cut > 0 ? `<b style="color:${T.navy};">${esc(rec.slice(0, cut))}:</b>${esc(rec.slice(cut + 1))}` : esc(rec));
     return row(card(h), "12px 32px 0");
   };
-  const cleanCard = (m) => row(card(top(m, "Clean", "green") + blk(`padding-top:10px;font-family:${FB};font-size:14px;color:${T.body};`, "Pattern 43: nothing found. Management List: no part past its rated life.")), "12px 32px 0");
+  const cleanCard = (m) => m.mml && m.mml.lifeUnverified
+    ? row(card(top(m, "No marks", "green") + blk(`padding-top:10px;font-family:${FB};font-size:14px;color:${T.body};`, "Pattern 43: nothing found. Management List: part life not verified, the figures read from it did not pass their checks.")), "12px 32px 0")
+    : row(card(top(m, "Clean", "green") + blk(`padding-top:10px;font-family:${FB};font-size:14px;color:${T.body};`, "Pattern 43: nothing found. Management List: no part past its rated life.")), "12px 32px 0");
   const downCard = (m) => row(card(top(m, "Down", "red") + box(`${blk(`padding-bottom:2px;font-family:${FB};font-size:12px;color:${T.slate};`, "Reported by the crew")}<div style="font-family:${FB};font-size:14px;color:${T.body};line-height:1.45;">${esc(m.down)}</div>`)), "12px 32px 0");
   const section = (txt, pad) => row(`<div style="font-family:${FH};font-size:18px;font-weight:600;color:${T.navy};">${txt}</div>`, pad || "28px 32px 0");
 
@@ -95,7 +103,7 @@ ${blk(`padding-top:3px;font-family:${FB};font-size:13px;color:${T.slate};`, (cou
     ((count.extras || []).length ? blk(`padding-top:10px;font-family:${FB};font-size:14px;color:${T.body};line-height:1.45;`, `<b style="color:${T.navy};">Found, not on the OBP list:</b> ${(count.extras || []).map((x) => esc(x.text) + (x.counted != null ? " (" + esc(x.counted) + ")" : "")).join(" · ")}`) : "")), "12px 32px 0");
   const rows = [
     test ? row(card(`<div style="font-family:${FB};font-size:13px;color:${T.amberInk};font-weight:700;">TEST MODE · sent to you only.</div>`)) : "",
-    row(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${stat(marked.length, (marked.length === 1 ? "machine" : "machines") + " with Pattern 43 marks", marked.length ? "amber" : "green")}${stat(past, (past === 1 ? "part" : "parts") + " past rated life", past ? "amber" : "green")}${stat(gaps.length, "count " + (gaps.length === 1 ? "line" : "lines") + " off OBP", gaps.length ? "amber" : "green")}</tr></table>`, "22px 32px 0"),
+    row(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${stat(marked.length, (marked.length === 1 ? "machine" : "machines") + " with Pattern 43 marks", marked.length ? "amber" : "green")}${unver.length && !past ? stat("–", "part life not verified", "amber") : stat(past, (past === 1 ? "part" : "parts") + " past rated life", past ? "amber" : "green")}${stat(gaps.length, "count " + (gaps.length === 1 ? "line" : "lines") + " off OBP", gaps.length ? "amber" : "green")}</tr></table>`, "22px 32px 0"),
     section("Machines"),
     ...busy.map(machineCard), ...down.map(downCard), ...quiet.map(cleanCard),
     countCard,
@@ -107,6 +115,7 @@ ${blk(`padding-top:3px;font-family:${FB};font-size:13px;color:${T.slate};`, (cou
   const unesc = (t) => t.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
   const text = [head + " " + head2, unesc(lead.replace(/<[^>]+>/g, "")),
     ...busy.map((m) => m.label + " (" + m.serial + "): " + ((m.p43 && m.p43.legend && m.p43.legend.items) || []).map((i) => i.head).join("; ") + (((m.mml && m.mml.lifeOver) || []).length ? " · past rated life: " + m.mml.lifeOver.map((x) => x.name + " " + x.pct + "%").join(", ") : "")),
+    ...unver.map((m) => m.label + " (" + m.serial + "): Management List part life not verified."),
     ...down.map((m) => m.label + " down: " + m.down),
     gaps.length ? "Count off OBP: " + gaps.map((d) => d.part_no + " OBP " + d.obp + " counted " + d.counted).join("; ") : !count.total ? "No OBP list to count against." : "Count agrees with OBP.",
     PARTS_RULE].join("\n\n");

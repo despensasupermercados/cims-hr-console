@@ -1076,7 +1076,11 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   `CC_*_SQL` join reads the mark and the tag); **off the bench and the seats** (a "Training visit · trainer" line under the
   ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard); **off the crew's statement** (Miguel, 21 Oct
   2026: "left off the crew's statement, is a training visit"; `statementContracts` skips the leg, so its row and its days are
-  not printed — the PDF, its email and the internal crew file's statement pages). The profile's time at sea still counts its days. The
+  not printed — the PDF, its email and the internal crew file's statement pages). **Rita's card for a trainer, once started, is the
+  ship's visit line too** (night watch, 3 Nov 2026: Jonathan Alonzo's Spectrum card, 3 → 11 Nov, drew as a seat "awaiting the TDG
+  file", the audit site listed him aboard and the SeatReader made him HON's outgoing printer — HON opened a final count for him):
+  the board reads the schedule's answer (`visitCardIds(HIST)`, the cards `markAssignmentVisits` marked) and draws the card as
+  `sec.visits` (`cardVisitLine`), a tap opening the card's own panel; before its sign-on it stays a plan. The profile's time at sea still counts its days. The
   mark belongs to the trip that embarked that day: a later file that moves the embark makes it a new trip. (The same
   morning this was Jonathan's id alone, PR #284, then a per-trip tick, PR #285.) Checked on the 17 Oct 2026 production
   data before merging: Score Card inputs, statements and schedule legs identical for all 108 crew. Pinned by
@@ -1179,7 +1183,7 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   Yes = 1–5. The supervisor statement names the line's title: Royal GSM, Celebrity DCM, Azamara BOM, NCL **shipboard manager**.
 - **Who is asked**: a contract the Keyman board shows ENDED (offSource tdg / rita / card — a projected sign-off that passed is
   held, still aboard, never asked), never a training visit, **3 days after the sign-off** (`surveyDue`: off on or before
-  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on; Miguel, 23 Oct 2026,
+  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on (night watch, 15 Nov 2026: a Contract Counter contract closed by the sign-off Rita typed carries offSource rita, TDG's act_off tdg — `fetchRecordedSignoffs` → `applyRecordedSignoffs`; it carried none, so Edward Francis Guazon, Liberty, off 5 Nov, was never asked once the 10 Nov file earmarked him for Icon with no dates; pinned by `test/ship_leg_source_sql.test.js`); Miguel, 23 Oct 2026,
   "ok go ahead": the delay gives Rita time to record why a contract ended, so a Performance / Medical / Compassionate end
   is not asked — it was the morning after until then). One per contract (`ux_crew_survey_contract` on sc + sign-on).
 - **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own
@@ -1871,6 +1875,57 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   quality, not on a mark …" and that the auditor sees the same reading. Built in code from HON's measurement, the same lines
   Dexter's app shows (`p43Lines`) — no model writes it, nothing is guessed, never "replace". Pinned by
   `test/audit_request.test.js`.
+- **A BROWSER THAT CANNOT CHOOSE A FILE IS SAID, NEVER SILENT** (6 Nov 2026, Mark John Bornea, Independence; Miguel: "when he
+  clicks the box to chose the file.. is not able to chose the file", then "can we prevent this to happen again"). His request
+  received no file and no count; the page, rebuilt in Chromium with his real request, opens the chooser on a tap on a desktop, an
+  iPhone and an Android phone — so the box fails only where the BROWSER cannot pick a file: a mail or chat app's own browser on
+  Android, or a desk that blocks file dialogs (Darryl Ramos, Constellation, HON, 1 Oct 2026). The crew's page (`audit_upload_ui.js`)
+  now: (1) inside an Android app's browser (the WebView's "; wv)", Facebook / Instagram / Line / WeChat) says so at the top with
+  "Open in Chrome" and **Copy the link**; (2) a tap after which the page neither lost focus, nor was hidden, nor got a file or a
+  "cancel" within `PICK_MS` = 6 s says "Nothing opened?" under THAT box (Chrome / Edge, drop the file, or reply to the email with
+  it) — never on an iPhone, whose picker is a sheet that does not blur the page; a "cancel" or a file clears it; (3) a file DROPPED
+  on a box on a computer is sent for that press and document — and SAID (Miguel, the same afternoon, after seven opens from Firefox on
+  Linux and still no file: "can u make it drag and drop thise rectangles .. besides clicking"): on a computer every
+  empty box reads "Drag here or click", every box lights up green the moment a file is dragged over the page (`body.dragfiles`, a
+  depth count), and the "Nothing opened?" line leads with dragging the file from the folder. **Every open of the page is logged** (`activity_log`
+  `audit_page_open`: the request id and the browser's own User-Agent, no crew id), so the next "the box does nothing" is read
+  from the log, never guessed; since the same evening the line also carries the network the open came from (` | AS<n> <owner>`,
+  Cloudflare's own read of the address). Pinned by `test/audit_file_picker.test.js`, `test/audit_request.test.js`.
+- **THE EMAIL'S LINK CAN OPEN IN MIMECAST'S PROTECTED VIEWER, AND THE VIEWER TAKES NO FILE** (6 Nov 2026, Miguel's screenshot of
+  Mark's link: "mimecast Browser Isolation", a 5-minute session; "the links open on a sub page under mine-cast .. figure it out
+  and ensure this comes off"). **Correction of the paragraph above: the "Firefox on Linux" opens were never the ship's computer.**
+  They are Mimecast Browser Isolation: the mail system Mimecast rewrites the email's link, and on a click it opens the page in a
+  browser running on Mimecast's side, drawn in a window that takes no file from the computer — so neither the box nor a drag can
+  work there, and #379's drag could not help Mark. The crew's page now treats a Linux desktop browser as that viewer (`VIEWER` in
+  `audit_upload_ui.js`; not Android, not a Chromebook — every Linux open of Mark's link lines up with the viewer; the ship and
+  office computers in the log run Windows or macOS): the top says **Open this page in Chrome or Edge**, why, the whole address to
+  select (`#addr`) with **Copy the address**, and "reply to the email with the files"; each box reads "Open in Chrome first", never
+  "Drag here", and its "Nothing opened?" line points to the top. **What turns it off is not in this code**: whoever runs Mimecast for
+  the mailbox (RCCL for the ship mailboxes `*_printerspecialist@rccl.com`; DG3 IT if dg3.com runs it too) adds cims.work and its
+  hosts as a permitted URL that is not rewritten or isolated — Miguel's ask to make. The same viewer would meet every cims.work link
+  read in that mail — hon.cims.work's uploads behind the instructions email's button too (inferred, not yet seen in a log). Pinned by `test/audit_file_picker.test.js`.
+- **A PART-LIFE % IS SHOWN ONLY FROM A READ HON VERIFIED** (Miguel, 6 Nov 2026, over the Independence documents-in email's "72
+  parts past rated life": "is it true these numbers percetages are so high ??"; then "yes. all of it"). It was not: on Mark John
+  Bornea's Machine 2 six different parts read 6,387,753%, "times replaced" read in the millions on both presses, and "(Page)" rows
+  (page counts) were listed as percentages. HON's Management List reader is a model transcribing 52 scanned pages, and nothing
+  checked what it returned; 13 reads stored in cims-hon (16 Oct – 2 Nov 2026) show the same faults (Oasis 886,480%, one value
+  copied across unrelated parts on Liberty and Ascent, summarised names on Quantum and Ovation). `audit_read.shownLife` is the ONE
+  gate, applied where a stored read is loaded (`machinesRead`, so the documents-in email, the request screen, the visit, Before the
+  visit and the filed record all read the same answer): a machine-list read without HON's `lifeVerified: true` shows NO percentage
+  and is never "no part past its rated life" — it says **Part life not verified** (`lifeUnverified`; the email's tile reads "–
+  part life not verified", a clean press reads "No marks"); the crew is told "Read. Thank you.", never a count of parts. Every read
+  stored before 6 Nov 2026 is unverified. HON marks a read verified once its reader checks the figures against the document (the
+  rebuild, cims-hon). Pinned by `test/audit_request.test.js` (Mark's stored read, end to end). **HON's read version 5** (cims-hon, 6 Nov 2026) reads each life figure twice, from the list's life blocks and from its
+  Special parts counter, and keeps it only where the two agree; HON's `LIFE_LIVE` switch keeps every figure held until the
+  stored v5 reads match nine lists read by eye. Here: `mmlReadState` treats a list whose figures were compared and did not
+  agree (`lifeCheck` without rows) as the right document, "not verified", never "no parts-life page"; the summary keeps
+  `lifeChecks`, `lifeChecked` and each figure's two sides (`check`); the hourly sweep re-reads, newest first, two an hour,
+  every OK Management List read below `MGMT_READ_VERSION` (`rereadUpload`), stops for the hour while HON still answers
+  an older version, and never lets a re-read that is not "ok" replace a good read (it is noted on `read_json.reread`). **Read version 6, the same evening** (Miguel, sending three
+  life pages: "from the management list.. is all u need .. for right now.. identfy those .. and read them"): HON reads the
+  list's life page twice, two ways (its cells, and its value rows copied as text and parsed in code), and no longer reads
+  the Special parts counter; eighteen figures, the transfer belt included. `MGMT_READ_VERSION` = 6; a figure's second side
+  is `second` (v5's `counter` still reads); the "no parts-life page" words point at the Maintenance counter page, pp. 3–5.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`
