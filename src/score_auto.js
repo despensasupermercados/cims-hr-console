@@ -151,7 +151,16 @@ export function missOwnerByBoard(m, sc, ix, legs) {
   const est = aboard.filter((a) => daysBetween(a.on, d) >= ESTABLISHED_DAYS);
   const namedIds = new Set(String(m.requester || "").split(/\s*(?:\/|&|\band\b|;)\s*/i).map((p) => matchTravelName(p.trim(), ix).agency_id).filter(Boolean));
   let owner = null, why = "";
-  if (aboard.length === 1) { owner = aboard[0]; why = "the only crew aboard"; }
+  // THE SCHEDULE CAN FORGET THE MAN WHO WAS ABOARD (bug hunt, 16 Nov 2026): TDG's file keeps one row per crew, so once the
+  // outgoing printer is re-listed on his next ship his old contract is gone and his reliever reads as "the only crew
+  // aboard" on the days of the handover. Miguel's rule stands wherever the schedule KNOWS the other man on this hull (he
+  // left, or he was a training visitor: the one aboard is charged, whoever typed it). Only when the order names a roster
+  // crew the schedule has NO record of on this hull, and the lone crew aboard was under 4 weeks in, is nobody charged:
+  // the card says "Check whose miss it is" (§6).
+  let forgotten = false;
+  const k0 = shipKey(m.ship), onHull = (id) => (legs || []).some((l) => l && l.sc === id && shipKey(l.ship) === k0);
+  if (aboard.length === 1 && daysBetween(aboard[0].on, d) < ESTABLISHED_DAYS && [...namedIds].some((id) => id !== aboard[0].sc && !onHull(id))) { forgotten = true; why = "the only crew the schedule has aboard was under 4 weeks in, and the order names a crew the schedule has no record of on this ship"; }
+  else if (aboard.length === 1) { owner = aboard[0]; why = "the only crew aboard"; }
   else if (est.length === 1) { owner = est[0]; why = "aboard " + weeks(est[0]) + " weeks, the other under 4"; }
   else {
     const pool = est.length ? est : aboard;
@@ -160,7 +169,7 @@ export function missOwnerByBoard(m, sc, ix, legs) {
     else if (!est.length) { owner = aboard[0]; why = "the longest aboard, both under 4 weeks"; }
   }
   return { mine: !!owner && owner.sc === sc, who: named.who, joint: named.joint, rule: "board", why,
-    owner: owner ? owner.name : null, aboard: aboard.map((a) => a.name), unplaced: owner ? [] : ["(two crew aboard 4+ weeks, the order names neither)"], others: owner && owner.sc !== sc ? [owner.name] : [] };
+    owner: owner ? owner.name : null, aboard: aboard.map((a) => a.name), unplaced: owner ? [] : [forgotten ? "(the schedule has only a crew under 4 weeks aboard; the order names " + (named.who || "another crew") + ", not on record for this ship)" : "(two crew aboard 4+ weeks, the order names neither)"], others: owner && owner.sc !== sc ? [owner.name] : [] };
 }
 // MONO (Miguel, 15 Oct 2026: "presses only, under 20% of clicks over the contract"). OBP's rows are the day's clicks per
 // machine (they equal the day's meter change); the share is the press mono over press colour + mono on the card's ships

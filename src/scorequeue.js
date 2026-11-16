@@ -46,7 +46,12 @@ export function scoreContracts(legs, sc) {
   }
   return out;
 }
-const covered = (c, outcomes) => (outcomes || []).some((o) => o && o.span_start && o.span_end && c.on <= o.span_end && (c.off || "9999") >= o.span_start);
+// WHERE A CONTRACT WITH NO SIGN-OFF DATE ENDS (bug hunt, 16 Nov 2026). Only a contract still RUNNING is open-ended. An
+// ENDED one with no date (a Contract Counter row uploaded without a projected sign-off, served as history — 11 rows on
+// 16 Oct 2026) was read as running to "9999": it overlapped every later date, so after the crew's first outcome every
+// later contract was refused as already_scored. With no date on record it covers its sign-on day and nothing after.
+const endOf = (c) => c.off || (c.current || c.is_current ? "9999" : c.on);
+const covered = (c, outcomes) => (outcomes || []).some((o) => o && o.span_start && o.span_end && c.on <= o.span_end && endOf(c) >= o.span_start);
 // Ended: TDG's word, Rita's or a card's sign-off that has passed — never a contract still current (held by TDG's On board,
 // or past a PROJECTED sign-off: overdue, not gone, §10d).
 const endedBy = (c, today) => !c.current && !!c.off && c.off <= today;
@@ -91,13 +96,13 @@ export function commitBlock(legs, sc, today, outcomes, spanStart, spanEnd) {
   if (blank(spanStart) || blank(spanEnd)) return null;                       // the route's span_required answers a blank span
   if (!ISO.test(spanStart) || !ISO.test(spanEnd)) return { error: "span_invalid" };
   const C = scoreContracts(legs, sc);
-  const mine = C.filter((c) => c.on <= spanEnd && (c.off || "9999") >= spanStart);
-  const reach = mine.reduce((r, c) => ({ on: c.on < r.on ? c.on : r.on, off: (c.off || "9999") > r.off ? (c.off || "9999") : r.off }), { on: spanStart, off: spanEnd });
+  const mine = C.filter((c) => c.on <= spanEnd && endOf(c) >= spanStart);
+  const reach = mine.reduce((r, c) => ({ on: c.on < r.on ? c.on : r.on, off: endOf(c) > r.off ? endOf(c) : r.off }), { on: spanStart, off: spanEnd });
   const prior = (outcomes || []).find((o) => o && o.span_start && o.span_end && reach.on <= o.span_end && reach.off >= o.span_start);
   if (prior) return { error: "already_scored", on: prior.span_start, off: prior.span_end };
   if (spanEnd > today) return { error: "not_ended", off: spanEnd };
   const all = (legs || []).filter((h) => h && h.ours && h.sc === sc && ISO.test(h.on || ""));
-  const hits = all.filter((h) => h.on <= spanEnd && (h.off || "9999") >= spanStart);
+  const hits = all.filter((h) => h.on <= spanEnd && endOf(h) >= spanStart);
   if (hits.length && hits.every((h) => h.visit)) return { error: "visit" };
   const held = mine.find((c) => c.held);
   if (held) return { error: "held_by_tdg", on: held.on, off: held.off, ship: held.ships.join(", ") };

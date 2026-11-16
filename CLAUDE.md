@@ -1765,6 +1765,19 @@ it adds to the count are Miguel's to decide (Brain rec3UjhXkYKvfz4N0; night-watc
 contracts lost before 16 Nov are not in it (the console no longer holds them); a fresh TDG count file restates the count.
 Pinned by `test/registry_contract.test.js`.
 
+**The Score Card's three findings of 16 Nov 2026 — MONEY (§1): Miguel's merge, the pull request after #390.** Pinned by
+`test/bughunt_1116_money.test.js`. (1) **An ENDED contract with no sign-off date ends on its sign-on day** for the commit
+rules (`scorequeue.endOf`): a Contract Counter row uploaded without a projected sign-off (11 rows), served as history, was
+read as running to "9999", so after a crew's first outcome every later contract was refused `already_scored`; a contract
+still RUNNING with no date is open-ended as before. (2) **The inventory count pays the handover factor only on HON's word
+`clean`** (`bonus.inventoryCount`): any other word on a judged count (HON says clean or wrong today) read as "no gaps";
+now it holds the factor at 0 and says the word, like a count that could not be read. Ray's or Rolando's override still
+wins. (3) **Whose miss, when the schedule forgot the outgoing printer** (`missOwnerByBoard`): the file keeps one row per
+crew, so once the outgoing printer is re-listed on his next ship his reliever reads as "the only crew aboard" during the
+handover and was charged an order the other man typed. Only when the lone crew aboard was under 4 weeks in AND the order
+names a roster crew the schedule has NO leg for on that ship is nobody charged ("Check whose miss it is", §6). Miguel's
+rule is unchanged wherever the schedule knows the other man on the hull (he left, or he was a training visitor).
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):
