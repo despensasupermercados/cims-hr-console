@@ -689,8 +689,13 @@ test("a Management List read before version 6 is read again by the sweep, and on
   t.env.HON = fakeHon({ mml: V5_FAILED });
   assert.equal((await t.R.sweep(t.env)).reread, 0);
   assert.equal(row().read_version, 4);
-  // HON on version 6, the two readings disagreed: the read is replaced, the crew's state is unchanged, nothing shown
+  // HON on version 6 BEFORE its code reader (no lifeCode in the answer, 6-9 Nov 2026) is older now too: nothing replaced
   t.env.HON = fakeHon({ mml: V6_FAILED });
+  assert.equal((await t.R.sweep(t.env)).reread, 0);
+  assert.equal(row().read_version, 4);
+  // HON on version 6 with its code reader (10 Nov 2026), the two readings disagreed: the read is replaced, the crew's state
+  // is unchanged, nothing shown
+  t.env.HON = fakeHon({ mml: { ...V6_FAILED, lifeCode: { ok: false, codeVersion: 3, why: "no life page found" } } });
   assert.equal((await t.R.sweep(t.env)).reread, 1);
   const r = row();
   assert.equal(r.read_state, "ok"); assert.equal(r.read_version, 6);
@@ -701,7 +706,7 @@ test("a Management List read before version 6 is read again by the sweep, and on
   const q = await makeRequest(t2);
   const u2 = await (await upload(t2, q.token, "S1", "mgmt")).json();
   await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u2.id, {}, null);
-  t2.env.HON = fakeHon({ mml: { ok: true, version: 6, kind: "settings-list" } });
+  t2.env.HON = fakeHon({ mml: { ok: true, version: 6, kind: "settings-list", lifeCode: null } });
   await t2.R.sweep(t2.env);
   const r2 = t2.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(u2.id);
   assert.equal(r2.read_state, "ok", "a good read is never downgraded by a re-read");
@@ -731,4 +736,55 @@ test("HON's OBP list comes back empty the day the count is in: the count is comp
   assert.deepEqual(kept.map((l) => l.part_number), ["A1", "B2"], "the snapshot's lines are what the count is read against");
   const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
   assert.deepEqual(v.count.diff.map((x) => [x.part_no, x.obp, x.counted]), [["B2", 5, 1]]);
+});
+
+// HON'S CODE READER IN THE AUDIT (Miguel, 16 Nov 2026: "copy the knowledge u build on the HON app and transfer the knowledge
+// here to the audit app"). Since 10 Nov 2026 HON's audit door reads each life figure off the scan's pixels and verifies it only
+// where the code and a vision read agree (cims-hon mmlDigits.js, lifeWithCode), and names the figures it could not verify. Its
+// read version stayed 6, so the audit's three stored reads of 6-7 Nov 2026 (no code check) were never asked again.
+const CODE_OK = { ok: true, version: 6, kind: "machine-list", lifeVerified: true, lifeChecked: true,
+  read: { ok: true, lifeItems: [{ name: "Drum Unit/K(%)", pct: 113 }, { name: "Developer/Y(Distance %)", pct: 46 }] },
+  lifeCheck: [{ key: "drum/K", front: "113 (%)", second: "113", ok: true }], lifeOver: [{ name: "Drum Unit/K(%)", partNo: null, pct: 113 }],
+  lifeCode: { ok: true, codeVersion: 3, shown: 16, notShown: ["corona/Y", "drum/M"], pairs: [] }, lifeNotShown: ["Charging corona yellow", "Drum magenta"],
+  recommendation: "Recommendation: have this machine looked at. Parts are changed on copy quality, not on a count." };
+test("a code-verified read: the parts past their rating shown, the figures not checked named, and the code read kept", () => {
+  const st = mmlReadState(CODE_OK);
+  assert.equal(st.read_state, "ok");
+  assert.equal(st.say, "Read. 1 part past rated life, for the team.");
+  assert.deepEqual(st.summary.code, { version: 3, ok: true, shown: 16 });
+  assert.deepEqual(st.summary.lifeNotShown, ["Charging corona yellow", "Drum magenta"]);
+  const shown = shownLife(st.summary);
+  assert.equal(shown.lifeOver.length, 1, "a verified part past its rating is shown");
+  assert.notEqual(shown.lifeUnverified, true);
+});
+test("a code-verified read with figures not checked and none past its rating is never a clean machine", () => {
+  const st = mmlReadState({ ...CODE_OK, lifeOver: [] });
+  assert.equal(st.say, "Read. Thank you.", "never 'No part past its rated life' while figures were not checked");
+  const shown = shownLife(st.summary);
+  assert.equal(shown.lifePartial, true);
+  assert.equal(shown.lifeUnverified, true, "the documents-in email, which knows two states, says 'part life not verified'");
+  // every figure verified and none past its rating: the one case that is a clean machine
+  const all = mmlReadState({ ...CODE_OK, lifeOver: [], lifeNotShown: [], lifeCode: { ok: true, codeVersion: 3, shown: 18, notShown: [] } });
+  assert.equal(all.say, "Read. No part past its rated life.");
+  assert.notEqual(shownLife(all.summary).lifeUnverified, true);
+  // an image list has no code read: its mark says so (version null) and it is not asked again for it
+  assert.deepEqual(mmlReadState({ ...CODE_OK, lifeCode: null }).summary.code, { version: null, ok: false, shown: 0 });
+  // a HON answer from before its code reader carries no mark
+  const old = { ...CODE_OK }; delete old.lifeCode;
+  assert.equal(mmlReadState(old).summary.code, undefined);
+});
+test("a list read at version 6 before HON's code reader is read again once, through HON's current door", async () => {
+  const t = setup({ reads: { mml: { ...V6_FAILED } } }); // stored as 6 Nov 2026 did: version 6, no code mark
+  const { token } = await makeRequest(t);
+  const u = await (await upload(t, token, "S1", "mgmt")).json();
+  await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null);
+  const row = () => t.db.prepare("SELECT read_state, read_version, read_json FROM audit_upload WHERE id=?").get(u.id);
+  assert.equal(row().read_version, 6);
+  assert.equal(JSON.parse(row().read_json).summary.code, undefined);
+  t.env.HON = fakeHon({ mml: CODE_OK });
+  assert.equal((await t.R.sweep(t.env)).reread, 1, "the stored read had no code check: asked again");
+  const r = JSON.parse(row().read_json);
+  assert.deepEqual(r.summary.code, { version: 3, ok: true, shown: 16 });
+  assert.equal(r.summary.lifeVerified, true);
+  assert.equal((await t.R.sweep(t.env)).reread, 0, "read once with the code check, never again");
 });

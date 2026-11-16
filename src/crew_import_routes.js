@@ -219,10 +219,11 @@ export async function apiCrewImportStage(request, env, deps) {
   // previous (8 Oct 2026): the LAST file's word per crew, read before this file replaces it — a crew it had On
   // board another ship whom this file no longer has aboard has signed off, and their earmark is ready for TDG.
   const [prevRows, shipRows] = await Promise.all([
-    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
+    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, embarked_at, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
     env.DB.prepare("SELECT name FROM vessel ORDER BY name").all().then((r) => (r && r.results) || []).catch(() => []),
   ]);
   const em = earmarkDiscrepancies({ projections, registry, today, shipOf: SHIP_OF, previous: prevRows });
+  review.early_moves = earlyMoves(registry, prevRows, today, SHIP_OF);
   review.earmarks = em.items;
   review.ships = shipRows.map((r) => r.name).filter(Boolean); // the Edit choice's ship list (the names a move accepts)
   // A TDG earmark Rita REJECTED from the board (earmark_dismiss, worker.js) is not re-created while the file
@@ -230,6 +231,7 @@ export async function apiCrewImportStage(request, env, deps) {
   const dismissed = deps && deps.dismissed ? await deps.dismissed(env).catch(() => []) : [];
   review.tdg_earmarks = tdgEarmarksWithoutCard({ projections, registry, shipOf: SHIP_OF, exclude: em.items.filter((i) => i.kind === "other_person" && i.file && i.file.other).map((i) => i.file.other.sc + "|" + String(i.ship).trim().toLowerCase()).concat(dismissed || []) });
   review.registry = registry;
+  review.schedule = scheduleCheck(registry, prevRows);
   review.km_mismatch = kmMismatch;
   review.groups.unretire = unretireItems(registry, retiredByAgency);
   review.counts.unretire = review.groups.unretire.length;
@@ -237,6 +239,44 @@ export async function apiCrewImportStage(request, env, deps) {
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
   return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
+}
+
+// THE FILE DATES THE BOARD (§10d): sign-on = the file's EMBARKEDDATE. A file in which no crew On board carries one, while
+// the file on the board did, empties every seat's dates when applied — the board, the sign-off emails, the staff-house pass
+// and the welcome all read them (night watch, 29 Oct 2026: the 28 Oct 12:10 UTC upload, 108 rows, 50 On board, not one
+// embark date; the 27 Oct file had them: 28 seats lost their dates, 2 fell back to the Counter's, 2 left the board). Said
+// on the review before Apply, never a block: whether to apply stays Rita's.
+export function scheduleCheck(registry, previous) {
+  const onboard = (registry || []).filter((r) => r && r.status === "On board");
+  const dated = onboard.filter((r) => r.embarked_at).length;
+  const keptDated = (previous || []).filter((r) => r && r.status === "On board" && r.embarked_at).length;
+  return { onboard: onboard.length, dated, kept_dated: keptDated, lost: onboard.length > 0 && dated === 0 && keptDated > 0 };
+}
+
+// A FILE THAT MOVES A CREW BEFORE THEY LEAVE THEIR SHIP (night watch, 12 Nov 2026). TDG's file of 10 Nov 2026 had Bernard
+// Paqueo "On board MV RADIANCE OF THE SEAS, embarked 2026-11-14" while the kept file had him On board Reflection (embarked
+// 17 Jul, Rita's sign-off 13 Nov). The file keeps one row per crew, so applying it took his Reflection contract off the one
+// schedule: Reflection read nobody aboard, and HON cancelled the Reflection handover count (Paqueo to Darryl Ramos, 13 Nov).
+// The review said only "Current ship Reflection → Radiance, Take TDG". Listed here, before Apply, with what it does. Pure:
+// a row On board a hull with an embark still ahead of today, for a crew the kept file has On board ANOTHER hull and not
+// debarked. Warn, never block: Apply stays Rita's.
+export function earlyMoves(registry, previous, today, shipOf) {
+  const iso = (v) => { const s = String(v == null ? "" : v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
+  const t = iso(today);
+  const prev = {};
+  for (const p of (previous || [])) if (p && p.agency_id) prev[String(p.agency_id)] = p;
+  const out = [];
+  for (const r of (registry || [])) {
+    if (!r || r.status !== "On board") continue;
+    const on = iso(r.embarked_at), to = shipOf(r.vessel_observed);
+    if (!t || !on || on <= t || !to) continue;
+    const p = prev[String(r.agency_id)];
+    if (!p || (p.status || "") !== "On board") continue;
+    const from = shipOf(p.vessel), off = iso(p.debarked_at);
+    if (!from || from === to || (off && off <= t)) continue;
+    out.push({ agency_id: r.agency_id, name: r.name || null, from, to, embark: on });
+  }
+  return out;
 }
 
 // Rita's edit of one earmark in the review: { ship, sign_on, sign_off }, blanks falling back to the card. ISO

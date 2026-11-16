@@ -1498,6 +1498,10 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **The registry import survives its own file**: a repeated agency id (last row stands, reported), a row keyed
   on the cruise-line id (carried under the real agency id), presence flags deduped while open and closed on
   reappearance, an open ship flag closed when a later file agrees with the registry.
+  **A file that dates nobody On board is said before Apply** (night watch, 29 Oct 2026: the 28 Oct 12:10 UTC file, 108
+  rows, 50 On board, not one EMBARKEDDATE, emptied the board's dates — 28 seats blank, 2 back on the Counter's dates, 2
+  off the board): `scheduleCheck` on the stage (the kept file read with its `embarked_at`), a red line on the Uploads
+  review naming both counts and asking for an export with EMBARKEDDATE. Never a block. Pinned by `test/crew_import_routes.test.js`.
 - **A plan that starts after the file's current contract ends is the next contract**, not a conflict
   (`counter_sync.diffCounter`). Dashboard birthdays and tiles use the derived status and visible crew.
 
@@ -2015,6 +2019,15 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   list's life page twice, two ways (its cells, and its value rows copied as text and parsed in code), and no longer reads
   the Special parts counter; eighteen figures, the transfer belt included. `MGMT_READ_VERSION` = 6; a figure's second side
   is `second` (v5's `counter` still reads); the "no parts-life page" words point at the Maintenance counter page, pp. 3–5.
+  **HON's code reader reaches the audit** (Miguel, 16 Nov 2026: "copy the knowledge u build on the HON app and transfer the
+  knowledge here to the audit app"). Since 10 Nov 2026 HON's audit door verifies a life figure only where its code read of the
+  scan's pixels and a vision read agree (cims-hon `mmlDigits.js`, `lifeWithCode`) and names the rest (`lifeNotShown`), without
+  changing its read version (6). The audit keeps HON's code mark on the read (`audit_read.codeMark`: version, ok, shown) and the
+  names not checked; the hourly sweep re-reads a list whose read has no code mark or an older code version (`MGMT_CODE_VERSION`
+  = 3, a twin of HON's `MML_CODE_VERSION`: change both; `codeAware` refuses an answer from a HON without its code reader). A
+  verified read with figures not checked and none past its rating is never a clean machine (`shownLife`: `lifePartial`, and
+  `lifeUnverified` for the documents-in email, which knows two states); the audit screens say "Part life partly checked" and
+  name what was not checked; the crew reads "Read. Thank you.". Pinned by `test/audit_request.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

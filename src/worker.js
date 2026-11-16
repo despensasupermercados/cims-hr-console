@@ -357,7 +357,7 @@ export default {
         if (p === "/api/crew/statement/email" && request.method === "POST") return apiStatementEmail(request, env, session);
         if (p === "/api/compliance") return apiCompliance(env, url);
         if (p === "/api/rotation")   return apiRotation(env);
-        if (session) { if (p === "/api/relief/board") await ensurePortDayIndexes(env); const rr = await handleRelief(request, url, env); if (rr) return rr; }
+        if (session) { if (p === "/api/relief/board") await ensurePortDayIndexes(env); const rr = await handleRelief(request, url, env, session); if (rr) return rr; }
         if (session) { const ci = await handleCrewImport(request, url, env, session, { boardLegs, openProjections: fetchOpenAssignments, ensureRegistrySnapshot, absorbCard: removeReliefAssignment, recordSignoff: recordSignoffEdit, moveCard: saveReliefAssignment, createCard: createEarmarkCard, sendMail: sendViaMailer, recipient: deployRecipient, cc: deployCc, dismissed: dismissedEarmarks, markTold: (env, id) => markDeployed(env, id, null, new Date().toISOString()) }); if (ci) return ci; }
         // "Update TG" (17 Aug 2026 per-ship digest to Joy) was removed on 8 Oct 2026 (Miguel: "remove it"): it never sent
         // (TG_NOTIFY unset), and the import review now tells Joy row by row (§10d). The tg_update_run table is left as is.
@@ -6459,6 +6459,14 @@ function impCard(inner){return '<div class=icard>'+inner+'</div>';}
 // a crew id the file repeats (the last row stands), a cruise-line id that differs from the roster (never overwritten),
 // a row keyed on the cruise-line id (matched, not added) and a new row with no status word it can read (not added).
 // Until now only the unused /api/crew/import page drew one of them: on Uploads they went nowhere (§6 flag, never silent).
+// THE FILE DATES THE BOARD (night watch, 29 Oct 2026): a file whose crew On board carry no embark date, applied over a file
+// that dated them, empties every seat's dates (crew_import_routes.scheduleCheck). Said before Apply; never a block.
+function impSchedule(rv){
+  var s=(rv||{}).schedule;if(!s||!s.lost)return '';
+  return '<div style="'+BADBOX+'"><b>This file has no embark date for any of the '+s.onboard+' crew it has On board.</b> The file on the board dates '+s.kept_dated+'. '
+   +'The Keyman board, the sign-off emails, the staff-house pass and the welcome email read their dates from it: applying this file removes them. '
+   +'Ask Joy for an AdvancedQuery export that carries EMBARKEDDATE before you apply.</div>';
+}
 function impFlagged(rv){
   rv=rv||{};var g=rv.groups||{},dup=rv.duplicate_ids||[],km=rv.km_mismatch||[],rk=g.rekeyed||[],ns=g.needs_status||[],col=g.collisions||[];
   if(!(dup.length||km.length||rk.length||ns.length||col.length))return '';
@@ -6468,6 +6476,14 @@ function impFlagged(rv){
   km.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impDiff("Cruise-line id",it.roster,it.file,impTag("kept as on the roster","amber")));});
   rk.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>The file keyed this crew on the cruise-line id '+impEsc(it.ship_crew_id||it.incoming_id||'')+'. Matched to the crew you hold, nothing added.</div>');});
   ns.forEach(function(it){var f=it.fields||{};var nm=((f.first_name||'')+' '+(f.last_name||'')).trim();h+=impCard('<div class=iwho>'+impEsc(nm||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=itxt>A new row with no status word the console can read'+(f.status_raw||f.status?(' (&#8220;'+impEsc(f.status_raw||f.status)+'&#8221;)'):'')+'. Not added.</div>');});
+  return h+'</div>';
+}
+// A file that moves a crew to their next ship before the embark (night watch, 12 Nov 2026: Paqueo, Reflection to Radiance,
+// embark 14 Nov, in the file of 10 Nov). Applying it leaves the ship they are on with nobody aboard. Warn, never block.
+function impEarly(rv){
+  var x=(rv&&rv.early_moves)||[];if(!x.length)return '';
+  var h='<div class=isec><h3>&#9888; Moved to the next ship before they sign off</h3><div class=d>The file has these crew On board their next ship from a date still ahead, and no longer on the ship they are on. Applying it takes them off that ship now: it reads nobody aboard, and the handover count there is cancelled. Ask Joy to keep them On board until they sign off, with the next ship as Earmarked. Apply stays your call.</div>';
+  x.forEach(function(it){h+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div><div class=itxt>On board <b>'+impEsc(it.to)+'</b> from '+impEsc(fmtDateS(it.embark))+' in this file; the board has them on <b>'+impEsc(it.from)+'</b> until then. Applying it takes them off '+impEsc(it.from)+' now.'+impTag("embark still ahead","red")+'</div>');});
   return h+'</div>';
 }
 function impFld(f){return (typeof IMP_FLAB!=="undefined"&&IMP_FLAB[f])?IMP_FLAB[f]:f;}
@@ -6539,6 +6555,7 @@ function cimsRender(){
     +'<span class="chip2 navy">&#65291; <span class=n>'+c.new+'</span> new</span>'
     +'<span class="chip2 gray">&#128682; <span class=n>'+c.departed+'</span> departed</span></div>';
   var EM=impEmSplit();
+  L+=impEarly(STAGE.review);
   if(EM.dis.length){L+='<div class=isec><h3>&#9873; Earmarks the TDG file disagrees with</h3><div class=d><b>Accept TDG</b>: the file wins (another ship moves your earmark there with your dates; another seafarer replaces yours; Inactive or not aboard removes it; a far embark absorbs it). <b>Keep mine</b>: your earmark stands and Joy gets one email, Rita in copy, so TDG is corrected. <b>Edit</b>: change the ship or dates here; Joy gets the corrected earmark.</div>';
     EM.dis.forEach(function(it){L+=impCard(impEmWho(it)+'<div class=itxt>'+impEsc(it.text||"")+'</div>'+impSegN("earmark:"+it.id,"accept",["accept","keep","edit"],["Accept TDG","Keep mine (email Joy)","Edit"])+impEmEdit(it));});L+='</div>';}
   if(EM.off.length){L+='<div class=isec><h3>&#9993; Signed off &mdash; earmark ready for TDG</h3><div class=d>These seafarers were aboard another ship, so TDG could not earmark them. The file now shows the sign-off. <b>Tell Joy</b> (default) emails her the earmark with every document, not valid first, Rita in copy.</div>';
@@ -6562,6 +6579,7 @@ function cimsRender(){
     g.new.forEach(function(it){var f=it.fields||{};L+=impCard('<div class=iwho>'+impEsc(((f.first_name||"")+" "+(f.last_name||"")).trim()||it.agency_id)+' <span class=iid>'+impEsc(it.agency_id)+'</span></div><div class=irow><span class=ik>Joining</span><span class=idf><span class=inew>'+(f.vessel_observed?impEsc(f.vessel_observed):'&mdash;')+'</span> <span class=csub>'+impEsc(f.rank_observed||"")+'</span>'+(f.status?impTag(impEsc(f.status),"green"):"")+'</span></div>'+impSeg("new:"+it.agency_id,"add","add","skip","Add","Skip"));});L+='</div>';}
   if(g.departed.length){L+='<div class=isec><h3>&#128682; Absent from this file</h3><div class=d>Never auto-removed. Decide the status yourself.</div>';
     g.departed.forEach(function(it){L+=impCard('<div class=iwho>'+impWho(it.agency_id)+'</div>'+impSeg("departed:"+it.agency_id,"flag","flag","dismiss","Flag","Dismiss",true));});L+='</div>';}
+  L+=impSchedule(STAGE.review);
   L+=impFlagged(STAGE.review);
   var ab=g.override_absorbed||[];
   if(ab.length){L+='<details class=iminor><summary><span class=c>'+ab.length+'</span> manual entries already match the file &#8212; absorbed (the file shows from now onward)</summary>'+ab.map(function(it){return '<div style="font-size:12px;color:var(--mut);padding:3px 0">'+impWho(it.agency_id)+' &middot; '+impEsc(impFld(it.field))+' &#8594; '+impEsc(it.new)+'</div>';}).join("")+'</details>';}
