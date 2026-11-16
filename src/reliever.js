@@ -67,7 +67,9 @@ export function assignRelievers(seats) {
       if (out[i]) return;
       const hit = pickReliever(s, (s.cands || []).filter((c) => c && iso(c.on) && !taken.has(c.sc)));
       if (!hit) return;
-      const k = hit.sc + "|" + iso(hit.on);
+      // one claim per PERSON, whatever date he is reachable under (his file row and a card further than ABSORB_DAYS): two
+      // keys let him win two seats in one round (16 Nov 2026 review)
+      const k = hit.sc;
       if (!claims.has(k)) claims.set(k, { hit, by: [] });
       claims.get(k).by.push(i);
     });

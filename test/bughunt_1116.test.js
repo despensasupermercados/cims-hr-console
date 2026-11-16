@@ -202,3 +202,51 @@ test("audit page: a text box stops at what the server keeps, a read being retrie
   const up = readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf-8");
   assert.match(up, /poll = setTimeout\(function \(\) \{ load\(true\); \}, 30000\)/);
 });
+
+// ---- 13. the Keyman schedule review (16 Nov 2026, second pass) -------------------------------------------------------------
+test("schedule: one person relieves one seat even when he is reachable under two dates", async () => {
+  const { assignRelievers } = await import("../src/reliever.js");
+  const xFile = { sc: "SC-X", on: "2026-10-20" }, xCard = { sc: "SC-X", on: "2026-11-01" };
+  const out = assignRelievers([{ sc: "SC-A", on: "2026-04-01", off: "2026-10-25", cands: [xFile, xCard] }, { sc: "SC-B", on: "2026-05-10", off: "2026-12-10", cands: [xFile, xCard] }]);
+  assert.equal(out.filter((h) => h && h.sc === "SC-X").length, 1, "Xia relieves one seat");
+});
+
+test("schedule: a seat the file holds past its sign-off still suppresses Rita's card for the same contract", async () => {
+  const { mergeBoardLegs } = await import("../src/ship_leg_source.js");
+  const held = { sc: "SC-M", ship: "Allure", on: "2026-09-01", off: "2026-11-10", is_current: true, source: "registry", heldByFile: true, ours: true };
+  const card = { id: "as1", sc: "SC-M", ship: "Allure", sign_on: "2026-09-15", planned_sign_off: "2027-04-15", crew_name: "Marco Held" };
+  const legs = mergeBoardLegs([held], [card], "2026-11-16", []);
+  assert.equal(legs.filter((l) => l.sc === "SC-M" && l.is_current).length, 1);
+});
+
+test("schedule: one person one ship counts a running contract the Contract Counter dates, and a rejected card never relieves the printer", async () => {
+  const src = await import("../src/ship_leg_source.js");
+  const counterSeat = { sc: "SC-I", ship: "Xcel", on: "2026-04-26", off: "2027-02-10", offSource: "rita", is_current: true, source: "counter" };
+  assert.deepEqual(src.cardOverlapsSeat({ sc: "SC-I", ship: "Millennium", sign_on: "2027-01-24" }, [counterSeat]), { ship: "Xcel", off: "2027-02-10", offSource: "rita" });
+  const s = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
+  assert.match(s, /const openOk = dropOverlappedCards\(open, registry\.concat\(firstHistory\)\);\n  if \(openOk\.length !== \(open \|\| \[\]\)\.length\) registry = legsFromRegistry\(\{ rows, edits, counter, open: openOk,/);
+});
+
+test("board: Rita's card for the hull TDG earmarks her for is never the running contract that seats her 'ABOARD · TDG REGISTRY'", () => {
+  assert.match(SRC, /h\.on <= today && h\.source !== "assignment"\) liveRun\.add/);
+  assert.match(SRC, /const earmarkedHere = [^\n]*liveRun\.has\(sc \+ "\|" \+ w\.key\)\);/);
+});
+
+// ---- 14. the TDG imports review (16 Nov 2026, second pass) -----------------------------------------------------------------
+test("imports: an impossible text date is refused, never rolled into the next month", async () => {
+  const { normalizeDate } = await import("../src/crewimport.js");
+  assert.equal(normalizeDate("31 Sep 2026"), null); assert.equal(normalizeDate("29 Feb 2027"), null);
+  assert.equal(normalizeDate("30 Sep 2026"), "2026-09-30"); assert.equal(normalizeDate("Oct 7, 2026"), "2026-10-07"); assert.equal(normalizeDate("23-Sep-2034"), "2034-09-23");
+});
+
+test("imports: the name ladder folds accents (Tañgonan meets TANGONAN, Baleña meets BALENA)", async () => {
+  const { buildBridge, bridgeName } = await import("../src/keymanimport.js");
+  const bridge = buildBridge([{ agency_id: "SC-T", first_name: "Ryan", last_name: "Tañgonan" }, { agency_id: "SC-B", first_name: "A.J. Lorenzo", last_name: "Baleña" }]);
+  assert.equal(bridgeName({ last: "TANGONAN", first: "RYAN" }, bridge), "SC-T");
+  assert.equal(bridgeName({ last: "BALENA", first: "A.J. LORENZO" }, bridge), "SC-B");
+});
+
+test("imports: Accept on an embark_date earmark row keeps the sign-off Rita confirmed on the card", () => {
+  const src = readFileSync(new URL("../src/crew_import_routes.js", import.meta.url), "utf-8");
+  assert.match(src, /if \(it\.kind === "embark_date" && deps\.recordSignoff\) \{[\s\S]{0,400}a\.off_date_conf && a\.planned_sign_off && w\.embarked_at[\s\S]{0,300}deps\.recordSignoff\(env, \{ sc: it\.sc, on_key: w\.embarked_at/);
+});

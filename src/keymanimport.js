@@ -8,7 +8,8 @@
 // Informational only — NEVER a payout input.
 import { normalizeDate, looksDMY } from "./crewimport.js";
 
-const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[^a-z]/g, "");
+// accents FOLD, never drop (16 Nov 2026 review: "Tañgonan" read "tagonan" and never met TDG's "TANGONAN"; Baleña / BALENA)
+const norm = (s) => String(s == null ? "" : s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
 // Normalise a cruise-line crew id for comparison: string, trimmed, drop a trailing ".0" spreadsheet float artifact.
 const normKm = (v) => String(v == null ? "" : v).trim().replace(/\.0$/, "");
 

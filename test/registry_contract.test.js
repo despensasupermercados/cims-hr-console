@@ -74,12 +74,54 @@ test("an empty record starts from the latest file's rows, once; a record with ro
 
 test("the record is written after the import's own batch and can never fail an Apply; the guard and the migration make the same table", () => {
   const src = readFileSync(new URL("../src/crew_import_routes.js", import.meta.url), "utf-8");
-  const i = src.indexOf("const results = await env.DB.batch(stmts);"), j = src.indexOf("contracts_kept = await keepContracts(env, registry, run_at)");
+  const i = src.indexOf("const results = await env.DB.batch(stmts);"), j = src.indexOf("contracts_kept = await keepContracts(env, registry, run_at, held)");
   assert.ok(i > 0 && j > i, "after the batch");
-  assert.match(src.slice(i, j + 200), /try \{ contracts_kept = await keepContracts\(env, registry, run_at\); \} catch/);
+  assert.match(src.slice(i, j + 200), /try \{ contracts_kept = await keepContracts\(env, registry, run_at, held\); \} catch/);
   const w = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
   assert.match(w, /env\.DB\.prepare\(REGISTRY_CONTRACT_DDL\)\.run\(\)\.catch\(\(\) => null\)/);
   assert.match(w, /await env\.DB\.prepare\(REGISTRY_CONTRACT_SEED_SQL\)\.run\(\)\.catch\(\(\) => null\)/);
   const mig = readFileSync(new URL("../migrations/0043_registry_contract.sql", import.meta.url), "utf-8").replace(/--.*$/gm, "").replace(/\s+/g, " ").trim().replace(/;$/, "");
   assert.equal(mig.replace(/\( /g, "(").replace(/ \)/g, ")"), REGISTRY_CONTRACT_DDL);
+});
+
+// 16 Nov 2026 review: a blank embark on a crew TDG still has On board the same ship closed his contract (and since #394 the
+// board drew it "ended per TDG file"); a collision's crew had his rows closed too.
+test("a crew the file still has On board the same ship with no embark date keeps his contract open; a collision's crew keeps his rows", { skip: !DatabaseSync }, async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(REGISTRY_CONTRACT_DDL);
+  const env = envFor(d);
+  await keepContracts(env, [R("SC-1", "MV CELEBRITY APEX", "2026-10-07"), R("SC-2", "MV ANTHEM OF THE SEAS", "2026-09-01"), R("SC-3", "MV CELEBRITY XCEL", "2026-10-03"), R("SC-4", "MV OASIS OF THE SEAS", "2026-06-01")], "2026-11-07T00:00:00.000Z");
+  // file 2: SC-1 On board Apex, embark "-"; SC-2 On board ANOTHER ship with no date; SC-3 is a collision (held); SC-4 dated as before
+  const r = await keepContracts(env, [R("SC-1", "MV CELEBRITY APEX", "-"), R("SC-2", "MV ODYSSEY OF THE SEAS", null), R("SC-4", "MV OASIS OF THE SEAS", "2026-06-01")], "2026-11-15T00:00:00.000Z", ["SC-3"]);
+  assert.equal(r.closed, 1);
+  const c = Object.fromEntries(rows(d).map((x) => [x.sc, x.c]));
+  assert.deepEqual(c, { "SC-1": null, "SC-2": "2026-11-15", "SC-3": null, "SC-4": null });
+});
+
+test("a collision (two file rows for one crew) writes neither row to the snapshot or the record; the crew keeps the file before", { skip: !DatabaseSync }, async () => {
+  const { makeDb, d1 } = await import("./_import_db.mjs");
+  const { apiCrewImportStage, apiCrewImportApply } = await import("../src/crew_import_routes.js");
+  const d = makeDb();
+  d.exec("CREATE TABLE IF NOT EXISTS registry_snapshot (agency_id TEXT PRIMARY KEY, status TEXT, vessel TEXT, run_at TEXT, import_run_id TEXT, name TEXT, raw_status TEXT, embarked_at TEXT, debarked_at TEXT)");
+  d.exec(REGISTRY_CONTRACT_DDL);
+  d.exec("DELETE FROM crew"); d.exec("DELETE FROM crew_override");
+  const now = "2026-11-01T00:00:00Z";
+  d.prepare("INSERT INTO crew (id,agency_id,ship_crew_id,first_name,last_name,status,vessel_observed,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)").run("c1", "SC-0040010", "349195", "Ida Bagus Made", "Purnama", "On board", "MV CELEBRITY XCEL", now, now);
+  // the file before: aboard Xcel since 26 Apr
+  d.prepare("INSERT INTO registry_snapshot VALUES ('SC-0040010','On board','MV CELEBRITY XCEL','2026-11-07T00:00:00Z','run_old','Ida Purnama','On board','2026-04-26',NULL)").run();
+  d.prepare("INSERT INTO registry_contract VALUES ('SC-0040010','2026-04-26','MV CELEBRITY XCEL',NULL,'Ida Purnama','2026-11-07T00:00:00Z','2026-11-07T00:00:00Z',NULL)").run();
+  const env = { DB: d1(d) }, deps = { ensureRegistrySnapshot: async () => {}, runBy: "rita@dg3.com" }, req = (b) => ({ json: async () => b });
+  const rows = [
+    { "CREW ID": "SC-0040010", "FIRST NAME": "Ida Bagus Made", "LAST NAME": "Purnama", "CREW STATUS": "On board", "VESSEL NAME": "MV CELEBRITY XCEL", "EMBARKEDDATE": "03 Oct 2026", "DEBARKEDDATE": "-" },
+    { "CREW ID": "349195", "FIRST NAME": "Ida", "LAST NAME": "Purnama", "CREW STATUS": "On Vacation", "VESSEL NAME": "MV CELEBRITY XCEL", "EMBARKEDDATE": "01 Feb 2026", "DEBARKEDDATE": "30 Aug 2026" },
+    { "CREW ID": "SC-0099999", "FIRST NAME": "Ana", "LAST NAME": "Other", "CREW STATUS": "On board", "VESSEL NAME": "MV OASIS OF THE SEAS", "EMBARKEDDATE": "01 Oct 2026", "DEBARKEDDATE": "-" },
+  ];
+  const st = await (await apiCrewImportStage(req({ rows, file_hash: "h1" }), env, deps)).json();
+  assert.ok(!st.review.registry.some((r) => r.agency_id === "349195" || r.agency_id === "SC-0040010"), "neither colliding row is staged as TDG's word");
+  assert.deepEqual(st.review.registry_held.sort(), ["349195", "SC-0040010"]);
+  const ap = await (await apiCrewImportApply(req({ review: st.review, decisions: {}, file_hash: "h1", rows_seen: 3 }), env, deps)).json();
+  assert.equal(ap.ok, true, JSON.stringify(ap));
+  const snap = d.prepare("SELECT agency_id, embarked_at FROM registry_snapshot ORDER BY agency_id").all().map((r) => [r.agency_id, r.embarked_at]);
+  assert.deepEqual(snap, [["SC-0040010", "2026-04-26"], ["SC-0099999", "2026-10-01"]], "Ida keeps the file before; no row under 349195");
+  const rc = d.prepare("SELECT sc, embarked_at, closed_run_at FROM registry_contract ORDER BY sc, embarked_at").all().map((r) => [r.sc, r.embarked_at, r.closed_run_at]);
+  assert.deepEqual(rc.map((r) => [r[0], r[1], r[2] == null]), [["SC-0040010", "2026-04-26", true], ["SC-0099999", "2026-10-01", true]]);
 });

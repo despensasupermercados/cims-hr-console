@@ -68,5 +68,5 @@ test("the board's awaiting test and the schedule read the one rule", () => {
   const w = readFileSync(new URL("../src/worker.js", import.meta.url), "utf-8");
   assert.match(w, /const awaitingCard = \(a\) => \{[^\n]*!cardOverlapsSeat\(\{ sc: a\.sc, ship: shipOf\(a\.ship\) \|\| a\.ship, sign_on: a\.sign_on \}, HIST\)/);
   const s = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
-  assert.match(s, /markAssignmentVisits\(dropOverlappedCards\(dropContradictedCards\(asg, rows, today\), registry\), visits, trainers\)/);
+  assert.match(s, /markAssignmentVisits\(dropOverlappedCards\(dropContradictedCards\(asg, rows, today\), registry\.concat\(history\)\), visits, trainers\)/);
 });
