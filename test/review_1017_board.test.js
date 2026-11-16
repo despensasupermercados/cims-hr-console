@@ -122,7 +122,7 @@ test("the dashboard: a reliever already aboard is the reliever (Baleña), never 
 
 test("the board: an earmark TDG also has turns green on its sign-on; a crew earmarked for the ship he is aboard keeps his seat", () => {
   const W = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
-  assert.match(W, /const awaitingCard = \(a\) => \{ const v = regOf\(a\.id\); return !!\(a\.sign_on && a\.sign_on <= today\) && \(!v \|\| v\.verdict === "pending" \|\| v\.verdict === "earmarked"\); \};/);
+  assert.match(W, /const awaitingCard = \(a\) => \{ const v = regOf\(a\.id\); return !!\(a\.sign_on && a\.sign_on <= today\) && \(!v \|\| v\.verdict === "pending" \|\| v\.verdict === "earmarked"\)(?: && !cardOverlapsSeat\([^\n]*\))?; \};/);
   assert.match(W, /<= today && \(!regOf\(x\.asgId\) \|\| regOf\(x\.asgId\)\.verdict === "pending" \|\| regOf\(x\.asgId\)\.verdict === "earmarked"\)\)/);
   assert.match(W, /if \(w\.status === "Earmarked" && w\.key === k\) return null;/, "his running contract is not ended 'per the TDG file'");
 });

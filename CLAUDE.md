@@ -1689,6 +1689,37 @@ contract ending first, incoming = the one reliever rule (`assignRelievers`). A r
 day. Read only. Pinned by `test/ship_seats.test.js`. An app that still reads `keyman_contract3` or `assignment` to decide who
 is aboard is a defect.
 
+## 11h. Invariants from the 16 Nov 2026 bug hunt (Miguel: "find bugs and fix them .. read the brain and also code .. also the logic of the app")
+Six readers, every finding reproduced on the old code first. Pinned by `test/bughunt_1116.test.js`,
+`test/one_person_one_ship.test.js`, `test/audit_visit.test.js`, `test/audit_request.test.js`.
+- **ONE PERSON, ONE SHIP.** On 9 Nov 2026 the console emailed Joe Art Eresmas "welcome aboard Norwegian Getaway" while TDG
+  had him On board Solstice and Rita's own typed Solstice sign-off read 15 Mar 2027: his Getaway card's 9 Nov sign-on had
+  come, and the last file (7 Nov) was dated before it, so nothing contradicted it. A card whose sign-on has come is NOT
+  aboard-awaiting-the-file while the schedule has the same crew under a running contract on ANOTHER hull whose sign-off —
+  TDG's, Rita's typed date or a reliever card — is after the card's sign-on (`cardOverlapsSeat` / `dropOverlappedCards` in
+  `ship_leg_source.js`, read by the schedule and by the board's `awaitingCard`). A projected sign-off says nothing; a seat
+  TDG holds past its sign-off has ended for Rita; a transfer Rita dated (old sign-off on or before the card's sign-on)
+  stands. The card stays on the board as a plan. Checked on the 16 Nov production cards: none dropped.
+- **A signed-in POST from another host is refused before ANY handler** (`crossSite` right after `getSession`): the cookie is
+  `Domain=cims.work`, and the survey, hub, welcome and sign-off routes are dispatched before the `/api` block that held
+  the only check — a page on a sibling host could flip an automation switch or send a crew email as whoever was signed in.
+- **The travel name bridge swaps only on agreement**: a swapped name is taken when surname AND first name agree with one
+  crew (`agreed`), never on a lone surname ("Tatel, Joseph", an NCL trainee, was filed on Emil Rondy JOSEPH; four names).
+- **The mail intake**: an EMPTY envelope sender vouches for nobody (the gate opened on the typed From alone); a bill named
+  `DG3_SGA_EXCEL_NOVEMBER_2026.xlsx` or `… 2026_REVISED.xlsx` is still the bill and says its month (`SGA_NAME_RX`, one
+  pattern for the intake, the inbox and the dormant sync).
+- **A refund is a movement**: a refund-only row of Rita's workbook (negative total) is kept (`total === 0` skips), and the
+  page's Category filter keeps a negative amount.
+- **The intel body** is decoded when `Content-Transfer-Encoding` is written above `Content-Type` (the part's whole header
+  block is read, and only its own `content-transfer-encoding:` line).
+- **The dashboard**: with no closed month the travel pace tick is at 0 (it read 100% in January); Norwegian crew are counted
+  on the crew card once there are any.
+- **One undated TDG earmark relieves one seat** (`assignRelievers`): the seat leaving first takes him, the other reads "no
+  reliever yet". "1 month", never "1 months" (welcome pass, survey).
+- **The audit**: `GET /api/audit/visit` answers `not_complete` until the crew has SENT the count (it handed OBP's on-hand per
+  line to anyone on the open site, the seafarer counting included — the blind count, §10i); HON answering "ok" with an EMPTY
+  OBP list no longer makes the documents-in email say "Every line agrees" — the request's snapshot is compared instead.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

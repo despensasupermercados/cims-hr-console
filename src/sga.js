@@ -49,8 +49,10 @@ export function sgaPeriodFromName(name) {
   // The month AFTER "SGA EXCEL" is the bill's (27 Oct 2026: "FW SGA EXCEL AUGUST 2026 sent SEP 3 2026" is August); with no
   // such marker the first month word followed by a year is read, as before.
   const base = String(name || "").replace(/\.xlsx?$/i, "");
-  const tail = /sga\s*excel/i.test(base) ? base.slice(base.search(/sga\s*excel/i)) : base;
-  const re = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})\b/g;
+  const tail = /sga[\s_]*excel/i.test(base) ? base.slice(base.search(/sga[\s_]*excel/i)) : base;
+  // the year ends where the digits end: "NOVEMBER 2026_REVISED" (an underscore is a word character, so \b never matched
+  // there and the file had no period — ignored by mail, refused on Upload; 16 Nov 2026).
+  const re = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})(?![0-9])/g;
   for (const src of tail === base ? [base] : [tail, base]) {
     re.lastIndex = 0;
     let m;

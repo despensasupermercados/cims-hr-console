@@ -76,6 +76,11 @@ export function assignRelievers(seats) {
     }
   }
   // Nothing dated for a seat: TDG's undated Earmarked row, the last resort (pickReliever's own fallback).
-  S.forEach((s, i) => { if (!out[i]) out[i] = pickReliever(s, (s.cands || []).filter((c) => c && !iso(c.on))); });
+  // One person relieves one seat here too (16 Nov 2026: two seats on a hull were both given the same undated earmark):
+  // the seat that leaves first takes him, the other reads "no reliever yet".
+  S.map((s, i) => i).filter((i) => !out[i]).sort((a, b) => String(iso(S[a].off) || "9999").localeCompare(String(iso(S[b].off) || "9999")) || a - b).forEach((i) => {
+    const r = pickReliever(S[i], (S[i].cands || []).filter((c) => c && !iso(c.on) && !taken.has(c.sc)));
+    if (r) { out[i] = r; taken.add(r.sc); }
+  });
   return out;
 }
