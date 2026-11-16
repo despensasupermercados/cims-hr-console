@@ -148,6 +148,14 @@ export function normalizeDate(v, opts) {
   // dates from typos, which the accept-by-default cert tier would then store. Local components,
   // not toISOString(): the suite must not depend on the machine's time zone (Rita is UTC+8).
   if (!/\b\d{4}\b/.test(s) || !/[A-Za-z]{3}/.test(s) || !/(^|\D)\d{1,2}(\D|$)/.test(s)) return null;
+  // "31 Sep 2026" / "Sep 31, 2026" are read by their own parts, so an impossible day is REFUSED: new Date() rolled it into
+  // the next month (2026-10-01), a real-looking date in a DEBARKEDDATE or an expiry (16 Nov 2026 review).
+  const MW = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  const mw = (w) => MW[String(w).toLowerCase()] || MW[String(w).toLowerCase().slice(0, 3)] || null;
+  let t = s.match(/^(\d{1,2})[\s\-\/.]+([A-Za-z]{3,9})\.?[\s\-\/.,]+(\d{4})$/);
+  if (t && mw(t[2])) return realDate(+t[3], mw(t[2]), +t[1]);
+  t = s.match(/^([A-Za-z]{3,9})\.?[\s\-]+(\d{1,2})(?:st|nd|rd|th)?,?[\s\-]+(\d{4})$/i);
+  if (t && mw(t[1])) return realDate(+t[3], mw(t[1]), +t[2]);
   const d = new Date(s);
   return isNaN(d) ? null : realDate(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }

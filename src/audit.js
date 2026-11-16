@@ -179,7 +179,7 @@ export function gateState({ request, machines, uploads, down, lines, counted, re
       const u = ups.filter((x) => x.serial === m.serial && x.kind === kind).sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
       const label = (m.label || m.serial) + " · " + UPLOAD_KINDS[kind];
       if (!u) missing.push({ what: kind, serial: m.serial, say: label + " not sent" });
-      else if (requireRead && u.read_state !== "ok") missing.push({ what: kind, serial: m.serial, say: label + (u.read_state === "pending" || !u.read_state ? " not read yet" : " needs a new file") });
+      else if (requireRead && u.read_state !== "ok") missing.push({ what: kind, serial: m.serial, say: label + (u.read_state === "pending" || !u.read_state ? " not read yet" : u.read_state === "failed" ? " is being read again" : " needs a new file") });
     }
   }
   const c = countCompleteness(lines, counted);

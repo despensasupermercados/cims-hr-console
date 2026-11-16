@@ -1750,9 +1750,23 @@ Six readers, every finding reproduced on the old code first. Pinned by `test/bug
   files it under the file's embark, which can sit a few days from the Counter's sign-on. No production row differed on
   16 Nov; the join to the day is what left a Counter leg open once TDG moved the crew's row on.
 - **The crew's audit page** keeps what is on it when one refresh fails (a toast, not an error card over the count).
-- **Left for Miguel, not built**: a contract whose sign-on the console learns from TDG's file more than
-  `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
-  since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
+- **A sign-on the console learns late is welcomed late** (Miguel, 16 Nov 2026: "Send it late"; `welcomeDue`,
+  `WELCOME_LATE_DAYS` = 10): a contract TDG's file dates (`source` registry — no card told the console the day) is welcomed
+  by itself up to 10 days after its sign-on; a card-dated one keeps the 2-day catch-up (its welcome went on the day). Never
+  before the switch-on day, never a visit, once per contract. The email already says "is yours since <date>".
+
+**Batch 3, the same day** (Miguel approved the Score Card's three findings, #391 merged on his word). Pinned by
+`test/sbm.test.js`, `test/travel_filters.test.js`, `test/bughunt_1116.test.js`.
+- **The GSM review invite** goes at T-7 and for `SBM_CATCHUP_DAYS` = 2 after (a missed morning or a sign-off moved INTO the
+  window was never asked), once per contract (a request within 21 days of the sign-off is the same contract — a moved date
+  never invites the manager twice); the reminder the same at T-4. The manual invite reads the board's seat first, the
+  Contract Counter only for a crew the board does not seat. The GSM switch is still OFF.
+- **The Travel rail marks the body's year** when none is chosen (the latest year the rows in view carry): once a bill
+  arrived ahead of the workbook the rail marked the bill's year and greyed its months while the body showed the year before.
+- **Born 29 February** is listed on 28 Feb in a year without one.
+- **The audit page**: every text box stops at what the server keeps (600, or 2000 for strengths / to improve / agreed — the
+  server cut it without a word); a read HON is retrying says "is being read again", never "needs a new file"; the crew's page
+  asks again every 30 s while a file is Reading (it stayed "Reading" until a reload).
 
 **THE CONTRACTS THE FILE HAS SHOWN ARE KEPT — `registry_contract`, 16 Nov 2026 (the record only).** `registry_snapshot` holds
 ONE row per crew, the latest file's; the day TDG moves that row on (Earmarked for the next ship with no dates, or a new
@@ -1763,11 +1777,50 @@ Radiance. Since this PR every registry Apply writes one row per crew and embark 
 `src/crew_import_routes.js`, migrations/0043, the same CREATE in `ensureRegistrySnapshot`): TDG's debark kept once a file
 gives it, the first and last file that carried it, and the file that stopped carrying it (`closed_run_at`). Written AFTER
 the import's batch, on its own (`contracts_kept` on the Apply answer; a failure never fails an Apply); a file with no
-embark dates closes nothing; an empty table is seeded once from the snapshot. **NOTHING READS IT YET**: how a kept
-contract is drawn, what ends it when TDG gave no debark (Rita's typed date, or the day the file dropped it), and whether
-it adds to the count are Miguel's to decide (Brain rec3UjhXkYKvfz4N0; night-watch draft #385 is the same question). The
-contracts lost before 16 Nov are not in it (the console no longer holds them); a fresh TDG count file restates the count.
-Pinned by `test/registry_contract.test.js`.
+embark dates closes nothing; an empty table is seeded once from the snapshot. The contracts lost before 16 Nov are not in
+it (the console no longer holds them); a fresh TDG count file restates the count. Pinned by `test/registry_contract.test.js`.
+**SHOWN AND COUNTED** (Miguel, 16 Nov 2026, asked how: "Show and count them"). A kept row the latest file no longer carries
+(`closed_run_at`) is a history leg of the ONE schedule (`keptLegs` / `fetchKeptContracts` in `ship_leg_source.js`, one more
+read in `boardLegsFromDb`'s wave): the profile, the statement, the Score Card list and the board's history all see it. Its
+sign-off: TDG's debark (`tdg`), else the sign-off Rita typed for it (`rita`, an edit keyed within `ABSORB_DAYS` of the embark),
+else the day of the file that stopped carrying it (`offSource` `file`, `byFile` — "ended per TDG file"; never a date the
+console invents). Never `fileAt` (it is not the latest file's word). A contract the current file still has on the same hull
+within `ABSORB_DAYS` is the file's, and a Counter contract the kept record carries is folded like one the file has. **The
+count**: `completedSince` adds every kept contract TDG ENDED (a debark) after the count's as-of date, not in the future, not a
+visit — unless the crew embarked again within 21 days of it (a transfer: one contract, counted when its last leg ends); a row
+the file merely dropped adds nothing. Read by every count reader through `CC_VISIT_COLS` (`kept_offs`), with a fallback to the
+old read while the table does not exist. Day one changes nothing: every seeded row is open. Pinned by
+`test/kept_contracts.test.js`.
+
+**The second pass, the same day** (the Keyman schedule and the TDG imports, read again). Pinned by `test/bughunt_1116.test.js`,
+`test/registry_contract.test.js` (on a database built from `migrations/`, `test/_import_db.mjs`).
+- **A blank embark never closes a contract** (`keepContracts`): a crew the file still has On board THE SAME SHIP with no
+  readable embark keeps his kept contract open (it was stamped closed and, read since #394, drawn "ended per TDG file");
+  Earmarked for the next ship, ashore or aboard another ship with no date still closes it.
+- **A collision is TDG's word for nobody** (`stagedRegistry`, `registry_held`): two file rows for one crew reach neither the
+  snapshot nor the kept record; the crew keeps the previous file's row (the snapshot's delete skips them) and his contracts.
+- **An impossible text date is refused** (`normalizeDate`: "31 Sep 2026" read 2026-10-01). **Accents fold in the name
+  ladder** (`keymanimport.norm`: Tañgonan / TANGONAN, Baleña / BALENA). **Accept on an `embark_date` earmark row keeps
+  Rita's confirmed sign-off** (`recordSignoff` under the file's embark), like the ABSORB_DAYS route.
+- **Rita's card for the hull TDG earmarks her for is never the running contract** (`liveRun` excludes assignment legs):
+  Ramos (Reflection) and Lorono (Oasis) read "ABOARD · TDG REGISTRY"; they read "ABOARD · AWAITING TDG FILE".
+- **A card one-person-one-ship rejects never relieves the printer** (`boardLegsFromDbUncached`: a second pass of
+  `legsFromRegistry` without it) and the rule counts a running contract the Contract Counter dates (source `counter`).
+- **A seat the file holds past its sign-off still suppresses Rita's card for the same contract** (`mergeBoardLegs`).
+- **One person relieves one seat under any date** (`assignRelievers` claims by person).
+
+**The Score Card's three findings of 16 Nov 2026 — MONEY (§1): Miguel's merge, the pull request after #390.** Pinned by
+`test/bughunt_1116_money.test.js`. (1) **An ENDED contract with no sign-off date ends on its sign-on day** for the commit
+rules (`scorequeue.endOf`): a Contract Counter row uploaded without a projected sign-off (11 rows), served as history, was
+read as running to "9999", so after a crew's first outcome every later contract was refused `already_scored`; a contract
+still RUNNING with no date is open-ended as before. (2) **The inventory count pays the handover factor only on HON's word
+`clean`** (`bonus.inventoryCount`): any other word on a judged count (HON says clean or wrong today) read as "no gaps";
+now it holds the factor at 0 and says the word, like a count that could not be read. Ray's or Rolando's override still
+wins. (3) **Whose miss, when the schedule forgot the outgoing printer** (`missOwnerByBoard`): the file keeps one row per
+crew, so once the outgoing printer is re-listed on his next ship his reliever reads as "the only crew aboard" during the
+handover and was charged an order the other man typed. Only when the lone crew aboard was under 4 weeks in AND the order
+names a roster crew the schedule has NO leg for on that ship is nobody charged ("Check whose miss it is", §6). Miguel's
+rule is unchanged wherever the schedule knows the other man on the hull (he left, or he was a training visitor).
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by

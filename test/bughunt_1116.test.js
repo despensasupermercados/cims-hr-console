@@ -11,6 +11,7 @@ import { sgaPeriodFromName } from "../src/sga.js";
 import { parseMonthSheet, parseCimsSheet } from "../src/travel.js";
 import { assignRelievers } from "../src/reliever.js";
 import { welcomeContext } from "../src/welcome_context.js";
+import { welcomeDue, WELCOME_LATE_DAYS } from "../src/welcome_send.js";
 import { hubModel } from "../src/crew_hub_routes.js";
 import { hubPage } from "../src/crew_hub.js";
 import { signToken } from "../src/auth.js";
@@ -174,4 +175,78 @@ test("the Crew Hub counts the sign-on as day 1 and the sign-off as the last day,
 test("the crew's audit page: a lost connection on a page already open shows a toast, never replaces the page", () => {
   const ui = readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf-8");
   assert.match(ui, /else if \(S && S\.machines && !\(j && j\.status\)\) \{[^}]*toast\(/);
+});
+
+// ---- 11. a sign-on the console learns late (Miguel, 16 Nov 2026: "Send it late") ------------------------------------------
+test("a contract TDG's file reveals days after the embark is welcomed late, up to 10 days; a card-dated one keeps the 2-day catch-up", () => {
+  assert.equal(WELCOME_LATE_DAYS, 10);
+  const leg = (sc, on, source) => ({ sc, ship: "Voyager", on, off: "2027-06-01", is_current: true, source, fileAt: source === "registry" ? "2026-11-13" : undefined });
+  const due = (legs, since = "2026-10-19") => welcomeDue(legs, "2026-11-16", since).map((l) => l.sc);
+  assert.deepEqual(due([leg("SC-FILE", "2026-11-09", "registry")]), ["SC-FILE"], "7 days after the embark, known from the file");
+  assert.deepEqual(due([leg("SC-FILE", "2026-11-06", "registry")]), ["SC-FILE"], "10 days");
+  assert.deepEqual(due([leg("SC-OLD", "2026-11-05", "registry")]), [], "11 days: too late to welcome");
+  assert.deepEqual(due([leg("SC-CARD", "2026-11-09", "assignment")]), [], "a card told the console the day: its welcome went then");
+  assert.deepEqual(due([leg("SC-CARD", "2026-11-14", "assignment")]), ["SC-CARD"], "the 2-day catch-up, as before");
+  assert.deepEqual(due([leg("SC-FILE", "2026-11-09", "registry")], "2026-11-12"), [], "never a contract that began before the switch went on");
+  assert.deepEqual(due([{ ...leg("SC-V", "2026-11-09", "registry"), visit: true }]), [], "never a training visit");
+});
+
+// ---- 12. the small audit-page items ----------------------------------------------------------------------------------------
+test("audit page: a text box stops at what the server keeps, a read being retried is not 'needs a new file', a 'Reading' row is asked about again", async () => {
+  const ui = readFileSync(new URL("../src/audit_ui.js", import.meta.url), "utf-8");
+  assert.match(ui, /maxlength="' \+ \(field === "strengths" \|\| field === "improve" \|\| field === "agreed" \? 2000 : 600\)/, "the server cut the text at 600 / 2000 without a word");
+  const { gateState } = await import("../src/audit.js");
+  const g = gateState({ request: { status: "sent" }, machines: [{ serial: "S1", label: "Machine # 1" }], uploads: [{ serial: "S1", kind: "p43", read_state: "failed", at: "2026-11-16T08:00:00Z" }, { serial: "S1", kind: "mgmt", read_state: "wrong_doc", at: "2026-11-16T08:00:00Z" }], down: [], lines: [], counted: {}, requireRead: true });
+  const says = g.missing.map((m) => m.say).join(" | ");
+  assert.match(says, /Pattern 43[^|]* is being read again/); assert.match(says, /needs a new file/);
+  const up = readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf-8");
+  assert.match(up, /poll = setTimeout\(function \(\) \{ load\(true\); \}, 30000\)/);
+});
+
+// ---- 13. the Keyman schedule review (16 Nov 2026, second pass) -------------------------------------------------------------
+test("schedule: one person relieves one seat even when he is reachable under two dates", async () => {
+  const { assignRelievers } = await import("../src/reliever.js");
+  const xFile = { sc: "SC-X", on: "2026-10-20" }, xCard = { sc: "SC-X", on: "2026-11-01" };
+  const out = assignRelievers([{ sc: "SC-A", on: "2026-04-01", off: "2026-10-25", cands: [xFile, xCard] }, { sc: "SC-B", on: "2026-05-10", off: "2026-12-10", cands: [xFile, xCard] }]);
+  assert.equal(out.filter((h) => h && h.sc === "SC-X").length, 1, "Xia relieves one seat");
+});
+
+test("schedule: a seat the file holds past its sign-off still suppresses Rita's card for the same contract", async () => {
+  const { mergeBoardLegs } = await import("../src/ship_leg_source.js");
+  const held = { sc: "SC-M", ship: "Allure", on: "2026-09-01", off: "2026-11-10", is_current: true, source: "registry", heldByFile: true, ours: true };
+  const card = { id: "as1", sc: "SC-M", ship: "Allure", sign_on: "2026-09-15", planned_sign_off: "2027-04-15", crew_name: "Marco Held" };
+  const legs = mergeBoardLegs([held], [card], "2026-11-16", []);
+  assert.equal(legs.filter((l) => l.sc === "SC-M" && l.is_current).length, 1);
+});
+
+test("schedule: one person one ship counts a running contract the Contract Counter dates, and a rejected card never relieves the printer", async () => {
+  const src = await import("../src/ship_leg_source.js");
+  const counterSeat = { sc: "SC-I", ship: "Xcel", on: "2026-04-26", off: "2027-02-10", offSource: "rita", is_current: true, source: "counter" };
+  assert.deepEqual(src.cardOverlapsSeat({ sc: "SC-I", ship: "Millennium", sign_on: "2027-01-24" }, [counterSeat]), { ship: "Xcel", off: "2027-02-10", offSource: "rita" });
+  const s = readFileSync(new URL("../src/ship_leg_source.js", import.meta.url), "utf-8");
+  assert.match(s, /const openOk = dropOverlappedCards\(open, registry\.concat\(firstHistory\)\);\n  if \(openOk\.length !== \(open \|\| \[\]\)\.length\) registry = legsFromRegistry\(\{ rows, edits, counter, open: openOk,/);
+});
+
+test("board: Rita's card for the hull TDG earmarks her for is never the running contract that seats her 'ABOARD · TDG REGISTRY'", () => {
+  assert.match(SRC, /h\.on <= today && h\.source !== "assignment"\) liveRun\.add/);
+  assert.match(SRC, /const earmarkedHere = [^\n]*liveRun\.has\(sc \+ "\|" \+ w\.key\)\);/);
+});
+
+// ---- 14. the TDG imports review (16 Nov 2026, second pass) -----------------------------------------------------------------
+test("imports: an impossible text date is refused, never rolled into the next month", async () => {
+  const { normalizeDate } = await import("../src/crewimport.js");
+  assert.equal(normalizeDate("31 Sep 2026"), null); assert.equal(normalizeDate("29 Feb 2027"), null);
+  assert.equal(normalizeDate("30 Sep 2026"), "2026-09-30"); assert.equal(normalizeDate("Oct 7, 2026"), "2026-10-07"); assert.equal(normalizeDate("23-Sep-2034"), "2034-09-23");
+});
+
+test("imports: the name ladder folds accents (Tañgonan meets TANGONAN, Baleña meets BALENA)", async () => {
+  const { buildBridge, bridgeName } = await import("../src/keymanimport.js");
+  const bridge = buildBridge([{ agency_id: "SC-T", first_name: "Ryan", last_name: "Tañgonan" }, { agency_id: "SC-B", first_name: "A.J. Lorenzo", last_name: "Baleña" }]);
+  assert.equal(bridgeName({ last: "TANGONAN", first: "RYAN" }, bridge), "SC-T");
+  assert.equal(bridgeName({ last: "BALENA", first: "A.J. LORENZO" }, bridge), "SC-B");
+});
+
+test("imports: Accept on an embark_date earmark row keeps the sign-off Rita confirmed on the card", () => {
+  const src = readFileSync(new URL("../src/crew_import_routes.js", import.meta.url), "utf-8");
+  assert.match(src, /if \(it\.kind === "embark_date" && deps\.recordSignoff\) \{[\s\S]{0,400}a\.off_date_conf && a\.planned_sign_off && w\.embarked_at[\s\S]{0,300}deps\.recordSignoff\(env, \{ sc: it\.sc, on_key: w\.embarked_at/);
 });

@@ -69,15 +69,22 @@ export const REGISTRY_CONTRACT_SEED_SQL = "INSERT OR IGNORE INTO registry_contra
   "SELECT agency_id, substr(embarked_at,1,10), vessel, CASE WHEN debarked_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN substr(debarked_at,1,10) END, name, run_at, run_at, NULL FROM registry_snapshot " +
   "WHERE embarked_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' AND run_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM registry_contract)";
 const isoDay = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
-export async function keepContracts(env, registry, runAt) {
+export async function keepContracts(env, registry, runAt, held = []) {
   const rows = (registry || []).filter((r) => r && r.agency_id && isoDay(r.embarked_at));
   if (!rows.length) return { kept: 0, closed: 0 };
   const stmts = rows.map((r) => env.DB.prepare(
     "INSERT INTO registry_contract (sc, embarked_at, vessel, debarked_at, name, first_run_at, last_run_at, closed_run_at) VALUES (?,?,?,?,?,?,?,NULL) " +
     "ON CONFLICT(sc, embarked_at) DO UPDATE SET vessel=excluded.vessel, debarked_at=COALESCE(excluded.debarked_at, registry_contract.debarked_at), name=COALESCE(excluded.name, registry_contract.name), last_run_at=excluded.last_run_at, closed_run_at=NULL")
     .bind(String(r.agency_id), isoDay(r.embarked_at), r.vessel_observed ?? null, isoDay(r.debarked_at), r.name ?? null, runAt, runAt));
-  // a contract this file no longer carries: stamped once with the file that dropped it (never a date the console infers)
-  stmts.push(env.DB.prepare("UPDATE registry_contract SET closed_run_at=? WHERE closed_run_at IS NULL AND last_run_at < ?").bind(runAt, runAt));
+  // a contract this file no longer carries: stamped once with the file that dropped it (never a date the console infers).
+  // A crew the file still has On board THE SAME SHIP without a readable embark ("-", or a cell the parser refused) says nothing
+  // about his contract: it stays open (16 Nov 2026 review: a blank embark closed a contract TDG still had On board). Earmarked
+  // for the next ship, ashore or aboard another ship with no date: that contract is over. A collision's crew keeps his rows.
+  const undated = (registry || []).filter((r) => r && r.agency_id && !isoDay(r.embarked_at) && r.status === "On board" && r.vessel_observed)
+    .map((r) => ({ sc: String(r.agency_id), v: String(r.vessel_observed) }));
+  stmts.push(env.DB.prepare("UPDATE registry_contract SET closed_run_at=? WHERE closed_run_at IS NULL AND last_run_at < ? AND sc NOT IN (SELECT value FROM json_each(?)) " +
+    "AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE json_extract(j.value,'$.sc') = registry_contract.sc AND json_extract(j.value,'$.v') = registry_contract.vessel)")
+    .bind(runAt, runAt, JSON.stringify((held || []).map(String)), JSON.stringify(undated)));
   const res = await env.DB.batch(stmts);
   const last = res && res[res.length - 1];
   return { kept: rows.length, closed: Number((last && last.meta && last.meta.changes) || 0) };
@@ -85,10 +92,16 @@ export async function keepContracts(env, registry, runAt) {
 
 // The file's word per crew, from the parsed rows: the LAST row of a repeated agency id stands, and a row
 // the file keyed on the cruise-line id (D7 rekeyed) is carried under the crew's real agency id.
+// TWO FILE ROWS FOR ONE CREW ARE A COLLISION (§11b): neither reaches the crew row, and neither is TDG's word — the snapshot,
+// the verdicts and the kept contracts skip both, and the crew keeps the word of the file before (16 Nov 2026 review: the
+// agency-id row reached registry_snapshot and set the card through crewStatus step 0, the cruise-line-id row was kept
+// under its bare number as a crew the roster lacks). heldOf lists the crew whose old rows stay.
 function stagedRegistry(mapped, diff) {
   const realId = {}; for (const rk of (diff.rekeyed || [])) realId[String(rk.incoming_id)] = String(rk.agency_id);
-  return registryOf(mapped).map(r => (realId[r.agency_id] ? { ...r, agency_id: realId[r.agency_id] } : r));
+  const clash = new Set(); for (const c of (diff.collisions || [])) for (const i of (c.incoming_ids || [])) clash.add(String(i));
+  return registryOf(mapped).filter((r) => !clash.has(String(r.agency_id))).map(r => (realId[r.agency_id] ? { ...r, agency_id: realId[r.agency_id] } : r));
 }
+const heldOf = (diff) => [...new Set((diff.collisions || []).flatMap((c) => [c.agency_id, ...(c.incoming_ids || [])]).filter(Boolean).map(String))];
 
 // THE SAME FILE, DROPPED AGAIN, FILLS THE BOARD'S COPY (Miguel, 5 Oct 2026: "I dont think so u are
 // reading well the tdg file"). The console kept no copy of a registry file until #134; the 5 Oct 18:54
@@ -114,10 +127,12 @@ async function keepCopyOfAppliedFile(env, deps, mapped, file_hash, seen) {
   const held = await env.DB.prepare("SELECT COUNT(*) AS n FROM registry_snapshot WHERE import_run_id=?").bind(run.id).first();
   if (held && Number(held.n) > 0) return 0;
   const { existingByAgency } = await loadContext(env, null);
-  const registry = stagedRegistry(mapped, diffCrew(mapped, existingByAgency)).filter(r => r && r.agency_id);
+  const diff0 = diffCrew(mapped, existingByAgency);
+  const registry = stagedRegistry(mapped, diff0).filter(r => r && r.agency_id);
+  const held0 = heldOf(diff0);
   if (!registry.length) return 0;
   const stmts = registry.map(r => snapshotStmt(env, r, run.run_at, run.id));
-  stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(run.id));
+  stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ? AND agency_id NOT IN (SELECT value FROM json_each(?))").bind(run.id, JSON.stringify(held0)));
   await env.DB.batch(stmts);
   return registry.length;
 }
@@ -231,6 +246,7 @@ export async function apiCrewImportStage(request, env, deps) {
   const dismissed = deps && deps.dismissed ? await deps.dismissed(env).catch(() => []) : [];
   review.tdg_earmarks = tdgEarmarksWithoutCard({ projections, registry, shipOf: SHIP_OF, exclude: em.items.filter((i) => i.kind === "other_person" && i.file && i.file.other).map((i) => i.file.other.sc + "|" + String(i.ship).trim().toLowerCase()).concat(dismissed || []) });
   review.registry = registry;
+  review.registry_held = heldOf(diff);   // a collision's crew: their previous snapshot row and contracts stay
   review.schedule = scheduleCheck(registry, prevRows);
   review.km_mismatch = kmMismatch;
   review.groups.unretire = unretireItems(registry, retiredByAgency);
@@ -418,13 +434,14 @@ export async function apiCrewImportApply(request, env, deps) {
   // A crew the latest file does NOT carry has no word in it: their old snapshot row goes, so the board
   // never shows a previous file's verdict as current (silence is not a verdict). Only when this body
   // actually carried the file's rows — an empty list (an old cached page) must not wipe the table.
-  if (kept) stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(importRunId));
+  const held = Array.isArray(body.review && body.review.registry_held) ? body.review.registry_held.map(String) : [];
+  if (kept) stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ? AND agency_id NOT IN (SELECT value FROM json_each(?))").bind(importRunId, JSON.stringify(held)));
 
   const results = await env.DB.batch(stmts);
   // the contracts this file shows, kept on their own after the import is in (registry_contract; never fails the Apply)
   let contracts_kept = null;
   if (kept && deps && deps.ensureRegistrySnapshot) {
-    try { contracts_kept = await keepContracts(env, registry, run_at); } catch (e) { contracts_kept = { error: String((e && e.message) || e).slice(0, 160) }; }
+    try { contracts_kept = await keepContracts(env, registry, run_at, held); } catch (e) { contracts_kept = { error: String((e && e.message) || e).slice(0, 160) }; }
   }
   // THE FILE ABSORBS THE CARD (Miguel, 7 Oct 2026: "when Rita uploads a new TDG file matching that seafarer,
   // take the file's row and eliminate the green template"). A card the file CONFIRMS aboard — same crew, On
@@ -521,7 +538,20 @@ export async function apiCrewImportApply(request, env, deps) {
         const c = r && r.ok ? await deps.createCard(env, { agencyId: it.file.other.sc, ship: it.ship, today }).catch(fail) : null;
         earmarks.cards.push({ sc: it.file.other.sc, ship: it.ship, name: it.file.other.name || null, ok: !!(c && c.ok), id: (c && c.id) || null, sign_on: (c && c.sign_on) || null, error: c && c.ok ? null : (c && c.error) || (r && r.ok ? "failed" : "not created: the card could not be removed") });
       }
-      else if ((it.kind === "inactive" || it.kind === "not_aboard" || it.kind === "embark_date") && deps && deps.absorbCard) { action = it.kind === "embark_date" ? "absorbed by the file's row" : "removed"; r = await deps.absorbCard(env, it.id).catch(fail); }
+      else if ((it.kind === "inactive" || it.kind === "not_aboard" || it.kind === "embark_date") && deps && deps.absorbCard) {
+        action = it.kind === "embark_date" ? "absorbed by the file's row" : "removed";
+        // the file's row becomes the seat: a sign-off Rita CONFIRMED on the card is kept first as hers for that contract, as
+        // the ABSORB_DAYS route does (16 Nov 2026 review: this route dropped it)
+        if (it.kind === "embark_date" && deps.recordSignoff) {
+          const a = (projections || []).find((x) => x && x.id === it.id);
+          const w = (registry || []).find((x) => x && String(x.agency_id) === String(it.sc)) || {};
+          if (a && a.off_date_conf && a.planned_sign_off && w.embarked_at) {
+            const kept = await deps.recordSignoff(env, { sc: it.sc, on_key: w.embarked_at, sign_off: a.planned_sign_off, embark: a.on_port_seed || null, disembark: a.off_port_seed || null }).catch(fail);
+            if (kept && kept.ok) action += ", your confirmed sign-off kept";
+          }
+        }
+        r = await deps.absorbCard(env, it.id).catch(fail);
+      }
       earmarks.accepted.push({ id: it.id, sc: it.sc, crew_name: it.crew_name || null, ship: it.ship, kind: it.kind, action, ok: !!(r && r.ok), error: r && r.ok ? null : (r && r.error) || "failed" });
       continue;
     }

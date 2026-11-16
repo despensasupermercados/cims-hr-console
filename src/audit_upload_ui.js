@@ -86,7 +86,7 @@ export function auditClosedHtml(why) {
 const SCRIPT = String.raw`
 (function () {
   "use strict";
-  var T = window.__T, IC = window.__IC || {}, S = null, busy = {}, pend = {}, openDown = {}, timer = null, filter = "todo", picked = false, find = "", addOpen = false, faq = 0;
+  var T = window.__T, IC = window.__IC || {}, S = null, busy = {}, pend = {}, openDown = {}, timer = null, poll = null, filter = "todo", picked = false, find = "", addOpen = false, faq = 0;
   // A BROWSER THAT CANNOT CHOOSE A FILE (6 Nov 2026, Mark John Bornea, Independence: "he clicks the box to choose the file ..
   // is not able to choose the file"). The box opens the picker in Chrome, Edge and Safari; a mail or chat app's own browser on
   // Android shows the page and never opens one, and a locked desk can block file dialogs. So: the page says so at the top
@@ -120,7 +120,7 @@ const SCRIPT = String.raw`
       .catch(function () { return { ok: false, say: "No connection. Your numbers on this page are kept; try again." }; });
   }
   function typing() { var a = document.activeElement; return !!(a && a.getAttribute && (a.getAttribute("data-part") || a.getAttribute("data-reason") || a.id === "xt" || a.id === "xn" || a.id === "find")); }
-  function load(soft) { return api("/api/audit/u/state").then(function (j) { if (j && j.machines) { S = j; if (soft && typing() && S.status === "sent") { head(); dock(); progress(); } else draw(); } else if (S && S.machines && !(j && j.status)) { /* a lost connection on a page already open: the page and what is typed on it stay (16 Nov 2026: one failed refresh replaced the whole page with an error card) */ toast((j && j.say) || "No connection. Try again."); } else { $("main").innerHTML = '<div class="card pad"><p class="txt">' + esc(j.say || j.error || "Could not load.") + "</p></div>"; } }); }
+  function load(soft) { return api("/api/audit/u/state").then(function (j) { if (j && j.machines) { S = j; /* a file HON is still reading (or reading again) is asked about every 30 s: the row stayed on "Reading" until the crew reloaded the page (16 Nov 2026) */ clearTimeout(poll); if (S.status === "sent" && S.machines.some(function (m) { return [m.p43, m.mgmt].some(function (x) { return x && (x.read_state === "pending" || x.read_state === "failed"); }); })) poll = setTimeout(function () { load(true); }, 30000); if (soft && typing() && S.status === "sent") { head(); dock(); progress(); } else draw(); } else if (S && S.machines && !(j && j.status)) { /* a lost connection on a page already open: the page and what is typed on it stay (16 Nov 2026: one failed refresh replaced the whole page with an error card) */ toast((j && j.say) || "No connection. Try again."); } else { $("main").innerHTML = '<div class="card pad"><p class="txt">' + esc(j.say || j.error || "Could not load.") + "</p></div>"; } }); }
 
   function mDone(m) { return !!m.down || !!(m.p43 && m.p43.read_state === "ok" && m.mgmt && m.mgmt.read_state === "ok"); }
   function counted(l) { var v = S.counted[l.part_no]; return v !== undefined && v !== null && v !== ""; }
