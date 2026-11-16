@@ -161,6 +161,7 @@ export function sbmLegsFromSections(sections) {
 
 /* ------------------------------ dates ----------------------------------- */
 
+export const SBM_CATCHUP_DAYS = 2;
 export function sbmPlusDays(today, n) {
   const d = new Date(String(today) + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
@@ -663,13 +664,17 @@ export function installSbm(deps) {
     const ex = await env.DB.prepare("UPDATE sbm_review_request SET status='expired' WHERE status IN ('sent','reminded') AND contract_signoff < ?").bind(today).run();
     out.expired = (ex && ex.meta && ex.meta.changes) || 0;
 
-    // ① Invites at exactly T-7.
+    // ① Invites at T-7, and for SBM_CATCHUP_DAYS after a morning that did not run or a sign-off that moved INTO the
+    // window (16 Nov 2026: "exactly T-7" meant one missed run, or a date moved by a day, and the manager was never asked).
+    const tLo = sbmPlusDays(today, 7 - SBM_CATCHUP_DAYS);
     for (const leg of legs) {
-      if (leg.off !== t7) continue;
+      if (leg.off > t7 || leg.off < tLo) continue;
       const cr = crew[leg.sc];
       if (!cr || cr.retired || cr.status === "Inactive" || cr.status === "Not for Rehire") { out.skipped.push({ sc: leg.sc, reason: "retired_or_inactive" }); continue; }
-      const dup = await env.DB.prepare("SELECT id FROM sbm_review_request WHERE agency_id=? AND contract_signoff=?").bind(leg.sc, leg.off).first();
-      if (dup) continue;                                        // already handled (any status) -> sweep is idempotent
+      // already handled (any status) -> sweep is idempotent; a request for the same crew within 21 days is the same
+      // contract under a sign-off that moved, never a second invitation to the ship's manager
+      const dup = await env.DB.prepare("SELECT id FROM sbm_review_request WHERE agency_id=? AND abs(julianday(contract_signoff) - julianday(?)) <= 21 LIMIT 1").bind(leg.sc, leg.off).first();
+      if (dup) continue;
       const brand = sbmBrandForShip(leg.ship, deps.VESSEL_REF);
       const byShip = await cfgGetShip(env, "recipient", leg.ship); // exact key, then sbmNormShip key (S1)
       const byBrand = brand ? await cfgGet(env, "recipient:" + brand) : null;
@@ -704,7 +709,7 @@ export function installSbm(deps) {
     // ② Reminders at exactly T-4, only for rows still 'sent' (once, ever).
     const open = (await env.DB.prepare("SELECT id, crew_id, agency_id, contract_signon, contract_signoff, ship, brand, recipient_email, status FROM sbm_review_request WHERE status='sent'").all()).results || [];
     for (const req of open) {
-      if (req.contract_signoff !== t4) continue;
+      if (req.contract_signoff > t4 || req.contract_signoff < sbmPlusDays(today, 4 - SBM_CATCHUP_DAYS)) continue; // T-4, same catch-up; 'sent' -> 'reminded' keeps it once
       const leg = legs.find(l => l.sc === req.agency_id && String(l.off) === String(req.contract_signoff)) || null;
       const reason = sbmSuppressReason(req, leg, crew[req.agency_id], today);
       if (reason) {                                             // terminal: a cancelled reminder never un-cancels
@@ -769,10 +774,15 @@ export function installSbm(deps) {
     if (!sc || seq == null || Number.isNaN(seq)) return json({ error: "missing_sc_seq" }, 400);
     // Resolve ship + sign-off EXACTLY as the sign-off flows do: the keyman leg,
     // with a manual contract_edit override winning (CLAUDE.md §11 override rule).
-    const leg = await env.DB.prepare("SELECT ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
-    const ed = (await env.DB.prepare("SELECT ship, sign_off FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {};
-    const ship = ed.ship || (leg && leg.ship) || null;
-    const off = ed.sign_off || (leg && (leg.act_off || leg.proj_off)) || null;
+    // THE SEAT FIRST (16 Nov 2026): the Keyman board's own seat for this crew — the sweep's source — and only for a crew
+    // the board does not seat, the Contract Counter position as before. The Counter is history since 7 Oct (§10d): read
+    // alone it named a ship and a sign-off the crew had left months ago.
+    let seat = null;
+    try { seat = sbmLegsFromSections((await deps.SECTIONS(env)).sections).filter((l) => l.sc === sc && l.off >= todayStr()).sort((a, b) => a.off.localeCompare(b.off))[0] || null; } catch (e) { seat = null; }
+    const leg = seat ? null : await env.DB.prepare("SELECT ship, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND seq=?").bind(sc, seq).first();
+    const ed = seat ? {} : ((await env.DB.prepare("SELECT ship, sign_off FROM contract_edit WHERE sc=? AND seq=?").bind(sc, seq).first()) || {});
+    const ship = seat ? seat.ship : ed.ship || (leg && leg.ship) || null;
+    const off = seat ? seat.off : ed.sign_off || (leg && (leg.act_off || leg.proj_off)) || null;
     if (!off) return json({ error: "no_signoff_date" }, 400);
     // Past sign-off: the single-use link would already be expired -> refuse
     // rather than send a dead link (matches sbmFormPage's expiry check).

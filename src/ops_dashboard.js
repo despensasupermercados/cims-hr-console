@@ -183,7 +183,10 @@ export function buildOps(input) {
   for (const c of crew) {
     if (!c.dob || !people[c.sc]) continue;
     const md = String(c.dob).slice(5, 10); if (md.length !== 5) continue;
-    const y = +today.slice(0, 4), cand = [y + "-" + md, (y + 1) + "-" + md].find(inWin);
+    // born 29 Feb: in a year without one the day is 28 Feb (it was listed as "Feb 29" of a year that has none, or missed)
+    const leap = (yy) => (yy % 4 === 0 && yy % 100 !== 0) || yy % 400 === 0;
+    const onYear = (yy) => yy + "-" + (md === "02-29" && !leap(yy) ? "02-28" : md);
+    const y = +today.slice(0, 4), cand = [onYear(y), onYear(y + 1)].find(inWin);
     if (cand) bdays.push({ date: cand, sc: c.sc, surname: c.last || surname(c.first), code: people[c.sc], age: +cand.slice(0, 4) - +String(c.dob).slice(0, 4) });
   }
   bdays.sort((a, b) => a.date.localeCompare(b.date) || a.surname.localeCompare(b.surname));

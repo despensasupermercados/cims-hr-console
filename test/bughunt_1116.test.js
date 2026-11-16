@@ -11,6 +11,7 @@ import { sgaPeriodFromName } from "../src/sga.js";
 import { parseMonthSheet, parseCimsSheet } from "../src/travel.js";
 import { assignRelievers } from "../src/reliever.js";
 import { welcomeContext } from "../src/welcome_context.js";
+import { welcomeDue, WELCOME_LATE_DAYS } from "../src/welcome_send.js";
 import { hubModel } from "../src/crew_hub_routes.js";
 import { hubPage } from "../src/crew_hub.js";
 import { signToken } from "../src/auth.js";
@@ -174,4 +175,30 @@ test("the Crew Hub counts the sign-on as day 1 and the sign-off as the last day,
 test("the crew's audit page: a lost connection on a page already open shows a toast, never replaces the page", () => {
   const ui = readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf-8");
   assert.match(ui, /else if \(S && S\.machines && !\(j && j\.status\)\) \{[^}]*toast\(/);
+});
+
+// ---- 11. a sign-on the console learns late (Miguel, 16 Nov 2026: "Send it late") ------------------------------------------
+test("a contract TDG's file reveals days after the embark is welcomed late, up to 10 days; a card-dated one keeps the 2-day catch-up", () => {
+  assert.equal(WELCOME_LATE_DAYS, 10);
+  const leg = (sc, on, source) => ({ sc, ship: "Voyager", on, off: "2027-06-01", is_current: true, source, fileAt: source === "registry" ? "2026-11-13" : undefined });
+  const due = (legs, since = "2026-10-19") => welcomeDue(legs, "2026-11-16", since).map((l) => l.sc);
+  assert.deepEqual(due([leg("SC-FILE", "2026-11-09", "registry")]), ["SC-FILE"], "7 days after the embark, known from the file");
+  assert.deepEqual(due([leg("SC-FILE", "2026-11-06", "registry")]), ["SC-FILE"], "10 days");
+  assert.deepEqual(due([leg("SC-OLD", "2026-11-05", "registry")]), [], "11 days: too late to welcome");
+  assert.deepEqual(due([leg("SC-CARD", "2026-11-09", "assignment")]), [], "a card told the console the day: its welcome went then");
+  assert.deepEqual(due([leg("SC-CARD", "2026-11-14", "assignment")]), ["SC-CARD"], "the 2-day catch-up, as before");
+  assert.deepEqual(due([leg("SC-FILE", "2026-11-09", "registry")], "2026-11-12"), [], "never a contract that began before the switch went on");
+  assert.deepEqual(due([{ ...leg("SC-V", "2026-11-09", "registry"), visit: true }]), [], "never a training visit");
+});
+
+// ---- 12. the small audit-page items ----------------------------------------------------------------------------------------
+test("audit page: a text box stops at what the server keeps, a read being retried is not 'needs a new file', a 'Reading' row is asked about again", async () => {
+  const ui = readFileSync(new URL("../src/audit_ui.js", import.meta.url), "utf-8");
+  assert.match(ui, /maxlength="' \+ \(field === "strengths" \|\| field === "improve" \|\| field === "agreed" \? 2000 : 600\)/, "the server cut the text at 600 / 2000 without a word");
+  const { gateState } = await import("../src/audit.js");
+  const g = gateState({ request: { status: "sent" }, machines: [{ serial: "S1", label: "Machine # 1" }], uploads: [{ serial: "S1", kind: "p43", read_state: "failed", at: "2026-11-16T08:00:00Z" }, { serial: "S1", kind: "mgmt", read_state: "wrong_doc", at: "2026-11-16T08:00:00Z" }], down: [], lines: [], counted: {}, requireRead: true });
+  const says = g.missing.map((m) => m.say).join(" | ");
+  assert.match(says, /Pattern 43[^|]* is being read again/); assert.match(says, /needs a new file/);
+  const up = readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf-8");
+  assert.match(up, /poll = setTimeout\(function \(\) \{ load\(true\); \}, 30000\)/);
 });
