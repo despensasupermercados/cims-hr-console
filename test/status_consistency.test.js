@@ -41,7 +41,7 @@ test("rotationSections seats a crew from TDG's file, never from a schedule self-
   assert.match(b, /if \(w && \(w\.status === "On board" \|\| earmarkedHere\) && w\.known && !absentSince\[sc\]\) \{/, "a green seat needs the file On board a known hull, and the crew still in the file");
   // The one widening (Miguel, 17 Oct 2026, Ida Purnama: "Ida is onboard"): TDG earmarks him for the hull his contract is
   // still running on — his NEXT contract there. Only a live leg on THAT hull, never a schedule self-heal elsewhere.
-  assert.match(b, /const earmarkedHere = !!\(w && w\.status === "Earmarked" && w\.known && !absentSince\[sc\] && liveLeg\.has\(sc \+ "\|" \+ w\.key\)\);/);
+  assert.match(b, /const earmarkedHere = !!\(w && w\.status === "Earmarked" && w\.known && !absentSince\[sc\] && liveRun\.has\(sc \+ "\|" \+ w\.key\)\);/);
   assert.match(b, /const off = completedOff\(HIST, sc, w\.key, today, keyOf\);/, "a contract the console KNOWS completed on that hull goes underneath");
   // A TBA sign-off is still aboard: the live-leg test reads the Counter's current flag, not the date.
   assert.match(b, /if \(h && h\.ours && h\.sc && h\.is_current && h\.on && h\.on <= today\) liveLeg\.add/);

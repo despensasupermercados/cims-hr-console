@@ -2865,6 +2865,12 @@ async function rotationSections(env) {
   // contract on the same hull must not hand its dates to a new one the Counter does not carry yet.
   const liveLeg = new Set();
   for (const h of HIST) if (h && h.ours && h.sc && h.is_current && h.on && h.on <= today) liveLeg.add(h.sc + "|" + keyOf(h.ship));
+  // "Earmarked for the ship he is aboard" (Purnama, §11f) needs a contract the FILE or the Counter runs on that hull: Rita's
+  // own card for it is the earmark, not a running contract, so it never makes the crew a seat "ABOARD · TDG REGISTRY" (16 Nov
+  // 2026 review: Ramos on Reflection and Lorono on Oasis read verified by TDG while TDG only earmarks them; their cards are
+  // "ABOARD · AWAITING TDG FILE").
+  const liveRun = new Set();
+  for (const h of HIST) if (h && h.ours && h.sc && h.is_current && h.on && h.on <= today && h.source !== "assignment") liveRun.add(h.sc + "|" + keyOf(h.ship));
   const promByShip = {}, shoreside = [], pool = [];
   // ONE seat card renderer. x = { state, asgId, confirmed, file }: green = TDG's file has them On board
   // this hull; yellow = Rita's placeholder aboard. Dates: the live Keyman leg, then the schedule.
@@ -2925,7 +2931,7 @@ async function rotationSections(env) {
     // lists him "Earmarked Xcel" — his NEXT contract there (Rita's card for 24 Jan 2027) — while his current one runs to
     // Rita's 21 Nov. The schedule already keeps that contract current (the file gives it no dates, foldCounterHistory);
     // the board now seats him too instead of ending it "per the TDG file". Only a leg already running on THAT hull.
-    const earmarkedHere = !!(w && w.status === "Earmarked" && w.known && !absentSince[sc] && liveLeg.has(sc + "|" + w.key));
+    const earmarkedHere = !!(w && w.status === "Earmarked" && w.known && !absentSince[sc] && liveRun.has(sc + "|" + w.key));
     if (w && (w.status === "On board" || earmarkedHere) && w.known && !absentSince[sc]) {
       const off = completedOff(HIST, sc, w.key, today, keyOf);
       if (off) completedBy[sc + "|" + w.key] = off;          // KNOWN completed: drawn underneath (6 Oct 2026: not a row)

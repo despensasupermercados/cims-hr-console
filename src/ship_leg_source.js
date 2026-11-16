@@ -156,7 +156,9 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
   const taken = new Set();
   const brandByShip = {};
   for (const r of legs) {
-    if (r.is_current && (!today || !r.off || r.off >= today)) {
+    // a seat the FILE holds is taken while it is current — held or overdue past its sign-off included (16 Nov 2026 review: a
+    // held seat stopped suppressing Rita's card for the same contract, so the statement and the Score Card read two)
+    if (r.is_current && (r.source === "registry" || !today || !r.off || r.off >= today)) {
       if (r.sc) taken.add("sc:" + r.sc + "|" + shipKey(r.ship));
       if (r.crew_id) taken.add("id:" + r.crew_id + "|" + shipKey(r.ship));
     }
@@ -431,7 +433,9 @@ export function cardOverlapsSeat(card, legs) {
   const sc = card && card.sc, on = card && dayOf(card.sign_on), k = card && card.ship ? shipKey(card.ship) : null;
   if (!sc || !on || !k) return null;
   for (const l of (legs || [])) {
-    if (!l || l.sc !== sc || l.source !== "registry" || !l.is_current || l.visit || l.heldByFile) continue;
+    // the file's running contract, or — for a crew TDG has On board with no embark date — the Contract Counter's, with the
+    // sign-off Rita typed or TDG gave (16 Nov 2026 review: Purnama's Counter-dated Xcel seat did not count)
+    if (!l || l.sc !== sc || (l.source !== "registry" && l.source !== "counter") || !l.is_current || l.visit || l.heldByFile) continue;
     if (!l.ship || shipKey(l.ship) === k || !dayOf(l.off) || !(dayOf(l.off) > on)) continue;
     if (l.offSource !== "tdg" && l.offSource !== "rita" && l.offSource !== "card") continue;
     return { ship: l.ship, off: dayOf(l.off), offSource: l.offSource };
@@ -667,7 +671,13 @@ async function boardLegsFromDbUncached(env, today) {
     fetchKeptContracts(env), // the contracts the file has shown and forgotten (16 Nov 2026)
   ]);
   const turnarounds = turnaroundsByShip(taRows);
-  const registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers });
+  // ONE PERSON, ONE SHIP for the relief cards too (16 Nov 2026 review): a card the rule rejects — its crew still under a dated
+  // contract on another hull past its sign-on — must not date the printer's sign-off or name the reliever either, or the
+  // hull's printer is drawn "Contract completed" and the ship empty. A second pass without those cards.
+  let registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers });
+  const firstHistory = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry);
+  const openOk = dropOverlappedCards(open, registry.concat(firstHistory));
+  if (openOk.length !== (open || []).length) registry = legsFromRegistry({ rows, edits, counter, open: openOk, vessels, today, turnarounds, visits, trainers });
   const keptH = keptLegs({ kept, registry, edits, vessels, visits, trainers });
   // a Counter contract the kept record also carries (same crew, same hull, within ABSORB_DAYS) is folded like one the file has
   const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry.concat(keptH)).concat(keptH);
@@ -677,7 +687,7 @@ async function boardLegsFromDbUncached(env, today) {
   // sign-off buttons all read a running contract the board had taken off (Gayda's Allure card beside her Jewel seat).
   // And a trainer's card is a visit, as his file row is (§10i), never a seat the emails or the count read as a contract.
   // ...nor is a card a contract while his own running contract on another hull is dated past the card's sign-on (16 Nov 2026).
-  const cards = markAssignmentVisits(dropOverlappedCards(dropContradictedCards(asg, rows, today), registry), visits, trainers);
+  const cards = markAssignmentVisits(dropOverlappedCards(dropContradictedCards(asg, rows, today), registry.concat(history)), visits, trainers);
   const out = mergeBoardLegs(registry.concat(history), cards, today, ended);
   // The same map rides on the schedule (non-enumerable) so the board's other projections — the earmark bench's
   // one-tap dates — snap to the same days without a second read (§12).

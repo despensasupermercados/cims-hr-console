@@ -1792,6 +1792,23 @@ the file merely dropped adds nothing. Read by every count reader through `CC_VIS
 old read while the table does not exist. Day one changes nothing: every seeded row is open. Pinned by
 `test/kept_contracts.test.js`.
 
+**The second pass, the same day** (the Keyman schedule and the TDG imports, read again). Pinned by `test/bughunt_1116.test.js`,
+`test/registry_contract.test.js` (on a database built from `migrations/`, `test/_import_db.mjs`).
+- **A blank embark never closes a contract** (`keepContracts`): a crew the file still has On board THE SAME SHIP with no
+  readable embark keeps his kept contract open (it was stamped closed and, read since #394, drawn "ended per TDG file");
+  Earmarked for the next ship, ashore or aboard another ship with no date still closes it.
+- **A collision is TDG's word for nobody** (`stagedRegistry`, `registry_held`): two file rows for one crew reach neither the
+  snapshot nor the kept record; the crew keeps the previous file's row (the snapshot's delete skips them) and his contracts.
+- **An impossible text date is refused** (`normalizeDate`: "31 Sep 2026" read 2026-10-01). **Accents fold in the name
+  ladder** (`keymanimport.norm`: Tañgonan / TANGONAN, Baleña / BALENA). **Accept on an `embark_date` earmark row keeps
+  Rita's confirmed sign-off** (`recordSignoff` under the file's embark), like the ABSORB_DAYS route.
+- **Rita's card for the hull TDG earmarks her for is never the running contract** (`liveRun` excludes assignment legs):
+  Ramos (Reflection) and Lorono (Oasis) read "ABOARD · TDG REGISTRY"; they read "ABOARD · AWAITING TDG FILE".
+- **A card one-person-one-ship rejects never relieves the printer** (`boardLegsFromDbUncached`: a second pass of
+  `legsFromRegistry` without it) and the rule counts a running contract the Contract Counter dates (source `counter`).
+- **A seat the file holds past its sign-off still suppresses Rita's card for the same contract** (`mergeBoardLegs`).
+- **One person relieves one seat under any date** (`assignRelievers` claims by person).
+
 **The Score Card's three findings of 16 Nov 2026 — MONEY (§1): Miguel's merge, the pull request after #390.** Pinned by
 `test/bughunt_1116_money.test.js`. (1) **An ENDED contract with no sign-off date ends on its sign-on day** for the commit
 rules (`scorequeue.endOf`): a Contract Counter row uploaded without a projected sign-off (11 rows), served as history, was
