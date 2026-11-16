@@ -25,7 +25,7 @@ import { isIntakeMail, intakeMail, sha256Hex, yearFromName } from "./mail_intake
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { fileWordBySc, completedOff, boardIssues } from "./board_truth.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections, cardOverlapsSeat } from "./ship_leg_source.js"; import { fileWordBySc, completedOff, boardIssues } from "./board_truth.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED, normShip as normShipKey } from "./shipname.js";
 import { htmlPage, etagFor } from "./etag.js";
@@ -316,6 +316,12 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
+      // A SIGNED-IN POST FROM ANOTHER HOST IS REFUSED BEFORE ANY HANDLER (bug hunt, 16 Nov 2026). The session cookie is
+      // Domain=cims.work, so it rides on a POST from every *.cims.work page; the check below guarded the /api/ block only,
+      // while the survey, hub, welcome, sign-off instructions and sign-off link routes are dispatched first: a page on a
+      // sibling host could turn ON the crew survey or the welcome run, revoke a Crew Hub link or send a crew email as
+      // whoever was signed in. Token pages (the hub, the survey, the sign-off pass) carry no session and post to their own host.
+      if (session && request.method === "POST" && crossSite(request, url)) return json({ error: "cross_site" }, 403);
       // The Crew Hub: /hub/<token> and /hub/expense.xlsx answer without a session (the link is the key); the two /api/hub/ routes need one.
       // The crew survey (its page is a /hub/ path, so it is asked first).
       if (p.startsWith("/hub/survey/") || p.startsWith("/api/survey/")) { const _s = await _survey.handle(p, request, env, url, session); if (_s) return _s; }
@@ -2966,7 +2972,9 @@ async function rotationSections(env) {
   // the board (overriddenAsg); a confirmed one is the seat itself.
   // TDG earmarking him for this very hull is TDG having the plan, not the embark yet (17 Oct 2026, Corpin on Grandeur:
   // "turn green") — the same as no word: aboard per the console, awaiting the file.
-  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked"); };
+  // ONE PERSON, ONE SHIP (16 Nov 2026, Joe Art Eresmas' Getaway card of 9 Nov while Rita's typed Solstice sign-off read
+  // 15 Mar 2027): a card is never "aboard" while the schedule has him under a dated contract on another hull past its sign-on.
+  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked") && !cardOverlapsSeat({ sc: a.sc, ship: shipOf(a.ship) || a.ship, sign_on: a.sign_on }, HIST); };
   // A TRAINER'S CARD THAT HAS STARTED IS A VISIT (night watch, 3 Nov 2026; visits.js): the schedule already marked it
   // (markAssignmentVisits); the board drew it as a seat "awaiting the TDG file", so the audit site listed Jonathan Alonzo
   // aboard Spectrum and the SeatReader named him HON's outgoing printer. It is the ship's training-visit line instead.
@@ -4162,8 +4170,12 @@ function decodeEmailBody(raw) {
   if (tp >= 0) {
     const nl = raw.indexOf("\n\n", tp);
     start = nl >= 0 ? nl + 2 : tp;
-    const hdr = raw.slice(tp, start).toLowerCase();
-    if (hdr.indexOf("base64") >= 0) cte = "b64"; else if (hdr.indexOf("quoted-printable") >= 0) cte = "qp";
+    // the part's header block: from the blank line before Content-Type to the blank line after (a Content-Transfer-Encoding
+    // written ABOVE Content-Type was missed, and a base64 / quoted-printable report was filed as its raw encoding; 16 Nov 2026)
+    const h0 = raw.lastIndexOf("\n\n", tp);
+    const hdr = raw.slice(h0 < 0 ? 0 : h0, start).toLowerCase();
+    const enc = /content-transfer-encoding:\s*"?(base64|quoted-printable)/.exec(hdr);
+    if (enc) cte = enc[1] === "base64" ? "b64" : "qp";
     // The part ends at ITS MIME boundary — the innermost one declared before it (a forwarded report is multipart/mixed
     // around multipart/alternative). It used to end at the first line starting "--": the sender's "-- " signature or
     // the "--- Forwarded message ---" line, so the matcher and the model saw the first paragraph only (16 Oct 2026).
@@ -6732,7 +6744,7 @@ function tvRail(){
   var kindOf=function(r){return r.kind||'crew';};
   var years=tYears(),LYr=TF.year?+TF.year:(years[0]||null);
   var base=TRVALL.filter(function(r){return !TF.client||r.client===TF.client;});
-  var catOk=function(r){return !TF.cat||(r[TF.cat]>0);};
+  var catOk=function(r){return !TF.cat||(+r[TF.cat]||0)!==0;};
   // the same period as the hero: the chosen month, else the year's closed months (the running month is not counted yet)
   var closedOf=function(y){return (TRV&&TRV.closed&&TRV.closed[y]!=null)?TRV.closed[y]:12;};
   var inPer=function(r){return TF.month?r.month===+TF.month:r.month<=closedOf(r.year);};
@@ -6772,7 +6784,7 @@ function tvRail(){
   el.innerHTML=h;
   el.onclick=tvRailClick;
   var tt=document.getElementById('tvtotal');
-  if(tt){if(TF.kind==='training'){tt.innerHTML='TDG’s training statement';}else{var n=tScope().filter(function(r){return (!TF.year||r.year===+TF.year)&&(!TF.month||r.month===+TF.month)&&(!TF.cat||r[TF.cat]>0);}).length;tt.innerHTML='<b>'+n+'</b> line item'+(n===1?'':'s')+(TF.year?'':' · all years');}}
+  if(tt){if(TF.kind==='training'){tt.innerHTML='TDG’s training statement';}else{var n=tScope().filter(function(r){return (!TF.year||r.year===+TF.year)&&(!TF.month||r.month===+TF.month)&&(!TF.cat||(+r[TF.cat]||0)!==0);}).length;tt.innerHTML='<b>'+n+'</b> line item'+(n===1?'':'s')+(TF.year?'':' · all years');}}
 }
 function tvRailClick(e){
   var el=e.target.closest?e.target.closest('[data-tv]'):null;if(!el)return;
@@ -7100,7 +7112,7 @@ function paintTravel(){
   var byp={};TLBL={};sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0;}).forEach(function(r){var v=cat?(r[cat]||0):r.total;if(cat&&!v)return;var k=tKey(r);byp[k]=(byp[k]||0)+v;TLBL[k]=tLabel(r);});
   TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,8);
   var ppl='<div class=tvcard><div class=tvh>Who <small>top '+TLB.length+' · '+P.span+' '+LY+(cat?' · '+catName:'')+'</small></div><div style="margin-top:6px">';
-  ppl+=TLB.map(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||r[cat]>0);});var k=(rs[0]||{}).kind;var unp=k!=='shoreside'&&!(rs[0]||{}).agency_id;
+  ppl+=TLB.map(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||(+r[cat]||0)!==0);});var k=(rs[0]||{}).kind;var unp=k!=='shoreside'&&!(rs[0]||{}).agency_id;
     return '<div class=tvp onclick="travelDrill('+i+')"><span class=av>'+escHtml(tvInitials(TLBL[n]||n))+'</span><span><span class=nm>'+escHtml(TLBL[n]||n)+'</span>'+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(unp?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'<span class=sb>'+rs.length+' movement'+(rs.length===1?'':'s')+'</span></span><b>'+usd0(byp[n])+'</b></div>';}).join('')||'<div class=tvsub>Nobody in this period.</div>';
   ppl+='</div></div>';
   h+='<div class=tvgrid2>'+wg+ppl+'</div>';
@@ -7124,7 +7136,7 @@ function paintTravel(){
     outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':escHtml(r.leg||''))+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(val(r))+'</b></td></tr>';});
     h+='</tbody></table></details>';
   }
-  var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;return true;});
+  var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!((+r[TF.cat]||0)!==0))return false;return true;});
   h+='<details class="tvcard tvfold" id=tvlines><summary><span class=tvh>Line items <small>'+rows.length+(TF.year?'':' · all years')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+catName:'')+'</small></span></summary>';
   h+='<div style="overflow:auto;margin-top:10px"><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Ship</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
     +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':(r.client==='ncl'?'<span class="cchip amber">NCL</span>':'crew'))+'</td><td>'+(r.leg==='shoreside'?'—':escHtml(r.leg||''))+'</td><td>'+escHtml(r.ship||'')+'</td><td>'+escHtml(r.crew_name)+(r.crew_display&&r.crew_display!==r.crew_name?' <span class=muted style="padding:0">· '+escHtml(r.crew_display)+'</span>':'')+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=14 class=muted>No line items match these filters.</td></tr>';
@@ -7157,7 +7169,7 @@ function paintTravelCrew(){var t=document.getElementById('trbody');if(!t)return;
 function paintTravelSearch(){
   var q=(TF.q||'').trim().toLowerCase();
   // the Year / Month / Category filters narrow the search like every other section (16 Oct 2026)
-  var cat=TF.cat||null,sc=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(cat&&!(r[cat]>0))return false;return true;});
+  var cat=TF.cat||null,sc=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(cat&&!((+r[cat]||0)!==0))return false;return true;});
   var within=(TF.year?' in '+TF.year:'')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+TCATLAB[cat]:'');
   var seen={},names=[],tot={};TLBL={};
   sc.forEach(function(r){var k=tKey(r);if(!seen[k]){seen[k]=1;names.push(k);}tot[k]=(tot[k]||0)+(cat?(r[cat]||0):r.total);TLBL[k]=tLabel(r);}); // tScope already applied the search to both spellings
@@ -8856,13 +8868,13 @@ function opsCrewCard(w){
   var h='<section id=oc-crew class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>The '+tot+' crew</h2><p class=oc-sub>Where everyone is today, per TDG&#39;s word.</p></div>';
   h+='<div style="display:flex;height:16px;gap:2px;border-radius:4px;overflow:hidden" role=img aria-label="'+seg.map(function(s){return (s[1]||0)+' '+s[0];}).join(', ')+'">'+seg.filter(function(s){return s[1];}).map(function(s){return '<span style="width:'+(tot?s[1]/tot*100:0)+'%;background:'+s[2]+'"></span>';}).join('')+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 14px;font-size:12.5px">'+seg.map(function(s){return '<span><i class=oc-dot style="background:'+s[2]+'"></i>'+s[0]+' <b>'+(s[1]||0)+'</b></span>';}).join('')+'</div>';
-  h+='<div style="border-top:1px solid #F0F3F7;padding-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;text-align:center">'
-    +[['Royal Caribbean','Royal'],['Celebrity','Celebrity'],['Azamara','Azamara']].map(function(b){return '<div><div style="font-family:Outfit;font-size:20px;font-weight:700">'+(bc[b[0]]||0)+'</div><div class=oc-mut style="font-size:11.5px">'+b[1]+'</div></div>';}).join('')+'</div>';
+  h+='<div style="border-top:1px solid #F0F3F7;padding-top:10px;display:grid;grid-template-columns:repeat('+(bc.NCL>0?4:3)+',minmax(0,1fr));gap:8px;text-align:center">'
+    +[['Royal Caribbean','Royal'],['Celebrity','Celebrity'],['Azamara','Azamara']].concat(bc.NCL>0?[['NCL','Norwegian']]:[]).map(function(b){return '<div><div style="font-family:Outfit;font-size:20px;font-weight:700">'+(bc[b[0]]||0)+'</div><div class=oc-mut style="font-size:11.5px">'+b[1]+'</div></div>';}).join('')+'</div>';
   return h+'<p class=oc-sub style="font-size:11.5px">In the rotation = aboard, earmarked or ashore (On Vacation, Reserved).</p></section>';
 }
 function opsTravel(tv){
   if(!tv||!tv.year)return '<section class=oc-card><h2 class=oc-h>Crew travel</h2><p class=oc-sub>No travel on file yet.</p></section>';
-  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crewYTD||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo||12)/12*100);
+  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crewYTD||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo==null?12:tv.elapsedMo)/12*100);
   var h='<section class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>Crew travel &middot; '+tv.year+'</h2><p class=oc-sub>Against the '+opsMoney(ann)+' budget. Reference only, never an invoice source.</p></div>';
   h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crewYTD)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget over '+(tv.elapsedMo||0)+' closed month'+(tv.elapsedMo===1?'':'s'))+'</div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="position:relative;height:14px;font-size:11px"><span style="position:absolute;left:'+yearPct+'%;transform:translateX(-50%);font-weight:600;white-space:nowrap">'+(tv.elapsedMo||0)+' of 12 months closed</span></div>'

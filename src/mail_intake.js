@@ -43,7 +43,10 @@ export function senderAllowed(from, env) {
 }
 
 const isXlsx = (a) => /\.xlsx?$/i.test(String(a.filename || "")) || /spreadsheetml|ms-excel/i.test(String(a.mimeType || ""));
-export const isSgaName = (n) => /sga excel/i.test(String(n || "")) && /\.xlsx?$/i.test(String(n || ""));
+// "DG3 SGA EXCEL NOVEMBER 2026.xlsx" — and the same name once a mail client or a download swapped the spaces for
+// underscores ("DG3_SGA_EXCEL_NOVEMBER_2026.xlsx" was ignored as "no workbook", 16 Nov 2026).
+export const SGA_NAME_RX = /sga[\s_]*excel/i;
+export const isSgaName = (n) => SGA_NAME_RX.test(String(n || "")) && /\.xlsx?$/i.test(String(n || ""));
 export const isTravelName = (n) => /travel expenses/i.test(String(n || "")) && /\.xlsx?$/i.test(String(n || ""));
 export function yearFromName(n) { const m = /\b(20\d{2})\b/.exec(String(n || "")); return m ? +m[1] : null; }
 
@@ -85,7 +88,9 @@ export async function intakeMail(env, rawMessage, meta, deps) {
   // envelope sender (`meta.from`, Email Routing's) is who actually handed the mail over. When the two differ, both must be
   // on SGA_MAIL_SENDERS — a workbook under a dg3.com header from an unlisted envelope is held, and the receipt names both.
   const envelope = bareAddress(meta && meta.from);
-  const allowed = senderAllowed(from, env) && (!envelope || envelope === from || senderAllowed(envelope, env));
+  // An EMPTY envelope sender (a null return path, "MAIL FROM:<>") vouches for nobody (16 Nov 2026 bug hunt): the gate used to
+  // open on the typed header alone in that case — the one thing it was written not to trust.
+  const allowed = senderAllowed(from, env) && !!envelope && (envelope === from || senderAllowed(envelope, env));
   const { take, ignored } = pickAttachments(mail.attachments || []);
   const files = [];
   const at = new Date(deps.now || Date.now()).toISOString();

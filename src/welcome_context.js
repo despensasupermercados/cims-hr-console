@@ -4,7 +4,7 @@
 // test/welcome_email.test.js.
 import { nextPayday } from "./payroll.js";
 import { shipCode, shipWord } from "./ship_codes.js";
-import { mdParts, mdShort } from "./span_md.js";
+import { mdParts, mdShort, mdWords } from "./span_md.js";
 import { RELIEF_WINDOW_DAYS } from "./signoff_context.js";
 import { isVisit, visitMap, trainerSet } from "./visits.js";
 
@@ -70,7 +70,7 @@ export function welcomeContext({ crew, legs, today, links }) {
     sc, first: firstWord(crew.first_name), name: [crew.first_name, crew.last_name].filter(Boolean).join(" ").trim(),
     position: crew.rank_observed || "Printer Specialist", brand: leg.brand || null, ship: leg.ship, shipShort: cap(shipWord(leg.ship)), code: shipCode(leg.ship),
     port: leg.embark || null, on: dmy(leg.on), off: dmy(leg.off), offSource: leg.offSource || "projected",
-    months: p ? (p.d ? mdShort(leg.on, leg.off) : `${p.m} months`) : "",
+    months: p ? (p.d ? mdShort(leg.on, leg.off) : mdWords(leg.on, leg.off)) : "",
     prev: prev && prev.name ? prev : null, today: dmy(today),
     // THE ARRIVAL COUNT (cims-hon stockCount.arrivalWindow): 9:00 ship time on the day the shelf becomes his — his sign-on,
     // or the predecessor's sign-off when he joins before it. Its own email carries the link; this only names the day.
