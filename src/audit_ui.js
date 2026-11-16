@@ -747,7 +747,7 @@ export const AUDIT_HTML = String.raw`<!doctype html>
     if (blank) h += '<button type="button" class="sc blank' + (cur == null ? " on" : "") + '" data-a="' + act + '-blank" data-k="' + k + '" aria-pressed="' + (cur == null) + '">Blank</button>';
     return h + "</div>";
   }
-  function box(field, val, ph, rows) { return '<textarea class="ta' + (rows === 1 ? " one" : "") + '" rows="2" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
+  function box(field, val, ph, rows) { return '<textarea class="ta' + (rows === 1 ? " one" : "") + '" rows="2" maxlength="' + (field === "strengths" || field === "improve" || field === "agreed" ? 2000 : 600) + '" data-f="' + field + '" placeholder="' + esc(ph || "") + '">' + esc(val || "") + "</textarea>"; }
   function whyMsg(probs, field) { var p = probs.filter(function (x) { return x.field === field; })[0]; return p && S.err.show ? '<div class="why">' + ic("warning-circle") + "<span>" + esc(p.say) + "</span></div>" : ""; }
   function lbl(title, inner) { return '<label class="lbl"><span class="xs b">' + title + "</span>" + inner + "</label>"; }
 

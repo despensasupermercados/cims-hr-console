@@ -6773,7 +6773,10 @@ function tvK(n){n=Number(n||0);if(!n)return '';return n>=1000?('$'+(Math.round(n
 function tvRail(){
   var el=document.getElementById('tvfacets');if(!el)return;
   var kindOf=function(r){return r.kind||'crew';};
-  var years=tYears(),LYr=TF.year?+TF.year:(years[0]||null);
+  // The year the rail marks when none is chosen is the BODY's (tPeriod: the latest year the rows in view carry). tYears()
+  // also lists the bill's years, so once January's bill arrived ahead of the workbook the rail marked the new year, greyed
+  // its months and printed its amounts, while the body below showed last year (16 Nov 2026).
+  var years=tYears(),rowYears=TF.kind==='training'?[]:tScope().map(function(r){return r.year;}),LYr=TF.year?+TF.year:(rowYears.length?Math.max.apply(null,rowYears):(years[0]||null));
   var base=TRVALL.filter(function(r){return !TF.client||r.client===TF.client;});
   var catOk=function(r){return !TF.cat||(+r[TF.cat]||0)!==0;};
   // the same period as the hero: the chosen month, else the year's closed months (the running month is not counted yet)

@@ -76,6 +76,8 @@ function fakeDB(state) {
           return c ? { id: c.id || null, first_name: c.first_name || null, middle_name: c.middle_name || null, last_name: c.last_name || null } : null;
         }
         if (S.includes("FROM sbm_review_request WHERE token_hash=?")) return state.requests.find(r => r.token_hash === s.args[0]) || null;
+        if (S.includes("FROM sbm_review_request WHERE agency_id=? AND abs(julianday(contract_signoff) - julianday(?)) <= 21"))
+          return state.requests.find(r => r.agency_id === s.args[0] && Math.abs(Date.parse(r.contract_signoff) - Date.parse(s.args[1])) <= 21 * 86400000) || null;
         if (S.includes("FROM sbm_review_request WHERE agency_id=? AND contract_signoff=?"))
           return state.requests.find(r => r.agency_id === s.args[0] && r.contract_signoff === s.args[1]) || null;
         throw new Error("fakeDB first: unhandled SQL: " + S);
@@ -617,4 +619,29 @@ test("master switch: deps.isEnabled override is honoured (test seam)", async () 
   const sbm2 = installSbm({ ...r.deps, isEnabled: async () => true }); // ...but override says ON
   const res = await sbm2.sbmDailySweep(r.env);
   assert.equal(res.invited, 1);
+});
+
+// 16 Nov 2026 bug hunt: "exactly T-7" meant one missed morning, or a sign-off moved by a day, and the ship's manager was
+// never asked — or was asked twice once the date moved after the invitation.
+test("the invite survives a missed morning and a moved sign-off: sent at T-6 or T-5, never earlier than T-7, never twice for one contract", async () => {
+  for (const [n, want] of [[8, 0], [7, 1], [6, 1], [5, 1], [4, 0]]) {
+    const { sbm, env, outbox } = rig({ board: [{ agency_id: "SC-0038865", name: "Maria Murillo", ship: "Navigator of the Seas", signOn: "2026-01-14", signOff: dayN(n) }] });
+    assert.equal((await sbm.sbmDailySweep(env)).invited, want, "sign-off in " + n + " days");
+    assert.equal(outbox.length, want);
+  }
+  const { sbm, env, state, outbox } = rig();
+  await sbm.sbmDailySweep(env);
+  state.board[0].signOff = dayN(6);                         // Rita moves the sign-off a day after the invitation went
+  assert.equal((await sbm.sbmDailySweep(env)).invited, 0);
+  assert.equal(outbox.length, 1, "one invitation for the contract");
+});
+
+test("the manual invite reads the board's seat, not the Contract Counter position", async () => {
+  const { sbm, env, state, outbox } = rig();
+  const req = new Request("https://cims.test/api/sbm/invite", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sc: "SC-0038865", seq: 1 }) });
+  const res = await sbm.sbmInviteRequest(req, env, { email: "rita@dg3.com" });
+  const j = await res.json();
+  assert.equal(res.status, 200, JSON.stringify(j));
+  assert.equal(state.requests[0].contract_signoff, T7_OFF, "the seat's sign-off (the stub has no Counter row at all)");
+  assert.equal(state.requests[0].ship, "Navigator of the Seas"); assert.equal(outbox.length, 1);
 });

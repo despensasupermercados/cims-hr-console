@@ -1750,9 +1750,23 @@ Six readers, every finding reproduced on the old code first. Pinned by `test/bug
   files it under the file's embark, which can sit a few days from the Counter's sign-on. No production row differed on
   16 Nov; the join to the day is what left a Counter leg open once TDG moved the crew's row on.
 - **The crew's audit page** keeps what is on it when one refresh fails (a toast, not an error card over the count).
-- **Left for Miguel, not built**: a contract whose sign-on the console learns from TDG's file more than
-  `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
-  since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
+- **A sign-on the console learns late is welcomed late** (Miguel, 16 Nov 2026: "Send it late"; `welcomeDue`,
+  `WELCOME_LATE_DAYS` = 10): a contract TDG's file dates (`source` registry — no card told the console the day) is welcomed
+  by itself up to 10 days after its sign-on; a card-dated one keeps the 2-day catch-up (its welcome went on the day). Never
+  before the switch-on day, never a visit, once per contract. The email already says "is yours since <date>".
+
+**Batch 3, the same day** (Miguel approved the Score Card's three findings, #391 merged on his word). Pinned by
+`test/sbm.test.js`, `test/travel_filters.test.js`, `test/bughunt_1116.test.js`.
+- **The GSM review invite** goes at T-7 and for `SBM_CATCHUP_DAYS` = 2 after (a missed morning or a sign-off moved INTO the
+  window was never asked), once per contract (a request within 21 days of the sign-off is the same contract — a moved date
+  never invites the manager twice); the reminder the same at T-4. The manual invite reads the board's seat first, the
+  Contract Counter only for a crew the board does not seat. The GSM switch is still OFF.
+- **The Travel rail marks the body's year** when none is chosen (the latest year the rows in view carry): once a bill
+  arrived ahead of the workbook the rail marked the bill's year and greyed its months while the body showed the year before.
+- **Born 29 February** is listed on 28 Feb in a year without one.
+- **The audit page**: every text box stops at what the server keeps (600, or 2000 for strengths / to improve / agreed — the
+  server cut it without a word); a read HON is retrying says "is being read again", never "needs a new file"; the crew's page
+  asks again every 30 s while a file is Reading (it stayed "Reading" until a reload).
 
 **THE CONTRACTS THE FILE HAS SHOWN ARE KEPT — `registry_contract`, 16 Nov 2026 (the record only).** `registry_snapshot` holds
 ONE row per crew, the latest file's; the day TDG moves that row on (Earmarked for the next ship with no dates, or a new

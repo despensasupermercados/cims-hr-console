@@ -35,14 +35,22 @@ export function welcomeRecipients({ contacts, ship, personal }) {
 
 // The contracts the daily run welcomes: running, not a visit, signed on between (today - catch-up) and today, and never
 // before the day the switch went on.
+// A SIGN-ON THE CONSOLE LEARNS LATE IS WELCOMED LATE (Miguel, 16 Nov 2026: "Send it late"): a contract TDG's file dates
+// (no card told the console the day) can appear days after the embark, past the two-day catch-up — it got no welcome and
+// nothing listed it. Such a contract is welcomed by itself up to WELCOME_LATE_DAYS after its sign-on; the email already
+// says "is yours since <date>" on any day after the sign-on. Once per contract as ever (the run checks welcome_send).
+export const WELCOME_LATE_DAYS = 10;
 export function welcomeDue(legs, today, since) {
-  const lo = [addDays(today, -WELCOME_CATCHUP_DAYS), iso(since) || "0000-00-00"].sort().pop();
+  const sinceDay = iso(since) || "0000-00-00";
+  const lo = [addDays(today, -WELCOME_CATCHUP_DAYS), sinceDay].sort().pop();
+  const loLate = [addDays(today, -WELCOME_LATE_DAYS), sinceDay].sort().pop();
   const seen = new Set(), out = [];
   for (const l of Array.isArray(legs) ? legs : []) {
     if (!l || !l.sc || seen.has(l.sc)) continue;
     const cur = currentLeg(legs, l.sc);
     seen.add(l.sc);
-    if (cur && cur.on >= lo && cur.on <= today) out.push(cur);
+    if (!cur || cur.on > today) continue;
+    if (cur.on >= lo || (cur.source === "registry" && cur.on >= loLate)) out.push(cur);
   }
   return out;
 }

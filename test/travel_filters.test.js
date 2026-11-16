@@ -271,3 +271,17 @@ test("a crew row neither its ship nor TDG's bill places is listed as Not placed,
   p.run("TF.client='none';paintTravel()");
   assert.match(p.body(), /\$777/, "picking it shows those rows");
 });
+
+// 16 Nov 2026 bug hunt: the bill arrives by email a month ahead of Rita's workbook. In February 2027 the rail marked 2027
+// (the bill's year), greyed its months and printed its amounts, while the body below showed 2026.
+test("the rail and the body show the same year when the bill's year runs ahead of the workbook", async () => {
+  const p = pageContext();
+  const R = []; for (let m = 1; m <= 12; m++) { R.push(rec(2026, m, { air: 9000, hotel: 1500 })); R.push(rec(2025, m, { air: 8000 })); }
+  p.ctx.show("travel"); await tick();
+  p.pending["/api/travel"]({ years: [2026, 2025], today: "2027-02-10", closed: { 2026: 12, 2025: 12 }, budgetMo: 15000, records: R, unmatched: [], acks: [] }); await tick();
+  p.pending["/api/sga"]({ today: "2027-02-10", lines: [], held: [], sources: [], files: [{ year: 2027, month: 1, sga_no: "43-A", rows: 0, total: 1 }],
+    summary: [{ year: 2027, month: 1, air: 9000, hotel: 1500, medical: 300, visa: 100, medical_repat: 0, crew_total: 76000 }], training: [{ year: 2027, month: 1, total: 900 }] }); await tick(); await tick();
+  assert.match(p.body(), /2026 to date/, "the body reads the workbook's latest year");
+  assert.equal((p.rail().match(/class="[^"]*none"[^>]*data-tv="month"/g) || []).length, 0, "the rail's months are 2026's: none greyed as 'nothing on file'");
+  assert.match(p.rail(), /data-tv="year" data-key="2027"/, "the bill's year is still offered");
+});
