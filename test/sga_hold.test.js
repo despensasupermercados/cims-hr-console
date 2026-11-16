@@ -31,12 +31,14 @@ function envFor(d) {
 }
 const J = async (r) => JSON.parse(await r.text());
 // October's bill: one line of $1,428.52; TDG's GRAND TOTAL says `grand`
-function sgaXlsx(grand) {
+function sgaXlsx(grand, extra) {
   const wb = XLSX.utils.book_new();
   const H = ["", "REF. NO.", "", "CREW", "CREW", "VESSELS", "", "", "", "HOME ALLOTMENT", "FINAL PAY", "MANNING FEE/ AGENCY FEE", "SOCIAL COSTS", "JOINING FEE", "ACCOUNTING FEE", "TRANSITION FEE", "TRAVEL /PLANEFARE", "MEDICAL", "MEDICAL REPAT", "VISA", "HOTEL", "AMOUNT"];
-  const rows = [[], ["", "DATE", ":", "November 02, 2026"], ["", "SGA NO.", ":", "40-A"], H, ["", "1. ROYAL VESSELS"],
-    ["", "ANT-2026-09-40-01", "", "CAAG, HAZIEL", "CAAG, HAZIEL", "", "ANTHEM OF THE SEAS", "", "", 534.4, "", 52, 78.12, 120, 30, "", 614, "", "", "", "", 1428.52],
-    ["", "", "", "", "", "", "", "", "GRAND TOTAL", "", "", "", "", "", "", "", "", "", "", "", "", grand]];
+  const line = ["", "ANT-2026-09-40-01", "", "CAAG, HAZIEL", "CAAG, HAZIEL", "", "ANTHEM OF THE SEAS", "", "", 534.4, "", 52, 78.12, 120, 30, "", 614, "", "", "", "", 1428.52];
+  // `extra` = { header, value }: a cost column TDG added that the console does not know, placed before AMOUNT and inside it
+  if (extra) { H.splice(21, 0, extra.header); line.splice(21, 1, extra.value, Math.round((1428.52 + extra.value) * 100) / 100); }
+  const total = Array(H.length).fill(""); total[8] = "GRAND TOTAL"; total[H.length - 1] = grand;
+  const rows = [[], ["", "DATE", ":", "November 02, 2026"], ["", "SGA NO.", ":", "40-A"], H, ["", "1. ROYAL VESSELS"], line, total];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "SUMMARY MANNING");
   return XLSX.write(wb, { type: "array", bookType: "xlsx" });
 }
@@ -92,6 +94,35 @@ test("a bill that reconciles still loads by itself, as before", async () => {
   assert.equal((await J(await apiSga(env))).held.length, 0);
   const rep = await applyInbox(env);
   assert.equal(rep.files, 0, "nothing left pending");
+});
+
+// 16 Nov 2026 bug hunt: TDG adds or renames a cost column. AMOUNT is read on its own, so the bill still "reconciled" and
+// loaded with that money in no category. Now the gap is said, and a bill that arrives by itself is held.
+test("a bill with a cost column the console does not know: said in the review, held when it arrives by mail, loadable by Rita", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = envFor(d);
+  const wb = () => sgaXlsx(1453.52, { header: "CREW WELFARE FUND", value: 25 });
+  const sheets = sheetsOf(XLSX, wb(), WANT_SGA);
+  const req = (body) => new Request("https://cims.work/api/sga/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const dry = await J(await apiSgaImport(req({ sheets, name: NAME, dryRun: true }), env, { email: "rita.berenyi@dg3.com" }));
+  assert.equal(dry.reconciles, true, "the lines still add up to TDG's grand total");
+  assert.deepEqual([dry.colsOff, dry.colsGap, dry.unknownCols], [1, 25, [{ header: "CREW WELFARE FUND", total: 25 }]]);
+  const r = await intakeMailToInbox(env, msg(mime("rita.berenyi@dg3.com", NAME, wb()), "rita.berenyi@dg3.com"), null);
+  assert.equal(r.outcome, "queued");
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line").get().n, 0, "nothing loaded");
+  let s = await J(await apiSga(env));
+  assert.equal(s.held.length, 1);
+  assert.deepEqual([s.held[0].why, s.held[0].cols_off, s.held[0].cols_gap, s.held[0].unknown_cols[0].header], ["unknown_column", 1, 25, "CREW WELFARE FUND"]);
+  await new Promise((res) => setTimeout(res, 5));
+  const app = await J(await apiSgaImport(req({ sheets, name: NAME }), env, { email: "rita.berenyi@dg3.com" }));
+  assert.equal(app.ok, true);
+  assert.equal(d.prepare("SELECT amount FROM sga_line WHERE month=10").get().amount, 1453.52, "TDG's amount stands");
+  assert.equal((await J(await apiSga(env))).held.length, 0);
+  // a bill whose columns all read is never held for this (the 15 bills on file: every line adds up)
+  const ok = await J(await apiSgaImport(req({ sheets: sheetsOf(XLSX, sgaXlsx(1428.52), WANT_SGA), name: NAME, dryRun: true }), env, { email: "rita.berenyi@dg3.com" }));
+  assert.deepEqual([ok.colsOff, ok.colsGap, ok.unknownCols], [0, 0, []]);
+  const page = readFileSync(SRC, "utf-8");
+  assert.match(page, /x\.why==='unknown_column'/); assert.match(page, /a cost column the console does not read/);
 });
 
 test("the Travel tab's Needs a decision names a held bill of its year, with the download", () => {

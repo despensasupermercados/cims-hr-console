@@ -89,6 +89,9 @@ function tryLastFirst(last, first, ix) {
   return null;
 }
 
+// A swapped reading stands only when a first-name token agreed ("exact" / "fuzzy"), never on the bare unique surname.
+const agreed = (h) => !!(h && h.agency_id && (h.how === "exact" || h.how === "fuzzy"));
+
 // One travel name against the roster. Returns { agency_id, name, how } or { agency_id:null, how:'none'|'ambiguous', candidates? }.
 export function matchTravelName(raw, ix) {
   const c = cleanTravelName(raw);
@@ -99,8 +102,12 @@ export function matchTravelName(raw, ix) {
     if (!(tried[0] && tried[0].agency_id) && c.first.length) {
       // swapped halves: "Edelmar, Doctolero" — the surname sits after the comma
       const sw = tryLastFirst(c.first.join(" "), c.last.split(" ").filter(Boolean), ix) || tryLastFirst(c.first[c.first.length - 1], c.last.split(" ").filter(Boolean), ix);
-      if (sw && sw.agency_id) return { ...sw, how: "swapped" };
-      tried.push(sw);
+      // ...and only when the OTHER half agrees with that crew's first name (16 Nov 2026 bug hunt): "Tatel, Joseph",
+      // "FINEZ, JOHN JOSEPH" (the NCL preps, as TDG's bill spells them) and "Malkevich, Joseph" are nobody on the roster, yet
+      // the unique-surname fallback filed each on Emil Rondy JOSEPH, "Villaran, Miranda" on Ohji Miranda, "Aguas, Marto" on
+      // Ryan Marto — a first name that happens to be someone's surname. Two = ambiguous, none = none, never a guess (§6).
+      if (agreed(sw)) return { ...sw, how: "swapped" };
+      tried.push(sw && sw.agency_id ? null : sw);
     }
   } else {
     const w = c.words;
@@ -108,8 +115,8 @@ export function matchTravelName(raw, ix) {
     if (w.length > 1) { const whole = tryLastFirst(w.join(" "), [], ix); if (whole && whole.agency_id) return whole; }
     // "Osorio Norman" (Last First) then "Lawrence Dexter" (First Last); a single word is a surname only
     tried.push(tryLastFirst(w[0], w.slice(1), ix));
-    if (!(tried[0] && tried[0].agency_id) && w.length > 1) { const sw = tryLastFirst(w[w.length - 1], w.slice(0, -1), ix); if (sw && sw.agency_id) return { ...sw, how: "swapped" }; tried.push(sw); }
-    if (!(tried[0] && tried[0].agency_id) && w.length > 2) { const sw = tryLastFirst(w.slice(-2).join(" "), w.slice(0, -2), ix); if (sw && sw.agency_id) return { ...sw, how: "swapped" }; }
+    if (!(tried[0] && tried[0].agency_id) && w.length > 1) { const sw = tryLastFirst(w[w.length - 1], w.slice(0, -1), ix); if (agreed(sw)) return { ...sw, how: "swapped" }; tried.push(sw && sw.agency_id ? null : sw); }
+    if (!(tried[0] && tried[0].agency_id) && w.length > 2) { const sw = tryLastFirst(w.slice(-2).join(" "), w.slice(0, -2), ix); if (agreed(sw)) return { ...sw, how: "swapped" }; }
   }
   const hit = tried.find((t) => t && t.agency_id); if (hit) return hit;
   const amb = tried.find((t) => t && t.how === "ambiguous"); if (amb) return amb;

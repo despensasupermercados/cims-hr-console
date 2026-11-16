@@ -24,6 +24,9 @@ function addMonths(d, n) {
   return new Date(Date.UTC(y, m, Math.min(day, last))).toISOString().slice(0, 10);
 }
 
+// The projected sign-off of a contract that carries none: sign-on + 7 months, Azamara 5 (§10d). null without a sign-on.
+export function projectedOff(on, azamara) { const a = iso(on); return a ? addMonths(a, azamara ? AZAMARA_CONTRACT_MONTHS : CONTRACT_MONTHS) : null; }
+
 // The day a reliever may sign on from: RELIEF_WINDOW_DAYS before the earlier of the shown sign-off and the projected one.
 // No sign-on and no sign-off → null (no window: anything after him counts).
 export function reliefFrom(on, off, azamara) {
@@ -76,6 +79,11 @@ export function assignRelievers(seats) {
     }
   }
   // Nothing dated for a seat: TDG's undated Earmarked row, the last resort (pickReliever's own fallback).
-  S.forEach((s, i) => { if (!out[i]) out[i] = pickReliever(s, (s.cands || []).filter((c) => c && !iso(c.on))); });
+  // One person relieves one seat here too (16 Nov 2026: two seats on a hull were both given the same undated earmark):
+  // the seat that leaves first takes him, the other reads "no reliever yet".
+  S.map((s, i) => i).filter((i) => !out[i]).sort((a, b) => String(iso(S[a].off) || "9999").localeCompare(String(iso(S[b].off) || "9999")) || a - b).forEach((i) => {
+    const r = pickReliever(S[i], (S[i].cands || []).filter((c) => c && !iso(c.on) && !taken.has(c.sc)));
+    if (r) { out[i] = r; taken.add(r.sc); }
+  });
   return out;
 }

@@ -65,7 +65,7 @@ export async function download(env, token, itemId, fetchImpl) {
 // Which workbook in a month folder is the month's file: the REVISED one when both exist, else the plain one; never the
 // per-crew PDFs or the training PDF (scans). Returns the item or null.
 export function pickSgaWorkbook(children) {
-  const xl = (children || []).filter((c) => c.file && /sga excel/i.test(c.name) && /\.xlsx?$/i.test(c.name));
+  const xl = (children || []).filter((c) => c.file && /sga[\s_]*excel/i.test(c.name) && /\.xlsx?$/i.test(c.name));
   if (!xl.length) return null;
   const rev = xl.filter((c) => /revised/i.test(c.name)).sort((a, b) => String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)));
   return rev[0] || xl.sort((a, b) => String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)))[0];

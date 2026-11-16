@@ -65,7 +65,7 @@ export function parseMonthSheet(name, rows, year) {
       if (!nm || nm.toLowerCase() === "nan" || nm.toLowerCase() === "crew") continue;
       const vals = CATS.map((_, k) => num(row[s.col + 1 + k]));
       const total = Math.round(vals.reduce((a, b) => a + b, 0) * 100) / 100;
-      if (total <= 0) continue; // skip name rows with no spend
+      if (total === 0) continue; // skip name rows with no spend; a refund-only row (negative) is a movement and stays (16 Nov 2026)
       const rec = { year, month: mon, leg: s.leg, kind: "crew", crew_name: nm, ship, total, other: 0 };
       CATS.forEach((c, k) => { rec[c] = vals[k]; });
       out.push(rec);
@@ -93,7 +93,7 @@ export function parseCimsSheet(rows, year) {
     for (const b of blocks) {
       const flight = num(row[b.col]), hotel = num(row[b.col + 1]), trans = num(row[b.col + 2]), meals = num(row[b.col + 3]), other = num(row[b.col + 4]);
       const total = Math.round((flight + hotel + trans + meals + other) * 100) / 100;
-      if (total <= 0) continue;
+      if (total === 0) continue;
       out.push({ year, month: b.month, leg: "shoreside", kind: "shoreside", crew_name: nm, air: flight, hotel, medical: 0, visa: 0, food: meals, transport: trans, other, total });
     }
   }

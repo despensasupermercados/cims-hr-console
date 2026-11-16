@@ -110,6 +110,23 @@ export function installAutoSend(deps) {
   }
   async function manualExists(env, sc, off, kind) { return !!(await manualOnFile(env, sc, off, kind)); }
 
+  // THE STAFF-HOUSE PASS GOES ONCE PER CONTRACT (bug hunt, 16 Nov 2026). The log is keyed on the sign-off DATE, and the pass
+  // has no request table: a sign-off that moved by a day after the pass went (Rita's edit, a new file, a turnaround snap)
+  // was a new key, so the crew, Rita, Miguel and Maryjoy got "Manila has a bed for you" a second time. A house row for the
+  // same crew within 21 days of this sign-off is the same contract.
+  async function housePassNear(env, sc, off) {
+    try {
+      var rows = (await env.DB.prepare("SELECT seq FROM auto_send_log WHERE sc=? AND kind='house'").bind(sc).all()).results || [];
+      var t = Date.parse(off + "T00:00:00Z");
+      return rows.some(function (r) {
+        var q = String(r.seq);
+        if (q.length !== 8) return false;
+        var d = Date.parse(q.slice(0, 4) + "-" + q.slice(4, 6) + "-" + q.slice(6, 8) + "T00:00:00Z");
+        return isFinite(d) && isFinite(t) && Math.abs(d - t) <= 21 * 864e5;
+      });
+    } catch (e) { return false; }
+  }
+
   // Legs seeded at enable in the last 36h - listed once in the next digest for transparency.
   async function recentSeeded(env) {
     try {
@@ -129,6 +146,10 @@ export function installAutoSend(deps) {
   async function processKind(env, today, upper, kind, sender, DRY, sent, alerts, since, days) {
     for (const leg of await dueWithin(env, today, upper)) {
       if (await already(env, leg.sc, leg.seq, kind)) continue;                 // already handled
+      if (kind === "house" && await housePassNear(env, leg.sc, leg.off)) {     // the pass went for this contract under another date
+        if (!DRY) await markSent(env, leg.sc, leg.seq, kind, "same-contract");
+        continue;
+      }
       if (leg.ctx && (leg.ctx.visit || leg.ctx.instruct === false)) continue;  // a training visit (visits.js): no instructions, no sign-off link, no daily alert
       if (since && addDays(leg.off, -days) < since) {
         if (addDays(since, 1) >= today && !(await manualExists(env, leg.sc, leg.off, kind)))

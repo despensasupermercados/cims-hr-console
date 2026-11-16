@@ -25,7 +25,7 @@ import { isIntakeMail, intakeMail, sha256Hex, yearFromName } from "./mail_intake
 import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
-import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections } from "./ship_leg_source.js"; import { fileWordBySc, completedOff, boardIssues } from "./board_truth.js"; import { handleRelief } from "./relief_api.js";
+import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections, cardOverlapsSeat } from "./ship_leg_source.js"; import { fileWordBySc, completedOff, boardIssues } from "./board_truth.js"; import { handleRelief } from "./relief_api.js";
 import { handleCrewImport } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED, normShip as normShipKey } from "./shipname.js";
 import { htmlPage, etagFor } from "./etag.js";
@@ -64,7 +64,8 @@ import { mariaFriendlyError } from "./maria_errors.js";
 import { installAck } from "./signoff_ack.js";
 import { installInstr } from "./signoff_instructions.js";
 import { seatContexts } from "./signoff_context.js";
-import { isShoreCrew, trainerSet } from "./visits.js";
+import { shipSeats } from "./ship_seats.js";
+import { isShoreCrew, trainerSet, visitCardIds, cardVisitLine } from "./visits.js";
 import { installAutoSend } from "./auto_send.js";
 import { installHousePass } from "./house_pass.js";
 import { installSbm } from "./sbm.js";
@@ -249,6 +250,23 @@ const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days (internal 2-user tool; reduces
 const LOGIN_TTL   = 60 * 15;           // 15m
 const COOKIE = "cims_sid";
 
+// THE SEAT READER (Miguel, 30 Oct 2026: HON's Reflection handover named the man the Contract Counter still had aboard,
+// not the man TDG's file has aboard; src/ship_seats.js). A NAMED entrypoint: reachable only through a service binding that
+// names it (cims-hon's HR_SEATS, entrypoint = "SeatReader"), never from the internet, so it needs no token — the same
+// posture as cims-hon's AuditReader the other way. Read only: the Keyman board's sections, nothing written.
+// Any path → { ok, ships: { <ship>: { ship, brand, aboard, outgoing, incoming } } }.
+export const SeatReader = {
+  async fetch(request, env) {
+    try {
+      env = Object.assign({}, env, { DB: batchingDb(env.DB) });
+      const { sections } = await rotationSections(env);
+      return new Response(JSON.stringify({ ok: true, ships: shipSeats(sections) }), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: String((e && e.message) || e) }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
+  },
+};
+
 export default {
   async fetch(request, env, ctx) {
     // One trip per wave of reads (d1batch.js): the same binding wrapped once per isolate, so the guard and
@@ -298,6 +316,12 @@ export default {
 
       // ---- everything below requires a session ----
       const session = await getSession(request, env);
+      // A SIGNED-IN POST FROM ANOTHER HOST IS REFUSED BEFORE ANY HANDLER (bug hunt, 16 Nov 2026). The session cookie is
+      // Domain=cims.work, so it rides on a POST from every *.cims.work page; the check below guarded the /api/ block only,
+      // while the survey, hub, welcome, sign-off instructions and sign-off link routes are dispatched first: a page on a
+      // sibling host could turn ON the crew survey or the welcome run, revoke a Crew Hub link or send a crew email as
+      // whoever was signed in. Token pages (the hub, the survey, the sign-off pass) carry no session and post to their own host.
+      if (session && request.method === "POST" && crossSite(request, url)) return json({ error: "cross_site" }, 403);
       // The Crew Hub: /hub/<token> and /hub/expense.xlsx answer without a session (the link is the key); the two /api/hub/ routes need one.
       // The crew survey (its page is a /hub/ path, so it is asked first).
       if (p.startsWith("/hub/survey/") || p.startsWith("/api/survey/")) { const _s = await _survey.handle(p, request, env, url, session); if (_s) return _s; }
@@ -1653,7 +1677,9 @@ async function sgaStage(env, b) {
     // TDG's grand total against the rows: a gap is a parsing miss or a row the sheet hides — said, never silently accepted
     reconciles: manning.grand_total == null ? null : Math.abs((sum.total + manning.others.reduce((a, o) => a + (o.amount || 0), 0)) - manning.grand_total) < 0.05,
     // the summary sheet's crew total for this month against the manning sheet's GRAND TOTAL — the two sheets of one bill must agree
-    summaryAgrees: thisMonth && manning.grand_total != null ? Math.abs(thisMonth.crew_total - manning.grand_total) < 0.05 : null };
+    summaryAgrees: thisMonth && manning.grand_total != null ? Math.abs(thisMonth.crew_total - manning.grand_total) < 0.05 : null,
+    // the cost columns read by header against each line's AMOUNT: a gap is a column the console does not know (sga.js)
+    colsOff: manning.cols_off || 0, colsGap: manning.cols_gap || 0, unknownCols: manning.unknown_cols || [] };
 }
 async function apiSgaImport(request, env, session) {
   await ensureSga(env);
@@ -1664,7 +1690,8 @@ async function apiSgaImport(request, env, session) {
   if (b.dryRun) {
     return json({ dryRun: true, period: st.period, meta: st.meta, rows: st.lines.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles,
       byBrand: st.summary.byBrand, byCat: st.summary.byCat, others: st.others, training: st.training, trainingMonths: trMonths.length, unmatched: st.unmatched, prior: st.prior, sheets: st.sheets,
-      summaryOnly: st.summaryOnly, summaryMonths: st.summaryRows.length, summaryThisMonth: st.summaryThisMonth, summaryAgrees: st.summaryAgrees });
+      summaryOnly: st.summaryOnly, summaryMonths: st.summaryRows.length, summaryThisMonth: st.summaryThisMonth, summaryAgrees: st.summaryAgrees,
+      colsOff: st.colsOff, colsGap: st.colsGap, unknownCols: st.unknownCols });
   }
   return json(await applySgaWorkbook(env, b, st, (session && session.email) || "?", b.source || "upload"));
 }
@@ -1674,7 +1701,8 @@ function sgaGap(st) {
   const others = Math.round(st.others.reduce((a, o) => a + (o.amount || 0), 0) * 100) / 100;
   const grand = st.grand_total == null ? null : Math.round(st.grand_total * 100) / 100;
   return { year: st.period.year, month: st.period.month, lines_total: lines, others, grand_total: grand,
-    gap: grand == null ? null : Math.round((grand - lines - others) * 100) / 100, rows: st.lines.length };
+    gap: grand == null ? null : Math.round((grand - lines - others) * 100) / 100, rows: st.lines.length,
+    cols_off: st.colsOff || 0, cols_gap: st.colsGap || 0, unknown_cols: (st.unknownCols || []).slice(0, 6) };
 }
 // The ONE path that loads a month of the bill — the Upload page and the SharePoint sync both come here (§10j).
 // `st` is sgaStage's result (staged once, applied once); `b` carries the file's name / hash for sga_file.
@@ -1768,6 +1796,9 @@ function syncDeps(env) {
       // and the agent's rows) whose lines do not add up to TDG's GRAND TOTAL loads nothing. The Upload page — the dry-run,
       // its amber chip, then Apply — is how she loads it after checking. A summary-only file has no total to miss (null).
       if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
+      // ...and so does a bill whose cost columns do not add up to its lines' AMOUNT: a column the console does not know
+      // (16 Nov 2026). Loaded as it is, the month's categories would be short by that column and nothing would say so.
+      if (meta.holdUnreconciled && st.colsOff > 0) return { held: "unknown_column", ...sgaGap(st) };
       return applySgaWorkbook(env, b, st, meta.by, meta.source);
     },
     applyTravel: async (sheets, year, meta) => {
@@ -1959,7 +1990,9 @@ async function apiSgaArchive(request, env, session) {
   const bytes = await request.arrayBuffer();
   if (!bytes.byteLength) return json({ error: "empty" }, 400);
   if (bytes.byteLength > 25 * 1024 * 1024) return json({ error: "too_large" }, 413);
-  const kind = /travel expenses/i.test(name) ? "travel" : "sga";
+  // the page says which workbook it read (it routes a file by its sheets, not its name); else the name decides, as before
+  const said = String(request.headers.get("x-file-kind") || "").toLowerCase();
+  const kind = said === "travel" || said === "sga" ? said : /travel expenses/i.test(name) ? "travel" : "sga";
   const per = kind === "sga" ? sgaPeriodFromName(name) : null;
   const a = await archiveSourceFile(env, bytes, { name, kind, year: per ? per.year : yearFromName(name), month: per ? per.month : null, source: "upload", by: (session && session.email) || "?" });
   return json({ ok: true, ...a });
@@ -2009,7 +2042,8 @@ async function apiSga(env) {
     if (filesRes.results.some((f) => f.year === d.year && f.month === d.month && f.loaded_at > (r.held_at || ""))) continue;
     const src = byFileKey[r.file_key];
     held.push({ file_key: r.file_key, name: r.name, held_at: r.held_at, year: d.year || null, month: d.month || null, lines_total: d.lines_total ?? null,
-      others: d.others ?? null, grand_total: d.grand_total ?? null, gap: d.gap ?? null, rows: d.rows ?? null, hash: src && src.r2_key ? src.hash : null });
+      others: d.others ?? null, grand_total: d.grand_total ?? null, gap: d.gap ?? null, rows: d.rows ?? null, hash: src && src.r2_key ? src.hash : null,
+      why: d.held || null, cols_off: d.cols_off || 0, cols_gap: d.cols_gap || 0, unknown_cols: d.unknown_cols || [] });
   }
   return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, held, cols: SGA_COL_KEYS, today: TODAY() });
 }
@@ -2946,11 +2980,19 @@ async function rotationSections(env) {
   // the board (overriddenAsg); a confirmed one is the seat itself.
   // TDG earmarking him for this very hull is TDG having the plan, not the embark yet (17 Oct 2026, Corpin on Grandeur:
   // "turn green") — the same as no word: aboard per the console, awaiting the file.
-  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked"); };
+  // ONE PERSON, ONE SHIP (16 Nov 2026, Joe Art Eresmas' Getaway card of 9 Nov while Rita's typed Solstice sign-off read
+  // 15 Mar 2027): a card is never "aboard" while the schedule has him under a dated contract on another hull past its sign-on.
+  const awaitingCard = (a) => { const v = regOf(a.id); return !!(a.sign_on && a.sign_on <= today) && (!v || v.verdict === "pending" || v.verdict === "earmarked") && !cardOverlapsSeat({ sc: a.sc, ship: shipOf(a.ship) || a.ship, sign_on: a.sign_on }, HIST); };
+  // A TRAINER'S CARD THAT HAS STARTED IS A VISIT (night watch, 3 Nov 2026; visits.js): the schedule already marked it
+  // (markAssignmentVisits); the board drew it as a seat "awaiting the TDG file", so the audit site listed Jonathan Alonzo
+  // aboard Spectrum and the SeatReader named him HON's outgoing printer. It is the ship's training-visit line instead.
+  const cardVisit = visitCardIds(HIST);
+  const visitByShip = {};
   const projByShip = {};
   for (const a of pendingProjections(canonAsg, drawn)) {
     const ship = a.ship;
     if (!ship) continue;
+    if (cardVisit.has(a.id)) { (visitByShip[ship] = visitByShip[ship] || []).push(cardVisitLine(a, { name: cmap[a.sc] && cmap[a.sc].name, trainer: _trainers.has(a.sc) }, vkOf(ship))); continue; }
     const kk = normShip(ship);
     const pdl = (_pdBy[(brandFor(ship) === "Royal" ? "Royal Caribbean" : brandFor(ship)) + "|" + ship] || []);
     const onC = resolveCity({ date: a.sign_on, seed: a.on_port_seed || shipHome[kk], override: a.override_on_city, portDays: pdl });
@@ -3028,7 +3070,7 @@ async function rotationSections(env) {
     // A yellow card the registry has CONFIRMED aboard is someone already onboard: it sorts with the greens.
     // TRAINING VISITS (17 Oct 2026, visits.js) are not seats: they leave the cards — and with them the timeline, the Gantt,
     // the dashboard and the instructions email — and ride on the section as `visits`, drawn as one line under the cards.
-    const visits = (promByShip[ship] || []).filter((c) => c.visit).sort((a, b) => String(a.signOn || "").localeCompare(String(b.signOn || "")));
+    const visits = (promByShip[ship] || []).filter((c) => c.visit).concat(visitByShip[ship] || []).sort((a, b) => String(a.signOn || "").localeCompare(String(b.signOn || "")));
     const crew = (promByShip[ship] || []).filter((c) => !c.visit).sort((a, b) =>
       (a.state === "yellow" && !a.confirmed && !a.awaiting ? 1 : 0) - (b.state === "yellow" && !b.confirmed && !b.awaiting ? 1 : 0)
       || (b.current ? 1 : 0) - (a.current ? 1 : 0)
@@ -4136,8 +4178,12 @@ function decodeEmailBody(raw) {
   if (tp >= 0) {
     const nl = raw.indexOf("\n\n", tp);
     start = nl >= 0 ? nl + 2 : tp;
-    const hdr = raw.slice(tp, start).toLowerCase();
-    if (hdr.indexOf("base64") >= 0) cte = "b64"; else if (hdr.indexOf("quoted-printable") >= 0) cte = "qp";
+    // the part's header block: from the blank line before Content-Type to the blank line after (a Content-Transfer-Encoding
+    // written ABOVE Content-Type was missed, and a base64 / quoted-printable report was filed as its raw encoding; 16 Nov 2026)
+    const h0 = raw.lastIndexOf("\n\n", tp);
+    const hdr = raw.slice(h0 < 0 ? 0 : h0, start).toLowerCase();
+    const enc = /content-transfer-encoding:\s*"?(base64|quoted-printable)/.exec(hdr);
+    if (enc) cte = enc[1] === "base64" ? "b64" : "qp";
     // The part ends at ITS MIME boundary — the innermost one declared before it (a forwarded report is multipart/mixed
     // around multipart/alternative). It used to end at the first line starting "--": the sender's "-- " signature or
     // the "--- Forwarded message ---" line, so the matcher and the model saw the first paragraph only (16 Oct 2026).
@@ -6250,7 +6296,7 @@ function parseTravelFile(f){
         var want=new RegExp('${TRAVEL_SHEET_RE.source}','i'); // the server's TRAVEL_SHEET_RE: every spelling the parser reads
         var sheets={};
         wb.SheetNames.forEach(function(sn){ if(want.test(sn.trim())){ sheets[sn]=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,raw:true,defval:''}); }});
-        TRAVELUP={sheets:sheets,year:+ym};
+        TRAVELUP={sheets:sheets,year:+ym,name:f.name,buf:e.target.result,kind:'travel'};   // the bytes too: the original is kept after Apply
         previewTravel();
       }catch(err){$('#imp').textContent='Could not parse that file: '+err.message;}
     };
@@ -6274,6 +6320,7 @@ async function applyTravel(){
   var r=await (await fetch('/api/travel/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sheets:TRAVELUP.sheets,year:TRAVELUP.year})})).json();
   if(r.ok)$('#imp').innerHTML='<span class="cchip ok">Done</span> loaded '+r.applied+' travel items for '+r.year+'. <a href="#" onclick="show(\\'travel\\');return false">Open Travel</a>';
   else $('#imp').textContent='Import failed.';
+  if(r.ok)keepOriginal(TRAVELUP);
 }
 // TDG's SGA workbook (15 Oct 2026, CLAUDE.md §10j): the page sends only the two sheets the console reads — SUMMARY MANNING
 // (one row per crew per ship, every cost column) and the training summary (TRAINREL / TRAINING). Raw cell values: TDG's
@@ -6303,6 +6350,7 @@ async function previewSga(){
   var p=r.period, brands=Object.keys(r.byBrand||{});
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">TDG bill &middot; '+sgaMonthName(p.year,p.month)+'</b>'+(r.meta&&r.meta.sgaNo?' &middot; SGA '+impEsc(r.meta.sgaNo):'')+(r.meta&&r.meta.date?' &middot; dated '+impEsc(r.meta.date):'')
     +'<div class=csub style="margin-top:4px">'+r.rows+' crew lines &middot; $'+Number(r.total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.grand_total!=null?(' &middot; TDG grand total $'+Number(r.grand_total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.reconciles?' <span class="cchip ok">reconciles</span>':' <span class="cchip amber">does not reconcile with the lines</span>')):'')+'</div>'
+    +(r.colsOff>0?'<div class=csub style="margin-top:4px"><span class="cchip amber">a cost column the console does not read</span> $'+Number(Math.abs(r.colsGap)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+' on '+r.colsOff+' line'+(r.colsOff===1?'':'s')+' is in no category'+((r.unknownCols||[]).length?': '+r.unknownCols.map(function(u){return escHtml(u.header);}).join(', '):'')+'. The total still loads; tell the agent so the column is added.</div>':'')
     +'<div class=csub>'+brands.map(function(b){return TCLIENT[b]||b;}).map(function(b,i){return b+' $'+Number(r.byBrand[brands[i]]).toLocaleString(undefined,{maximumFractionDigits:0});}).join(' &middot; ')+'</div>'
     +'<div class=csub>Travel in the bill: air $'+Number((r.byCat||{}).air||0).toLocaleString()+' &middot; hotel $'+Number((r.byCat||{}).hotel||0).toLocaleString()+' &middot; medical $'+Number(((r.byCat||{}).medical||0)+((r.byCat||{}).medical_repat||0)).toLocaleString()+' &middot; visa $'+Number((r.byCat||{}).visa||0).toLocaleString()+'</div></div>';
   var trm=(r.training||[]).filter(function(t){return !t.summary_only;});
@@ -6319,12 +6367,15 @@ async function applySga(){
   else $('#imp').innerHTML='<div style="'+BADBOX+'">Import failed'+(r.detail?(': '+impEsc(r.detail)):'')+'.</div>';
   if(r.ok)keepSgaOriginal();
 }
-// the original workbook, kept as it arrived (15 Oct 2026, "I dont wanna lose this"): the raw bytes go to /api/sga/archive
-async function keepSgaOriginal(){
-  if(!SGAUP||!SGAUP.buf)return;
+// the original workbook, kept as it arrived (15 Oct 2026, "I dont wanna lose this"): the raw bytes go to /api/sga/archive —
+// TDG's bill and Rita's travel workbook alike (30 Oct 2026: the travel Apply never sent its bytes; the archive files a
+// "Travel Expenses" name under travel/<year>/, as it does for the same workbook emailed to sga@cims.work)
+async function keepSgaOriginal(){return keepOriginal(SGAUP);}
+async function keepOriginal(up){
+  if(!up||!up.buf)return;
   var el=$('#imp');
   try{
-    var a=await (await fetch('/api/sga/archive',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(SGAUP.name||'')},body:SGAUP.buf})).json();
+    var a=await (await fetch('/api/sga/archive',{method:'POST',headers:{'Content-Type':'application/octet-stream','X-File-Name':encodeURIComponent(up.name||''),'X-File-Kind':up.kind||'sga'},body:up.buf})).json();
     if(el)el.innerHTML+=(a&&a.kept)?' <span class="cchip ok">Original kept</span>':' <span class="cchip warn">Original not kept'+(a&&a.error?(': '+impEsc(a.error)):'')+'</span>';
   }catch(e){ if(el)el.innerHTML+=' <span class="cchip warn">Original not kept</span>'; }
 }
@@ -6711,7 +6762,7 @@ function tvRail(){
   var kindOf=function(r){return r.kind||'crew';};
   var years=tYears(),LYr=TF.year?+TF.year:(years[0]||null);
   var base=TRVALL.filter(function(r){return !TF.client||r.client===TF.client;});
-  var catOk=function(r){return !TF.cat||(r[TF.cat]>0);};
+  var catOk=function(r){return !TF.cat||(+r[TF.cat]||0)!==0;};
   // the same period as the hero: the chosen month, else the year's closed months (the running month is not counted yet)
   var closedOf=function(y){return (TRV&&TRV.closed&&TRV.closed[y]!=null)?TRV.closed[y]:12;};
   var inPer=function(r){return TF.month?r.month===+TF.month:r.month<=closedOf(r.year);};
@@ -6751,7 +6802,7 @@ function tvRail(){
   el.innerHTML=h;
   el.onclick=tvRailClick;
   var tt=document.getElementById('tvtotal');
-  if(tt){if(TF.kind==='training'){tt.innerHTML='TDG’s training statement';}else{var n=tScope().filter(function(r){return (!TF.year||r.year===+TF.year)&&(!TF.month||r.month===+TF.month)&&(!TF.cat||r[TF.cat]>0);}).length;tt.innerHTML='<b>'+n+'</b> line item'+(n===1?'':'s')+(TF.year?'':' · all years');}}
+  if(tt){if(TF.kind==='training'){tt.innerHTML='TDG’s training statement';}else{var n=tScope().filter(function(r){return (!TF.year||r.year===+TF.year)&&(!TF.month||r.month===+TF.month)&&(!TF.cat||(+r[TF.cat]||0)!==0);}).length;tt.innerHTML='<b>'+n+'</b> line item'+(n===1?'':'s')+(TF.year?'':' · all years');}}
 }
 function tvRailClick(e){
   var el=e.target.closest?e.target.closest('[data-tv]'):null;if(!el)return;
@@ -6964,6 +7015,9 @@ function tvDecisions(ctx){
   // loaded nothing. Named in every view of its year until a bill for that month is loaded after it.
   var c2=function(n){return '$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});};   // a bill reconciles to the cent
   ((SGA&&SGA.held)||[]).filter(function(x){return x.year===LY;}).forEach(function(x){
+    if(x.why==='unknown_column'){out.push({sev:'crit',t:'TDG’s bill for '+TMN[x.month]+' '+x.year+' is held: a cost column the console does not know',
+      w:c2(Math.abs(x.cols_gap))+' on '+x.cols_off+' line'+(x.cols_off===1?'':'s')+' sits in no column the console reads'+((x.unknown_cols||[]).length?' ('+x.unknown_cols.map(function(u){return escHtml(u.header)+' '+c2(u.total);}).join(', ')+')':'')+'. It arrived on '+fmtDateS(String(x.held_at||'').slice(0,10))+' and loaded nothing. Loaded from Upload data, the total is right and that amount is in no category until the column is added.',
+      go:x.hash?'window.open(&quot;/api/sga/file?hash='+x.hash+'&quot;)':'',gl:x.hash?'Download':''});return;}
     out.push({sev:'crit',t:'TDG’s bill for '+TMN[x.month]+' '+x.year+' is held: its lines do not add up',
       w:'Lines '+c2(x.lines_total)+(x.others?' + '+c2(x.others)+' other':'')+' against TDG’s grand total '+c2(x.grand_total)+(x.gap!=null?' · '+c2(Math.abs(x.gap))+(x.gap>0?' missing':' too much'):'')+'. It arrived on '+fmtDateS(String(x.held_at||'').slice(0,10))+' and loaded nothing. Check it with Finance, then drop it on Upload data to load it.',
       go:x.hash?'window.open(&quot;/api/sga/file?hash='+x.hash+'&quot;)':'',gl:x.hash?'Download':''});
@@ -7079,7 +7133,7 @@ function paintTravel(){
   var byp={};TLBL={};sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0;}).forEach(function(r){var v=cat?(r[cat]||0):r.total;if(cat&&!v)return;var k=tKey(r);byp[k]=(byp[k]||0)+v;TLBL[k]=tLabel(r);});
   TLB=Object.keys(byp).sort(function(a,b){return byp[b]-byp[a];}).slice(0,8);
   var ppl='<div class=tvcard><div class=tvh>Who <small>top '+TLB.length+' · '+P.span+' '+LY+(cat?' · '+catName:'')+'</small></div><div style="margin-top:6px">';
-  ppl+=TLB.map(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||r[cat]>0);});var k=(rs[0]||{}).kind;var unp=k!=='shoreside'&&!(rs[0]||{}).agency_id;
+  ppl+=TLB.map(function(n,i){var rs=sc.filter(function(r){return r.year===LY&&months.indexOf(r.month)>=0&&tKey(r)===n&&(!cat||(+r[cat]||0)!==0);});var k=(rs[0]||{}).kind;var unp=k!=='shoreside'&&!(rs[0]||{}).agency_id;
     return '<div class=tvp onclick="travelDrill('+i+')"><span class=av>'+escHtml(tvInitials(TLBL[n]||n))+'</span><span><span class=nm>'+escHtml(TLBL[n]||n)+'</span>'+(k==='shoreside'?' <span class="cchip amber">shore</span>':'')+(unp?' <span class="cchip amber" title="Not on the crew registry under this spelling">not on registry</span>':'')+'<span class=sb>'+rs.length+' movement'+(rs.length===1?'':'s')+'</span></span><b>'+usd0(byp[n])+'</b></div>';}).join('')||'<div class=tvsub>Nobody in this period.</div>';
   ppl+='</div></div>';
   h+='<div class=tvgrid2>'+wg+ppl+'</div>';
@@ -7103,7 +7157,7 @@ function paintTravel(){
     outs.forEach(function(r){h+='<tr><td>'+TMN[r.month]+'</td><td>'+escHtml(r.crew_name)+'</td><td>'+(r.leg==='shoreside'?'—':escHtml(r.leg||''))+'</td><td style="text-align:right">'+usd0(r.air)+'</td><td style="text-align:right"><b>'+usd0(val(r))+'</b></td></tr>';});
     h+='</tbody></table></details>';
   }
-  var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!(r[TF.cat]>0))return false;return true;});
+  var rows=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(TF.cat&&!((+r[TF.cat]||0)!==0))return false;return true;});
   h+='<details class="tvcard tvfold" id=tvlines><summary><span class=tvh>Line items <small>'+rows.length+(TF.year?'':' · all years')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+catName:'')+'</small></span></summary>';
   h+='<div style="overflow:auto;margin-top:10px"><table class=tbl><thead><tr><th>Yr</th><th>Mo</th><th>Kind</th><th>Leg</th><th>Ship</th><th>Name</th><th style="text-align:right">Air</th><th style="text-align:right">Hotel</th><th style="text-align:right">Med</th><th style="text-align:right">Visa</th><th style="text-align:right">Food</th><th style="text-align:right">Trans</th><th style="text-align:right">Other</th><th style="text-align:right">Total</th></tr></thead><tbody>'
     +rows.map(function(r){return '<tr><td>'+r.year+'</td><td>'+TMN[r.month]+'</td><td>'+(r.kind==='shoreside'?'<span class="cchip amber">shore</span>':(r.client==='ncl'?'<span class="cchip amber">NCL</span>':'crew'))+'</td><td>'+(r.leg==='shoreside'?'—':escHtml(r.leg||''))+'</td><td>'+escHtml(r.ship||'')+'</td><td>'+escHtml(r.crew_name)+(r.crew_display&&r.crew_display!==r.crew_name?' <span class=muted style="padding:0">· '+escHtml(r.crew_display)+'</span>':'')+'</td><td style="text-align:right">'+usd(r.air)+'</td><td style="text-align:right">'+usd(r.hotel)+'</td><td style="text-align:right">'+usd(r.medical)+'</td><td style="text-align:right">'+usd(r.visa)+'</td><td style="text-align:right">'+usd(r.food)+'</td><td style="text-align:right">'+usd(r.transport)+'</td><td style="text-align:right">'+usd(r.other)+'</td><td style="text-align:right"><b>'+usd(r.total)+'</b></td></tr>';}).join('')||'<tr><td colspan=14 class=muted>No line items match these filters.</td></tr>';
@@ -7136,7 +7190,7 @@ function paintTravelCrew(){var t=document.getElementById('trbody');if(!t)return;
 function paintTravelSearch(){
   var q=(TF.q||'').trim().toLowerCase();
   // the Year / Month / Category filters narrow the search like every other section (16 Oct 2026)
-  var cat=TF.cat||null,sc=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(cat&&!(r[cat]>0))return false;return true;});
+  var cat=TF.cat||null,sc=tScope().filter(function(r){if(TF.year&&r.year!==+TF.year)return false;if(TF.month&&r.month!==+TF.month)return false;if(cat&&!((+r[cat]||0)!==0))return false;return true;});
   var within=(TF.year?' in '+TF.year:'')+(TF.month?' · '+TMN[+TF.month]:'')+(cat?' · '+TCATLAB[cat]:'');
   var seen={},names=[],tot={};TLBL={};
   sc.forEach(function(r){var k=tKey(r);if(!seen[k]){seen[k]=1;names.push(k);}tot[k]=(tot[k]||0)+(cat?(r[cat]||0):r.total);TLBL[k]=tLabel(r);}); // tScope already applied the search to both spellings
@@ -7604,7 +7658,9 @@ function rotShip(sec){
   // TRAINING VISITS (Miguel, 17 Oct 2026; visits.js): a trainer aboard to teach is not a seat — one line under the cards,
   // never on the timeline or the Gantt. A tap opens the contract window, where Rita ticks or clears "Training visit".
   var visitRows=(sec.visits||[]).map(function(v){
-    return '<div class=visitrow onclick="cardClick(\\''+v.agency_id+'\\','+(v.seq||1)+')" title="Open the trip"><span class=vtag>Training visit</span><b>'+escHtml(v.name)+'</b>'
+    // Rita's card that is a visit (3 Nov 2026) opens its own panel, as the card did; a trip the file has opens the trip window
+    var open=(v.assignment_id&&v.vessel_key)?(' data-vk="'+escHtml(v.vessel_key)+'" data-aid="'+escHtml(v.assignment_id)+'" onclick="openRelief(this)" title="Open the card"'):(' onclick="cardClick(\\''+v.agency_id+'\\','+(v.seq||1)+')" title="Open the trip"');
+    return '<div class=visitrow'+open+'><span class=vtag>Training visit</span><b>'+escHtml(v.name)+'</b>'
       +' <span class=sentmeta>'+(v.signOn?('aboard since '+escHtml(fmtDateS(v.signOn))):'aboard')+(v.signOff?(' &middot; off '+escHtml(fmtDateS(v.signOff))):'')+(v.trainer?' &middot; trainer':(v.shoreTeam?' &middot; shoreside team':''))+'</span></div>';
   }).join('');
   // Sent to TDG and not yet back in a Contract Counter. The line clears itself when they return.
@@ -8833,13 +8889,13 @@ function opsCrewCard(w){
   var h='<section id=oc-crew class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>The '+tot+' crew</h2><p class=oc-sub>Where everyone is today, per TDG&#39;s word.</p></div>';
   h+='<div style="display:flex;height:16px;gap:2px;border-radius:4px;overflow:hidden" role=img aria-label="'+seg.map(function(s){return (s[1]||0)+' '+s[0];}).join(', ')+'">'+seg.filter(function(s){return s[1];}).map(function(s){return '<span style="width:'+(tot?s[1]/tot*100:0)+'%;background:'+s[2]+'"></span>';}).join('')+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 14px;font-size:12.5px">'+seg.map(function(s){return '<span><i class=oc-dot style="background:'+s[2]+'"></i>'+s[0]+' <b>'+(s[1]||0)+'</b></span>';}).join('')+'</div>';
-  h+='<div style="border-top:1px solid #F0F3F7;padding-top:10px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;text-align:center">'
-    +[['Royal Caribbean','Royal'],['Celebrity','Celebrity'],['Azamara','Azamara']].map(function(b){return '<div><div style="font-family:Outfit;font-size:20px;font-weight:700">'+(bc[b[0]]||0)+'</div><div class=oc-mut style="font-size:11.5px">'+b[1]+'</div></div>';}).join('')+'</div>';
+  h+='<div style="border-top:1px solid #F0F3F7;padding-top:10px;display:grid;grid-template-columns:repeat('+(bc.NCL>0?4:3)+',minmax(0,1fr));gap:8px;text-align:center">'
+    +[['Royal Caribbean','Royal'],['Celebrity','Celebrity'],['Azamara','Azamara']].concat(bc.NCL>0?[['NCL','Norwegian']]:[]).map(function(b){return '<div><div style="font-family:Outfit;font-size:20px;font-weight:700">'+(bc[b[0]]||0)+'</div><div class=oc-mut style="font-size:11.5px">'+b[1]+'</div></div>';}).join('')+'</div>';
   return h+'<p class=oc-sub style="font-size:11.5px">In the rotation = aboard, earmarked or ashore (On Vacation, Reserved).</p></section>';
 }
 function opsTravel(tv){
   if(!tv||!tv.year)return '<section class=oc-card><h2 class=oc-h>Crew travel</h2><p class=oc-sub>No travel on file yet.</p></section>';
-  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crewYTD||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo||12)/12*100);
+  var ann=(tv.budgetMo||15000)*12,used=ann?Math.round((tv.crewYTD||0)/ann*100):0,pace=(tv.ytdBudget||0)-(tv.crewYTD||0),yearPct=Math.round((tv.elapsedMo==null?12:tv.elapsedMo)/12*100);
   var h='<section class=oc-card style="display:flex;flex-direction:column;gap:14px"><div><h2 class=oc-h>Crew travel &middot; '+tv.year+'</h2><p class=oc-sub>Against the '+opsMoney(ann)+' budget. Reference only, never an invoice source.</p></div>';
   h+='<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-family:Outfit;font-size:28px;font-weight:700;letter-spacing:-.02em">'+opsMoney(tv.crewYTD)+'</span>'+opsSt(pace>=0?'ok':'warn',used+'% used · '+opsMoney(Math.abs(pace))+(pace>=0?' under':' over')+' budget over '+(tv.elapsedMo||0)+' closed month'+(tv.elapsedMo===1?'':'s'))+'</div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px"><div style="position:relative;height:14px;font-size:11px"><span style="position:absolute;left:'+yearPct+'%;transform:translateX(-50%);font-weight:600;white-space:nowrap">'+(tv.elapsedMo||0)+' of 12 months closed</span></div>'

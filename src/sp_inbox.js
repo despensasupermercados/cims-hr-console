@@ -140,7 +140,7 @@ export function monthOfFolder(name) {
 // Which workbook in a month folder (the connector's listing: { name, id, lastModifiedDateTime }) is the month's bill:
 // REVISED beats plain, the newest modified wins among equals, never a PDF — the same rule as the Graph sync.
 export function pickSgaItem(items) {
-  const xl = (items || []).filter((c) => /sga excel/i.test(c.name) && /\.xlsx?$/i.test(c.name));
+  const xl = (items || []).filter((c) => /sga[\s_]*excel/i.test(c.name) && /\.xlsx?$/i.test(c.name));
   if (!xl.length) return null;
   const newest = (a, b) => String(b.lastModifiedDateTime || "").localeCompare(String(a.lastModifiedDateTime || ""));
   const rev = xl.filter((c) => /revised/i.test(c.name)).sort(newest);

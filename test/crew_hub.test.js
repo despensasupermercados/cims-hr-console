@@ -69,7 +69,7 @@ test("the page: the approved bonus wording, the ladder read from bonus.js, the s
   assert.match(h, /A compassionate sign-off does not reset you\./);
   for (let n = 2; n <= 9; n++) assert.ok(h.includes("$" + ladderValue(n).toLocaleString("en-US")), "rung " + n);
   assert.match(h, /Wed 4 Nov/);
-  assert.match(h, /Day 2 of 212/);
+  assert.match(h, /Day 2 of 213/); // the sign-on is day 1, so the sign-off is day 213 (16 Nov 2026: it read 212 and the header ran to 213)
   assert.match(h, /Sign-off projected\. TDG confirms it later\./);
   assert.match(h, /Updated 19 Oct 2026/);
   assert.equal(HUB_UPDATED, "19 Oct 2026");
