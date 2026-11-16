@@ -24,6 +24,9 @@ function addMonths(d, n) {
   return new Date(Date.UTC(y, m, Math.min(day, last))).toISOString().slice(0, 10);
 }
 
+// The projected sign-off of a contract that carries none: sign-on + 7 months, Azamara 5 (§10d). null without a sign-on.
+export function projectedOff(on, azamara) { const a = iso(on); return a ? addMonths(a, azamara ? AZAMARA_CONTRACT_MONTHS : CONTRACT_MONTHS) : null; }
+
 // The day a reliever may sign on from: RELIEF_WINDOW_DAYS before the earlier of the shown sign-off and the projected one.
 // No sign-on and no sign-off → null (no window: anything after him counts).
 export function reliefFrom(on, off, azamara) {

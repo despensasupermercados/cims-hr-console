@@ -58,7 +58,9 @@ export function hubPage(m) {
   const rows = payrollRows(year);
   const next = nextPayday(TODAY);
   const inDays = next ? next.inDays : null;
-  const cDays = hasK ? days(on, off) : 0, cDay = hasK ? Math.max(1, days(on, TODAY) + 1) : 0, cPct = hasK ? Math.min(100, Math.max(2, Math.round(100 * cDay / cDays))) : 0;
+  // the sign-on is day 1, so the sign-off is day (days between + 1): it read "Day 153 of 153 · 1 day to go" on the eve and
+  // "day 154" in the header on the day (16 Nov 2026)
+  const cDays = hasK ? days(on, off) + 1 : 0, cDay = hasK ? Math.max(1, days(on, TODAY) + 1) : 0, cPct = hasK ? Math.min(100, Math.max(2, Math.round(100 * cDay / cDays))) : 0;
   const stepNow = CREW.contractNo ? ladderValue(CREW.contractNo) : 0, stepNext = CREW.contractNo ? ladderValue(CREW.contractNo + 1) : 0;
   const total9 = [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce((a, n) => a + ladderValue(n), 0);
   const exStep = stepNow > 0 ? stepNow : 500, example = Math.round(exStep * 90 / 100);

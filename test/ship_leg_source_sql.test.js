@@ -210,3 +210,20 @@ test("a Counter contract closed by Rita's recorded sign-off says so (offSource r
   assert.equal(t.off, "2026-11-04");
   assert.equal(t.offSource, "tdg");
 });
+
+// 16 Nov 2026 bug hunt: the contract modal files Rita's sign-off under the FILE's embark date; the Counter's sign-on for the
+// same contract can sit a few days from it. Joined to the day, her date never reached the Counter leg.
+test("Rita's sign-off keyed on the file's embark reaches the Counter contract within ABSORB_DAYS, never a contract further away", async () => {
+  const d = db();
+  d.exec(`
+    INSERT INTO keyman_contract3 (sc,km,ship,st,seq,sign_on,proj_off) VALUES
+      ('SC-G','kmg','Liberty','Onboard',1,'2026-04-05','2026-11-08'),
+      ('SC-F','kmf','Liberty','Onboard',1,'2026-04-05','2026-11-08');
+    INSERT INTO contract_edit (sc,seq,sign_off,on_key,updated_at) VALUES ('SC-G',2,'2026-11-05','2026-04-03','2026-10-30T10:00:00Z');
+    INSERT INTO contract_edit (sc,seq,sign_off,on_key,updated_at) VALUES ('SC-F',2,'2026-11-05','2026-03-20','2026-10-30T10:00:00Z');
+  `);
+  const rec = await fetchRecordedSignoffs(envFor(d));
+  assert.equal(rec["SC-G|2026-04-05"], "2026-11-05", "two days apart: the same contract");
+  assert.equal(rec.sources["SC-G|2026-04-05"].offSource, "rita");
+  assert.equal(rec["SC-F|2026-04-05"], undefined, "sixteen days apart: another contract's edit");
+});

@@ -120,7 +120,7 @@ const SCRIPT = String.raw`
       .catch(function () { return { ok: false, say: "No connection. Your numbers on this page are kept; try again." }; });
   }
   function typing() { var a = document.activeElement; return !!(a && a.getAttribute && (a.getAttribute("data-part") || a.getAttribute("data-reason") || a.id === "xt" || a.id === "xn" || a.id === "find")); }
-  function load(soft) { return api("/api/audit/u/state").then(function (j) { if (j && j.machines) { S = j; if (soft && typing() && S.status === "sent") { head(); dock(); progress(); } else draw(); } else { $("main").innerHTML = '<div class="card pad"><p class="txt">' + esc(j.say || j.error || "Could not load.") + "</p></div>"; } }); }
+  function load(soft) { return api("/api/audit/u/state").then(function (j) { if (j && j.machines) { S = j; if (soft && typing() && S.status === "sent") { head(); dock(); progress(); } else draw(); } else if (S && S.machines && !(j && j.status)) { /* a lost connection on a page already open: the page and what is typed on it stay (16 Nov 2026: one failed refresh replaced the whole page with an error card) */ toast((j && j.say) || "No connection. Try again."); } else { $("main").innerHTML = '<div class="card pad"><p class="txt">' + esc(j.say || j.error || "Could not load.") + "</p></div>"; } }); }
 
   function mDone(m) { return !!m.down || !!(m.p43 && m.p43.read_state === "ok" && m.mgmt && m.mgmt.read_state === "ok"); }
   function counted(l) { var v = S.counted[l.part_no]; return v !== undefined && v !== null && v !== ""; }
