@@ -1754,6 +1754,21 @@ Six readers, every finding reproduced on the old code first. Pinned by `test/bug
   `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
   since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
 
+**THE CONTRACTS THE FILE HAS SHOWN ARE KEPT — `registry_contract`, 16 Nov 2026 (the record only).** `registry_snapshot` holds
+ONE row per crew, the latest file's; the day TDG moves that row on (Earmarked for the next ship with no dates, or a new
+embark) the contract it described leaves the console: its dates on the statement and the profile, its Score Card, the +1
+on the completed count (`completedSince` reads the snapshot row alone). Seen on the 10–15 Nov files: Padilla, Quiming,
+Racho and Guazon lost their +1; Paqueo's Reflection contract (17 Jul – 13 Nov) left the schedule when TDG embarked him on
+Radiance. Since this PR every registry Apply writes one row per crew and embark date (`keepContracts`,
+`src/crew_import_routes.js`, migrations/0043, the same CREATE in `ensureRegistrySnapshot`): TDG's debark kept once a file
+gives it, the first and last file that carried it, and the file that stopped carrying it (`closed_run_at`). Written AFTER
+the import's batch, on its own (`contracts_kept` on the Apply answer; a failure never fails an Apply); a file with no
+embark dates closes nothing; an empty table is seeded once from the snapshot. **NOTHING READS IT YET**: how a kept
+contract is drawn, what ends it when TDG gave no debark (Rita's typed date, or the day the file dropped it), and whether
+it adds to the count are Miguel's to decide (Brain rec3UjhXkYKvfz4N0; night-watch draft #385 is the same question). The
+contracts lost before 16 Nov are not in it (the console no longer holds them); a fresh TDG count file restates the count.
+Pinned by `test/registry_contract.test.js`.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):
