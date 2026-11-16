@@ -1146,6 +1146,9 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   preview, never a real link. **hub.cims.work** with no link is the hub's landing page (`hubHomePage`), never the console.
 
 ## 10l. NORWEGIAN GETAWAY — NCL's pilot hull on the console (Miguel, 20 Oct 2026: "yes get away i the console")
+**PAUSED — Miguel, 16 Nov 2026: "paused until NCL give us the green light."** `VESSEL_REF` Getaway carries no `from`, so the
+board draws no Getaway section, no empty hull and no red dashboard tile; the hull, its brand rules and its words below stay. Joe Art
+Eresmas' card was removed (he is On board Solstice). On NCL's date, set `from` again and the section below comes back.
 In service **16 Nov 2026** (Brain rec2lUszqqzau4xns, which supersedes the tracker's 15 Nov and the 12 Nov anchor; the ship's
 auto-brief still reads 16 Oct, flagged to Miguel); the first printer, Joe Art Eresmas (SC-0038131, now aboard Solstice), signs
 on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
@@ -1675,7 +1678,10 @@ questions (his answers land in the sections they change). Pinned by `test/review
   duplicate merged): TDG's Earmarked word for the hull his contract is still RUNNING on (a live leg there) is his next
   contract, not the end of this one — the board seats him (`earmarkedHere`) and never ends the leg "per the TDG file".
 - Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
-  audit request ar_eb101ea1 on Kevin Jugao is LIVE (test_mode 0) — Miguel says when to void or cancel it; do not grade it.
+  audit request ar_eb101ea1 on Kevin Jugao was REMOVED on Miguel's word, 16 Nov 2026 ("remove keving jugao test .. across
+  the app"): its request, 2 uploads, 116 count lines and 2 send-log rows deleted (never graded, no outcome); backups
+  `bak_audit_request_jugao_20261116`, `bak_audit_upload_…`, `bak_audit_count_…`, `bak_audit_send_log_…`; activity_log
+  `act_audit_jugao_test_removed_20261116`; its R2 files left in place. Pursuit is free for the next audit.
 
 ## 11g. OTHER APPS ASK THE BOARD WHO IS ABOARD — Miguel, 30 Oct 2026 ("why is the wrong crew in this ship??? review", then "go")
 HON's Reflection handover (30 Oct) named Michael Angelo Resposo as the man aboard: HON read the console's D1 itself, from
