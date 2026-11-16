@@ -2006,6 +2006,15 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   list's life page twice, two ways (its cells, and its value rows copied as text and parsed in code), and no longer reads
   the Special parts counter; eighteen figures, the transfer belt included. `MGMT_READ_VERSION` = 6; a figure's second side
   is `second` (v5's `counter` still reads); the "no parts-life page" words point at the Maintenance counter page, pp. 3–5.
+  **HON's code reader reaches the audit** (Miguel, 16 Nov 2026: "copy the knowledge u build on the HON app and transfer the
+  knowledge here to the audit app"). Since 10 Nov 2026 HON's audit door verifies a life figure only where its code read of the
+  scan's pixels and a vision read agree (cims-hon `mmlDigits.js`, `lifeWithCode`) and names the rest (`lifeNotShown`), without
+  changing its read version (6). The audit keeps HON's code mark on the read (`audit_read.codeMark`: version, ok, shown) and the
+  names not checked; the hourly sweep re-reads a list whose read has no code mark or an older code version (`MGMT_CODE_VERSION`
+  = 3, a twin of HON's `MML_CODE_VERSION`: change both; `codeAware` refuses an answer from a HON without its code reader). A
+  verified read with figures not checked and none past its rating is never a clean machine (`shownLife`: `lifePartial`, and
+  `lifeUnverified` for the documents-in email, which knows two states); the audit screens say "Part life partly checked" and
+  name what was not checked; the crew reads "Read. Thank you.". Pinned by `test/audit_request.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

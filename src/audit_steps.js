@@ -336,7 +336,10 @@ export function makeRules() {
       const items = (m.p43 && m.p43.items) || [];
       if (items.length) out.push({ tone: "a", step: "machines", t: name + " · Pattern 43: " + items.map((i) => sentence(i.head)).join("; "), s: (items[0].part ? "Points to " + sentence(items[0].part) + " · " : "") + "a reading of the scan · see it on the machine" });
       const life = m.life || [];
-      if (life.length) out.push({ tone: "a", step: "machines", t: name + " · " + life.length + (life.length === 1 ? " part" : " parts") + " past rated life", s: life.map((x) => partName(x.name) + " " + x.pct + "%").join(" · ") + " · copy quality decides" });
+      const notChecked = (m.lifeNotShown || []).length ? " · not checked: " + m.lifeNotShown.join(", ") : "";
+      if (life.length) out.push({ tone: "a", step: "machines", t: name + " · " + life.length + (life.length === 1 ? " part" : " parts") + " past rated life", s: life.map((x) => partName(x.name) + " " + x.pct + "%").join(" · ") + " · copy quality decides" + notChecked });
+      // HON's code verified some figures and none is past its rating; the rest it names (10 Nov 2026): never a clean machine
+      else if (m.lifePartial) out.push({ tone: "a", step: "machines", t: name + " · part life partly checked", s: "None past its rated life among the figures checked" + notChecked });
       else if (m.lifeUnverified) out.push({ tone: "a", step: "machines", t: name + " · part life not verified", s: "The figures read from the list did not pass their checks · none is shown" });
       else if (m.lifeRead === false) out.push({ tone: "a", step: "machines", t: name + " · part life not read", s: "The management list on file has no parts-life page · ask for the whole Machine Management List" });
     }

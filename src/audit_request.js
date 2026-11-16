@@ -15,7 +15,7 @@
 // to the auditor alone and says [TEST]; nothing reaches a ship. AUDIT_LIVE = "true" in wrangler.toml switches it on.
 // Nothing here is money (§1); no table of another app is written.
 import { aboardOf, addressFor, blindLines, parseCount, countCompleteness, countDiff, checkUpload, gateState, plusHours, REQUEST_HOURS, REMIND_HOURS, normShip, safeName, contractLabel, OPEN_REQ_SQL, SHIP_OPEN_SQL } from "./audit.js";
-import { p43ReadState, mmlReadState, coverFor, p43Assess, shownLife, lifeTrusted } from "./audit_read.js";
+import { p43ReadState, mmlReadState, coverFor, p43Assess, shownLife, lifeTrusted, codeMark } from "./audit_read.js";
 import { auditRequestEmail, TEMPLATE_ID as REQ_ID, REMINDER_ID } from "./emails/hr.audit.request.v1.js";
 import { docsInEmail, TEMPLATE_ID as DOCS_ID } from "./emails/hr.audit.docsin.v1.js";
 import { overdueEmail, TEMPLATE_ID as OVERDUE_ID } from "./emails/hr.audit.overdue.v1.js";
@@ -35,6 +35,13 @@ const READ_SWEEP_MAX = 3;
 // read before it is read again by the hourly sweep, a few an hour, newest first; an answer that is not "ok" never
 // replaces the read the crew already has.
 export const MGMT_READ_VERSION = 6;
+// HON'S CODE READER (cims-hon mmlDigits.js, 10 Nov 2026): HON's audit door reads each life figure off the scan's pixels and
+// verifies a figure only where the code and a vision read agree, without changing its read version (still 6). So a list read
+// before it is asked again when its stored read carries no code mark, or an older code read — a twin of HON's MML_CODE_VERSION,
+// change both (Miguel, 16 Nov 2026: "copy the knowledge u build on the HON app and transfer the knowledge here to the audit app").
+export const MGMT_CODE_VERSION = 3;
+// An answer from a HON that runs its code reader, at this code version or newer (an image list has no code read: null).
+export const codeAware = (res) => { const c = codeMark(res); return !!c && (c.version == null || c.version >= MGMT_CODE_VERSION); };
 const REREAD_MAX = 2;
 export const READ_TRIES = 3;              // a read that fails this many times is "send it again", never "Reading…" for ever
 export const PHOTO_MAX_BYTES = 8 * 1024 * 1024; // the page shrinks a photo to ~300 KB; this only refuses the absurd
@@ -305,7 +312,9 @@ export function installAuditRequest(deps) {
       // (lifeRows absent) or one with none is "part life not read", never a clean machine
       lifeRead: m.mml ? (m.mml.lifeUnverified ? null : lifeWasRead(m.mml)) : null,
       // figures were read but did not pass HON's checks: "part life not verified", never "no part past its rated life"
-      lifeUnverified: !!(m.mml && m.mml.lifeUnverified) }));
+      lifeUnverified: !!(m.mml && m.mml.lifeUnverified),
+      // HON's code check verified some figures and named the rest (10 Nov 2026): the audit says which were not checked
+      lifePartial: !!(m.mml && m.mml.lifePartial), lifeNotShown: (m.mml && m.mml.lifeNotShown) || [] }));
     const diff = countDiff(obp.lines, s.counted, String(req.complete_at || now()).slice(0, 10));
     const extras = s.extras.map((x) => ({ id: x.id, text: x.text, counted: x.counted }));
     const parts = blindLines(obp.lines).map((l) => { const o = obp.lines.find((x) => String(x.part_number || x.part_no || "").trim() === l.part_no); return { part_no: l.part_no, description: l.description, obp: o && Number.isFinite(Number(o.on_hand)) ? Number(o.on_hand) : null, counted: s.counted[l.part_no] == null ? null : s.counted[l.part_no] }; });
@@ -657,14 +666,14 @@ export function installAuditRequest(deps) {
     const obj = env.AUDIT_FILES ? await env.AUDIT_FILES.get(u.r2_key) : null;
     if (!obj) return "skip";
     const res = await hon(env, "managementList", new Uint8Array(await obj.arrayBuffer()), u.content_type || "application/pdf");
-    if (!res || !(Number(res.version) >= MGMT_READ_VERSION)) return "older";
+    if (!res || !(Number(res.version) >= MGMT_READ_VERSION) || !codeAware(res)) return "older";
     const st = mmlReadState(res);
     if (st.read_state === "ok") {
       await env.DB.prepare("UPDATE audit_upload SET read_json=?, read_at=?, read_version=? WHERE id=? AND read_state='ok'")
         .bind(JSON.stringify({ say: st.say, summary: st.summary || null }), now(), res.version, u.id).run();
       return "ok";
     }
-    const kept = Object.assign({}, J(u.read_json, {}) || {}, { reread: { at: now(), version: res.version, read_state: st.read_state, say: st.say } });
+    const kept = Object.assign({}, J(u.read_json, {}) || {}, { reread: { at: now(), version: res.version, read_state: st.read_state, say: st.say, code: codeMark(res) } });
     await env.DB.prepare("UPDATE audit_upload SET read_json=?, read_version=? WHERE id=? AND read_state='ok'").bind(JSON.stringify(kept), res.version, u.id).run();
     return "kept";
   }
@@ -820,7 +829,9 @@ export function installAuditRequest(deps) {
       try { const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(p.request_id).first(); const r = await readUpload(env, req, p.id); if (r.ok) out.read++; } catch (e) { console.error("audit_sweep_read", p.id, (e && e.message) || e); }
     }
     out.reread = 0;
-    const stale = (await env.DB.prepare("SELECT u.id FROM audit_upload u JOIN audit_request r ON r.id=u.request_id WHERE u.kind='mgmt' AND u.superseded_at IS NULL AND u.read_state='ok' AND COALESCE(u.read_version, 0) < ? AND r.status IN ('sent','complete') ORDER BY u.at DESC LIMIT ?").bind(MGMT_READ_VERSION, REREAD_MAX).all().catch(() => ({ results: [] }))).results || [];
+    // stale: an older read version, or no code read from HON's code reader (on the read, or on a re-read that was kept), or an
+    // older code version (a list that is not a PDF has none: its mark's version is null, never stale for it)
+    const stale = (await env.DB.prepare("SELECT u.id FROM audit_upload u JOIN audit_request r ON r.id=u.request_id WHERE u.kind='mgmt' AND u.superseded_at IS NULL AND u.read_state='ok' AND (COALESCE(u.read_version, 0) < ? OR (json_type(u.read_json, '$.summary.code') IS NULL AND json_type(u.read_json, '$.reread.code') IS NULL) OR COALESCE(json_extract(u.read_json, '$.reread.code.version'), json_extract(u.read_json, '$.summary.code.version'), ?) < ?) AND r.status IN ('sent','complete') ORDER BY u.at DESC LIMIT ?").bind(MGMT_READ_VERSION, MGMT_CODE_VERSION, MGMT_CODE_VERSION, REREAD_MAX).all().catch(() => ({ results: [] }))).results || [];
     for (const p of stale) {
       if (Date.now() - t0 > 240000) break;
       let r;
