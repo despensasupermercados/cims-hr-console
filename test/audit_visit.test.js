@@ -246,8 +246,13 @@ test("the rules run in the page out of the REAL Worker bundle (wrangler renames 
 test("the visit: closed before the documents are in; then the reads, the count against OBP, the items to confirm", async () => {
   const t = setup();
   const r = await (await t.call("POST", "/api/audit/request", { ship: "Oasis", sc: "SC-1" })).json();
-  let v = await (await t.call("GET", "/api/audit/visit?id=" + r.id)).json();
-  assert.equal(v.status, "sent");
+  // while the crew is still counting, the visit read answers nothing: OBP's on-hand stays with the team until the count
+  // is SENT (16 Nov 2026 — it handed every line's on-hand to anyone on the open site, the seafarer included)
+  const early = await t.call("GET", "/api/audit/visit?id=" + r.id);
+  assert.equal(early.status, 409);
+  const eb = await early.json();
+  assert.equal(eb.error, "not_complete"); assert.equal(eb.parts, undefined); assert.equal(eb.count, undefined);
+  let v;
   const f = await t.call("POST", "/api/audit/request/grade", { id: r.id, visit: {} });
   assert.equal(f.status, 409, "the gate: no audit before the documents are in");
   t.db.prepare("UPDATE audit_request SET status='cancelled' WHERE id=?").run(r.id);

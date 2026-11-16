@@ -4,9 +4,20 @@
 // test/welcome_email.test.js.
 import { nextPayday } from "./payroll.js";
 import { shipCode, shipWord } from "./ship_codes.js";
-import { mdParts, mdShort } from "./span_md.js";
+import { mdParts, mdShort, mdWords } from "./span_md.js";
 import { RELIEF_WINDOW_DAYS } from "./signoff_context.js";
 import { isVisit, visitMap, trainerSet } from "./visits.js";
+import { projectedOff } from "./reliever.js";
+
+// A RUNNING CONTRACT WITH NO SIGN-OFF ON FILE STILL RUNS (bug hunt, 16 Nov 2026). Rita's card saved with the Off date
+// left blank is a leg with `off: null` ("TBA sign-off" on the board): the Crew Hub told that seafarer "Between contracts"
+// and the welcome email was refused every morning until its two-day catch-up ran out. Read here as the board reads a
+// file-dated seat with no sign-off: projected, sign-on + 7 months (Azamara 5), and said as projected.
+export function legWithOff(leg) {
+  if (!leg || iso(leg.off) || !iso(leg.on)) return leg;
+  const off = projectedOff(leg.on, /azamara/i.test(String(leg.brand || leg.ship || "")));
+  return off ? { ...leg, off, offSource: "projected" } : leg;
+}
 
 // A trainer's trip that only Rita's card holds (no TDG file has it yet) is a training visit like a file trip (visits.js:
 // the trainer tag, unless Rita marked the trip a full contract) — never welcomed, never "your contract" on the Hub.
@@ -61,7 +72,7 @@ function arrival(on, prevOff, today) {
 
 export function welcomeContext({ crew, legs, today, links }) {
   const sc = crew && crew.agency_id;
-  const leg = currentLeg(legs, sc);
+  const leg = legWithOff(currentLeg(legs, sc));
   if (!leg || !iso(leg.off)) return null;
   const p = mdParts(leg.on, leg.off);
   const np = nextPayday(today);
@@ -70,7 +81,7 @@ export function welcomeContext({ crew, legs, today, links }) {
     sc, first: firstWord(crew.first_name), name: [crew.first_name, crew.last_name].filter(Boolean).join(" ").trim(),
     position: crew.rank_observed || "Printer Specialist", brand: leg.brand || null, ship: leg.ship, shipShort: cap(shipWord(leg.ship)), code: shipCode(leg.ship),
     port: leg.embark || null, on: dmy(leg.on), off: dmy(leg.off), offSource: leg.offSource || "projected",
-    months: p ? (p.d ? mdShort(leg.on, leg.off) : `${p.m} months`) : "",
+    months: p ? (p.d ? mdShort(leg.on, leg.off) : mdWords(leg.on, leg.off)) : "",
     prev: prev && prev.name ? prev : null, today: dmy(today),
     // THE ARRIVAL COUNT (cims-hon stockCount.arrivalWindow): 9:00 ship time on the day the shelf becomes his — his sign-on,
     // or the predecessor's sign-off when he joins before it. Its own email carries the link; this only names the day.

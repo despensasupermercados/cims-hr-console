@@ -629,6 +629,8 @@ test("an unverified Management List read: the crew is told it is in, the team se
   const t2 = setup({ reads: { mml: { ...MARK_M1, lifeVerified: true, lifeOver: [{ name: "Drum Unit/K (%)", partNo: "A1", pct: 140, resets: 2 }] } } });
   const q = await makeRequest(t2);
   for (const kind of ["p43", "mgmt"]) { const u = await (await upload(t2, q.token, "S1", kind)).json(); await t2.call("POST", "/api/audit/u/read?t=" + q.token + "&id=" + u.id, {}, null); }
+  await t2.call("POST", "/api/audit/u/count?t=" + q.token, { counts: { A1: "2", B2: "5" } }, null);
+  assert.equal((await (await t2.call("POST", "/api/audit/u/submit?t=" + q.token, {}, null)).json()).ok, true); // the visit opens once the crew has sent
   const v2 = await (await t2.call("GET", "/api/audit/visit?id=" + q.id)).json();
   assert.equal(v2.machines[0].life[0].pct, 140); assert.equal(v2.machines[0].lifeUnverified, false);
 });
@@ -709,4 +711,24 @@ test("a Management List read before version 6 is read again by the sweep, and on
   const before = mmlCalls();
   await t2.R.sweep(t2.env);
   assert.equal(mmlCalls(), before, "not asked again");
+});
+
+// 16 Nov 2026 bug hunt: HON answering "ok" with an EMPTY OBP list made the documents-in email read "Every line agrees with
+// OBP" — nothing was compared. The request's own snapshot (the list the crew counted) stands instead.
+test("HON's OBP list comes back empty the day the count is in: the count is compared with the request's snapshot, never 'every line agrees'", async () => {
+  const t = setup();
+  const { id, token } = await makeRequest(t);
+  for (const kind of ["p43", "mgmt"]) { const u = await (await upload(t, token, "S1", kind)).json(); await t.call("POST", "/api/audit/u/read?t=" + token + "&id=" + u.id, {}, null); }
+  const ship0 = t.env.HON.ship;
+  t.env.HON.ship = async (s) => { const r = await ship0(s); return { ...r, obp: { asOf: "2026-10-14", lines: [], intransit: [] } }; };
+  const before = t.sent.length;
+  await t.call("POST", "/api/audit/u/count?t=" + token, { counts: { A1: "2", B2: "1" } }, null); // B2: OBP says 5
+  assert.equal((await (await t.call("POST", "/api/audit/u/submit?t=" + token, {}, null)).json()).ok, true);
+  const mail = t.sent.slice(before).find((m) => m.templateId === "hr.audit.docsin.v1");
+  assert.ok(mail, "the documents-in email went");
+  assert.doesNotMatch(mail.html, /Every line agrees with OBP/);
+  const kept = JSON.parse(t.db.prepare("SELECT lines_json FROM audit_obp_at_count WHERE request_id=?").get(id).lines_json);
+  assert.deepEqual(kept.map((l) => l.part_number), ["A1", "B2"], "the snapshot's lines are what the count is read against");
+  const v = await (await t.call("GET", "/api/audit/visit?id=" + id)).json();
+  assert.deepEqual(v.count.diff.map((x) => [x.part_no, x.obp, x.counted]), [["B2", 5, 1]]);
 });

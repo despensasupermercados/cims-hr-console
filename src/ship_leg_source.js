@@ -231,20 +231,33 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
 // newer than the Counter row (an unstamped row — every row today — is older than anything); a Counter
 // that arrived after the edit reopens the leg, exactly as the upload's dry-run promised ("overrides").
 // k.act_off is TDG's own actual sign-off and always counts.
+// THE SAME CONTRACT WITHIN ABSORB_DAYS (16 Nov 2026): the contract modal files Rita's sign-off under the FILE's embark,
+// which can sit a few days from the Counter's sign-on for the same contract (legsFromRegistry's editFor already allows
+// that). Joined to the day, her date never reached the Counter leg — the one left once TDG moves the crew's row on.
 export async function fetchRecordedSignoffs(env) {
   const { results } = await env.DB.prepare(
     `SELECT k.sc, k.sign_on,
             CASE WHEN k.act_off IS NOT NULL THEN k.act_off
                  WHEN e.sign_off IS NOT NULL AND (k.imported_at IS NULL OR (e.updated_at IS NOT NULL AND e.updated_at > k.imported_at)) THEN e.sign_off
-                 END AS recorded_off
+                 END AS recorded_off,
+            CASE WHEN k.act_off IS NOT NULL THEN 'tdg' ELSE 'rita' END AS recorded_src,
+            CASE WHEN k.act_off IS NULL THEN e.updated_at END AS recorded_at
        FROM keyman_contract3 k
        LEFT JOIN contract_edit e ON e.sc = k.sc
-                                 AND ((e.on_key IS NOT NULL AND substr(e.on_key,1,10) = substr(k.sign_on,1,10))
+                                 AND ((e.on_key IS NOT NULL AND abs(julianday(substr(e.on_key,1,10)) - julianday(substr(k.sign_on,1,10))) <= ${ABSORB_DAYS})
                                       OR (e.on_key IS NULL AND e.seq = k.seq))
       WHERE k.act_off IS NOT NULL OR e.sign_off IS NOT NULL`
   ).all();
-  const m = {};
-  for (const r of results || []) if (r.recorded_off) m[(r.sc || "") + "|" + (r.sign_on || "")] = r.recorded_off;
+  // WHOSE DATE IT IS rides beside the date (night watch, 15 Nov 2026): TDG's act_off is "tdg", Rita's typed sign-off is
+  // "rita" — the words a file-dated contract already carries (legsFromRegistry). Kept off the map's own keys (non-enumerable)
+  // so the date stays the value every reader and test compares.
+  const m = {}, src = {};
+  for (const r of results || []) if (r.recorded_off) {
+    const k = (r.sc || "") + "|" + (r.sign_on || "");
+    m[k] = r.recorded_off;
+    src[k] = { offSource: r.recorded_src || "rita", offAt: r.recorded_at ? String(r.recorded_at).slice(0, 10) : null };
+  }
+  Object.defineProperty(m, "sources", { value: src, enumerable: false });
   return m;
 }
 
@@ -263,7 +276,10 @@ export function applyRecordedSignoffs(legs, recMap, today) {
     const rec = recMap[(r.sc || "") + "|" + (r.on || "")];
     if (!rec) return r;
     const eff = legWithRecordedSignoff(r.off, r.is_current, rec, today);
-    return { ...r, off: eff.off, is_current: eff.is_current };
+    // A Counter contract closed by Rita's confirmed date read as a sign-off of no one's: the survey (tdg / rita / card only)
+    // never asked Guazon (Liberty, off 5 Nov 2026) once TDG's next file earmarked him elsewhere with no dates.
+    const why = recMap.sources && recMap.sources[(r.sc || "") + "|" + (r.on || "")];
+    return { ...r, off: eff.off, is_current: eff.is_current, ...(why && !r.offSource ? { offSource: why.offSource, offAt: r.offAt || why.offAt } : {}) };
   });
 }
 
@@ -402,6 +418,28 @@ export function dropContradictedCards(asg, rows, today) {
     if (today && dayOf(a.sign_on) > today) return true;
     return (w.status === "On board" || w.status === "Earmarked") && w.key === shipKey(a.ship);
   });
+}
+// PURE. ONE PERSON, ONE SHIP. A card whose sign-on has come is "aboard, awaiting the TDG file" (§10d) — unless the console's
+// own schedule says he is still under contract on ANOTHER hull past that day: the file has him On board there and that
+// contract's sign-off — TDG's, the one Rita typed, or his reliever's card — is after the card's sign-on. Then the card is a
+// plan that overlaps his running contract, never an embark. (9 Nov 2026, Joe Art Eresmas: On board Solstice per TDG, Rita's
+// typed Solstice sign-off 15 Mar 2027, and a Norwegian Getaway card dated 9 Nov that was never moved — the console welcomed
+// him aboard Getaway by email, and the Crew Hub, the audit site and HON's seat reader had him there until the next file.)
+// A sign-off that is only PROJECTED says nothing (the console has no word on when he leaves), and a seat TDG still holds
+// past its sign-off (heldByFile) has ended as far as Rita knows: neither blocks the card. legs = the schedule's legs.
+export function cardOverlapsSeat(card, legs) {
+  const sc = card && card.sc, on = card && dayOf(card.sign_on), k = card && card.ship ? shipKey(card.ship) : null;
+  if (!sc || !on || !k) return null;
+  for (const l of (legs || [])) {
+    if (!l || l.sc !== sc || l.source !== "registry" || !l.is_current || l.visit || l.heldByFile) continue;
+    if (!l.ship || shipKey(l.ship) === k || !dayOf(l.off) || !(dayOf(l.off) > on)) continue;
+    if (l.offSource !== "tdg" && l.offSource !== "rita" && l.offSource !== "card") continue;
+    return { ship: l.ship, off: dayOf(l.off), offSource: l.offSource };
+  }
+  return null;
+}
+export function dropOverlappedCards(asg, legs) {
+  return (asg || []).filter((a) => !cardOverlapsSeat(a, legs));
 }
 // PURE. A card of a trainer or of the shoreside team is a training visit unless Rita marked that trip a full contract
 // (visits.js, §10i) — the same mark the file's row gets, so every reader of the schedule sees one rule.
@@ -593,7 +631,8 @@ async function boardLegsFromDbUncached(env, today) {
   // here, so the statement, the profile, the Score Card's contracts and whose-miss rule, the bench and the crew page's
   // sign-off buttons all read a running contract the board had taken off (Gayda's Allure card beside her Jewel seat).
   // And a trainer's card is a visit, as his file row is (§10i), never a seat the emails or the count read as a contract.
-  const cards = markAssignmentVisits(dropContradictedCards(asg, rows, today), visits, trainers);
+  // ...nor is a card a contract while his own running contract on another hull is dated past the card's sign-on (16 Nov 2026).
+  const cards = markAssignmentVisits(dropOverlappedCards(dropContradictedCards(asg, rows, today), registry), visits, trainers);
   const out = mergeBoardLegs(registry.concat(history), cards, today, ended);
   // The same map rides on the schedule (non-enumerable) so the board's other projections — the earmark bench's
   // one-tap dates — snap to the same days without a second read (§12).

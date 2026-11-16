@@ -1146,6 +1146,9 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   preview, never a real link. **hub.cims.work** with no link is the hub's landing page (`hubHomePage`), never the console.
 
 ## 10l. NORWEGIAN GETAWAY — NCL's pilot hull on the console (Miguel, 20 Oct 2026: "yes get away i the console")
+**PAUSED — Miguel, 16 Nov 2026: "paused until NCL give us the green light."** `VESSEL_REF` Getaway carries no `from`, so the
+board draws no Getaway section, no empty hull and no red dashboard tile; the hull, its brand rules and its words below stay. Joe Art
+Eresmas' card was removed (he is On board Solstice). On NCL's date, set `from` again and the section below comes back.
 In service **16 Nov 2026** (Brain rec2lUszqqzau4xns, which supersedes the tracker's 15 Nov and the 12 Nov anchor; the ship's
 auto-brief still reads 16 Oct, flagged to Miguel); the first printer, Joe Art Eresmas (SC-0038131, now aboard Solstice), signs
 on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
@@ -1183,7 +1186,7 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   Yes = 1–5. The supervisor statement names the line's title: Royal GSM, Celebrity DCM, Azamara BOM, NCL **shipboard manager**.
 - **Who is asked**: a contract the Keyman board shows ENDED (offSource tdg / rita / card — a projected sign-off that passed is
   held, still aboard, never asked), never a training visit, **3 days after the sign-off** (`surveyDue`: off on or before
-  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on; Miguel, 23 Oct 2026,
+  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on (night watch, 15 Nov 2026: a Contract Counter contract closed by the sign-off Rita typed carries offSource rita, TDG's act_off tdg — `fetchRecordedSignoffs` → `applyRecordedSignoffs`; it carried none, so Edward Francis Guazon, Liberty, off 5 Nov, was never asked once the 10 Nov file earmarked him for Icon with no dates; pinned by `test/ship_leg_source_sql.test.js`); Miguel, 23 Oct 2026,
   "ok go ahead": the delay gives Rita time to record why a contract ended, so a Performance / Medical / Compassionate end
   is not asked — it was the morning after until then). One per contract (`ux_crew_survey_contract` on sc + sign-on).
 - **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own
@@ -1675,7 +1678,10 @@ questions (his answers land in the sections they change). Pinned by `test/review
   duplicate merged): TDG's Earmarked word for the hull his contract is still RUNNING on (a live leg there) is his next
   contract, not the end of this one — the board seats him (`earmarkedHere`) and never ends the leg "per the TDG file".
 - Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
-  audit request ar_eb101ea1 on Kevin Jugao is LIVE (test_mode 0) — Miguel says when to void or cancel it; do not grade it.
+  audit request ar_eb101ea1 on Kevin Jugao was REMOVED on Miguel's word, 16 Nov 2026 ("remove keving jugao test .. across
+  the app"): its request, 2 uploads, 116 count lines and 2 send-log rows deleted (never graded, no outcome); backups
+  `bak_audit_request_jugao_20261116`, `bak_audit_upload_…`, `bak_audit_count_…`, `bak_audit_send_log_…`; activity_log
+  `act_audit_jugao_test_removed_20261116`; its R2 files left in place. Pursuit is free for the next audit.
 
 ## 11g. OTHER APPS ASK THE BOARD WHO IS ABOARD — Miguel, 30 Oct 2026 ("why is the wrong crew in this ship??? review", then "go")
 HON's Reflection handover (30 Oct) named Michael Angelo Resposo as the man aboard: HON read the console's D1 itself, from
@@ -1688,6 +1694,61 @@ the audit's `aboardOf` (TDG's seat, held included; Earmarked-here; Rita's awaiti
 contract ending first, incoming = the one reliever rule (`assignRelievers`). A rule changed on the board reaches HON the same
 day. Read only. Pinned by `test/ship_seats.test.js`. An app that still reads `keyman_contract3` or `assignment` to decide who
 is aboard is a defect.
+
+## 11h. Invariants from the 16 Nov 2026 bug hunt (Miguel: "find bugs and fix them .. read the brain and also code .. also the logic of the app")
+Six readers, every finding reproduced on the old code first. Pinned by `test/bughunt_1116.test.js`,
+`test/one_person_one_ship.test.js`, `test/audit_visit.test.js`, `test/audit_request.test.js`.
+- **ONE PERSON, ONE SHIP.** On 9 Nov 2026 the console emailed Joe Art Eresmas "welcome aboard Norwegian Getaway" while TDG
+  had him On board Solstice and Rita's own typed Solstice sign-off read 15 Mar 2027: his Getaway card's 9 Nov sign-on had
+  come, and the last file (7 Nov) was dated before it, so nothing contradicted it. A card whose sign-on has come is NOT
+  aboard-awaiting-the-file while the schedule has the same crew under a running contract on ANOTHER hull whose sign-off —
+  TDG's, Rita's typed date or a reliever card — is after the card's sign-on (`cardOverlapsSeat` / `dropOverlappedCards` in
+  `ship_leg_source.js`, read by the schedule and by the board's `awaitingCard`). A projected sign-off says nothing; a seat
+  TDG holds past its sign-off has ended for Rita; a transfer Rita dated (old sign-off on or before the card's sign-on)
+  stands. The card stays on the board as a plan. Checked on the 16 Nov production cards: none dropped.
+- **A signed-in POST from another host is refused before ANY handler** (`crossSite` right after `getSession`): the cookie is
+  `Domain=cims.work`, and the survey, hub, welcome and sign-off routes are dispatched before the `/api` block that held
+  the only check — a page on a sibling host could flip an automation switch or send a crew email as whoever was signed in.
+- **The travel name bridge swaps only on agreement**: a swapped name is taken when surname AND first name agree with one
+  crew (`agreed`), never on a lone surname ("Tatel, Joseph", an NCL trainee, was filed on Emil Rondy JOSEPH; four names).
+- **The mail intake**: an EMPTY envelope sender vouches for nobody (the gate opened on the typed From alone); a bill named
+  `DG3_SGA_EXCEL_NOVEMBER_2026.xlsx` or `… 2026_REVISED.xlsx` is still the bill and says its month (`SGA_NAME_RX`, one
+  pattern for the intake, the inbox and the dormant sync).
+- **A refund is a movement**: a refund-only row of Rita's workbook (negative total) is kept (`total === 0` skips), and the
+  page's Category filter keeps a negative amount.
+- **The intel body** is decoded when `Content-Transfer-Encoding` is written above `Content-Type` (the part's whole header
+  block is read, and only its own `content-transfer-encoding:` line).
+- **The dashboard**: with no closed month the travel pace tick is at 0 (it read 100% in January); Norwegian crew are counted
+  on the crew card once there are any.
+- **One undated TDG earmark relieves one seat** (`assignRelievers`): the seat leaving first takes him, the other reads "no
+  reliever yet". "1 month", never "1 months" (welcome pass, survey).
+- **The audit**: `GET /api/audit/visit` answers `not_complete` until the crew has SENT the count (it handed OBP's on-hand per
+  line to anyone on the open site, the seafarer counting included — the blind count, §10i); HON answering "ok" with an EMPTY
+  OBP list no longer makes the documents-in email say "Every line agrees" — the request's snapshot is compared instead.
+
+**Batch 2, the same day.** Pinned by `test/bughunt_1116.test.js`, `test/sga_hold.test.js`, `test/house_pass.test.js`,
+`test/ship_leg_source_sql.test.js`.
+- **A bill's cost columns add up to its lines** (`parseSgaManning`: `cols_off`, `cols_gap`, `unknown_cols`). TDG's AMOUNT is
+  read on its own, so a new or renamed cost column was dropped in silence while the bill still "reconciled". Every line of
+  the 15 bills July 2025 – September 2026 adds up to the cent, so a gap is a column the console does not know: the Upload
+  review says it (amount, lines, the header), and a bill that arrives by itself is HELD (`held: "unknown_column"`, the
+  Travel tab's Needs a decision names the header) like one that does not reconcile (17 Oct 2026 rule). Rita's Upload still
+  loads it — TDG's amount stands, that money is in no category until the column is added to `SGA_COLS`.
+- **The staff-house pass goes once per contract** (`housePassNear`): its log is keyed on the sign-off date and it has no
+  request table, so a sign-off that moved a day after the pass went sent it again to the crew, Rita, Miguel and Maryjoy. A
+  house row for the same crew within 21 days is the same contract (marked `same-contract`).
+- **A running contract with no sign-off on file still runs** (`welcome_context.legWithOff`): Rita's card saved with the Off
+  date blank read "Between contracts" on the Crew Hub and was never welcomed. Read as projected (sign-on + 7 months, Azamara
+  5, `reliever.projectedOff`) and said as projected. A date on file is never replaced.
+- **The Crew Hub's day counter**: the sign-on is day 1 and the sign-off the last day (it read "Day 153 of 153 · 1 day to
+  go" on the eve and "day 154" in the header on the day).
+- **Rita's typed sign-off reaches the Counter contract within `ABSORB_DAYS`** (`fetchRecordedSignoffs`): the contract modal
+  files it under the file's embark, which can sit a few days from the Counter's sign-on. No production row differed on
+  16 Nov; the join to the day is what left a Counter leg open once TDG moved the crew's row on.
+- **The crew's audit page** keeps what is on it when one refresh fails (a toast, not an error card over the count).
+- **Left for Miguel, not built**: a contract whose sign-on the console learns from TDG's file more than
+  `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
+  since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by

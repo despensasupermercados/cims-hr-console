@@ -319,6 +319,9 @@ export function installAuditRequest(deps) {
     await ensureAudit(env);
     const req = await env.DB.prepare("SELECT * FROM audit_request WHERE id=?").bind(id).first();
     if (!req) return json({ error: "not_found" }, 404);
+    // OBP's on-hand is the team's, and only once the crew has SENT the count: while the request waits, this read handed
+    // every line's on-hand number to anyone on the open audit site, the seafarer counting included (16 Nov 2026).
+    if (req.status !== "complete") return json({ ok: false, error: "not_complete" }, 409);
     const [c, ev, data, mine] = await Promise.all([
       visitCtx(env, req),
       env.DB.prepare("SELECT * FROM audit_eval WHERE request_id=?").bind(req.id).first().catch(() => null),
@@ -692,9 +695,12 @@ export function installAuditRequest(deps) {
     else {
       const snap = J(req.lines_json, { lines: [], intransit: [] });
       const H = await hon(env, "ship", req.ship); // OBP the day the count is in; the request's snapshot if HON is away
-      lines = (H && H.ok && H.obp && H.obp.lines) || snap.lines || [];
-      intransit = (H && H.ok && H.obp && H.obp.intransit) || snap.intransit || [];
-      asOf = (H && H.ok && H.obp && H.obp.asOf) || snap.asOf || null;
+      // HON's list only when it carries lines to count: an "ok" answer with an EMPTY list read every counted line as
+      // agreeing ("Every line agrees") — the request's own snapshot stands instead (16 Nov 2026).
+      const live = H && H.ok && H.obp && Array.isArray(H.obp.lines) && blindLines(H.obp.lines).length > 0 ? H.obp : null;
+      lines = live ? live.lines : snap.lines || [];
+      intransit = (live && live.intransit) || snap.intransit || [];
+      asOf = live ? live.asOf || null : snap.asOf || null;
       await env.DB.prepare("INSERT OR IGNORE INTO audit_obp_at_count (request_id, as_of, lines_json, intransit_json, at) VALUES (?,?,?,?,?)")
         .bind(req.id, asOf, JSON.stringify(lines), JSON.stringify(intransit), now()).run().catch((e) => console.error("audit_obp_at_count", (e && e.message) || e));
     }
