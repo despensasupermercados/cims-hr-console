@@ -49,8 +49,10 @@ export function sgaPeriodFromName(name) {
   // The month AFTER "SGA EXCEL" is the bill's (27 Oct 2026: "FW SGA EXCEL AUGUST 2026 sent SEP 3 2026" is August); with no
   // such marker the first month word followed by a year is read, as before.
   const base = String(name || "").replace(/\.xlsx?$/i, "");
-  const tail = /sga\s*excel/i.test(base) ? base.slice(base.search(/sga\s*excel/i)) : base;
-  const re = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})\b/g;
+  const tail = /sga[\s_]*excel/i.test(base) ? base.slice(base.search(/sga[\s_]*excel/i)) : base;
+  // the year ends where the digits end: "NOVEMBER 2026_REVISED" (an underscore is a word character, so \b never matched
+  // there and the file had no period — ignored by mail, refused on Upload; 16 Nov 2026).
+  const re = /([A-Za-z]{3,9})[\s_]*'?[\s_]*(\d{4}|\d{2})(?![0-9])/g;
   for (const src of tail === base ? [base] : [tail, base]) {
     re.lastIndex = 0;
     let m;
@@ -166,6 +168,13 @@ export function parseSgaManning(rows, period = {}) {
   const meta = sgaManningMeta(rows);
   const records = [], others = [];
   let brand = null, grand = null;
+  // A COST COLUMN THE CONSOLE DOES NOT KNOW (16 Nov 2026). TDG's AMOUNT is the line's total; the cost columns read by their
+  // header must add up to it (every line of the 15 bills July 2025 – September 2026 does, to the cent). A new or renamed
+  // column was dropped in silence while the bill still "reconciled" (AMOUNT is read on its own): the month's categories
+  // came up short and nobody was told. Here: the lines that are off, the gap, and the headers nothing matched that carry money.
+  const known = new Set([h.refCol, h.amountCol, h.vesselCol, h.idCol, h.natCol, ...h.nameCols, ...Object.values(h.cols).flat()].filter((j) => j >= 0));
+  const head = rows[h.row] || [], extra = {};
+  let colsGap = 0, colsOff = 0;
   // a cell that is a number (TDG's own number, or " 1,169.60 " / "$15.00" / "(50.00)"), never a label with digits in it
   const isNumCell = (x) => typeof x === "number" || (/\d/.test(String(x)) && !/[A-Za-z]/.test(String(x)));
   const lastNum = (r) => { for (let j = r.length - 1; j >= 0; j--) if (r[j] !== "" && r[j] != null && isNumCell(r[j])) return num(r[j]); return 0; };
@@ -199,8 +208,13 @@ export function parseSgaManning(rows, period = {}) {
     rec.cols_sum = Math.round(sum * 100) / 100;
     if (!rec.crew_name && !rec.amount) continue;
     records.push(rec);
+    if (Math.abs(rec.amount - rec.cols_sum) >= 0.05) {
+      colsOff++; colsGap += rec.amount - rec.cols_sum;
+      head.forEach((c, j) => { if (!known.has(j) && txt(c) && isNumCell(r[j] == null ? "" : r[j]) && num(r[j]) !== 0) extra[j] = (extra[j] || 0) + num(r[j]); });
+    }
   }
-  return { meta, records, others, grand_total: grand };
+  const unknown_cols = Object.keys(extra).map((j) => ({ header: txt(head[j]), total: Math.round(extra[j] * 100) / 100 })).filter((x) => x.total !== 0);
+  return { meta, records, others, grand_total: grand, cols_off: colsOff, cols_gap: Math.round(colsGap * 100) / 100, unknown_cols };
 }
 
 // The training sheet ("2026 SUMMARY TRAINREL"): blocks headed by a year cell, then month rows, then TOTAL.

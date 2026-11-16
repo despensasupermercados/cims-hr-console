@@ -59,19 +59,36 @@ export function daysOut(signoffDate, today) {
   return { n, eyebrow: `SIGN-OFF IN ${n} DAYS`, subject: `Signing off in ${w} days?`, intro: `${w} days from now` };
 }
 
-const shell = (inner) => `
+// A real document (28 Oct 2026, Miguel's phone screenshot: the table alone, with no viewport, had iOS Mail scale the
+// text up and squeeze the pass): the viewport meta and -webkit-text-size-adjust:100% make a phone render the sizes as
+// written. No <style> block — every width below works with no CSS at all (the standard's rule, and this template's test).
+const shell = (inner, subject) => `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformat">
+<title>${esc(subject || "CIMS Staff House")}</title></head>
+<body style="margin:0;padding:0;background:${T.cloud};-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${T.cloud}" style="background:${T.cloud};">
- <tr><td align="center" style="padding:24px 12px;">
+ <tr><td align="center" style="padding:20px 10px;">
   <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
    ${mastRows()}
-   <tr><td bgcolor="#FFFFFF" style="background:#FFFFFF;padding:26px 24px;">${inner}</td></tr>
+   <tr><td bgcolor="#FFFFFF" style="background:#FFFFFF;padding:24px 20px;">${inner}</td></tr>
    <tr><td bgcolor="${T.deep}" style="background:${T.deep};padding:16px 24px;">
     <div style="font-family:${FB};font-size:10px;color:${T.slate};line-height:1.7;">
      CIMS Staff House &middot; ${esc(HOUSE.name)}, ${esc(HOUSE.line2)}<br>
      CIMS &mdash; Cruise Industry Managed Services &middot; A division of DG3</div>
    </td></tr>
   </table>
- </td></tr></table>`;
+ </td></tr></table>
+</body></html>`;
+
+// Two facts side by side where there is room, one under the other on a phone — with no CSS: each block is an
+// inline-block of at most 240px, so a 520px pass holds two across and a 318px one stacks them (the standard's
+// layout-without-a-style-block rule). Outlook desktop ignores inline-block, so a ghost table holds its two columns.
+const pair = (a, b) => `
+     <!--[if mso]><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td width="50%" valign="top"><![endif]-->
+     <div style="display:inline-block;width:100%;max-width:240px;vertical-align:top;padding-bottom:14px;">${a}</div><!--[if mso]></td><td width="50%" valign="top"><![endif]--><div style="display:inline-block;width:100%;max-width:240px;vertical-align:top;padding-bottom:14px;">${b}</div>
+     <!--[if mso]></td></tr></table><![endif]-->`;
 
 const button = (href, label) => `
  <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -80,8 +97,8 @@ const button = (href, label) => `
   </td></tr></table>`;
 
 const label = (k, v, inkK, inkV, size = 14) => `
-   <div style="font-family:${FB};font-size:8px;font-weight:700;letter-spacing:1.6px;color:${inkK};">${k}</div>
-   <div style="font-family:${FH};font-size:${size}px;font-weight:700;color:${inkV};margin-top:3px;line-height:1.2;">${esc(v)}</div>`;
+   <div style="font-family:${FB};font-size:8px;font-weight:700;letter-spacing:1.6px;color:${inkK};line-height:1.2;">${k}</div>
+   <div style="font-family:${FH};font-size:${size}px;font-weight:700;color:${inkV};margin-top:3px;line-height:1.25;">${esc(v)}</div>`;
 
 const contactsLine = (contacts) => contacts.length
   ? `Questions? Email ${contacts.map((c) => `<a href="mailto:${esc(c.email)}" style="color:${T.greenInk};font-weight:700;text-decoration:none;">${esc(c.name)}</a>`).join(" or ")}${
@@ -111,7 +128,7 @@ export function houseKeyCardEmail(data) {
    <div style="font-family:${FB};font-size:13.5px;color:${T.body};line-height:1.65;margin-top:9px;">You sign off <strong style="color:${T.navy};">${esc(off ? day(off) : "soon")}</strong> &mdash; ${esc(d.intro)}. Contract done, bags packed, and the last thing you need is an airport chair. CIMS keeps a four-bed studio by NAIA, free for crew. Pick a bed, get your pass, walk in &mdash; no approval, no waiting.</div>
 
    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;border-radius:14px;">
-    <tr><td bgcolor="${T.deep}" style="background:${T.deep};padding:20px 20px 22px;border-radius:14px 14px 0 0;">
+    <tr><td bgcolor="${T.deep}" style="background:${T.deep};padding:18px 18px 8px;border-radius:14px 14px 0 0;">
      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td style="font-family:${FB};font-size:9px;font-weight:700;letter-spacing:2px;color:${T.onNavy};">STAFF HOUSE &nbsp;&middot;&nbsp; MANILA</td>
       <td align="right" style="padding:0;">
@@ -121,29 +138,15 @@ export function houseKeyCardEmail(data) {
       </td>
      </tr></table>
 
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:22px;"><tr>
-      <td width="50%" style="padding:0;">
-       <div style="font-family:${FB};font-size:8px;font-weight:700;letter-spacing:1.6px;color:${T.green};">SIGN-OFF</div>
+     <div style="margin-top:20px;font-size:0;line-height:0;">${pair(`
+       <div style="font-family:${FB};font-size:8px;font-weight:700;letter-spacing:1.6px;color:${T.green};line-height:1.2;">SIGN-OFF</div>
        <div style="font-family:${FH};font-size:22px;font-weight:700;color:#FFFFFF;margin-top:5px;line-height:1.05;">${so.dow} ${so.dm}</div>
-       <div style="font-family:${FB};font-size:11.5px;color:${T.onNavy};margin-top:4px;">${esc(data.ship || "your ship")}</div>
-      </td>
-      <td width="50%" align="right" style="padding:0;">
-       <div style="font-family:${FB};font-size:8px;font-weight:700;letter-spacing:1.6px;color:${T.green};">CHECK IN</div>
+       <div style="font-family:${FB};font-size:11.5px;color:${T.onNavy};margin-top:4px;line-height:1.4;">${esc(data.ship || "your ship")}</div>`, `
+       <div style="font-family:${FB};font-size:8px;font-weight:700;letter-spacing:1.6px;color:${T.green};line-height:1.2;">CHECK IN</div>
        <div style="font-family:${FH};font-size:22px;font-weight:700;color:#FFFFFF;margin-top:5px;line-height:1.05;">ANY DAY</div>
-       <div style="font-family:${FB};font-size:11.5px;color:${T.onNavy};margin-top:4px;">from 12:00 noon &middot; out by noon</div>
-      </td>
-     </tr></table>
+       <div style="font-family:${FB};font-size:11.5px;color:${T.onNavy};margin-top:4px;line-height:1.4;">from 12:00 noon &middot; out by noon</div>`)}</div>
 
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:20px;border-top:1px solid ${T.navy};">
-      <tr>
-       <td width="60%" style="padding:16px 0 0;">${label("GUEST", data.name || first, T.green, "#FFFFFF")}</td>
-       <td width="40%" align="right" style="padding:16px 0 0;">${label("BEDS", "4 · first come, first served", T.green, "#FFFFFF", 12)}</td>
-      </tr>
-      <tr>
-       <td width="60%" style="padding:12px 0 0;">${label("RATE", "Free for CIMS crew", T.green, "#FFFFFF")}</td>
-       <td width="40%" align="right" style="padding:12px 0 0;">${label("WHERE", "Newport City, by NAIA T3", T.green, "#FFFFFF", 12)}</td>
-      </tr>
-     </table>
+     <div style="margin-top:4px;padding-top:16px;border-top:1px solid ${T.navy};font-size:0;line-height:0;">${pair(label("GUEST", data.name || first, T.green, "#FFFFFF"), label("BEDS", "4 · first come, first served", T.green, "#FFFFFF", 12))}${pair(label("RATE", "Free for CIMS crew", T.green, "#FFFFFF"), label("WHERE", "Newport City, by NAIA T3", T.green, "#FFFFFF", 12))}</div>
     </td></tr>
 
     <tr><td bgcolor="${T.deep}" style="background:${T.deep};padding:0;font-size:0;line-height:0;">
@@ -171,7 +174,7 @@ export function houseKeyCardEmail(data) {
 
    <div style="font-family:${FB};font-size:11.5px;color:${T.slate};line-height:1.6;margin-top:22px;border-top:1px solid ${T.border};padding-top:14px;">
     Not coming through Manila this time? Ignore this &mdash; the house will still be there next time. ${contactsLine(contacts)}
-   </div>`);
+   </div>`, subject);
 
   const text = [
     `${d.eyebrow} — ${off ? day(off) : "soon"}`,

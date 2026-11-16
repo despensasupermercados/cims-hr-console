@@ -889,7 +889,10 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   identity as the inbox (`file_key mail:<sha16>@<sha16>`) and `sga_file.file_hash`, so a bill on file, its inbox rows and its
   original are one thing. Two writers, both the Worker: the **mail intake** archives every attachment it took (held and
   already-loaded ones too — keeping costs nothing, loading is the gate), and the **Upload page** sends the raw file to
-  `POST /api/sga/archive` after a successful Apply (`keepSgaOriginal`, "Original kept" chip). `GET /api/sga/file?hash=` returns
+  `POST /api/sga/archive` after a successful Apply (`keepSgaOriginal`, "Original kept" chip) — the bill and, since 30 Oct 2026,
+  Rita's travel workbook too (`keepOriginal(TRAVELUP)`; only the bill's Apply posted its bytes, so a travel year dropped on Upload
+  data was loaded and its original lost). The page sends `X-File-Kind` (it routes a file by its sheets, not its name); without it
+  the name decides (`Travel Expenses` = travel). Pinned by `test/sga_archive.test.js`, `test/review_1027_travel.test.js`. `GET /api/sga/file?hash=` returns
   the original; `/api/sga` carries `sources`; the Travel tab's Bills on file table says "kept · download" / "not kept" / "no
   record" per bill. **A mail whose file is already loaded (same bytes → same key, status ok) is archived and receipted, never
   queued again** (`already_loaded`) — so re-sending a bill to sga@cims.work is the way to archive an original without
@@ -1073,7 +1076,11 @@ recnTLnsjGVcXs4EU, rec2dsh7hh8mIYwgV, recJIAzBJv8SDDl1N, recTAzAfzjpC0bSXX):
   `CC_*_SQL` join reads the mark and the tag); **off the bench and the seats** (a "Training visit · trainer" line under the
   ship's cards — `sec.visits` — never on the timeline, the Gantt or the dashboard); **off the crew's statement** (Miguel, 21 Oct
   2026: "left off the crew's statement, is a training visit"; `statementContracts` skips the leg, so its row and its days are
-  not printed — the PDF, its email and the internal crew file's statement pages). The profile's time at sea still counts its days. The
+  not printed — the PDF, its email and the internal crew file's statement pages). **Rita's card for a trainer, once started, is the
+  ship's visit line too** (night watch, 3 Nov 2026: Jonathan Alonzo's Spectrum card, 3 → 11 Nov, drew as a seat "awaiting the TDG
+  file", the audit site listed him aboard and the SeatReader made him HON's outgoing printer — HON opened a final count for him):
+  the board reads the schedule's answer (`visitCardIds(HIST)`, the cards `markAssignmentVisits` marked) and draws the card as
+  `sec.visits` (`cardVisitLine`), a tap opening the card's own panel; before its sign-on it stays a plan. The profile's time at sea still counts its days. The
   mark belongs to the trip that embarked that day: a later file that moves the embark makes it a new trip. (The same
   morning this was Jonathan's id alone, PR #284, then a per-trip tick, PR #285.) Checked on the 17 Oct 2026 production
   data before merging: Score Card inputs, statements and schedule legs identical for all 108 crew. Pinned by
@@ -1139,6 +1146,9 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   preview, never a real link. **hub.cims.work** with no link is the hub's landing page (`hubHomePage`), never the console.
 
 ## 10l. NORWEGIAN GETAWAY — NCL's pilot hull on the console (Miguel, 20 Oct 2026: "yes get away i the console")
+**PAUSED — Miguel, 16 Nov 2026: "paused until NCL give us the green light."** `VESSEL_REF` Getaway carries no `from`, so the
+board draws no Getaway section, no empty hull and no red dashboard tile; the hull, its brand rules and its words below stay. Joe Art
+Eresmas' card was removed (he is On board Solstice). On NCL's date, set `from` again and the section below comes back.
 In service **16 Nov 2026** (Brain rec2lUszqqzau4xns, which supersedes the tracker's 15 Nov and the 12 Nov anchor; the ship's
 auto-brief still reads 16 Oct, flagged to Miguel); the first printer, Joe Art Eresmas (SC-0038131, now aboard Solstice), signs
 on 9 Nov (recbpoXVhLjn9Ordl). Pinned by `test/getaway.test.js`.
@@ -1176,7 +1186,7 @@ reports tab .. crew survey"; mock-ups approved 23 Oct 2026 ("1. yes. 2. yes or o
   Yes = 1–5. The supervisor statement names the line's title: Royal GSM, Celebrity DCM, Azamara BOM, NCL **shipboard manager**.
 - **Who is asked**: a contract the Keyman board shows ENDED (offSource tdg / rita / card — a projected sign-off that passed is
   held, still aboard, never asked), never a training visit, **3 days after the sign-off** (`surveyDue`: off on or before
-  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on; Miguel, 23 Oct 2026,
+  today − `SURVEY_DELAY_DAYS` = 3, within `SURVEY_CATCHUP_DAYS` = 30 (TDG's file confirms a debark up to three weeks late — 14 missed two of three on the 22–25 Oct 2026 files), never before the switch went on (night watch, 15 Nov 2026: a Contract Counter contract closed by the sign-off Rita typed carries offSource rita, TDG's act_off tdg — `fetchRecordedSignoffs` → `applyRecordedSignoffs`; it carried none, so Edward Francis Guazon, Liberty, off 5 Nov, was never asked once the 10 Nov file earmarked him for Icon with no dates; pinned by `test/ship_leg_source_sql.test.js`); Miguel, 23 Oct 2026,
   "ok go ahead": the delay gives Rita time to record why a contract ended, so a Performance / Medical / Compassionate end
   is not asked — it was the morning after until then). One per contract (`ux_crew_survey_contract` on sc + sign-on).
 - **The emails** (`hr.survey.invite.v1`, `hr.survey.answers.v1`, canonical letterhead): the invitation To the seafarer's own
@@ -1668,7 +1678,77 @@ questions (his answers land in the sections they change). Pinned by `test/review
   duplicate merged): TDG's Earmarked word for the hull his contract is still RUNNING on (a live leg there) is his next
   contract, not the end of this one — the board seats him (`earmarkedHere`) and never ends the leg "per the TDG file".
 - Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
-  audit request ar_eb101ea1 on Kevin Jugao is LIVE (test_mode 0) — Miguel says when to void or cancel it; do not grade it.
+  audit request ar_eb101ea1 on Kevin Jugao was REMOVED on Miguel's word, 16 Nov 2026 ("remove keving jugao test .. across
+  the app"): its request, 2 uploads, 116 count lines and 2 send-log rows deleted (never graded, no outcome); backups
+  `bak_audit_request_jugao_20261116`, `bak_audit_upload_…`, `bak_audit_count_…`, `bak_audit_send_log_…`; activity_log
+  `act_audit_jugao_test_removed_20261116`; its R2 files left in place. Pursuit is free for the next audit.
+
+## 11g. OTHER APPS ASK THE BOARD WHO IS ABOARD — Miguel, 30 Oct 2026 ("why is the wrong crew in this ship??? review", then "go")
+HON's Reflection handover (30 Oct) named Michael Angelo Resposo as the man aboard: HON read the console's D1 itself, from
+Rita's cards and the Contract Counter (`keyman_contract3`), which since 7 Oct is history (§10d). The Counter still had him
+on Reflection 16 Jan – 17 Jul with no sign-off; TDG's file has Bernard Paqueo aboard since 17 Jul and Resposo on Apex since
+7 Oct. **Who is aboard, who leaves first and who relieves him is answered by the console, never re-derived by another app**:
+`SeatReader`, a NAMED entrypoint in worker.js (reachable only through a service binding that names it — cims-hon's
+`HR_SEATS` — never from the internet, no token), returns `shipSeats(rotationSections)` (`src/ship_seats.js`, pure): aboard =
+the audit's `aboardOf` (TDG's seat, held included; Earmarked-here; Rita's awaiting card; never a visit), outgoing = the
+contract ending first, incoming = the one reliever rule (`assignRelievers`). A rule changed on the board reaches HON the same
+day. Read only. Pinned by `test/ship_seats.test.js`. An app that still reads `keyman_contract3` or `assignment` to decide who
+is aboard is a defect.
+
+## 11h. Invariants from the 16 Nov 2026 bug hunt (Miguel: "find bugs and fix them .. read the brain and also code .. also the logic of the app")
+Six readers, every finding reproduced on the old code first. Pinned by `test/bughunt_1116.test.js`,
+`test/one_person_one_ship.test.js`, `test/audit_visit.test.js`, `test/audit_request.test.js`.
+- **ONE PERSON, ONE SHIP.** On 9 Nov 2026 the console emailed Joe Art Eresmas "welcome aboard Norwegian Getaway" while TDG
+  had him On board Solstice and Rita's own typed Solstice sign-off read 15 Mar 2027: his Getaway card's 9 Nov sign-on had
+  come, and the last file (7 Nov) was dated before it, so nothing contradicted it. A card whose sign-on has come is NOT
+  aboard-awaiting-the-file while the schedule has the same crew under a running contract on ANOTHER hull whose sign-off —
+  TDG's, Rita's typed date or a reliever card — is after the card's sign-on (`cardOverlapsSeat` / `dropOverlappedCards` in
+  `ship_leg_source.js`, read by the schedule and by the board's `awaitingCard`). A projected sign-off says nothing; a seat
+  TDG holds past its sign-off has ended for Rita; a transfer Rita dated (old sign-off on or before the card's sign-on)
+  stands. The card stays on the board as a plan. Checked on the 16 Nov production cards: none dropped.
+- **A signed-in POST from another host is refused before ANY handler** (`crossSite` right after `getSession`): the cookie is
+  `Domain=cims.work`, and the survey, hub, welcome and sign-off routes are dispatched before the `/api` block that held
+  the only check — a page on a sibling host could flip an automation switch or send a crew email as whoever was signed in.
+- **The travel name bridge swaps only on agreement**: a swapped name is taken when surname AND first name agree with one
+  crew (`agreed`), never on a lone surname ("Tatel, Joseph", an NCL trainee, was filed on Emil Rondy JOSEPH; four names).
+- **The mail intake**: an EMPTY envelope sender vouches for nobody (the gate opened on the typed From alone); a bill named
+  `DG3_SGA_EXCEL_NOVEMBER_2026.xlsx` or `… 2026_REVISED.xlsx` is still the bill and says its month (`SGA_NAME_RX`, one
+  pattern for the intake, the inbox and the dormant sync).
+- **A refund is a movement**: a refund-only row of Rita's workbook (negative total) is kept (`total === 0` skips), and the
+  page's Category filter keeps a negative amount.
+- **The intel body** is decoded when `Content-Transfer-Encoding` is written above `Content-Type` (the part's whole header
+  block is read, and only its own `content-transfer-encoding:` line).
+- **The dashboard**: with no closed month the travel pace tick is at 0 (it read 100% in January); Norwegian crew are counted
+  on the crew card once there are any.
+- **One undated TDG earmark relieves one seat** (`assignRelievers`): the seat leaving first takes him, the other reads "no
+  reliever yet". "1 month", never "1 months" (welcome pass, survey).
+- **The audit**: `GET /api/audit/visit` answers `not_complete` until the crew has SENT the count (it handed OBP's on-hand per
+  line to anyone on the open site, the seafarer counting included — the blind count, §10i); HON answering "ok" with an EMPTY
+  OBP list no longer makes the documents-in email say "Every line agrees" — the request's snapshot is compared instead.
+
+**Batch 2, the same day.** Pinned by `test/bughunt_1116.test.js`, `test/sga_hold.test.js`, `test/house_pass.test.js`,
+`test/ship_leg_source_sql.test.js`.
+- **A bill's cost columns add up to its lines** (`parseSgaManning`: `cols_off`, `cols_gap`, `unknown_cols`). TDG's AMOUNT is
+  read on its own, so a new or renamed cost column was dropped in silence while the bill still "reconciled". Every line of
+  the 15 bills July 2025 – September 2026 adds up to the cent, so a gap is a column the console does not know: the Upload
+  review says it (amount, lines, the header), and a bill that arrives by itself is HELD (`held: "unknown_column"`, the
+  Travel tab's Needs a decision names the header) like one that does not reconcile (17 Oct 2026 rule). Rita's Upload still
+  loads it — TDG's amount stands, that money is in no category until the column is added to `SGA_COLS`.
+- **The staff-house pass goes once per contract** (`housePassNear`): its log is keyed on the sign-off date and it has no
+  request table, so a sign-off that moved a day after the pass went sent it again to the crew, Rita, Miguel and Maryjoy. A
+  house row for the same crew within 21 days is the same contract (marked `same-contract`).
+- **A running contract with no sign-off on file still runs** (`welcome_context.legWithOff`): Rita's card saved with the Off
+  date blank read "Between contracts" on the Crew Hub and was never welcomed. Read as projected (sign-on + 7 months, Azamara
+  5, `reliever.projectedOff`) and said as projected. A date on file is never replaced.
+- **The Crew Hub's day counter**: the sign-on is day 1 and the sign-off the last day (it read "Day 153 of 153 · 1 day to
+  go" on the eve and "day 154" in the header on the day).
+- **Rita's typed sign-off reaches the Counter contract within `ABSORB_DAYS`** (`fetchRecordedSignoffs`): the contract modal
+  files it under the file's embark, which can sit a few days from the Counter's sign-on. No production row differed on
+  16 Nov; the join to the day is what left a Counter leg open once TDG moved the crew's row on.
+- **The crew's audit page** keeps what is on it when one refresh fails (a toast, not an error card over the count).
+- **Left for Miguel, not built**: a contract whose sign-on the console learns from TDG's file more than
+  `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
+  since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
 
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
@@ -1856,6 +1936,57 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   quality, not on a mark …" and that the auditor sees the same reading. Built in code from HON's measurement, the same lines
   Dexter's app shows (`p43Lines`) — no model writes it, nothing is guessed, never "replace". Pinned by
   `test/audit_request.test.js`.
+- **A BROWSER THAT CANNOT CHOOSE A FILE IS SAID, NEVER SILENT** (6 Nov 2026, Mark John Bornea, Independence; Miguel: "when he
+  clicks the box to chose the file.. is not able to chose the file", then "can we prevent this to happen again"). His request
+  received no file and no count; the page, rebuilt in Chromium with his real request, opens the chooser on a tap on a desktop, an
+  iPhone and an Android phone — so the box fails only where the BROWSER cannot pick a file: a mail or chat app's own browser on
+  Android, or a desk that blocks file dialogs (Darryl Ramos, Constellation, HON, 1 Oct 2026). The crew's page (`audit_upload_ui.js`)
+  now: (1) inside an Android app's browser (the WebView's "; wv)", Facebook / Instagram / Line / WeChat) says so at the top with
+  "Open in Chrome" and **Copy the link**; (2) a tap after which the page neither lost focus, nor was hidden, nor got a file or a
+  "cancel" within `PICK_MS` = 6 s says "Nothing opened?" under THAT box (Chrome / Edge, drop the file, or reply to the email with
+  it) — never on an iPhone, whose picker is a sheet that does not blur the page; a "cancel" or a file clears it; (3) a file DROPPED
+  on a box on a computer is sent for that press and document — and SAID (Miguel, the same afternoon, after seven opens from Firefox on
+  Linux and still no file: "can u make it drag and drop thise rectangles .. besides clicking"): on a computer every
+  empty box reads "Drag here or click", every box lights up green the moment a file is dragged over the page (`body.dragfiles`, a
+  depth count), and the "Nothing opened?" line leads with dragging the file from the folder. **Every open of the page is logged** (`activity_log`
+  `audit_page_open`: the request id and the browser's own User-Agent, no crew id), so the next "the box does nothing" is read
+  from the log, never guessed; since the same evening the line also carries the network the open came from (` | AS<n> <owner>`,
+  Cloudflare's own read of the address). Pinned by `test/audit_file_picker.test.js`, `test/audit_request.test.js`.
+- **THE EMAIL'S LINK CAN OPEN IN MIMECAST'S PROTECTED VIEWER, AND THE VIEWER TAKES NO FILE** (6 Nov 2026, Miguel's screenshot of
+  Mark's link: "mimecast Browser Isolation", a 5-minute session; "the links open on a sub page under mine-cast .. figure it out
+  and ensure this comes off"). **Correction of the paragraph above: the "Firefox on Linux" opens were never the ship's computer.**
+  They are Mimecast Browser Isolation: the mail system Mimecast rewrites the email's link, and on a click it opens the page in a
+  browser running on Mimecast's side, drawn in a window that takes no file from the computer — so neither the box nor a drag can
+  work there, and #379's drag could not help Mark. The crew's page now treats a Linux desktop browser as that viewer (`VIEWER` in
+  `audit_upload_ui.js`; not Android, not a Chromebook — every Linux open of Mark's link lines up with the viewer; the ship and
+  office computers in the log run Windows or macOS): the top says **Open this page in Chrome or Edge**, why, the whole address to
+  select (`#addr`) with **Copy the address**, and "reply to the email with the files"; each box reads "Open in Chrome first", never
+  "Drag here", and its "Nothing opened?" line points to the top. **What turns it off is not in this code**: whoever runs Mimecast for
+  the mailbox (RCCL for the ship mailboxes `*_printerspecialist@rccl.com`; DG3 IT if dg3.com runs it too) adds cims.work and its
+  hosts as a permitted URL that is not rewritten or isolated — Miguel's ask to make. The same viewer would meet every cims.work link
+  read in that mail — hon.cims.work's uploads behind the instructions email's button too (inferred, not yet seen in a log). Pinned by `test/audit_file_picker.test.js`.
+- **A PART-LIFE % IS SHOWN ONLY FROM A READ HON VERIFIED** (Miguel, 6 Nov 2026, over the Independence documents-in email's "72
+  parts past rated life": "is it true these numbers percetages are so high ??"; then "yes. all of it"). It was not: on Mark John
+  Bornea's Machine 2 six different parts read 6,387,753%, "times replaced" read in the millions on both presses, and "(Page)" rows
+  (page counts) were listed as percentages. HON's Management List reader is a model transcribing 52 scanned pages, and nothing
+  checked what it returned; 13 reads stored in cims-hon (16 Oct – 2 Nov 2026) show the same faults (Oasis 886,480%, one value
+  copied across unrelated parts on Liberty and Ascent, summarised names on Quantum and Ovation). `audit_read.shownLife` is the ONE
+  gate, applied where a stored read is loaded (`machinesRead`, so the documents-in email, the request screen, the visit, Before the
+  visit and the filed record all read the same answer): a machine-list read without HON's `lifeVerified: true` shows NO percentage
+  and is never "no part past its rated life" — it says **Part life not verified** (`lifeUnverified`; the email's tile reads "–
+  part life not verified", a clean press reads "No marks"); the crew is told "Read. Thank you.", never a count of parts. Every read
+  stored before 6 Nov 2026 is unverified. HON marks a read verified once its reader checks the figures against the document (the
+  rebuild, cims-hon). Pinned by `test/audit_request.test.js` (Mark's stored read, end to end). **HON's read version 5** (cims-hon, 6 Nov 2026) reads each life figure twice, from the list's life blocks and from its
+  Special parts counter, and keeps it only where the two agree; HON's `LIFE_LIVE` switch keeps every figure held until the
+  stored v5 reads match nine lists read by eye. Here: `mmlReadState` treats a list whose figures were compared and did not
+  agree (`lifeCheck` without rows) as the right document, "not verified", never "no parts-life page"; the summary keeps
+  `lifeChecks`, `lifeChecked` and each figure's two sides (`check`); the hourly sweep re-reads, newest first, two an hour,
+  every OK Management List read below `MGMT_READ_VERSION` (`rereadUpload`), stops for the hour while HON still answers
+  an older version, and never lets a re-read that is not "ok" replace a good read (it is noted on `read_json.reread`). **Read version 6, the same evening** (Miguel, sending three
+  life pages: "from the management list.. is all u need .. for right now.. identfy those .. and read them"): HON reads the
+  list's life page twice, two ways (its cells, and its value rows copied as text and parsed in code), and no longer reads
+  the Special parts counter; eighteen figures, the transfer belt included. `MGMT_READ_VERSION` = 6; a figure's second side
+  is `second` (v5's `counter` still reads); the "no parts-life page" words point at the Maintenance counter page, pp. 3–5.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`

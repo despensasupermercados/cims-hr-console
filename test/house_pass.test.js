@@ -154,7 +154,8 @@ function rail({ legs, settings = {}, ackRows = [], withHouse = true }) {
           if (/FROM (instr_ack|ack_request)/.test(sql)) return ackRows.find((r) => r.sc === st.args[0]) || null;
           return null;
         };
-        st.all = async () => (/FROM crew c/.test(sql) ? { results: legs.map((l) => ({ agency_id: l.sc, email: l.email === undefined ? "crew@example.com" : l.email, redacted: 0 })) } : { results: [] });
+        st.all = async () => (/SELECT seq FROM auto_send_log WHERE sc=\? AND kind='house'/.test(sql) ? { results: marked.filter((m) => m.sc === st.args[0] && m.kind === "house").map((m) => ({ seq: m.seq })) }
+          : /FROM crew c/.test(sql) ? { results: legs.map((l) => ({ agency_id: l.sc, email: l.email === undefined ? "crew@example.com" : l.email, redacted: 0 })) } : { results: [] });
         return st;
       },
     },
@@ -182,6 +183,25 @@ test("rail: a seat three days out gets the pass once — logged as kind 'house',
   const r2 = await h.run(h.env, h.event);
   assert.equal(r2.sent, 0, "second morning: already on the log");
   assert.equal(h.house.length, 1);
+});
+
+// 16 Nov 2026 bug hunt: the log is keyed on the sign-off DATE, so a sign-off that moved a day after the pass went was a
+// new key and the crew, Rita, Miguel and Maryjoy got the pass a second time.
+test("rail: the sign-off moves a day after the pass went — the same contract, no second pass; another contract months later still gets its own", async () => {
+  const legs = [{ sc: "SC-1", name: "Bernard Paqueo", ship: "Reflection", off: plus(2), port: null, ctx: { brand: "Celebrity" } }];
+  const h = rail({ legs, settings: { auto_send_house_enabled: "true", auto_send_house_since: plus(-30) } });
+  await h.run(h.env, h.event);
+  assert.equal(h.house.length, 1);
+  legs[0].off = plus(3);                                   // Rita moves the sign-off one day
+  const r2 = await h.run(h.env, h.event);
+  assert.equal(h.house.length, 1, "no second pass for the same contract");
+  assert.equal(r2.sent, 0);
+  assert.deepEqual(h.marked.map((m) => m.note), [null, "same-contract"]);
+  // a pass from his previous contract (seven months ago) is not this one
+  const far = rail({ legs: [{ sc: "SC-1", ship: "Reflection", off: plus(3) }], settings: { auto_send_house_enabled: "true", auto_send_house_since: plus(-300) } });
+  far.marked.push({ sc: "SC-1", seq: +plus(-210).replace(/-/g, ""), kind: "house", note: null });
+  await far.run(far.env, far.event);
+  assert.equal(far.house.length, 1);
 });
 
 test("rail: seven days out is NOT three — the pass waits for its own window", async () => {
@@ -247,3 +267,16 @@ test("rail: a training visit never gets a house pass", async () => {
   await h.run(h.env, h.event);
   assert.deepEqual(h.house, []);
 });
+
+test("the pass renders on a phone: a real document with the viewport meta, and facts that stack with no CSS (28 Oct 2026)", () => {
+  const { html } = houseKeyCardEmail({ name: "Maria Santos", first_name: "Maria", ship: "Azamara Pursuit", signoff_date: "2026-10-31", today: "2026-10-28" });
+  assert.match(html, /^<!DOCTYPE html/);
+  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1">/);
+  assert.match(html, /-webkit-text-size-adjust:100%/, "iOS Mail keeps the sizes as written");
+  assert.doesNotMatch(html, /<style/i, "still no style block: every width works with no CSS");
+  // the four facts and the two dates are inline blocks of at most 240px: two across on a desktop, stacked on a phone
+  assert.equal((html.match(/display:inline-block;width:100%;max-width:240px/g) || []).length, 6);
+  assert.match(html, /<!--\[if mso\]>/, "Outlook desktop gets a ghost table for its two columns");
+  assert.doesNotMatch(html, /width="40%" align="right"/, "the 60\/40 right-aligned split that broke on a phone is gone (the mast's own 60\/40 rule stays)");
+});
+

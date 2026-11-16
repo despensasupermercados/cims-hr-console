@@ -12,7 +12,7 @@ import { surveyAnswersEmail } from "./emails/hr.survey.answers.v1.js";
 import { surveyPage, surveyThanksPage, surveyGonePage } from "./crew_survey_page.js";
 import { composeSurveyReport } from "./crew_survey_pdf.js";
 import { shipCode, shipWord } from "./ship_codes.js";
-import { mdShort, mdParts } from "./span_md.js";
+import { mdShort, mdParts, mdWords } from "./span_md.js";
 import { newHubToken, TOKEN_RX } from "./crew_hub_routes.js";
 
 export const INVITE_TEMPLATE = "hr.survey.invite.v1", ANSWERS_TEMPLATE = "hr.survey.answers.v1";
@@ -23,7 +23,7 @@ export const dmy = (s) => (iso(s) ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1
 const dm = (s) => (iso(s) ? `${+s.slice(8, 10)} ${MON[+s.slice(5, 7) - 1]}` : "");
 const cap = (w) => (w ? w[0].toUpperCase() + w.slice(1) : "");
 const shortOf = (ship) => cap(shipWord(ship)) || ship || "";
-const aboardOf = (on, off) => { const p = mdParts(on, off); return p ? (p.d ? mdShort(on, off) : `${p.m} months`) : ""; };
+const aboardOf = (on, off) => { const p = mdParts(on, off); return p ? (p.d ? mdShort(on, off) : mdWords(on, off)) : ""; }; // "1 month", never "1 months" (16 Nov 2026)
 // "raymond.quiming@gmail.com" → "ray•••@gmail.com": the page names where the copy goes without printing the address whole.
 export const maskEmail = (e) => { const m = /^([^@]+)@(.+)$/.exec(String(e || "").trim()); return m ? m[1].slice(0, 3) + "•••@" + m[2] : null; };
 const PAGE_HEADERS = { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow", "Referrer-Policy": "no-referrer" };
