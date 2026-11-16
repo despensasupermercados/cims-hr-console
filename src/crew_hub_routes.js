@@ -8,7 +8,7 @@ import { hubPage, hubGonePage } from "./crew_hub.js";
 import { nextPayday } from "./payroll.js";
 import { shipCode } from "./ship_codes.js";
 import { EXPENSE_XLSX_B64, CALENDAR_PNG_B64 } from "./hub_assets.js";
-import { currentLeg, welcomeContext, markCardVisits } from "./welcome_context.js";
+import { currentLeg, welcomeContext, markCardVisits, legWithOff } from "./welcome_context.js";
 import { welcomeEmail } from "./emails/hr.welcome.v1.js";
 import { shipMailbox } from "./audit.js";
 export { currentLeg };
@@ -31,6 +31,7 @@ const firstWord = (s) => String(s || "").trim().split(/\s+/)[0] || "";
 // The page's model: who, the running contract and how its sign-off was set, the contract number (count + 1) or null.
 export function hubModel({ crew, leg, count, today }) {
   const m = { first: firstWord(crew && crew.first_name), today, contractNo: Number.isInteger(count) && count >= 0 ? count + 1 : null };
+  leg = legWithOff(leg);   // a card saved without a sign-off still runs: projected, and said so (16 Nov 2026)
   if (leg && iso(leg.on) && iso(leg.off)) {
     Object.assign(m, { ship: leg.ship || null, code: shipCode(leg.ship) || null, brand: leg.brand || null, on: iso(leg.on), off: iso(leg.off),
       offSource: leg.offSource || "projected", offProjected: !leg.offSource || leg.offSource === "projected" });
