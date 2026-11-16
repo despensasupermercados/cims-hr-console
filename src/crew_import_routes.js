@@ -54,6 +54,35 @@ const SNAPSHOT_SQL =
 const snapshotStmt = (env, r, runAt, runId) =>
   env.DB.prepare(SNAPSHOT_SQL).bind(String(r.agency_id), r.status ?? null, r.vessel_observed ?? null, runAt, runId, r.name ?? null, r.status_raw ?? null, r.embarked_at ?? null, r.debarked_at ?? null);
 
+// EVERY CONTRACT THE FILE HAS SHOWN, KEPT (registry_contract, bug hunt 16 Nov 2026). registry_snapshot holds ONE row per
+// crew — the latest file's. The day TDG moves a crew's row on (Earmarked for the next ship with no dates, or a new embark),
+// the contract that row described is gone from the console: its embark, its debark, the +1 on the completed count
+// (Padilla, Quiming, Racho and Guazon lost theirs on the 10–15 Nov files; Paqueo's Reflection contract left the schedule
+// when TDG embarked him on Radiance). This table is the RECORD: one row per crew and embark date, TDG's debark kept once a
+// file gives it, the first and last file that carried it, and the file that stopped carrying it (closed_run_at).
+// NOTHING READS IT YET: how a kept contract is drawn, dated and counted is Miguel's to decide (Brain rec3UjhXkYKvfz4N0).
+// Written AFTER the import's own batch, on its own: a failure here never fails an Apply. A file with no embark dates
+// says nothing about contracts and closes nothing.
+export const REGISTRY_CONTRACT_DDL = "CREATE TABLE IF NOT EXISTS registry_contract (sc TEXT NOT NULL, embarked_at TEXT NOT NULL, vessel TEXT, debarked_at TEXT, name TEXT, first_run_at TEXT NOT NULL, last_run_at TEXT NOT NULL, closed_run_at TEXT, PRIMARY KEY (sc, embarked_at))";
+// An empty record starts from the rows the console still holds (the latest file's); a record with rows is never re-seeded.
+export const REGISTRY_CONTRACT_SEED_SQL = "INSERT OR IGNORE INTO registry_contract (sc, embarked_at, vessel, debarked_at, name, first_run_at, last_run_at, closed_run_at) " +
+  "SELECT agency_id, substr(embarked_at,1,10), vessel, CASE WHEN debarked_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN substr(debarked_at,1,10) END, name, run_at, run_at, NULL FROM registry_snapshot " +
+  "WHERE embarked_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' AND run_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM registry_contract)";
+const isoDay = (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
+export async function keepContracts(env, registry, runAt) {
+  const rows = (registry || []).filter((r) => r && r.agency_id && isoDay(r.embarked_at));
+  if (!rows.length) return { kept: 0, closed: 0 };
+  const stmts = rows.map((r) => env.DB.prepare(
+    "INSERT INTO registry_contract (sc, embarked_at, vessel, debarked_at, name, first_run_at, last_run_at, closed_run_at) VALUES (?,?,?,?,?,?,?,NULL) " +
+    "ON CONFLICT(sc, embarked_at) DO UPDATE SET vessel=excluded.vessel, debarked_at=COALESCE(excluded.debarked_at, registry_contract.debarked_at), name=COALESCE(excluded.name, registry_contract.name), last_run_at=excluded.last_run_at, closed_run_at=NULL")
+    .bind(String(r.agency_id), isoDay(r.embarked_at), r.vessel_observed ?? null, isoDay(r.debarked_at), r.name ?? null, runAt, runAt));
+  // a contract this file no longer carries: stamped once with the file that dropped it (never a date the console infers)
+  stmts.push(env.DB.prepare("UPDATE registry_contract SET closed_run_at=? WHERE closed_run_at IS NULL AND last_run_at < ?").bind(runAt, runAt));
+  const res = await env.DB.batch(stmts);
+  const last = res && res[res.length - 1];
+  return { kept: rows.length, closed: Number((last && last.meta && last.meta.changes) || 0) };
+}
+
 // The file's word per crew, from the parsed rows: the LAST row of a repeated agency id stands, and a row
 // the file keyed on the cruise-line id (D7 rekeyed) is carried under the crew's real agency id.
 function stagedRegistry(mapped, diff) {
@@ -190,10 +219,11 @@ export async function apiCrewImportStage(request, env, deps) {
   // previous (8 Oct 2026): the LAST file's word per crew, read before this file replaces it — a crew it had On
   // board another ship whom this file no longer has aboard has signed off, and their earmark is ready for TDG.
   const [prevRows, shipRows] = await Promise.all([
-    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
+    env.DB.prepare("SELECT agency_id, status, raw_status, vessel, embarked_at, debarked_at FROM registry_snapshot").all().then((r) => (r && r.results) || []).catch(() => []),
     env.DB.prepare("SELECT name FROM vessel ORDER BY name").all().then((r) => (r && r.results) || []).catch(() => []),
   ]);
   const em = earmarkDiscrepancies({ projections, registry, today, shipOf: SHIP_OF, previous: prevRows });
+  review.early_moves = earlyMoves(registry, prevRows, today, SHIP_OF);
   review.earmarks = em.items;
   review.ships = shipRows.map((r) => r.name).filter(Boolean); // the Edit choice's ship list (the names a move accepts)
   // A TDG earmark Rita REJECTED from the board (earmark_dismiss, worker.js) is not re-created while the file
@@ -201,6 +231,7 @@ export async function apiCrewImportStage(request, env, deps) {
   const dismissed = deps && deps.dismissed ? await deps.dismissed(env).catch(() => []) : [];
   review.tdg_earmarks = tdgEarmarksWithoutCard({ projections, registry, shipOf: SHIP_OF, exclude: em.items.filter((i) => i.kind === "other_person" && i.file && i.file.other).map((i) => i.file.other.sc + "|" + String(i.ship).trim().toLowerCase()).concat(dismissed || []) });
   review.registry = registry;
+  review.schedule = scheduleCheck(registry, prevRows);
   review.km_mismatch = kmMismatch;
   review.groups.unretire = unretireItems(registry, retiredByAgency);
   review.counts.unretire = review.groups.unretire.length;
@@ -208,6 +239,44 @@ export async function apiCrewImportStage(request, env, deps) {
   // unparsed: non-empty date cells no reading could make a real date (kept as-is on the roster;
   // before 2026-09-05 they vanished silently because null means "blank in source").
   return J({ ok: true, file_hash, filename: body.filename || null, rows_seen: rows.length, invalidCount, unparsed, review });
+}
+
+// THE FILE DATES THE BOARD (§10d): sign-on = the file's EMBARKEDDATE. A file in which no crew On board carries one, while
+// the file on the board did, empties every seat's dates when applied — the board, the sign-off emails, the staff-house pass
+// and the welcome all read them (night watch, 29 Oct 2026: the 28 Oct 12:10 UTC upload, 108 rows, 50 On board, not one
+// embark date; the 27 Oct file had them: 28 seats lost their dates, 2 fell back to the Counter's, 2 left the board). Said
+// on the review before Apply, never a block: whether to apply stays Rita's.
+export function scheduleCheck(registry, previous) {
+  const onboard = (registry || []).filter((r) => r && r.status === "On board");
+  const dated = onboard.filter((r) => r.embarked_at).length;
+  const keptDated = (previous || []).filter((r) => r && r.status === "On board" && r.embarked_at).length;
+  return { onboard: onboard.length, dated, kept_dated: keptDated, lost: onboard.length > 0 && dated === 0 && keptDated > 0 };
+}
+
+// A FILE THAT MOVES A CREW BEFORE THEY LEAVE THEIR SHIP (night watch, 12 Nov 2026). TDG's file of 10 Nov 2026 had Bernard
+// Paqueo "On board MV RADIANCE OF THE SEAS, embarked 2026-11-14" while the kept file had him On board Reflection (embarked
+// 17 Jul, Rita's sign-off 13 Nov). The file keeps one row per crew, so applying it took his Reflection contract off the one
+// schedule: Reflection read nobody aboard, and HON cancelled the Reflection handover count (Paqueo to Darryl Ramos, 13 Nov).
+// The review said only "Current ship Reflection → Radiance, Take TDG". Listed here, before Apply, with what it does. Pure:
+// a row On board a hull with an embark still ahead of today, for a crew the kept file has On board ANOTHER hull and not
+// debarked. Warn, never block: Apply stays Rita's.
+export function earlyMoves(registry, previous, today, shipOf) {
+  const iso = (v) => { const s = String(v == null ? "" : v).slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
+  const t = iso(today);
+  const prev = {};
+  for (const p of (previous || [])) if (p && p.agency_id) prev[String(p.agency_id)] = p;
+  const out = [];
+  for (const r of (registry || [])) {
+    if (!r || r.status !== "On board") continue;
+    const on = iso(r.embarked_at), to = shipOf(r.vessel_observed);
+    if (!t || !on || on <= t || !to) continue;
+    const p = prev[String(r.agency_id)];
+    if (!p || (p.status || "") !== "On board") continue;
+    const from = shipOf(p.vessel), off = iso(p.debarked_at);
+    if (!from || from === to || (off && off <= t)) continue;
+    out.push({ agency_id: r.agency_id, name: r.name || null, from, to, embark: on });
+  }
+  return out;
 }
 
 // Rita's edit of one earmark in the review: { ship, sign_on, sign_off }, blanks falling back to the card. ISO
@@ -352,6 +421,11 @@ export async function apiCrewImportApply(request, env, deps) {
   if (kept) stmts.push(env.DB.prepare("DELETE FROM registry_snapshot WHERE import_run_id IS NOT ?").bind(importRunId));
 
   const results = await env.DB.batch(stmts);
+  // the contracts this file shows, kept on their own after the import is in (registry_contract; never fails the Apply)
+  let contracts_kept = null;
+  if (kept && deps && deps.ensureRegistrySnapshot) {
+    try { contracts_kept = await keepContracts(env, registry, run_at); } catch (e) { contracts_kept = { error: String((e && e.message) || e).slice(0, 160) }; }
+  }
   // THE FILE ABSORBS THE CARD (Miguel, 7 Oct 2026: "when Rita uploads a new TDG file matching that seafarer,
   // take the file's row and eliminate the green template"). A card the file CONFIRMS aboard — same crew, On
   // board the same hull — whose sign-on sits within ABSORB_DAYS of the file's embark (or the file carries no
@@ -472,6 +546,7 @@ export async function apiCrewImportApply(request, env, deps) {
     projections: { counts: proj.counts, items: proj.items.map(i => ({ id: i.id, sc: i.sc, crew_name: i.crew_name, ship: i.ship, verdict: i.verdict, file: i.file })) },
     cards_absorbed: absorbed,
     earmarks,
+    contracts_kept,
   };
   res.summary = applySummary(res); // ONE sentence for both import screens (they used to each compose their own)
   return J(res);

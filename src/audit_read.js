@@ -57,12 +57,30 @@ export function p43Assess(summary, auditor) {
 // checked `lifeVerified: true`; every other read — every read stored before 6 Nov 2026 included — shows no percentage,
 // never "no part past its rated life": it says "part life not verified". ONE definition, read by every surface.
 export const lifeTrusted = (s) => !!s && s.lifeVerified === true;
+// THE CODE IS THE SECOND READER (cims-hon, 10 Nov 2026; Miguel, 16 Nov 2026, for the audit: "copy the knowledge u build on the
+// HON app and transfer the knowledge here"). HON's audit door reads each life figure off the scan's own pixels and verifies a
+// figure only where the code and a vision read state the same number; it names every figure it could not verify
+// (`lifeNotShown`). A verified read with such a figure and no part past its rating is NOT a clean machine: one of the figures
+// it could not check may be past it. It reads "part life not verified" on every surface that knows two states (the
+// documents-in email), and the audit names what was checked (`lifePartial`).
 export function shownLife(s) {
-  if (!s || s.kind !== "machine-list" || lifeTrusted(s)) return s;
+  if (!s || s.kind !== "machine-list") return s;
+  if (lifeTrusted(s)) {
+    const ns = Array.isArray(s.lifeNotShown) ? s.lifeNotShown : [];
+    return ns.length && !(Array.isArray(s.lifeOver) && s.lifeOver.length) ? Object.assign({}, s, { lifeUnverified: true, lifePartial: true }) : s;
+  }
   // read version 5: a list whose two readings were compared claimed life figures even when none agreed (lifeChecks)
   const claimed = (Array.isArray(s.lifeOver) && s.lifeOver.length > 0) || s.lifeRows > 0 || s.lifeChecks > 0;
   if (!claimed) return s; // no life row read at all: "part life not read" stays what it is
   return Object.assign({}, s, { lifeOver: [], recommendation: null, lifeUnverified: true });
+}
+
+// Which code read an answer carries: { version, ok, shown } from HON's `lifeCode` (null when the code does not apply: an image,
+// not a PDF), or undefined from a HON older than its code reader — the answer the audit asks again (audit_request.codeAware).
+export function codeMark(res) {
+  if (!res || !Object.prototype.hasOwnProperty.call(res, "lifeCode")) return undefined;
+  const c = res.lifeCode;
+  return { version: c && c.codeVersion != null ? Number(c.codeVersion) : null, ok: !!(c && c.ok === true), shown: c && Number(c.shown) > 0 ? Number(c.shown) : 0 };
 }
 
 export function mmlReadState(res) {
@@ -85,13 +103,17 @@ export function mmlReadState(res) {
     const checks = Array.isArray(res.lifeCheck) ? res.lifeCheck.length : 0;
     if (rows === 0 && !checks) return { read_state: "wrong_doc", say: "No parts-life page was found in this file (the Maintenance counter page: Developer, Drum, Transfer belt, Charging corona, Toner filter and Developing unit life, pages 3 to 5 of the Machine Management List). Upload the whole list, every page, as one PDF.", summary: { kind: res.kind, lifeRows: 0, lifeOver: [], version: res.version || null } };
     const n = (res.lifeOver || []).length, ok = res.lifeVerified === true;
-    // the crew is told the file is in; a count of parts is said only from a verified read
-    return { read_state: "ok", say: !ok ? "Read. Thank you." : "Read. " + (n ? n + " part" + (n === 1 ? "" : "s") + " past rated life, for the team." : "No part past its rated life."),
+    const notShown = Array.isArray(res.lifeNotShown) ? res.lifeNotShown.slice(0, 24).map(String) : [];
+    // the crew is told the file is in; a count of parts is said only from a verified read, and "no part past its rated life"
+    // only when every figure was verified
+    return { read_state: "ok", say: !ok || (!n && notShown.length) ? "Read. Thank you." : "Read. " + (n ? n + " part" + (n === 1 ? "" : "s") + " past rated life, for the team." : "No part past its rated life."),
       summary: { kind: res.kind, lifeRows: rows, lifeChecks: checks, lifeChecked: res.lifeChecked === true,
         // each figure's two sides as read (key, first read, second read, agreed) — the evidence beside its read; HON names
         // the second side `second` from v6 (the life page's rows copied as text), `counter` in v5 (the counter row)
         check: checks ? res.lifeCheck.map((p) => [p.key, p.front, p.second !== undefined ? p.second : p.counter, p.ok]) : undefined,
-        lifeOver: res.lifeOver || [], lifeVerified: ok, recommendation: res.recommendation || null, version: res.version || null } };
+        lifeOver: res.lifeOver || [], lifeVerified: ok, recommendation: res.recommendation || null, version: res.version || null,
+        // HON's code check (10 Nov 2026): the figures it could not verify, by name, and which code read it was (codeMark)
+        lifeNotShown: notShown, code: codeMark(res) } };
   }
   if (res.kind === "settings-list") return { read_state: "wrong_doc", say: "This is the USER Management List (the settings). Print the MACHINE Management List, the long report with the life %, and upload that.", summary: { kind: res.kind } };
   return { read_state: "wrong_doc", say: "This file does not carry the part life. Print the MACHINE Management List, the long report with the life %, and upload that.", summary: { kind: res.kind || "unknown" } };

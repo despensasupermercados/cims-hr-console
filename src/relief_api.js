@@ -259,7 +259,11 @@ export async function saveReliefAssignment(env, payload) {
 // contract shell the relief insert created — but only when nothing else references it. Refuses
 // if a committed bonus outcome is tied to the contract. Printer legs (id "leg:...") are not
 // removable here.
-export async function removeReliefAssignment(env, id) {
+// opts.by: the signed-in user removing the card from the board (/api/relief/remove). The removal is then recorded on
+// activity_log IN THE SAME BATCH as the deletes (night watch, 10 Nov 2026: Joe Art Eresmas's Getaway card and its contract
+// were removed with no record of who or when). Callers that keep their own record (the import absorbing a card, an
+// earmark dismissed, Deploy) pass no opts and write nothing here.
+export async function removeReliefAssignment(env, id, opts) {
   id = String(id || "").trim();
   if (!id) return { ok: false, error: "id_required" };
   if (!id.startsWith("as_")) return { ok: false, error: "not_removable" };
@@ -293,8 +297,24 @@ export async function removeReliefAssignment(env, id) {
     env.DB.prepare("DELETE FROM relief_comment WHERE assignment_id=?").bind(id),
   ];
   if (contract_removed) writes.push(env.DB.prepare("DELETE FROM contract WHERE id=?").bind(cid));
+  // read before the DELETE runs: whose card, which ship, which dates
+  if (opts && "by" in opts) writes.unshift(env.DB.prepare(
+    "INSERT INTO activity_log (id,user_id,action,detail,at) SELECT ?, ?, 'relief_remove', " +
+    "COALESCE(cr.agency_id,'') || ' ' || COALESCE(a.vessel_name,'') || ' ' || COALESCE(a.sign_on,'') || ' → ' || COALESCE(a.planned_sign_off,'') || ' (' || a.id || ')', ? " +
+    "FROM assignment a LEFT JOIN contract k ON k.id = a.contract_id LEFT JOIN crew cr ON cr.id = k.crew_id WHERE a.id = ?"
+  ).bind("log_" + crypto.randomUUID(), opts.by == null ? null : String(opts.by), new Date().toISOString(), id));
   await env.DB.batch(writes);
   return { ok: true, id, mode: "remove", contract_removed };
+}
+
+// A card saved from the panel (a new earmark, a date or a ship changed): who, which card, the fields as sent. Best effort —
+// the save stands whatever the log does, as logActivity elsewhere.
+async function logCardSave(env, session, res, payload) {
+  const what = Object.keys(payload || {}).filter((k) => k === "crew_id" || ASSIGN_COLS.has(k)).map((k) => k + "=" + (payload[k] == null ? "" : String(payload[k])));
+  try {
+    await env.DB.prepare("INSERT INTO activity_log (id,user_id,action,detail,at) VALUES (?,?,?,?,?)")
+      .bind("log_" + crypto.randomUUID(), (session && session.email) || null, "relief_save", (res.mode + " " + res.id + ": " + what.join(", ")).slice(0, 500), new Date().toISOString()).run();
+  } catch {}
 }
 
 // Printer leg flags — PARTIAL upsert keyed by vessel_key (stores crew_name so a rotation resets).
@@ -366,7 +386,8 @@ export const RELIEF_CREW_PICKER_SQL =
     WHERE c.redacted = 0
     ORDER BY name`;
 
-export async function handleRelief(request, url, env) {
+// session: the signed-in user (worker.js); a card saved or removed here is recorded under their name (CLAUDE.md §8).
+export async function handleRelief(request, url, env, session) {
   const p = url.pathname;
   if (p === "/relief" && request.method === "GET") {
     // The card editor opens as an iframe on every click. Over Starlink that was a full page download each
@@ -493,12 +514,13 @@ export async function handleRelief(request, url, env) {
     let payload;
     try { payload = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
     const res = await saveReliefAssignment(env, payload);
+    if (res.ok) await logCardSave(env, session, res, payload);
     return jsonResp(res, res.ok ? 200 : 400);
   }
   if (p === "/api/relief/remove" && request.method === "POST") {
     let payload;
     try { payload = await request.json(); } catch { return jsonResp({ ok: false, error: "bad_json" }, 400); }
-    const res = await removeReliefAssignment(env, payload && payload.id);
+    const res = await removeReliefAssignment(env, payload && payload.id, { by: (session && session.email) || null });
     return jsonResp(res, res.ok ? 200 : 400);
   }
   if (p === "/api/relief/comments" && request.method === "GET") {

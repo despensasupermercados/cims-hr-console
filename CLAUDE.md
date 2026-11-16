@@ -1498,6 +1498,10 @@ fallback for a crew the file does not carry. Measured 24 Sep: the derivation was
 - **The registry import survives its own file**: a repeated agency id (last row stands, reported), a row keyed
   on the cruise-line id (carried under the real agency id), presence flags deduped while open and closed on
   reappearance, an open ship flag closed when a later file agrees with the registry.
+  **A file that dates nobody On board is said before Apply** (night watch, 29 Oct 2026: the 28 Oct 12:10 UTC file, 108
+  rows, 50 On board, not one EMBARKEDDATE, emptied the board's dates — 28 seats blank, 2 back on the Counter's dates, 2
+  off the board): `scheduleCheck` on the stage (the kept file read with its `embarked_at`), a red line on the Uploads
+  review naming both counts and asking for an export with EMBARKEDDATE. Never a block. Pinned by `test/crew_import_routes.test.js`.
 - **A plan that starts after the file's current contract ends is the next contract**, not a conflict
   (`counter_sync.diffCounter`). Dashboard birthdays and tiles use the derived status and visible crew.
 
@@ -1750,6 +1754,21 @@ Six readers, every finding reproduced on the old code first. Pinned by `test/bug
   `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
   since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
 
+**THE CONTRACTS THE FILE HAS SHOWN ARE KEPT — `registry_contract`, 16 Nov 2026 (the record only).** `registry_snapshot` holds
+ONE row per crew, the latest file's; the day TDG moves that row on (Earmarked for the next ship with no dates, or a new
+embark) the contract it described leaves the console: its dates on the statement and the profile, its Score Card, the +1
+on the completed count (`completedSince` reads the snapshot row alone). Seen on the 10–15 Nov files: Padilla, Quiming,
+Racho and Guazon lost their +1; Paqueo's Reflection contract (17 Jul – 13 Nov) left the schedule when TDG embarked him on
+Radiance. Since this PR every registry Apply writes one row per crew and embark date (`keepContracts`,
+`src/crew_import_routes.js`, migrations/0043, the same CREATE in `ensureRegistrySnapshot`): TDG's debark kept once a file
+gives it, the first and last file that carried it, and the file that stopped carrying it (`closed_run_at`). Written AFTER
+the import's batch, on its own (`contracts_kept` on the Apply answer; a failure never fails an Apply); a file with no
+embark dates closes nothing; an empty table is seeded once from the snapshot. **NOTHING READS IT YET**: how a kept
+contract is drawn, what ends it when TDG gave no debark (Rita's typed date, or the day the file dropped it), and whether
+it adds to the count are Miguel's to decide (Brain rec3UjhXkYKvfz4N0; night-watch draft #385 is the same question). The
+contracts lost before 16 Nov are not in it (the console no longer holds them); a fresh TDG count file restates the count.
+Pinned by `test/registry_contract.test.js`.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):
@@ -1987,6 +2006,15 @@ Dexter's audit app on this worker: design `docs/AUDIT_DESIGN.md`, plan `docs/AUD
   list's life page twice, two ways (its cells, and its value rows copied as text and parsed in code), and no longer reads
   the Special parts counter; eighteen figures, the transfer belt included. `MGMT_READ_VERSION` = 6; a figure's second side
   is `second` (v5's `counter` still reads); the "no parts-life page" words point at the Maintenance counter page, pp. 3–5.
+  **HON's code reader reaches the audit** (Miguel, 16 Nov 2026: "copy the knowledge u build on the HON app and transfer the
+  knowledge here to the audit app"). Since 10 Nov 2026 HON's audit door verifies a life figure only where its code read of the
+  scan's pixels and a vision read agree (cims-hon `mmlDigits.js`, `lifeWithCode`) and names the rest (`lifeNotShown`), without
+  changing its read version (6). The audit keeps HON's code mark on the read (`audit_read.codeMark`: version, ok, shown) and the
+  names not checked; the hourly sweep re-reads a list whose read has no code mark or an older code version (`MGMT_CODE_VERSION`
+  = 3, a twin of HON's `MML_CODE_VERSION`: change both; `codeAware` refuses an answer from a HON without its code reader). A
+  verified read with figures not checked and none past its rating is never a clean machine (`shownLife`: `lifePartial`, and
+  `lifeUnverified` for the documents-in email, which knows two states); the audit screens say "Part life partly checked" and
+  name what was not checked; the crew reads "Read. Thank you.". Pinned by `test/audit_request.test.js`.
 - **ONE PERSON AT A TIME PER SHIP** (Miguel, 20 Oct 2026, asked whether A.J. could be audited on the same visit as Kevin on
   Pursuit: "no . we do 1 perosn at the time per ship"). While a request is OPEN on a ship, no request is made on that ship
   for anyone: the next is asked once it is graded (filed) or cancelled. Open has ONE definition (`src/audit.js`
