@@ -16,9 +16,11 @@ import { normShip as auditShip } from "../src/audit.js";
 
 const SRC = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
 
-test("Getaway is a hull of the fleet: brand NCL, in service from 16 Nov 2026", () => {
+// PAUSED (Miguel, 16 Nov 2026: "paused until NCL give us the green light"): no in-service date, so the board draws no
+// Getaway section and no "empty ship in service" from 16 Nov; the hull, its brand and its words stay. NCL's date sets `from` again.
+test("Getaway is a hull of the fleet: brand NCL, paused (no in-service date) until NCL's green light", () => {
   const g = VESSEL_REF.find((v) => v.name === "Getaway");
-  assert.deepEqual([g.brand, g.homeport, g.from], ["NCL", "Miami", "2026-11-16"]);
+  assert.deepEqual([g.brand, g.homeport, g.from], ["NCL", "Miami", undefined]);
   assert.ok(validShipKeys(VESSEL_REF).has("getaway"));
   for (const raw of ["MV NORWEGIAN GETAWAY", "Norwegian Getaway", "NCL Getaway", "Getaway"]) assert.equal(canonShip(raw, VESSEL_REF), "Getaway", raw);
 });
