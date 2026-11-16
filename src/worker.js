@@ -26,7 +26,7 @@ import { TRAVEL_2025 } from "./travel_data.js";
 import { resolveBaseline, isMoneyUser, feedbackSubmittable } from "./policy.js";
 import { crewDataGaps, hasGaps } from "./datagaps.js";
 import { SHIP_HISTORY } from "./ship_history.js"; import { boardSource, boardLegsFromDb, fetchOpenAssignments, pendingProjections, cardOverlapsSeat } from "./ship_leg_source.js"; import { fileWordBySc, completedOff, boardIssues } from "./board_truth.js"; import { handleRelief } from "./relief_api.js";
-import { handleCrewImport } from "./crew_import_routes.js";
+import { handleCrewImport, REGISTRY_CONTRACT_DDL, REGISTRY_CONTRACT_SEED_SQL } from "./crew_import_routes.js";
 import { buildShipKeys, canonShipWith, validShipKeys, AZAMARA_SHORT, clientOf, UNASSIGNED, normShip as normShipKey } from "./shipname.js";
 import { htmlPage, etagFor } from "./etag.js";
 const SHIP_KEYS = buildShipKeys(VESSEL_REF); // the immutable reference table, keyed once per isolate
@@ -3389,7 +3389,11 @@ const ensureRegistrySnapshot = memoEnsure(async (env) => {
     addColumn(env, "ALTER TABLE assignment ADD COLUMN deploy_log_id TEXT"),
     // The import may write crew.gender (6 Oct 2026); its guard is this one, so the column is made here too.
     addColumn(env, "ALTER TABLE crew ADD COLUMN gender TEXT"),
+    // Every contract the file has shown, kept (16 Nov 2026, migrations/0043): written by the import after its batch.
+    env.DB.prepare(REGISTRY_CONTRACT_DDL).run().catch(() => null),
   ]);
+  // an EMPTY record starts from the latest file's rows (after the columns above exist); a record with rows is never re-seeded
+  await env.DB.prepare(REGISTRY_CONTRACT_SEED_SQL).run().catch(() => null);
 });
 // The STRICT hull matcher for the registry comparison (crew_flags.js): "MV JEWEL OF THE SEAS" meets
 // "Jewel"; an unreadable vessel never confirms anything. Built once per isolate.
