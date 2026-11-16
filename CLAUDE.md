@@ -1681,7 +1681,7 @@ questions (his answers land in the sections they change). Pinned by `test/review
 - **Earmarked for the ship he is aboard** (Ida Purnama, Xcel: "remember that Ida is onboard"; one person, SC-0040010, the
   duplicate merged): TDG's Earmarked word for the hull his contract is still RUNNING on (a live leg there) is his next
   contract, not the end of this one — the board seats him (`earmarkedHere`) and never ends the leg "per the TDG file".
-- Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. The test
+- Decided, nothing built: **Myrna Suarez** (Spa Hairdresser in TDG's file) — "ignore", no non-printer filter. **Hidden 16 Nov 2026** (Rita, on the Fleet Document Radar of that day: "ask the console to forget the spa girl, she was removed from TDG's file"): `crew.redacted = 1` on SC-0036160, the Hide button's own write (no cards, intel, bonus or kept contract on her), `activity_log` `act_hide_suarez_20261116`; she leaves every list and the radar; Restore from the Hidden cards list. The test
   audit request ar_eb101ea1 on Kevin Jugao was REMOVED on Miguel's word, 16 Nov 2026 ("remove keving jugao test .. across
   the app"): its request, 2 uploads, 116 count lines and 2 send-log rows deleted (never graded, no outcome); backups
   `bak_audit_request_jugao_20261116`, `bak_audit_upload_…`, `bak_audit_count_…`, `bak_audit_send_log_…`; activity_log
