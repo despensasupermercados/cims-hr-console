@@ -108,6 +108,10 @@ export function inventoryCount(c) {
   if (c.override === "cleared") return { zero: false, text: "Inventory count: CLEARED" + by + (gaps ? " (HON found " + gaps + ")" : "") };
   if (c.override === "upheld") return { zero: true, text: "Inventory count: wrong inventory, UPHELD" + by + (gaps ? " (" + gaps + ")" : "") };
   if (c.verdict === "wrong") return { zero: true, text: "Inventory count: wrong inventory" + (gaps ? " (" + gaps + ")" : "") + ". Ray or Rolando can clear it on the record" };
+  // "no gaps" is HON's word CLEAN and nothing else (bug hunt, 16 Nov 2026). Every judged count in HON says clean or wrong
+  // today; any other word (a new verdict, a blank on a judged row) used to read as "no gaps" and paid the factor. A word
+  // the console does not know holds the factor at 0 and says so, like a count it could not read.
+  if (c.verdict !== "clean") return { zero: true, text: "Inventory count: HON's verdict " + (c.verdict ? "\"" + String(c.verdict).slice(0, 40) + "\"" : "is blank") + " is not one the console reads: the handover factor is held at 0. Check it on the record" };
   return { zero: false, text: "Inventory count: no gaps" };
 }
 export const MONO_LIMIT = 20;
