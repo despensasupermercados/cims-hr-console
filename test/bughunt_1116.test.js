@@ -11,6 +11,8 @@ import { sgaPeriodFromName } from "../src/sga.js";
 import { parseMonthSheet, parseCimsSheet } from "../src/travel.js";
 import { assignRelievers } from "../src/reliever.js";
 import { welcomeContext } from "../src/welcome_context.js";
+import { hubModel } from "../src/crew_hub_routes.js";
+import { hubPage } from "../src/crew_hub.js";
 import { signToken } from "../src/auth.js";
 
 let DatabaseSync = null;
@@ -142,4 +144,34 @@ test("a contract of exactly one month reads '1 month' on the welcome pass", () =
   assert.equal(welcomeContext({ crew, legs: leg("2026-12-09"), today: "2026-11-09", links: {} }).months, "1 month");
   assert.equal(welcomeContext({ crew, legs: leg("2027-06-09"), today: "2026-11-09", links: {} }).months, "7 months");
   assert.match(readFileSync(new URL("../src/crew_survey_send.js", import.meta.url), "utf-8"), /p\.d \? mdShort\(on, off\) : mdWords\(on, off\)/);
+});
+
+// ---- 9. the Crew Hub and the welcome: a card saved without a sign-off still runs ------------------------------------------
+test("a running contract with no sign-off on file is projected (7 months, Azamara 5), never 'Between contracts' and never unwelcomed", () => {
+  const crew = { agency_id: "SC-1", first_name: "Archiegale", last_name: "Corpin" };
+  const strip = (h) => String(h).replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/&middot;/g, "·").replace(/\s+/g, " ");
+  const leg = { sc: "SC-1", ship: "Grandeur", brand: "Royal Caribbean", on: "2026-11-10", off: null, is_current: true, source: "assignment" };
+  const m = hubModel({ crew, leg, count: null, today: "2026-11-16" });
+  assert.deepEqual([m.ship, m.on, m.off, m.offProjected], ["Grandeur", "2026-11-10", "2027-06-10", true]);
+  const page = strip(hubPage(m));
+  assert.doesNotMatch(page, /Between contracts/); assert.match(page, /Sign-off projected/);
+  const w = welcomeContext({ crew, legs: [leg], today: "2026-11-10", links: {} });
+  assert.ok(w, "the welcome is not refused"); assert.equal(w.off, "10 Jun 2027"); assert.equal(w.offSource, "projected");
+  assert.equal(hubModel({ crew, leg: { ...leg, ship: "Azamara Quest", brand: "Azamara" }, count: null, today: "2026-11-16" }).off, "2027-04-10");
+  assert.equal(hubModel({ crew, leg: { ...leg, off: "2027-05-01", offSource: "rita" }, count: null, today: "2026-11-16" }).off, "2027-05-01", "a date on file is never replaced");
+});
+
+test("the Crew Hub counts the sign-on as day 1 and the sign-off as the last day, in the header and on the card", () => {
+  const crew = { agency_id: "SC-1", first_name: "Kevin Leif", last_name: "Jugao" };
+  const strip = (h) => String(h).replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/&middot;/g, "·").replace(/\s+/g, " ");
+  const at = (today) => strip(hubPage(hubModel({ crew, leg: { sc: "SC-1", ship: "Azamara Pursuit", brand: "Azamara", on: "2026-06-16", off: "2026-11-16", is_current: true, offSource: "rita" }, count: 2, today })));
+  assert.match(at("2026-06-16"), /Day 1 of 154 · 153 days to go/);
+  assert.match(at("2026-11-15"), /day 153 of your contract/); assert.match(at("2026-11-15"), /Day 153 of 154 · 1 day to go/);
+  assert.match(at("2026-11-16"), /day 154 of your contract/); assert.match(at("2026-11-16"), /Day 154 of 154 · sign-off today/);
+});
+
+// ---- 10. the crew's audit page keeps what is on it when one refresh fails ----------------------------------------------------
+test("the crew's audit page: a lost connection on a page already open shows a toast, never replaces the page", () => {
+  const ui = readFileSync(new URL("../src/audit_upload_ui.js", import.meta.url), "utf-8");
+  assert.match(ui, /else if \(S && S\.machines && !\(j && j\.status\)\) \{[^}]*toast\(/);
 });

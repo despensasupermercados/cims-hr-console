@@ -1720,6 +1720,30 @@ Six readers, every finding reproduced on the old code first. Pinned by `test/bug
   line to anyone on the open site, the seafarer counting included — the blind count, §10i); HON answering "ok" with an EMPTY
   OBP list no longer makes the documents-in email say "Every line agrees" — the request's snapshot is compared instead.
 
+**Batch 2, the same day.** Pinned by `test/bughunt_1116.test.js`, `test/sga_hold.test.js`, `test/house_pass.test.js`,
+`test/ship_leg_source_sql.test.js`.
+- **A bill's cost columns add up to its lines** (`parseSgaManning`: `cols_off`, `cols_gap`, `unknown_cols`). TDG's AMOUNT is
+  read on its own, so a new or renamed cost column was dropped in silence while the bill still "reconciled". Every line of
+  the 15 bills July 2025 – September 2026 adds up to the cent, so a gap is a column the console does not know: the Upload
+  review says it (amount, lines, the header), and a bill that arrives by itself is HELD (`held: "unknown_column"`, the
+  Travel tab's Needs a decision names the header) like one that does not reconcile (17 Oct 2026 rule). Rita's Upload still
+  loads it — TDG's amount stands, that money is in no category until the column is added to `SGA_COLS`.
+- **The staff-house pass goes once per contract** (`housePassNear`): its log is keyed on the sign-off date and it has no
+  request table, so a sign-off that moved a day after the pass went sent it again to the crew, Rita, Miguel and Maryjoy. A
+  house row for the same crew within 21 days is the same contract (marked `same-contract`).
+- **A running contract with no sign-off on file still runs** (`welcome_context.legWithOff`): Rita's card saved with the Off
+  date blank read "Between contracts" on the Crew Hub and was never welcomed. Read as projected (sign-on + 7 months, Azamara
+  5, `reliever.projectedOff`) and said as projected. A date on file is never replaced.
+- **The Crew Hub's day counter**: the sign-on is day 1 and the sign-off the last day (it read "Day 153 of 153 · 1 day to
+  go" on the eve and "day 154" in the header on the day).
+- **Rita's typed sign-off reaches the Counter contract within `ABSORB_DAYS`** (`fetchRecordedSignoffs`): the contract modal
+  files it under the file's embark, which can sit a few days from the Counter's sign-on. No production row differed on
+  16 Nov; the join to the day is what left a Counter leg open once TDG moved the crew's row on.
+- **The crew's audit page** keeps what is on it when one refresh fails (a toast, not an error card over the count).
+- **Left for Miguel, not built**: a contract whose sign-on the console learns from TDG's file more than
+  `WELCOME_CATCHUP_DAYS` after the embark gets no welcome and nothing lists it (not seen in production: all six embarks
+  since 19 Oct were welcomed on the day) — sending late or listing it for Rita is his call.
+
 ## 12. Performance invariants (2026-07-17 round-trip fix — don't regress these)
 The D1 data is tiny and sub-millisecond; console latency is Worker->D1 ROUND TRIPS. Pinned by
 `test/perf_invariants.test.js` (static guards, same approach as sqlsafety):

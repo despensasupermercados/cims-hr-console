@@ -231,6 +231,9 @@ export function mergeBoardLegs(shipLegRows, assignmentRows, today, endedRows) {
 // newer than the Counter row (an unstamped row — every row today — is older than anything); a Counter
 // that arrived after the edit reopens the leg, exactly as the upload's dry-run promised ("overrides").
 // k.act_off is TDG's own actual sign-off and always counts.
+// THE SAME CONTRACT WITHIN ABSORB_DAYS (16 Nov 2026): the contract modal files Rita's sign-off under the FILE's embark,
+// which can sit a few days from the Counter's sign-on for the same contract (legsFromRegistry's editFor already allows
+// that). Joined to the day, her date never reached the Counter leg — the one left once TDG moves the crew's row on.
 export async function fetchRecordedSignoffs(env) {
   const { results } = await env.DB.prepare(
     `SELECT k.sc, k.sign_on,
@@ -241,7 +244,7 @@ export async function fetchRecordedSignoffs(env) {
             CASE WHEN k.act_off IS NULL THEN e.updated_at END AS recorded_at
        FROM keyman_contract3 k
        LEFT JOIN contract_edit e ON e.sc = k.sc
-                                 AND ((e.on_key IS NOT NULL AND substr(e.on_key,1,10) = substr(k.sign_on,1,10))
+                                 AND ((e.on_key IS NOT NULL AND abs(julianday(substr(e.on_key,1,10)) - julianday(substr(k.sign_on,1,10))) <= ${ABSORB_DAYS})
                                       OR (e.on_key IS NULL AND e.seq = k.seq))
       WHERE k.act_off IS NOT NULL OR e.sign_off IS NOT NULL`
   ).all();

@@ -1677,7 +1677,9 @@ async function sgaStage(env, b) {
     // TDG's grand total against the rows: a gap is a parsing miss or a row the sheet hides — said, never silently accepted
     reconciles: manning.grand_total == null ? null : Math.abs((sum.total + manning.others.reduce((a, o) => a + (o.amount || 0), 0)) - manning.grand_total) < 0.05,
     // the summary sheet's crew total for this month against the manning sheet's GRAND TOTAL — the two sheets of one bill must agree
-    summaryAgrees: thisMonth && manning.grand_total != null ? Math.abs(thisMonth.crew_total - manning.grand_total) < 0.05 : null };
+    summaryAgrees: thisMonth && manning.grand_total != null ? Math.abs(thisMonth.crew_total - manning.grand_total) < 0.05 : null,
+    // the cost columns read by header against each line's AMOUNT: a gap is a column the console does not know (sga.js)
+    colsOff: manning.cols_off || 0, colsGap: manning.cols_gap || 0, unknownCols: manning.unknown_cols || [] };
 }
 async function apiSgaImport(request, env, session) {
   await ensureSga(env);
@@ -1688,7 +1690,8 @@ async function apiSgaImport(request, env, session) {
   if (b.dryRun) {
     return json({ dryRun: true, period: st.period, meta: st.meta, rows: st.lines.length, total: st.summary.total, grand_total: st.grand_total, reconciles: st.reconciles,
       byBrand: st.summary.byBrand, byCat: st.summary.byCat, others: st.others, training: st.training, trainingMonths: trMonths.length, unmatched: st.unmatched, prior: st.prior, sheets: st.sheets,
-      summaryOnly: st.summaryOnly, summaryMonths: st.summaryRows.length, summaryThisMonth: st.summaryThisMonth, summaryAgrees: st.summaryAgrees });
+      summaryOnly: st.summaryOnly, summaryMonths: st.summaryRows.length, summaryThisMonth: st.summaryThisMonth, summaryAgrees: st.summaryAgrees,
+      colsOff: st.colsOff, colsGap: st.colsGap, unknownCols: st.unknownCols });
   }
   return json(await applySgaWorkbook(env, b, st, (session && session.email) || "?", b.source || "upload"));
 }
@@ -1698,7 +1701,8 @@ function sgaGap(st) {
   const others = Math.round(st.others.reduce((a, o) => a + (o.amount || 0), 0) * 100) / 100;
   const grand = st.grand_total == null ? null : Math.round(st.grand_total * 100) / 100;
   return { year: st.period.year, month: st.period.month, lines_total: lines, others, grand_total: grand,
-    gap: grand == null ? null : Math.round((grand - lines - others) * 100) / 100, rows: st.lines.length };
+    gap: grand == null ? null : Math.round((grand - lines - others) * 100) / 100, rows: st.lines.length,
+    cols_off: st.colsOff || 0, cols_gap: st.colsGap || 0, unknown_cols: (st.unknownCols || []).slice(0, 6) };
 }
 // The ONE path that loads a month of the bill — the Upload page and the SharePoint sync both come here (§10j).
 // `st` is sgaStage's result (staged once, applied once); `b` carries the file's name / hash for sga_file.
@@ -1792,6 +1796,9 @@ function syncDeps(env) {
       // and the agent's rows) whose lines do not add up to TDG's GRAND TOTAL loads nothing. The Upload page — the dry-run,
       // its amber chip, then Apply — is how she loads it after checking. A summary-only file has no total to miss (null).
       if (meta.holdUnreconciled && st.reconciles === false) return { held: "does_not_reconcile", ...sgaGap(st) };
+      // ...and so does a bill whose cost columns do not add up to its lines' AMOUNT: a column the console does not know
+      // (16 Nov 2026). Loaded as it is, the month's categories would be short by that column and nothing would say so.
+      if (meta.holdUnreconciled && st.colsOff > 0) return { held: "unknown_column", ...sgaGap(st) };
       return applySgaWorkbook(env, b, st, meta.by, meta.source);
     },
     applyTravel: async (sheets, year, meta) => {
@@ -2035,7 +2042,8 @@ async function apiSga(env) {
     if (filesRes.results.some((f) => f.year === d.year && f.month === d.month && f.loaded_at > (r.held_at || ""))) continue;
     const src = byFileKey[r.file_key];
     held.push({ file_key: r.file_key, name: r.name, held_at: r.held_at, year: d.year || null, month: d.month || null, lines_total: d.lines_total ?? null,
-      others: d.others ?? null, grand_total: d.grand_total ?? null, gap: d.gap ?? null, rows: d.rows ?? null, hash: src && src.r2_key ? src.hash : null });
+      others: d.others ?? null, grand_total: d.grand_total ?? null, gap: d.gap ?? null, rows: d.rows ?? null, hash: src && src.r2_key ? src.hash : null,
+      why: d.held || null, cols_off: d.cols_off || 0, cols_gap: d.cols_gap || 0, unknown_cols: d.unknown_cols || [] });
   }
   return json({ files: filesRes.results, lines: lines.filter((l) => latest[l.year + "-" + l.month] === l.file_id), training: trRes.results, summary: sumRes.results, sources: srcRes.results, held, cols: SGA_COL_KEYS, today: TODAY() });
 }
@@ -6342,6 +6350,7 @@ async function previewSga(){
   var p=r.period, brands=Object.keys(r.byBrand||{});
   var h='<div style="margin-top:6px"><b style="color:var(--navy)">TDG bill &middot; '+sgaMonthName(p.year,p.month)+'</b>'+(r.meta&&r.meta.sgaNo?' &middot; SGA '+impEsc(r.meta.sgaNo):'')+(r.meta&&r.meta.date?' &middot; dated '+impEsc(r.meta.date):'')
     +'<div class=csub style="margin-top:4px">'+r.rows+' crew lines &middot; $'+Number(r.total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.grand_total!=null?(' &middot; TDG grand total $'+Number(r.grand_total).toLocaleString(undefined,{maximumFractionDigits:2})+(r.reconciles?' <span class="cchip ok">reconciles</span>':' <span class="cchip amber">does not reconcile with the lines</span>')):'')+'</div>'
+    +(r.colsOff>0?'<div class=csub style="margin-top:4px"><span class="cchip amber">a cost column the console does not read</span> $'+Number(Math.abs(r.colsGap)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+' on '+r.colsOff+' line'+(r.colsOff===1?'':'s')+' is in no category'+((r.unknownCols||[]).length?': '+r.unknownCols.map(function(u){return escHtml(u.header);}).join(', '):'')+'. The total still loads; tell the agent so the column is added.</div>':'')
     +'<div class=csub>'+brands.map(function(b){return TCLIENT[b]||b;}).map(function(b,i){return b+' $'+Number(r.byBrand[brands[i]]).toLocaleString(undefined,{maximumFractionDigits:0});}).join(' &middot; ')+'</div>'
     +'<div class=csub>Travel in the bill: air $'+Number((r.byCat||{}).air||0).toLocaleString()+' &middot; hotel $'+Number((r.byCat||{}).hotel||0).toLocaleString()+' &middot; medical $'+Number(((r.byCat||{}).medical||0)+((r.byCat||{}).medical_repat||0)).toLocaleString()+' &middot; visa $'+Number((r.byCat||{}).visa||0).toLocaleString()+'</div></div>';
   var trm=(r.training||[]).filter(function(t){return !t.summary_only;});
@@ -6997,6 +7006,9 @@ function tvDecisions(ctx){
   // loaded nothing. Named in every view of its year until a bill for that month is loaded after it.
   var c2=function(n){return '$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});};   // a bill reconciles to the cent
   ((SGA&&SGA.held)||[]).filter(function(x){return x.year===LY;}).forEach(function(x){
+    if(x.why==='unknown_column'){out.push({sev:'crit',t:'TDG’s bill for '+TMN[x.month]+' '+x.year+' is held: a cost column the console does not know',
+      w:c2(Math.abs(x.cols_gap))+' on '+x.cols_off+' line'+(x.cols_off===1?'':'s')+' sits in no column the console reads'+((x.unknown_cols||[]).length?' ('+x.unknown_cols.map(function(u){return escHtml(u.header)+' '+c2(u.total);}).join(', ')+')':'')+'. It arrived on '+fmtDateS(String(x.held_at||'').slice(0,10))+' and loaded nothing. Loaded from Upload data, the total is right and that amount is in no category until the column is added.',
+      go:x.hash?'window.open(&quot;/api/sga/file?hash='+x.hash+'&quot;)':'',gl:x.hash?'Download':''});return;}
     out.push({sev:'crit',t:'TDG’s bill for '+TMN[x.month]+' '+x.year+' is held: its lines do not add up',
       w:'Lines '+c2(x.lines_total)+(x.others?' + '+c2(x.others)+' other':'')+' against TDG’s grand total '+c2(x.grand_total)+(x.gap!=null?' · '+c2(Math.abs(x.gap))+(x.gap>0?' missing':' too much'):'')+'. It arrived on '+fmtDateS(String(x.held_at||'').slice(0,10))+' and loaded nothing. Check it with Finance, then drop it on Upload data to load it.',
       go:x.hash?'window.open(&quot;/api/sga/file?hash='+x.hash+'&quot;)':'',gl:x.hash?'Download':''});
