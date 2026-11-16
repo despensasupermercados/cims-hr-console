@@ -448,6 +448,48 @@ export function markAssignmentVisits(asg, visits, trainers) {
   return (asg || []).map((a) => (a && a.sc && !a.visit && isVisit(vmap, a.sc, dayOf(a.sign_on), { agency_id: a.sc, first_name: a.first_name, last_name: a.last_name, trainer: tset.has(a.sc) }) ? { ...a, visit: true } : a));
 }
 
+// THE CONTRACTS THE FILE HAS SHOWN, READ BACK (Miguel, 16 Nov 2026: "Show and count them"). registry_contract keeps every
+// contract an AdvancedQuery carried (crew_import_routes.keepContracts); a row the latest file no longer carries
+// (closed_run_at) is a FINISHED contract the snapshot has forgotten — Paqueo's Reflection contract once TDG embarked him on
+// Radiance. Each becomes a history leg of the ONE schedule (profile, statement, Score Card list, board history):
+// sign-off = TDG's debark (tdg), else the sign-off Rita typed for it (rita, the edit keyed within ABSORB_DAYS of the embark),
+// else the day of the file that stopped carrying it ("ended per TDG file", offSource file — never a date the console
+// invents). A contract the current file still has (same crew, same hull, embark within ABSORB_DAYS) is the file's, not kept.
+// Pure. kept = [{ sc, embarked_at, vessel, debarked_at, closed_run_at, name }].
+export async function fetchKeptContracts(env) {
+  try {
+    const { results } = await env.DB.prepare("SELECT sc, embarked_at, vessel, debarked_at, closed_run_at, name FROM registry_contract WHERE closed_run_at IS NOT NULL").all();
+    return results || [];
+  } catch (e) { return []; }   // the table is made by the import's guard; until then nothing is kept
+}
+export function keptLegs({ kept, registry, edits, vessels, visits, trainers } = {}) {
+  const vmap = visitMap(visits), tset = trainerSet(trainers);
+  const brandOf = {};
+  for (const v of (vessels || [])) if (v && v.name) brandOf[shipKey(v.name)] = BRAND_SHORT[v.brand] || v.brand || null;
+  const near = (a, b) => { const g = daysApart(a, b); return g != null && Math.abs(g) <= ABSORB_DAYS; };
+  const out = [];
+  for (const k of (kept || [])) {
+    const on = dayOf(k && k.embarked_at); if (!k || !k.sc || !on || !k.vessel) continue;
+    const ship = canonShipWith(k.vessel, SHIP_KEYS) || String(k.vessel).trim();
+    const key = shipKey(ship);
+    if ((registry || []).some((r) => r && r.sc === k.sc && shipKey(r.ship) === key && near(r.on, on))) continue;
+    let off = dayOf(k.debarked_at), offSource = "tdg", offAt = dayOf(k.closed_run_at);
+    if (!off || off < on) {
+      const e = (edits || []).filter((x) => x && x.sc === k.sc && x.on_key && near(x.on_key, on) && dayOf(x.sign_off) && dayOf(x.sign_off) >= on)
+        .sort((a, b) => Math.abs(daysApart(a.on_key, on)) - Math.abs(daysApart(b.on_key, on)))[0];
+      if (e) { off = dayOf(e.sign_off); offSource = "rita"; offAt = String(e.updated_at || "").slice(0, 10) || null; }
+      else { off = dayOf(k.closed_run_at); offSource = "file"; }
+    }
+    if (!off || off < on) continue;
+    const leg = { ship, name: k.name || null, sc: k.sc, ours: true, on, off, is_current: false, offSource, offAt, source: "registry", kept: true,
+      brand: brandOf[normShip(ship)] || (AZAMARA_SHORT.includes(normShip(ship)) ? "Azamara" : null) };
+    if (offSource === "file") leg.byFile = true;
+    if (isVisit(vmap, k.sc, on, { agency_id: k.sc, trainer: tset.has(k.sc) })) leg.visit = true;
+    out.push(leg);
+  }
+  return out;
+}
+
 export function legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers } = {}) {
   const vmap = visitMap(visits), tset = trainerSet(trainers);
   const brandOf = {};
@@ -617,15 +659,18 @@ export async function boardLegsFromDb(env, today) {
   return out;
 }
 async function boardLegsFromDbUncached(env, today) {
-  const [legs, asg, ended, recMap, rows, edits, counter, open, vessels, taRows, visits, trainers] = await Promise.all([
+  const [legs, asg, ended, recMap, rows, edits, counter, open, vessels, taRows, visits, trainers, kept] = await Promise.all([
     legsFromCounter(env), fetchCurrentAssignments(env, today), fetchRecentSignoffs(env, today), fetchRecordedSignoffs(env),
     fetchRegistryRows(env), fetchContractEdits(env), fetchCounterKeys(env), fetchOpenAssignments(env), fetchVesselBrands(env),
     fetchTurnarounds(env, today).catch(() => []), // the fleet's turnaround days (8 Oct 2026): a projected sign-off lands on one
     fetchContractVisits(env), fetchTrainers(env), // training visits (17 Oct 2026, visits.js)
+    fetchKeptContracts(env), // the contracts the file has shown and forgotten (16 Nov 2026)
   ]);
   const turnarounds = turnaroundsByShip(taRows);
   const registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers });
-  const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry);
+  const keptH = keptLegs({ kept, registry, edits, vessels, visits, trainers });
+  // a Counter contract the kept record also carries (same crew, same hull, within ABSORB_DAYS) is folded like one the file has
+  const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry.concat(keptH)).concat(keptH);
   // THE SCHEDULE CARRIES WHAT THE BOARD SHOWS (27 Oct 2026 review). A card the latest TDG file contradicts — a file dated
   // after its sign-on has the crew aboard another hull or ashore — is off the board (§11) but used to stay a CURRENT leg
   // here, so the statement, the profile, the Score Card's contracts and whose-miss rule, the bench and the crew page's
