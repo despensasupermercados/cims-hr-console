@@ -126,13 +126,37 @@ export function completedSince(asOf, row, today) {
   const on = row && typeof row === "object" ? row.embarked_at || null : null;
   const d = (v) => (v ? String(v).slice(0, 10) : null);
   const o = d(off), a = d(asOf), t = d(today), e = d(on);
-  if (!o || !a || !/^\d{4}-\d{2}-\d{2}$/.test(o)) return 0;
+  if (!a) return 0;
+  if (!o || !/^\d{4}-\d{2}-\d{2}$/.test(o)) return keptSince(a, row, t);
+  return snapshotPlus(row, o, a, t, e) + keptSince(a, row, t);
+}
+const isoD = (v) => (v ? String(v).slice(0, 10) : null);
+const dayNum = (d) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) / 864e5;
+function snapshotPlus(row, o, a, t, e) {
   if (o <= a) return 0;
   if (t && o > t) return 0;
   if (e && e > o) return 0;
   // A training visit is not a contract (17 Oct 2026, visits.js): Ohji's five days on Onward never add to his count.
   if (row && typeof row === "object" && row.visit) return 0;
   return 1;
+}
+// THE CONTRACTS THE FILE HAS SHOWN AND FORGOTTEN COUNT TOO (Miguel, 16 Nov 2026: "Show and count them"; registry_contract).
+// row.kept = [{ on, off, visit }]: each contract TDG ENDED (a debark) after the count's as-of date, not in the future, not a
+// training visit, adds one — unless the crew embarked again within GAP_DAYS (21) of that debark: a transfer, one contract,
+// counted when its last leg ends. Only TDG's debark counts; a contract the file merely stopped carrying adds nothing.
+const TRANSFER_DAYS = 21;
+function keptSince(a, row, t) {
+  const kept = row && typeof row === "object" && Array.isArray(row.kept) ? row.kept : [];
+  if (!kept.length) return 0;
+  const embarks = kept.map((k) => isoD(k && k.on)).concat([isoD(row.embarked_at || null)]).filter(Boolean);
+  let n = 0;
+  for (const k of kept) {
+    const on = isoD(k && k.on), off = isoD(k && k.off);
+    if (!on || !off || !/^\d{4}-\d{2}-\d{2}$/.test(off) || off <= a || (t && off > t) || on > off || k.visit) continue;
+    if (embarks.some((x) => x > off && dayNum(x) - dayNum(off) <= TRANSFER_DAYS)) continue;
+    n++;
+  }
+  return n;
 }
 
 // What an apply would change. current = { sc: completed today } (from contract_count), derived =

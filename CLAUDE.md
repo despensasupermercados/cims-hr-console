@@ -1777,11 +1777,20 @@ Radiance. Since this PR every registry Apply writes one row per crew and embark 
 `src/crew_import_routes.js`, migrations/0043, the same CREATE in `ensureRegistrySnapshot`): TDG's debark kept once a file
 gives it, the first and last file that carried it, and the file that stopped carrying it (`closed_run_at`). Written AFTER
 the import's batch, on its own (`contracts_kept` on the Apply answer; a failure never fails an Apply); a file with no
-embark dates closes nothing; an empty table is seeded once from the snapshot. **NOTHING READS IT YET**: how a kept
-contract is drawn, what ends it when TDG gave no debark (Rita's typed date, or the day the file dropped it), and whether
-it adds to the count are Miguel's to decide (Brain rec3UjhXkYKvfz4N0; night-watch draft #385 is the same question). The
-contracts lost before 16 Nov are not in it (the console no longer holds them); a fresh TDG count file restates the count.
-Pinned by `test/registry_contract.test.js`.
+embark dates closes nothing; an empty table is seeded once from the snapshot. The contracts lost before 16 Nov are not in
+it (the console no longer holds them); a fresh TDG count file restates the count. Pinned by `test/registry_contract.test.js`.
+**SHOWN AND COUNTED** (Miguel, 16 Nov 2026, asked how: "Show and count them"). A kept row the latest file no longer carries
+(`closed_run_at`) is a history leg of the ONE schedule (`keptLegs` / `fetchKeptContracts` in `ship_leg_source.js`, one more
+read in `boardLegsFromDb`'s wave): the profile, the statement, the Score Card list and the board's history all see it. Its
+sign-off: TDG's debark (`tdg`), else the sign-off Rita typed for it (`rita`, an edit keyed within `ABSORB_DAYS` of the embark),
+else the day of the file that stopped carrying it (`offSource` `file`, `byFile` — "ended per TDG file"; never a date the
+console invents). Never `fileAt` (it is not the latest file's word). A contract the current file still has on the same hull
+within `ABSORB_DAYS` is the file's, and a Counter contract the kept record carries is folded like one the file has. **The
+count**: `completedSince` adds every kept contract TDG ENDED (a debark) after the count's as-of date, not in the future, not a
+visit — unless the crew embarked again within 21 days of it (a transfer: one contract, counted when its last leg ends); a row
+the file merely dropped adds nothing. Read by every count reader through `CC_VISIT_COLS` (`kept_offs`), with a fallback to the
+old read while the table does not exist. Day one changes nothing: every seeded row is open. Pinned by
+`test/kept_contracts.test.js`.
 
 **The Score Card's three findings of 16 Nov 2026 — MONEY (§1): Miguel's merge, the pull request after #390.** Pinned by
 `test/bughunt_1116_money.test.js`. (1) **An ENDED contract with no sign-off date ends on its sign-on day** for the commit

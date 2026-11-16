@@ -2620,7 +2620,7 @@ async function rotationSections(env) {
     fetchOpenAssignments(env),           // Rita's projections — the yellow-card feed
     env.DB.prepare("SELECT name, brand, jr_ps_rule FROM vessel").all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT id, sc, crew_name, ship, sign_on, sign_off, sent_at, sent_by, recipient, assignment_id FROM deploy_log WHERE restored_at IS NULL ORDER BY sent_at DESC LIMIT 200").all().catch(() => ({ results: [] })),
-    env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026) + the file's debark (completedSince)
+    env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare(CC_WITH_OFF_SQL_BASE).all()).catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] })), // TDG's stated count (24 Sep 2026) + the file's debark (completedSince)
     env.DB.prepare("SELECT MAX(imported_at) AS stamp, COUNT(*) AS rows, COUNT(DISTINCT sc) AS crew FROM keyman_contract3").all().catch(() => ({ results: [] })), // how old the Counter is
     // The last AdvancedQuery's word per crew, for the projection verdict (registry_sync.js, 5 Oct 2026):
     // the kept snapshot, the open ship flags (the file's vessel where it differs from the registry), and
@@ -3354,15 +3354,26 @@ function countMapOf(rows) { const m = {}; for (const r of (rows || [])) if (r &&
 // embark) or a member of the shoreside team never adds to TDG's count. The same join, no extra trip.
 // A trainer's trip is a visit unless Rita marked it a full contract (contract_visit.kind), the shoreside team's always.
 const CC_VISIT_JOIN = " LEFT JOIN contract_visit v ON v.sc = c.sc AND v.on_key = substr(r.embarked_at,1,10) LEFT JOIN crew w ON w.agency_id = c.sc LEFT JOIN crew_trainer t ON t.sc = c.sc";
-const CC_VISIT_COLS = ", v.kind AS tdg_vkind, t.sc AS v_trainer, w.first_name AS v_fn, w.last_name AS v_ln";
+// + every contract the file has shown and forgotten (registry_contract, 16 Nov 2026: "Show and count them"), as
+// "embark|debark|visit kind" joined by ";" — completedSince counts the debarks after the as-of date.
+const CC_VISIT_BASE = ", v.kind AS tdg_vkind, t.sc AS v_trainer, w.first_name AS v_fn, w.last_name AS v_ln";
+const CC_VISIT_COLS = CC_VISIT_BASE +
+  ", (SELECT group_concat(substr(k.embarked_at,1,10) || '|' || COALESCE(substr(k.debarked_at,1,10),'') || '|' || COALESCE((SELECT cv.kind FROM contract_visit cv WHERE cv.sc = k.sc AND cv.on_key = substr(k.embarked_at,1,10)),''), ';') FROM registry_contract k WHERE k.sc = c.sc AND k.closed_run_at IS NOT NULL) AS kept_offs";
 const CC_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on" + CC_VISIT_COLS + " FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN;
 const CC_ONE_WITH_OFF_SQL = "SELECT c.sc, c.completed, c.as_of, r.debarked_at AS tdg_off, r.embarked_at AS tdg_on" + CC_VISIT_COLS + " FROM contract_count c LEFT JOIN registry_snapshot r ON r.agency_id = c.sc" + CC_VISIT_JOIN + " WHERE c.sc=?";
-const ccRowOf = (r) => ({ debarked_at: r.tdg_off, embarked_at: r.tdg_on,
-  visit: r.tdg_vkind === "visit" || (r.tdg_vkind !== "contract" && isShoreCrew({ agency_id: r.sc, first_name: r.v_fn, last_name: r.v_ln, trainer: !!r.v_trainer })) });
+// The same reads without the kept record: a database whose registry_contract is not made yet (the import's guard makes it)
+// keeps the snapshot's +1 instead of falling back to the bare count (every reader tries these between the two).
+const CC_WITH_OFF_SQL_BASE = CC_WITH_OFF_SQL.replace(CC_VISIT_COLS, CC_VISIT_BASE);
+const CC_ONE_WITH_OFF_SQL_BASE = CC_ONE_WITH_OFF_SQL.replace(CC_VISIT_COLS, CC_VISIT_BASE);
+const ccRowOf = (r) => {
+  const shore = isShoreCrew({ agency_id: r.sc, first_name: r.v_fn, last_name: r.v_ln, trainer: !!r.v_trainer });
+  const kept = String(r.kept_offs || "").split(";").filter(Boolean).map((x) => { const [on, off, kind] = x.split("|"); return { on, off: off || null, visit: kind === "visit" || (kind !== "contract" && shore) }; });
+  return { debarked_at: r.tdg_off, embarked_at: r.tdg_on, visit: r.tdg_vkind === "visit" || (r.tdg_vkind !== "contract" && shore), kept };
+};
 // sc -> { completed, as_of, added } from the last count import; {} until one has been applied. Read inside a
 // route's existing wave (§12), never as its own round trip.
 async function contractCountMap(env) {
-  const r = await env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] }));
+  const r = await env.DB.prepare(CC_WITH_OFF_SQL).all().catch(() => env.DB.prepare(CC_WITH_OFF_SQL_BASE).all()).catch(() => env.DB.prepare("SELECT sc, completed, as_of FROM contract_count").all()).catch(() => ({ results: [] }));
   const today = new Date().toISOString().slice(0, 10);
   const m = {}; for (const x of (r.results || [])) if (x && x.sc) m[x.sc] = { completed: x.completed, as_of: x.as_of || null, added: completedSince(x.as_of, ccRowOf(x), today) };
   return m;
@@ -3614,7 +3625,7 @@ async function apiBonusCrew(env, url) {
     effectiveBaseline(env, cr.agency_id, cr.baseline_count),
     env.DB.prepare("SELECT id, contract_group_id, score_pct, gate, pay_usd, count_before, count_after, span_start, span_end, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(cr.id).all(),
     env.DB.prepare("SELECT ship, sign_on, proj_off, act_off FROM keyman_contract3 WHERE sc=? AND sign_on IS NOT NULL").bind(cr.agency_id).all(),
-    env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(cr.agency_id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(cr.agency_id).first()).catch(() => null), // TDG's stated count (§10c) + the file's debark
+    env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(cr.agency_id).first().catch(() => env.DB.prepare(CC_ONE_WITH_OFF_SQL_BASE).bind(cr.agency_id).first()).catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(cr.agency_id).first()).catch(() => null), // TDG's stated count (§10c) + the file's debark
   ]);
   const count = await crewCount(env, cr.id, baseline);
   // Default sign-on/off for the Score Card (manually editable there). Prefer the live SCHEDULE
@@ -3723,7 +3734,7 @@ async function gatherStatement(env, id) {
     env.DB.prepare("SELECT seq, ship, sign_on as 'on', proj_off as proj, act_off as act FROM keyman_contract3 WHERE sc=? ORDER BY seq").bind(id).all(),
     boardLegs(env),
     effectiveBaseline(env, id, crew.baseline_count),
-    env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(id).first().catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
+    env.DB.prepare(CC_ONE_WITH_OFF_SQL).bind(id).first().catch(() => env.DB.prepare(CC_ONE_WITH_OFF_SQL_BASE).bind(id).first()).catch(() => env.DB.prepare("SELECT completed, as_of FROM contract_count WHERE sc=?").bind(id).first()).catch(() => null),
     env.DB.prepare("SELECT score_pct, gate, pay_usd, ships_json, committed_at FROM bonus_outcome WHERE crew_id=? ORDER BY committed_at DESC").bind(crew.id).all(),
     env.DB.prepare("SELECT run_at FROM registry_snapshot WHERE agency_id=?").bind(id).first().catch(() => null), // the TDG file that dates the contracts
     env.DB.prepare("SELECT on_key, sign_on, embark, disembark FROM contract_edit WHERE sc=?").bind(id).all().catch(() => ({ results: [] })), // the ports Rita typed (13 Oct 2026)
