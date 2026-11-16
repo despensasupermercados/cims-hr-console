@@ -257,8 +257,17 @@ test("mono: OBP's press clicks on the card's ships over the contract feed the mo
   assert.doesNotMatch(ev, /Quantum|Anthem/, "another ship's clicks are not his");
   const q = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Quantum" }, { engine: "none" });
   assert.equal(q.sliders.sMono, 5, "Quantum 9.1% mono: under 20% = 5");
-  const tr = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Quantum, Anthem" }, { engine: "none" });
-  assert.match(tr.evidence.map((e) => e.text).join(" | "), /Press clicks on Quantum, Anthem, 2026-04-01 to 2026-10-18: 10,000 mono of 150,000/, "a transfer is every ship on the card");
+  // A transfer is every ship on the card, EACH ON ITS OWN LEG'S DAYS (27 Oct 2026 review, Tuazon "Explorer, Jewel": both hulls
+  // summed over the whole contract read his successor's clicks). Quantum Apr 1 – Jun 30, Anthem Jul 5 – Nov 5: Quantum's
+  // August day and Anthem's June day are somebody else's.
+  const DAYS = [{ ship: "Quantum", day: "2026-04-10", c: 40000, m: 4000, a: "2026-04-10", b: "2026-04-10" }, { ship: "Quantum", day: "2026-08-10", c: 50000, m: 5000, a: "2026-08-10", b: "2026-08-10" },
+    { ship: "Anthem", day: "2026-06-10", c: 20000, m: 500, a: "2026-06-10", b: "2026-06-10" }, { ship: "Anthem", day: "2026-08-10", c: 30000, m: 500, a: "2026-08-10", b: "2026-08-10" }];
+  const LEGS = [{ sc: "SC-1", ours: true, ship: "Quantum", on: "2026-04-01", off: "2026-06-30", is_current: false }, { sc: "SC-1", ours: true, ship: "Anthem", on: "2026-07-05", off: "2026-11-05", is_current: false }];
+  const tr = await gatherAuto(env(clicksOnly(DAYS)), { ...base, ship: "Quantum, Anthem" }, { engine: "none", boardLegs: async () => LEGS });
+  assert.match(tr.evidence.map((e) => e.text).join(" | "), /Press clicks on Quantum, Anthem, 2026-04-10 to 2026-08-10[^:]*: 4,500 mono of 74,500/, "a transfer is every ship on the card, each on its own days");
+  const trNoLegs = await gatherAuto(env(clicksOnly(DAYS)), { ...base, ship: "Quantum, Anthem" }, { engine: "none" });
+  assert.equal(trNoLegs.sources.clicksRead, false, "without the legs whose clicks are whose is unknown: said, never guessed");
+  assert.match(trNoLegs.evidence.map((e) => e.text).join(" | "), /mono was NOT checked/);
   const late = await gatherAuto(env(clicksOnly(CLICKS)), { ...base, ship: "Anthem", signOn: "2026-04-20" }, { engine: "none" });
   assert.match(late.evidence.map((e) => e.text).join(" | "), /OBP's clicks on file begin 2026-05-02; the contract began 2026-04-20/, "a contract older than the clicks on file says so");
   // Azamara: the clicks file's ShipIDs for the Azamara hulls are not on OBP's ship list yet, so no row carries the name

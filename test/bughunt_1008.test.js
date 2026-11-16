@@ -46,7 +46,7 @@ test("server: dashboard tiles = Compliance tab; a removed user loses access; sam
   assert.match(W, /if \(!isOffFleet\(s\)\) \{\s*const d = /, "active crew only");
   assert.match(W, /return \(await stillAllowed\(env, p\.email\)\) \? p : null;/);
   assert.match(W, /const ALLOW_CACHE_MS = 5 \* 60 \* 1000;/, "remembered per isolate: no extra round trip per request");
-  assert.match(W, /if \(w === "recent" && h\.is_current\) continue;/);
+  assert.match(W, /if \(w === "recent" && k\.current\) continue;/);   // the queue walks contracts since 27 Oct 2026 (scoreContracts)
 });
 
 test("server: statement and sea-days, the intel inbox, the feedback form", () => {
