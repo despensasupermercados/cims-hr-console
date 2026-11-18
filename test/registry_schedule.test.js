@@ -284,3 +284,46 @@ test("Rita's typed sign-off outranks the file's cross-over while TDG lists the c
   assert.deepEqual(v("SC-0038464|Enchantment"), { off: "2027-01-31", src: "rita", cur: true, held: false, rel: null }, "Valderrama: 31 Jan 2027, no longer red past a 3 Oct sign-off");
   assert.deepEqual(v("SC-0037752|Apex"), { off: "2026-10-07", src: "rita", cur: true, held: true, rel: "SC-0038129" }, "Belhida: the same date either way; passed while TDG lists him On board -> held");
 });
+
+// NIGHT WATCH, 18 Nov 2026 — A CONTRACT THE FILE NO LONGER HAS IS HISTORY IN THE SCHEDULE TOO. Production, 15 Nov 2026 file:
+// Darryl Ramos's Counter contract Constellation 15 Feb → projected 5 Oct (no sign-off recorded) while the file reads him
+// Earmarked Reflection (aboard Reflection on Rita's card since 13 Nov); Raymond Villacortes, Wonder 22 Mar → projected
+// 9 Oct, the file: Earmarked Star. Neither row has an embark, so the file "did not date them" and the Counter leg stayed
+// CURRENT: the board drew both "Contract completed" while the statement ran their sea days to today and the Score Card
+// refused the commit (still_aboard). Purnama (On board Xcel, undated, his Counter contract on Xcel) stays current.
+test("night watch 18 Nov: a Counter contract on a hull the file no longer has the crew aboard ends in the schedule, as on the board", async () => {
+  const { statementContracts } = await import("../src/crew_profile.js");
+  const FILE = "2026-11-15T16:02:59.427Z", NOW = "2026-11-18";
+  const file = [
+    row("SC-0038104", "Earmarked", "MV CELEBRITY REFLECTION", null, null, { run_at: FILE }),
+    row("SC-0038350", "Earmarked", "MV STAR OF THE SEAS", null, null, { run_at: FILE }),
+    row("SC-0040010", "On board", "MV CELEBRITY XCEL", null, null, { run_at: FILE }),
+    row("SC-9", "On board", "MV NO SUCH SHIP", null, null, { run_at: FILE }),
+    row("SC-8", "Earmarked", "MV CELEBRITY APEX", null, null, { run_at: FILE }),
+  ];
+  const counter = [
+    { ship: "Constellation", sc: "SC-0038104", ours: true, on: "2026-02-15", off: "2026-10-05", is_current: true, source: "counter" },
+    { ship: "Wonder", sc: "SC-0038350", ours: true, on: "2026-03-22", off: "2026-10-09", is_current: true, source: "counter" },
+    { ship: "Xcel", sc: "SC-0040010", ours: true, on: "2026-04-26", off: "2026-11-28", is_current: true, source: "counter" },
+    { ship: "Wonder", sc: "SC-9", ours: true, on: "2026-05-01", off: "2026-12-01", is_current: true, source: "counter" },  // a hull the console cannot read: kept
+    { ship: "Apex", sc: "SC-8", ours: true, on: "2026-06-01", off: "2027-01-01", is_current: true, source: "counter" },     // Earmarked for THIS hull: kept
+    { ship: "Apex", sc: "SC-7", ours: true, on: "2026-06-01", off: "2027-01-01", is_current: true, source: "counter" },     // not in the file: kept
+  ];
+  const out = foldCounterHistory(counter, [], file, NOW);
+  const cur = Object.fromEntries(out.map((h) => [h.sc, h.is_current]));
+  assert.deepEqual(cur, { "SC-0038104": false, "SC-0038350": false, "SC-0040010": true, "SC-9": true, "SC-8": true, "SC-7": true });
+  const ramos = out.find((h) => h.sc === "SC-0038104");
+  assert.equal(ramos.off, "2026-10-05", "a sign-off that has passed stands");
+  // what the crew's statement prints: the contract ends on 5 Oct, not on today
+  const st = statementContracts(out, "SC-0038104", NOW);
+  assert.equal(st.seaDays, 232, "15 Feb → 5 Oct, not → 18 Nov (276)");
+  assert.equal(st.contracts[0].act, "2026-10-05");
+  // a sign-off still ahead when the file stopped carrying him ends on the file's day, said so (as the board's "ended per TDG file")
+  const [early] = foldCounterHistory([{ ship: "Wonder", sc: "SC-0038350", ours: true, on: "2026-03-22", off: "2026-12-09", is_current: true, source: "counter" }], [], file, NOW);
+  assert.deepEqual({ cur: early.is_current, off: early.off, src: early.offSource, byFile: early.byFile }, { cur: false, off: "2026-11-15", src: "file", byFile: true });
+  // a contract that started after the file's date: the file could not see it
+  const [later] = foldCounterHistory([{ ship: "Wonder", sc: "SC-0038350", ours: true, on: "2026-11-16", off: "2027-06-16", is_current: true, source: "counter" }], [], file, NOW);
+  assert.equal(later.is_current, true);
+  // without the file's rows nothing changes (every caller before this one)
+  assert.equal(foldCounterHistory(counter, []).filter((h) => h.is_current).length, 6);
+});

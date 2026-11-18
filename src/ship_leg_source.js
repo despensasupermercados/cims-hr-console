@@ -403,7 +403,10 @@ export function fileWordBy(rows) {
     if (!r || !r.sc) continue;
     const status = r.status || normalizeStatus(r.raw_status) || null;
     const ship = r.vessel ? (canonShipWith(r.vessel, SHIP_KEYS) || String(r.vessel).trim()) : null;
-    by[r.sc] = { status, key: ship ? normShip(ship) : null, at: dayOf(r.run_at) };
+    // known: the file's hull is one the console can name (canonShipWith returns a prettified raw name otherwise)
+    const nv = r.vessel ? normShip(r.vessel) : "";
+    const known = !!nv && (SHIP_KEYS.some((v) => nv.indexOf(v.key) >= 0) || AZAMARA_SHORT.some((k) => nv.indexOf(k) >= 0));
+    by[r.sc] = { status, key: ship ? normShip(ship) : null, known, at: dayOf(r.run_at) };
   }
   return by;
 }
@@ -632,13 +635,36 @@ export function legsFromRegistry({ rows, edits, counter, open, vessels, today, t
 // contract the file itself carries (same crew, same hull, sign-on within ABSORB_DAYS of the embark) is
 // dropped — the file's dates stand. A crew the file gives no dates for keeps their Counter legs as they
 // were (the seat still comes from the file; this is the fallback for an older file without the columns).
-export function foldCounterHistory(counterLegs, registryLegs) {
+//
+// A CONTRACT THE FILE NO LONGER HAS IS HISTORY HERE TOO (night watch, 18 Nov 2026). For a crew the file does not date — his
+// row now reads Earmarked for his next ship, ashore, or On board another hull, with no embark — the Counter's latest contract
+// stayed CURRENT: Darryl Ramos (Constellation, Feb 15 → projected Oct 5; file: Earmarked Reflection, aboard Reflection on
+// Rita's card since 13 Nov) and Raymond Villacortes (Wonder, Mar 22 → projected Oct 9; file: Earmarked Star). The board drew
+// both "Contract completed" (rotationSections endedByFile); the ONE schedule kept them aboard — the statement counted their
+// sea days to today, the profile read a running contract, the Score Card refused the commit (still_aboard). With fileRows
+// (the latest file, fetchRegistryRows) the schedule takes the BOARD's rule: a Counter leg already started whose crew the
+// file has a word for that is not On board this hull (nor On board a hull it cannot read, nor Earmarked for this hull — his
+// next contract here) ends on its sign-off if that has passed, else on the date of the file that ended it (byFile,
+// offSource "file"). Only a Counter contract, only once the file could see it; a crew the file does not carry, or
+// with no readable word, keeps his legs as before. Without fileRows nothing changes.
+export function foldCounterHistory(counterLegs, registryLegs, fileRows, today) {
   const reg = {};
   for (const r of (registryLegs || [])) if (r && r.sc) (reg[r.sc] = reg[r.sc] || []).push(r);
+  const word = fileRows ? fileWordBy(fileRows) : null;
+  const endedByFile = (h) => {
+    if (!word || !h || !h.is_current || !h.ours || !h.sc || !h.on || h.source === "assignment") return null;
+    const w = word[h.sc];
+    if (!w || !w.status || !w.at || h.on > w.at || (today && h.on > today)) return null;
+    if (w.status === "On board" && (w.key === shipKey(h.ship) || !w.known)) return null;
+    if (w.status === "Earmarked" && w.key === shipKey(h.ship)) return null;
+    const off = dayOf(h.off);
+    if (off && off <= (today || w.at)) return { ...h, is_current: false };
+    return { ...h, is_current: false, off: off && off < w.at ? off : w.at, byFile: true, offSource: "file", offAt: w.at };
+  };
   const out = [];
   for (const h of (counterLegs || [])) {
     const rs = h && h.sc ? reg[h.sc] : null;
-    if (!rs || !rs.length) { out.push(h); continue; }
+    if (!rs || !rs.length) { out.push(endedByFile(h) || h); continue; }
     const k = shipKey(h.ship);
     // THE SAME CONTRACT is the sign-on within ABSORB_DAYS of the embark — nothing wider (§10d, Miguel's rule). A Counter
     // contract further off that still overlaps the file's on the same hull is TDG's two files DISAGREEING: it is served
@@ -675,12 +701,12 @@ async function boardLegsFromDbUncached(env, today) {
   // contract on another hull past its sign-on — must not date the printer's sign-off or name the reliever either, or the
   // hull's printer is drawn "Contract completed" and the ship empty. A second pass without those cards.
   let registry = legsFromRegistry({ rows, edits, counter, open, vessels, today, turnarounds, visits, trainers });
-  const firstHistory = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry);
+  const firstHistory = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry, rows, today);
   const openOk = dropOverlappedCards(open, registry.concat(firstHistory));
   if (openOk.length !== (open || []).length) registry = legsFromRegistry({ rows, edits, counter, open: openOk, vessels, today, turnarounds, visits, trainers });
   const keptH = keptLegs({ kept, registry, edits, vessels, visits, trainers });
   // a Counter contract the kept record also carries (same crew, same hull, within ABSORB_DAYS) is folded like one the file has
-  const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry.concat(keptH)).concat(keptH);
+  const history = foldCounterHistory(applyRecordedSignoffs(legs, recMap, today), registry.concat(keptH), rows, today).concat(keptH);
   // THE SCHEDULE CARRIES WHAT THE BOARD SHOWS (27 Oct 2026 review). A card the latest TDG file contradicts — a file dated
   // after its sign-on has the crew aboard another hull or ashore — is off the board (§11) but used to stay a CURRENT leg
   // here, so the statement, the profile, the Score Card's contracts and whose-miss rule, the bench and the crew page's
