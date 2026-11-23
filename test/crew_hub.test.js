@@ -146,15 +146,30 @@ test("routes: unknown crew, a malformed or unknown token, and HUB_ORIGIN", async
   assert.match(html, /Multi Contract Bonus/, "no baseline and no outcome: the ladder only");
 });
 
-test("the expense report served is byte for byte the approved v3 file", async () => {
+test("the expense form served is byte for byte the approved file (v4, 23 Nov 2026) and carries Rita's name AND the Hub's fixes", async () => {
   const { env, h } = hub();
   const res = await h("/hub/expense.xlsx", req("/hub/expense.xlsx"), env, new URL("https://cims.work/hub/expense.xlsx"), null);
   assert.equal(res.status, 200);
-  assert.match(res.headers.get("Content-Disposition"), /Expense Report Template\.xlsx/);
+  assert.match(res.headers.get("Content-Disposition"), /filename="DG3 Reimbursable Expenses Form\.xlsx"/, "the download carries the handbook's name (Rita, 27 Oct 2026)");
   const got = Buffer.from(await res.arrayBuffer());
-  const want = readFileSync(new URL("../docs/mockups/welcome_20261019/expense_report_v3.xlsx", import.meta.url));
+  const want = readFileSync(new URL("../docs/mockups/expense_form_20261123/DG3_Reimbursable_Expenses_Form_v4.xlsx", import.meta.url));
   assert.ok(got.equals(want));
   assert.equal(Buffer.from(EXPENSE_XLSX_B64, "base64").length, want.length);
+  // What the file must say. Rita's file of 26 Oct 2026 was her edit of the OLD v2: it had the new name and lost every fix below.
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(got, { type: "buffer", cellFormula: true, sheetStubs: true }); // a formula with no cached value is a stub
+  const ws = wb.Sheets.EXPENSES, list = wb.Sheets["Sheet 1"];
+  assert.equal(ws.B3.v, "DG3 Reimbursable Expenses Form");
+  assert.equal(ws.B4.v, "Version 4. - 23 November 2026", "a different file never carries an older file's version line");
+  assert.equal(ws.A16.v, "Sign-On Date / Sign-Off Date");
+  for (let r = 19; r <= 29; r++) assert.equal(ws["F" + r].f, `IF(OR(D${r}="",E${r}=""),"",D${r}*E${r})`, "line " + (r - 18) + " computes, and is blank until used");
+  assert.equal(ws.F30.f, "SUM(F19:F29)");
+  assert.match(ws.A31.v, /USD for 1 unit of the receipt's currency/, "the rate's direction is stated");
+  assert.match(ws.A31.v, /maryjoy\.manzanares@dg3\.com/, "Mary Joy is named");
+  assert.doesNotMatch(ws.A31.v, /Delete formula from column E/);
+  const ships = []; for (let r = 1; r <= 60; r++) if (list["A" + r]) ships.push(list["A" + r].v);
+  for (const s of ["LEGEND OF THE SEAS", "STAR OF THE SEAS", "SYMPHONY OF THE SEAS", "XCEL"]) assert.ok(ships.includes(s), s + " is on the ship list");
+  assert.equal(ships.length, 48);
 });
 
 test("wiring: the Worker routes /hub/ before the session gate, reads the count without writing it, and the guard's DDL matches the migration", () => {

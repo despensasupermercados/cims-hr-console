@@ -1162,10 +1162,22 @@ download link. An earlier "keep the six" answer is superseded — never attach f
   right now" (503), never "Between contracts" (the preview and the audit say the same); the contract is never Rita's card a
   TDG file dated after its sign-on contradicts (`currentLeg`); the sign-off day reads "sign-off today" and after it "past the
   planned sign-off", never "-17 days to go".
-- **The Expense Report v3** is served at `/hub/expense.xlsx` (`src/hub_assets.js`, byte for byte
-  `docs/mockups/welcome_20261019/expense_report_v3.xlsx`): Legend, Star, Symphony, Xcel on the ship list (now dropdowns, warning
-  only), Mary Joy named, every line blank until used (v2's line 11 had no formula but was summed), and the rate's direction
-  stated (USD for 1 unit of the receipt's currency — "1 USD = 58 PHP" typed into v2 overclaimed ~3,000x).
+- **The DG3 Reimbursable Expenses Form, v4** (23 Nov 2026; it was "the Expense Report v3" of 19 Oct) is served at
+  `/hub/expense.xlsx` (`src/hub_assets.js`, byte for byte
+  `docs/mockups/expense_form_20261123/DG3_Reimbursable_Expenses_Form_v4.xlsx`; the download is named
+  "DG3 Reimbursable Expenses Form.xlsx"). **The name is the handbook's** (Rita, 27 Oct 2026, HR-6: "The name in the Handbook –
+  DG3 Reimbursable Expenses Form – should be used"). What v3 fixed and every edition keeps: Legend, Star, Symphony, Xcel on
+  the ship list (dropdowns, warning only), Mary Joy named, every line blank until used (v2's line 11 had no formula but was
+  summed), and the rate's direction stated (USD for 1 unit of the receipt's currency — "1 USD = 58 PHP" typed into v2
+  overclaimed ~3,000x). **v4 = v3 + Rita's three changes, nothing else**: the title, the version line, and "Sign-On Date /
+  Sign-Off Date". Miguel, 23 Nov 2026: "here is the new version .. update everywhere needed" — the file he passed on (Rita's
+  mail of that day, "Version 3. - 26 October 2026", kept as `rita_as_received_20261123.xlsx`) was her edit of the OLD v2: the
+  new name, and none of the fixes above (11 lines of $10–$25.80 totalled $139.56 instead of $149.56). So it was merged, not
+  swapped, and labelled Version 4 because two different files already read "Version 3". **The master is the file in this
+  repo**: a new edition is an edit of the served file (send Rita THAT file), regenerated with
+  `node scripts/hub_expense_asset.mjs <file>`; the test reads what the file must say, so a file that lost a fix is red.
+  NOT changed, Miguel's call (a crew-facing email is signed off on a render): the Hub's link and the welcome email's button
+  still read "Expense report" / "Expense Report".
 - **The welcome email** (`src/emails/hr.welcome.v1.js`, filled by `src/welcome_context.js`): the pass, the first 15 days, who to
   message, the Crew Hub card (one green button), the Expense Report download. Never a placeholder: a link not given is no
   button ("Rita sends you a time"); no predecessor within `RELIEF_WINDOW_DAYS` of the sign-on is no "You take over from"; the
