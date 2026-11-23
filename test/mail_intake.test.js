@@ -204,5 +204,14 @@ test("the email handler routes the intake address to the inbox and everything el
   assert.match(h, /INSERT INTO email_inbox/, "the intel path is still there");
   assert.match(src, /const ensureMailIntake = memoEnsure\(/, "the receipt table's DDL is memoized (§12)");
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf-8");
-  assert.match(toml, /^MAIL_SGA_TO = "sga@cims\.work"/m); assert.match(toml, /^SGA_MAIL_SENDERS = "dg3\.com"/m);
+  assert.match(toml, /^MAIL_SGA_TO = "sga@cims\.work"/m);
+  // TDG's own domain is on the list since 23 Nov 2026 (Miguel: "add the tdgcm.ph also") — their accounting mails the bill itself
+  const senders = /^SGA_MAIL_SENDERS = "([^"]+)"/m.exec(toml);
+  assert.ok(senders, "SGA_MAIL_SENDERS is set in wrangler.toml");
+  assert.equal(senders[1], "dg3.com, tdgcm.ph");
+  const live = { SGA_MAIL_SENDERS: senders[1] };
+  assert.equal(senderAllowed("TDGCM | Nympha Alimorong <nympha.alimorong@tdgcm.ph>", live), true, "TDG's accounting feeds the console");
+  assert.equal(senderAllowed("Miguel.Sanmartin@dg3.com", live), true, "dg3.com still does");
+  assert.equal(senderAllowed("someone@tdgsm.ph", live), false, "a look-alike domain is not tdgcm.ph");
+  assert.equal(senderAllowed("accounting@tdgcrew.com", live), false, "nor is the old example domain");
 });

@@ -841,7 +841,10 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   safety net) through the ONE apply path each (§3). PDFs, the body and other files are ignored and listed on the receipt.
   **Only `SGA_MAIL_SENDERS` feed the console** (addresses or domains, comma-separated, default `dg3.com`): a workbook from
   anyone else is written `held`, loads nothing, and the receipt names the sender — Miguel adds TDG's domain to the var when
-  their first mail shows it. `/api/sharepoint/status` carries `mail` (address, senders, last receipts). `postal-mime` is the
+  their first mail shows it. **Done 23 Nov 2026 (Miguel: "add the tdgcm.ph also"): the var is `dg3.com, tdgcm.ph`** — TDG's
+  accounting mails the bill itself from `@tdgcm.ph` (not `tdgcrew.com`, the example domain in older notes and tests) with
+  `sga@cims.work` in Cc; the Email Routing rule `sga@cims.work` → this Worker was created the same day (until then every
+  mail to the address bounced `550 5.1.1 Address does not exist`). `/api/sharepoint/status` carries `mail` (address, senders, last receipts). `postal-mime` is the
   Worker's second runtime dependency. Nothing here is money (§1).
 - **THE EMAIL IS THE ROUTE — Miguel, 15 Oct 2026, later that evening: "we not gonna use this way .. we will do the email way
   instead .. in the future .. u will get the email from the finance team once a month."** So: the scheduled task "Cims
