@@ -111,6 +111,12 @@ dg3.com address and it loads at once.
 bounced `550 5.1.1 Address does not exist`), and Miguel added TDG's domain ("add the tdgcm.ph also"): the var is now
 `dg3.com, tdgcm.ph`. TDG mails from `@tdgcm.ph`; `tdgcrew.com` in the examples was never their domain.
 
+**The first real bill by email, 23 Nov 2026, and what it showed.** `DG3 SGA EXCEL OCTOBER'2026.xlsx` holds 243 worksheets;
+the console reads four. `sheetsOf` read the whole workbook and the Worker was killed for CPU time on 6 of 7 deliveries
+(Metrics → "Exceeded CPU Time Limits"); the bill got in on a retry. `sheetsOf` now reads the sheet names, then only the
+wanted sheets (`test/sheets_of_wanted.test.js`). How to check a mail: Cloudflare → cims.work → Email Routing → Activity
+log (one "Handled" line per mail, no "Delivery failed"), then `mail_intake` in D1 (the receipt) and `sp_inbox` (the sheets).
+
 ## The archive of the original workbooks (15 Oct 2026, later that evening)
 
 Miguel: *"keep this [the files] somewhere in a bucket in the database or u will figure out where .. I dont wanna lose this
