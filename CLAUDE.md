@@ -871,6 +871,27 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   **Read a failed delivery like this:** Workers & Pages → cims-hr-console → Observability → filter the email invocations →
   the outcome, the CPU time, and the LAST stage line: the stage after it is the one that was killed. Do not change the
   intake again before that line has been read. The short read stays: it is correct and it is pinned.
+- **THE LOGS NAMED IT: AN EMAIL INVOCATION GETS ABOUT 10 ms OF CPU. STORE, THEN PROCESS (23 Nov 2026, evening).** Read off
+  Workers Logs for Miguel's forward of 16:23 UTC (a 14,771,309-byte mail), four deliveries at 18:50–18:51 UTC on the version
+  with `[limits] cpu_ms = 300_000`: outcome **`exceededCpu` at `cpuTimeMs` 2010**, last line `sheets_start` (twice); then
+  **`exceededCpu` at `cpuTimeMs` 10**, last line `tables_ready` (twice). So the Worker's CPU limit does not reach `email()`:
+  an email invocation is killed at about 10 ms once a short burst (about 2 s) is spent. That explains the whole day: 30 of 32
+  deliveries of the October bill failed, and the two that got through were the ones whose parse fit inside the burst. The
+  243 sheets were never the cause and no parser tuning could have been the cure. **THE RULE, the one cims-hon adopted on 21 Sep
+  2026 for obp@cims.work** (`docs/cims-hon-inbound-mail-spec.md` in weekly_orders_email): accepting a mail and processing a
+  mail must not share a failure. `email()` for the intake address calls **`acceptIntakeMail`** and nothing else: it pipes the
+  raw message into the EXPORTS bucket (`mail-inbox/<sha-256 of the Message-ID>.eml`; the same mail delivered twice is the same
+  object), looks that the object is there, writes one `mail_raw` row (`pending`) and returns. It parses nothing. **It has no
+  try/catch on purpose:** a mail that could not be stored is REFUSED, so the sender's server keeps it and retries for two
+  days; a mail accepted and not stored would be lost without a word. **`processStoredMail`** (the hourly job, before
+  `applyInbox`, never at the same time; also Travel's apply button) claims a row, reads the object and hands it to
+  `intakeMailToInbox` — the ONE parse path, unchanged (§3) — with a cron's budget; at most 3 mails a run; a claim older than
+  15 minutes is anyone's again; three failed tries park the row as `failed` with the bytes still in the bucket and a line in
+  the data log. **Consequence Miguel should expect:** a bill mailed to sga@cims.work shows in the console at the next top of
+  the hour, not within seconds. **Never put parsing, hashing of the body, or any loop over the message back into `email()`**
+  — for the intake or for crew-reports@; the test reads the handler's source for it. Pinned by `test/mail_intake.test.js`
+  (the handler stores and returns; the same mail twice; a refused mail; the hourly read through the one path; the sender gate
+  on the kept envelope; three tries then failed; the stuck claim).
 - **THE EMAIL IS THE ROUTE — Miguel, 15 Oct 2026, later that evening: "we not gonna use this way .. we will do the email way
   instead .. in the future .. u will get the email from the finance team once a month."** So: the scheduled task "Cims
   SharePoint pickup" (trig_01BerujiS9nWejWvyGuKfqu9) is **DISABLED** (21:29 UTC, not deleted — its run history stays; do not

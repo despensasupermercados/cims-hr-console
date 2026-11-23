@@ -14,9 +14,9 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* asserted be
 
 const SRC = new URL("../src/worker.js", import.meta.url);
 const TMP = new URL(`../src/__mail_${process.pid}__.mjs`, import.meta.url);
-writeFileSync(TMP, readFileSync(SRC, "utf-8") + "\nexport { intakeMailToInbox, applyInbox, apiSharePointStatus };\n", "utf-8");
-let intakeMailToInbox, applyInbox, apiSharePointStatus;
-try { ({ intakeMailToInbox, applyInbox, apiSharePointStatus } = await import(TMP.href)); } finally { unlinkSync(TMP); }
+writeFileSync(TMP, readFileSync(SRC, "utf-8") + "\nexport { intakeMailToInbox, applyInbox, apiSharePointStatus, acceptIntakeMail, processStoredMail };\n", "utf-8");
+let intakeMailToInbox, applyInbox, apiSharePointStatus, acceptIntakeMail, processStoredMail, worker;
+try { ({ intakeMailToInbox, applyInbox, apiSharePointStatus, acceptIntakeMail, processStoredMail, default: worker } = await import(TMP.href)); } finally { unlinkSync(TMP); }
 
 function envFor(d, vars = {}) {
   const stmt = (sql, args = []) => ({
@@ -200,7 +200,8 @@ test("the Worker: an unknown sender is held and loads nothing; a mail with no wo
 test("the email handler routes the intake address to the inbox and everything else to the intel pipeline", () => {
   const src = readFileSync(SRC, "utf-8");
   const h = src.slice(src.indexOf("async email(message, env, ctx)"), src.indexOf("async scheduled(event, env, ctx)"));
-  assert.match(h, /if \(isIntakeMail\(message, env\)\) \{[\s\S]*intakeMailToInbox\(env, message, ctx\)[\s\S]*return;/, "the intake returns before the intel insert");
+  assert.match(h, /if \(isIntakeMail\(message, env\)\) \{ await acceptIntakeMail\(env, message\); return; \}/, "the intake stores the mail and returns before the intel insert");
+  assert.ok(!/intakeMailToInbox|PostalMime|sheetsOf|intakeMail\(/.test(h), "the email handler parses nothing (store, then process — 23 Nov 2026)");
   assert.match(h, /INSERT INTO email_inbox/, "the intel path is still there");
   assert.match(src, /const ensureMailIntake = memoEnsure\(/, "the receipt table's DDL is memoized (§12)");
   const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf-8");
@@ -239,4 +240,139 @@ test("Workers Logs are on and the CPU ceiling is 5 minutes (wrangler.toml)", () 
   const fn = src.slice(src.indexOf("async function intakeMailToInbox"), src.indexOf("return { outcome, files: receipt"));
   for (const s of ["received", "tables_ready", "raw_read", "inbox_written", "receipt_written"]) assert.ok(fn.includes('stage("' + s + '"'), "the handler marks " + s);
   assert.match(fn, /log: stage/, "and hands the marker to the parser");
+});
+
+
+// ---- STORE, THEN PROCESS (23 Nov 2026) ----
+// The first real bill by email failed 30 of 32 deliveries: an email invocation is killed at about 10 ms of CPU once a short
+// burst is spent (Workers Logs: exceededCpu at cpuTimeMs 2010 after "sheets_start", then at cpuTimeMs 10), whatever the
+// Worker's CPU limit says. So the handler stores the raw mail and returns; the hourly job parses it.
+function bucket() {   // the EXPORTS bucket with the bytes kept: put / head / get
+  const store = new Map();
+  return { store,
+    async put(key, body, opts) { const buf = body instanceof ArrayBuffer ? body : await new Response(body).arrayBuffer(); store.set(key, { buf, opts }); },
+    async head(key) { return store.has(key) ? { size: store.get(key).buf.byteLength } : null; },
+    async get(key) { return store.has(key) ? { arrayBuffer: async () => store.get(key).buf, body: "bytes" } : null; } };
+}
+const bill = (from = "TDGCM | Nympha Alimorong <nympha.alimorong@tdgcm.ph>") => mime({ from, subject: "TCM DG3 Vessels OCTOBER 2026 SGA", attachments: [{ name: "SGA COVER PAGE OCTOBER 2026.pdf", type: "application/pdf", buf: new Uint8Array(4096) }, { name: "DG3 SGA EXCEL OCTOBER'26.xlsx", type: XLSX_MIME, buf: sgaXlsx() }] });
+function arriving(raw, { from = "nympha.alimorong@tdgcm.ph", to = "sga@cims.work", id = "<824e7b5d@mail.gmail.com>", subject = "TCM DG3 Vessels OCTOBER 2026 SGA" } = {}) {
+  const bytes = new TextEncoder().encode(raw);
+  const h = new Map([["subject", subject]]); if (id) h.set("message-id", id);
+  return { from, to, raw: new Blob([bytes]).stream(), rawSize: bytes.byteLength, headers: h };
+}
+const LIVE = { SGA_MAIL_SENDERS: "dg3.com, tdgcm.ph" };
+const tables = (d) => d.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+const rawRows = (d) => d.prepare("SELECT key, from_addr, to_addr, subject, size, state, attempts, note FROM mail_raw ORDER BY received_at").all().map((r) => ({ ...r }));
+
+test("the email handler stores the mail and returns: nothing is parsed, nothing is loaded", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = { ...envFor(d, LIVE), EXPORTS: bucket() };
+  const raw = bill();
+  await worker.email(arriving(raw), env, { waitUntil() { throw new Error("the handler starts no background work"); } });
+  const keys = [...env.EXPORTS.store.keys()];
+  assert.equal(keys.length, 1); assert.match(keys[0], /^mail-inbox\/[0-9a-f]{64}\.eml$/);
+  assert.equal(new TextDecoder().decode(env.EXPORTS.store.get(keys[0]).buf), raw, "the bytes in the bucket are the mail, to the byte");
+  assert.equal(env.EXPORTS.store.get(keys[0]).opts.httpMetadata.contentType, "message/rfc822");
+  assert.deepEqual(rawRows(d), [{ key: keys[0], from_addr: "nympha.alimorong@tdgcm.ph", to_addr: "sga@cims.work", subject: "TCM DG3 Vessels OCTOBER 2026 SGA", size: new TextEncoder().encode(raw).byteLength, state: "pending", attempts: 0, note: null }]);
+  // not one row of what parsing would have written
+  const t = tables(d);
+  assert.ok(!t.includes("mail_intake"), "no receipt yet: the mail was not read");
+  assert.ok(!t.includes("sp_inbox") || d.prepare("SELECT COUNT(*) n FROM sp_inbox").get().n === 0, "no sheet was read");
+  assert.ok(!t.includes("sga_line") || d.prepare("SELECT COUNT(*) n FROM sga_line").get().n === 0, "no line was loaded");
+});
+
+test("the same mail delivered again is the same object and the same row; a mail with no Message-ID gets its own", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = { ...envFor(d, LIVE), EXPORTS: bucket() };
+  const raw = bill();
+  await acceptIntakeMail(env, arriving(raw)); await acceptIntakeMail(env, arriving(raw));
+  assert.equal(env.EXPORTS.store.size, 1); assert.equal(rawRows(d).length, 1);
+  await acceptIntakeMail(env, arriving(raw, { id: null })); await acceptIntakeMail(env, arriving(raw, { id: null }));
+  assert.equal(rawRows(d).length, 3, "without a Message-ID nothing says two deliveries are one mail");
+  assert.equal(rawRows(d).filter((r) => /^mail-inbox\/noid-/.test(r.key)).length, 2);
+});
+
+test("a mail that cannot be kept is refused, so the sender's server keeps it and tries again", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const raw = bill();
+  const down = { ...envFor(d, LIVE), EXPORTS: { async put() { throw new Error("R2 down"); }, async head() { return null; } } };
+  await assert.rejects(() => worker.email(arriving(raw), down, {}), /R2 down/);
+  const lost = { ...envFor(d, LIVE), EXPORTS: { async put() {}, async head() { return null; } } };
+  await assert.rejects(() => worker.email(arriving(raw), lost, {}), /could not be read back/);
+  const short = { ...envFor(d, LIVE), EXPORTS: { async put() {}, async head() { return { size: 12 }; } } };
+  await assert.rejects(() => worker.email(arriving(raw), short, {}), /could not be read back/);
+  await assert.rejects(() => worker.email(arriving(raw), { ...envFor(d, LIVE), EXPORTS: undefined }, {}), /no EXPORTS bucket/);
+  assert.ok(!tables(d).includes("mail_raw") || rawRows(d).length === 0, "a refused mail leaves no row saying it is here");
+});
+
+test("the hourly job reads the stored mail through the one path: the bill loads, the receipt is written, the row is done", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = { ...envFor(d, LIVE), EXPORTS: bucket() };
+  await worker.email(arriving(bill()), env, {});
+  const r = await processStoredMail(env);
+  assert.deepEqual(r.read.map((x) => x.outcome), ["queued"]); assert.equal(r.waiting, 0); assert.deepEqual(r.failed, []);
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line WHERE year=2026 AND month=10").get().n, 1, "TDG's own mail loads: tdgcm.ph feeds the console");
+  const receipt = { ...d.prepare("SELECT from_addr, to_addr, subject, allowed, outcome, ignored_json FROM mail_intake").get() };
+  assert.deepEqual(receipt, { from_addr: "nympha.alimorong@tdgcm.ph", to_addr: "sga@cims.work", subject: "TCM DG3 Vessels OCTOBER 2026 SGA", allowed: 1, outcome: "queued", ignored_json: JSON.stringify(["SGA COVER PAGE OCTOBER 2026.pdf"]) });
+  assert.deepEqual(rawRows(d).map((x) => [x.state, x.attempts, x.note]), [["done", 1, "queued"]]);
+  assert.equal([...env.EXPORTS.store.keys()].filter((k) => k.startsWith("sga-archive/")).length, 1, "the workbook's original is archived as before");
+  // a second run has nothing to do, and the same mail delivered again stays done
+  const again = await processStoredMail(env);
+  assert.deepEqual(again.read, []); assert.equal(d.prepare("SELECT COUNT(*) n FROM mail_intake").get().n, 1);
+  await worker.email(arriving(bill()), env, {});
+  assert.deepEqual(rawRows(d).map((x) => x.state), ["done"]);
+});
+
+test("the sender gate still reads the envelope kept with the stored mail", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = { ...envFor(d, LIVE), EXPORTS: bucket() };
+  // a dg3.com header handed over by an unlisted envelope: held, as before
+  await worker.email(arriving(bill("Rita Berenyi <rita.berenyi@dg3.com>"), { from: "bounce@elsewhere.example", id: "<a@x>" }), env, {});
+  const r = await processStoredMail(env);
+  assert.deepEqual(r.read.map((x) => x.outcome), ["held"]);
+  assert.equal(d.prepare("SELECT COUNT(*) n FROM sga_line").get().n, 0);
+  assert.equal(d.prepare("SELECT allowed FROM mail_intake").get().allowed, 0);
+});
+
+test("a stored mail that cannot be read is tried three times, then parked as failed with its bytes kept; one bad mail does not block the next", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = { ...envFor(d, LIVE), EXPORTS: bucket() };
+  await worker.email(arriving("this is not a mail at all", { id: "<bad@x>" }), env, {});
+  const badKey = rawRows(d)[0].key;
+  const realGet = env.EXPORTS.get.bind(env.EXPORTS);
+  env.EXPORTS.get = async (k) => (k === badKey ? null : realGet(k));   // the object is not there when the job looks
+  for (let i = 1; i <= 2; i++) { const r = await processStoredMail(env); assert.deepEqual(r.read, []); assert.deepEqual(r.failed, []); assert.equal(r.waiting, 1); assert.deepEqual(rawRows(d).map((x) => [x.state, x.attempts]), [["pending", i]]); }
+  await worker.email(arriving(bill(), { id: "<good@x>" }), env, {});
+  const r3 = await processStoredMail(env);
+  assert.deepEqual(r3.failed.map((f) => f.key), [badKey]); assert.match(r3.failed[0].error, /not in the bucket/);
+  assert.deepEqual(r3.read.map((x) => x.outcome), ["queued"], "the good mail behind it is read in the same run");
+  assert.deepEqual(rawRows(d).map((x) => [x.state, x.attempts]), [["failed", 3], ["done", 1]]);
+  assert.ok(env.EXPORTS.store.has(badKey), "the bytes of a failed mail stay in the bucket");
+  assert.deepEqual((await processStoredMail(env)).read, [], "a failed mail is not tried a fourth time");
+  // the sender's server delivers it again: it is taken again from zero
+  await worker.email(arriving("this is not a mail at all", { id: "<bad@x>" }), env, {});
+  assert.deepEqual(rawRows(d).map((x) => [x.state, x.attempts]), [["pending", 0], ["done", 1]]);
+});
+
+test("a claim whose run died is anyone's again after 15 minutes, and not before", async () => {
+  const d = new DatabaseSync(":memory:"); d.exec(CREW);
+  const env = { ...envFor(d, LIVE), EXPORTS: bucket() };
+  await worker.email(arriving(bill()), env, {});
+  const stamp = (msAgo) => new Date(Date.now() - msAgo).toISOString() + "|dead-run";
+  d.prepare("UPDATE mail_raw SET state='claimed', claimed_at=?, attempts=1").run(stamp(5 * 60 * 1000));
+  assert.deepEqual((await processStoredMail(env)).read, [], "a 5-minute-old claim may still be running");
+  assert.deepEqual(rawRows(d).map((x) => x.state), ["claimed"]);
+  d.prepare("UPDATE mail_raw SET claimed_at=?").run(stamp(16 * 60 * 1000));
+  assert.deepEqual((await processStoredMail(env)).read.map((x) => x.outcome), ["queued"]);
+  assert.deepEqual(rawRows(d).map((x) => [x.state, x.attempts]), [["done", 2]]);
+});
+
+test("the hourly job reads stored mail first and applies the inbox after it, never both at once", () => {
+  const src = readFileSync(SRC, "utf-8");
+  const sch = src.slice(src.indexOf("async scheduled(event, env, ctx)"), src.indexOf("/* ----------------------- auth helpers"));
+  assert.match(sch, /processStoredMail\(env\)\.catch\([^]*?\)\.then\(function \(\) \{ return applyInbox\(env\); \}\)/);
+  assert.equal(sch.split("applyInbox(env)").length - 1, 1, "one applyInbox in the hourly job, after the stored mail");
+  const acc = src.slice(src.indexOf("async function acceptIntakeMail"), src.indexOf("async function processStoredMail"));
+  assert.ok(!/PostalMime|sheetsOf|intakeMail\(|XLSX\./.test(acc), "accepting a mail parses nothing");
+  assert.match(acc, /new FixedLengthStream\(size\)/, "the bytes are piped to the bucket, not read into the Worker, where the runtime can");
 });

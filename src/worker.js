@@ -487,10 +487,13 @@ if (p === "/api/health/send" && request.method === "POST") { await ensureRegistr
     env = Object.assign({}, env, { MAILER: guardMailer(env.MAILER, env.MAIL_ONLY_TO) });
     // THE MAIL INTAKE (15 Oct 2026, src/mail_intake.js): mail for sga@cims.work carries TDG's bill or Rita's workbook as an
     // attachment; it goes to the inbox (sp_inbox) and loads through the one apply path — never to the intel pipeline.
-    if (isIntakeMail(message, env)) {
-      try { await intakeMailToInbox(env, message, ctx); } catch (e) { console.error("mail_intake_error", (e && e.stack) || e); }
-      return;
-    }
+    // STORE, THEN PROCESS (23 Nov 2026). The handler makes the bytes durable and says yes — nothing else. It does NOT parse:
+    // an email invocation of this Worker is killed at about 10 ms of CPU once a short burst is spent (read off Workers Logs:
+    // outcome exceededCpu at cpuTimeMs 2010 with the last line "sheets_start", then at cpuTimeMs 10 on the next two tries),
+    // whatever [limits] cpu_ms says. The hourly job reads the stored mail with a real budget (processStoredMail).
+    // No try/catch on purpose: if the bytes cannot be kept, refusing the mail is the safe answer — the sender's mail server
+    // holds it and tries again for two days. Accepting a mail that was not stored would lose it without a word.
+    if (isIntakeMail(message, env)) { await acceptIntakeMail(env, message); return; }
     try {
       await ensureIntel(env);
       let raw = "";
@@ -522,7 +525,9 @@ if (ctx && ctx.waitUntil) ctx.waitUntil(ensureRegistrySnapshot(env).then(() => m
     if (ctx && ctx.waitUntil) ctx.waitUntil(maybeSyncSharePoint(env).catch(function (e) { console.error("sharepoint_sync", (e && e.stack) || e); }));
     // The SharePoint INBOX (15 Oct 2026, src/sp_inbox.js): the sheets the morning session wrote into sp_inbox load here,
     // through the same apply paths — this is the route that works before the Graph identity exists.
-    if (ctx && ctx.waitUntil) ctx.waitUntil(applyInbox(env).catch(function (e) { console.error("sp_inbox", (e && e.stack) || e); }));
+    // The mail intake's stored mail is read here first (23 Nov 2026, processStoredMail), then the inbox is applied — one after
+    // the other, so one bill is never applied by two runs at once.
+    if (ctx && ctx.waitUntil) ctx.waitUntil(processStoredMail(env).catch(function (e) { console.error("mail_stored", (e && e.stack) || e); }).then(function () { return applyInbox(env); }).catch(function (e) { console.error("sp_inbox", (e && e.stack) || e); }));
   }
 };
 
@@ -1945,6 +1950,87 @@ async function archiveSourceFile(env, bytes, meta) {
     "note=CASE WHEN COALESCE(sga_source_file.r2_key, excluded.r2_key) IS NULL THEN excluded.note ELSE NULL END").bind(...SOURCE_COLS.map((c) => rec[c] ?? null)).run();
   return { hash, kept, r2_key: rec.r2_key, error };
 }
+// ---- STORE, THEN PROCESS (23 Nov 2026) ----
+// WHY. The first real bill by email (TDG's October 2026 SGA, a 14.8 MB mail) failed 30 of 32 deliveries. Workers Logs, once
+// on, showed the email invocation killed with outcome `exceededCpu` at cpuTimeMs 2010 — its last line "sheets_start" — and
+// the next two tries killed at cpuTimeMs 10 after "tables_ready", with [limits] cpu_ms = 300000 in force. An email
+// invocation does not get the Worker's CPU limit: it gets about 10 ms and a short burst. Parsing a MIME message and a
+// workbook inside it is never safe, and a killed invocation throws nothing a try/catch could catch: Email Routing
+// answers the sender 421, the sender retries for two days and then destroys the message.
+// THE RULE (the one cims-hon adopted on 21 Sep 2026 for obp@cims.work, docs/cims-hon-inbound-mail-spec.md in
+// weekly_orders_email): accepting a mail and processing a mail must not share a failure. The handler streams the raw message
+// into the EXPORTS bucket (mail-inbox/<sha-256 of the Message-ID>.eml — the same mail delivered twice is the same object),
+// writes one row in mail_raw and returns. It reads no body, parses nothing and hashes nothing but the Message-ID.
+// processStoredMail (the hourly job, and Travel's "apply" button) claims a row, reads the object and hands it to
+// intakeMailToInbox — the ONE parse path, unchanged — with a cron's budget. Three failed tries park the row as `failed`,
+// with the bytes still in the bucket.
+const ensureMailRaw = memoEnsure(ensureMailRawImpl);
+async function ensureMailRawImpl(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS mail_raw (key TEXT PRIMARY KEY, from_addr TEXT, to_addr TEXT, subject TEXT, message_id TEXT, size INTEGER, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, received_at TEXT, claimed_at TEXT, done_at TEXT, note TEXT)").run();
+}
+const MAIL_RAW_PREFIX = "mail-inbox/";
+const MAIL_RAW_MAX_TRIES = 3;
+const MAIL_RAW_STUCK_MS = 15 * 60 * 1000;
+async function acceptIntakeMail(env, message) {
+  if (!env.EXPORTS) throw new Error("mail intake: no EXPORTS bucket bound — the mail is refused so the sender's server keeps it");
+  const hdr = (n) => (message.headers && message.headers.get && message.headers.get(n)) || null;
+  const messageId = hdr("message-id");
+  // the same mail delivered again is the same key; a mail with no Message-ID gets its own
+  const key = MAIL_RAW_PREFIX + (messageId ? await sha256Hex(new TextEncoder().encode(String(messageId).trim())) : "noid-" + crypto.randomUUID()) + ".eml";
+  const size = Number.isFinite(message.rawSize) ? message.rawSize : null;
+  // the bytes go from the mail to the bucket without passing through this code when the runtime can pipe them
+  let body;
+  if (size != null && typeof FixedLengthStream === "function" && message.raw && typeof message.raw.pipeTo === "function") {
+    const fixed = new FixedLengthStream(size);
+    message.raw.pipeTo(fixed.writable).catch(() => { /* a broken pipe fails the put below, which refuses the mail */ });
+    body = fixed.readable;
+  } else body = await new Response(message.raw).arrayBuffer();
+  await env.EXPORTS.put(key, body, { httpMetadata: { contentType: "message/rfc822" } });
+  // asked to keep it is not the same as kept: look
+  if (typeof env.EXPORTS.head === "function") {
+    const kept = await env.EXPORTS.head(key);
+    if (!kept || (size != null && kept.size != null && kept.size !== size)) throw new Error("mail intake: the stored mail could not be read back (" + key + ") — refused so the sender's server keeps it");
+  }
+  await ensureMailRaw(env);
+  const now = new Date().toISOString();
+  // a mail already here and done stays done; one that failed or is waiting is taken again
+  await env.DB.prepare("INSERT INTO mail_raw (key, from_addr, to_addr, subject, message_id, size, state, attempts, received_at) VALUES (?,?,?,?,?,?,'pending',0,?) ON CONFLICT(key) DO UPDATE SET state=CASE WHEN mail_raw.state IN ('done','claimed') THEN mail_raw.state ELSE 'pending' END, attempts=CASE WHEN mail_raw.state IN ('done','claimed') THEN mail_raw.attempts ELSE 0 END, size=excluded.size")
+    .bind(key, message.from || null, message.to || null, hdr("subject"), messageId, size, now).run();
+  try { console.log(JSON.stringify({ ev: "mail_intake", stage: "stored", raw_size: size })); } catch (e) { /* never breaks the intake */ }
+  return { key, size };
+}
+async function processStoredMail(env, max = 3) {
+  await ensureMailRaw(env);
+  const out = { read: [], failed: [], waiting: 0 };
+  const nowMs = Date.now();
+  // a claim whose run died would park the mail for good: after 15 minutes it is anyone's again
+  await env.DB.prepare("UPDATE mail_raw SET state='pending' WHERE state='claimed' AND (claimed_at IS NULL OR substr(claimed_at, 1, 24) < ?)").bind(new Date(nowMs - MAIL_RAW_STUCK_MS).toISOString()).run();
+  const pending = (await env.DB.prepare("SELECT key, from_addr, to_addr, subject, attempts FROM mail_raw WHERE state='pending' ORDER BY received_at LIMIT ?").bind(max).all()).results || [];
+  for (const m of pending) {
+    // claim it: two runs at once must never read one mail twice
+    const token = new Date().toISOString() + "|" + crypto.randomUUID();
+    await env.DB.prepare("UPDATE mail_raw SET state='claimed', claimed_at=?, attempts=attempts+1 WHERE key=? AND state='pending'").bind(token, m.key).run();
+    const mine = await env.DB.prepare("SELECT claimed_at, attempts FROM mail_raw WHERE key=?").bind(m.key).first();
+    if (!mine || mine.claimed_at !== token) continue;
+    try {
+      const obj = env.EXPORTS ? await env.EXPORTS.get(m.key) : null;
+      if (!obj) throw new Error("the stored mail is not in the bucket");
+      const raw = typeof obj.arrayBuffer === "function" ? await obj.arrayBuffer() : await new Response(obj.body).arrayBuffer();
+      // the ONE parse path, as if the mail had just arrived; no ctx, so the inbox is applied before this returns
+      const r = await intakeMailToInbox(env, { from: m.from_addr, to: m.to_addr, raw, rawSize: raw.byteLength, headers: new Map([["subject", m.subject]]) }, null);
+      await env.DB.prepare("UPDATE mail_raw SET state='done', done_at=?, note=? WHERE key=?").bind(new Date().toISOString(), String(r.outcome || "").slice(0, 200), m.key).run();
+      out.read.push({ key: m.key, outcome: r.outcome });
+    } catch (e) {
+      const msg = String((e && e.message) || e).slice(0, 300), gaveUp = mine.attempts >= MAIL_RAW_MAX_TRIES;
+      await env.DB.prepare("UPDATE mail_raw SET state=?, note=? WHERE key=?").bind(gaveUp ? "failed" : "pending", msg, m.key).run();
+      console.error("mail_stored_error", m.key, msg);
+      if (gaveUp) { out.failed.push({ key: m.key, error: msg }); await logData(env, "mail intake (stored mail)", 0, "FAILED after " + mine.attempts + " tries, the mail is kept in the bucket at " + m.key + ": " + msg).catch(() => null); }
+    }
+  }
+  const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM mail_raw WHERE state='pending'").first();
+  out.waiting = (left && left.n) || 0;
+  return out;
+}
 async function intakeMailToInbox(env, message, ctx) {
   // one line per stage in Workers Logs (sizes and counts only): a killed delivery's last line names the stage that did not finish
   const stage = (name, facts) => { try { console.log(JSON.stringify({ ev: "mail_intake", stage: name, ...(facts || {}) })); } catch (e) { /* never breaks the intake */ } };
@@ -2015,7 +2101,9 @@ async function apiSgaFile(request, env) {
   return new Response(obj.body, { headers: { "Content-Type": XLSX_MIME_TYPE, "Content-Disposition": 'attachment; filename="' + safeName(row.name) + '"', "Cache-Control": "private, no-store" } });
 }
 async function apiInboxApply(env, session) {
+  const stored = await processStoredMail(env).catch((e) => ({ error: String((e && e.message) || e) })); // mail waiting since the last hourly run is read now
   const report = await applyInbox(env);
+  report.stored_mail = stored;
   try { await env.DB.prepare("INSERT INTO activity_log (id, at, user_id, action, detail) VALUES (?,?,?,?,?)").bind("act_" + crypto.randomUUID(), new Date().toISOString(), (session && session.email) || "?", "sharepoint_inbox_apply", JSON.stringify({ files: report.files, loaded: report.loaded.length, waiting: report.waiting, errors: report.errors.length })).run(); } catch {}
   return json(report);
 }
