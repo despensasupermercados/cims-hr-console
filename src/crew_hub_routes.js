@@ -1,5 +1,5 @@
 // THE CREW HUB'S ROUTES (Miguel, 19 Oct 2026, "deploy"). Public: GET /hub/<token> (the seafarer's page, no login, the
-// link is the key) and GET /hub/expense.xlsx (the Expense Report v3). Signed in: POST /api/hub/link (get or make the
+// link is the key) and GET /hub/expense.xlsx (the DG3 Reimbursable Expenses Form, v4). Signed in: POST /api/hub/link (get or make the
 // crew's link) and POST /api/hub/revoke (stop it; the next request makes a new one). The reads are injected by the
 // Worker (deps.boardLegs = the ONE schedule; deps.bonusCount = the consecutive count, READ only — §1), so this module
 // never imports the Worker. Nothing here writes anything but crew_hub_link and the activity log. Pinned by
@@ -96,7 +96,7 @@ export function installHub(deps) {
       const bin = atob(EXPENSE_XLSX_B64), bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       return new Response(bytes, { headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": 'attachment; filename="Expense Report Template.xlsx"', "Cache-Control": "public, max-age=3600" } });
+        "Content-Disposition": 'attachment; filename="DG3 Reimbursable Expenses Form.xlsx"', "Cache-Control": "public, max-age=3600" } });
     }
     if (p === "/hub/i/calendar.png" && request.method === "GET") {
       const bin = atob(CALENDAR_PNG_B64), bytes = new Uint8Array(bin.length);
