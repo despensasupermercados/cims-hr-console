@@ -1946,10 +1946,15 @@ async function archiveSourceFile(env, bytes, meta) {
   return { hash, kept, r2_key: rec.r2_key, error };
 }
 async function intakeMailToInbox(env, message, ctx) {
+  // one line per stage in Workers Logs (sizes and counts only): a killed delivery's last line names the stage that did not finish
+  const stage = (name, facts) => { try { console.log(JSON.stringify({ ev: "mail_intake", stage: name, ...(facts || {}) })); } catch (e) { /* never breaks the intake */ } };
+  stage("received", { raw_size: message.rawSize != null ? message.rawSize : null });
   await Promise.all([ensureMailIntake(env), ensureSpInbox(env), ensureSga(env)]);
+  stage("tables_ready");
   const raw = await new Response(message.raw).arrayBuffer();
+  stage("raw_read", { raw_bytes: raw.byteLength });
   const subject = (message.headers && message.headers.get && message.headers.get("subject")) || null;
-  const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now() });
+  const r = await intakeMail(env, raw, { from: message.from, subject }, { parse: (b) => PostalMime.parse(b), XLSX, sheetsOf, wantSga: WANT_SGA, wantTravel: WANT_TRAVEL, now: Date.now(), log: stage });
   // a file the console already loaded (same bytes → same key, status ok) is archived and receipted, never queued again —
   // through the inbox, or (27 Oct 2026) on Upload data: the page stamps sga_file.file_hash with the file's SHA-256, so a bill
   // Rita loaded by hand and Finance then emails is the same file, not a month to replace with itself
@@ -1968,6 +1973,7 @@ async function intakeMailToInbox(env, message, ctx) {
     for (const row of f.inbox || []) stmts.push(ins.bind(...INBOX_COLS.map((c) => row[c] ?? null)));
   }
   for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  stage("inbox_written", { rows: stmts.length });
   // the original, kept as it arrived — a held or already-loaded file too (keeping costs nothing, loading is the gate)
   for (const f of r.files) {
     if (!f.bytes) continue;
@@ -1980,7 +1986,8 @@ async function intakeMailToInbox(env, message, ctx) {
   await env.DB.prepare("INSERT INTO mail_intake (id, from_addr, to_addr, subject, message_id, allowed, files_json, ignored_json, outcome, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .bind("mi_" + crypto.randomUUID(), r.from, message.to || null, r.subject, r.messageId, r.allowed ? 1 : 0, JSON.stringify(receipt), JSON.stringify(r.ignored), outcome, r.at).run();
   await logData(env, "mail intake (" + r.from + (r.envelope ? ", envelope " + r.envelope : "") + ")", r.files.length, outcome + ": " + r.files.map((f) => f.name + " → " + f.status + (f.error ? " (" + f.error + ")" : "") + (f.archived ? ", original kept" : "")).join(", ") + (r.ignored.length ? " · ignored " + r.ignored.length : ""));
-  if (outcome === "queued") { const run = applyInbox(env).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
+  stage("receipt_written", { outcome });
+  if (outcome === "queued") { const run = applyInbox(env).then((x) => { stage("apply_done"); return x; }).catch((e) => console.error("mail_intake_apply", (e && e.stack) || e)); if (ctx && ctx.waitUntil) ctx.waitUntil(run); else await run; }
   return { outcome, files: receipt, ignored: r.ignored, from: r.from };
 }
 // POST /api/sga/archive — the Upload page sends the raw workbook after a successful Apply (X-File-Name); any signed-in

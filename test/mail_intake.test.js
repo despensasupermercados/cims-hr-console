@@ -215,3 +215,28 @@ test("the email handler routes the intake address to the inbox and everything el
   assert.equal(senderAllowed("someone@tdgsm.ph", live), false, "a look-alike domain is not tdgcm.ph");
   assert.equal(senderAllowed("accounting@tdgcrew.com", live), false, "nor is the old example domain");
 });
+
+// BREADCRUMBS (23 Nov 2026): a killed delivery left nothing to read. One line per stage, sizes and counts only.
+test("the intake leaves a line per stage, with sizes and counts and never a name or an address", async () => {
+  const lines = [];
+  const raw = mime({ from: "Nympha Alimorong <nympha.alimorong@tdgcm.ph>", subject: "TCM DG3 Vessels OCTOBER 2026 SGA", attachments: [{ name: "DG3 SGA EXCEL OCTOBER'26.xlsx", type: XLSX_MIME, buf: sgaXlsx() }] });
+  const r = await intakeMail({ SGA_MAIL_SENDERS: "dg3.com, tdgcm.ph" }, raw, { from: "nympha.alimorong@tdgcm.ph" }, { ...deps, log: (stage, facts) => lines.push({ stage, ...facts }) });
+  assert.equal(r.files[0].status, "pending");
+  assert.deepEqual(lines.map((l) => l.stage), ["mime_parse_start", "mime_parse_done", "hash_start", "sheets_start", "sheets_done", "intake_parsed"]);
+  assert.ok(lines[0].raw_bytes > 0); assert.equal(lines[1].attachments, 1); assert.ok(lines[1].attachment_bytes > 0);
+  assert.ok(lines[4].sheets >= 1 && lines[4].rows >= 1);
+  const text = JSON.stringify(lines);
+  for (const secret of ["nympha", "tdgcm", "CAAG", "ANTHEM", "OCTOBER", "@"]) assert.ok(!text.includes(secret), "no " + secret + " in the log lines");
+  // a log function that throws, or none at all, changes nothing
+  const boom = await intakeMail({ SGA_MAIL_SENDERS: "dg3.com, tdgcm.ph" }, raw, { from: "nympha.alimorong@tdgcm.ph" }, { ...deps, log: () => { throw new Error("log down"); } });
+  assert.equal(boom.files[0].status, "pending"); assert.equal(boom.files[0].hash, r.files[0].hash);
+});
+test("Workers Logs are on and the CPU ceiling is 5 minutes (wrangler.toml)", () => {
+  const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf-8");
+  assert.match(toml, /^\[observability\]\nenabled = true\nhead_sampling_rate = 1$/m);
+  assert.match(toml, /^\[limits\]\ncpu_ms = 300_000$/m);
+  const src = readFileSync(SRC, "utf-8");
+  const fn = src.slice(src.indexOf("async function intakeMailToInbox"), src.indexOf("return { outcome, files: receipt"));
+  for (const s of ["received", "tables_ready", "raw_read", "inbox_written", "receipt_written"]) assert.ok(fn.includes('stage("' + s + '"'), "the handler marks " + s);
+  assert.match(fn, /log: stage/, "and hands the marker to the parser");
+});
