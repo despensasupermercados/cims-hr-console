@@ -37,6 +37,24 @@ keep_vars = true
 [placement]
 mode = "smart"
 
+# WORKERS LOGS: ON (23 Nov 2026). The mail intake (sga@cims.work) was killed on most deliveries of the first real bill and
+# left nothing to read: Cloudflare's Metrics counted "Exceeded CPU Time Limits" (22 that day) but, with Observability off,
+# no invocation kept its outcome, its CPU time or a console line, so the stage that was killed could not be named and a first
+# fix (PR #399, read only the wanted sheets) was written from the count alone and did not cure it. With this on, every
+# invocation keeps its outcome, CPU time and console output for Cloudflare's retention window (Workers & Pages →
+# cims-hr-console → Observability). Console output can name crew; it stays in this Cloudflare account. Billing: Workers Paid
+# includes a monthly allowance of log events; this Worker makes about 3,000 invocations a day. Miguel, 23 Nov 2026: "fix
+# everything u have to". Turn it off here, not in the dashboard (a deploy rewrites the dashboard's value).
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# CPU LIMIT: 5 minutes instead of Cloudflare's 30-second default (23 Nov 2026). The only error the mail intake ever produced is
+# "Exceeded CPU Time Limits". This is the room to finish while the cause is being read off the logs above; a healthy delivery
+# of the October 2026 bill took about 2 seconds end to end. It is a ceiling, not a cost: CPU is billed for what is used.
+[limits]
+cpu_ms = 300_000
+
 # DEPLOY GATE (2026-07-03 white-screen incident; patch retired 2026-09-04): wrangler runs
 # this before every bundle/deploy, no matter how wrangler is invoked (Workers Builds,
 # local, CI). It hard-verifies that every inline <script> the worker serves PARSES as

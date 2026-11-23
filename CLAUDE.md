@@ -859,6 +859,18 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   Workers Observability is OFF on this Worker, so a killed invocation leaves no log line: the evidence is Workers & Pages →
   cims-hr-console → Metrics → "Errors by invocation status", and Email Routing → Activity log ("Delivery failed" /
   "Handled").
+- **THAT FIX DID NOT CURE IT, AND WHY THE NEXT STEP IS LOGS, NOT A THIRD GUESS (23 Nov 2026, later).** On the version with
+  the short read (5081f024) the next forward of the same bill failed 12 deliveries out of 12 ("Exceeded CPU Time Limits"
+  went 10 → 22) and the sender got `421 4.3.0 Upstream error`. And D1 says the reading is NOT slow when it works: on the two
+  deliveries the old reader finished, the receipt's time and the archived original's time are 1.1 s and 2.4 s apart, whole
+  workbook included. So the count named the limit, not the stage, and the 243 sheets were a wrong reading of it. What changed
+  (the PR after #399): **Workers Logs ON** (`[observability]` in `wrangler.toml` — every invocation keeps its outcome, CPU
+  time and console lines), **the CPU ceiling at 5 minutes** (`[limits] cpu_ms`), and **a line per stage** from the intake
+  (`{"ev":"mail_intake","stage":…}`: received, tables_ready, raw_read, mime_parse_start/done, hash_start, sheets_start/done,
+  intake_parsed, inbox_written, receipt_written, apply_done — sizes and counts only, pinned by `test/mail_intake.test.js`).
+  **Read a failed delivery like this:** Workers & Pages → cims-hr-console → Observability → filter the email invocations →
+  the outcome, the CPU time, and the LAST stage line: the stage after it is the one that was killed. Do not change the
+  intake again before that line has been read. The short read stays: it is correct and it is pinned.
 - **THE EMAIL IS THE ROUTE — Miguel, 15 Oct 2026, later that evening: "we not gonna use this way .. we will do the email way
   instead .. in the future .. u will get the email from the finance team once a month."** So: the scheduled task "Cims
   SharePoint pickup" (trig_01BerujiS9nWejWvyGuKfqu9) is **DISABLED** (21:29 UTC, not deleted — its run history stays; do not
