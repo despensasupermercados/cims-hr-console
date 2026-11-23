@@ -107,6 +107,10 @@ other sender is written `held` and loads nothing; the receipt names the sender, 
 their domain (e.g. `dg3.com, tdgcrew.com`) and the next mail loads. Until then Rita can forward TDG's mail from her
 dg3.com address and it loads at once.
 
+**23 Nov 2026**: the routing rule above was created that day (it never had been: TDG's October bill and Miguel's reply
+bounced `550 5.1.1 Address does not exist`), and Miguel added TDG's domain ("add the tdgcm.ph also"): the var is now
+`dg3.com, tdgcm.ph`. TDG mails from `@tdgcm.ph`; `tdgcrew.com` in the examples was never their domain.
+
 ## The archive of the original workbooks (15 Oct 2026, later that evening)
 
 Miguel: *"keep this [the files] somewhere in a bucket in the database or u will figure out where .. I dont wanna lose this
