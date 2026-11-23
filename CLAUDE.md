@@ -846,6 +846,19 @@ Worker reads SharePoint itself (Microsoft Graph; the app registration and secret
   `sga@cims.work` in Cc; the Email Routing rule `sga@cims.work` → this Worker was created the same day (until then every
   mail to the address bounced `550 5.1.1 Address does not exist`). `/api/sharepoint/status` carries `mail` (address, senders, last receipts). `postal-mime` is the
   Worker's second runtime dependency. Nothing here is money (§1).
+- **`sheetsOf` PARSES ONLY THE WANTED SHEETS (23 Nov 2026; `src/sharepoint_sync.js`, pinned by
+  `test/sheets_of_wanted.test.js`).** TDG's real bill is not the four-sheet workbook of the fixtures: `DG3 SGA EXCEL
+  OCTOBER'2026.xlsx` (2.4 MB) carries **243 worksheets** (every ship's statement since SGA No. 1 of July 2023, most hidden)
+  and the console reads four (`2026 SUMMARY (2)`, `2026 SUMMARY TRAINREL`, `SUMMARY MANNING`, `TRAINING`). Reading the whole
+  workbook killed the mail intake on the first real bill by email: 6 of 7 deliveries failed, Cloudflare's Worker metrics
+  counted **"Exceeded CPU Time Limits"** (10 that day, 0 "Exceeded Memory"), nothing was written, and it only got in on a
+  retry of the sender's mail server. Now: one SheetJS pass for the sheet names only (`bookSheets`), one for the wanted
+  sheets by position (`sheets`); the result is the same object as a whole-workbook read (the test compares them), and if
+  the short read ever lacks a sheet it was asked for, the whole workbook is read as before. **Never go back to a bare
+  `XLSX.read(buf)` on a bill**, and when a new reader of TDG's workbook is added, give it the wanted sheets, not the file.
+  Workers Observability is OFF on this Worker, so a killed invocation leaves no log line: the evidence is Workers & Pages →
+  cims-hr-console → Metrics → "Errors by invocation status", and Email Routing → Activity log ("Delivery failed" /
+  "Handled").
 - **THE EMAIL IS THE ROUTE — Miguel, 15 Oct 2026, later that evening: "we not gonna use this way .. we will do the email way
   instead .. in the future .. u will get the email from the finance team once a month."** So: the scheduled task "Cims
   SharePoint pickup" (trig_01BerujiS9nWejWvyGuKfqu9) is **DISABLED** (21:29 UTC, not deleted — its run history stays; do not

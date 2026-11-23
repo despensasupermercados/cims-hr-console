@@ -106,10 +106,34 @@ export async function planSync(env, token, fetchImpl, today) {
 
 // A SheetJS workbook (ArrayBuffer) → { sheetName: rows2D } for the sheets a parser wants, raw values, '' for blanks —
 // the same shape the Upload page sends.
+// ONLY THE WANTED SHEETS ARE PARSED (23 Nov 2026). TDG's real bill is not a four-sheet file: "DG3 SGA EXCEL OCTOBER'2026.xlsx"
+// (2.4 MB) carries 243 worksheets — every ship's statement since SGA No. 1 of July 2023, most of them hidden — and the console
+// reads four of them. Reading the whole workbook built cell objects for all 243 and the mail intake died on it: the first real
+// bill by email (23 Nov 2026) was killed on 6 of 7 deliveries ("Exceeded CPU Time Limits" on the Worker, nothing written) and
+// only got in on a retry of the sender's mail server. So: one pass that reads the sheet NAMES and nothing else (SheetJS
+// `bookSheets`: no cells, no shared strings, no styles), then one pass that parses only the sheets `want` names (SheetJS
+// `sheets`, by position, so two names that differ only by case cannot be confused). The result is the same object as before,
+// sheet for sheet and cell for cell — pinned by test/sheets_of_wanted.test.js against a whole-workbook read.
+// If the short read ever comes back without a sheet it was asked for (a format SheetJS cannot limit), the whole workbook is
+// read as before: slower, never wrong.
 export function sheetsOf(XLSX, buf, want) {
+  const toRows = (ws) => XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+  let names = null;
+  try { names = XLSX.read(buf, { type: "array", bookSheets: true }).SheetNames; } catch (e) { names = null; }
+  if (Array.isArray(names)) {
+    const idx = [];
+    for (let i = 0; i < names.length; i++) if (want(String(names[i]))) idx.push(i);
+    if (!idx.length) return {};
+    const part = XLSX.read(buf, { type: "array", raw: true, sheets: idx });
+    if (idx.every((i) => part.Sheets && part.Sheets[names[i]])) {
+      const out = {};
+      for (const i of idx) out[names[i]] = toRows(part.Sheets[names[i]]);
+      return out;
+    }
+  }
   const wb = XLSX.read(buf, { type: "array", raw: true });
   const out = {};
-  for (const sn of wb.SheetNames) if (want(String(sn))) out[sn] = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: "" });
+  for (const sn of wb.SheetNames) if (want(String(sn))) out[sn] = toRows(wb.Sheets[sn]);
   return out;
 }
 export const WANT_SGA = (n) => isManningSheet(n) || /trainrel/i.test(n) || /^training$/i.test(n.trim()) || isSummarySheet(n);
