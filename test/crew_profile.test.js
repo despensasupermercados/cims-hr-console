@@ -277,3 +277,37 @@ test("the contract's bar names who he relieved and who relieves him: same hull, 
   assert.match(W, /<span>No reliever yet<\/span><small>Earmark one on the Keyman board<\/small>/);
   assert.match(W, /onclick="openCrew\(this\.dataset\.sc\);return false"/);
 });
+
+// NIGHT WATCH 25 NOV 2026: A TRAINING VISIT IS A TRIP, NOT A CONTRACT THAT ENDED EARLY (§10i). The profile measured
+// every leg against a 7-month plan (5 on Azamara), so a trainer's teaching visit read as a contract cut short: Ohji
+// Miranda's Onward visit (7 → 12 Sep 2026, TDG's debark) drew the red "Contract ended early — ended 4 mo 26 d early"
+// band and a To-check row asking Rita why; Jonathan Alonzo's Spectrum visit (3 → 11 Nov 2026) the same, 6 mo 23 d.
+// Real rows of 25 Nov 2026 (registry_snapshot / registry_contract, both tagged trainers in crew_trainer).
+test("night watch 25 Nov: a training visit never ends 'early' and raises no To-check row; the checks read the last real contract", () => {
+  const visitOnly = (sc, legs, today) => buildCrewProfile({ today, crew: { agency_id: sc, status: "Reserved" }, legs });
+  const OHJI = "SC-0038378";
+  const p = visitOnly(OHJI, [{ ship: "Onward", sc: OHJI, ours: true, on: "2026-09-07", off: "2026-09-12", is_current: false, source: "registry", offSource: "tdg", visit: true, brand: "Azamara" }], "2026-11-25");
+  const k = p.contracts[0];
+  assert.deepEqual([k.visit, k.earlyDays, k.earlyText, k.days], [true, 0, "", 5], "the visit is marked, never early, its days still count");
+  assert.equal(p.numbers.seaDays, 5, "time at sea still counts a visit (§10i)");
+  assert.deepEqual(p.checks.map((c) => c.key), [], "no 'why it ended early' and no 'never asked' for a visit");
+  // Jonathan Alonzo: a full Rhapsody contract, then the Spectrum visit. The checks speak of the contract, not the visit.
+  const JON = "SC-0041465";
+  const j = visitOnly(JON, [
+    { ship: "Rhapsody", sc: JON, ours: true, on: "2025-12-06", off: "2026-08-01", is_current: false, source: "counter" },
+    { ship: "Spectrum", sc: JON, ours: true, on: "2026-11-03", off: "2026-11-11", is_current: false, source: "registry", offSource: "tdg", visit: true },
+  ], "2026-11-25");
+  assert.deepEqual(j.contracts.map((c) => [c.ship, !!c.visit, c.earlyDays]), [["Spectrum", true, 0], ["Rhapsody", false, 0]]);
+  assert.deepEqual(j.checks.map((c) => c.text), ["Contract ended Aug 1, 2026 — never asked: Ray, Rolando, Shipboard review."]);
+  // a real contract that ended early still says so
+  const r = visitOnly(JON, [{ ship: "Rhapsody", sc: JON, ours: true, on: "2025-12-06", off: "2026-03-01", is_current: false, source: "registry", offSource: "tdg" }], "2026-11-25");
+  assert.ok(r.contracts[0].earlyDays > 21 && r.checks.some((c) => c.key === "end_reason"));
+});
+
+test("night watch 25 Nov: the page's contract card says 'Training visit' and offers no 'Why it ended' for one", () => {
+  const src = readFileSync(new URL("../src/worker.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function pfContract("), src.indexOf("function pfContract(") + 6000);
+  assert.match(fn, /x\.visit\)st=\['grey','Training visit/);
+  const why = src.slice(src.indexOf("function pfWhy("), src.indexOf("function pfWhy(") + 200);
+  assert.match(why, /^function pfWhy\(x\)\{\n  if\(x\.visit\)return '';/);
+});
