@@ -186,7 +186,10 @@ export function buildCrewProfile(input) {
     // The plan the contract was measured against: the Counter's projection, else the standard length.
     const planned = (k && iso(k.proj_off)) || plusMonths(l.on, isAz(l.ship) ? 5 : 7);
     const ended = !l.is_current && !!off && off <= today;
-    const earlyBy = ended && planned && offSource !== "projected" ? daysBetween(off, planned) : null;
+    // A TRAINING VISIT is a trip, not a contract (§10i, visits.js): it has no 7-month plan to end early against. Measured
+    // against one, Ohji Miranda's 5-day Onward visit read "ended 4 mo 26 d early" with a To-check row (night watch, 25 Nov 2026).
+    const visit = !!l.visit;
+    const earlyBy = ended && planned && offSource !== "projected" && !visit ? daysBetween(off, planned) : null;
     // a CURRENT contract (running, overdue or held by TDG's On board) is at sea to today, whatever its passed sign-off says
     const lastDay = l.is_current ? today : (off && off < today ? off : today);
     const r = e ? { eccr: !!e.eccr, air: !!e.air, hotel: !!e.hotel, on: !!e.on_conf, off: !!e.off_conf, src: "rita" }
@@ -194,7 +197,7 @@ export function buildCrewProfile(input) {
     const review = sbmReq.filter((q) => (iso(q.contract_signoff) && off && near(q.contract_signoff, off)) || (iso(q.contract_signon) && near(q.contract_signon, l.on)))
       .sort((a, b) => String(b.sent_at || b.created_at).localeCompare(String(a.sent_at || a.created_at)))[0];
     return {
-      n: i + 1, ship: l.ship, brand: l.brand || null, on: l.on, off, current: !!l.is_current, src, offSource,
+      n: i + 1, ship: l.ship, brand: l.brand || null, on: l.on, off, current: !!l.is_current, src, offSource, visit,
       held: !!l.heldByFile, confirmed: !!l.offConfirmed, reliever: l.reliever || null,
       embark: (e && e.embark) || l.embark || null, disembark: (e && e.disembark) || l.disembark || null,
       planned, earlyDays: earlyBy != null && earlyBy > EARLY_DAYS ? earlyBy : 0,
@@ -285,7 +288,8 @@ export function buildCrewProfile(input) {
 
   // ---- to check: where two sources disagree or something is missing. The console never picks.
   const checks = [];
-  const latest = contracts[0] || null;
+  // the last CONTRACT, never a training visit: a visit ends no contract and is asked for no feedback (§10i)
+  const latest = contracts.find((c) => !c.visit) || null;
   if (latest && latest.earlyDays && !latest.end && !A(I.cards).some((c) => c.end_reason && iso(c.sign_on) && near(c.sign_on, latest.on)))
     checks.push({ key: "end_reason", text: "Why the " + latest.ship + " contract ended " + latest.earlyText + " early is not recorded." + (comment ? " The comment says “" + comment.replace(/[.\s]+$/, "") + "”." : "") });
   if (I.grade && count && count.position && normGrade(I.grade) !== normGrade(count.position))

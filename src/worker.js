@@ -9484,6 +9484,7 @@ function pfContract(x,isCur,todayS,K,feed){
   if(x.held)st=['red','Past the sign-off · TDG still has them aboard'];
   else if(isCur&&off&&off<todayS)st=['red','Past the projected sign-off'];
   else if(isCur)st=['green','Aboard · '+(spanCompact(on,todayS)||'0 d')];
+  else if(x.visit)st=['grey','Training visit'+(!isCur&&off?' · ended '+fmtDateS(off):'')];
   else if(x.earlyDays)st=['red','Ended '+x.earlyText+' early'+(x.end?' · '+x.end.reason:'')];
   else st=['grey','Signed off '+fmtDateS(off)+(x.end?' · '+x.end.reason:'')];
   var ports=[x.embark?pfPort(x.embark):'',x.disembark?pfPort(x.disembark):''];
@@ -9502,8 +9503,8 @@ function pfContract(x,isCur,todayS,K,feed){
   h+='<div class=pf3facts>'
     +fact('Signed on',fmtDateS(on),pfSrc('tdg',PF3_SRC[(D[0]||{}).src]||'TDG embark'))
     +fact(isCur?'Sign-off':'Signed off',off?fmtDateS(off):'Not set',pfSrc(offSrc==='rita'?'typed':offSrc,offNote)+(differs?'<em class=pf3dif>'+escHtml((PF3_SRC[differs.src]||differs.src)+' says '+fmtDateS(differs.value))+'</em>':''))
-    +(isCur?fact('To go',dLeft==null?'—':(dLeft>=0?spanCompact(todayS,off):'<span style="color:var(--red)">'+spanCompact(off,todayS)+' over</span>'),'<span class=pf3sub>of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract</span>')
-      :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):('of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract'))+'</span>'))
+    +(isCur?fact('To go',dLeft==null?'—':(dLeft>=0?spanCompact(todayS,off):'<span style="color:var(--red)">'+spanCompact(off,todayS)+' over</span>'),'<span class=pf3sub>'+(x.visit?'training visit':'of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract')+'</span>')
+      :fact('Served',spanCompact(on,off||todayS),'<span class=pf3sub>'+(x.visit?'training visit':x.earlyDays?('the plan ran to '+fmtDateS(x.planned)):('of a '+Math.max(1,Math.round(x.plannedDays/30.44))+'-month contract'))+'</span>'))
     +fact(isCur?'Signs off at':'Signed off at',ports[1]?escHtml(ports[1]):'<span class=pf3na>Not on file</span>','<span class=pf3sub>'+(ports[0]?'joined at '+escHtml(ports[0]):'joining port not on file')+'</span>')
     +'</div>';
   if(!isCur&&off&&off<=todayS)h+=pfWhy(x);
@@ -9520,6 +9521,7 @@ function pfContract(x,isCur,todayS,K,feed){
 // picked from one list, a note, who and when; Change / Clear. HR only: never the bonus, never the crew's statement.
 var PF_END_REASONS=['Completed','Resigned','Medical','Compassionate','Emergency','Performance','Early relief','Other'];
 function pfWhy(x){
+  if(x.visit)return ''; // a training visit ends no contract: there is no 'why it ended' to record (§10i, night watch 25 Nov 2026)
   var E=x.end;
   var form='<div class=pf3wf id=pf3wf style="display:none"><select id=pf3wr aria-label="Why it ended"><option value="">Pick a reason…</option>'
     +PF_END_REASONS.map(function(r){return '<option'+(E&&E.reason===r?' selected':'')+'>'+r+'</option>';}).join('')+'</select>'
